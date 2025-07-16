@@ -8,36 +8,32 @@ export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [assistantStream, setAssistantStream] = useState("");
+  const [userStream, setUserStream] = useState("");
   const assistantBuffer = useRef("");
+  const userBuffer = useRef("");
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
 
   async function startSession() {
-    // Get a session token for OpenAI Realtime API
     const tokenResponse = await fetch("/token");
     const data = await tokenResponse.json();
     const EPHEMERAL_KEY = data.client_secret.value;
 
-    // Create a peer connection
     const pc = new RTCPeerConnection();
-
-    // Set up to play remote audio from the model
     audioElement.current = document.createElement("audio");
     audioElement.current.autoplay = true;
     pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
 
-    // Add local audio track for microphone input in the browser
     const ms = await navigator.mediaDevices.getUserMedia({
       audio: true,
     });
     pc.addTrack(ms.getTracks()[0]);
 
-    // Set up data channel for sending and receiving events
     const dc = pc.createDataChannel("oai-events");
     setDataChannel(dc);
 
-    // Start the session using the Session Description Protocol (SDP)
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
@@ -61,7 +57,6 @@ export default function App() {
     peerConnection.current = pc;
   }
 
-  // Stop current session, clean up peer connection and data channel
   function stopSession() {
     if (dataChannel) {
       dataChannel.close();
@@ -82,16 +77,13 @@ export default function App() {
     peerConnection.current = null;
   }
 
-  // Send a message to the model
   function sendClientEvent(message) {
     if (dataChannel) {
       const timestamp = new Date().toLocaleTimeString();
       message.event_id = message.event_id || crypto.randomUUID();
 
-      // send event before setting timestamp since the backend peer doesn't expect this field
       dataChannel.send(JSON.stringify(message));
 
-      // if guard just in case the timestamp exists by miracle
       if (!message.timestamp) {
         message.timestamp = timestamp;
       }
@@ -99,12 +91,11 @@ export default function App() {
     } else {
       console.error(
         "Failed to send message - no data channel available",
-        message,
+        message
       );
     }
   }
 
-  // Send a text message to the model
   function sendTextMessage(message) {
     const event = {
       type: "conversation.item.create",
@@ -121,26 +112,27 @@ export default function App() {
     };
 
     sendClientEvent(event);
-    setMessages((prev) => [...prev, { role: "user", text: message }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: "user", text: message },
+    ]);
     sendClientEvent({ type: "response.create" });
   }
 
-  // Attach event listeners to the data channel when a new one is created
   useEffect(() => {
     if (dataChannel) {
-      // Append new server events to the list
       dataChannel.addEventListener("message", (e) => {
         const event = JSON.parse(e.data);
         if (!event.timestamp) {
           event.timestamp = new Date().toLocaleTimeString();
         }
 
-        // collect assistant text output for chat view
         if (event.type && event.type.startsWith("response")) {
           if (event.response && event.response.output) {
             event.response.output.forEach((out) => {
               if (out.type === "text") {
                 assistantBuffer.current += out.text;
+                setAssistantStream(assistantBuffer.current.trim());
               }
             });
           }
@@ -148,20 +140,46 @@ export default function App() {
           if (event.type === "response.done" && assistantBuffer.current) {
             setMessages((prev) => [
               ...prev,
-              { role: "assistant", text: assistantBuffer.current.trim() },
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                text: assistantBuffer.current.trim(),
+              },
             ]);
             assistantBuffer.current = "";
+            setAssistantStream("");
+          }
+        }
+
+        if (event.type && event.type.startsWith("transcript")) {
+          if (event.transcript && event.transcript.text) {
+            userBuffer.current += event.transcript.text;
+            setUserStream(userBuffer.current.trim());
+          }
+
+          if (event.type === "transcript.done" && userBuffer.current) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "user",
+                text: userBuffer.current.trim(),
+              },
+            ]);
+            userBuffer.current = "";
+            setUserStream("");
           }
         }
 
         setEvents((prev) => [event, ...prev]);
       });
 
-      // Set session active when the data channel is opened
       dataChannel.addEventListener("open", () => {
         setIsSessionActive(true);
         setEvents([]);
         setMessages([]);
+        setAssistantStream("");
+        setUserStream("");
       });
     }
   }, [dataChannel]);
@@ -170,14 +188,17 @@ export default function App() {
     <>
       <nav className="absolute top-0 left-0 right-0 h-16 flex items-center">
         <div className="flex items-center gap-4 w-full m-4 pb-2 border-0 border-b border-solid border-gray-200">
-         
           <h1>AI therapist</h1>
         </div>
       </nav>
       <main className="absolute top-16 left-0 right-0 bottom-0">
         <section className="absolute inset-0 flex flex-col">
           <div className="flex-1 overflow-y-auto">
-            <ChatLog messages={messages} />
+            <ChatLog
+              messages={messages}
+              userStream={userStream}
+              assistantStream={assistantStream}
+            />
           </div>
           <div className="h-32 p-4">
             <SessionControls
@@ -190,7 +211,6 @@ export default function App() {
             />
           </div>
         </section>
-        
       </main>
     </>
   );
