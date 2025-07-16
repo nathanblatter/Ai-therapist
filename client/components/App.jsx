@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import logo from "/assets/openai-logomark.svg";
-import EventLog from "./EventLog";
+import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import ToolPanel from "./ToolPanel";
 
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const assistantBuffer = useRef("");
+  const userBuffer = useRef("");
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
@@ -119,6 +122,10 @@ export default function App() {
     };
 
     sendClientEvent(event);
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: "user", text: message },
+    ]);
     sendClientEvent({ type: "response.create" });
   }
 
@@ -132,6 +139,48 @@ export default function App() {
           event.timestamp = new Date().toLocaleTimeString();
         }
 
+        // collect assistant text output for chat view
+        if (event.type && event.type.startsWith("response")) {
+          if (event.response && event.response.output) {
+            event.response.output.forEach((out) => {
+              if (out.type === "text") {
+                assistantBuffer.current += out.text;
+              }
+            });
+          }
+
+          if (event.type === "response.done" && assistantBuffer.current) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                text: assistantBuffer.current.trim(),
+              },
+            ]);
+            assistantBuffer.current = "";
+          }
+        }
+
+        // collect user transcript output for chat view
+        if (event.type && event.type.startsWith("transcript")) {
+          if (event.transcript && event.transcript.text) {
+            userBuffer.current += event.transcript.text;
+          }
+
+          if (event.type === "transcript.done" && userBuffer.current) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "user",
+                text: userBuffer.current.trim(),
+              },
+            ]);
+            userBuffer.current = "";
+          }
+        }
+
         setEvents((prev) => [event, ...prev]);
       });
 
@@ -139,6 +188,7 @@ export default function App() {
       dataChannel.addEventListener("open", () => {
         setIsSessionActive(true);
         setEvents([]);
+        setMessages([]);
       });
     }
   }, [dataChannel]);
@@ -147,16 +197,15 @@ export default function App() {
     <>
       <nav className="absolute top-0 left-0 right-0 h-16 flex items-center">
         <div className="flex items-center gap-4 w-full m-4 pb-2 border-0 border-b border-solid border-gray-200">
-         
           <h1>AI therapist</h1>
         </div>
       </nav>
       <main className="absolute top-16 left-0 right-0 bottom-0">
-        <section className="absolute top-0 left-0 right-[380px] bottom-0 flex">
-          <section className="absolute top-0 left-0 right-0 bottom-32 px-4 overflow-y-auto">
-            <EventLog events={events} />
-          </section>
-          <section className="absolute h-32 left-0 right-0 bottom-0 p-4">
+        <section className="absolute inset-0 flex flex-col">
+          <div className="flex-1 overflow-y-auto">
+            <ChatLog messages={messages} />
+          </div>
+          <div className="h-32 p-4">
             <SessionControls
               startSession={startSession}
               stopSession={stopSession}
@@ -165,9 +214,8 @@ export default function App() {
               events={events}
               isSessionActive={isSessionActive}
             />
-          </section>
+          </div>
         </section>
-        
       </main>
     </>
   );
