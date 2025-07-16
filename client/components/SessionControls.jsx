@@ -1,5 +1,9 @@
 import { useState } from "react";
+
 import { CloudOff, MessageSquare, Mic } from "react-feather";
+
+import { CloudLightning, CloudOff, MessageSquare, Mic } from "react-feather";
+import Button from "./Button";
 
 function SessionStopped({ startSession }) {
   const [isActivating, setIsActivating] = useState(false);
@@ -48,6 +52,7 @@ function SessionActive({ stopSession, sendTextMessage }) {
             handleSendClientEvent();
           }
         }}
+
         type="text"
         placeholder="Type a message..."
         className="border border-gray-200 rounded-full p-3 flex-1"
@@ -88,6 +93,9 @@ export default function SessionControls({
       ) : (
         <SessionStopped startSession={startSession} />
       )}
+
+        // ... rest of your code
+      />
     </div>
   );
 }
