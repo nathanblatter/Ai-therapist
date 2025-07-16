@@ -7,7 +7,7 @@
     "build:client": "vite build --outDir dist/client --ssrManifest",
     "build:server": "vite build --outDir dist/server --ssr /index.js",
     "devinstall": "zx ../../devinstall.mjs -- node server.js --dev",
-    "lint": "eslint . --ext .js,.jsx --fix"
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx --fix"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -19,13 +19,14 @@
     "react-feather": "^2.0.10",
     "react-router-dom": "^6.20.0"
   },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "autoprefixer": "^10.4.21",
-    "postcss": "^8.5.6",
-    "postcss-nesting": "^12.0.2",
-    "postcss-preset-env": "^7.7.1",
-    "tailwindcss": "^3.4.17",
+    "devDependencies": {
+      "@vitejs/plugin-react": "^4.3.4",
+      "autoprefixer": "^10.4.21",
+      "eslint": "^8.57.0",
+      "postcss": "^8.5.6",
+      "postcss-nesting": "^12.0.2",
+      "postcss-preset-env": "^7.7.1",
+      "tailwindcss": "^3.4.17",
     "vite": "^5.0.2"
   }
 }
