@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { CloudLightning, CloudOff, MessageSquare, Mic } from "react-feather";
-import Button from "./Button";
+import { CloudOff, MessageSquare, Mic } from "react-feather";
 
 function SessionStopped({ startSession }) {
   const [isActivating, setIsActivating] = useState(false);
@@ -14,13 +13,14 @@ function SessionStopped({ startSession }) {
 
   return (
     <div className="flex items-center justify-center w-full h-full">
-      <Button
+      <button
+        className="p-3 bg-blue-500 text-white rounded-full"
         onClick={handleStartSession}
-        className={isActivating ? "bg-gray-600" : "bg-red-600"}
-        icon={<CloudLightning height={16} />}
+        title="start session"
+        disabled={isActivating}
       >
-        {isActivating ? "starting session..." : "start session"}
-      </Button>
+        <Mic height={18} />
+      </button>
     </div>
   );
 }

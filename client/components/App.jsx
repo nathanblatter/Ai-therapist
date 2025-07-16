@@ -8,6 +8,8 @@ export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [assistantStream, setAssistantStream] = useState("");
+  const [userStream, setUserStream] = useState("");
   const assistantBuffer = useRef("");
   const userBuffer = useRef("");
   const [dataChannel, setDataChannel] = useState(null);
@@ -145,6 +147,7 @@ export default function App() {
             event.response.output.forEach((out) => {
               if (out.type === "text") {
                 assistantBuffer.current += out.text;
+                setAssistantStream(assistantBuffer.current.trim());
               }
             });
           }
@@ -159,6 +162,7 @@ export default function App() {
               },
             ]);
             assistantBuffer.current = "";
+            setAssistantStream("");
           }
         }
 
@@ -166,6 +170,7 @@ export default function App() {
         if (event.type && event.type.startsWith("transcript")) {
           if (event.transcript && event.transcript.text) {
             userBuffer.current += event.transcript.text;
+            setUserStream(userBuffer.current.trim());
           }
 
           if (event.type === "transcript.done" && userBuffer.current) {
@@ -178,6 +183,7 @@ export default function App() {
               },
             ]);
             userBuffer.current = "";
+            setUserStream("");
           }
         }
 
@@ -189,6 +195,8 @@ export default function App() {
         setIsSessionActive(true);
         setEvents([]);
         setMessages([]);
+        setAssistantStream("");
+        setUserStream("");
       });
     }
   }, [dataChannel]);
@@ -203,7 +211,11 @@ export default function App() {
       <main className="absolute top-16 left-0 right-0 bottom-0">
         <section className="absolute inset-0 flex flex-col">
           <div className="flex-1 overflow-y-auto">
-            <ChatLog messages={messages} />
+            <ChatLog
+              messages={messages}
+              userStream={userStream}
+              assistantStream={assistantStream}
+            />
           </div>
           <div className="h-32 p-4">
             <SessionControls
