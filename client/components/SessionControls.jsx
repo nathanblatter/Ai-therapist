@@ -1,4 +1,7 @@
 import { useState } from "react";
+
+import { CloudOff, MessageSquare, Mic } from "react-feather";
+
 import { CloudLightning, CloudOff, MessageSquare, Mic } from "react-feather";
 import Button from "./Button";
 
@@ -49,6 +52,48 @@ function SessionActive({ stopSession, sendTextMessage }) {
             handleSendClientEvent();
           }
         }}
+
+        type="text"
+        placeholder="Type a message..."
+        className="border border-gray-200 rounded-full p-3 flex-1"
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+      />
+      <button
+        className="p-3 bg-blue-500 text-white rounded-full"
+        onClick={() => {
+          if (message.trim()) {
+            handleSendClientEvent();
+          }
+        }}
+        title="send"
+      >
+        <MessageSquare height={18} />
+      </button>
+      <button className="p-3 bg-gray-200 rounded-full" title="mic">
+        <Mic height={18} />
+      </button>
+    </div>
+  );
+}
+
+export default function SessionControls({
+  startSession,
+  stopSession,
+  sendTextMessage,
+  isSessionActive,
+}) {
+  return (
+    <div className="flex gap-4 border-t-2 border-gray-200 h-full rounded-md">
+      {isSessionActive ? (
+        <SessionActive
+          stopSession={stopSession}
+          sendTextMessage={sendTextMessage}
+        />
+      ) : (
+        <SessionStopped startSession={startSession} />
+      )}
+
         // ... rest of your code
       />
     </div>

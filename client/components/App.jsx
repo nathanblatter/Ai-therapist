@@ -127,6 +127,7 @@ export default function App() {
           event.timestamp = new Date().toLocaleTimeString();
         }
 
+main
         if (event.type && event.type.startsWith("response")) {
           if (event.response && event.response.output) {
             event.response.output.forEach((out) => {
@@ -150,6 +151,7 @@ export default function App() {
             setAssistantStream("");
           }
         }
+
 
         if (event.type && event.type.startsWith("transcript")) {
           if (event.transcript && event.transcript.text) {
@@ -204,9 +206,7 @@ export default function App() {
             <SessionControls
               startSession={startSession}
               stopSession={stopSession}
-              sendClientEvent={sendClientEvent}
               sendTextMessage={sendTextMessage}
-              events={events}
               isSessionActive={isSessionActive}
             />
           </div>
