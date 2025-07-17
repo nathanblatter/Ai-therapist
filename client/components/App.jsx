@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import logo from "/assets/openai-logomark.svg";
 import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
-import ToolPanel from "./ToolPanel";
+import Header from './header';
+
+
 
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -187,31 +189,25 @@ main
   }, [dataChannel]);
 
   return (
-    <>
-      <nav className="absolute top-0 left-0 right-0 h-16 flex items-center">
-        <div className="flex items-center gap-4 w-full m-4 pb-2 border-0 border-b border-solid border-gray-200">
-          <h1>AI therapist</h1>
+    <div className="flex flex-col min-h-screen">
+      <Header /> 
+      <main className="flex-1 flex flex-col items-center justify-between px-4 py-6 bg-gray-50">
+        <div className="w-full max-w-4xl flex-1 overflow-y-auto">
+          <ChatLog
+            messages={messages}
+            userStream={userStream}
+            assistantStream={assistantStream}
+          />
         </div>
-      </nav>
-      <main className="absolute top-16 left-0 right-0 bottom-0">
-        <section className="absolute inset-0 flex flex-col">
-          <div className="flex-1 overflow-y-auto">
-            <ChatLog
-              messages={messages}
-              userStream={userStream}
-              assistantStream={assistantStream}
-            />
-          </div>
-          <div className="h-32 p-4">
-            <SessionControls
-              startSession={startSession}
-              stopSession={stopSession}
-              sendTextMessage={sendTextMessage}
-              isSessionActive={isSessionActive}
-            />
-          </div>
-        </section>
+        <div className="w-full max-w-4xl h-32 p-4">
+          <SessionControls
+            startSession={startSession}
+            stopSession={stopSession}
+            sendTextMessage={sendTextMessage}
+            isSessionActive={isSessionActive}
+          />
+        </div>
       </main>
-    </>
+    </div>
   );
-}
+}  

@@ -1,9 +1,8 @@
 import { useState } from "react";
 
-import { CloudOff, MessageSquare, Mic } from "react-feather";
+import { CloudOff, MessageSquare, Mic, CloudLightning } from "react-feather";
 
-import { CloudLightning, CloudOff, MessageSquare, Mic } from "react-feather";
-import Button from "./Button";
+import Button from "./Button"; 
 
 function SessionStopped({ startSession }) {
   const [isActivating, setIsActivating] = useState(false);
@@ -18,12 +17,12 @@ function SessionStopped({ startSession }) {
   return (
     <div className="flex items-center justify-center w-full h-full">
       <button
-        className="p-3 bg-blue-500 text-white rounded-full"
+        className="p-3 bg-byuRoyal hover:bg-gray-700 text-white rounded-full"
         onClick={handleStartSession}
         title="start session"
         disabled={isActivating}
       >
-        <Mic height={18} />
+         Start Session
       </button>
     </div>
   );
@@ -40,11 +39,11 @@ function SessionActive({ stopSession, sendTextMessage }) {
   return (
     <div className="flex items-center gap-2 w-full h-full">
       <button
-        className="p-3 bg-gray-200 rounded-full"
+        className="p-3 bg-gray-200 hover:bg-red-700 hover:text-white rounded-full"
         onClick={stopSession}
         title="disconnect"
       >
-        <CloudOff height={18} />
+        Disconnect
       </button>
       <input
         onKeyDown={(e) => {
@@ -60,7 +59,7 @@ function SessionActive({ stopSession, sendTextMessage }) {
         onChange={(e) => setMessage(e.target.value)}
       />
       <button
-        className="p-3 bg-blue-500 text-white rounded-full"
+        className="p-3 bg-byuRoyal hover:bg-gray-700 text-white rounded-full"
         onClick={() => {
           if (message.trim()) {
             handleSendClientEvent();
@@ -68,9 +67,18 @@ function SessionActive({ stopSession, sendTextMessage }) {
         }}
         title="send"
       >
-        <MessageSquare height={18} />
+       Send Message
       </button>
-      <button className="p-3 bg-gray-200 rounded-full" title="mic">
+      
+      <button 
+      className="p-3 bg-gray-200 rounded-full" 
+      onClick={() => {
+
+      }
+
+
+      }
+      title="mic">
         <Mic height={18} />
       </button>
     </div>
@@ -94,8 +102,7 @@ export default function SessionControls({
         <SessionStopped startSession={startSession} />
       )}
 
-        // ... rest of your code
-      />
+      
     </div>
   );
 }
