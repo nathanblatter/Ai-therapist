@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { CloudOff, MessageSquare, Mic, CloudLightning, MicOff } from "react-feather";
 import Button from "./Button"; 
 
@@ -25,10 +25,21 @@ function SessionStopped({ startSession }) {
   );
 }
 
-function SessionActive({ stopSession, sendTextMessage }) {
+function SessionActive({ stopSession, sendTextMessage, localStream }) {
   const [message, setMessage] = useState("");
   const [isMicOn, setIsMicOn] = useState(true); //assuming mic is on by default
   const streamRef = useRef(null);
+
+  // keep reference to the current microphone stream
+  useEffect(() => {
+    streamRef.current = localStream;
+    if (localStream) {
+      const track = localStream.getAudioTracks()[0];
+      if (track) {
+        setIsMicOn(track.enabled);
+      }
+    }
+  }, [localStream]);
 
   function handleSendClientEvent() {
     sendTextMessage(message);
@@ -96,6 +107,7 @@ export default function SessionControls({
   stopSession,
   sendTextMessage,
   isSessionActive,
+  localStream,
 }) {
   return (
     <div className="flex gap-4 border-t-2 border-gray-200 h-full rounded-md">
@@ -103,6 +115,7 @@ export default function SessionControls({
         <SessionActive
           stopSession={stopSession}
           sendTextMessage={sendTextMessage}
+          localStream={localStream}
         />
       ) : (
         <SessionStopped startSession={startSession} />
