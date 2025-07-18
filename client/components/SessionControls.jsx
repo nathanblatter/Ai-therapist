@@ -49,10 +49,10 @@ function SessionActive({ stopSession, sendTextMessage, localStream }) {
   const toggleMic = () => {
     const stream = streamRef.current;
     if (!stream) return;
-  
+
     const audioTrack = stream.getAudioTracks()[0];
     if (!audioTrack) return;
-  
+
     audioTrack.enabled = !audioTrack.enabled;
     setIsMicOn(audioTrack.enabled);
   };
@@ -94,7 +94,7 @@ function SessionActive({ stopSession, sendTextMessage, localStream }) {
       <button
       onClick={toggleMic}
       className={`p-3 rounded-full ${isMicOn ? "bg-red-600" : "bg-green-600"} text-white`}
-      title={isMicOn ? "Mic Off" : "Mic On"}
+      title={isMicOn ? "Turn Mic Off" : "Turn Mic On"}
     >
       {isMicOn ? <MicOff size={18} /> : <Mic size={18} />}
     </button>

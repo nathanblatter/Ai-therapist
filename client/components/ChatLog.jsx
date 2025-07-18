@@ -4,7 +4,7 @@ export default function ChatLog({ messages, userStream, assistantStream }) {
   return (
     <div className="flex flex-col gap-3 p-4 overflow-y-auto">
       {messages.length === 0 && !userStream && !assistantStream ? (
-        <p className="text-gray-400 text-2xl text-center">Start talking to begin...</p>
+        <p className="text-gray-400 text-2xl text-center">Start talking or type in the chat bar to begin...</p>
       ) : (
         messages.map((msg) => (
           <div
