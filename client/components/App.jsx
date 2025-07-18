@@ -12,6 +12,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [assistantStream, setAssistantStream] = useState("");
   const [userStream, setUserStream] = useState("");
+  const [localStream, setLocalStream] = useState(null);
   const assistantBuffer = useRef("");
   const userBuffer = useRef("");
   const [dataChannel, setDataChannel] = useState(null);
@@ -31,6 +32,7 @@ export default function App() {
     const ms = await navigator.mediaDevices.getUserMedia({
       audio: true,
     });
+    setLocalStream(ms);
     pc.addTrack(ms.getTracks()[0]);
 
     const dc = pc.createDataChannel("oai-events");
@@ -76,6 +78,7 @@ export default function App() {
 
     setIsSessionActive(false);
     setDataChannel(null);
+    setLocalStream(null);
     peerConnection.current = null;
   }
 
@@ -129,7 +132,6 @@ export default function App() {
           event.timestamp = new Date().toLocaleTimeString();
         }
 
-main
         if (event.type && event.type.startsWith("response")) {
           if (event.response && event.response.output) {
             event.response.output.forEach((out) => {
@@ -205,6 +207,7 @@ main
             stopSession={stopSession}
             sendTextMessage={sendTextMessage}
             isSessionActive={isSessionActive}
+            localStream={localStream}
           />
         </div>
       </main>
