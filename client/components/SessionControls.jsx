@@ -1,7 +1,5 @@
-import { useState } from "react";
-
-import { CloudOff, MessageSquare, Mic, CloudLightning } from "react-feather";
-
+import { useState, useRef } from "react";
+import { CloudOff, MessageSquare, Mic, CloudLightning, MicOff } from "react-feather";
 import Button from "./Button"; 
 
 function SessionStopped({ startSession }) {
@@ -9,7 +7,6 @@ function SessionStopped({ startSession }) {
 
   function handleStartSession() {
     if (isActivating) return;
-
     setIsActivating(true);
     startSession();
   }
@@ -17,12 +14,12 @@ function SessionStopped({ startSession }) {
   return (
     <div className="flex items-center justify-center w-full h-full">
       <button
-        className="p-3 bg-byuRoyal hover:bg-gray-700 text-white rounded-full"
+        className="p-3 bg-byuRoyal hover:bg-green-700 text-white rounded-full"
         onClick={handleStartSession}
         title="start session"
         disabled={isActivating}
       >
-         Start Session
+        Start Session
       </button>
     </div>
   );
@@ -30,34 +27,47 @@ function SessionStopped({ startSession }) {
 
 function SessionActive({ stopSession, sendTextMessage }) {
   const [message, setMessage] = useState("");
+  const [isMicOn, setIsMicOn] = useState(true); //assuming mic is on by default
+  const streamRef = useRef(null);
 
   function handleSendClientEvent() {
     sendTextMessage(message);
     setMessage("");
   }
 
+  const toggleMic = () => {
+    const stream = streamRef.current;
+    if (!stream) return;
+  
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!audioTrack) return;
+  
+    audioTrack.enabled = !audioTrack.enabled;
+    setIsMicOn(audioTrack.enabled);
+  };
   return (
     <div className="flex items-center gap-2 w-full h-full">
       <button
-        className="p-3 bg-gray-200 hover:bg-red-700 hover:text-white rounded-full"
+        className="p-3 bg-byuRoyal hover:bg-red-700 text-white rounded-full"
         onClick={stopSession}
         title="disconnect"
       >
         Disconnect
       </button>
+
       <input
         onKeyDown={(e) => {
           if (e.key === "Enter" && message.trim()) {
             handleSendClientEvent();
           }
         }}
-
         type="text"
         placeholder="Type a message..."
         className="border border-gray-200 rounded-full p-3 flex-1"
         value={message}
         onChange={(e) => setMessage(e.target.value)}
       />
+
       <button
         className="p-3 bg-byuRoyal hover:bg-gray-700 text-white rounded-full"
         onClick={() => {
@@ -67,20 +77,16 @@ function SessionActive({ stopSession, sendTextMessage }) {
         }}
         title="send"
       >
-       Send Message
+        Send Message
       </button>
-      
-      <button 
-      className="p-3 bg-gray-200 rounded-full" 
-      onClick={() => {
 
-      }
-
-
-      }
-      title="mic">
-        <Mic height={18} />
-      </button>
+      <button
+      onClick={toggleMic}
+      className={`p-3 rounded-full ${isMicOn ? "bg-red-600" : "bg-green-600"} text-white`}
+      title={isMicOn ? "Mic Off" : "Mic On"}
+    >
+      {isMicOn ? <MicOff size={18} /> : <Mic size={18} />}
+    </button>
     </div>
   );
 }
@@ -101,8 +107,6 @@ export default function SessionControls({
       ) : (
         <SessionStopped startSession={startSession} />
       )}
-
-      
     </div>
   );
 }
