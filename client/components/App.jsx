@@ -11,10 +11,10 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [messages, setMessages] = useState([]);
   const [assistantStream, setAssistantStream] = useState("");
-  const [userStream, setUserStream] = useState("");
   const [localStream, setLocalStream] = useState(null);
   const assistantBuffer = useRef("");
   const userBuffer = useRef("");
+  const currentVoiceMessageId = useRef(null);
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
@@ -159,21 +159,29 @@ export default function App() {
 
         if (event.type && event.type.startsWith("transcript")) {
           if (event.transcript && event.transcript.text) {
+            if (!currentVoiceMessageId.current) {
+              const id = crypto.randomUUID();
+              currentVoiceMessageId.current = id;
+              setMessages((prev) => [
+                ...prev,
+                { id, role: "user", text: "" },
+              ]);
+            }
             userBuffer.current += event.transcript.text;
-            setUserStream(userBuffer.current.trim());
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === currentVoiceMessageId.current
+                  ? { ...m, text: userBuffer.current.trim() }
+                  : m,
+              ),
+            );
           }
 
           if (event.type === "transcript.done" && userBuffer.current) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: "user",
-                text: userBuffer.current.trim(),
-              },
-            ]);
+            currentVoiceMessageId.current = null;
             userBuffer.current = "";
-            setUserStream("");
+            // request the assistant's reply after the user finishes speaking
+            sendClientEvent({ type: "response.create" });
           }
         }
 
@@ -185,7 +193,6 @@ export default function App() {
         setEvents([]);
         setMessages([]);
         setAssistantStream("");
-        setUserStream("");
       });
     }
   }, [dataChannel]);
@@ -197,7 +204,6 @@ export default function App() {
         <div className="w-full max-w-4xl flex-1 overflow-y-auto">
           <ChatLog
             messages={messages}
-            userStream={userStream}
             assistantStream={assistantStream}
           />
         </div>

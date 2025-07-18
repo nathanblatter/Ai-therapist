@@ -1,9 +1,9 @@
 import React from "react";
 
-export default function ChatLog({ messages, userStream, assistantStream }) {
+export default function ChatLog({ messages, assistantStream }) {
   return (
     <div className="flex flex-col gap-3 p-4 overflow-y-auto">
-      {messages.length === 0 && !userStream && !assistantStream ? (
+      {messages.length === 0 && !assistantStream ? (
         <p className="text-gray-400 text-2xl text-center">Start talking or type in the chat bar to begin...</p>
       ) : (
         messages.map((msg) => (
@@ -22,14 +22,6 @@ export default function ChatLog({ messages, userStream, assistantStream }) {
             </div>
           </div>
         ))
-      )}
-
-      {userStream && (
-        <div className="flex justify-end">
-          <div className="max-w-xs px-4 py-2 rounded-2xl bg-byuRoyal text-white rounded-br-none opacity-70 whitespace-pre-line">
-            {userStream}
-          </div>
-        </div>
       )}
 
       {assistantStream && (
