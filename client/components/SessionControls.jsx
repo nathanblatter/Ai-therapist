@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { CloudOff, MessageSquare, Mic, CloudLightning, MicOff } from "react-feather";
-import Button from "./Button"; 
+import {  Mic, MicOff } from "react-feather";
+
 
 function SessionStopped({ startSession }) {
   const [isActivating, setIsActivating] = useState(false);
@@ -93,10 +93,10 @@ function SessionActive({ stopSession, sendTextMessage, localStream }) {
 
       <button
       onClick={toggleMic}
-      className={`p-3 rounded-full ${isMicOn ? "bg-red-600" : "bg-green-600"} text-white`}
-      title={isMicOn ? "Turn Mic Off" : "Turn Mic On"}
+      className={`p-3 rounded-full ${isMicOn ? "bg-green-600" : "bg-red-600"} text-white`}
+      title={isMicOn ? "Mic is currently on, press this button to turn the Mic Off." : "Mic is currently off, press this button to turn the Mic On"}
     >
-      {isMicOn ? <MicOff size={18} /> : <Mic size={18} />}
+      {isMicOn ? <Mic size={18} /> : <MicOff size={18} />}
     </button>
     </div>
   );
@@ -110,7 +110,7 @@ export default function SessionControls({
   localStream,
 }) {
   return (
-    <div className="flex gap-4 border-t-2 border-gray-200 h-full rounded-md">
+    <div className="flex gap-4 border-t-2 border-gray-200 h-full">
       {isSessionActive ? (
         <SessionActive
           stopSession={stopSession}
@@ -123,3 +123,4 @@ export default function SessionControls({
     </div>
   );
 }
+

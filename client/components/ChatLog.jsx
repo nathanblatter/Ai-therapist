@@ -2,14 +2,14 @@ import React from "react";
 
 export default function ChatLog({ messages, assistantStream }) {
   return (
-    <div className="flex flex-col gap-3 p-4 overflow-y-auto">
+    <div className="flex-grow flex-col gap-3 p-4 overflow-y-auto h-full pt-16">
       {messages.length === 0 && !assistantStream ? (
         <p className="text-gray-400 text-2xl text-center">Start talking or type in the chat bar to begin...</p>
       ) : (
         messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            className={`flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
               className={`max-w-xs px-4 py-2 rounded-2xl whitespace-pre-line ${

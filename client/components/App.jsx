@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import logo from "/assets/openai-logomark.svg";
 import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import Header from './header';
+import logo from "/assets/byulogo.png";
 
 
 
@@ -199,13 +199,26 @@ export default function App() {
 
   return (
     <div className="flex flex-col min-h-screen">
+
       <Header /> 
-      <main className="flex-1 flex flex-col items-center justify-between px-4 py-6 bg-gray-50">
-        <div className="w-full max-w-4xl flex-1 overflow-y-auto">
-          <ChatLog
-            messages={messages}
-            assistantStream={assistantStream}
-          />
+    
+      
+      <main className="flex-1 flex flex-col items-center justify-end px-4 py-6 bg-gray-50">
+      <div className="flex-1 overflow-y-auto p-4 items-right">
+          {isSessionActive ? (
+            // If session is active, show the chat log
+            <ChatLog
+              messages={messages}
+              assistantStream={assistantStream}
+            />
+          ) : (
+            // If session is not active, show a welcome message
+            <div className="flex items-center justify-end h-full">
+              <p className="text-gray-500 text-xl">
+                Press "Start Session" to begin your conversation.
+              </p>
+            </div>
+          )}
         </div>
         <div className="w-full max-w-4xl h-32 p-4">
           <SessionControls
