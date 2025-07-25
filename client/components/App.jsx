@@ -2,9 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import Header from './header';
-import logo from "/assets/byulogo.png";
-
-
 
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -18,6 +15,20 @@ export default function App() {
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
+
+  async function logConversation(message) {
+    try {
+      await fetch("/log", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ message }),
+      });
+    } catch (error) {
+      console.error("Failed to log conversation:", error);
+    }
+  }
 
   async function startSession() {
     const tokenResponse = await fetch("/token");
@@ -122,6 +133,7 @@ export default function App() {
       { id: crypto.randomUUID(), role: "user", text: message },
     ]);
     sendClientEvent({ type: "response.create" });
+    logConversation(`User: ${message}`);
   }
 
   useEffect(() => {
@@ -143,16 +155,18 @@ export default function App() {
           }
 
           if (event.type === "response.done" && assistantBuffer.current) {
+            const assistantMessage = assistantBuffer.current.trim();
             setMessages((prev) => [
               ...prev,
               {
                 id: crypto.randomUUID(),
                 role: "assistant",
-                text: assistantBuffer.current.trim(),
+                text: assistantMessage,
               },
             ]);
             assistantBuffer.current = "";
             setAssistantStream("");
+            logConversation(`Assistant: ${assistantMessage}`);
           }
         }
 
@@ -178,10 +192,12 @@ export default function App() {
           }
 
           if (event.type === "transcript.done" && userBuffer.current) {
+            const userMessage = userBuffer.current.trim();
             currentVoiceMessageId.current = null;
             userBuffer.current = "";
             // request the assistant's reply after the user finishes speaking
             sendClientEvent({ type: "response.create" });
+            logConversation(`User: ${userMessage}`);
           }
         }
 
@@ -198,17 +214,18 @@ export default function App() {
   }, [dataChannel]);
 
   return (
-    <div className="flex flex-col min-h-screen">
+    // The fix is here: changed min-h-screen to h-dvh
+    <div className="flex flex-col h-dvh bg-gray-50">
       <Header />
-      <main className="flex-1 flex flex-col items-center justify-end px-2 sm:px-4 py-6 bg-gray-50">
-        <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4 items-right">
+      <main className="flex-1 flex flex-col items-center overflow-hidden">
+        <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
           {isSessionActive ? (
             <ChatLog
               messages={messages}
               assistantStream={assistantStream}
             />
           ) : (
-            <div className="flex items-center justify-center h-full text-center">
+            <div className="flex items-center justify-center h-full text-center px-4">
               <p className="text-gray-500 text-xl">
                 Press "Start Session" to begin your conversation.
               </p>
