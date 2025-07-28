@@ -3,6 +3,7 @@ import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import Header from './header';
 
+
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
@@ -227,11 +228,12 @@ export default function App() {
           ) : (
             <div className="flex items-center justify-center h-full text-center px-4">
               <p className="text-gray-500 text-xl">
-                Press "Start Session" to begin your conversation.
+                Press "Start Session" to begin your conversation with the AI Therapist.
               </p>
             </div>
           )}
         </div>
+
         <div className="w-full max-w-4xl p-2 sm:p-4">
           <SessionControls
             startSession={startSession}
