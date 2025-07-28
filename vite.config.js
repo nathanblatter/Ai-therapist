@@ -7,4 +7,9 @@ const path = fileURLToPath(import.meta.url);
 export default {
   root: join(dirname(path), "client"),
   plugins: [react()],
+  // Add this 'server' section
+  server: {
+    host: true, // This will expose the server to the network
+    allowedHosts: ["www.byuisresearch.com"],
+  },
 };
