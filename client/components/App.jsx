@@ -3,7 +3,6 @@ import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import Header from './header';
 
-
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
@@ -41,9 +40,7 @@ export default function App() {
     audioElement.current.autoplay = true;
     pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
 
-    const ms = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-    });
+    const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
     setLocalStream(ms);
     pc.addTrack(ms.getTracks()[0]);
 
@@ -106,10 +103,7 @@ export default function App() {
       }
       setEvents((prev) => [message, ...prev]);
     } else {
-      console.error(
-        "Failed to send message - no data channel available",
-        message
-      );
+      console.error("Failed to send message - no data channel available", message);
     }
   }
 
@@ -137,12 +131,33 @@ export default function App() {
     logConversation(`User: ${message}`);
   }
 
+  function sendInvisiblePrompt(text) {
+    const event = {
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: text,
+          },
+        ],
+      },
+    };
+
+    sendClientEvent(event);
+    sendClientEvent({ type: "response.create" });
+    logConversation(`INVISIBLE USER PROMPT: ${text}`);
+  }
+
   useEffect(() => {
     if (dataChannel) {
       dataChannel.addEventListener("message", (e) => {
         const event = JSON.parse(e.data);
         if (!event.timestamp) {
           event.timestamp = new Date().toLocaleTimeString();
+          console.log(event);
         }
 
         if (event.type && event.type.startsWith("response")) {
@@ -155,22 +170,27 @@ export default function App() {
             });
           }
 
-          if (event.type === "response.done" && assistantBuffer.current) {
-            const assistantMessage = assistantBuffer.current.trim();
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: "assistant",
-                text: assistantMessage,
-              },
-            ]);
-            assistantBuffer.current = "";
-            setAssistantStream("");
-            logConversation(`Assistant: ${assistantMessage}`);
+          if (event.type === "response.content_part.done") {
+            if (event.part?.type === "audio" && event.part.transcript) {
+              const assistantMessage = event.part.transcript.trim();
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: crypto.randomUUID(),
+                  role: "assistant",
+                  text: assistantMessage,
+                },
+              ]);
+              assistantBuffer.current = "";
+              setAssistantStream("");
+              logConversation(
+                `
+               
+                Assistant: ${assistantMessage}
+                `);
+            }
           }
         }
-
 
         if (event.type && event.type.startsWith("transcript")) {
           if (event.transcript && event.transcript.text) {
@@ -187,8 +207,8 @@ export default function App() {
               prev.map((m) =>
                 m.id === currentVoiceMessageId.current
                   ? { ...m, text: userBuffer.current.trim() }
-                  : m,
-              ),
+                  : m
+              )
             );
           }
 
@@ -196,7 +216,6 @@ export default function App() {
             const userMessage = userBuffer.current.trim();
             currentVoiceMessageId.current = null;
             userBuffer.current = "";
-            // request the assistant's reply after the user finishes speaking
             sendClientEvent({ type: "response.create" });
             logConversation(`User: ${userMessage}`);
           }
@@ -210,12 +229,14 @@ export default function App() {
         setEvents([]);
         setMessages([]);
         setAssistantStream("");
+
+        // ✅ Invisible trigger for intro message
+        sendInvisiblePrompt("Say this phrase exactly: 'Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. Please remember, if you're in crisis, you should call the BYU Counseling and Psychological Services crisis line at (801) 422-3035. Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to press the red mic toggle button to turn it on. And if you're comfortable, may I ask for your name?'");
       });
     }
   }, [dataChannel]);
 
   return (
-    // The fix is here: changed min-h-screen to h-dvh
     <div className="flex flex-col h-dvh bg-gray-50">
       <Header />
       <main className="flex-1 flex flex-col items-center overflow-hidden">

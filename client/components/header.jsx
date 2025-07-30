@@ -9,7 +9,7 @@ const Header = () => {
       <div className="max-w-5xl mx-auto">
         <h1 className="text-3xl md:text-5xl font-bold text-center">AI Therapist Assistant</h1>
         <p className="mt-2 text-sm md:text-base leading-relaxed">
-          If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your session, please reach out immediately to BYU's Counseling and Psychological Services crisis line at 
+          If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your session please reach out immediately to BYU's Counseling and Psychological Services crisis line at 
           <a href="tel:8014223035" className="text-blue-300 underline ml-1" title="BYU Counseling and Psychological Services Crisis Line">(801) 422-3035</a> or visit 
           <a href="https://caps.byu.edu" target="_blank" rel="noopener noreferrer" className="text-blue-300 underline ml-1" title="BYU Counseling and Psychological services Website">caps.byu.edu</a> for support. You are not alone—help is available.
         </p>

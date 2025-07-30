@@ -37,7 +37,8 @@ function SessionActive({ stopSession, sendTextMessage, localStream }) {
     if (localStream) {
       const track = localStream.getAudioTracks()[0];
       if (track) {
-        setIsMicOn(track.enabled);
+        track.enabled = false; // turn mic OFF by default
+        setIsMicOn(false);
       }
     }
   }, [localStream]);
@@ -70,13 +71,13 @@ function SessionActive({ stopSession, sendTextMessage, localStream }) {
           <PhoneOff size={18} />
         </span>
         {/* Text is hidden on small screens and visible on larger screens */}
-        <span className="hidden sm:inline">Disconnect</span>
+        <span className="hidden sm:inline">Disconnect Session</span>
       </button>
 
       <button
         onClick={toggleMic}
         className={`p-3 rounded-full ${
-          isMicOn ? "bg-green-600 hover:bg-red-600" : "bg-red-600 hover:bg-green-600"
+          isMicOn ? "bg-green-600 " : "bg-red-600"
         } text-white`}
         title={isMicOn ? "Mute" : "Unmute"}
       >
@@ -91,6 +92,8 @@ function SessionActive({ stopSession, sendTextMessage, localStream }) {
         }}
         type="text"
         placeholder="Type a message..."
+        id="textMessageInput"
+        name="textMessageInput"
         className="border border-gray-300 rounded-full p-3 flex-1 min-w-0"
         value={message}
         onChange={(e) => setMessage(e.target.value)}

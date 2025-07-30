@@ -8,6 +8,7 @@ export default {
       colors: {
         byuNavy: "#002E5D",
         byuRoyal: "#0047BA",
+        byuLightBlue :"#BDD6E6",
       },
     },
   },
