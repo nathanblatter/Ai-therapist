@@ -15,6 +15,7 @@ export default function App() {
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
+  const [sessionId, setSessionId] = useState(null);
 
   async function logConversation(message) {
     try {
@@ -34,6 +35,9 @@ export default function App() {
     const tokenResponse = await fetch("/token");
     const data = await tokenResponse.json();
     const EPHEMERAL_KEY = data.client_secret.value;
+    setSessionId(data.id); // <-- store the session ID
+    console.log(data);
+
 
     const pc = new RTCPeerConnection();
     audioElement.current = document.createElement("audio");
@@ -157,7 +161,7 @@ export default function App() {
         const event = JSON.parse(e.data);
         if (!event.timestamp) {
           event.timestamp = new Date().toLocaleTimeString();
-          console.log(event);
+          
         }
 
         if (event.type && event.type.startsWith("response")) {
@@ -220,7 +224,17 @@ export default function App() {
             logConversation(`User: ${userMessage}`);
           }
         }
-
+        if (event.type === "conversation.item.input_audio_transcription.completed") {
+          const transcript = event.transcript;
+          if (transcript) {
+            const id = crypto.randomUUID();
+            setMessages((prev) => [
+              ...prev,
+              { id, role: "user", text: transcript.trim() }
+            ]);
+            logConversation(`User: ${transcript.trim()}`);
+          }
+        }
         setEvents((prev) => [event, ...prev]);
       });
 
@@ -231,21 +245,23 @@ export default function App() {
         setAssistantStream("");
 
         // ✅ Invisible trigger for intro message
-        sendInvisiblePrompt("Say this phrase exactly: 'Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. Please remember, if you're in crisis, you should call the BYU Counseling and Psychological Services crisis line at (801) 422-3035. Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to press the red mic toggle button to turn it on. And if you're comfortable, may I ask for your name?'");
+        sendInvisiblePrompt("Say this phrase exactly: 'Test123 this still works'");
       });
     }
   }, [dataChannel]);
 
   return (
     <div className="flex flex-col h-dvh bg-gray-50">
-      <Header />
+      <Header sessionId={sessionId} />
+      
       <main className="flex-1 flex flex-col items-center overflow-hidden">
         <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
-          {isSessionActive ? (
+          {isSessionActive ? ( 
             <ChatLog
               messages={messages}
               assistantStream={assistantStream}
             />
+            
           ) : (
             <div className="flex items-center justify-center h-full text-center px-4">
               <p className="text-gray-500 text-xl">

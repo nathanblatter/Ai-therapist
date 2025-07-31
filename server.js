@@ -5,7 +5,7 @@ import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
 import getOpenAIKey from "./loadSecrets.js"; // Import the function to get the OpenAI API key
-import { get } from "http";
+
 
 
 
@@ -87,6 +87,9 @@ app.get("/token", async (req, res) => {
           model: "gpt-4o-mini-realtime-preview-2024-12-17",
           voice: "alloy",
           instructions: systemPrompt,
+          input_audio_transcription: {
+            "model": "whisper-1"
+        },
         }),
       }
     );
@@ -94,6 +97,8 @@ app.get("/token", async (req, res) => {
     const data = await response.json();
     
     res.json(data);
+    console.log(data)
+    console.log(data.id)
   } catch (error) {
     console.error("Token generation error:", error);
     res.status(500).json({ error: "Failed to generate token" });
