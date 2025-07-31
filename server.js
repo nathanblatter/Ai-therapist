@@ -5,7 +5,7 @@ import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
 import getOpenAIKey from "./loadSecrets.js"; // Import the function to get the OpenAI API key
-
+import { type } from "os";
 
 
 
@@ -90,6 +90,24 @@ app.get("/token", async (req, res) => {
           input_audio_transcription: {
             "model": "whisper-1"
         },
+        temperature: 1,
+        tools:[{
+          "type": "function",
+          "name": "read_consent_form",
+          "description": "read this consent form https://consent-form-ai-therapist.s3.us-west-1.amazonaws.com/Student+consent+Form.pdf ",
+          "parameters": {
+            "type": "object",
+            "properties": {
+             "question": {
+              "type": "string",
+              "description": "The question to be answered about the consent content"
+            },
+              "additionalProperties": false,
+             
+            }
+          }
+        }],
+        tool_choice: "auto",
         }),
       }
     );
@@ -98,7 +116,7 @@ app.get("/token", async (req, res) => {
     
     res.json(data);
     console.log(data)
-    console.log(data.id)
+
   } catch (error) {
     console.error("Token generation error:", error);
     res.status(500).json({ error: "Failed to generate token" });

@@ -17,6 +17,7 @@
     "express": "^4.21.2",
     "history": "^5.3.0",
     "minipass": "^7.0.4",
+    "openai-realtime-api": "^1.0.8",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-feather": "^2.0.10",
@@ -31,6 +32,6 @@
     "postcss-nesting": "^12.0.2",
     "postcss-preset-env": "^7.7.1",
     "tailwindcss": "^3.4.17",
-    "vite": "^7.0.6"
+    "vite": "^6.3.5"
   }
 }

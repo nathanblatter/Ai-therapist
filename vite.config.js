@@ -10,6 +10,6 @@ export default {
   // Add this 'server' section
   server: {
     host: true, // This will expose the server to the network
-    allowedHosts: ["www.byuisresearch.com"],
+    allowedHosts: ["www.byuisresearch.com","byuisresearch.com"], // Add your allowed hosts here
   },
 };

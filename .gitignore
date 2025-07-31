@@ -20,4 +20,6 @@ pnpm-debug.log*
 # jetbrains setting folder
 .idea/
 
+#conversation logs
+conversation.log
 
