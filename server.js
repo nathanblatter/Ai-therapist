@@ -7,12 +7,14 @@ import { fileURLToPath } from "url";
 import {getOpenAIKey} from "./loadSecrets.js"; // Import the function to get the OpenAI API key
 import {pool } from "./db.js";
 
-
+// ES module-compatible __dirname replacement
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT ;
 
 
 const apiKey = await getOpenAIKey();
@@ -59,18 +61,9 @@ Finally, always **prioritize the user’s well-being over anything else**. Your 
 By adhering to these content moderation rules and ethical guardrails, you ensure the AI therapist remains a **safe, trustworthy tool**. The system prompt and underlying design should **prevent the AI from straying outside these boundaries**, and you as the AI should consistently self-check: *“Is my response staying within my ethical guidelines? Am I doing anything that could potentially harm the user or violate their privacy?”* If unsure, err on the side of caution – it’s better to apologize for not being able to fulfill a request than to risk causing harm.
 **In summary**, this system prompt establishes you as a **supportive, ethical AI therapist assistant**. You will provide empathic listening, helpful coping strategies, and evidence-based guidance within a limited scope. You will **not diagnose, not prescribe, and not overstep professional boundaries**. You will keep the conversation **safe, confidential, and user-centered**, with **clear upfront communication about your nature and limits**. In crisis situations, you will **immediately refer the user to real help**. Throughout, your tone stays **calm, caring, and respectful**, honoring the user’s autonomy and diversity. By following these principles, you aim to be a **reliable and ethical source of comfort and emotional support** for users, while always urging them toward **greater safety, wellness, and appropriate professional care when needed**.`;
 
-// ES module-compatible __dirname replacement
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 app.use(express.json()); // Needed to parse JSON bodies
 
-// Configure Vite middleware for React client
-const vite = await createViteServer({
-  server: { middlewareMode: true },
-  appType: "custom",
-});
-app.use(vite.middlewares);
+
 
 // API route for token generation
 app.get("/token", async (req, res) => {
@@ -130,24 +123,72 @@ app.post("/log", async (req, res) => {
   }
 });
 
-// Render the React client
-app.use("*", async (req, res, next) => {
-  const url = req.originalUrl;
+async function startProdServer() {
+  console.log("Starting in production mode...");
 
-  try {
-    const template = await vite.transformIndexHtml(
-      url,
-      fs.readFileSync("./client/index.html", "utf-8")
-    );
-    const { render } = await vite.ssrLoadModule("./client/entry-server.jsx");
-    const appHtml = await render(url);
-    const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
-    res.status(200).set({ "Content-Type": "text/html" }).end(html);
-  } catch (e) {
-    vite.ssrFixStacktrace(e);
-    next(e);
+  // Serve static files from the client build directory.
+  app.use(express.static(path.resolve(__dirname, 'client/dist/client')));
+
+  // Dynamically import the server-side rendering module from the build output.
+  const { render } = await import('./client/dist/server/entry-server.js');
+
+  // Handle all other requests with SSR.
+  app.use('*', async (req, res) => {
+    try {
+      const template = fs.readFileSync(path.resolve(__dirname, 'client/dist/client/index.html'), 'utf-8');
+      const appHtml = await render(req.originalUrl);
+      const html = template.replace(``, appHtml.html); // Use the correct placeholder
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+    } catch (e) {
+      console.error(e.stack);
+      res.status(500).end(e.stack);
+    }
+  });
+}
+
+async function startDevServer() {
+  console.log("Starting in development mode...");
+
+  const vite = await createViteServer({
+    server: { middlewareMode: true },
+    appType: "custom",
+  });
+  app.use(vite.middlewares);
+
+  app.use("*", async (req, res, next) => {
+    try {
+      const template = await vite.transformIndexHtml(
+        req.originalUrl,
+        fs.readFileSync(path.resolve(__dirname, "./client/index.html"), "utf-8")
+      );
+      // Make sure the path here is relative to the project root for ssrLoadModule
+      const { render } = await vite.ssrLoadModule("./entry-server.jsx"); 
+      const appHtml = await render(req.originalUrl);
+
+      // This line is the critical fix
+      const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
+      
+      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      next(e);
+    }
+  });
+}
+
+// --- Main Server Initialization ---
+
+async function initializeServer() {
+  if (process.env.NODE_ENV === "production") {
+    await startProdServer();
+  } else {
+    await startDevServer();
   }
-});
+
+  
+}
+
+initializeServer();
 
 app.listen(port, () => {
   console.log(`✅ Express server running on http://localhost:${port}`);

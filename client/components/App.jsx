@@ -4,6 +4,7 @@ import SessionControls from "./SessionControls";
 import Header from './header';
 
 export default function App() {
+  const [isClient, setIsClient] = useState(false);
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -16,6 +17,10 @@ export default function App() {
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
   const [sessionId, setSessionId] = useState(null);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   async function logConversation({ sessionId, role, type, message, extras }) {
     const payload = {
@@ -255,6 +260,11 @@ export default function App() {
     }
   }, [dataChannel]);
 
+  if (!isClient) {
+    // Render a placeholder or nothing on the server
+    return null;
+  }
+
   return (
     <div className="flex flex-col h-dvh bg-gray-50">
       <Header sessionId={sessionId} />
@@ -281,5 +291,6 @@ export default function App() {
         </div>
       </main>
     </div>
+
   );
 }
