@@ -4,15 +4,15 @@ import { createServer as createViteServer } from "vite";
 import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
-import getOpenAIKey from "./loadSecrets.js"; // Import the function to get the OpenAI API key
-import { type } from "os";
+import {getOpenAIKey} from "./loadSecrets.js"; // Import the function to get the OpenAI API key
+import {pool } from "./db.js";
 
 
 
 
 
 const app = express();
-const port = process.env.PORT;
+const port = 3000;
 
 
 const apiKey = await getOpenAIKey();
@@ -90,56 +90,42 @@ app.get("/token", async (req, res) => {
           input_audio_transcription: {
             "model": "whisper-1"
         },
-        temperature: 1,
+        temperature: 0.6,
         tools:[{
-          "type": "function",
-          "name": "read_consent_form",
-          "description": "read this consent form https://consent-form-ai-therapist.s3.us-west-1.amazonaws.com/Student+consent+Form.pdf ",
-          "parameters": {
-            "type": "object",
-            "properties": {
-             "question": {
-              "type": "string",
-              "description": "The question to be answered about the consent content"
-            },
-              "additionalProperties": false,
-             
-            }
-          }
-        }],
+            type: "function",
+            name: "stopSession",
+            description: 'Stops the current session, when the user says they want to end the "conversation", "Session", "Chat", or "Call".',
+          },
+        ],
         tool_choice: "auto",
-        }),
-      }
-    );
+      }),
+    });
 
     const data = await response.json();
-    
     res.json(data);
-    console.log(data)
-
   } catch (error) {
     console.error("Token generation error:", error);
     res.status(500).json({ error: "Failed to generate token" });
   }
 });
 
-// Logging endpoint
-app.post("/log", (req, res) => {
-  const { message } = req.body;
+// === LOGGING ENDPOINT ===
+app.post("/log", async (req, res) => {
+  const { timestamp, sessionId, role, type, message, extras } = req.body;
 
-  if (!message) {
-    return res.status(400).send("Missing message");
+  if (!timestamp || !sessionId || !role || !type || !message) {
+    return res.status(400).send("Missing required log fields");
   }
 
-  const logEntry = `${new Date().toISOString()} - ${JSON.stringify(message)}\n`;
-  const logPath = path.join(__dirname, "conversation.log");
-
   try {
-    fs.appendFileSync(logPath, logEntry);
-    
+    await pool.query(
+      `INSERT INTO conversation_logs (session_id, role, message_type, message, extras, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [sessionId, role, type, message, extras || null, new Date(timestamp)]
+    );
     res.sendStatus(200);
   } catch (err) {
-    console.error("❌ Failed to write log:", err);
+    console.error("❌ Failed to insert log into DB:", err);
     res.sendStatus(500);
   }
 });

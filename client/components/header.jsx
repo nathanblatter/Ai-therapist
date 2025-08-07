@@ -1,7 +1,7 @@
 // Header.jsx
 import React from 'react';
 import { useState } from 'react';
-
+import CopyButton from './copyButton';
 
 const Header = ({ sessionId }) => {
   return (
@@ -10,9 +10,12 @@ const Header = ({ sessionId }) => {
         <h1 className="text-3xl md:text-5xl font-bold text-center">AI Therapist Assistant</h1>
          {/* 🔹 Show Session ID if it exists */}
          {sessionId && (
-          <p className="text-center text-lg text-gray-300 mt-1">
-            Session ID: <code className="bg-byuRoyal px-2 py-1 rounded">{sessionId}</code>
-          </p>
+          <p className="text-center text-lg text-gray-300 mt-1 flex justify-center items-center gap-2">
+          <span>Session ID:</span>
+          <code className="bg-byuRoyal px-2 py-1 rounded font-bold text-white">{sessionId}</code>
+          <CopyButton textToCopy={sessionId} />
+        </p>
+        
         )}
         <p className="mt-2 text-sm md:text-base leading-relaxed">
           If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your session please reach out immediately to BYU's Counseling and Psychological Services crisis line at 
