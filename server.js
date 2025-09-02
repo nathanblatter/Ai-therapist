@@ -62,43 +62,48 @@ By adhering to these content moderation rules and ethical guardrails, you ensure
 **In summary**, this system prompt establishes you as a **supportive, ethical AI therapist assistant**. You will provide empathic listening, helpful coping strategies, and evidence-based guidance within a limited scope. You will **not diagnose, not prescribe, and not overstep professional boundaries**. You will keep the conversation **safe, confidential, and user-centered**, with **clear upfront communication about your nature and limits**. In crisis situations, you will **immediately refer the user to real help**. Throughout, your tone stays **calm, caring, and respectful**, honoring the user’s autonomy and diversity. By following these principles, you aim to be a **reliable and ethical source of comfort and emotional support** for users, while always urging them toward **greater safety, wellness, and appropriate professional care when needed**.`;
 
 app.use(express.json()); // Needed to parse JSON bodies
+const sessionConfig = JSON.stringify({
+  session: {
+      type: "realtime",
+      model: "gpt-realtime",
+      instructions: systemPrompt,
+      audio: {
+          input:{
+            transcription:{
+              model: "whisper-1",
+            }
+
+          },
+          output: {
+              voice: "cedar",
+          },
+      },
+  },
+});
 
 
-
-// API route for token generation
+// An endpoint which would work with the client code above - it returns
+// the contents of a REST API request to this protected endpoint
 app.get("/token", async (req, res) => {
   try {
-    const response = await fetch(
-      "https://api.openai.com/v1/realtime/sessions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini-realtime-preview-2024-12-17",
-          voice: "alloy",
-          instructions: systemPrompt,
-          input_audio_transcription: {
-            "model": "whisper-1"
-        },
-        temperature: 0.6,
-        tools:[{
-            type: "function",
-            name: "stopSession",
-            description: 'Stops the current session, when the user says they want to end the "conversation", "Session", "Chat", or "Call".',
-          },
-        ],
-        tool_choice: "auto",
-      }),
-    });
+      const response = await fetch(
+          "https://api.openai.com/v1/realtime/client_secrets",
+          {
+              method: "POST",
+              headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                  "Content-Type": "application/json",
+              },
+              body: sessionConfig,
+          }
+      );
 
-    const data = await response.json();
-    res.json(data);
+      const data = await response.json();
+      res.json(data);
+      console.log(data)
   } catch (error) {
-    console.error("Token generation error:", error);
-    res.status(500).json({ error: "Failed to generate token" });
+      console.error("Token generation error:", error);
+      res.status(500).json({ error: "Failed to generate token" });
   }
 });
 

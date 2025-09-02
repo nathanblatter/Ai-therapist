@@ -44,17 +44,20 @@ export default function App() {
   }
 
   async function startSession() {
+    // Get a session token for OpenAI Realtime API
     const tokenResponse = await fetch("/token");
     const data = await tokenResponse.json();
     console.log("Session token data:", data);
-    const EPHEMERAL_KEY = data.client_secret.value;
-    setSessionId(data.id);
+    const EPHEMERAL_KEY = data.value;
+    setSessionId(data.session.id);
 
     const trimmedData = {
-      ...data,
+      ...data.session,
+      
       instructions: "[[ OMITTED FOR LOGGING ]]",
-      client_secret: "[[ OMITTED FOR LOGGING ]]",
-      tools: "Stop Session function caller"
+      
+      
+     
     };
 
     logConversation({
@@ -70,32 +73,33 @@ export default function App() {
       message: "Session settings",
       extras: trimmedData, // This will include trimmed session metadata
     });
-
+    // Create a peer connection
     const pc = new RTCPeerConnection();
+    // Set up to play remote audio from the model
     audioElement.current = document.createElement("audio");
     audioElement.current.autoplay = true;
     pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
-
-    const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Add local audio track for microphone input in the browser
+    const ms = await navigator.mediaDevices.getUserMedia({ audio: true,}); //video: true// });
     setLocalStream(ms);
     pc.addTrack(ms.getTracks()[0]);
-
+    // Set up data channel for sending and receiving events
     const dc = pc.createDataChannel("oai-events");
     setDataChannel(dc);
-
+    // Start the session using the Session Description Protocol (SDP)
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    const baseUrl = "https://api.openai.com/v1/realtime";
-    const model = "gpt-4o-realtime-preview-2024-12-17";
+    const baseUrl = "https://api.openai.com/v1/realtime/calls";
+    const model = "gpt-realtime";
     const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-      method: "POST",
-      body: offer.sdp,
-      headers: {
+    method: "POST",
+    body: offer.sdp,
+    headers: {
         Authorization: `Bearer ${EPHEMERAL_KEY}`,
         "Content-Type": "application/sdp",
-      },
-    });
+    },
+});
 
     const answer = {
       type: "answer",
@@ -125,6 +129,7 @@ export default function App() {
     setIsSessionActive(false);
     setDataChannel(null);
     setLocalStream(null);
+    setSessionId(null)
     peerConnection.current = null;
   }
 
@@ -194,6 +199,7 @@ export default function App() {
     if (dataChannel) {
       dataChannel.addEventListener("message", async (e) => {
         const event = JSON.parse(e.data);
+        console.log(event)
         if (!event.timestamp) {
           event.timestamp = new Date().toLocaleTimeString();
         }
@@ -255,6 +261,7 @@ export default function App() {
         setEvents([]);
         setMessages([]);
         setAssistantStream("");
+        
         sendInvisiblePrompt("Say this phrase exactly: 'Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. Please remember, if you're in crisis, you should call the BYU Counseling and Psychological Services crisis line at (801) 422-3035. Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to press the red mic toggle button to turn it on. And if you're comfortable, may I ask for your name?'");
       });
     }
