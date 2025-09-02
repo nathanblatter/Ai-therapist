@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import {getOpenAIKey} from "./loadSecrets.js"; // Import the function to get the OpenAI API key
 import {pool } from "./db.js";
+import redactPHI from "./redact.js";
 
 // ES module-compatible __dirname replacement
 const __filename = fileURLToPath(import.meta.url);
@@ -107,23 +108,66 @@ app.get("/token", async (req, res) => {
   }
 });
 
-// === LOGGING ENDPOINT ===
-app.post("/log", async (req, res) => {
-  const { timestamp, sessionId, role, type, message, extras } = req.body;
+// // === OLD LOGGING ENDPOINT ===
+// app.post("/log", async (req, res) => {
+//   const { timestamp, sessionId, role, type, message, extras } = req.body;
 
-  if (!timestamp || !sessionId || !role || !type || !message) {
-    return res.status(400).send("Missing required log fields");
+//   if (!timestamp || !sessionId || !role || !type || !message) {
+//     return res.status(400).send("Missing required log fields");
+//   }
+
+//   try {
+//     await pool.query(
+//       `INSERT INTO conversation_logs (session_id, role, message_type, message, extras, created_at)
+//        VALUES ($1, $2, $3, $4, $5, $6)`,
+//       [sessionId, role, type, message, extras || null, new Date(timestamp)]
+//     );
+//     res.sendStatus(200);
+//   } catch (err) {
+//     console.error("❌ Failed to insert log into DB:", err);
+//     res.sendStatus(500);
+//   }
+// });
+
+// ===================== Logs batch route with redaction =====================
+app.post("/logs/batch", async (req, res) => {
+  const { records } = req.body;
+  if (!Array.isArray(records) || records.length === 0) {
+    return res.status(400).send("No records provided");
   }
 
   try {
+    const values = [];
+    const placeholders = [];
+    let paramIndex = 1;
+
+    for (const record of records) {
+      const { timestamp, sessionId, role, type, message, extras } = record;
+      if (!timestamp || !sessionId || !role || !type) continue;
+      const redactedMessage = await redactPHI(message);
+
+      
+
+      values.push(sessionId, role, type, redactedMessage, extras || null, new Date(timestamp));
+      placeholders.push(
+        `($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5})`
+      );
+      paramIndex += 6;
+    }
+
+    if (values.length === 0) {
+      return res.status(400).send("No valid records to insert");
+    }
+
     await pool.query(
       `INSERT INTO conversation_logs (session_id, role, message_type, message, extras, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [sessionId, role, type, message, extras || null, new Date(timestamp)]
+       VALUES ${placeholders.join(", ")}`,
+      values
     );
+
     res.sendStatus(200);
   } catch (err) {
-    console.error("❌ Failed to insert log into DB:", err);
+    console.error("Failed to insert batch logs into DB:", err);
     res.sendStatus(500);
   }
 });

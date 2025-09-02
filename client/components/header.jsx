@@ -12,7 +12,7 @@ const Header = ({ sessionId }) => {
          {sessionId && (
           <p className="text-center text-lg text-gray-300 mt-1 flex justify-center items-center gap-2">
           <span>Session ID:</span>
-          <code className="bg-byuRoyal px-2 py-1 rounded font-bold text-white">{sessionId}</code>
+          <code className="bg-byuRoyal px-2 py-1 rounded font-bold text-white" title="Session ID (Copy this value into the form)">{sessionId}</code>
           <CopyButton textToCopy={sessionId} />
         </p>
         

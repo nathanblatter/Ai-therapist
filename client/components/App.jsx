@@ -22,24 +22,55 @@ export default function App() {
     setIsClient(true);
   }, []);
 
-  async function logConversation({ sessionId, role, type, message, extras }) {
-    const payload = {
+  // ---- Batched logger ----
+  const logBufferRef = useRef([]);
+  const flushInFlightRef = useRef(false);
+  const flushTimerRef = useRef(null);
+  const FLUSH_SIZE = 200;
+  const FLUSH_INTERVAL_MS = 15000;
+
+  function logConversation({ sessionId, role, type, message, extras }) {
+    if (!sessionId || !type) return;
+    logBufferRef.current.push({
       timestamp: new Date().toISOString(),
       sessionId,
-      role,
+      role: role || "system",
       type,
-      message,
-      extras: extras || null,
-    };
-  
+      message: message ?? null,
+      extras: extras ?? null,
+    });
+    if (logBufferRef.current.length >= FLUSH_SIZE) void flushLogs();
+  }
+
+  async function flushLogs() {
+    if (flushInFlightRef.current) return;
+    const batch = logBufferRef.current;
+    if (!batch.length) return;
+    flushInFlightRef.current = true;
+    logBufferRef.current = [];
     try {
-      await fetch("/log", {
+      await fetch("/logs/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ records: batch }),
+        keepalive: true,
       });
-    } catch (error) {
-      console.error("Failed to log conversation:", error);
+    } catch (err) {
+      console.error("Failed to batch log, re-queueing:", err);
+      logBufferRef.current = [...batch, ...logBufferRef.current];
+    } finally {
+      flushInFlightRef.current = false;
+    }
+  }
+
+  function startPeriodicFlush() {
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = setInterval(() => void flushLogs(), FLUSH_INTERVAL_MS);
+  }
+  function stopPeriodicFlush() {
+    if (flushTimerRef.current) {
+      clearInterval(flushTimerRef.current);
+      flushTimerRef.current = null;
     }
   }
 
@@ -110,8 +141,10 @@ export default function App() {
     peerConnection.current = pc;
   }
 
-  function stopSession() {
+  async function stopSession() {
     logConversation({ sessionId:sessionId, role: "system", type: "session_end", message: "Session ended" });
+    stopPeriodicFlush();
+    await flushLogs();
     if (dataChannel) {
       dataChannel.close();
     }
@@ -132,6 +165,16 @@ export default function App() {
     setSessionId(null)
     peerConnection.current = null;
   }
+
+  // flush on page unload
+  useEffect(() => {
+    const handler = () => {
+      navigator.sendBeacon?.("/logs/batch", JSON.stringify({ records: logBufferRef.current })) || void flushLogs();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+
 
   function sendClientEvent(message) {
     if (dataChannel) {
@@ -261,6 +304,7 @@ export default function App() {
         setEvents([]);
         setMessages([]);
         setAssistantStream("");
+        startPeriodicFlush();
         
         sendInvisiblePrompt("Say this phrase exactly: 'Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. Please remember, if you're in crisis, you should call the BYU Counseling and Psychological Services crisis line at (801) 422-3035. Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to press the red mic toggle button to turn it on. And if you're comfortable, may I ask for your name?'");
       });
