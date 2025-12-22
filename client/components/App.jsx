@@ -122,7 +122,7 @@ export default function App() {
     await pc.setLocalDescription(offer);
 
     const baseUrl = "https://api.openai.com/v1/realtime/calls";
-    const model = "gpt-realtime";
+    const model = "gpt-realtime-mini";
     const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
     method: "POST",
     body: offer.sdp,
@@ -238,6 +238,46 @@ export default function App() {
     stopSession: () => stopSession(),
   };
 
+  const event = {
+  type: "session.update",
+  session: {
+      type: "realtime",
+      model: "gpt-realtime",
+      // Lock the output to audio (set to ["text"] if you want text without audio)
+      output_modalities: ["audio"],
+      audio: {
+        input: {
+          format: {
+            type: "audio/pcm",
+            rate: 24000,
+            transcription:{
+              model: "whisper-1",
+            }
+          },
+          turn_detection: {
+            type: "semantic_vad"
+          }
+        },
+        output: {
+          format: {
+            type: "audio/pcm",
+          },
+          voice: "marin",
+        }
+      },
+      // Use a server-stored prompt by ID. Optionally pin a version and pass variables.
+      prompt: {
+        id: "pmpt_123",          // your stored prompt ID
+        version: "89",           // optional: pin a specific version
+        variables: {
+          city: "Paris"          // example variable used by your prompt
+        }
+      },
+      // You can still set direct session fields; these override prompt fields if they overlap:
+      instructions: "Speak clearly and briefly. Confirm understanding before taking actions."
+  },
+};
+
   useEffect(() => {
     if (dataChannel) {
       dataChannel.addEventListener("message", async (e) => {
@@ -306,7 +346,7 @@ export default function App() {
         setAssistantStream("");
         startPeriodicFlush();
         
-        sendInvisiblePrompt("Say this phrase exactly: 'Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. Please remember, if you're in crisis, you should call the BYU Counseling and Psychological Services crisis line at (801) 422-3035. Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to press the red mic toggle button to turn it on. And if you're comfortable, may I ask for your name?'");
+        sendInvisiblePrompt("Say this phrase exactly: 'Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. Please remember, if you're in crisis, you should call the BYU Counseling and Psychological Services crisis line at (801) 422-3035. Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to press the red mic toggle button to turn it on. Thanks again for being willing to talk, I'm glad you're here with me today.'");
       });
     }
   }, [dataChannel]);

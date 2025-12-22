@@ -3,9 +3,11 @@
   "scripts": {
     "dev": "node server.js --dev",
     "start": "NODE_ENV=production node server.js",
-    "build": "npm run build:client && npm run build:server",
+    "build": "npm run build:client && npm run build:admin-client && npm run build:server && npm run build:admin-server",
     "build:client": "vite build --outDir dist/client --ssrManifest",
+    "build:admin-client": "vite build --config vite.admin.config.js --outDir dist/client --ssrManifest",
     "build:server": "vite build --ssr ./entry-server.jsx --outDir dist/server",
+    "build:admin-server": "vite build --ssr ./admin/admin-entry-server.jsx --outDir dist/server",
     "devinstall": "zx ../../devinstall.mjs -- node server.js --dev",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx --fix"
   },
@@ -13,8 +15,10 @@
     "@aws-sdk/client-dynamodb": "^3.848.0",
     "@aws-sdk/client-secrets-manager": "^3.857.0",
     "@aws-sdk/lib-dynamodb": "^3.850.0",
+    "bcrypt": "^6.0.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-session": "^1.18.2",
     "history": "^5.3.0",
     "minipass": "^7.0.4",
     "openai": "^5.17.0",
@@ -23,7 +27,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-feather": "^2.0.10",
-    "react-router-dom": "^6.20.0"
+    "react-router-dom": "^6.20.0",
+    "recharts": "^3.6.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

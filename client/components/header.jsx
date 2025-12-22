@@ -1,13 +1,63 @@
 // Header.jsx
 import React from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import CopyButton from './copyButton';
 
+
 const Header = ({ sessionId }) => {
+  const [username, setUsername] = useState(null);
+  const [userRole, setUserRole] = useState(null);
+  const navigate = useNavigate();
+  function capitalizeFirst(str) {
+  if (!str || typeof str !== "string") return str;
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+
+  useEffect(() => {
+    // Fetch auth status to get username and role
+    const fetchAuthStatus = async () => {
+      try {
+        const response = await fetch('/api/auth/status');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.authenticated && data.user) {
+            setUsername(data.user.username);
+            setUserRole(data.user.role);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch auth status:', error);
+      }
+    };
+
+    fetchAuthStatus();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        navigate('/login');
+      }
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  };
+
   return (
     <header className="bg-byuNavy text-white p-4 md:p-6 font-sans">
       <div className="max-w-5xl mx-auto">
         <h1 className="text-3xl md:text-5xl font-bold text-center">AI Therapist Assistant</h1>
+        {username && (
+          <p className="text-center text-lg text-byuLightBlue mt-2">
+            Welcome, {capitalizeFirst(username)}
+          </p>
+        )}
          {/* 🔹 Show Session ID if it exists */}
          {sessionId && (
           <p className="text-center text-lg text-gray-300 mt-1 flex justify-center items-center gap-2">
@@ -25,6 +75,10 @@ const Header = ({ sessionId }) => {
         <nav className="mt-4 flex flex-col sm:flex-row items-center gap-2 sm:gap-4 justify-center">
           <a href="tel:8014223035" className="bg-byuRoyal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center" title="BYU Counseling and Psychological Services">Call CAPS</a>
           <a href="https://caps.byu.edu/for-students-in-crisis" target="_blank" rel="noopener noreferrer" className="bg-byuRoyal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center" title="BYU Crisis Resources">Crisis Resources</a>
+          {(userRole === 'researcher' || userRole === 'therapist') && (
+            <a href="/admin/" target="_blank" rel="noopener noreferrer" className="bg-byuRoyal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center" title="Admin Portal">Admin Portal</a>
+          )}
+          <button onClick={handleLogout} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center" title="Logout">Logout</button>
         </nav>
         
       </div>

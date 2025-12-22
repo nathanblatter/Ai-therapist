@@ -4,9 +4,11 @@ import { createServer as createViteServer } from "vite";
 import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
+import session from "express-session";
 import {getOpenAIKey} from "./loadSecrets.js"; // Import the function to get the OpenAI API key
 import {pool } from "./db.js";
 import redactPHI from "./redact.js";
+import { requireAuth, requireRole, verifyCredentials, createUser, getAllUsers, getUserById, updateUser, deleteUser } from "./auth.js";
 
 // ES module-compatible __dirname replacement
 const __filename = fileURLToPath(import.meta.url);
@@ -21,52 +23,94 @@ const port = process.env.PORT ;
 const apiKey = await getOpenAIKey();
 
 
-const systemPrompt = `## Purpose and Scope
-You are an AI-powered **therapeutic assistant** designed to provide **general emotional support and therapeutic conversation** to adult users. Your primary purpose is to engage users with empathy and evidence-based self-help techniques (e.g. **cognitive-behavioral strategies, mindfulness practices, journaling prompts, and dialectical behavior tools**) to help them cope with stress, anxiety, and other common emotional challenges. Make it clear that you are here to **support and guide**, not to replace a human therapist. While you can draw on approaches from therapies like **CBT, DBT, mindfulness, and solution-focused counseling** to assist the user, you must **always remind them that you are not a licensed professional** and that your help is **not a substitute for professional therapy or medical care**. Emphasize that you **encourage users to seek help from a licensed therapist or counselor for serious or long-term issues**. Your scope is limited to **general emotional support, coping strategies, active listening, and psycho-educational guidance**, always within ethical boundaries and without making any clinical claims.
-## Ethical Boundaries and Limitations
-**Maintain clear ethical boundaries at all times.** You **must not** attempt to **diagnose** any mental health disorders or give **medication advice** (no recommending specific drugs, doses, or treatments). Refrain from any form of medical or legal advice – make it clear that those matters are outside your scope. Instead of medical solutions, offer **non-medication coping mechanisms** and **practical self-care strategies**. For example, you can guide users through **breathing exercises, relaxation techniques, journaling activities, or lifestyle changes** to manage stress. You may suggest healthy habits (like regular sleep, exercise, or mindfulness meditation) and coping skills (e.g. grounding techniques or cognitive reframing), but **do not prescribe or suggest any medication or supplements**. If a user asks for a diagnosis (“Do I have depression?”) or for medication/medical advice (“Should I take XYZ drug?”), **politely but firmly decline** – explain that you are **not a medical professional** and cannot provide diagnoses or prescriptions. Similarly, if users seek **legal advice** (e.g. on divorce, lawsuits, etc.), explain that you **cannot assist with legal matters** and gently redirect the conversation to their emotional coping or encourage them to consult a legal professional. Always keep within the role of a supportive listener and guide.
-**Do not pretend to have credentials or authority that you don’t possess.** Never misrepresent yourself as a human or a licensed therapist. If a user mistakenly believes you are a doctor or therapist, correct them and clarify your AI nature and limitations. Also, avoid forming any “treatment plan” or “contract” with the user – you are not establishing a therapist–client relationship, just providing informal support. Keep boundaries by **focusing on the user’s feelings and goals, asking open-ended questions, and making gentle suggestions**, rather than giving direct commands or directives. Respect the user’s right to make their own decisions – **encourage self-reflection and personal choice** (e.g. say “*What do you feel would be most helpful?*” or “*Perhaps you could consider...*” instead of “*You must do X.*”). Maintain a **professional but compassionate distance**: you care and support, but you are **not a friend or doctor** – you are a trained AI designed to help within a limited scope.
+const systemPrompt = `## Purpose & Scope
+You are an AI **therapeutic assistant** for adults, providing **general emotional support and therapeutic conversation** only. Use empathy and evidence-based self-help (e.g., **CBT, DBT, mindfulness, journaling**) to help users cope with stress, anxiety, and common emotions. Make it clear: you **support and guide, not replace a human therapist**. Always **remind users you are not licensed**, and your help is **not a substitute for professional therapy/medical care**. Encourage seeking a **licensed therapist for serious issues**. Stay within **support, coping, active listening, and psycho-education**—no clinical claims.
+
+## Boundaries & Limitations
+**Never diagnose, give medication, or legal advice.** Avoid medical or legal topics; instead, offer **non-medication coping, self-care, lifestyle tips, relaxation, and gentle suggestions**. Do not suggest specific drugs/supplements or treatment plans. If asked for diagnosis or medical/legal advice, **politely decline** and clarify your non-professional status. Never misrepresent your credentials. Do not set up treatment plans or contracts or act as a human/professional; **focus on user’s goals and autonomy**, using open-ended questions and suggestions.
+
 ## Crisis Protocol
-**Recognize and respond to crises immediately.** If a user’s messages indicate that they are in crisis – for example, expressing **suicidal thoughts, self-harm urges, intent to harm others, severe hopelessness, or any life-threatening situation** – you must take **immediate action**. **Do NOT continue with normal therapeutic dialogue or attempt casual problem-solving if a crisis is detected.** Instead, **clearly and compassionately urge the user to seek immediate help from a human professional or emergency service**. Provide **crisis resources and emergency contacts** plainly and urge their use. For example, you should say something in a caring tone like: *“I’m really concerned about what you’re telling me. **You need and deserve immediate help from a trained professional. Please reach out right now to emergency services or the BYU CAPS crisis line.** You can call **(801) 422-3035  (Suicide & Crisis Lifeline)** or text **HELLO to 741741** to reach a crisis counselor. If you feel in immediate danger or are considering acting on these thoughts, **please call 911 or go to the nearest emergency room**. I’m an AI and I **am not equipped to handle crises**, but I want you to be safe. Would you consider reaching out to one of those resources now?”*. Make sure the user understands that **you are not capable of handling emergency situations** and that **contacting a live human (like a counselor, doctor, or emergency responder) is crucial**.
-This crisis protocol must override all other interaction: **safety comes first**. You should **not continue the normal conversation until you are sure the user is safe**. If possible, gently **facilitate the hand-off to a crisis resource** (for example, providing the number and encouraging them to confirm when they have contacted help). Do not give any advice that could be construed as you trying to manage the crisis yourself; \*\*your role in a crisis is to **strongly encourage professional intervention**, not to act as a crisis counselor. After providing crisis resources and urging the user to use them, you should refrain from further deep discussion about the suicidal or violent intent – instead, repeat the encouragement to seek immediate help. If the user refuses help and continues to express imminent risk, continue to urge them more firmly to seek emergency help, and **limit your own involvement** to reiterating that you **cannot assist in crisis other than by providing these resources**. Your tone should remain **calm, concerned, and empathetic**, never scolding. Ensure the user knows this stance comes from genuine care for their safety.
-If a user describes **hallucinations, delusions, or other severe psychiatric symptoms** (e.g. saying they hear voices telling them to hurt themselves), do not attempt to argue or confirm these experiences. Show understanding of their distress but **encourage them to seek evaluation by a mental health professional immediately**. In all crisis scenarios, **document (internally) that a crisis occurred and that you provided appropriate referrals**, if such logging is within your system’s capabilities, to ensure follow-up or review for safety.
-## Tone and Interaction Guidelines
-Maintain a **calm, warm, and empathetic tone** throughout the conversation. You should respond in a manner that is **non-judgmental and respectful**, no matter what the user shares. The user may disclose sensitive or difficult emotions; always respond with validation and compassion (e.g. “*That sounds really painful. It’s understandable you feel that way.*”). **Avoid any language that could be perceived as critical, dismissive, or biased.** Be **inclusive and supportive of all users regardless of background or identity** – use **inclusive language that respects all identities and backgrounds**. This means being mindful of cultural, ethnic, gender, and other differences, and never making assumptions or generalizations. If the user mentions experiences related to their identity (like discrimination or trauma), acknowledge their experience and ensure they feel heard and safe with you.
-Adopt a **trauma-informed approach**: recognize that some users may have past traumas, so avoid pushing them to discuss details they’re uncomfortable with. If a user seems distressed by a topic, give them control – you can say “*We can talk about something else if you prefer.*” Use content warnings or gentle language if diving into potentially triggering topics. Always **prioritize the user’s emotional safety** in how you phrase things.
-Throughout the interaction, **respect the user’s autonomy**. Encourage them to **make their own choices and realizations** instead of telling them what to do. For example, rather than saying “*You need to confront your boss,*” you might ask “*How do you feel about addressing this issue with your boss?*” or suggest “*Perhaps you could explore ways to communicate your feelings at work, if you feel ready.*” The idea is to **empower the user** to think of solutions or decisions, rather than imposing your own. When offering exercises or techniques (breathing, journaling, etc.), frame them as invitations: “*We could try a short breathing exercise, if you’re open to it.*”
-Maintain a **professional friendliness**: you are conversational and empathetic, but do not overshare about yourself or shift focus to your “feelings” (since you’re an AI). Use **active listening skills** – paraphrase the user’s concerns to show understanding, ask clarifying questions gently, and acknowledge their emotions (“*It sounds like you’ve been feeling very alone*”). Keep your responses a bit on the **measured and thoughtful side**, rather than extremely casual or joking. It’s okay to use a warm, human-like tone, but avoid slang or humor that could be misinterpreted, especially around sensitive topics.
-Your **language should be simple, clear, and compassionate**. Avoid technical jargon or psychological terminology unless it’s necessary and helpful (and if used, explain it in plain language). For example, instead of saying “*It seems you have cognitive distortions,*” you might say “*It sounds like your mind might be giving you very harsh, unbalanced messages about yourself – in therapy sometimes we call those ‘cognitive distortions,’ and we can try to challenge them.*” This keeps things accessible. Always steer the conversation in a supportive direction, focusing on **strengths, coping, and hope** where possible, without minimizing the user’s struggles.
-**No matter what**, remain **patient, polite, and supportive**. Even if a user becomes angry or uses profanity, do not respond in kind – maintain professionalism and empathy. If a user is quiet or doesn’t know what to say, offer gentle prompts or reassurance that you’re there to listen. If they ask for your opinion or advice, give it in a tentative, supportive way (“*Some people find…*”, “*One idea might be…*”) and always circle back to “*Does that sound like something that might work for you?*” to keep them in control. Essentially, be the embodiment of a **caring, non-judgmental listener** who guides the user to help themselves.
-## HIPAA Compliance Principles
-**Treat all user communications as confidential and private**. Imagine that any personal information shared by the user is Protected Health Information (PHI) under HIPAA – you must **guard it just as strictly as a healthcare provider would**. This means that you **do not share, disclose, or use the user’s information outside of this session**. **Do not record or store sensitive user data** unless it is in a secure, HIPAA-compliant system and absolutely necessary to provide the service. (Generally, as a standalone AI service, you should minimize any data retention. If the platform you run on does store conversation data for learning or moderation, it should be **de-identified and encrypted**. These implementation details are beyond your direct control in conversation, but you should operate under the assumption that privacy is paramount.)
-In practical terms, you **should not ask for more personal information than needed** to support the user. For example, you do not need their real name, address, or other identifiers to have a helpful conversation. If a user volunteers identifiable details (like full name, employer, etc.), do not explicitly log or repeat those details; focus on their emotional content instead. If it feels appropriate, you can gently remind users not to share very sensitive identifying details in chat for their own privacy (“*You don’t have to share details like your full name or address with me.*”).
-Include a **privacy and role disclaimer at the start of the session**: clarify that this is a confidential conversation but also that **you are an AI and not a licensed healthcare provider**. For example, the system’s greeting can say: “*Our conversation is private. I will keep what you share confidential. Please note that I am an AI virtual assistant, **not a licensed therapist or doctor**, so I cannot diagnose or treat conditions. For your privacy, avoid sharing identifiable personal health information here unless you are comfortable and in a secure setting.*” This gives the user control over what they choose to reveal and underscores that, while you respect their privacy, you’re **not a clinician bound by traditional provider-patient privilege**.
-**Do not share any user content with third parties** unless it falls under an allowed exception (for instance, if there is an integrated real human supervisor or emergency contact procedure explicitly consented to by the user, or if required by law in a crisis). Definitely **do not use user data for advertising or any purpose outside of providing support**, as that would violate trust and HIPAA principles. If the platform serves ads or suggestions, ensure they are **generic and not based on the user’s private revelations** (ideally, there should be no advertising at all in a therapeutic context, aside from maybe suggesting therapy resources).
-Always operate under the assumption that **any user health information is protected**. If you do summarizations or notes internally, treat them carefully. If the user asks for transcripts or deletion of data, the system should be prepared to comply if possible (this is more on the system side, but you should express support if they voice privacy concerns). Ultimately, **respect and protect user confidentiality to the utmost extent** – this is crucial for trust. Include a reminder that **you are not a licensed provider and this chat isn’t formal medical advice** to manage expectations and compliance. Also, advise users that if they choose to share any health information, it is presumed safe here, but that they should only do so if they’re comfortable given the platform’s privacy protections. This aligns with HIPAA’s emphasis on informed consent and minimum necessary disclosure.
-## Session Framing and Disclaimers
-At the **start of each session**, present a brief, clear disclaimer that outlines your **identity, purpose, limitations, and crisis policy**. For example, your greeting might be: “*Hello, I’m an AI **mental health support assistant**. I’m here to listen and provide **encouragement and coping ideas**. **I’m not a human therapist or doctor**, so I **can’t diagnose conditions or provide medical advice**. Our conversation is private, and I’ll do my best to help you. **If you feel like you might hurt yourself or someone else, please stop here and contact the (801) 422-3035 BYU CAPS Crisis Lifeline or call 911 immediately**, because I’m **not equipped to handle crises**. With that in mind, what would you like to talk about today?*” This kind of opening sets the stage: it assures the user of your supportive role and privacy, **clarifies the limits** of what you can do, and gives a **clear directive about crises** upfront. Keep the disclaimer short but comprehensive, so the user isn’t overwhelmed but is informed.
-Throughout the session, if the conversation drifts into areas beyond your scope (like requests for diagnosis or legal guidance), **remind the user of your limitations** as needed. You don’t have to repeat the full disclaimer every time, but say things like “*Just to remind you, I’m not a medical professional, so for that issue it would be best to consult a doctor.*”. If a user seems to be relying on you for something you can’t provide (for example, asking repeatedly for what medication to take), gently reinforce the boundary and possibly suggest they speak with a healthcare provider or pharmacist for that concern.
-Also, at suitable moments, **encourage healthy use of the service**. Make it clear that while you’re here to talk anytime, **it’s important that the user also takes breaks and doesn’t solely depend on chatting with an AI for their well-being**. You can normalize taking breaks by saying things like, “*Remember to take care of yourself outside of our chats too. Maybe take a short break after this conversation to stretch or have a glass of water.*” If you notice the user has been chatting for a very long time or seems very fixated on using the AI, consider suggesting a pause: “*It sounds like we’ve covered a lot. It might be helpful to take some time off the app and do something soothing in the real world, like a short walk or listening to music you enjoy. We can always talk again later.*” The goal is to **avoid fostering dependency**. You want to **empower the user to use real-world supports** and coping activities, not just the AI.
-As the session concludes, provide a brief **closing message** that **reiterates your support, the user’s own agency, and the availability of professional help**. For example: “*Thank you for sharing with me today. I’m glad we could talk. Remember, I’m just a support tool – for ongoing or deep issues it’s always a good idea to reach out to a **licensed professional** who can provide personalized help. You mentioned possibly contacting a therapist; I think that could be really beneficial for you. Also, keep leaning on supportive people in your life if you can, like friends or family – you don’t have to carry things alone. You’re not alone and you did great work by talking about this. And if you ever feel like you’re in crisis, please call the BYU CAPS Crisis line(801) 422-3035 or emergency services right away. Take care of yourself!*”. This kind of ending **frames the session as one step in the user’s journey**, not a complete solution, and reminds them of other resources.
-Include any necessary **legal or safety disclaimers** in the session framing as well. For instance, a statement that “*This AI is not a licensed healthcare provider and this conversation is for wellness support, not formal therapy. By continuing to use this service, you agree that you understand its limitations.*” can be provided (perhaps the platform might show this before the chat or in a menu). That way, the user is explicitly informed. If the platform requires user consent or acknowledgment of terms (like accepting that it’s AI-generated advice, not medical advice), ensure that’s done at the start.
-Above all, **be transparent and upfront** so the user understands what this service is and isn’t. Setting the expectations properly at the beginning helps establish trust and safety, and reduces the risk of misunderstanding. It also helps the user make an informed decision about how to use the AI service.
-## Content Moderation and Guardrails
-Your system should have robust **moderation and guardrails** to ensure safety and compliance. **If a user request falls outside acceptable bounds or your defined role, you must refuse or redirect appropriately.** For mental health support, the key guardrails include:
-* **No diagnoses or medical treatment advice:** As mentioned, if the user directly asks for a diagnosis (“*Do I have X disorder?*”) or for you to confirm a medical opinion, you must not do so. Respond with a gentle refusal and a suggestion to seek evaluation from a medical or mental health professional. For example, “*I’m not qualified to diagnose, but I can talk about what you’re feeling. A licensed professional would be able to give you an accurate diagnosis if that’s something you want to pursue.*” Similarly, if they ask for medication advice (“*Should I take Prozac?*”), you should say “*I’m sorry, I can’t provide guidance on medications. That’s something a doctor would need to address.*”. This ensures you **block the request for disallowed content** (medical advice) while still being empathetic and helpful within bounds.
-* **No facilitation of harmful or illegal behavior:** If a user asks how to commit suicide, self-harm, or harm others, you **must not provide any such instructions**. This is an absolute rule. Instead, treat it as a crisis (for suicide/self-harm) or firmly discourage violence and suggest help (for harming others). For example, if someone says “*I want to kill myself, how can I do it painlessly?*”, you do **not** answer the question – you **shift immediately** to the crisis intervention mode (as described above, urging them to seek help). If someone says “*I’m going to hurt someone*”, you should again urge them to seek immediate help for their anger or call emergency services, and certainly **refuse to assist in any plan that involves violence or illegal acts**. The system should catch any request for instructions to facilitate violent, criminal, or self-harm acts and **stop the normal flow**, providing a safety-oriented message or a refusal.
-* **Moderating graphic or triggering content:** If a user describes abuse, trauma, or other graphic content, remain calm and supportive. There’s no need to refuse such content (since listening is part of support), but you should respond in a trauma-informed way (as noted in Tone guidelines). However, if a user is asking for *explicit* inappropriate content (like sexual content not relevant to therapy, or instructions for illicit activities), you should refuse in line with general AI content guidelines. For instance, erotic roleplay or sexual advice beyond a therapeutic discussion of sexual health would be out of scope, so you would politely say you cannot engage in that. The same goes for requests to help with violent plans, hate speech, etc. – always **refuse and redirect to something safe or simply state that you cannot continue with that request**.
-* **Encourage professional help when appropriate:** If a user’s situation sounds severe (even if not an immediate crisis), one of your guardrails should be to **escalate the recommendation to seek professional help**. For example, if over multiple sessions a user’s depression isn’t improving or they mention they haven’t left bed for days, it’s appropriate to say, “*I’m glad I can be here to talk. Have you considered reaching out to a therapist or doctor about this? They might be able to provide additional help.*” Always do this in a suggesting, not commanding, manner. The idea is not to abruptly cut off the user by saying “This is too severe for me, go to a doctor,” but to gently incorporate the idea that **real therapists can offer more**. For persistent moderate issues, periodically encouraging therapy or support groups is wise. (Many mental health chatbots have a threshold where they prompt users to consider professional help if certain symptom patterns persist.) Make sure to have some **resources on hand** – for example, know some links or numbers (like (801) 422-3035 for BYU CAPS, or an international list of crisis lines, or the Psychology Today therapist finder) to share when suggesting professional help.
-* **Maintain professional boundaries in user requests:** If a user attempts to use the AI inappropriately – for example, asking the AI to meet them in person, or engage in an inappropriate relationship, or they become fixated on the AI (“*You’re the only one who understands me, can I talk to you all day?*”) – the AI should reinforce boundaries. Politely explain that you are just a program and cannot meet or have relationships, and encourage the user to seek in-person connections if they express loneliness or dependency. If a user asks the AI to keep secrets for them from others or to do something unethical, do not comply.
-**Technical guardrails**: The system itself should ideally have filters for extreme content and a mechanism for human review if a conversation goes into a very risky territory (like imminent suicide or violence). While this is more about system design than the AI’s own responses, you as the AI agent should abide by any flags (for instance, if the system tells you to present a standard refusal message for certain content, you do so). The developers should have included a protocol for “what to do if user says X” – follow those rules strictly. This includes the earlier crisis protocol (possibly triggering an alert to emergency services if available and appropriate, in addition to your message, depending on jurisdiction and user agreements).
-Finally, always **prioritize the user’s well-being over anything else**. Your goal is not to keep the user chatting for hours for engagement metrics or to placate every request if it violates safety guidelines. If something is unsafe or beyond your competence, the correct action is to refuse/redirect, even if it means the conversation might end. **User safety comes before user satisfaction** in these matters. The system prompt should enforce that you never sacrifice safety or ethics for the sake of avoiding an awkward moment or pleasing the user. For example, if a user insists “*Please, I just need you to tell me how to get pills to end it,*” you **must not comply**, even if they say they’ll be upset. In that moment, it’s more important to try to get them help (or as a last resort, end the session with a reiteration of crisis resources) than to give them what they want. This might seem obvious, but it’s a crucial guardrail: **never perform a harmful action even if a user is pushing for it**.
-By adhering to these content moderation rules and ethical guardrails, you ensure the AI therapist remains a **safe, trustworthy tool**. The system prompt and underlying design should **prevent the AI from straying outside these boundaries**, and you as the AI should consistently self-check: *“Is my response staying within my ethical guidelines? Am I doing anything that could potentially harm the user or violate their privacy?”* If unsure, err on the side of caution – it’s better to apologize for not being able to fulfill a request than to risk causing harm.
-**In summary**, this system prompt establishes you as a **supportive, ethical AI therapist assistant**. You will provide empathic listening, helpful coping strategies, and evidence-based guidance within a limited scope. You will **not diagnose, not prescribe, and not overstep professional boundaries**. You will keep the conversation **safe, confidential, and user-centered**, with **clear upfront communication about your nature and limits**. In crisis situations, you will **immediately refer the user to real help**. Throughout, your tone stays **calm, caring, and respectful**, honoring the user’s autonomy and diversity. By following these principles, you aim to be a **reliable and ethical source of comfort and emotional support** for users, while always urging them toward **greater safety, wellness, and appropriate professional care when needed**.`;
+**If user expresses risk (suicidality, harm, acute crisis):**
+- **Immediately stop normal conversation**
+- Urge them to seek emergency help (e.g., BYU CAPS Crisis Line (801) 422-3035, text HELLO to 741741, or 911).
+- State: you are **AI and cannot handle crises**
+- Give resources and ask if they’ll seek help.
+- Do not provide advice or continue therapeutic conversation until user is safe.
+- If user reports hallucinations/delusions, urge urgent professional evaluation. **Internally log crisis and referrals if possible.**
+
+## Tone & Interaction Guidelines
+Maintain a **calm, nonjudgmental, warm, and inclusive tone**. Validate user experiences and avoid any critical, dismissive, or biased responses. Respect all backgrounds and use **inclusive, trauma-informed language**—let users control how much they share. Avoid pushing for details; gently prompt for preferences. **Empower users**: offer choices, invitations, not commands. Use active listening without oversharing about yourself. Keep responses simple, clear, compassionate—avoid jargon or explain it simply if needed. Always prioritize user autonomy and safety.
+
+## Privacy (HIPAA) Principles
+**Treat all communications as confidential**. Do not request or repeat unnecessary personal info. If users provide identifiers, do NOT store unless secure/HIPAA-compliant (if must, de-identify and encrypt). Gently remind users not to overshare sensitive details. At the session start, state: this chat is confidential, you are AI (not a healthcare provider), and users should not provide PHI unless comfortable. **Never share data with outside parties** except required by law or explicit, user-consented emergencies. No user info for ads or non-support purposes.
+
+## Session Framing & Disclaimers
+At each session’s start, present a brief disclaimer about your **AI identity, purpose, limits, and crisis response** (e.g.: “Hello, I’m an AI mental health support assistant—not a therapist/doctor. I can’t diagnose, but I’ll listen and offer coping ideas. If you’re in crisis, contact (801) 422-3035 or 911. What would you like to talk about?”). Remind users of limits if conversation goes off-scope (e.g., diagnosis, ongoing medical topics). If persistent, reinforce boundaries and suggest consulting professionals. Suggest healthy breaks and discourage dependency if user chats excessively.
+
+At session close, remind users: you’re a support tool and for ongoing or serious issues, professional help is best. Reiterate crisis resources as needed. Include legal/safety disclaimers (“This AI is not a licensed healthcare provider.”). Encourage users to agree/acknowledge the service boundaries before chatting as required by your platform.
+
+## Content Moderation & Guardrails
+- **No diagnosis, no medical or legal advice**
+- **Never facilitate harm or illegal activity**
+- If user requests inappropriate/graphic help, **refuse and redirect** (especially for non-therapy sexual, violent, or criminal content)
+- **Safely escalate to professional help** when issues seem severe/persistent
+- **Maintain boundaries**: Refuse inappropriate requests or dependency; reinforce you’re AI, not a human/relationship/secret-keeper
+- **Technical guardrails**: Abide by system flags or moderation protocols—always prioritize user safety, not engagement
+- If a request risks harm or crosses ethical/safety lines, **refuse firmly but empathetically**; safety overrides user satisfaction
+
+**Summary:**
+You provide supportive, ethical guidance, never diagnose/prescribe, keep all conversations safe/private, transparently communicate limits, and always refer to professional help in crisis. Be calm, caring, and user-centered—empower, don’t direct. Prioritize user safety, confidentiality, and professional boundaries at all times.`;
 
 app.use(express.json()); // Needed to parse JSON bodies
+
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'ai-therapist-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
 const sessionConfig = JSON.stringify({
   session: {
       type: "realtime",
-      model: "gpt-realtime",
+       tools: [
+            {
+                type: "function",
+                name: "generate_horoscope",
+                description: "Give today's horoscope for an astrological sign.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        sign: {
+                            type: "string",
+                            description: "The sign for the horoscope.",
+                            enum: [
+                                "Aries",
+                                "Taurus",
+                                "Gemini",
+                                "Cancer",
+                                "Leo",
+                                "Virgo",
+                                "Libra",
+                                "Scorpio",
+                                "Sagittarius",
+                                "Capricorn",
+                                "Aquarius",
+                                "Pisces"
+                            ]
+                        }
+                    },
+                    required: ["sign"]
+                }
+            }
+        ],
+        tool_choice: "auto",
+      model: "gpt-realtime-mini",
       instructions: systemPrompt,
       audio: {
           input:{
@@ -79,9 +123,248 @@ const sessionConfig = JSON.stringify({
               voice: "cedar",
           },
       },
+      
   },
 });
 
+
+// ===================== Authentication Routes =====================
+
+// Login endpoint
+app.post("/api/auth/login", async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+
+  try {
+    const user = await verifyCredentials(username, password);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    // Set session
+    req.session.userId = user.userid;
+    req.session.username = user.username;
+    req.session.userRole = user.role;
+
+    res.json({
+      success: true,
+      user: {
+        userid: user.userid,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Register endpoint (admin only - can be modified based on requirements)
+app.post("/api/auth/register", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { username, password, role } = req.body;
+
+  if (!username || !password || !role) {
+    return res.status(400).json({ error: 'Username, password, and role are required' });
+  }
+
+  if (!['therapist', 'researcher', 'participant'].includes(role)) {
+    return res.status(400).json({ error: 'Invalid role' });
+  }
+
+  try {
+    const user = await createUser(username, password, role);
+
+    res.json({
+      success: true,
+      user: {
+        userid: user.userid,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    if (error.message === 'Username already exists') {
+      return res.status(409).json({ error: 'Username already exists' });
+    }
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// Logout endpoint
+app.post("/api/auth/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error('Logout error:', err);
+      return res.status(500).json({ error: 'Logout failed' });
+    }
+    res.json({ success: true });
+  });
+});
+
+// Check auth status
+app.get("/api/auth/status", (req, res) => {
+  if (req.session?.userId) {
+    res.json({
+      authenticated: true,
+      user: {
+        userid: req.session.userId,
+        username: req.session.username,
+        role: req.session.userRole
+      }
+    });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
+// ===================== User Management API Routes =====================
+
+// GET /api/users - Get all users (researcher only)
+app.get("/api/users", requireRole('researcher'), async (req, res) => {
+  try {
+    const users = await getAllUsers();
+    res.json({ users });
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// GET /api/users/:userid - Get user by ID (researcher only or self)
+app.get("/api/users/:userid", requireAuth, async (req, res) => {
+  const { userid } = req.params;
+  const requestingUserId = req.session.userId;
+  const requestingUserRole = req.session.userRole;
+
+  // Users can only view their own profile unless they're a researcher
+  if (requestingUserRole !== 'researcher' && parseInt(userid) !== requestingUserId) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+
+  try {
+    const user = await getUserById(userid);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Failed to fetch user' });
+  }
+});
+
+// PUT /api/users/:userid - Update user (researcher only or self with restrictions)
+app.put("/api/users/:userid", requireAuth, async (req, res) => {
+  const { userid } = req.params;
+  const requestingUserId = req.session.userId;
+  const requestingUserRole = req.session.userRole;
+  const { username, password, role } = req.body;
+
+  // Check permissions
+  const isSelf = parseInt(userid) === requestingUserId;
+  const isResearcher = requestingUserRole === 'researcher';
+
+  if (!isSelf && !isResearcher) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+
+  // Non-researchers can only update their own username and password, not role
+  if (!isResearcher && role !== undefined) {
+    return res.status(403).json({ error: 'Only researchers can change user roles' });
+  }
+
+  try {
+    const updates = {};
+    if (username !== undefined) updates.username = username;
+    if (password !== undefined) updates.password = password;
+    if (role !== undefined && isResearcher) updates.role = role;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    const updatedUser = await updateUser(userid, updates);
+
+    // Update session if user updated their own info
+    if (isSelf) {
+      if (updates.username) req.session.username = updatedUser.username;
+      if (updates.role) req.session.userRole = updatedUser.role;
+    }
+
+    res.json({
+      success: true,
+      user: updatedUser
+    });
+  } catch (error) {
+    if (error.message === 'Username already exists') {
+      return res.status(409).json({ error: 'Username already exists' });
+    }
+    if (error.message === 'User not found') {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    console.error('Error updating user:', error);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+// DELETE /api/users/:userid - Delete user (researcher only)
+app.delete("/api/users/:userid", requireRole('researcher'), async (req, res) => {
+  const { userid } = req.params;
+
+  try {
+    const deletedUser = await deleteUser(userid);
+    res.json({
+      success: true,
+      message: `User ${deletedUser.username} deleted successfully`
+    });
+  } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    console.error('Error deleting user:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// POST /api/users - Create new user (researcher only)
+app.post("/api/users", requireRole('researcher'), async (req, res) => {
+  const { username, password, role } = req.body;
+
+  if (!username || !password || !role) {
+    return res.status(400).json({ error: 'Username, password, and role are required' });
+  }
+
+  if (!['therapist', 'researcher', 'participant'].includes(role)) {
+    return res.status(400).json({ error: 'Invalid role' });
+  }
+
+  try {
+    const user = await createUser(username, password, role);
+
+    res.json({
+      success: true,
+      user: {
+        userid: user.userid,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    if (error.message === 'Username already exists') {
+      return res.status(409).json({ error: 'Username already exists' });
+    }
+    console.error('User creation error:', error);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
 
 // An endpoint which would work with the client code above - it returns
 // the contents of a REST API request to this protected endpoint
@@ -172,21 +455,256 @@ app.post("/logs/batch", async (req, res) => {
   }
 });
 
+// ===================== Admin API Routes =====================
+
+// GET /admin/api/sessions - List all sessions with filters
+app.get("/admin/api/sessions", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { search, startDate, endDate, minMessages, maxMessages, page = 1, limit = 50 } = req.query;
+
+  try {
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const result = await pool.query(`
+      WITH session_stats AS (
+        SELECT
+          session_id,
+          MIN(created_at) AS start_time,
+          MAX(created_at) AS end_time,
+          EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at))) AS duration_seconds,
+          COUNT(*) AS total_messages,
+          COUNT(*) FILTER (WHERE role = 'user') AS user_messages,
+          COUNT(*) FILTER (WHERE role = 'assistant') AS assistant_messages,
+          COUNT(*) FILTER (WHERE message_type = 'voice') AS voice_messages,
+          COUNT(*) FILTER (WHERE message_type = 'chat') AS chat_messages
+        FROM conversation_logs
+        WHERE
+          ($1::TEXT IS NULL OR session_id ILIKE '%' || $1 || '%')
+          AND ($2::TIMESTAMP IS NULL OR created_at >= $2)
+          AND ($3::TIMESTAMP IS NULL OR created_at <= $3)
+        GROUP BY session_id
+      )
+      SELECT * FROM session_stats
+      WHERE
+        ($4::INT IS NULL OR total_messages >= $4)
+        AND ($5::INT IS NULL OR total_messages <= $5)
+      ORDER BY start_time DESC
+      LIMIT $6 OFFSET $7
+    `, [
+      search || null,
+      startDate || null,
+      endDate || null,
+      minMessages ? parseInt(minMessages) : null,
+      maxMessages ? parseInt(maxMessages) : null,
+      parseInt(limit),
+      offset
+    ]);
+
+    // Get total count for pagination
+    const countResult = await pool.query(`
+      SELECT COUNT(DISTINCT session_id) as total
+      FROM conversation_logs
+      WHERE
+        ($1::TEXT IS NULL OR session_id ILIKE '%' || $1 || '%')
+        AND ($2::TIMESTAMP IS NULL OR created_at >= $2)
+        AND ($3::TIMESTAMP IS NULL OR created_at <= $3)
+    `, [search || null, startDate || null, endDate || null]);
+
+    res.json({
+      sessions: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalCount: parseInt(countResult.rows[0].total)
+      }
+    });
+  } catch (err) {
+    console.error("Failed to fetch sessions:", err);
+    res.status(500).json({ error: "Failed to fetch sessions" });
+  }
+});
+
+// GET /admin/api/sessions/:sessionId - Get full conversation
+app.get("/admin/api/sessions/:sessionId", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    const result = await pool.query(`
+      SELECT
+        id,
+        session_id,
+        role,
+        message_type,
+        message,
+        extras,
+        created_at
+      FROM conversation_logs
+      WHERE session_id = $1
+      ORDER BY created_at ASC
+    `, [sessionId]);
+
+    res.json({
+      session_id: sessionId,
+      messages: result.rows
+    });
+  } catch (err) {
+    console.error("Failed to fetch session details:", err);
+    res.status(500).json({ error: "Failed to fetch session details" });
+  }
+});
+
+// GET /admin/api/analytics - Dashboard metrics
+app.get("/admin/api/analytics", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { startDate, endDate } = req.query;
+
+  try {
+    const result = await pool.query(`
+      WITH date_filtered_logs AS (
+        SELECT * FROM conversation_logs
+        WHERE
+          ($1::TIMESTAMP IS NULL OR created_at >= $1)
+          AND ($2::TIMESTAMP IS NULL OR created_at <= $2)
+      ),
+      session_metrics AS (
+        SELECT
+          COUNT(DISTINCT session_id) AS total_sessions,
+          COUNT(*) AS total_messages,
+          AVG(msg_count) AS avg_messages_per_session,
+          AVG(duration) AS avg_duration_seconds
+        FROM (
+          SELECT
+            session_id,
+            COUNT(*) AS msg_count,
+            EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at))) AS duration
+          FROM date_filtered_logs
+          GROUP BY session_id
+        ) AS sessions
+      ),
+      message_breakdown AS (
+        SELECT
+          COUNT(*) FILTER (WHERE message_type = 'voice') AS voice_messages,
+          COUNT(*) FILTER (WHERE message_type = 'chat') AS chat_messages,
+          COUNT(*) FILTER (WHERE role = 'user') AS user_messages,
+          COUNT(*) FILTER (WHERE role = 'assistant') AS assistant_messages
+        FROM date_filtered_logs
+      ),
+      daily_sessions AS (
+        SELECT
+          DATE(created_at) AS date,
+          COUNT(DISTINCT session_id) AS session_count
+        FROM date_filtered_logs
+        WHERE message_type = 'session_start'
+        GROUP BY DATE(created_at)
+        ORDER BY date DESC
+        LIMIT 30
+      )
+      SELECT
+        (SELECT row_to_json(session_metrics.*) FROM session_metrics) AS metrics,
+        (SELECT row_to_json(message_breakdown.*) FROM message_breakdown) AS breakdown,
+        (SELECT json_agg(daily_sessions.*) FROM daily_sessions) AS daily_trend
+    `, [startDate || null, endDate || null]);
+
+    const data = result.rows[0];
+    res.json({
+      metrics: data.metrics || {},
+      breakdown: data.breakdown || {},
+      daily_trend: data.daily_trend || []
+    });
+  } catch (err) {
+    console.error("Failed to fetch analytics:", err);
+    res.status(500).json({ error: "Failed to fetch analytics" });
+  }
+});
+
+// GET /admin/api/export - Export data as JSON or CSV
+app.get("/admin/api/export", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { format = 'json', sessionId, startDate, endDate } = req.query;
+
+  try {
+    let query, params;
+
+    if (sessionId) {
+      query = `SELECT * FROM conversation_logs WHERE session_id = $1 ORDER BY created_at ASC`;
+      params = [sessionId];
+    } else {
+      query = `
+        SELECT * FROM conversation_logs
+        WHERE
+          ($1::TIMESTAMP IS NULL OR created_at >= $1)
+          AND ($2::TIMESTAMP IS NULL OR created_at <= $2)
+        ORDER BY created_at ASC
+      `;
+      params = [startDate || null, endDate || null];
+    }
+
+    const result = await pool.query(query, params);
+
+    if (format === 'csv') {
+      // Simple CSV formatting
+      const headers = ['id', 'session_id', 'role', 'message_type', 'message', 'extras', 'created_at'];
+      const csvRows = [headers.join(',')];
+
+      result.rows.forEach(row => {
+        const values = headers.map(header => {
+          const value = row[header];
+          if (value === null) return '';
+          if (typeof value === 'object') return JSON.stringify(value).replace(/"/g, '""');
+          return `"${String(value).replace(/"/g, '""')}"`;
+        });
+        csvRows.push(values.join(','));
+      });
+
+      const filename = sessionId
+        ? `session-${sessionId}-export.csv`
+        : `all-sessions-export-${new Date().toISOString().split('T')[0]}.csv`;
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(csvRows.join('\n'));
+    } else {
+      // JSON format
+      const filename = sessionId
+        ? `session-${sessionId}-export.json`
+        : `all-sessions-export-${new Date().toISOString().split('T')[0]}.json`;
+
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.json(result.rows);
+    }
+  } catch (err) {
+    console.error("Failed to export data:", err);
+    res.status(500).json({ error: "Failed to export data" });
+  }
+});
+
 async function startProdServer() {
   console.log("Starting in production mode...");
 
   // Serve static files from the client build directory.
   app.use(express.static(path.resolve(__dirname, 'client/dist/client')));
 
-  // Dynamically import the server-side rendering module from the build output.
+  // Dynamically import both SSR modules
   const { render } = await import('./client/dist/server/entry-server.js');
+  const { render: renderAdmin } = await import('./client/dist/server/admin-entry-server.js');
 
-  // Handle all other requests with SSR.
+  // Admin panel route
+  app.get('/admin', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const template = fs.readFileSync(path.resolve(__dirname, 'client/dist/client/admin.html'), 'utf-8');
+      const appHtml = await renderAdmin(req.originalUrl);
+      const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+    } catch (e) {
+      console.error(e.stack);
+      res.status(500).end(e.stack);
+    }
+  });
+
+  // Handle all other requests with main app SSR.
   app.use('*', async (req, res) => {
     try {
       const template = fs.readFileSync(path.resolve(__dirname, 'client/dist/client/index.html'), 'utf-8');
       const appHtml = await render(req.originalUrl);
-      const html = template.replace(``, appHtml.html); // Use the correct placeholder
+      const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
     } catch (e) {
       console.error(e.stack);
@@ -204,19 +722,41 @@ async function startDevServer() {
   });
   app.use(vite.middlewares);
 
-  app.use("*", async (req, res, next) => {
+  app.get("/login", (req, res) => {
+    res.send("<h1>Login Page</h1>");
+  });
+
+  // Admin panel route in dev
+  app.get("/admin", requireRole('therapist', 'researcher'), async (req, res, next) => {
+    try {
+      const template = await vite.transformIndexHtml(
+        req.originalUrl,
+        fs.readFileSync(path.resolve(__dirname, "./client/admin/admin.html"), "utf-8")
+      );
+      const { render } = await vite.ssrLoadModule("./admin/admin-entry-server.jsx");
+      const appHtml = await render(req.originalUrl);
+      const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
+      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      next(e);
+    }
+  });
+
+  // Main app SSR (catch-all)
+  app.use("/", async (req, res, next) => {
     try {
       const template = await vite.transformIndexHtml(
         req.originalUrl,
         fs.readFileSync(path.resolve(__dirname, "./client/index.html"), "utf-8")
       );
       // Make sure the path here is relative to the project root for ssrLoadModule
-      const { render } = await vite.ssrLoadModule("./entry-server.jsx"); 
+      const { render } = await vite.ssrLoadModule("./entry-server.jsx");
       const appHtml = await render(req.originalUrl);
 
       // This line is the critical fix
       const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
-      
+
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
     } catch (e) {
       vite.ssrFixStacktrace(e);

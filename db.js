@@ -12,7 +12,7 @@ const pool = new Pool({
   password: dbCredentials.password,
   database: 'postgres', // or your chosen DB name
   ssl: {
-    rejectUnauthorized: true, // ← 👈 disables cert verification
+    rejectUnauthorized: false, // ← 👈 disables cert verification
   },
 });
 

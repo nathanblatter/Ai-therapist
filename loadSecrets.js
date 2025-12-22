@@ -9,7 +9,7 @@ const secret_name = "prod/ai-therapist/oaiAPIKey";
 const client = new SecretsManagerClient({
 
 
-    region: process.env.AWS_REGION 
+    region: process.env.AWS_REGION || 'us-west-1'
     
 });
 
