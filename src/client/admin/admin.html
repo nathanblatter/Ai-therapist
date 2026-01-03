@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="assets/byulogo.png" />
+    <link rel="apple-touch-icon" href="assets/byulogo.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Therapist - Admin Panel</title>
+    <style>
+      /* Prevent FOUC by hiding content until React hydrates */
+      body:not(.hydrated) #root {
+        opacity: 0;
+      }
+      #root {
+        transition: opacity 0.1s ease-in;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"><!--ssr-outlet--></div>
+    <script type="module" src="/@fs/Users/nathanblatter/Desktop/Ai-therapist/src/client/admin/admin-entry-client.jsx"></script>
+  </body>
+</html>
