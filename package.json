@@ -1,20 +1,26 @@
 {
   "type": "module",
   "scripts": {
-    "dev": "node server.js --dev",
-    "start": "NODE_ENV=production node server.js",
-    "build": "npm run build:client && npm run build:server",
-    "build:client": "vite build --outDir dist/client --ssrManifest",
-    "build:server": "vite build --ssr ./entry-server.jsx --outDir dist/server",
-    "devinstall": "zx ../../devinstall.mjs -- node server.js --dev",
+    "dev": "node src/server/index.js --dev",
+    "start": "NODE_ENV=production node src/server/index.js",
+    "build": "npm run build:client && npm run build:admin-client && npm run build:server && npm run build:admin-server",
+    "build:client": "vite build --outDir ../../../dist/client --ssrManifest",
+    "build:admin-client": "vite build --config vite.admin.config.js --outDir ../../../dist/admin-client --ssrManifest",
+    "build:server": "vite build --ssr entry-server.jsx --outDir ../../../dist/server --emptyOutDir",
+    "build:admin-server": "vite build --ssr admin-entry-server.jsx --config vite.admin.config.js --outDir ../../../dist/admin-server --emptyOutDir",
+    "devinstall": "zx ../../devinstall.mjs -- node src/server/index.js --dev",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx --fix"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.848.0",
     "@aws-sdk/client-secrets-manager": "^3.857.0",
     "@aws-sdk/lib-dynamodb": "^3.850.0",
+    "bcrypt": "^6.0.0",
+    "connect-pg-simple": "^10.0.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-session": "^1.18.2",
+    "geoip-lite": "^1.4.10",
     "history": "^5.3.0",
     "minipass": "^7.0.4",
     "openai": "^5.17.0",
@@ -23,7 +29,10 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-feather": "^2.0.10",
-    "react-router-dom": "^6.20.0"
+    "react-router-dom": "^6.20.0",
+    "recharts": "^3.6.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
