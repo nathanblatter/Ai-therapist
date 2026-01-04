@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit2, Check, X } from 'react-feather';
+import { ArrowLeft, Edit2, Check, X, AlertCircle } from 'react-feather';
 import UserSessionDetail from './UserSessionDetail';
 
 export default function Profile() {
@@ -11,6 +11,10 @@ export default function Profile() {
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Rate limit states
+  const [rateLimitStatus, setRateLimitStatus] = useState(null);
+  const [showRateLimitBanner, setShowRateLimitBanner] = useState(false);
 
   // Edit states
   const [editingUsername, setEditingUsername] = useState(false);
@@ -28,6 +32,7 @@ export default function Profile() {
   useEffect(() => {
     fetchUserData();
     fetchSessions();
+    fetchRateLimitStatus();
   }, []);
 
   useEffect(() => {
@@ -61,6 +66,19 @@ export default function Profile() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchRateLimitStatus = async () => {
+    try {
+      const response = await fetch('/api/rate-limits/status');
+      if (response.ok) {
+        const data = await response.json();
+        setRateLimitStatus(data);
+        setShowRateLimitBanner(data.is_rate_limited && !data.is_exempt);
+      }
+    } catch (err) {
+      console.error('Failed to fetch rate limit status:', err);
     }
   };
 
@@ -192,7 +210,23 @@ export default function Profile() {
   };
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString();
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
+  const formatResetTime = (hoursUntilReset) => {
+    if (!hoursUntilReset) return 'less than 1 hour';
+    const hours = Math.floor(hoursUntilReset);
+    const minutes = Math.round((hoursUntilReset - hours) * 60);
+    if (hours === 0) return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    return `${hours} hour${hours !== 1 ? 's' : ''}, ${minutes} minute${minutes !== 1 ? 's' : ''}`;
   };
 
   const stats = calculateStatistics();
@@ -223,6 +257,27 @@ export default function Profile() {
       </div>
 
       <div className="max-w-6xl mx-auto p-6 pb-12 space-y-6">
+        {/* Rate Limit Warning Banner */}
+        {showRateLimitBanner && rateLimitStatus && (
+          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
+            <div className="flex items-start">
+              <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={24} />
+              <div className="ml-3 flex-1">
+                <h3 className="text-lg font-semibold text-yellow-800">
+                  Daily Session Limit Reached
+                </h3>
+                <p className="text-yellow-700 mt-1">
+                  You have used {rateLimitStatus.sessions_used_today} of {rateLimitStatus.session_limit} sessions today.
+                  Your limit will reset at midnight Salt Lake City time.
+                </p>
+                <p className="text-yellow-600 text-sm mt-2">
+                  <strong>Resets in:</strong> {formatResetTime(rateLimitStatus.hours_until_reset)}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Account Information Card */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-2xl font-bold text-byuNavy mb-4">Account Information</h2>

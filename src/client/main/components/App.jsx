@@ -31,6 +31,12 @@ export default function App() {
     text: 'HELLO to 741741',
     enabled: true
   });
+  const [features, setFeatures] = useState({
+    output_modalities: ["audio"]
+  });
+  const [sessionEndTime, setSessionEndTime] = useState(null);
+  const [timeRemaining, setTimeRemaining] = useState(null);
+  const timerIntervalRef = useRef(null);
 
   useEffect(() => {
     setIsClient(true);
@@ -40,7 +46,50 @@ export default function App() {
       .then(res => res.json())
       .then(data => setCrisisContact(data))
       .catch(err => console.error('Failed to fetch crisis contact:', err));
+
+    // Fetch features config
+    fetch('/api/config/features')
+      .then(res => res.json())
+      .then(data => setFeatures(data))
+      .catch(err => console.error('Failed to fetch features config:', err));
   }, []);
+
+  // Session countdown timer
+  useEffect(() => {
+    if (!sessionEndTime || !isSessionActive) {
+      // Clear timer if no session or session ended
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      setTimeRemaining(null);
+      return;
+    }
+
+    // Update countdown every second
+    timerIntervalRef.current = setInterval(() => {
+      const remaining = sessionEndTime - Date.now();
+
+      if (remaining <= 0) {
+        // Time's up! End the session
+        setTimeRemaining(0);
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+
+        alert("Your session time has ended. The session will now close.");
+        stopSession();
+      } else {
+        setTimeRemaining(remaining);
+      }
+    }, 1000);
+
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+    };
+  }, [sessionEndTime, isSessionActive]);
 
   // ---- Batched logger ----
   const logBufferRef = useRef([]);
@@ -104,6 +153,15 @@ export default function App() {
         language: sessionSettings.language
       })
     });
+
+    // Check for rate limiting errors
+    if (tokenResponse.status === 429) {
+      const errorData = await tokenResponse.json();
+      alert(errorData.message || "You have reached your session limit. Please try again later.");
+      console.warn("Rate limit exceeded:", errorData);
+      return;
+    }
+
     const data = await tokenResponse.json();
     console.log("Session token data:", data);
 
@@ -118,6 +176,15 @@ export default function App() {
     const newSessionId = data.session.id;
     setSessionId(newSessionId);
 
+    // Set up session timer if duration limit exists
+    if (data.session_limits && data.session_limits.max_duration_minutes) {
+      const durationMs = data.session_limits.max_duration_minutes * 60 * 1000;
+      const endTime = Date.now() + durationMs;
+      setSessionEndTime(endTime);
+      setTimeRemaining(durationMs);
+      console.log(`Session will end in ${data.session_limits.max_duration_minutes} minutes`);
+    }
+
     // Connect to Socket.io for remote session management
     const socket = io({
       transports: ['websocket', 'polling'],
@@ -130,11 +197,15 @@ export default function App() {
       socket.emit('session:join', { sessionId: newSessionId });
     });
 
-    // Listen for remote session termination by admin
+    // Listen for remote session termination by admin or system
     socket.on('session:status', (data) => {
       console.log('Received session:status event:', data);
       if (data.status === 'ended' && data.remoteTermination) {
-        alert(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
+        if (data.endedBy === 'system' && data.reason === 'duration_limit') {
+          alert(data.message || 'Your session has ended due to time limit.');
+        } else {
+          alert(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
+        }
         stopSession();
       }
     });
@@ -293,6 +364,8 @@ export default function App() {
     setDataChannel(null);
     setLocalStream(null);
     setSessionId(null);
+    setSessionEndTime(null);
+    setTimeRemaining(null);
     peerConnection.current = null;
   }
 
@@ -406,8 +479,8 @@ export default function App() {
   session: {
       type: "realtime",
       model: "gpt-realtime",
-      // Lock the output to audio (set to ["text"] if you want text without audio)
-      output_modalities: ["audio"],
+      // Output modalities from system config (can be ["audio"], ["text"], or ["audio", "text"])
+      output_modalities: features.output_modalities || ["audio"],
       audio: {
         input: {
           format: {
@@ -521,7 +594,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-dvh bg-gray-50">
-      <Header sessionId={sessionId} />
+      <Header sessionId={sessionId} timeRemaining={timeRemaining} />
       <main className="flex-1 flex flex-col items-center overflow-hidden">
         <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
           {isSessionActive ? (

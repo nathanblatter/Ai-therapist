@@ -28,7 +28,7 @@ INSERT INTO system_config (config_key, config_value, description) VALUES
 ),
 (
     'session_limits',
-    '{"max_duration_minutes": 60, "max_sessions_per_day": 3, "cooldown_minutes": 30, "enabled": false}'::jsonb,
+    '{"max_duration_minutes": 30, "max_sessions_per_day": 3, "cooldown_minutes": 30, "enabled": true}'::jsonb,
     'Session duration and frequency limits'
 ),
 (

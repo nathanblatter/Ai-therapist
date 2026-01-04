@@ -239,7 +239,14 @@ export default function LiveMonitoring({ onViewSession }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {new Date(session.created_at).toLocaleString()}
+                      {new Date(session.created_at).toLocaleString('en-US', {
+                        month: 'numeric',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true
+                      })}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {formatDuration(session.duration_seconds)}

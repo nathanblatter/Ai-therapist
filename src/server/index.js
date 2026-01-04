@@ -94,9 +94,125 @@ async function getSystemConfig() {
         phone: '(801) 422-3035',
         text: 'HELLO to 741741',
         enabled: true
+      },
+      session_limits: {
+        max_duration_minutes: 30,
+        max_sessions_per_day: 3,
+        cooldown_minutes: 30,
+        enabled: true
       }
     };
   }
+}
+
+// Session limit enforcement helpers
+async function checkSessionLimits(userId, userRole = null) {
+  if (!userId) {
+    // Anonymous users don't have limits enforced
+    return { allowed: true };
+  }
+
+  // Researcher accounts are exempt from limits
+  if (userRole === 'researcher') {
+    console.log(`✓ Researcher ${userId} bypassing session limits`);
+    return { allowed: true, bypass: 'researcher' };
+  }
+
+  const config = await getSystemConfig();
+  const limits = config.session_limits || { enabled: false };
+
+  if (!limits.enabled) {
+    return { allowed: true };
+  }
+
+  // Check daily session count (using Salt Lake City timezone)
+  const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+  todayStart.setHours(0, 0, 0, 0);
+
+  const todaySessionsResult = await pool.query(
+    `SELECT COUNT(*) as session_count
+     FROM therapy_sessions
+     WHERE user_id = $1 AND created_at >= $2`,
+    [userId, todayStart]
+  );
+
+  const todaySessionCount = parseInt(todaySessionsResult.rows[0].session_count);
+
+  if (todaySessionCount >= limits.max_sessions_per_day) {
+    return {
+      allowed: false,
+      reason: 'daily_limit',
+      message: `You have reached your daily limit of ${limits.max_sessions_per_day} sessions. Please try again tomorrow.`,
+      limit: limits.max_sessions_per_day,
+      current: todaySessionCount
+    };
+  }
+
+  // Check cooldown period
+  if (limits.cooldown_minutes > 0) {
+    const recentSessionResult = await pool.query(
+      `SELECT ended_at
+       FROM therapy_sessions
+       WHERE user_id = $1 AND ended_at IS NOT NULL
+       ORDER BY ended_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (recentSessionResult.rows.length > 0) {
+      const lastEndedAt = new Date(recentSessionResult.rows[0].ended_at);
+      const now = new Date();
+      const timeSinceEndMs = now - lastEndedAt;
+      const cooldownMs = limits.cooldown_minutes * 60 * 1000;
+
+      // Debug logging
+      console.log('Cooldown check:', {
+        lastEndedAt: lastEndedAt.toISOString(),
+        now: now.toISOString(),
+        timeSinceEndMs,
+        timeSinceEndMinutes: timeSinceEndMs / 60000,
+        cooldownMinutes: limits.cooldown_minutes,
+        cooldownMs,
+        isInCooldown: timeSinceEndMs < cooldownMs
+      });
+
+      if (timeSinceEndMs < cooldownMs) {
+        const remainingMs = cooldownMs - timeSinceEndMs;
+        const minutesRemaining = Math.ceil(remainingMs / 60000);
+
+        return {
+          allowed: false,
+          reason: 'cooldown',
+          message: `Please wait ${minutesRemaining} more minute${minutesRemaining !== 1 ? 's' : ''} before starting a new session.`,
+          cooldown_minutes: limits.cooldown_minutes,
+          minutes_remaining: minutesRemaining
+        };
+      }
+    }
+  }
+
+  return {
+    allowed: true,
+    limits: {
+      max_duration_minutes: limits.max_duration_minutes,
+      max_sessions_per_day: limits.max_sessions_per_day,
+      sessions_today: todaySessionCount
+    }
+  };
+}
+
+// Helper functions for Salt Lake City timezone calculations
+function getNextMidnightSLC() {
+  const nowSLC = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+  const nextMidnight = new Date(nowSLC);
+  nextMidnight.setHours(24, 0, 0, 0); // Next midnight SLC time
+  return nextMidnight;
+}
+
+function getHoursUntilReset() {
+  const now = new Date();
+  const resetTime = getNextMidnightSLC();
+  return (resetTime - now) / (1000 * 60 * 60); // hours
 }
 
 async function getSystemPrompt(language = 'en') {
@@ -462,6 +578,57 @@ app.get("/api/auth/status", (req, res) => {
   }
 });
 
+// GET /api/rate-limits/status - Get current user's rate limit status
+app.get('/api/rate-limits/status', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    const userRole = req.session.userRole;
+
+    // Check if user is exempt
+    if (userRole === 'researcher') {
+      return res.json({
+        is_rate_limited: false,
+        is_exempt: true,
+        exemption_reason: 'researcher'
+      });
+    }
+
+    const config = await getSystemConfig();
+    const limits = config.session_limits || { enabled: false };
+
+    if (!limits.enabled) {
+      return res.json({ is_rate_limited: false, is_exempt: true, exemption_reason: 'limits_disabled' });
+    }
+
+    // Get today's session count
+    const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+    todayStart.setHours(0, 0, 0, 0);
+
+    const result = await pool.query(`
+      SELECT COUNT(*) as session_count, MAX(created_at) as last_session_at
+      FROM therapy_sessions
+      WHERE user_id = $1 AND created_at >= $2
+    `, [userId, todayStart]);
+
+    const sessionsToday = parseInt(result.rows[0].session_count);
+    const isRateLimited = sessionsToday >= limits.max_sessions_per_day;
+
+    res.json({
+      is_rate_limited: isRateLimited,
+      sessions_used_today: sessionsToday,
+      session_limit: limits.max_sessions_per_day,
+      limit_resets_at: getNextMidnightSLC().toISOString(),
+      hours_until_reset: getHoursUntilReset(),
+      last_session_at: result.rows[0].last_session_at,
+      is_exempt: false,
+      exemption_reason: null
+    });
+  } catch (err) {
+    console.error('Error fetching rate limit status:', err);
+    res.status(500).json({ error: 'Failed to fetch rate limit status' });
+  }
+});
+
 // ===================== User Management API Routes =====================
 
 // GET /api/users - Get all users (researcher only)
@@ -611,6 +778,24 @@ app.post("/api/users", requireRole('researcher'), async (req, res) => {
 app.all("/token", async (req, res) => {
   try {
       const userId = req.session?.userId || null;
+      const userRole = req.session?.userRole || null;
+
+      // RATE LIMITING CHECK: Enforce session limits (researchers are exempt)
+      const limitCheck = await checkSessionLimits(userId, userRole);
+      if (!limitCheck.allowed) {
+        console.log(`✗ Session limit exceeded for user ${userId}:`, limitCheck.reason);
+        return res.status(429).json({
+          error: 'rate_limit_exceeded',
+          reason: limitCheck.reason,
+          message: limitCheck.message,
+          details: {
+            limit: limitCheck.limit,
+            current: limitCheck.current,
+            cooldown_minutes: limitCheck.cooldown_minutes,
+            minutes_remaining: limitCheck.minutes_remaining
+          }
+        });
+      }
 
       // IDEMPOTENCY CHECK: Look for existing active session
       if (userId) {
@@ -744,6 +929,49 @@ app.all("/token", async (req, res) => {
           created_at: new Date()
         });
 
+        // Schedule auto-termination if session limits are enabled (not for researchers)
+        if (limitCheck.limits && limitCheck.limits.max_duration_minutes && !limitCheck.bypass) {
+          const durationMs = limitCheck.limits.max_duration_minutes * 60 * 1000;
+          setTimeout(async () => {
+            try {
+              // Check if session is still active
+              const checkResult = await pool.query(
+                'SELECT status FROM therapy_sessions WHERE session_id = $1',
+                [sessionId]
+              );
+
+              if (checkResult.rows.length > 0 && checkResult.rows[0].status === 'active') {
+                console.log(`⏰ Auto-terminating session ${sessionId} after ${limitCheck.limits.max_duration_minutes} minutes`);
+
+                // End the session
+                const { updateSessionStatus } = await import("./models/dbQueries.js");
+                await updateSessionStatus(sessionId, 'ended', 'system');
+
+                // Notify the user via Socket.io
+                global.io.to(`session:${sessionId}`).emit('session:status', {
+                  status: 'ended',
+                  endedBy: 'system',
+                  reason: 'duration_limit',
+                  message: `Your session has ended after ${limitCheck.limits.max_duration_minutes} minutes (maximum session duration).`,
+                  remoteTermination: true
+                });
+
+                // Notify admins
+                global.io.to('admin-broadcast').emit('session:ended', {
+                  sessionId,
+                  endedAt: new Date(),
+                  endedBy: 'system',
+                  reason: 'duration_limit'
+                });
+              }
+            } catch (err) {
+              console.error(`Failed to auto-terminate session ${sessionId}:`, err);
+            }
+          }, durationMs);
+
+          console.log(`✓ Session ${sessionId} will auto-terminate in ${limitCheck.limits.max_duration_minutes} minutes`);
+        }
+
         // Insert session configuration
         const sessionConfigObj = JSON.parse(dynamicSessionConfig);
         await upsertSessionConfig(sessionId, {
@@ -762,7 +990,13 @@ app.all("/token", async (req, res) => {
         // Continue anyway - session will be created by logs/batch endpoint
       }
 
-      res.json(data);
+      // Include session limits in response for client-side timer
+      const responseData = {
+        ...data,
+        session_limits: limitCheck.limits || null
+      };
+
+      res.json(responseData);
   } catch (error) {
       console.error("Token generation error:", error);
       res.status(500).json({ error: "Failed to generate token" });
@@ -1587,6 +1821,25 @@ app.get("/api/config/crisis", async (req, res) => {
   }
 });
 
+// GET /api/config/features - Get features configuration
+app.get("/api/config/features", async (req, res) => {
+  try {
+    const config = await getSystemConfig();
+    const features = config.features || {
+      voice_enabled: true,
+      chat_enabled: true,
+      file_upload_enabled: false,
+      session_recording_enabled: false,
+      output_modalities: ["audio"]
+    };
+
+    res.json(features);
+  } catch (err) {
+    console.error("Failed to fetch features config:", err);
+    res.status(500).json({ error: "Failed to fetch features config" });
+  }
+});
+
 // GET /admin/api/config - Get all system configuration
 app.get("/admin/api/config", requireRole('therapist', 'researcher'), async (req, res) => {
   try {
@@ -1671,6 +1924,54 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
   } catch (err) {
     console.error("Failed to update configuration:", err);
     res.status(500).json({ error: "Failed to update configuration" });
+  }
+});
+
+// GET /admin/api/rate-limits/users - Get all rate-limited users
+app.get('/admin/api/rate-limits/users', requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const config = await getSystemConfig();
+    const limits = config.session_limits || { enabled: false };
+
+    if (!limits.enabled) {
+      return res.json({ rateLimitedUsers: [], config: limits });
+    }
+
+    // Get today's start in SLC time
+    const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+    todayStart.setHours(0, 0, 0, 0);
+
+    const result = await pool.query(`
+      SELECT
+        u.userid,
+        u.username,
+        u.role,
+        COUNT(ts.session_id) AS sessions_today,
+        MAX(ts.created_at) AS last_session_at
+      FROM users u
+      LEFT JOIN therapy_sessions ts ON u.userid = ts.user_id
+        AND ts.created_at >= $1
+      WHERE u.role = 'participant'
+      GROUP BY u.userid, u.username, u.role
+      HAVING COUNT(ts.session_id) >= $2
+      ORDER BY last_session_at DESC
+    `, [todayStart, limits.max_sessions_per_day]);
+
+    const rateLimitedUsers = result.rows.map(row => ({
+      userid: row.userid,
+      username: row.username,
+      role: row.role,
+      sessions_used_today: parseInt(row.sessions_today),
+      session_limit: limits.max_sessions_per_day,
+      limit_resets_at: getNextMidnightSLC().toISOString(),
+      hours_until_reset: getHoursUntilReset(),
+      last_session_at: row.last_session_at
+    }));
+
+    res.json({ rateLimitedUsers, config: limits });
+  } catch (err) {
+    console.error('Error fetching rate-limited users:', err);
+    res.status(500).json({ error: 'Failed to fetch rate-limited users' });
   }
 });
 

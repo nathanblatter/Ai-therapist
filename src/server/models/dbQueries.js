@@ -118,7 +118,7 @@ export async function updateSessionStatus(sessionId, status, endedBy = null) {
     `UPDATE therapy_sessions
      SET status = $1,
          updated_at = CURRENT_TIMESTAMP,
-         ended_at = ${status === 'ended' ? 'CURRENT_TIMESTAMP' : 'ended_at'},
+         ended_at = ${status === 'ended' ? "CURRENT_TIMESTAMP" : 'ended_at'},
          ended_by = ${status === 'ended' && endedBy ? '$3' : 'ended_by'}
      WHERE session_id = $2
      RETURNING *`,

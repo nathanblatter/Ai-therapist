@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SessionList from "./SessionList";
 import SessionDetail from "./SessionDetail";
@@ -8,6 +8,7 @@ import ExportPanel from "./ExportPanel";
 import UserManagement from "./UserManagement";
 import LiveMonitoring from "./LiveMonitoring";
 import SystemConfig from "./SystemConfig";
+import RateLimitedUsers from "./RateLimitedUsers";
 
 export default function AdminApp() {
   const [currentView, setCurrentView] = useState('sessions');
@@ -55,10 +56,11 @@ export default function AdminApp() {
     { id: 'live', label: 'Live Monitoring', icon: Activity },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart2 },
     { id: 'sessions', label: 'Sessions', icon: List },
+    { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle },
     { id: 'users', label: 'Users', icon: Users, researcherOnly: true },
     { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
     { id: 'export', label: 'Export', icon: Download },
-    
+
   ];
 
   // Filter nav items based on user role
@@ -100,10 +102,11 @@ export default function AdminApp() {
           {currentView === 'dashboard' && <Analytics />}
           {currentView === 'sessions' && <SessionList onViewSession={handleViewSession} />}
           {currentView === 'live' && <LiveMonitoring onViewSession={handleViewSession} />}
+          {currentView === 'rate-limits' && <RateLimitedUsers />}
           {currentView === 'users' && <UserManagement />}
           {currentView === 'config' && <SystemConfig />}
           {currentView === 'export' && <ExportPanel />}
-          
+
         </div>
       </main>
 

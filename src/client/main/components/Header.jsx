@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import CopyButton from '../../shared/components/CopyButton';
 
 
-const Header = ({ sessionId }) => {
+const Header = ({ sessionId, timeRemaining }) => {
   const [username, setUsername] = useState(null);
   const [userRole, setUserRole] = useState(null);
   const navigate = useNavigate();
@@ -13,6 +13,24 @@ const Header = ({ sessionId }) => {
   if (!str || typeof str !== "string") return str;
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
+
+  // Format time remaining as MM:SS
+  const formatTimeRemaining = (ms) => {
+    if (ms === null || ms === undefined) return null;
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // Determine timer color based on time remaining
+  const getTimerColor = (ms) => {
+    if (ms === null || ms === undefined) return '';
+    const totalSeconds = Math.floor(ms / 1000);
+    if (totalSeconds <= 60) return 'text-red-400 font-bold'; // Last minute - red
+    if (totalSeconds <= 300) return 'text-yellow-300 font-bold'; // Last 5 minutes - yellow
+    return 'text-green-300'; // More than 5 minutes - green
+  };
 
 
   useEffect(() => {
@@ -65,7 +83,21 @@ const Header = ({ sessionId }) => {
           <code className="bg-byuRoyal px-2 py-1 rounded font-bold text-white" title="Session ID (Copy this value into the form)">{sessionId}</code>
           <CopyButton textToCopy={sessionId} />
         </p>
-        
+
+        )}
+
+        {/* 🔹 Show Session Timer if active */}
+        {timeRemaining !== null && (
+          <div className="text-center mt-2">
+            <p className={`text-2xl font-mono ${getTimerColor(timeRemaining)}`}>
+              Time Remaining: {formatTimeRemaining(timeRemaining)}
+            </p>
+            {timeRemaining <= 60000 && (
+              <p className="text-red-300 text-sm mt-1 animate-pulse">
+                ⚠️ Your session will end soon!
+              </p>
+            )}
+          </div>
         )}
         <p className="mt-2 text-sm md:text-base leading-relaxed">
           If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your session please reach out immediately to BYU's Counseling and Psychological Services crisis line at 

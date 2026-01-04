@@ -18,17 +18,18 @@ export default function SystemConfig() {
   });
 
   const [sessionLimits, setSessionLimits] = useState({
-    max_duration_minutes: 60,
+    max_duration_minutes: 30,
     max_sessions_per_day: 3,
     cooldown_minutes: 30,
-    enabled: false
+    enabled: true
   });
 
   const [features, setFeatures] = useState({
     voice_enabled: true,
     chat_enabled: true,
     file_upload_enabled: false,
-    session_recording_enabled: false
+    session_recording_enabled: false,
+    output_modalities: ["audio"]
   });
 
   useEffect(() => {
@@ -248,6 +249,11 @@ export default function SystemConfig() {
         <p className="text-sm text-gray-600 mb-4">
           Control session duration and frequency to prevent overuse or fatigue.
         </p>
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-800">
+            <strong>Note:</strong> Researcher accounts are exempt from these limits and can start unlimited sessions.
+          </p>
+        </div>
 
         <div className="space-y-4">
           <div className="flex items-center gap-2 mb-4">
@@ -371,12 +377,59 @@ export default function SystemConfig() {
               className="w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
             />
           </div>
+
+          {/* Output Modalities */}
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div>
+              <p className="font-medium text-gray-900 mb-2">AI Output Modalities</p>
+              <p className="text-xs text-gray-600 mb-3">Choose how the AI responds to users</p>
+            </div>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="output_modalities"
+                  checked={JSON.stringify(features.output_modalities) === JSON.stringify(["audio"])}
+                  onChange={() => updateFeatures('output_modalities', ["audio"])}
+                  className="w-4 h-4 text-byuRoyal border-gray-300 focus:ring-byuRoyal"
+                />
+                <span className="text-sm text-gray-700">Audio Only - AI speaks responses</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="output_modalities"
+                  checked={JSON.stringify(features.output_modalities) === JSON.stringify(["text"])}
+                  onChange={() => updateFeatures('output_modalities', ["text"])}
+                  className="w-4 h-4 text-byuRoyal border-gray-300 focus:ring-byuRoyal"
+                />
+                <span className="text-sm text-gray-700">Text Only - AI types responses</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="output_modalities"
+                  checked={JSON.stringify(features.output_modalities) === JSON.stringify(["audio", "text"]) || JSON.stringify(features.output_modalities) === JSON.stringify(["text", "audio"])}
+                  onChange={() => updateFeatures('output_modalities', ["audio", "text"])}
+                  className="w-4 h-4 text-byuRoyal border-gray-300 focus:ring-byuRoyal"
+                />
+                <span className="text-sm text-gray-700">Both - AI speaks and shows text</span>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 
       {config && (
         <div className="text-xs text-gray-500 mt-6">
-          Last updated: {config.crisis_contact?.updated_at ? new Date(config.crisis_contact.updated_at).toLocaleString() : 'Never'}
+          Last updated: {config.crisis_contact?.updated_at ? new Date(config.crisis_contact.updated_at).toLocaleString('en-US', {
+            month: 'numeric',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+          }) : 'Never'}
           {config.crisis_contact?.updated_by && ` by ${config.crisis_contact.updated_by}`}
         </div>
       )}
