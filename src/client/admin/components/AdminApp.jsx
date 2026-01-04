@@ -18,15 +18,17 @@ export default function AdminApp() {
   const [userRole, setUserRole] = useState(null);
 
   // Handle SSR - only render interactive parts on client
-  if (typeof window !== 'undefined' && !isClient) {
+  useEffect(() => {
     setIsClient(true);
-  }
+  }, []);
 
   // Fetch user role to determine navigation items
   useEffect(() => {
     const fetchUserRole = async () => {
       try {
-        const response = await fetch('/api/auth/status');
+        const response = await fetch('/api/auth/status', {
+          credentials: 'include'
+        });
         if (response.ok) {
           const data = await response.json();
           if (data.authenticated && data.user) {
