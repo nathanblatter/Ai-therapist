@@ -1,31 +1,61 @@
-# OpenAI Realtime Console
+# AI Therapist
 
-This is an example application showing how to use the [OpenAI Realtime API](https://platform.openai.com/docs/guides/realtime) with [WebRTC](https://platform.openai.com/docs/guides/realtime-webrtc).
+This is a real-time, voice-based AI therapy assistant built using the OpenAI Realtime API, WebRTC, and React. The application provides an empathetic, low-latency therapeutic conversation experience while maintaining strict HIPAA-compliant data practices and robust administrative oversight.
 
-## Installation and usage
+## Key Features
 
-Before you begin, you'll need an OpenAI API key - [create one in the dashboard here](https://platform.openai.com/settings/api-keys). Create a `.env` file from the example file and set your API key in there:
+* **Real-time Voice Interaction**: Provides low-latency, natural conversations using OpenAI's gpt-realtime-mini model.
+* **Multi-language and Voice Support**: Supports 12+ languages—including English, Spanish, French, German, and Japanese—and 10 distinct OpenAI voices such as Alloy, Cedar, and Sage.
+* **HIPAA-Compliant Redaction**: Automatically identifies and redacts 18 HIPAA PHI identifiers, such as names and SSNs, using AI before storing logs.
+* **Dual-Role Dashboard**:
+    * **Therapists**: Can view unredacted logs for clinical oversight.
+    * **Researchers**: Can view redacted logs and aggregate analytics.
+* **Advanced Analytics**: Visualizes session trends, language distribution, and usage metrics using Recharts.
+* **Session Guardrails**: Enforces daily session limits, cooldown periods, and crisis protocols, such as redirection to emergency services or counseling hotlines.
 
-```bash
-cp .env.example .env
-```
+---
 
-Running this application locally requires [Node.js](https://nodejs.org/) to be installed. Install dependencies for the application with:
+## Tech Stack
 
-```bash
-npm install
-```
+| Component | Technology |
+| :--- | :--- |
+| **Frontend** | React, Vite, Tailwind CSS, Recharts |
+| **Backend** | Node.js, Express, Socket.io |
+| **Database** | PostgreSQL (AWS RDS) |
+| **AI/ML** | OpenAI Realtime API (WebRTC), Whisper-1 |
+| **Security** | AWS Secrets Manager, Bcrypt, GeoIP Filtering |
 
-Start the application server with:
+---
 
-```bash
-npm run dev
-```
+## Project Structure
 
-This should start the console application on [http://localhost:3000](http://localhost:3000).
+```text
+/
+├── src/
+│   ├── client/
+│   │   ├── main/      # Participant therapy interface (SSR)
+│   │   ├── admin/     # Therapist/researcher dashboard
+│   │   └── shared/    # Reusable UI components
+│   ├── server/
+│   │   ├── config/    # DB and AWS Secrets integration
+│   │   ├── middleware/# Auth, RBAC, and IP filtering
+│   │   ├── models/    # PostgreSQL data access layer
+│   │   └── services/  # PHI redaction and AI session naming
+│   └── database/      # SQL migrations and rollback scripts
+├── dist/              # Production build output
+├── vite.config.js     # Build config for participant app
+└── vite.admin.config.js # Build config for admin dashboard
 
-This application is a minimal template that uses [express](https://expressjs.com/) to serve the React frontend contained in the [`/client`](./client) folder. The server is configured to use [vite](https://vitejs.dev/) to build the React frontend.
+## Installation and Local Development
 
-## License
+### Prerequisites
+* Node.js (v20.x recommended)
+* PostgreSQL
+* OpenAI API Key
 
-MIT
+### Setup
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repo-url>
+   cd ai-therapist
