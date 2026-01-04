@@ -3,7 +3,7 @@ import { io } from "socket.io-client";
 import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import SessionSettings from "./SessionSettings";
-import Header from './header';
+import Header from './Header';
 
 export default function App() {
   const [isClient, setIsClient] = useState(false);
