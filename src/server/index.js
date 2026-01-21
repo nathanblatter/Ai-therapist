@@ -3279,8 +3279,8 @@ app.get("/api/voices/preview/:voiceName", async (req, res) => {
     // Sanitize voice name to prevent directory traversal
     const sanitizedVoiceName = path.basename(voiceName);
 
-    // Construct the path to the voice file
-    const voiceFilePath = path.join(__dirname, '../../OAI_VOICES', `${sanitizedVoiceName}.flac`);
+    // Construct the path to the voice file (MP3 for browser compatibility)
+    const voiceFilePath = path.join(__dirname, '../../OAI_VOICES', `${sanitizedVoiceName}.mp3`);
 
     // Check if file exists
     if (!fs.existsSync(voiceFilePath)) {
@@ -3288,8 +3288,9 @@ app.get("/api/voices/preview/:voiceName", async (req, res) => {
     }
 
     // Set appropriate headers for audio streaming
-    res.setHeader('Content-Type', 'audio/flac');
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
 
     // Stream the file
     const stream = fs.createReadStream(voiceFilePath);
