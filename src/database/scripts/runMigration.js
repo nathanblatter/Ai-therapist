@@ -19,10 +19,10 @@ async function runMigration() {
     const migrationPath = path.join(__dirname, '../migrations', '003_normalize_schema.sql');
     const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
 
-    console.log('📝 Executing migration script...');
+    console.log('Executing migration script...');
     await client.query(migrationSQL);
 
-    console.log('\n✅ Migration completed successfully!\n');
+    console.log('\nMigration completed successfully!\n');
     console.log('New tables created:');
     console.log('  - therapy_sessions');
     console.log('  - session_configurations');
@@ -42,12 +42,12 @@ async function runMigration() {
 
     console.log('Verified tables:');
     tablesResult.rows.forEach(row => {
-      console.log(`  ✓ ${row.table_name}`);
+      console.log(`  ${row.table_name}`);
     });
     console.log();
 
   } catch (error) {
-    console.error('\n❌ Migration failed:', error.message);
+    console.error('\nMigration failed:', error.message);
     console.error('\nYou can rollback using: node rollbackMigration.js\n');
     throw error;
   } finally {

@@ -23,7 +23,7 @@ function askQuestion(query) {
 }
 
 async function rollbackMigration() {
-  console.log('\n⚠️  WARNING: This will delete all data in the new tables!\n');
+  console.log('\nWARNING: This will delete all data in the new tables!\n');
   console.log('The following tables will be dropped:');
   console.log('  - therapy_sessions');
   console.log('  - session_configurations');
@@ -34,7 +34,7 @@ async function rollbackMigration() {
   const answer = await askQuestion('Are you sure you want to rollback? (yes/no): ');
 
   if (answer.toLowerCase() !== 'yes') {
-    console.log('\n❌ Rollback cancelled.\n');
+    console.log('\nRollback cancelled.\n');
     process.exit(0);
   }
 
@@ -47,10 +47,10 @@ async function rollbackMigration() {
     const rollbackPath = path.join(__dirname, '../migrations', '003_normalize_schema_rollback.sql');
     const rollbackSQL = fs.readFileSync(rollbackPath, 'utf8');
 
-    console.log('📝 Executing rollback script...');
+    console.log('Executing rollback script...');
     await client.query(rollbackSQL);
 
-    console.log('\n✅ Rollback completed successfully!\n');
+    console.log('\nRollback completed successfully!\n');
     console.log('Tables removed:');
     console.log('  - therapy_sessions');
     console.log('  - session_configurations');
@@ -60,7 +60,7 @@ async function rollbackMigration() {
     console.log('The database has been reverted to the previous state.\n');
 
   } catch (error) {
-    console.error('\n❌ Rollback failed:', error.message);
+    console.error('\nRollback failed:', error.message);
     throw error;
   } finally {
     client.release();

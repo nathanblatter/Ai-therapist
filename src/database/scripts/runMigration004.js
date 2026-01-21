@@ -19,17 +19,17 @@ async function runMigration() {
     const migrationPath = path.join(__dirname, '../migrations', '004_change_session_id_to_text.sql');
     const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
 
-    console.log('📝 Executing migration script...');
+    console.log('Executing migration script...');
     await client.query(migrationSQL);
 
-    console.log('\n✅ Migration completed successfully!\n');
+    console.log('\nMigration completed successfully!\n');
     console.log('Changes applied:');
     console.log('  - session_id column changed from UUID to TEXT');
     console.log('  - Foreign key constraints recreated');
     console.log('  - Now supports external session IDs (e.g., GPT realtime)\n');
 
   } catch (error) {
-    console.error('\n❌ Migration failed:', error.message);
+    console.error('\nMigration failed:', error.message);
     console.error('\nYou can rollback using a custom rollback script if needed.\n');
     throw error;
   } finally {

@@ -19,21 +19,21 @@ export function useSocket() {
       });
 
       socketInstance.on('connect', () => {
-        console.log('✅ Socket.io connected');
+        console.log('Socket.io connected');
         setConnected(true);
       });
 
       socketInstance.on('disconnect', () => {
-        console.warn('⚠️ Socket.io disconnected');
+        console.warn('Socket.io disconnected');
         setConnected(false);
       });
 
       socketInstance.on('connect_error', (error) => {
-        console.error('❌ Socket.io connection error:', error.message);
+        console.error('Socket.io connection error:', error.message);
       });
 
       socketInstance.on('reconnect', (attemptNumber) => {
-        console.log(`✅ Socket.io reconnected after ${attemptNumber} attempts`);
+        console.log(`Socket.io reconnected after ${attemptNumber} attempts`);
       });
     }
 

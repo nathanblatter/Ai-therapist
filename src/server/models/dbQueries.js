@@ -10,18 +10,37 @@ import redactPHI from '../services/redaction.service.js';
 
 /**
  * Create a new therapy session
- * @param {number|null} userId - User ID (null for anonymous sessions)
- * @param {string|null} sessionName - Optional session name
+ * @param {number|object|null} userId - User ID (null for anonymous) OR session config object
+ * @param {string|null} sessionName - Optional session name (only used if first param is userId)
  * @returns {Promise<object>} Created session object
  */
 export async function createSession(userId = null, sessionName = null) {
-  const result = await pool.query(
-    `INSERT INTO therapy_sessions (user_id, session_name, status, created_at, updated_at)
-     VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-     RETURNING *`,
-    [userId, sessionName]
-  );
-  return result.rows[0];
+  // Support both object-based and parameter-based calls
+  if (typeof userId === 'object' && userId !== null) {
+    const config = userId;
+    const result = await pool.query(
+      `INSERT INTO therapy_sessions (session_id, user_id, session_name, status, session_type, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [
+        config.sessionId,
+        config.userId || null,
+        config.sessionName || null,
+        config.status || 'active',
+        config.sessionType || 'realtime'
+      ]
+    );
+    return result.rows[0];
+  } else {
+    // Legacy parameter-based call
+    const result = await pool.query(
+      `INSERT INTO therapy_sessions (user_id, session_name, status, created_at, updated_at)
+       VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [userId, sessionName]
+    );
+    return result.rows[0];
+  }
 }
 
 /**
@@ -541,4 +560,32 @@ export async function getConfigStats() {
     languages: languageStats,
     voices: voiceStats
   };
+}
+
+// ============================================
+// SYSTEM CONFIGURATION
+// ============================================
+
+/**
+ * Get AI model configuration from system_config
+ * @returns {Promise<string>} Model name (defaults to 'gpt-realtime-mini')
+ */
+export async function getAiModel() {
+  try {
+    const result = await pool.query(
+      `SELECT config_value FROM system_config WHERE config_key = 'ai_model'`
+    );
+
+    if (result.rows.length > 0) {
+      const config = result.rows[0].config_value;
+      return config.model || 'gpt-realtime-mini';
+    }
+
+    // Default model if not configured
+    return 'gpt-realtime-mini';
+  } catch (error) {
+    console.error('Failed to fetch AI model config:', error);
+    // Fallback to default model
+    return 'gpt-realtime-mini';
+  }
 }

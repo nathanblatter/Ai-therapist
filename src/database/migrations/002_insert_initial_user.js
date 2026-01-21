@@ -22,13 +22,13 @@ async function createInitialUser() {
       [username, hashedPassword, role]
     );
 
-    console.log('✅ Initial researcher user created successfully');
+    console.log('Initial researcher user created successfully');
     console.log(`   Username: ${username}`);
     console.log(`   Role: ${role}`);
 
     process.exit(0);
   } catch (error) {
-    console.error('❌ Failed to create initial user:', error);
+    console.error('Failed to create initial user:', error);
     process.exit(1);
   }
 }

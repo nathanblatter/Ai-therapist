@@ -12,9 +12,8 @@
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx --fix"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.848.0",
+    "@anthropic-ai/sdk": "^0.71.2",
     "@aws-sdk/client-secrets-manager": "^3.857.0",
-    "@aws-sdk/lib-dynamodb": "^3.850.0",
     "bcrypt": "^6.0.0",
     "connect-pg-simple": "^10.0.0",
     "dotenv": "^16.4.7",
@@ -26,13 +25,16 @@
     "openai": "^5.17.0",
     "openai-realtime-api": "^1.0.8",
     "pg": "^8.16.3",
+    "qrcode": "^1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-feather": "^2.0.10",
     "react-router-dom": "^6.20.0",
     "recharts": "^3.6.0",
     "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "speakeasy": "^2.0.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

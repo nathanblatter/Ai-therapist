@@ -26,7 +26,7 @@ export async function generateSessionName(sessionId) {
 
     // IDEMPOTENCY CHECK: If name already exists, don't regenerate
     if (session.session_name && session.session_name.trim() !== '') {
-      console.log(`✓ Session ${sessionId} already has name: "${session.session_name}" (skipping generation)`);
+      console.log(`Session ${sessionId} already has name: "${session.session_name}" (skipping generation)`);
       return session.session_name;
     }
 
@@ -98,6 +98,6 @@ export async function generateSessionName(sessionId) {
 export function generateSessionNameAsync(sessionId) {
   // Fire and forget - don't wait for completion
   generateSessionName(sessionId)
-    .then(name => console.log(`✓ Generated name for session ${sessionId}: "${name}"`))
-    .catch(err => console.error(`✗ Failed to generate name for session ${sessionId}:`, err));
+    .then(name => console.log(`Generated name for session ${sessionId}: "${name}"`))
+    .catch(err => console.error(`Failed to generate name for session ${sessionId}:`, err));
 }

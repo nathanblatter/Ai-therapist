@@ -3,13 +3,18 @@ import { Download } from "react-feather";
 
 export default function ExportPanel() {
   const [format, setFormat] = useState('json');
+  const [exportType, setExportType] = useState('full'); // 'full', 'metadata', 'anonymized', 'aggregated'
   const [sessionId, setSessionId] = useState('');
   const [sessions, setSessions] = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [aggregationPeriod, setAggregationPeriod] = useState('day'); // 'day', 'week', 'month'
+  const [crisisFlaggedOnly, setCrisisFlaggedOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [exportWarning, setExportWarning] = useState(null);
+  const [userRole, setUserRole] = useState(null);
 
   useEffect(() => {
     const fetchSessions = async () => {
@@ -26,18 +31,52 @@ export default function ExportPanel() {
       }
     };
 
+    const fetchUserRole = async () => {
+      try {
+        const response = await fetch('/api/auth/status', { credentials: 'include' });
+        if (response.ok) {
+          const data = await response.json();
+          setUserRole(data.role);
+        }
+      } catch (err) {
+        console.error('Failed to fetch user role:', err);
+      }
+    };
+
     fetchSessions();
+    fetchUserRole();
   }, []);
+
+  const checkRedactionStatus = async (sessionId) => {
+    const response = await fetch(`/admin/api/sessions/${sessionId}/redaction-status`, {
+      credentials: 'include'
+    });
+    const data = await response.json();
+    return data.pendingCount;
+  };
 
   const handleExport = async () => {
     setLoading(true);
     setError(null);
+    setExportWarning(null);
 
     try {
-      const params = new URLSearchParams({ format });
+      // For researchers, check redaction status if specific session selected
+      if (userRole === 'researcher' && sessionId) {
+        const pendingRedactions = await checkRedactionStatus(sessionId);
+        if (pendingRedactions > 0) {
+          setExportWarning(`⏳ ${pendingRedactions} message(s) still being redacted. Please wait for redaction to complete before exporting.`);
+          setLoading(false);
+          return;
+        }
+      }
+
+      const params = new URLSearchParams({ format, exportType });
       if (sessionId) params.append('sessionId', sessionId);
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
+      if (exportType === 'aggregated') params.append('aggregationPeriod', aggregationPeriod);
+      if (crisisFlaggedOnly) params.append('crisisFlaggedOnly', 'true');
 
       const response = await fetch(`/admin/api/export?${params}`);
       if (!response.ok) throw new Error('Export failed');
@@ -70,7 +109,27 @@ export default function ExportPanel() {
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="space-y-4">
           <div>
-            <label className="block font-medium mb-2 text-gray-700">Export Format</label>
+            <label className="block font-medium mb-2 text-gray-700">Export Type</label>
+            <select
+              value={exportType}
+              onChange={(e) => setExportType(e.target.value)}
+              className="border rounded px-3 py-2 w-full"
+            >
+              <option value="full">Full Data (All messages & metadata)</option>
+              <option value="metadata">Metadata Only (No messages)</option>
+              <option value="anonymized">Anonymized (Research IDs only)</option>
+              <option value="aggregated">Aggregated Statistics</option>
+            </select>
+            <p className="text-sm text-gray-500 mt-1">
+              {exportType === 'full' && 'Complete session data with HIPAA redaction'}
+              {exportType === 'metadata' && 'Session metadata, timestamps, and statistics without message content'}
+              {exportType === 'anonymized' && 'Replaces usernames with research IDs for IRB compliance'}
+              {exportType === 'aggregated' && 'Temporal statistics aggregated by time period'}
+            </p>
+          </div>
+
+          <div>
+            <label className="block font-medium mb-2 text-gray-700">File Format</label>
             <select
               value={format}
               onChange={(e) => setFormat(e.target.value)}
@@ -78,7 +137,36 @@ export default function ExportPanel() {
             >
               <option value="json">JSON</option>
               <option value="csv">CSV</option>
+              {exportType === 'aggregated' && <option value="xlsx">Excel (XLSX)</option>}
             </select>
+          </div>
+
+          {exportType === 'aggregated' && (
+            <div>
+              <label className="block font-medium mb-2 text-gray-700">Aggregation Period</label>
+              <select
+                value={aggregationPeriod}
+                onChange={(e) => setAggregationPeriod(e.target.value)}
+                className="border rounded px-3 py-2 w-full"
+              >
+                <option value="day">Daily</option>
+                <option value="week">Weekly</option>
+                <option value="month">Monthly</option>
+              </select>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="crisisFlaggedOnly"
+              checked={crisisFlaggedOnly}
+              onChange={(e) => setCrisisFlaggedOnly(e.target.checked)}
+              className="w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+            />
+            <label htmlFor="crisisFlaggedOnly" className="text-sm text-gray-700">
+              Export only crisis-flagged sessions
+            </label>
           </div>
 
           <div>
@@ -144,12 +232,19 @@ export default function ExportPanel() {
             </div>
           )}
 
+          {exportWarning && (
+            <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded">
+              {exportWarning}
+            </div>
+          )}
+
           <button
             onClick={handleExport}
             disabled={loading}
-            className="w-full bg-byuRoyal text-white py-3 rounded-lg font-semibold hover:bg-byuNavy transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-byuRoyal text-white py-3 rounded-lg font-semibold hover:bg-byuNavy transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
+            aria-label={loading ? 'Exporting data' : 'Download export file'}
           >
-            <Download size={20} />
+            <Download size={20} aria-hidden="true" />
             {loading ? 'Exporting...' : 'Download Export'}
           </button>
         </div>
@@ -158,9 +253,12 @@ export default function ExportPanel() {
       <div className="mt-6 bg-byuLightBlue bg-opacity-30 border border-byuRoyal border-opacity-30 rounded-lg p-4">
         <h3 className="font-semibold mb-2">Export Information</h3>
         <ul className="text-sm space-y-1 text-gray-700">
-          <li>• All exported data is HIPAA-redacted</li>
-          <li>• JSON format preserves full data structure including metadata</li>
-          <li>• CSV format is suitable for spreadsheet analysis</li>
+          <li>• <strong>Full Data:</strong> All messages with HIPAA redaction applied</li>
+          <li>• <strong>Metadata Only:</strong> Session details without message content (ideal for privacy-sensitive research)</li>
+          <li>• <strong>Anonymized:</strong> Usernames replaced with research IDs (RID_001, RID_002, etc.)</li>
+          <li>• <strong>Aggregated:</strong> Statistical summaries by time period (session counts, duration, crisis events)</li>
+          <li>• JSON preserves full structure; CSV is suitable for statistical software (R, SPSS, etc.)</li>
+          <li>• Crisis-flagged filter exports only sessions with high/medium/low risk flags</li>
           <li>• Large exports may take a few moments to process</li>
         </ul>
       </div>
