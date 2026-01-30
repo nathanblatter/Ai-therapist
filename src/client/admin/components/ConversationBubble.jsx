@@ -15,7 +15,12 @@ export default function ConversationBubble({
   };
 
   const getBubbleClass = () => {
-    if (message.role === 'user') {
+    // Tool calls get special styling
+    if (message.message_type === 'tool_call') {
+      return 'bg-purple-100 text-purple-900 border-2 border-purple-400 rounded-none justify-center';
+    } else if (message.message_type === 'tool_response') {
+      return 'bg-purple-50 text-purple-800 border border-purple-300 rounded-none justify-center';
+    } else if (message.role === 'user') {
       return 'bg-byuRoyal text-white rounded-br-none justify-end';
     } else if (message.role === 'assistant') {
       return 'bg-byuLightBlue text-black rounded-bl-none justify-start';
@@ -51,7 +56,33 @@ export default function ConversationBubble({
             rows={4}
           />
         ) : (
-          <div className="whitespace-pre-line">{message.message || '(No message content)'}</div>
+          <div>
+            {message.message_type === 'tool_call' && (
+              <div className="font-semibold text-purple-900 mb-2">🔧 Tool Call</div>
+            )}
+            {message.message_type === 'tool_response' && (
+              <div className="font-semibold text-purple-800 mb-2">📥 Tool Response</div>
+            )}
+            {userRole === 'researcher' && !message.message ? (
+              <div className="text-gray-400 italic flex items-center">
+                <svg className="animate-spin inline w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Redacting content...
+              </div>
+            ) : (
+              <div className="whitespace-pre-line">{message.message || '(No message content)'}</div>
+            )}
+            {message.metadata && (message.message_type === 'tool_call' || message.message_type === 'tool_response') && (
+              <div className="mt-2 p-2 bg-white bg-opacity-50 rounded text-xs">
+                <div><strong>Tool:</strong> {message.metadata.tool_name}</div>
+                {message.metadata.status && (
+                  <div><strong>Status:</strong> <span className={message.metadata.status === 'completed' ? 'text-green-700' : message.metadata.status === 'failed' ? 'text-red-700' : 'text-yellow-700'}>{message.metadata.status}</span></div>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Edit indicator */}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2 } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SessionList from "./SessionList";
 import SessionDetail from "./SessionDetail";
@@ -8,7 +8,13 @@ import ExportPanel from "./ExportPanel";
 import UserManagement from "./UserManagement";
 import LiveMonitoring from "./LiveMonitoring";
 import SystemConfig from "./SystemConfig";
+import SystemPrompts from "./SystemPrompts";
 import RateLimitedUsers from "./RateLimitedUsers";
+import UserSessions from "./UserSessions";
+import CrisisManagement from "./CrisisManagement";
+import MFASetup from "./MFASetup";
+import DataRetention from "./DataRetention";
+import ToastContainer from "../../shared/components/Toast";
 
 export default function AdminApp() {
   const [currentView, setCurrentView] = useState('sessions');
@@ -58,11 +64,15 @@ export default function AdminApp() {
     { id: 'live', label: 'Live Monitoring', icon: Activity },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart2 },
     { id: 'sessions', label: 'Sessions', icon: List },
+    { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle },
     { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle },
+    { id: 'mfa', label: 'MFA Security', icon: Shield },
     { id: 'users', label: 'Users', icon: Users, researcherOnly: true },
+    { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
+    { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
+    { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
     { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
     { id: 'export', label: 'Export', icon: Download },
-
   ];
 
   // Filter nav items based on user role
@@ -104,11 +114,15 @@ export default function AdminApp() {
           {currentView === 'dashboard' && <Analytics />}
           {currentView === 'sessions' && <SessionList onViewSession={handleViewSession} />}
           {currentView === 'live' && <LiveMonitoring onViewSession={handleViewSession} />}
+          {currentView === 'crisis' && <CrisisManagement />}
           {currentView === 'rate-limits' && <RateLimitedUsers />}
+          {currentView === 'mfa' && <MFASetup />}
           {currentView === 'users' && <UserManagement />}
+          {currentView === 'user-sessions' && <UserSessions />}
+          {currentView === 'prompts' && <SystemPrompts />}
+          {currentView === 'retention' && <DataRetention />}
           {currentView === 'config' && <SystemConfig />}
           {currentView === 'export' && <ExportPanel />}
-
         </div>
       </main>
 
@@ -119,6 +133,9 @@ export default function AdminApp() {
           isEditMode={isEditMode}
         />
       )}
+
+      {/* Toast Notifications */}
+      <ToastContainer />
     </div>
   );
 }

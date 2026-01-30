@@ -19,17 +19,17 @@ async function runMigration() {
     const migrationPath = path.join(__dirname, '../migrations', '005_add_language_to_session_config.sql');
     const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
 
-    console.log('📝 Executing migration script...');
+    console.log('Executing migration script...');
     await client.query(migrationSQL);
 
-    console.log('\n✅ Migration completed successfully!\n');
+    console.log('\nMigration completed successfully!\n');
     console.log('Changes applied:');
     console.log('  - Added language column to session_configurations');
     console.log('  - Default value: "en" (English)');
     console.log('  - Enables tracking language preferences for sessions\n');
 
   } catch (error) {
-    console.error('\n❌ Migration failed:', error.message);
+    console.error('\nMigration failed:', error.message);
     console.error('\nYou can rollback using: node migrations/rollbackMigration005.js\n');
     throw error;
   } finally {

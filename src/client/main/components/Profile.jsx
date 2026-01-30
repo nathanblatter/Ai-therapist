@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit2, Check, X, AlertCircle } from 'react-feather';
+import { ArrowLeft, AlertCircle } from 'react-feather';
 import UserSessionDetail from './UserSessionDetail';
+import { toast } from '../../shared/components/Toast';
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -17,9 +18,7 @@ export default function Profile() {
   const [showRateLimitBanner, setShowRateLimitBanner] = useState(false);
 
   // Edit states
-  const [editingUsername, setEditingUsername] = useState(false);
   const [editingPassword, setEditingPassword] = useState(false);
-  const [newUsername, setNewUsername] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -46,7 +45,6 @@ export default function Profile() {
         const data = await response.json();
         if (data.authenticated && data.user) {
           setUser(data.user);
-          setNewUsername(data.user.username);
         }
       }
     } catch (err) {
@@ -108,45 +106,19 @@ export default function Profile() {
     setFilteredSessions(filtered);
   };
 
-  const handleUpdateUsername = async () => {
-    if (!newUsername.trim()) {
-      alert('Username cannot be empty');
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/users/${user.userid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: newUsername })
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to update username');
-      }
-
-      setUser({ ...user, username: newUsername });
-      setEditingUsername(false);
-      alert('Username updated successfully');
-    } catch (err) {
-      alert(err.message);
-    }
-  };
-
   const handleUpdatePassword = async () => {
     if (!currentPassword || !newPassword || !confirmPassword) {
-      alert('All password fields are required');
+      toast.error('All password fields are required');
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      alert('New passwords do not match');
+      toast.error('New passwords do not match');
       return;
     }
 
     if (newPassword.length < 6) {
-      alert('Password must be at least 6 characters');
+      toast.error('Password must be at least 6 characters');
       return;
     }
 
@@ -166,9 +138,9 @@ export default function Profile() {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      alert('Password updated successfully');
+      toast.success('Password updated successfully');
     } catch (err) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -242,11 +214,12 @@ export default function Profile() {
   return (
     <div className="fixed inset-0 bg-gray-50 overflow-y-auto">
       {/* Header */}
-      <div className="bg-byuNavy text-white p-6">
+      <div className="bg-byuNavy text-white p-6" role="banner">
         <div className="max-w-6xl mx-auto">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-byuLightBlue hover:text-white transition mb-4"
+            className="flex items-center gap-2 text-byuLightBlue hover:text-white transition mb-4 min-h-[44px]"
+            aria-label="Back to main application"
           >
             <ArrowLeft size={20} />
             <span>Back to App</span>
@@ -259,9 +232,9 @@ export default function Profile() {
       <div className="max-w-6xl mx-auto p-6 pb-12 space-y-6">
         {/* Rate Limit Warning Banner */}
         {showRateLimitBanner && rateLimitStatus && (
-          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
+          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg" role="alert" aria-live="assertive">
             <div className="flex items-start">
-              <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={24} />
+              <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={24} aria-hidden="true" />
               <div className="ml-3 flex-1">
                 <h3 className="text-lg font-semibold text-yellow-800">
                   Daily Session Limit Reached
@@ -286,41 +259,7 @@ export default function Profile() {
             {/* Username */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Username</label>
-              {editingUsername ? (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    className="flex-1 px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal"
-                  />
-                  <button
-                    onClick={handleUpdateUsername}
-                    className="bg-green-500 text-white px-3 py-2 rounded hover:bg-green-600 transition"
-                  >
-                    <Check size={20} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingUsername(false);
-                      setNewUsername(user.username);
-                    }}
-                    className="bg-gray-500 text-white px-3 py-2 rounded hover:bg-gray-600 transition"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">{user.username}</span>
-                  <button
-                    onClick={() => setEditingUsername(true)}
-                    className="text-byuRoyal hover:text-byuNavy transition"
-                  >
-                    <Edit2 size={18} />
-                  </button>
-                </div>
-              )}
+              <span className="text-lg">{user.username}</span>
             </div>
 
             {/* User ID */}
@@ -342,38 +281,43 @@ export default function Profile() {
               {!editingPassword ? (
                 <button
                   onClick={() => setEditingPassword(true)}
-                  className="bg-byuRoyal text-white px-4 py-2 rounded hover:bg-byuNavy transition"
+                  className="bg-byuRoyal text-white px-4 py-2 rounded hover:bg-byuNavy transition min-h-[44px]"
+                  aria-label="Change account password"
                 >
                   Change Password
                 </button>
               ) : (
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-lg">Change Password</h3>
+                <div className="space-y-3" role="form" aria-labelledby="password-change-title">
+                  <h3 id="password-change-title" className="font-semibold text-lg">Change Password</h3>
                   <input
                     type="password"
                     placeholder="Current Password"
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
-                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+                    aria-label="Enter current password"
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
                   />
                   <input
                     type="password"
                     placeholder="New Password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+                    aria-label="Enter new password (minimum 6 characters)"
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
                   />
                   <input
                     type="password"
                     placeholder="Confirm New Password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+                    aria-label="Confirm new password"
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
                   />
                   <div className="flex gap-2">
                     <button
                       onClick={handleUpdatePassword}
-                      className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
+                      className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition min-h-[44px]"
+                      aria-label="Submit new password"
                     >
                       Update Password
                     </button>
@@ -384,7 +328,8 @@ export default function Profile() {
                         setNewPassword('');
                         setConfirmPassword('');
                       }}
-                      className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 transition"
+                      className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 transition min-h-[44px]"
+                      aria-label="Cancel password change"
                     >
                       Cancel
                     </button>
@@ -423,27 +368,30 @@ export default function Profile() {
           <h2 className="text-2xl font-bold text-byuNavy mb-4">Session History</h2>
 
           {/* Filters */}
-          <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3" role="search" aria-label="Filter sessions">
             <input
               type="text"
               placeholder="Search sessions..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+              aria-label="Search sessions by name or ID"
+              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
             />
             <input
               type="date"
               placeholder="Start Date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+              aria-label="Filter by start date"
+              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
             />
             <input
               type="date"
               placeholder="End Date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+              aria-label="Filter by end date"
+              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
             />
           </div>
 
@@ -466,14 +414,14 @@ export default function Profile() {
           )}
 
           {!loading && !error && filteredSessions.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="overflow-x-auto" role="region" aria-label="Session history table">
+              <table className="w-full" role="table">
                 <thead>
                   <tr className="bg-gray-100 border-b">
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Session Name</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Date</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Actions</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">Session Name</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">Date</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">Status</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -501,7 +449,8 @@ export default function Profile() {
                       <td className="px-4 py-3">
                         <button
                           onClick={() => setSelectedSessionId(session.session_id)}
-                          className="bg-byuRoyal text-white px-3 py-1 rounded hover:bg-byuNavy transition text-sm"
+                          className="bg-byuRoyal text-white px-3 py-1 rounded hover:bg-byuNavy transition text-sm min-h-[44px]"
+                          aria-label={`View details for session ${session.session_name || 'unnamed'}`}
                         >
                           View
                         </button>

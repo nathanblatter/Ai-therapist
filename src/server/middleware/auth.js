@@ -31,7 +31,7 @@ export function requireRole(...allowedRoles) {
 export async function verifyCredentials(username, password) {
   try {
     const result = await pool.query(
-      'SELECT userid, username, password, role FROM users WHERE username = $1',
+      'SELECT userid, username, password, role, mfa_enabled, mfa_secret, mfa_backup_codes FROM users WHERE username = $1',
       [username]
     );
 
@@ -50,7 +50,10 @@ export async function verifyCredentials(username, password) {
     return {
       userid: user.userid,
       username: user.username,
-      role: user.role
+      role: user.role,
+      mfa_enabled: user.mfa_enabled,
+      mfa_secret: user.mfa_secret,
+      mfa_backup_codes: user.mfa_backup_codes
     };
   } catch (error) {
     console.error('Error verifying credentials:', error);
@@ -97,7 +100,7 @@ export function canViewUnredactedData(role) {
 export async function getAllUsers() {
   try {
     const result = await pool.query(
-      'SELECT userid, username, role, created_at, updated_at FROM users ORDER BY created_at DESC'
+      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, created_at, updated_at FROM users ORDER BY created_at DESC'
     );
     return result.rows;
   } catch (error) {
@@ -110,7 +113,7 @@ export async function getAllUsers() {
 export async function getUserById(userid) {
   try {
     const result = await pool.query(
-      'SELECT userid, username, role, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
+      'SELECT userid, username, role, preferred_voice, preferred_language, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
       [userid]
     );
 

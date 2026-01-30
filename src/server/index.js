@@ -10,11 +10,11 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import {getOpenAIKey} from "./config/secrets.js"; // Import the function to get the OpenAI API key
 import {pool } from "./config/db.js";
-import redactPHI from "./services/redaction.service.js";
 import { requireAuth, requireRole, verifyCredentials, createUser, getAllUsers, getUserById, updateUser, deleteUser } from "./middleware/auth.js";
-import { createSession, getSession, insertMessagesBatch, upsertSessionConfig } from "./models/dbQueries.js";
+import { createSession, getSession, insertMessagesBatch, upsertSessionConfig, updateSessionStatus, getAiModel } from "./models/dbQueries.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
+import { getRetentionSettings, updateRetentionSettings, executeContentWipe, getWipeStats, startScheduler as startContentWipeScheduler, getSchedulerStatus } from "./services/contentWipe.service.js";
 
 // ES module-compatible __dirname replacement
 const __filename = fileURLToPath(import.meta.url);
@@ -48,23 +48,8 @@ const port = process.env.PORT ;
 const apiKey = await getOpenAIKey();
 
 
-const languageInstructions = {
-  'en': '',
-  'es-ES': '\n\n**IMPORTANT: Please respond in Spanish from Spain (Español de España). Use European Spanish vocabulary, pronunciation, and expressions (vosotros, conducir, ordenador, etc.).**',
-  'es-419': '\n\n**IMPORTANT: Please respond in Latin American Spanish (Español Latinoamericano). Use Latin American Spanish vocabulary and expressions (ustedes, manejar, computadora, etc.).**',
-  'fr-FR': '\n\n**IMPORTANT: Please respond in French from France (Français de France). Use standard French vocabulary and expressions.**',
-  'fr-CA': '\n\n**IMPORTANT: Please respond in Québécois French (Français Québécois). Use Canadian French vocabulary, pronunciation, and expressions.**',
-  'pt-BR': '\n\n**IMPORTANT: Please respond in Brazilian Portuguese (Português Brasileiro). Use Brazilian Portuguese vocabulary, pronunciation, and expressions.**',
-  'pt-PT': '\n\n**IMPORTANT: Please respond in European Portuguese (Português Europeu). Use European Portuguese vocabulary, pronunciation, and expressions.**',
-  'de': '\n\n**IMPORTANT: Please respond in German (Deutsch).**',
-  'it': '\n\n**IMPORTANT: Please respond in Italian (Italiano).**',
-  'zh': '\n\n**IMPORTANT: Please respond in Chinese (中文).**',
-  'ja': '\n\n**IMPORTANT: Please respond in Japanese (日本語).**',
-  'ko': '\n\n**IMPORTANT: Please respond in Korean (한국어).**',
-  'ar': '\n\n**IMPORTANT: Please respond in Arabic (العربية).**',
-  'hi': '\n\n**IMPORTANT: Please respond in Hindi (हिन्दी).**',
-  'ru': '\n\n**IMPORTANT: Please respond in Russian (Русский).**'
-};
+// Language instructions are now stored in the database system_config table
+// They will be loaded dynamically from the 'languages' config
 
 // Cache for system config to avoid database hits on every request
 let systemConfigCache = null;
@@ -118,7 +103,7 @@ async function checkSessionLimits(userId, userRole = null) {
 
   // Researcher accounts are exempt from limits
   if (userRole === 'researcher') {
-    console.log(`✓ Researcher ${userId} bypassing session limits`);
+    console.log(`Researcher ${userId} bypassing session limits`);
     return { allowed: true, bypass: 'researcher' };
   }
 
@@ -219,19 +204,8 @@ function getHoursUntilReset() {
   return (resetTime - now) / (1000 * 60 * 60); // hours
 }
 
-async function getSystemPrompt(language = 'en') {
-  const config = await getSystemConfig();
-  const crisisContact = config.crisis_contact || {
-    hotline: 'BYU Counseling and Psychological Services',
-    phone: '(801) 422-3035',
-    text: 'HELLO to 741741'
-  };
-
-  const crisisText = crisisContact.enabled
-    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
-    : '911 or your local emergency services';
-
-  const basePrompt = `## Purpose & Scope
+// Default system prompt used as fallback if database config is unavailable
+const DEFAULT_SYSTEM_PROMPT = `## Purpose & Scope
 You are an AI **therapeutic assistant** for adults, providing **general emotional support and therapeutic conversation** only. Use empathy and evidence-based self-help (e.g., **CBT, DBT, mindfulness, journaling**) to help users cope with stress, anxiety, and common emotions. Make it clear: you **support and guide, not replace a human therapist**. Always **remind users you are not licensed**, and your help is **not a substitute for professional therapy/medical care**. Encourage seeking a **licensed therapist for serious issues**. Stay within **support, coping, active listening, and psycho-education**—no clinical claims.
 
 ## Boundaries & Limitations
@@ -240,7 +214,7 @@ You are an AI **therapeutic assistant** for adults, providing **general emotiona
 ## Crisis Protocol
 **If user expresses risk (suicidality, harm, acute crisis):**
 - **Immediately stop normal conversation**
-- Urge them to seek emergency help (e.g., ${crisisText}).
+- Urge them to seek emergency help (e.g., {{crisis_text}}).
 - State: you are **AI and cannot handle crises**
 - Give resources and ask if they'll seek help.
 - Do not provide advice or continue therapeutic conversation until user is safe.
@@ -253,7 +227,7 @@ Maintain a **calm, nonjudgmental, warm, and inclusive tone**. Validate user expe
 **Treat all communications as confidential**. Do not request or repeat unnecessary personal info. If users provide identifiers, do NOT store unless secure/HIPAA-compliant (if must, de-identify and encrypt). Gently remind users not to overshare sensitive details. At the session start, state: this chat is confidential, you are AI (not a healthcare provider), and users should not provide PHI unless comfortable. **Never share data with outside parties** except required by law or explicit, user-consented emergencies. No user info for ads or non-support purposes.
 
 ## Session Framing & Disclaimers
-At each session's start, present a brief disclaimer about your **AI identity, purpose, limits, and crisis response** (e.g.: "Hello, I'm an AI mental health support assistant—not a therapist/doctor. I can't diagnose, but I'll listen and offer coping ideas. If you're in crisis, contact ${crisisText}. What would you like to talk about?"). Remind users of limits if conversation goes off-scope (e.g., diagnosis, ongoing medical topics). If persistent, reinforce boundaries and suggest consulting professionals. Suggest healthy breaks and discourage dependency if user chats excessively.
+At each session's start, present a brief disclaimer about your **AI identity, purpose, limits, and crisis response** (e.g.: "Hello, I'm an AI mental health support assistant—not a therapist/doctor. I can't diagnose, but I'll listen and offer coping ideas. If you're in crisis, contact {{crisis_text}}. What would you like to talk about?"). Remind users of limits if conversation goes off-scope (e.g., diagnosis, ongoing medical topics). If persistent, reinforce boundaries and suggest consulting professionals. Suggest healthy breaks and discourage dependency if user chats excessively.
 
 At session close, remind users: you're a support tool and for ongoing or serious issues, professional help is best. Reiterate crisis resources as needed. Include legal/safety disclaimers ("This AI is not a licensed healthcare provider."). Encourage users to agree/acknowledge the service boundaries before chatting as required by your platform.
 
@@ -269,7 +243,37 @@ At session close, remind users: you're a support tool and for ongoing or serious
 **Summary:**
 You provide supportive, ethical guidance, never diagnose/prescribe, keep all conversations safe/private, transparently communicate limits, and always refer to professional help in crisis. Be calm, caring, and user-centered—empower, don't direct. Prioritize user safety, confidentiality, and professional boundaries at all times.`;
 
-  return basePrompt + (languageInstructions[language] || '');
+async function getSystemPrompt(language = 'en', sessionType = 'realtime') {
+  const config = await getSystemConfig();
+  const crisisContact = config.crisis_contact || {
+    hotline: 'BYU Counseling and Psychological Services',
+    phone: '(801) 422-3035',
+    text: 'HELLO to 741741'
+  };
+
+  // Build the crisis text for interpolation
+  const crisisText = crisisContact.enabled
+    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
+    : '911 or your local emergency services';
+
+  // Get the prompt from database config, or use default fallback
+  let basePrompt = DEFAULT_SYSTEM_PROMPT;
+  const systemPrompts = config.system_prompts;
+  if (systemPrompts && systemPrompts[sessionType] && systemPrompts[sessionType].prompt) {
+    basePrompt = systemPrompts[sessionType].prompt;
+  }
+
+  // Interpolate {{crisis_text}} placeholder
+  basePrompt = basePrompt.replace(/\{\{crisis_text\}\}/g, crisisText);
+
+  // Get language-specific addition from database config
+  const languagesConfig = config.languages || { languages: [], default_language: 'en' };
+  const languageObj = languagesConfig.languages
+    ? languagesConfig.languages.find(l => l.value === language)
+    : null;
+  const languageAddition = languageObj?.systemPromptAddition || '';
+
+  return basePrompt + languageAddition;
 }
 
 app.use(express.json()); // Needed to parse JSON bodies
@@ -286,7 +290,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false', // Use secure cookies in production (disable with COOKIE_SECURE=false for local testing)
+    secure: false, // Only use secure cookies when explicitly enabled (for HTTPS deployments)
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     sameSite: 'lax' // Prevent CSRF while allowing navigation
@@ -310,7 +314,7 @@ io.use((socket, next) => {
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false',
+      secure: process.env.COOKIE_SECURE === 'true',
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000,
       sameSite: 'lax'
@@ -369,6 +373,43 @@ io.on('connection', (socket) => {
     socket.leave(`session:${sessionId}`);
   });
 
+  // Handle admin request for sideband connections (admin only)
+  socket.on('admin:get-sideband-connections', async () => {
+    if (!isAdmin) {
+      console.warn(`[Socket.io] Unauthorized admin:get-sideband-connections attempt from ${socket.id}`);
+      return;
+    }
+
+    try {
+      const { sidebandManager } = await import('./services/sidebandManager.service.js');
+      const activeSessions = sidebandManager.getActiveConnections();
+
+      const result = await pool.query(`
+        SELECT
+          session_id,
+          openai_call_id,
+          sideband_connected,
+          sideband_connected_at,
+          status
+        FROM therapy_sessions
+        WHERE session_id = ANY($1)
+        ORDER BY sideband_connected_at DESC
+      `, [activeSessions]);
+
+      const connections = result.rows.map(session => ({
+        sessionId: session.session_id,
+        callId: session.openai_call_id,
+        connectedAt: session.sideband_connected_at,
+        status: session.sideband_connected ? 'connected' : 'disconnected'
+      }));
+
+      socket.emit('admin:sideband-connections', connections);
+    } catch (error) {
+      console.error('[Socket.io] Error fetching sideband connections:', error);
+      socket.emit('admin:sideband-connections', []);
+    }
+  });
+
   // Handle admin messages to participants (admin only)
   socket.on('admin:sendMessage', async ({ sessionId, message, messageType }) => {
     if (!isAdmin) {
@@ -405,7 +446,7 @@ io.on('connection', (socket) => {
     // Insert admin message into database
     try {
       await insertMessagesBatch([logData]);
-      console.log(`✓ Admin message logged to database`);
+      console.log(`Admin message logged to database`);
     } catch (err) {
       console.error('Failed to log admin message:', err);
     }
@@ -425,39 +466,11 @@ const sessionConfig = JSON.stringify({
   session: {
       type: "realtime",
        tools: [
-            {
-                type: "function",
-                name: "generate_horoscope",
-                description: "Give today's horoscope for an astrological sign.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        sign: {
-                            type: "string",
-                            description: "The sign for the horoscope.",
-                            enum: [
-                                "Aries",
-                                "Taurus",
-                                "Gemini",
-                                "Cancer",
-                                "Leo",
-                                "Virgo",
-                                "Libra",
-                                "Scorpio",
-                                "Sagittarius",
-                                "Capricorn",
-                                "Aquarius",
-                                "Pisces"
-                            ]
-                        }
-                    },
-                    required: ["sign"]
-                }
-            }
+            
         ],
         tool_choice: "auto",
       model: "gpt-realtime-mini",
-      instructions: await getSystemPrompt('en'),
+      instructions: await getSystemPrompt('en', 'realtime'),
       audio: {
           input:{
             transcription:{
@@ -478,7 +491,7 @@ const sessionConfig = JSON.stringify({
 
 // Login endpoint
 app.post("/api/auth/login", async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, mfaToken, backupCode } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password are required' });
@@ -491,20 +504,67 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    // Set session
+    // Check if MFA is enabled for this user
+    console.log('User MFA enabled?', user.mfa_enabled);
+    console.log('MFA token provided?', !!mfaToken);
+    console.log('Backup code provided?', !!backupCode);
+
+    if (user.mfa_enabled) {
+      // MFA is enabled - verify MFA token or backup code
+      if (!mfaToken && !backupCode) {
+        // First login step - credentials valid, but MFA required
+        console.log('Returning mfaRequired response');
+        return res.json({
+          success: false,
+          mfaRequired: true,
+          userId: user.userid // Pass userId for MFA verification
+        });
+      }
+
+      // Verify MFA token or backup code
+      const { verifyTOTP, verifyBackupCode, updateBackupCodes, updateMFAVerificationTime } = await import('./services/mfa.service.js');
+
+      let mfaValid = false;
+
+      if (mfaToken) {
+        // Verify TOTP token
+        mfaValid = verifyTOTP(mfaToken, user.mfa_secret);
+      } else if (backupCode) {
+        // Verify backup code
+        const verification = await verifyBackupCode(backupCode, user.mfa_backup_codes);
+        mfaValid = verification.valid;
+
+        if (mfaValid) {
+          // Remove used backup code
+          await updateBackupCodes(user.userid, verification.remainingCodes);
+          console.log(`Backup code used for user ${user.username}. Remaining codes: ${verification.remainingCodes.length}`);
+        }
+      }
+
+      if (!mfaValid) {
+        return res.status(401).json({ error: 'Invalid MFA token or backup code' });
+      }
+
+      // Update last MFA verification timestamp
+      await updateMFAVerificationTime(user.userid);
+    }
+
+    // Set session (after successful MFA or if MFA not enabled)
     req.session.userId = user.userid;
     req.session.username = user.username;
     req.session.userRole = user.role;
+    req.session.mfaVerified = true; // Mark that MFA was verified (or not required)
 
     // Explicitly save session to ensure it persists
     req.session.save((err) => {
       if (err) {
         console.error('Session save error:', err);
       } else {
-        console.log('✓ User logged in and session saved:', {
+        console.log('User logged in and session saved:', {
           userId: user.userid,
           username: user.username,
-          role: user.role
+          role: user.role,
+          mfaVerified: true
         });
       }
     });
@@ -582,6 +642,183 @@ app.get("/api/auth/status", (req, res) => {
   }
 });
 
+// ===================== MFA (Multi-Factor Authentication) Routes =====================
+
+// GET /api/mfa/status - Get MFA status for current user
+app.get("/api/mfa/status", requireAuth, async (req, res) => {
+  try {
+    const { getMFAStatus } = await import('./services/mfa.service.js');
+    const status = await getMFAStatus(req.session.userId);
+
+    // Don't send the secret to the client
+    delete status.secret;
+
+    res.json({
+      success: true,
+      mfa: status
+    });
+  } catch (error) {
+    console.error('Failed to get MFA status:', error);
+    res.status(500).json({ error: 'Failed to get MFA status' });
+  }
+});
+
+// POST /api/mfa/setup/init - Initialize MFA setup (generate secret and QR code)
+app.post("/api/mfa/setup/init", requireAuth, async (req, res) => {
+  try {
+    const { generateMFASecret, generateQRCode } = await import('./services/mfa.service.js');
+
+    // Only allow therapists and researchers to enable MFA
+    if (req.session.userRole !== 'therapist' && req.session.userRole !== 'researcher') {
+      return res.status(403).json({ error: 'MFA is only available for therapist and researcher accounts' });
+    }
+
+    // Generate secret
+    const { secret, otpauthUrl } = generateMFASecret(req.session.username);
+
+    // Generate QR code
+    const qrCode = await generateQRCode(otpauthUrl);
+
+    // Store secret in session temporarily (not in database yet)
+    req.session.tempMFASecret = secret;
+
+    res.json({
+      success: true,
+      secret: secret, // Show to user so they can enter manually if QR code fails
+      qrCode: qrCode  // Data URL for QR code image
+    });
+  } catch (error) {
+    console.error('Failed to initialize MFA setup:', error);
+    res.status(500).json({ error: 'Failed to initialize MFA setup' });
+  }
+});
+
+// POST /api/mfa/setup/verify - Verify MFA token and complete setup
+app.post("/api/mfa/setup/verify", requireAuth, async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Token is required' });
+  }
+
+  try {
+    const { verifyTOTP, generateBackupCodes, enableMFA } = await import('./services/mfa.service.js');
+
+    // Get temporary secret from session
+    const secret = req.session.tempMFASecret;
+
+    if (!secret) {
+      return res.status(400).json({ error: 'MFA setup not initialized. Please start setup again.' });
+    }
+
+    // Verify the token
+    const isValid = verifyTOTP(token, secret);
+
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid token. Please try again.' });
+    }
+
+    // Generate backup codes
+    const { codes, hashedCodes } = await generateBackupCodes(10);
+
+    // Enable MFA in database
+    await enableMFA(req.session.userId, secret, hashedCodes);
+
+    // Clear temporary secret from session
+    delete req.session.tempMFASecret;
+
+    console.log(`MFA enabled for user ${req.session.username}`);
+
+    res.json({
+      success: true,
+      message: 'MFA enabled successfully',
+      backupCodes: codes // Return plain codes to user (only time they're shown)
+    });
+  } catch (error) {
+    console.error('Failed to verify MFA setup:', error);
+    res.status(500).json({ error: 'Failed to complete MFA setup' });
+  }
+});
+
+// POST /api/mfa/disable - Disable MFA for current user
+app.post("/api/mfa/disable", requireAuth, async (req, res) => {
+  const { password } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ error: 'Password is required to disable MFA' });
+  }
+
+  try {
+    const { verifyCredentials } = await import('./middleware/auth.js');
+    const { disableMFA } = await import('./services/mfa.service.js');
+
+    // Verify password before disabling MFA
+    const user = await verifyCredentials(req.session.username, password);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    // Disable MFA
+    await disableMFA(req.session.userId);
+
+    console.log(`MFA disabled for user ${req.session.username}`);
+
+    res.json({
+      success: true,
+      message: 'MFA disabled successfully'
+    });
+  } catch (error) {
+    console.error('Failed to disable MFA:', error);
+    res.status(500).json({ error: 'Failed to disable MFA' });
+  }
+});
+
+// POST /api/mfa/regenerate-backup-codes - Generate new backup codes
+app.post("/api/mfa/regenerate-backup-codes", requireAuth, async (req, res) => {
+  const { password } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ error: 'Password is required to regenerate backup codes' });
+  }
+
+  try {
+    const { verifyCredentials } = await import('./middleware/auth.js');
+    const { generateBackupCodes, updateBackupCodes, getMFAStatus } = await import('./services/mfa.service.js');
+
+    // Verify password
+    const user = await verifyCredentials(req.session.username, password);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    // Check if MFA is enabled
+    const mfaStatus = await getMFAStatus(req.session.userId);
+
+    if (!mfaStatus.enabled) {
+      return res.status(400).json({ error: 'MFA is not enabled' });
+    }
+
+    // Generate new backup codes
+    const { codes, hashedCodes } = await generateBackupCodes(10);
+
+    // Update backup codes in database
+    await updateBackupCodes(req.session.userId, hashedCodes);
+
+    console.log(`Backup codes regenerated for user ${req.session.username}`);
+
+    res.json({
+      success: true,
+      message: 'Backup codes regenerated successfully',
+      backupCodes: codes // Return new codes to user
+    });
+  } catch (error) {
+    console.error('Failed to regenerate backup codes:', error);
+    res.status(500).json({ error: 'Failed to regenerate backup codes' });
+  }
+});
+
 // GET /api/rate-limits/status - Get current user's rate limit status
 app.get('/api/rate-limits/status', requireAuth, async (req, res) => {
   try {
@@ -643,6 +880,121 @@ app.get("/api/users", requireRole('researcher'), async (req, res) => {
   } catch (error) {
     console.error('Error fetching users:', error);
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// ===================== User Preferences Endpoints =====================
+// NOTE: These MUST come before /api/users/:userid to avoid route conflicts
+
+// GET /api/users/preferences - Get user's voice and language preferences
+app.get("/api/users/preferences", requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+
+  try {
+    const result = await pool.query(
+      'SELECT preferred_voice, preferred_language FROM users WHERE userid = $1',
+      [userId]
+    );
+
+    // Get system config for enabled voices/languages
+    const config = await getSystemConfig();
+    const voicesConfig = config.voices || {
+      voices: [
+        { value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }
+      ],
+      default_voice: 'cedar'
+    };
+    const languagesConfig = config.languages || {
+      languages: [
+        { value: 'en', label: 'English', description: 'English', enabled: true }
+      ],
+      default_language: 'en'
+    };
+
+    let voice = voicesConfig.default_voice;
+    let language = languagesConfig.default_language;
+
+    if (result.rows.length > 0) {
+      const userVoice = result.rows[0].preferred_voice;
+      const userLanguage = result.rows[0].preferred_language;
+
+      // Check if user's preference is still enabled
+      const voiceEnabled = voicesConfig.voices
+        ? voicesConfig.voices.find(v => v.value === userVoice && v.enabled)
+        : null;
+      const languageEnabled = languagesConfig.languages
+        ? languagesConfig.languages.find(l => l.value === userLanguage && l.enabled)
+        : null;
+
+      voice = voiceEnabled ? userVoice : voicesConfig.default_voice;
+      language = languageEnabled ? userLanguage : languagesConfig.default_language;
+
+      // Log fallback
+      if (userVoice && !voiceEnabled) {
+        console.log(`User ${userId} preferred voice '${userVoice}' is disabled, falling back to '${voice}'`);
+      }
+      if (userLanguage && !languageEnabled) {
+        console.log(`User ${userId} preferred language '${userLanguage}' is disabled, falling back to '${language}'`);
+      }
+    }
+
+    res.json({ voice, language });
+  } catch (error) {
+    console.error('Error fetching user preferences:', error);
+    res.status(500).json({ error: 'Failed to fetch preferences' });
+  }
+});
+
+// PUT /api/users/preferences - Save user preferences
+app.put("/api/users/preferences", requireAuth, async (req, res) => {
+  const userId = req.session.userId;
+  const { voice, language } = req.body;
+
+  if (!voice || !language) {
+    return res.status(400).json({ error: 'Voice and language are required' });
+  }
+
+  try {
+    // Validate against enabled options
+    const config = await getSystemConfig();
+    const voicesConfig = config.voices || {
+      voices: [
+        { value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }
+      ],
+      default_voice: 'cedar'
+    };
+    const languagesConfig = config.languages || {
+      languages: [
+        { value: 'en', label: 'English', description: 'English', enabled: true }
+      ],
+      default_language: 'en'
+    };
+
+    const voiceEnabled = voicesConfig.voices
+      ? voicesConfig.voices.find(v => v.value === voice && v.enabled)
+      : null;
+    const languageEnabled = languagesConfig.languages
+      ? languagesConfig.languages.find(l => l.value === language && l.enabled)
+      : null;
+
+    if (!voiceEnabled) {
+      return res.status(400).json({ error: `Voice '${voice}' is not available` });
+    }
+    if (!languageEnabled) {
+      return res.status(400).json({ error: `Language '${language}' is not available` });
+    }
+
+    await pool.query(
+      'UPDATE users SET preferred_voice = $1, preferred_language = $2 WHERE userid = $3',
+      [voice, language, userId]
+    );
+
+    console.log(`Updated preferences for user ${userId}: voice=${voice}, language=${language}`);
+
+    res.json({ success: true, voice, language });
+  } catch (error) {
+    console.error('Error saving user preferences:', error);
+    res.status(500).json({ error: 'Failed to save preferences' });
   }
 });
 
@@ -776,6 +1128,8 @@ app.post("/api/users", requireRole('researcher'), async (req, res) => {
   }
 });
 
+// ===================== Session Token and Creation Endpoints =====================
+
 // An endpoint which would work with the client code above - it returns
 // the contents of a REST API request to this protected endpoint
 // Accept both GET (backward compatibility) and POST (with settings)
@@ -787,7 +1141,7 @@ app.all("/token", async (req, res) => {
       // RATE LIMITING CHECK: Enforce session limits (researchers are exempt)
       const limitCheck = await checkSessionLimits(userId, userRole);
       if (!limitCheck.allowed) {
-        console.log(`✗ Session limit exceeded for user ${userId}:`, limitCheck.reason);
+        console.log(`Session limit exceeded for user ${userId}:`, limitCheck.reason);
         return res.status(429).json({
           error: 'rate_limit_exceeded',
           reason: limitCheck.reason,
@@ -807,7 +1161,7 @@ app.all("/token", async (req, res) => {
         const existingSession = await getActiveSessionForUser(userId);
 
         if (existingSession) {
-          console.log(`✓ Returning existing active session for user ${userId}:`, {
+          console.log(`Returning existing active session for user ${userId}:`, {
             sessionId: existingSession.session_id.substring(0, 12) + '...',
             created_at: existingSession.created_at
           });
@@ -824,39 +1178,74 @@ app.all("/token", async (req, res) => {
       }
 
       // No active session - proceed with creating new one
-      // Get user settings from request body (if POST) or use defaults
-      const userVoice = req.body?.voice || 'cedar';
-      const userLanguage = req.body?.language || 'en';
+      // Get user settings: First check saved preferences, then request body, then defaults
+      let userVoice = req.body?.voice;
+      let userLanguage = req.body?.language;
+
+      console.log(`[Token] Request body - voice: ${userVoice}, language: ${userLanguage}`);
+      console.log(`[Token] User ID: ${userId}`);
+
+      // If not provided in request, load from user preferences
+      if (!userVoice || !userLanguage) {
+        console.log('[Token] Loading preferences from database...');
+        try {
+          const prefsResult = await pool.query(
+            'SELECT preferred_voice, preferred_language FROM users WHERE userid = $1',
+            [userId]
+          );
+
+          console.log(`[Token] Database query result:`, prefsResult.rows);
+
+          if (prefsResult.rows.length > 0) {
+            const dbVoice = prefsResult.rows[0].preferred_voice;
+            const dbLanguage = prefsResult.rows[0].preferred_language;
+            console.log(`[Token] DB values - voice: ${dbVoice}, language: ${dbLanguage}`);
+
+            userVoice = userVoice || dbVoice || 'cedar';
+            userLanguage = userLanguage || dbLanguage || 'en';
+
+            console.log(`[Token] Final values - voice: ${userVoice}, language: ${userLanguage}`);
+          } else {
+            console.log('[Token] No user found in database, using defaults');
+            userVoice = userVoice || 'cedar';
+            userLanguage = userLanguage || 'en';
+          }
+        } catch (err) {
+          console.error('[Token] Failed to load user preferences, using defaults:', err);
+          userVoice = userVoice || 'cedar';
+          userLanguage = userLanguage || 'en';
+        }
+      }
+
+      console.log(`[Token] Using voice: ${userVoice}, language: ${userLanguage} for user ${userId}`);
+
+      // Save preferences for next time (async, don't block)
+      if (userId) {
+        pool.query(
+          'UPDATE users SET preferred_voice = $1, preferred_language = $2 WHERE userid = $3',
+          [userVoice, userLanguage, userId]
+        ).then(() => {
+          console.log(`[Token] Saved preferences for user ${userId}: voice=${userVoice}, language=${userLanguage}`);
+        }).catch(err => console.error('[Token] Failed to save user preferences:', err));
+      }
+
       const temperature = 0.8; // Fixed temperature
+
+      // Get AI model from system config
+      const aiModel = await getAiModel();
+
+      // Get tools from registry
+      const { toolRegistry } = await import('./services/toolRegistry.service.js');
+      const tools = toolRegistry.getAllToolDefinitions();
 
       // Create dynamic session config with user settings
       const dynamicSessionConfig = JSON.stringify({
         session: {
             type: "realtime",
-            tools: [
-                  {
-                      type: "function",
-                      name: "generate_horoscope",
-                      description: "Give today's horoscope for an astrological sign.",
-                      parameters: {
-                          type: "object",
-                          properties: {
-                              sign: {
-                                  type: "string",
-                                  description: "The sign for the horoscope.",
-                                  enum: [
-                                      "Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
-                                      "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"
-                                  ]
-                              }
-                          },
-                          required: ["sign"]
-                      }
-                  }
-              ],
-              tool_choice: "auto",
-            model: "gpt-realtime-mini",
-            instructions: await getSystemPrompt(userLanguage),
+            tools: tools,
+            tool_choice: "auto",
+            model: aiModel,
+            instructions: await getSystemPrompt(userLanguage, 'realtime'),
             audio: {
                 input:{
                   transcription:{
@@ -922,7 +1311,7 @@ app.all("/token", async (req, res) => {
            ON CONFLICT (session_id) DO NOTHING`,
           [sessionId, userId]
         );
-        console.log(`✓ Therapy session created with user_id: ${userId}`);
+        console.log(`Therapy session created with user_id: ${userId}`);
 
         // Emit session created event to Socket.io
         global.io.to('admin-broadcast').emit('session:created', {
@@ -951,6 +1340,9 @@ app.all("/token", async (req, res) => {
                 const { updateSessionStatus } = await import("./models/dbQueries.js");
                 await updateSessionStatus(sessionId, 'ended', 'system');
 
+                // Handle room assignment cleanup and queue promotion
+                await handleSessionEndRoomCleanup(sessionId);
+
                 // Notify the user via Socket.io
                 global.io.to(`session:${sessionId}`).emit('session:status', {
                   status: 'ended',
@@ -973,7 +1365,7 @@ app.all("/token", async (req, res) => {
             }
           }, durationMs);
 
-          console.log(`✓ Session ${sessionId} will auto-terminate in ${limitCheck.limits.max_duration_minutes} minutes`);
+          console.log(`Session ${sessionId} will auto-terminate in ${limitCheck.limits.max_duration_minutes} minutes`);
         }
 
         // Insert session configuration
@@ -988,7 +1380,7 @@ app.all("/token", async (req, res) => {
           max_response_output_tokens: sessionConfigObj.session?.max_response_output_tokens || 4096,
           language: userLanguage
         });
-        console.log(`✓ Session configuration created for session: ${sessionId.substring(0, 12)}... (voice: ${userVoice}, language: ${userLanguage})`);
+        console.log(`Session configuration created for session: ${sessionId.substring(0, 12)}... (voice: ${userVoice}, language: ${userLanguage})`);
       } catch (dbError) {
         console.error("Failed to create session in database:", dbError);
         // Continue anyway - session will be created by logs/batch endpoint
@@ -1004,6 +1396,550 @@ app.all("/token", async (req, res) => {
   } catch (error) {
       console.error("Token generation error:", error);
       res.status(500).json({ error: "Failed to generate token" });
+  }
+});
+
+// ===================== Chat-Only Therapy Endpoints =====================
+// Used when voice is disabled - routes to GPT-5 chat completions instead of Realtime API
+
+// POST /api/chat/start - Start a chat-only therapy session
+app.post("/api/chat/start", async (req, res) => {
+  const userId = req.session?.userId || req.sessionID; // Use session userId or fallback to sessionID for anonymous
+
+  try {
+    // Check session limits (same as /token endpoint)
+    const userRole = req.session?.userRole || 'participant';
+    const limitCheck = await checkSessionLimits(userId, userRole);
+
+    if (!limitCheck.allowed) {
+      return res.status(429).json({
+        error: 'Session limit exceeded',
+        reason: limitCheck.reason,
+        timeRemaining: limitCheck.timeRemaining
+      });
+    }
+
+    // Check for existing active session (prevent multiple simultaneous sessions)
+    const { getActiveSessionForUser } = await import("./models/dbQueries.js");
+    const existingSession = await getActiveSessionForUser(userId);
+    if (existingSession) {
+      return res.status(200).json({
+        message: "Active session already exists",
+        sessionId: existingSession.session_id,
+        alreadyActive: true
+      });
+    }
+
+    // Get language setting: First check saved preferences, then request body, then defaults
+    let userLanguage = req.body?.language;
+
+    console.log(`[ChatStart] Request body - language: ${userLanguage}`);
+    console.log(`[ChatStart] User ID: ${userId}`);
+
+    // If not provided in request, load from user preferences
+    if (!userLanguage && req.session?.userId) {
+      console.log('[ChatStart] Loading language preference from database...');
+      try {
+        const prefsResult = await pool.query(
+          'SELECT preferred_language FROM users WHERE userid = $1',
+          [userId]
+        );
+
+        console.log(`[ChatStart] Database query result:`, prefsResult.rows);
+
+        if (prefsResult.rows.length > 0) {
+          const dbLanguage = prefsResult.rows[0].preferred_language;
+          console.log(`[ChatStart] DB language: ${dbLanguage}`);
+          userLanguage = dbLanguage || 'en';
+        } else {
+          console.log('[ChatStart] No user found in database, using default');
+          userLanguage = 'en';
+        }
+      } catch (err) {
+        console.error('[ChatStart] Failed to load user preferences, using default:', err);
+        userLanguage = 'en';
+      }
+    } else {
+      userLanguage = userLanguage || 'en';
+    }
+
+    console.log(`[ChatStart] Using language: ${userLanguage} for user ${userId}`);
+
+    // Save language preference for next time (async, don't block)
+    if (req.session?.userId) {
+      pool.query(
+        'UPDATE users SET preferred_language = $1 WHERE userid = $2',
+        [userLanguage, userId]
+      ).then(() => {
+        console.log(`[ChatStart] Saved language preference for user ${userId}: ${userLanguage}`);
+      }).catch(err => console.error('[ChatStart] Failed to save user language preference:', err));
+    }
+
+    // Generate unique session ID
+    const sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    // Get system prompt for chat sessions
+    const systemPrompt = await getSystemPrompt(userLanguage, 'chat');
+
+    // Initialize chat session in memory
+    const { initializeChatSession } = await import('./services/chatTherapy.service.js');
+    initializeChatSession(sessionId, systemPrompt);
+
+    // Create session in database
+    const username = req.session?.username || null;
+    await createSession({
+      sessionId,
+      userId,
+      sessionName: null,  // Will be generated from conversation when session ends
+      status: 'active',
+      sessionType: 'chat'  // Mark as chat-only session
+    });
+
+    // Emit session started event to Socket.io
+    global.io.to('admin-broadcast').emit('session:started', {
+      sessionId,
+      userId,
+      username,
+      sessionType: 'chat',
+      startedAt: new Date()
+    });
+
+    console.log(`Chat-only session started: ${sessionId.substring(0, 12)}... for user ${userId}`);
+
+    res.json({
+      success: true,
+      sessionId,
+      sessionType: 'chat',
+      message: 'Chat therapy session started'
+    });
+
+  } catch (error) {
+    console.error('Failed to start chat session:', error);
+    res.status(500).json({
+      error: 'Failed to start chat session',
+      details: error.message
+    });
+  }
+});
+
+// POST /api/chat/message - Send a message and get AI response
+app.post("/api/chat/message", async (req, res) => {
+  const { sessionId, message } = req.body;
+
+  if (!sessionId || !message) {
+    return res.status(400).json({ error: 'sessionId and message are required' });
+  }
+
+  try {
+    // Verify session exists and is active
+    const sessionCheck = await pool.query(
+      'SELECT status, user_id, session_type FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const session = sessionCheck.rows[0];
+
+    if (session.status !== 'active') {
+      return res.status(400).json({ error: 'Session is not active' });
+    }
+
+    if (session.session_type !== 'chat') {
+      return res.status(400).json({ error: 'Session is not a chat-only session' });
+    }
+
+    // Verify user owns this session (security check)
+    const userId = req.session?.userId || req.sessionID;
+    if (session.user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized: You do not own this session' });
+    }
+
+    // Send message and get AI response
+    const { sendMessage } = await import('./services/chatTherapy.service.js');
+    const aiResponse = await sendMessage(sessionId, message);
+
+    // Store both messages in database (content_redacted will be null initially)
+    const insertedMessages = await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'user',
+        message_type: 'text',
+        content: message,
+        content_redacted: null  // Will be populated by async redaction
+      },
+      {
+        session_id: sessionId,
+        role: 'assistant',
+        message_type: 'text',
+        content: aiResponse,
+        content_redacted: null  // Will be populated by async redaction
+      }
+    ]);
+
+    // Queue messages for async PHI/PII redaction
+    const { queueRedactionBatch } = await import('./services/redactionQueue.service.js');
+    const redactionJobs = insertedMessages.map(msg => ({
+      messageId: msg.message_id,
+      content: msg.content,
+      sessionId: msg.session_id
+    }));
+    queueRedactionBatch(redactionJobs);
+    console.log(`📋 Queued ${redactionJobs.length} chat messages for async redaction`);
+
+    // Emit message events to Socket.io for real-time monitoring
+    global.io.to(`session:${sessionId}`).emit('message:new', {
+      sessionId,
+      role: 'user',
+      message,
+      timestamp: new Date()
+    });
+
+    global.io.to(`session:${sessionId}`).emit('message:new', {
+      sessionId,
+      role: 'assistant',
+      message: aiResponse,
+      timestamp: new Date()
+    });
+
+    console.log(`[ChatTherapy] Message exchanged for session ${sessionId.substring(0, 12)}...`);
+
+    res.json({
+      success: true,
+      response: aiResponse,
+      sessionId
+    });
+
+  } catch (error) {
+    console.error('Failed to process chat message:', error);
+    res.status(500).json({
+      error: 'Failed to process message',
+      details: error.message
+    });
+  }
+});
+
+// POST /api/chat/end - End a chat therapy session
+app.post("/api/chat/end", async (req, res) => {
+  const { sessionId } = req.body;
+
+  if (!sessionId) {
+    return res.status(400).json({ error: 'sessionId is required' });
+  }
+
+  try {
+    // Verify session exists
+    const sessionCheck = await pool.query(
+      'SELECT status, user_id FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const session = sessionCheck.rows[0];
+
+    // Verify user owns this session (security check)
+    const userId = req.session?.userId || req.sessionID;
+    if (session.user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized: You do not own this session' });
+    }
+
+    // If already ended, return success (idempotent)
+    if (session.status === 'ended') {
+      console.log(`Chat session ${sessionId} already ended, returning existing data (idempotent)`);
+      return res.status(200).json({
+        ...session,
+        alreadyEnded: true,
+        message: "Session was already ended"
+      });
+    }
+
+    // End the chat session (clean up memory)
+    const { endChatSession } = await import('./services/chatTherapy.service.js');
+    endChatSession(sessionId);
+
+    // Update database
+    const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
+
+    // Handle room assignment cleanup and queue promotion
+    await handleSessionEndRoomCleanup(sessionId);
+
+    // Emit session ended events to Socket.io
+    global.io.to('admin-broadcast').emit('session:ended', {
+      sessionId,
+      endedBy: 'user',
+      endedAt: new Date()
+    });
+
+    global.io.to(`session:${sessionId}`).emit('session:ended', {
+      sessionId,
+      endedAt: new Date()
+    });
+
+    // Generate session name from conversation history (async, don't block response)
+    generateSessionNameAsync(sessionId);
+
+    console.log(`Chat session ${sessionId.substring(0, 12)}... ended by user`);
+
+    res.json({
+      success: true,
+      message: 'Chat session ended',
+      session: updatedSession
+    });
+
+  } catch (error) {
+    console.error('Failed to end chat session:', error);
+    res.status(500).json({
+      error: 'Failed to end session',
+      details: error.message
+    });
+  }
+});
+
+// ===================== Sideband WebSocket Control Endpoints =====================
+
+// POST /api/sessions/:sessionId/register-call - Register call_id and establish sideband connection
+app.post("/api/sessions/:sessionId/register-call", async (req, res) => {
+  const { sessionId } = req.params;
+  const { call_id } = req.body;
+
+  if (!call_id) {
+    return res.status(400).json({ error: 'call_id is required' });
+  }
+
+  try {
+    // Verify session exists and is active
+    const sessionCheck = await pool.query(
+      'SELECT status FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (sessionCheck.rows[0].status !== 'active') {
+      return res.status(400).json({ error: 'Session is not active' });
+    }
+
+    // Update session with call_id
+    await pool.query(
+      'UPDATE therapy_sessions SET openai_call_id = $1 WHERE session_id = $2',
+      [call_id, sessionId]
+    );
+
+    // TODO: Sideband connection - disabled (OpenAI returns 404 for WebRTC sessions)
+    // Re-enable when properly researched and implemented
+    /*
+    const { sidebandManager } = await import('./services/sidebandManager.service.js');
+    const apiKey = await getOpenAIKey();
+
+    // Try to connect, but don't wait for it or fail if it errors
+    sidebandManager.connect(sessionId, call_id, apiKey).catch(err => {
+      console.warn(`[Sideband] Failed to establish connection (feature may not be available): ${err.message}`);
+    });
+
+    console.log(`Sideband connection attempt initiated for session ${sessionId.substring(0, 12)}...`);
+    */
+
+    res.json({
+      success: true,
+      message: 'Call registered',
+      sessionId,
+      call_id
+    });
+
+  } catch (error) {
+    console.error('Failed to establish sideband connection:', error);
+    res.status(500).json({
+      error: 'Failed to establish sideband connection',
+      details: error.message
+    });
+  }
+});
+
+// POST /admin/api/sessions/:sessionId/update-instructions - Update AI instructions mid-session
+app.post("/admin/api/sessions/:sessionId/update-instructions", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { sessionId } = req.params;
+  const { instructions } = req.body;
+
+  if (!instructions) {
+    return res.status(400).json({ error: 'instructions field is required' });
+  }
+
+  try {
+    const { sidebandManager } = await import('./services/sidebandManager.service.js');
+
+    if (!sidebandManager.isConnected(sessionId)) {
+      return res.status(400).json({ error: 'No active sideband connection for this session' });
+    }
+
+    // Send session.update event via sideband
+    await sidebandManager.updateSession(sessionId, {
+      instructions
+    });
+
+    // Emit to admins
+    global.io.to('admin-broadcast').emit('session:instructions-updated', {
+      sessionId,
+      updatedBy: req.session.username,
+      timestamp: new Date()
+    });
+
+    console.log(`Instructions updated for session ${sessionId} by ${req.session.username}`);
+
+    res.json({
+      success: true,
+      message: 'Instructions updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Failed to update instructions:', error);
+    res.status(500).json({
+      error: 'Failed to update instructions',
+      details: error.message
+    });
+  }
+});
+
+// GET /admin/api/sideband/status - Get global sideband connection status
+app.get("/admin/api/sideband/status", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { sidebandManager } = await import('./services/sidebandManager.service.js');
+
+    const activeSessions = sidebandManager.getActiveConnections();
+
+    const result = await pool.query(`
+      SELECT
+        session_id,
+        openai_call_id,
+        sideband_connected,
+        sideband_connected_at,
+        sideband_disconnected_at,
+        sideband_error,
+        status
+      FROM therapy_sessions
+      WHERE status = 'active'
+      ORDER BY created_at DESC
+    `);
+
+    const sessions = result.rows.map(session => ({
+      ...session,
+      connection_active: activeSessions.includes(session.session_id)
+    }));
+
+    res.json({
+      total_active_sessions: result.rows.length,
+      sideband_connected_count: sessions.filter(s => s.connection_active).length,
+      sessions
+    });
+
+  } catch (error) {
+    console.error('Failed to fetch sideband status:', error);
+    res.status(500).json({
+      error: 'Failed to fetch sideband status',
+      details: error.message
+    });
+  }
+});
+
+// POST /admin/api/sideband/update-session - Update session instructions via sideband
+app.post("/admin/api/sideband/update-session", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { sessionId, instructions } = req.body;
+
+    if (!sessionId || !instructions) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'sessionId and instructions are required'
+      });
+    }
+
+    const { sidebandManager } = await import('./services/sidebandManager.service.js');
+
+    // Check if connection is active
+    if (!sidebandManager.isConnected(sessionId)) {
+      return res.status(400).json({
+        error: 'No active sideband connection',
+        details: 'Session must have an active sideband connection'
+      });
+    }
+
+    // Update session via sideband
+    await sidebandManager.updateSession(sessionId, {
+      instructions: instructions.trim()
+    });
+
+    // Log the update
+    await pool.query(`
+      INSERT INTO messages (session_id, role, type, message, metadata)
+      VALUES ($1, 'system', 'admin_action', 'Instructions updated via sideband', $2)
+    `, [sessionId, JSON.stringify({
+      admin_user: req.session.user?.username,
+      action: 'update_instructions'
+    })]);
+
+    res.json({
+      success: true,
+      message: 'Session instructions updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Failed to update session via sideband:', error);
+    res.status(500).json({
+      error: 'Failed to update session',
+      details: error.message
+    });
+  }
+});
+
+// POST /admin/api/sideband/disconnect - Disconnect sideband connection
+app.post("/admin/api/sideband/disconnect", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        error: 'Missing sessionId'
+      });
+    }
+
+    const { sidebandManager } = await import('./services/sidebandManager.service.js');
+
+    // Check if connection exists
+    if (!sidebandManager.isConnected(sessionId)) {
+      return res.status(400).json({
+        error: 'No active sideband connection for this session'
+      });
+    }
+
+    // Disconnect
+    await sidebandManager.disconnect(sessionId);
+
+    // Log the disconnection
+    await pool.query(`
+      INSERT INTO messages (session_id, role, type, message, metadata)
+      VALUES ($1, 'system', 'admin_action', 'Sideband connection manually disconnected', $2)
+    `, [sessionId, JSON.stringify({
+      admin_user: req.session.user?.username,
+      action: 'disconnect_sideband'
+    })]);
+
+    res.json({
+      success: true,
+      message: 'Sideband connection disconnected successfully'
+    });
+
+  } catch (error) {
+    console.error('Failed to disconnect sideband:', error);
+    res.status(500).json({
+      error: 'Failed to disconnect sideband connection',
+      details: error.message
+    });
   }
 });
 
@@ -1023,7 +1959,7 @@ app.all("/token", async (req, res) => {
 //     );
 //     res.sendStatus(200);
 //   } catch (err) {
-//     console.error("❌ Failed to insert log into DB:", err);
+//     console.error("Failed to insert log into DB:", err);
 //     res.sendStatus(500);
 //   }
 // });
@@ -1105,7 +2041,7 @@ app.post("/api/sessions/:sessionId/end", async (req, res) => {
 
     // IDEMPOTENCY CHECK: If already ended, return existing session
     if (session.status === 'ended') {
-      console.log(`✓ Session ${sessionId} already ended, returning existing data (idempotent)`);
+      console.log(`Session ${sessionId} already ended, returning existing data (idempotent)`);
       return res.status(200).json({
         ...session,
         alreadyEnded: true,
@@ -1114,7 +2050,16 @@ app.post("/api/sessions/:sessionId/end", async (req, res) => {
     }
 
     // Session is active - proceed with ending it (ended by user)
+    // TODO: Sideband disconnect - currently disabled
+    /*
+    const { sidebandManager } = await import('./services/sidebandManager.service.js');
+    await sidebandManager.disconnect(sessionId);
+    */
+
     const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
+
+    // Handle room assignment cleanup and queue promotion
+    await handleSessionEndRoomCleanup(sessionId);
 
     // Emit session ended events to Socket.io
     global.io.to('admin-broadcast').emit('session:ended', {
@@ -1158,14 +2103,13 @@ app.post("/logs/batch", async (req, res) => {
 
       sessionIds.add(sessionId);
 
-      const redactedMessage = await redactPHI(message);
-
+      // Save immediately without waiting for redaction (async queue processing)
       messages.push({
         session_id: sessionId,
         role: role,
         message_type: type,
         content: message,
-        content_redacted: redactedMessage,
+        content_redacted: null, // Will be updated asynchronously
         metadata: extras || null,
         created_at: new Date(timestamp)
       });
@@ -1197,7 +2141,7 @@ app.post("/logs/batch", async (req, res) => {
            ON CONFLICT (session_id) DO NOTHING`,
           [sessionId, userId]
         );
-        console.log(`✓ Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
+        console.log(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
 
         // Insert session configuration for newly created session
         try {
@@ -1211,7 +2155,7 @@ app.post("/logs/batch", async (req, res) => {
             temperature: sessionConfigObj.session?.temperature || 0.8,
             max_response_output_tokens: sessionConfigObj.session?.max_response_output_tokens || 4096
           });
-          console.log(`✓ Session configuration created for session: ${sessionId.substring(0, 12)}...`);
+          console.log(`Session configuration created for session: ${sessionId.substring(0, 12)}...`);
         } catch (configError) {
           console.error(`Failed to create session configuration for ${sessionId}:`, configError);
           // Continue anyway - configuration is not critical for message logging
@@ -1222,6 +2166,100 @@ app.post("/logs/batch", async (req, res) => {
     // Insert all messages
     const insertedMessages = await insertMessagesBatch(messages);
 
+    // ========== QUEUE ASYNC REDACTION ==========
+    const { queueRedactionBatch } = await import('./services/redactionQueue.service.js');
+    const redactionJobs = insertedMessages.map(msg => ({
+      messageId: msg.message_id,
+      content: msg.content,
+      sessionId: msg.session_id
+    }));
+    queueRedactionBatch(redactionJobs);
+    console.log(`📋 Queued ${redactionJobs.length} messages for async redaction`);
+
+    // ========== MULTI-LAYERED CRISIS DETECTION ==========
+    const { analyzeMessageRisk, flagSessionCrisis, logInterventionAction } = await import('./services/crisisDetection.service.js');
+    const { executeGraduatedResponse } = await import('./services/crisisIntervention.service.js');
+
+    for (const msg of insertedMessages) {
+      // Analyze risk for user and assistant messages
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        // Get conversation history (last 10 messages)
+        const historyResult = await pool.query(
+          `SELECT * FROM messages
+           WHERE session_id = $1
+           ORDER BY created_at DESC
+           LIMIT 10`,
+          [msg.session_id]
+        );
+
+        const conversationHistory = historyResult.rows.reverse(); // Chronological order
+
+        // Perform multi-layered risk analysis
+        const riskAnalysis = await analyzeMessageRisk(msg, conversationHistory);
+
+        if (riskAnalysis.riskScore > 0) {
+          console.log(` Risk detected in session ${msg.session_id}:
+            Score=${riskAnalysis.riskScore},
+            Severity=${riskAnalysis.severity},
+            Factors=${JSON.stringify(riskAnalysis.factors)}`);
+
+          // Check current session state
+          const sessionCheck = await pool.query(
+            `SELECT crisis_flagged, crisis_severity, crisis_risk_score
+             FROM therapy_sessions
+             WHERE session_id = $1`,
+            [msg.session_id]
+          );
+
+          const session = sessionCheck.rows[0];
+          const currentScore = session?.crisis_risk_score || 0;
+
+          // Flag if score exceeds threshold (>30) or increases significantly
+          const shouldFlag = riskAnalysis.riskScore > 30 &&
+            (!session.crisis_flagged || riskAnalysis.riskScore > currentScore + 10);
+
+          if (shouldFlag) {
+            // Flag session with risk score and factors
+            await flagSessionCrisis(
+              msg.session_id,
+              riskAnalysis.severity,
+              riskAnalysis.riskScore,
+              'system',
+              'auto',
+              msg.message_id,
+              riskAnalysis.factors,
+              `Risk score: ${riskAnalysis.riskScore} - Factors: ${riskAnalysis.factors.join(', ')}`
+            );
+
+            // Log intervention triggered
+            await logInterventionAction(msg.session_id, 'auto_flag', {
+              riskScore: riskAnalysis.riskScore,
+              severity: riskAnalysis.severity,
+              messageId: msg.message_id,
+              factors: riskAnalysis.factors
+            });
+
+            // Emit real-time alert to admins
+            global.io.to('admin-broadcast').emit('session:crisis-detected', {
+              sessionId: msg.session_id,
+              severity: riskAnalysis.severity,
+              riskScore: riskAnalysis.riskScore,
+              factors: riskAnalysis.factors,
+              messageId: msg.message_id,
+              detectedAt: new Date(),
+              message: `${riskAnalysis.severity.toUpperCase()} risk detected (score: ${riskAnalysis.riskScore})`
+            });
+
+            // Execute graduated response based on severity
+            await executeGraduatedResponse(msg.session_id, riskAnalysis.severity, riskAnalysis.riskScore);
+
+            console.log(`Session ${msg.session_id} flagged as ${riskAnalysis.severity} risk (score: ${riskAnalysis.riskScore})`);
+          }
+        }
+      }
+    }
+    // ========== END CRISIS DETECTION ==========
+
     // ========== SOCKET.IO EVENT EMISSION ==========
     // Group messages by session for efficient emission
     const sessionGroups = {};
@@ -1231,7 +2269,8 @@ app.post("/logs/batch", async (req, res) => {
         message_id: msg.message_id,
         role: msg.role,
         message_type: msg.message_type,
-        content: msg.content_redacted, // Always redacted for real-time
+        content: msg.content,                   // Original for therapists
+        content_redacted: msg.content_redacted, // Redacted for researchers (may be null initially)
         created_at: msg.created_at
       });
     });
@@ -1273,6 +2312,11 @@ app.get("/admin/api/sessions/active", requireRole('therapist', 'researcher'), as
         u.username,
         ts.status,
         ts.created_at,
+        ts.crisis_flagged,
+        ts.crisis_severity,
+        ts.crisis_risk_score,
+        ts.crisis_flagged_at,
+        ts.crisis_flagged_by,
         COUNT(m.message_id) as message_count,
         MAX(m.created_at) as last_activity,
         EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ts.created_at)) as duration_seconds
@@ -1281,7 +2325,7 @@ app.get("/admin/api/sessions/active", requireRole('therapist', 'researcher'), as
       LEFT JOIN messages m ON ts.session_id = m.session_id
       WHERE ts.status = 'active'
       GROUP BY ts.session_id, u.username
-      ORDER BY ts.created_at DESC
+      ORDER BY ts.crisis_flagged DESC, ts.created_at DESC
     `);
 
     res.json({ sessions: result.rows });
@@ -1306,7 +2350,7 @@ app.post("/admin/api/sessions/:sessionId/end", requireRole('therapist', 'researc
 
     // IDEMPOTENCY CHECK: If already ended, return existing session
     if (session.status === 'ended') {
-      console.log(`✓ Admin: Session ${sessionId} already ended, returning existing data (idempotent)`);
+      console.log(`Admin: Session ${sessionId} already ended, returning existing data (idempotent)`);
       return res.status(200).json({
         ...session,
         alreadyEnded: true,
@@ -1315,7 +2359,16 @@ app.post("/admin/api/sessions/:sessionId/end", requireRole('therapist', 'researc
     }
 
     // Session is active - proceed with ending it (ended by admin)
+    // TODO: Sideband disconnect - currently disabled
+    /*
+    const { sidebandManager } = await import('./services/sidebandManager.service.js');
+    await sidebandManager.disconnect(sessionId);
+    */
+
     const updatedSession = await updateSessionStatus(sessionId, 'ended', req.session.username);
+
+    // Handle room assignment cleanup and queue promotion
+    await handleSessionEndRoomCleanup(sessionId);
 
     // Emit session ended events to Socket.io
     global.io.to('admin-broadcast').emit('session:ended', {
@@ -1332,7 +2385,7 @@ app.post("/admin/api/sessions/:sessionId/end", requireRole('therapist', 'researc
     // Trigger auto-naming in the background
     generateSessionNameAsync(sessionId);
 
-    console.log(`✓ Admin ${req.session.username} remotely ended session ${sessionId}`);
+    console.log(`Admin ${req.session.username} remotely ended session ${sessionId}`);
 
     res.json({
       ...updatedSession,
@@ -1347,10 +2400,24 @@ app.post("/admin/api/sessions/:sessionId/end", requireRole('therapist', 'researc
 
 // GET /admin/api/sessions - List all sessions with filters
 app.get("/admin/api/sessions", requireRole('therapist', 'researcher'), async (req, res) => {
-  const { search, startDate, endDate, minMessages, maxMessages, page = 1, limit = 50 } = req.query;
+  const {
+    search, startDate, endDate, minMessages, maxMessages,
+    page = 1, limit = 50,
+    // New filters
+    voices, languages, durations, sessionTypes, statuses, endedBy,
+    crisisFlagged, crisisSeverity
+  } = req.query;
 
   try {
     const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Parse comma-separated arrays
+    const voiceArray = voices ? voices.split(',').filter(Boolean) : null;
+    const languageArray = languages ? languages.split(',').filter(Boolean) : null;
+    const durationArray = durations ? durations.split(',').filter(Boolean) : null;
+    const sessionTypeArray = sessionTypes ? sessionTypes.split(',').filter(Boolean) : null;
+    const statusArray = statuses ? statuses.split(',').filter(Boolean) : null;
+    const endedByArray = endedBy ? endedBy.split(',').filter(Boolean) : null;
 
     const result = await pool.query(`
       WITH session_stats AS (
@@ -1360,10 +2427,20 @@ app.get("/admin/api/sessions", requireRole('therapist', 'researcher'), async (re
           ts.user_id,
           u.username,
           ts.status,
+          ts.session_type,
           ts.created_at AS start_time,
           ts.ended_at AS end_time,
           ts.ended_by,
+          ts.crisis_flagged,
+          ts.crisis_severity,
+          sc.voice,
+          sc.language,
           EXTRACT(EPOCH FROM (ts.ended_at - ts.created_at)) AS duration_seconds,
+          CASE
+            WHEN EXTRACT(EPOCH FROM (ts.ended_at - ts.created_at)) < 300 THEN 'short'
+            WHEN EXTRACT(EPOCH FROM (ts.ended_at - ts.created_at)) < 1800 THEN 'medium'
+            ELSE 'long'
+          END AS duration_category,
           COUNT(m.message_id) AS total_messages,
           COUNT(m.message_id) FILTER (WHERE m.role = 'user') AS user_messages,
           COUNT(m.message_id) FILTER (WHERE m.role = 'assistant') AS assistant_messages,
@@ -1371,27 +2448,45 @@ app.get("/admin/api/sessions", requireRole('therapist', 'researcher'), async (re
           COUNT(m.message_id) FILTER (WHERE m.message_type = 'chat') AS chat_messages
         FROM therapy_sessions ts
         LEFT JOIN users u ON ts.user_id = u.userid
+        LEFT JOIN session_configurations sc ON ts.session_id = sc.session_id
         LEFT JOIN messages m ON ts.session_id = m.session_id
         WHERE
           ($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')
           AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
           AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
-        GROUP BY ts.session_id, u.username, ts.ended_by
+          AND ($8::TEXT[] IS NULL OR sc.voice = ANY($8))
+          AND ($9::TEXT[] IS NULL OR sc.language = ANY($9))
+          AND ($10::TEXT[] IS NULL OR ts.session_type = ANY($10))
+          AND ($11::TEXT[] IS NULL OR ts.status = ANY($11))
+          AND ($12::TEXT[] IS NULL OR ts.ended_by = ANY($12))
+          AND ($13::BOOLEAN IS NULL OR ts.crisis_flagged = $13)
+          AND ($14::TEXT IS NULL OR ts.crisis_severity = $14)
+        GROUP BY ts.session_id, u.username, ts.ended_by, ts.session_type, ts.crisis_flagged, ts.crisis_severity, sc.voice, sc.language
       )
       SELECT * FROM session_stats
       WHERE
         ($4::INT IS NULL OR total_messages >= $4)
         AND ($5::INT IS NULL OR total_messages <= $5)
+        AND ($15::TEXT[] IS NULL OR duration_category = ANY($15))
       ORDER BY start_time DESC
       LIMIT $6 OFFSET $7
     `, [
-      search || null,
-      startDate || null,
-      endDate || null,
-      minMessages ? parseInt(minMessages) : null,
-      maxMessages ? parseInt(maxMessages) : null,
-      parseInt(limit),
-      offset
+      search || null,                                    // $1
+      startDate || null,                                 // $2
+      endDate || null,                                   // $3
+      minMessages ? parseInt(minMessages) : null,        // $4
+      maxMessages ? parseInt(maxMessages) : null,        // $5
+      parseInt(limit),                                   // $6
+      offset,                                            // $7
+      voiceArray,                                        // $8
+      languageArray,                                     // $9
+      sessionTypeArray,                                  // $10
+      statusArray,                                       // $11
+      endedByArray,                                      // $12
+      crisisFlagged === 'true' ? true :                  // $13
+        crisisFlagged === 'false' ? false : null,
+      crisisSeverity || null,                            // $14
+      durationArray                                      // $15
     ]);
 
     // Get total count for pagination
@@ -1399,11 +2494,30 @@ app.get("/admin/api/sessions", requireRole('therapist', 'researcher'), async (re
       SELECT COUNT(DISTINCT ts.session_id) as total
       FROM therapy_sessions ts
       LEFT JOIN users u ON ts.user_id = u.userid
+      LEFT JOIN session_configurations sc ON ts.session_id = sc.session_id
       WHERE
         ($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')
         AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
         AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
-    `, [search || null, startDate || null, endDate || null]);
+        AND ($4::TEXT[] IS NULL OR sc.voice = ANY($4))
+        AND ($5::TEXT[] IS NULL OR sc.language = ANY($5))
+        AND ($6::TEXT[] IS NULL OR ts.session_type = ANY($6))
+        AND ($7::TEXT[] IS NULL OR ts.status = ANY($7))
+        AND ($8::TEXT[] IS NULL OR ts.ended_by = ANY($8))
+        AND ($9::BOOLEAN IS NULL OR ts.crisis_flagged = $9)
+        AND ($10::TEXT IS NULL OR ts.crisis_severity = $10)
+    `, [
+      search || null,
+      startDate || null,
+      endDate || null,
+      voiceArray,
+      languageArray,
+      sessionTypeArray,
+      statusArray,
+      endedByArray,
+      crisisFlagged === 'true' ? true : crisisFlagged === 'false' ? false : null,
+      crisisSeverity || null
+    ]);
 
     res.json({
       sessions: result.rows,
@@ -1562,15 +2676,34 @@ app.delete("/admin/api/messages/:messageId", requireRole('therapist', 'researche
 
 // GET /admin/api/analytics - Dashboard metrics
 app.get("/admin/api/analytics", requireRole('therapist', 'researcher'), async (req, res) => {
-  const { startDate, endDate } = req.query;
+  const {
+    startDate, endDate,
+    // New filters
+    voices, languages, sessionTypes, statuses, endedBy, crisisFlagged
+  } = req.query;
 
   try {
+    // Parse comma-separated arrays
+    const voiceArray = voices ? voices.split(',').filter(Boolean) : null;
+    const languageArray = languages ? languages.split(',').filter(Boolean) : null;
+    const sessionTypeArray = sessionTypes ? sessionTypes.split(',').filter(Boolean) : null;
+    const statusArray = statuses ? statuses.split(',').filter(Boolean) : null;
+    const endedByArray = endedBy ? endedBy.split(',').filter(Boolean) : null;
+
     const result = await pool.query(`
       WITH date_filtered_sessions AS (
-        SELECT * FROM therapy_sessions
+        SELECT ts.*
+        FROM therapy_sessions ts
+        LEFT JOIN session_configurations sc ON ts.session_id = sc.session_id
         WHERE
-          ($1::TIMESTAMP IS NULL OR created_at >= $1)
-          AND ($2::TIMESTAMP IS NULL OR created_at <= $2)
+          ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
+          AND ($2::TIMESTAMP IS NULL OR ts.created_at <= $2)
+          AND ($3::TEXT[] IS NULL OR sc.voice = ANY($3))
+          AND ($4::TEXT[] IS NULL OR sc.language = ANY($4))
+          AND ($5::TEXT[] IS NULL OR ts.session_type = ANY($5))
+          AND ($6::TEXT[] IS NULL OR ts.status = ANY($6))
+          AND ($7::TEXT[] IS NULL OR ts.ended_by = ANY($7))
+          AND ($8::BOOLEAN IS NULL OR ts.crisis_flagged = $8)
       ),
       date_filtered_messages AS (
         SELECT m.* FROM messages m
@@ -1684,6 +2817,105 @@ app.get("/admin/api/analytics", requireRole('therapist', 'researcher'), async (r
         WHERE sc.voice IS NOT NULL
         GROUP BY sc.voice
         ORDER BY session_count DESC
+      ),
+      -- Session Completion Patterns
+      completion_by_ended_by AS (
+        SELECT
+          COALESCE(ended_by, 'unknown') AS ended_by,
+          COUNT(*) AS session_count,
+          ROUND(COUNT(*) * 100.0 / NULLIF(SUM(COUNT(*)) OVER (), 0), 2) AS percentage
+        FROM date_filtered_sessions
+        WHERE status = 'ended'
+        GROUP BY ended_by
+      ),
+      abandonment_rate AS (
+        SELECT
+          COUNT(*) FILTER (WHERE EXTRACT(EPOCH FROM (ended_at - created_at)) < 60) AS abandoned_sessions,
+          COUNT(*) FILTER (WHERE ended_at IS NOT NULL) AS completed_sessions,
+          ROUND(
+            COUNT(*) FILTER (WHERE EXTRACT(EPOCH FROM (ended_at - created_at)) < 60) * 100.0 /
+            NULLIF(COUNT(*) FILTER (WHERE ended_at IS NOT NULL), 0),
+            2
+          ) AS abandonment_rate_percentage
+        FROM date_filtered_sessions
+      ),
+      session_depth_by_user_type AS (
+        SELECT
+          CASE
+            WHEN ts.user_id IS NOT NULL THEN 'authenticated'
+            ELSE 'anonymous'
+          END AS user_type,
+          AVG(msg_count) AS avg_messages,
+          COUNT(*) AS session_count
+        FROM (
+          SELECT
+            ts.session_id,
+            ts.user_id,
+            COUNT(m.message_id) AS msg_count
+          FROM date_filtered_sessions ts
+          LEFT JOIN messages m ON ts.session_id = m.session_id
+          GROUP BY ts.session_id, ts.user_id
+        ) ts
+        GROUP BY user_type
+      ),
+      -- Engagement Metrics
+      messages_per_minute AS (
+        SELECT
+          AVG(
+            CASE
+              WHEN EXTRACT(EPOCH FROM (ts.ended_at - ts.created_at)) > 0
+              THEN msg_count / (EXTRACT(EPOCH FROM (ts.ended_at - ts.created_at)) / 60.0)
+              ELSE 0
+            END
+          ) AS avg_messages_per_minute
+        FROM (
+          SELECT
+            ts.session_id,
+            ts.created_at,
+            ts.ended_at,
+            COUNT(m.message_id) AS msg_count
+          FROM date_filtered_sessions ts
+          LEFT JOIN messages m ON ts.session_id = m.session_id
+          WHERE ts.ended_at IS NOT NULL
+          GROUP BY ts.session_id, ts.created_at, ts.ended_at
+        ) ts
+      ),
+      response_times AS (
+        SELECT
+          AVG(response_time_seconds) AS avg_response_time_seconds,
+          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY response_time_seconds) AS median_response_time_seconds,
+          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time_seconds) AS p95_response_time_seconds
+        FROM (
+          SELECT
+            EXTRACT(EPOCH FROM (assistant_msg.created_at - user_msg.created_at)) AS response_time_seconds
+          FROM (
+            SELECT
+              session_id,
+              created_at,
+              ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at) AS msg_order
+            FROM messages
+            WHERE role = 'user'
+          ) user_msg
+          INNER JOIN (
+            SELECT
+              session_id,
+              created_at,
+              ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at) AS msg_order
+            FROM messages
+            WHERE role = 'assistant'
+          ) assistant_msg
+          ON user_msg.session_id = assistant_msg.session_id
+          AND assistant_msg.msg_order = user_msg.msg_order + 1
+          WHERE assistant_msg.created_at > user_msg.created_at
+        ) response_times
+      ),
+      turn_taking_ratio AS (
+        SELECT
+          COUNT(*) FILTER (WHERE role = 'user')::DECIMAL /
+          NULLIF(COUNT(*) FILTER (WHERE role = 'assistant'), 0) AS user_to_assistant_ratio,
+          COUNT(*) FILTER (WHERE role = 'user') AS total_user_messages,
+          COUNT(*) FILTER (WHERE role = 'assistant') AS total_assistant_messages
+        FROM date_filtered_messages
       )
       SELECT
         (SELECT row_to_json(sm.*) FROM (SELECT sm.*, mm.total_messages, mm.avg_messages_per_session FROM session_metrics sm, message_metrics mm) sm) AS metrics,
@@ -1694,8 +2926,24 @@ app.get("/admin/api/analytics", requireRole('therapist', 'researcher'), async (r
         (SELECT json_agg(duration_distribution.*) FROM duration_distribution) AS duration_distribution,
         (SELECT json_agg(daily_duration.*) FROM daily_duration) AS duration_trend,
         (SELECT json_agg(language_stats.*) FROM language_stats) AS language_distribution,
-        (SELECT json_agg(voice_stats.*) FROM voice_stats) AS voice_distribution
-    `, [startDate || null, endDate || null]);
+        (SELECT json_agg(voice_stats.*) FROM voice_stats) AS voice_distribution,
+        (SELECT json_agg(completion_by_ended_by.*) FROM completion_by_ended_by) AS completion_patterns,
+        (SELECT row_to_json(abandonment_rate.*) FROM abandonment_rate) AS abandonment_stats,
+        (SELECT json_agg(session_depth_by_user_type.*) FROM session_depth_by_user_type) AS session_depth,
+        (SELECT row_to_json(messages_per_minute.*) FROM messages_per_minute) AS engagement_pace,
+        (SELECT row_to_json(response_times.*) FROM response_times) AS response_times,
+        (SELECT row_to_json(turn_taking_ratio.*) FROM turn_taking_ratio) AS turn_taking
+    `, [
+      startDate || null,                                 // $1
+      endDate || null,                                   // $2
+      voiceArray,                                        // $3
+      languageArray,                                     // $4
+      sessionTypeArray,                                  // $5
+      statusArray,                                       // $6
+      endedByArray,                                      // $7
+      crisisFlagged === 'true' ? true :                  // $8
+        crisisFlagged === 'false' ? false : null
+    ]);
 
     const data = result.rows[0];
     res.json({
@@ -1707,7 +2955,13 @@ app.get("/admin/api/analytics", requireRole('therapist', 'researcher'), async (r
       duration_distribution: data.duration_distribution || [],
       duration_trend: data.duration_trend || [],
       language_distribution: data.language_distribution || [],
-      voice_distribution: data.voice_distribution || []
+      voice_distribution: data.voice_distribution || [],
+      completion_patterns: data.completion_patterns || [],
+      abandonment_stats: data.abandonment_stats || {},
+      session_depth: data.session_depth || [],
+      engagement_pace: data.engagement_pace || {},
+      response_times: data.response_times || {},
+      turn_taking: data.turn_taking || {}
     });
   } catch (err) {
     console.error("Failed to fetch analytics:", err);
@@ -1715,38 +2969,86 @@ app.get("/admin/api/analytics", requireRole('therapist', 'researcher'), async (r
   }
 });
 
-// GET /admin/api/export - Export data as JSON or CSV
+// GET /admin/api/sessions/:sessionId/redaction-status - Check redaction completion status
+app.get('/admin/api/sessions/:sessionId/redaction-status',
+  requireRole('therapist', 'researcher'),
+  async (req, res) => {
+    const { sessionId } = req.params;
+
+    try {
+      const result = await pool.query(
+        `SELECT COUNT(*) as pending_count
+         FROM messages
+         WHERE session_id = $1 AND content_redacted IS NULL`,
+        [sessionId]
+      );
+
+      res.json({
+        sessionId,
+        pendingCount: parseInt(result.rows[0].pending_count),
+        allComplete: result.rows[0].pending_count === '0'
+      });
+    } catch (err) {
+      console.error('Failed to check redaction status:', err);
+      res.status(500).json({ error: 'Failed to check redaction status' });
+    }
+  }
+);
+
+// GET /admin/api/export - Export data as JSON or CSV with research-focused options
 app.get("/admin/api/export", requireRole('therapist', 'researcher'), async (req, res) => {
-  const { format = 'json', sessionId, startDate, endDate } = req.query;
+  const {
+    format = 'json',
+    exportType = 'full',
+    sessionId,
+    startDate,
+    endDate,
+    aggregationPeriod = 'day',
+    crisisFlaggedOnly = 'false'
+  } = req.query;
 
   try {
-    let query, params;
-
-    // Use content_redacted for researchers, content for therapists
+    let result;
     const contentColumn = req.session.userRole === 'therapist' ? 'content' : 'content_redacted';
+    const isCrisisOnly = crisisFlaggedOnly === 'true';
 
-    if (sessionId) {
-      query = `
+    // Handle different export types
+    if (exportType === 'metadata') {
+      // Metadata-only export (no message content)
+      let query = `
         SELECT
-          m.message_id as id,
-          m.session_id,
-          m.role,
-          m.message_type,
-          m.${contentColumn} as message,
-          m.metadata as extras,
-          m.created_at
-        FROM messages m
-        WHERE m.session_id = $1
-        ORDER BY m.created_at ASC
+          ts.session_id,
+          ts.session_name,
+          u.username,
+          ts.session_type,
+          ts.created_at as session_start,
+          ts.ended_at as session_end,
+          EXTRACT(EPOCH FROM (ts.ended_at - ts.created_at))/60 as duration_minutes,
+          ts.crisis_flagged,
+          ts.crisis_severity,
+          ts.crisis_risk_score,
+          COUNT(m.message_id) as message_count
+        FROM therapy_sessions ts
+        LEFT JOIN users u ON ts.user_id = u.userid
+        LEFT JOIN messages m ON ts.session_id = m.session_id
+        WHERE
+          ($1::VARCHAR IS NULL OR ts.session_id = $1)
+          AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
+          AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
+          AND ($4::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)
+        GROUP BY ts.session_id, ts.session_name, u.username, ts.session_type, ts.created_at, ts.ended_at, ts.crisis_flagged, ts.crisis_severity, ts.crisis_risk_score
+        ORDER BY ts.created_at DESC
       `;
-      params = [sessionId];
-    } else {
-      query = `
+      result = await pool.query(query, [sessionId || null, startDate || null, endDate || null, isCrisisOnly]);
+
+    } else if (exportType === 'anonymized') {
+      // Anonymized export with research IDs
+      let query = `
         SELECT
           m.message_id as id,
           m.session_id,
           ts.session_name,
-          u.username,
+          'RID_' || LPAD(ROW_NUMBER() OVER (ORDER BY u.userid)::TEXT, 3, '0') as research_id,
           m.role,
           m.message_type,
           m.${contentColumn} as message,
@@ -1756,14 +3058,85 @@ app.get("/admin/api/export", requireRole('therapist', 'researcher'), async (req,
         INNER JOIN therapy_sessions ts ON m.session_id = ts.session_id
         LEFT JOIN users u ON ts.user_id = u.userid
         WHERE
-          ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
-          AND ($2::TIMESTAMP IS NULL OR ts.created_at <= $2)
+          ($1::VARCHAR IS NULL OR m.session_id = $1)
+          AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
+          AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
+          AND ($4::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)
         ORDER BY m.created_at ASC
       `;
-      params = [startDate || null, endDate || null];
-    }
+      result = await pool.query(query, [sessionId || null, startDate || null, endDate || null, isCrisisOnly]);
 
-    const result = await pool.query(query, params);
+    } else if (exportType === 'aggregated') {
+      // Aggregated statistics by time period
+      const dateFormat = aggregationPeriod === 'day' ? 'YYYY-MM-DD' :
+                         aggregationPeriod === 'week' ? 'IYYY-IW' :
+                         'YYYY-MM';
+      let query = `
+        SELECT
+          TO_CHAR(ts.created_at, '${dateFormat}') as period,
+          COUNT(DISTINCT ts.session_id) as total_sessions,
+          COUNT(DISTINCT ts.user_id) as unique_users,
+          AVG(EXTRACT(EPOCH FROM (ts.ended_at - ts.created_at))/60) as avg_duration_minutes,
+          SUM(CASE WHEN ts.crisis_flagged THEN 1 ELSE 0 END) as crisis_flagged_count,
+          AVG(ts.crisis_risk_score) as avg_risk_score,
+          COUNT(DISTINCT CASE WHEN ts.session_type = 'realtime' THEN ts.session_id END) as realtime_sessions,
+          COUNT(DISTINCT CASE WHEN ts.session_type = 'chat' THEN ts.session_id END) as chat_sessions
+        FROM therapy_sessions ts
+        WHERE
+          ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
+          AND ($2::TIMESTAMP IS NULL OR ts.created_at <= $2)
+          AND ($3::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)
+        GROUP BY TO_CHAR(ts.created_at, '${dateFormat}')
+        ORDER BY period
+      `;
+      result = await pool.query(query, [startDate || null, endDate || null, isCrisisOnly]);
+
+    } else {
+      // Full export (default)
+      let query;
+      let params;
+
+      if (sessionId) {
+        query = `
+          SELECT
+            m.message_id as id,
+            m.session_id,
+            m.role,
+            m.message_type,
+            m.${contentColumn} as message,
+            m.metadata as extras,
+            m.created_at
+          FROM messages m
+          WHERE m.session_id = $1
+          ORDER BY m.created_at ASC
+        `;
+        params = [sessionId];
+      } else {
+        query = `
+          SELECT
+            m.message_id as id,
+            m.session_id,
+            ts.session_name,
+            u.username,
+            m.role,
+            m.message_type,
+            m.${contentColumn} as message,
+            m.metadata as extras,
+            m.created_at
+          FROM messages m
+          INNER JOIN therapy_sessions ts ON m.session_id = ts.session_id
+          LEFT JOIN users u ON ts.user_id = u.userid
+          WHERE
+            ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
+            AND ($2::TIMESTAMP IS NULL OR ts.created_at <= $2)
+            AND ($3::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)
+          ORDER BY m.created_at ASC
+        `;
+        params = [startDate || null, endDate || null, isCrisisOnly];
+      }
+
+      result = await pool.query(query, params);
+    }
 
     if (format === 'csv') {
       // Simple CSV formatting
@@ -1802,6 +3175,487 @@ app.get("/admin/api/export", requireRole('therapist', 'researcher'), async (req,
   } catch (err) {
     console.error("Failed to export data:", err);
     res.status(500).json({ error: "Failed to export data" });
+  }
+});
+
+// ===================== Room Assignment API Routes =====================
+
+// Helper function to handle room assignment cleanup when a session ends
+async function handleSessionEndRoomCleanup(sessionId) {
+  try {
+    // Get the session to find the user_id
+    const sessionResult = await pool.query(
+      'SELECT user_id FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return; // Session not found, nothing to do
+    }
+
+    const userId = sessionResult.rows[0].user_id;
+
+    if (!userId) {
+      return; // No user associated with session
+    }
+
+    // Check if this user has a room assignment
+    const assignmentResult = await pool.query(
+      `SELECT assignment_id, room_number
+       FROM room_assignments
+       WHERE user_id = $1 AND assignment_type = 'room'`,
+      [userId]
+    );
+
+    if (assignmentResult.rows.length === 0) {
+      return; // User not assigned to a room, nothing to do
+    }
+
+    const assignment = assignmentResult.rows[0];
+    const roomNumber = assignment.room_number;
+
+    console.log(`[Room Assignment] Session ended for user ${userId} in room ${roomNumber}, promoting queue...`);
+
+    // Use a transaction to handle the promotion atomically
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Delete the room assignment
+      await client.query(
+        'DELETE FROM room_assignments WHERE assignment_id = $1',
+        [assignment.assignment_id]
+      );
+
+      // Get the first person in the queue for this room
+      const queueResult = await client.query(
+        `SELECT * FROM room_queue
+         WHERE room_number = $1
+         ORDER BY queue_position
+         LIMIT 1`,
+        [roomNumber]
+      );
+
+      if (queueResult.rows.length > 0) {
+        const firstInQueue = queueResult.rows[0];
+
+        // Assign them to the room
+        const newAssignmentResult = await client.query(
+          `INSERT INTO room_assignments (assignment_type, room_number, position, user_id)
+           VALUES ('room', $1, NULL, $2)
+           RETURNING *`,
+          [roomNumber, firstInQueue.user_id]
+        );
+
+        // Remove them from the queue
+        await client.query(
+          'DELETE FROM room_queue WHERE queue_id = $1',
+          [firstInQueue.queue_id]
+        );
+
+        // Get user info for socket event
+        const userResult = await client.query(
+          'SELECT userid, username, role FROM users WHERE userid = $1',
+          [firstInQueue.user_id]
+        );
+
+        const user = userResult.rows[0];
+        const newAssignment = newAssignmentResult.rows[0];
+
+        await client.query('COMMIT');
+
+        // Emit real-time updates
+        global.io.to('admin-broadcast').emit('room-assignment:removed', {
+          assignmentId: assignment.assignment_id
+        });
+
+        global.io.to('admin-broadcast').emit('room-assignment:updated', {
+          assignment: {
+            ...newAssignment,
+            username: user.username,
+            role: user.role
+          }
+        });
+
+        global.io.to('admin-broadcast').emit('room-queue:removed', {
+          queueId: firstInQueue.queue_id
+        });
+
+        console.log(`[Room Assignment] Auto-promoted ${user.username} from queue to room ${roomNumber}`);
+      } else {
+        // No one in queue, just remove the assignment
+        await client.query('COMMIT');
+
+        global.io.to('admin-broadcast').emit('room-assignment:removed', {
+          assignmentId: assignment.assignment_id
+        });
+
+        console.log(`[Room Assignment] Room ${roomNumber} is now empty (no queue)`);
+      }
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Failed to handle room cleanup:', err);
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error in handleSessionEndRoomCleanup:', err);
+    // Don't throw - we don't want to break session ending if room cleanup fails
+  }
+}
+
+// GET /admin/api/room-assignments - Get all current room assignments and queues
+app.get("/admin/api/room-assignments", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    // Get all room assignments
+    const assignmentsResult = await pool.query(`
+      SELECT
+        ra.assignment_id,
+        ra.assignment_type,
+        ra.room_number,
+        ra.position,
+        ra.user_id,
+        u.username,
+        u.role,
+        ra.created_at,
+        ra.updated_at
+      FROM room_assignments ra
+      LEFT JOIN users u ON ra.user_id = u.userid
+      ORDER BY ra.assignment_type, ra.room_number, ra.position
+    `);
+
+    // Get all queue positions
+    const queueResult = await pool.query(`
+      SELECT
+        rq.queue_id,
+        rq.room_number,
+        rq.queue_position,
+        rq.user_id,
+        u.username,
+        u.role,
+        rq.created_at
+      FROM room_queue rq
+      LEFT JOIN users u ON rq.user_id = u.userid
+      ORDER BY rq.room_number, rq.queue_position
+    `);
+
+    // Get active sessions to show which participants are currently in a session
+    const activeSessionsResult = await pool.query(`
+      SELECT
+        ts.user_id,
+        ts.session_id,
+        ts.created_at as session_started
+      FROM therapy_sessions ts
+      WHERE ts.status = 'active'
+    `);
+
+    res.json({
+      assignments: assignmentsResult.rows,
+      queue: queueResult.rows,
+      activeSessions: activeSessionsResult.rows
+    });
+  } catch (err) {
+    console.error("Failed to fetch room assignments:", err);
+    res.status(500).json({ error: "Failed to fetch room assignments" });
+  }
+});
+
+// POST /admin/api/room-assignments - Set a room assignment
+app.post("/admin/api/room-assignments", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { assignmentType, roomNumber, position, userId } = req.body;
+
+    // Validate inputs
+    if (!assignmentType || !userId) {
+      return res.status(400).json({ error: "assignmentType and userId are required" });
+    }
+
+    if (assignmentType === 'room' && (!roomNumber || roomNumber < 1 || roomNumber > 5)) {
+      return res.status(400).json({ error: "Valid room number (1-5) is required for room assignments" });
+    }
+
+    if (assignmentType === 'monitoring' && (!position || position < 1 || position > 3)) {
+      return res.status(400).json({ error: "Valid position (1-3) is required for monitoring assignments" });
+    }
+
+    if (assignmentType === 'checkin' && (!position || position < 1 || position > 2)) {
+      return res.status(400).json({ error: "Valid position (1-2) is required for checkin assignments" });
+    }
+
+    // Check if user exists
+    const userResult = await pool.query('SELECT userid, username, role FROM users WHERE userid = $1', [userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = userResult.rows[0];
+
+    // Validate role restrictions
+    if (assignmentType === 'room' && user.role !== 'participant') {
+      return res.status(400).json({ error: "Only participants can be assigned to rooms" });
+    }
+
+    if ((assignmentType === 'monitoring' || assignmentType === 'checkin') && user.role !== 'researcher') {
+      return res.status(400).json({ error: "Only researchers can be assigned to monitoring/checkin stations" });
+    }
+
+    // Remove user from any existing assignments first
+    await pool.query('DELETE FROM room_assignments WHERE user_id = $1', [userId]);
+
+    // Remove user from any queue positions
+    await pool.query('DELETE FROM room_queue WHERE user_id = $1', [userId]);
+
+    // Insert new assignment using ON CONFLICT to handle slot already taken
+    const result = await pool.query(`
+      INSERT INTO room_assignments (assignment_type, room_number, position, user_id)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (assignment_type, room_number, position)
+      DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [
+      assignmentType,
+      assignmentType === 'room' ? roomNumber : null,
+      assignmentType !== 'room' ? position : null,
+      userId
+    ]);
+
+    const assignment = result.rows[0];
+
+    // Emit real-time update to all admin clients
+    global.io.to('admin-broadcast').emit('room-assignment:updated', {
+      assignment: {
+        ...assignment,
+        username: user.username,
+        role: user.role
+      }
+    });
+
+    console.log(`[Room Assignment] ${req.session.username} assigned ${user.username} to ${assignmentType} ${roomNumber || position}`);
+
+    res.json({
+      assignment: {
+        ...assignment,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (err) {
+    console.error("Failed to create room assignment:", err);
+    res.status(500).json({ error: "Failed to create room assignment" });
+  }
+});
+
+// DELETE /admin/api/room-assignments/:assignmentId - Remove a room assignment
+app.delete("/admin/api/room-assignments/:assignmentId", requireRole('therapist', 'researcher'), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { assignmentId } = req.params;
+
+    await client.query('BEGIN');
+
+    // Delete the assignment and get its info
+    const result = await client.query(
+      'DELETE FROM room_assignments WHERE assignment_id = $1 RETURNING *',
+      [assignmentId]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: "Assignment not found" });
+    }
+
+    const deletedAssignment = result.rows[0];
+
+    // If it was a room assignment, check if there's someone in the queue to promote
+    if (deletedAssignment.assignment_type === 'room' && deletedAssignment.room_number) {
+      const roomNumber = deletedAssignment.room_number;
+
+      // Get the first person in the queue for this room
+      const queueResult = await client.query(
+        `SELECT * FROM room_queue
+         WHERE room_number = $1
+         ORDER BY queue_position
+         LIMIT 1`,
+        [roomNumber]
+      );
+
+      if (queueResult.rows.length > 0) {
+        const firstInQueue = queueResult.rows[0];
+
+        // Assign them to the room
+        const newAssignmentResult = await client.query(
+          `INSERT INTO room_assignments (assignment_type, room_number, position, user_id)
+           VALUES ('room', $1, NULL, $2)
+           RETURNING *`,
+          [roomNumber, firstInQueue.user_id]
+        );
+
+        // Remove them from the queue
+        await client.query(
+          'DELETE FROM room_queue WHERE queue_id = $1',
+          [firstInQueue.queue_id]
+        );
+
+        // Get user info for socket event
+        const userResult = await client.query(
+          'SELECT userid, username, role FROM users WHERE userid = $1',
+          [firstInQueue.user_id]
+        );
+
+        const user = userResult.rows[0];
+        const newAssignment = newAssignmentResult.rows[0];
+
+        await client.query('COMMIT');
+
+        // Emit real-time updates
+        global.io.to('admin-broadcast').emit('room-assignment:removed', {
+          assignmentId: parseInt(assignmentId)
+        });
+
+        global.io.to('admin-broadcast').emit('room-assignment:updated', {
+          assignment: {
+            ...newAssignment,
+            username: user.username,
+            role: user.role
+          }
+        });
+
+        global.io.to('admin-broadcast').emit('room-queue:removed', {
+          queueId: firstInQueue.queue_id
+        });
+
+        console.log(`[Room Assignment] ${req.session.username} removed assignment ${assignmentId}`);
+        console.log(`[Room Assignment] Auto-promoted ${user.username} from queue to room ${roomNumber}`);
+
+        return res.json({
+          message: "Assignment removed successfully",
+          promoted: {
+            username: user.username,
+            roomNumber: roomNumber
+          }
+        });
+      }
+    }
+
+    await client.query('COMMIT');
+
+    // Emit real-time update to all admin clients
+    global.io.to('admin-broadcast').emit('room-assignment:removed', {
+      assignmentId: parseInt(assignmentId)
+    });
+
+    console.log(`[Room Assignment] ${req.session.username} removed assignment ${assignmentId}`);
+
+    res.json({ message: "Assignment removed successfully" });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error("Failed to remove room assignment:", err);
+    res.status(500).json({ error: "Failed to remove room assignment" });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /admin/api/room-queue - Add user to room queue
+app.post("/admin/api/room-queue", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { roomNumber, queuePosition, userId } = req.body;
+
+    // Validate inputs
+    if (!roomNumber || roomNumber < 1 || roomNumber > 5) {
+      return res.status(400).json({ error: "Valid room number (1-5) is required" });
+    }
+
+    if (!queuePosition || queuePosition < 1 || queuePosition > 4) {
+      return res.status(400).json({ error: "Valid queue position (1-4) is required" });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    // Check if user exists and is a participant
+    const userResult = await pool.query('SELECT userid, username, role FROM users WHERE userid = $1', [userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = userResult.rows[0];
+
+    if (user.role !== 'participant') {
+      return res.status(400).json({ error: "Only participants can be added to room queues" });
+    }
+
+    // Remove user from any existing queue positions or room assignments
+    await pool.query('DELETE FROM room_queue WHERE user_id = $1', [userId]);
+    await pool.query('DELETE FROM room_assignments WHERE user_id = $1', [userId]);
+
+    // Insert into queue using ON CONFLICT
+    const result = await pool.query(`
+      INSERT INTO room_queue (room_number, queue_position, user_id)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (room_number, queue_position)
+      DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        created_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [roomNumber, queuePosition, userId]);
+
+    const queueEntry = result.rows[0];
+
+    // Emit real-time update
+    global.io.to('admin-broadcast').emit('room-queue:updated', {
+      queueEntry: {
+        ...queueEntry,
+        username: user.username,
+        role: user.role
+      }
+    });
+
+    console.log(`[Room Queue] ${req.session.username} added ${user.username} to room ${roomNumber} queue position ${queuePosition}`);
+
+    res.json({
+      queueEntry: {
+        ...queueEntry,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (err) {
+    console.error("Failed to add to room queue:", err);
+    res.status(500).json({ error: "Failed to add to room queue" });
+  }
+});
+
+// DELETE /admin/api/room-queue/:queueId - Remove from room queue
+app.delete("/admin/api/room-queue/:queueId", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { queueId } = req.params;
+
+    const result = await pool.query(
+      'DELETE FROM room_queue WHERE queue_id = $1 RETURNING *',
+      [queueId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Queue entry not found" });
+    }
+
+    // Emit real-time update
+    global.io.to('admin-broadcast').emit('room-queue:removed', {
+      queueId: parseInt(queueId)
+    });
+
+    console.log(`[Room Queue] ${req.session.username} removed queue entry ${queueId}`);
+
+    res.json({ message: "Queue entry removed successfully" });
+  } catch (err) {
+    console.error("Failed to remove from room queue:", err);
+    res.status(500).json({ error: "Failed to remove from room queue" });
   }
 });
 
@@ -1844,6 +3698,122 @@ app.get("/api/config/features", async (req, res) => {
   }
 });
 
+// GET /api/config/ai-model - Get AI model for client (no auth required)
+app.get("/api/config/ai-model", async (req, res) => {
+  try {
+    const model = await getAiModel();
+    res.json({ model });
+  } catch (err) {
+    console.error('Failed to fetch AI model:', err);
+    res.status(500).json({ error: 'Failed to fetch AI model configuration' });
+  }
+});
+
+// GET /api/config/client-logging - Get client logging configuration (public endpoint)
+app.get("/api/config/client-logging", async (req, res) => {
+  try {
+    const config = await getSystemConfig();
+    const clientLogging = config.client_logging || { enabled: false };
+    res.json(clientLogging);
+  } catch (err) {
+    console.error("Failed to fetch client logging config:", err);
+    res.status(500).json({ error: "Failed to fetch client logging config" });
+  }
+});
+
+// GET /api/config/voices - Get enabled voices with metadata (public endpoint for users)
+app.get("/api/config/voices", async (req, res) => {
+  try {
+    const config = await getSystemConfig();
+    const voicesConfig = config.voices || {
+      voices: [
+        { value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }
+      ],
+      default_voice: 'cedar'
+    };
+
+    // Filter to only enabled voices for users
+    const enabledVoices = voicesConfig.voices
+      ? voicesConfig.voices
+          .filter(v => v.enabled)
+          .map(v => ({ value: v.value, label: v.label, description: v.description }))
+      : [];
+
+    res.json({
+      voices: enabledVoices,
+      default_voice: voicesConfig.default_voice
+    });
+  } catch (err) {
+    console.error("Failed to fetch voices config:", err);
+    res.status(500).json({ error: "Failed to fetch voices config" });
+  }
+});
+
+// GET /api/config/languages - Get enabled languages with metadata (public endpoint for users)
+app.get("/api/config/languages", async (req, res) => {
+  try {
+    const config = await getSystemConfig();
+    const languagesConfig = config.languages || {
+      languages: [
+        { value: 'en', label: 'English', description: 'English', enabled: true }
+      ],
+      default_language: 'en'
+    };
+
+    // Filter to only enabled languages for users
+    const enabledLanguages = languagesConfig.languages
+      ? languagesConfig.languages
+          .filter(l => l.enabled)
+          .map(l => ({ value: l.value, label: l.label, description: l.description }))
+      : [];
+
+    res.json({
+      languages: enabledLanguages,
+      default_language: languagesConfig.default_language
+    });
+  } catch (err) {
+    console.error("Failed to fetch languages config:", err);
+    res.status(500).json({ error: "Failed to fetch languages config" });
+  }
+});
+
+// GET /api/voices/preview/:voiceName - Serve voice preview audio files
+app.get("/api/voices/preview/:voiceName", async (req, res) => {
+  try {
+    const { voiceName } = req.params;
+
+    // Sanitize voice name to prevent directory traversal
+    const sanitizedVoiceName = path.basename(voiceName);
+
+    // Construct the path to the voice file (MP3 for browser compatibility)
+    const voiceFilePath = path.join(__dirname, '../../OAI_VOICES', `${sanitizedVoiceName}.mp3`);
+
+    // Check if file exists
+    if (!fs.existsSync(voiceFilePath)) {
+      return res.status(404).json({ error: 'Voice preview not found' });
+    }
+
+    // Set appropriate headers for audio streaming
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+
+    // Stream the file
+    const stream = fs.createReadStream(voiceFilePath);
+    stream.pipe(res);
+
+    stream.on('error', (err) => {
+      console.error('Error streaming voice preview:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to stream voice preview' });
+      }
+    });
+  } catch (err) {
+    console.error("Failed to serve voice preview:", err);
+    res.status(500).json({ error: "Failed to serve voice preview" });
+  }
+});
+
 // GET /admin/api/config - Get all system configuration
 app.get("/admin/api/config", requireRole('therapist', 'researcher'), async (req, res) => {
   try {
@@ -1864,6 +3834,32 @@ app.get("/admin/api/config", requireRole('therapist', 'researcher'), async (req,
   } catch (err) {
     console.error("Failed to fetch system configuration:", err);
     res.status(500).json({ error: "Failed to fetch system configuration" });
+  }
+});
+
+// GET /admin/api/config/system-prompt-preview - Get fully interpolated system prompt for preview
+// NOTE: This route must be defined BEFORE /admin/api/config/:key to avoid being matched as a key
+app.get("/admin/api/config/system-prompt-preview", requireRole('researcher'), async (req, res) => {
+  const { sessionType = 'realtime', language = 'en' } = req.query;
+
+  // Validate sessionType
+  if (!['realtime', 'chat'].includes(sessionType)) {
+    return res.status(400).json({ error: 'sessionType must be either "realtime" or "chat"' });
+  }
+
+  try {
+    const interpolatedPrompt = await getSystemPrompt(language, sessionType);
+
+    res.json({
+      success: true,
+      sessionType,
+      language,
+      prompt: interpolatedPrompt,
+      characterCount: interpolatedPrompt.length
+    });
+  } catch (err) {
+    console.error("Failed to generate system prompt preview:", err);
+    res.status(500).json({ error: "Failed to generate system prompt preview" });
   }
 });
 
@@ -1904,6 +3900,73 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
   }
 
   try {
+    // Validate voices config
+    if (key === 'voices') {
+      if (!value.voices || !Array.isArray(value.voices)) {
+        return res.status(400).json({ error: 'voices must be an array' });
+      }
+      const enabledVoices = value.voices.filter(v => v.enabled);
+      if (enabledVoices.length === 0) {
+        return res.status(400).json({ error: 'At least one voice must be enabled' });
+      }
+      const defaultVoice = value.voices.find(v => v.value === value.default_voice && v.enabled);
+      if (!defaultVoice) {
+        return res.status(400).json({
+          error: 'default_voice must be one of the enabled voices'
+        });
+      }
+      // Validate each voice has required fields
+      for (const voice of value.voices) {
+        if (!voice.value || !voice.label) {
+          return res.status(400).json({ error: 'Each voice must have value and label' });
+        }
+      }
+    }
+
+    // Validate languages config
+    if (key === 'languages') {
+      if (!value.languages || !Array.isArray(value.languages)) {
+        return res.status(400).json({ error: 'languages must be an array' });
+      }
+      const enabledLanguages = value.languages.filter(l => l.enabled);
+      if (enabledLanguages.length === 0) {
+        return res.status(400).json({ error: 'At least one language must be enabled' });
+      }
+      const defaultLanguage = value.languages.find(l => l.value === value.default_language && l.enabled);
+      if (!defaultLanguage) {
+        return res.status(400).json({
+          error: 'default_language must be one of the enabled languages'
+        });
+      }
+      // Validate each language has required fields
+      for (const language of value.languages) {
+        if (!language.value || !language.label) {
+          return res.status(400).json({ error: 'Each language must have value and label' });
+        }
+      }
+    }
+
+    // Validate system_prompts config
+    if (key === 'system_prompts') {
+      // Validate both realtime and chat prompts exist
+      if (!value.realtime || !value.chat) {
+        return res.status(400).json({ error: 'system_prompts must have both realtime and chat prompts' });
+      }
+      // Validate each prompt has required fields and minimum length
+      for (const promptType of ['realtime', 'chat']) {
+        if (!value[promptType].prompt) {
+          return res.status(400).json({ error: `${promptType} prompt is required` });
+        }
+        if (value[promptType].prompt.length < 100) {
+          return res.status(400).json({ error: `${promptType} prompt must be at least 100 characters` });
+        }
+      }
+      // Update last_modified timestamps
+      const now = new Date().toISOString();
+      value.realtime.last_modified = now;
+      value.chat.last_modified = now;
+    }
+
     const result = await pool.query(
       `UPDATE system_config
        SET config_value = $1, updated_at = CURRENT_TIMESTAMP, updated_by = $2
@@ -1916,7 +3979,11 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
       return res.status(404).json({ error: 'Configuration key not found' });
     }
 
-    console.log(`✓ Config updated: ${key} by ${req.session.username}`);
+    // Invalidate cache to force refresh
+    systemConfigCache = null;
+    configCacheTime = null;
+
+    console.log(`Config updated: ${key} by ${req.session.username}`);
 
     res.json({
       success: true,
@@ -1928,6 +3995,184 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
   } catch (err) {
     console.error("Failed to update configuration:", err);
     res.status(500).json({ error: "Failed to update configuration" });
+  }
+});
+
+// ============================================
+// Content Retention / Data Wipe Endpoints
+// ============================================
+
+// GET /admin/api/content-retention - Get retention settings and stats
+app.get("/admin/api/content-retention", requireRole('researcher'), async (req, res) => {
+  try {
+    const stats = await getWipeStats();
+    const schedulerStatus = getSchedulerStatus();
+
+    res.json({
+      ...stats,
+      scheduler: schedulerStatus
+    });
+  } catch (err) {
+    console.error("Failed to fetch content retention stats:", err);
+    res.status(500).json({ error: "Failed to fetch content retention stats" });
+  }
+});
+
+// PUT /admin/api/content-retention - Update retention settings
+app.put("/admin/api/content-retention", requireRole('researcher'), async (req, res) => {
+  const { settings } = req.body;
+
+  if (!settings) {
+    return res.status(400).json({ error: 'Settings are required' });
+  }
+
+  // Validate settings
+  if (typeof settings.enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be a boolean' });
+  }
+
+  if (typeof settings.retention_hours !== 'number' || settings.retention_hours < 1 || settings.retention_hours > 8760) {
+    return res.status(400).json({ error: 'retention_hours must be between 1 and 8760 (1 year)' });
+  }
+
+  // Validate wipe_time format (HH:MM)
+  const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+  if (!timeRegex.test(settings.wipe_time)) {
+    return res.status(400).json({ error: 'wipe_time must be in HH:MM format' });
+  }
+
+  if (typeof settings.require_redaction_complete !== 'boolean') {
+    return res.status(400).json({ error: 'require_redaction_complete must be a boolean' });
+  }
+
+  try {
+    const updatedSettings = await updateRetentionSettings(settings, req.session.username);
+
+    console.log(`Content retention settings updated by ${req.session.username}`);
+
+    res.json({
+      success: true,
+      settings: updatedSettings
+    });
+  } catch (err) {
+    console.error("Failed to update content retention settings:", err);
+    res.status(500).json({ error: "Failed to update content retention settings" });
+  }
+});
+
+// POST /admin/api/content-retention/wipe - Trigger manual content wipe
+app.post("/admin/api/content-retention/wipe", requireRole('researcher'), async (req, res) => {
+  try {
+    console.log(`Manual content wipe triggered by ${req.session.username}`);
+
+    const result = await executeContentWipe('manual', req.session.username);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        wipeId: result.wipeId,
+        messagesWiped: result.messagesWiped,
+        messagesSkipped: result.messagesSkipped
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (err) {
+    console.error("Failed to execute content wipe:", err);
+    res.status(500).json({ error: "Failed to execute content wipe" });
+  }
+});
+
+// GET /admin/api/content-retention/log - Get wipe history log
+app.get("/admin/api/content-retention/log", requireRole('researcher'), async (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  const offset = parseInt(req.query.offset) || 0;
+
+  try {
+    const result = await pool.query(
+      `SELECT * FROM content_wipe_log
+       ORDER BY started_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    const countResult = await pool.query('SELECT COUNT(*) as count FROM content_wipe_log');
+
+    res.json({
+      wipes: result.rows,
+      total: parseInt(countResult.rows[0].count),
+      limit,
+      offset
+    });
+  } catch (err) {
+    console.error("Failed to fetch content wipe log:", err);
+    res.status(500).json({ error: "Failed to fetch content wipe log" });
+  }
+});
+
+// GET /admin/api/user-sessions - Get all active user sessions
+app.get("/admin/api/user-sessions", requireRole('researcher'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        sid,
+        sess,
+        expire
+      FROM user_sessions
+      ORDER BY expire DESC
+    `);
+
+    // Parse the sess JSON and extract relevant fields
+    const sessions = result.rows.map(row => {
+      let sessData = {};
+      try {
+        sessData = typeof row.sess === 'string' ? JSON.parse(row.sess) : row.sess;
+      } catch (err) {
+        console.error('Failed to parse session data:', err);
+      }
+
+      return {
+        sid: row.sid,
+        expire: row.expire,
+        userId: sessData.userId,
+        username: sessData.username,
+        userRole: sessData.userRole,
+        cookie: sessData.cookie
+      };
+    });
+
+    res.json(sessions);
+  } catch (err) {
+    console.error("Failed to fetch user sessions:", err);
+    res.status(500).json({ error: "Failed to fetch user sessions" });
+  }
+});
+
+// DELETE /admin/api/user-sessions/:sid - Delete a specific user session (logout user)
+app.delete("/admin/api/user-sessions/:sid", requireRole('researcher'), async (req, res) => {
+  const { sid } = req.params;
+
+  try {
+    const result = await pool.query(
+      'DELETE FROM user_sessions WHERE sid = $1 RETURNING sid',
+      [sid]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    console.log(`[Admin] Session ${sid} deleted by ${req.session.username}`);
+    res.json({
+      message: 'Session deleted successfully',
+      sid: result.rows[0].sid
+    });
+  } catch (err) {
+    console.error("Failed to delete user session:", err);
+    res.status(500).json({ error: "Failed to delete user session" });
   }
 });
 
@@ -1979,6 +4224,311 @@ app.get('/admin/api/rate-limits/users', requireRole('therapist', 'researcher'), 
   }
 });
 
+// ===================== Crisis Management API Routes =====================
+
+// POST /admin/api/sessions/:sessionId/crisis/flag - Manually flag session as crisis
+app.post("/admin/api/sessions/:sessionId/crisis/flag", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { sessionId } = req.params;
+  const { severity, notes } = req.body;
+
+  // Validate severity
+  if (!['low', 'medium', 'high'].includes(severity)) {
+    return res.status(400).json({ error: 'Invalid severity. Must be low, medium, or high.' });
+  }
+
+  try {
+    const { flagSessionCrisis, logInterventionAction } = await import('./services/crisisDetection.service.js');
+
+    // Check if session exists
+    const sessionCheck = await pool.query(
+      'SELECT session_id FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Calculate risk score based on severity
+    const riskScoreMap = { low: 25, medium: 50, high: 85 };
+    const riskScore = riskScoreMap[severity];
+
+    // Flag the session
+    await flagSessionCrisis(
+      sessionId,
+      severity,
+      riskScore,
+      req.session.username,
+      'manual',
+      null,
+      [],
+      notes || 'Manually flagged by admin'
+    );
+
+    // Log intervention
+    await logInterventionAction(sessionId, 'manual_flag', {
+      riskScore,
+      severity,
+      flaggedBy: req.session.username,
+      notes
+    });
+
+    // Emit Socket.io event
+    global.io.to('admin-broadcast').emit('session:crisis-flagged', {
+      sessionId,
+      severity,
+      riskScore,
+      flaggedBy: req.session.username,
+      flaggedAt: new Date(),
+      message: `Session manually flagged as ${severity} risk by ${req.session.username}`
+    });
+
+    console.log(`Session ${sessionId} manually flagged as ${severity} by ${req.session.username}`);
+
+    res.json({
+      success: true,
+      message: 'Session flagged as crisis',
+      sessionId,
+      severity,
+      riskScore,
+      flaggedBy: req.session.username,
+      flaggedAt: new Date()
+    });
+  } catch (err) {
+    console.error("Failed to flag session as crisis:", err);
+    res.status(500).json({ error: "Failed to flag session" });
+  }
+});
+
+// DELETE /admin/api/sessions/:sessionId/crisis/flag - Unflag session
+app.delete("/admin/api/sessions/:sessionId/crisis/flag", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { sessionId } = req.params;
+  const { notes } = req.body;
+
+  try {
+    const { unflagSessionCrisis } = await import('./services/crisisDetection.service.js');
+
+    // Check if session exists
+    const sessionCheck = await pool.query(
+      'SELECT session_id, crisis_flagged FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (!sessionCheck.rows[0].crisis_flagged) {
+      return res.status(400).json({ error: 'Session is not flagged as crisis' });
+    }
+
+    // Unflag the session
+    await unflagSessionCrisis(
+      sessionId,
+      req.session.username,
+      notes || 'Manually unflagged by admin'
+    );
+
+    // Emit Socket.io event
+    global.io.to('admin-broadcast').emit('session:crisis-unflagged', {
+      sessionId,
+      unflaggedBy: req.session.username,
+      unflaggedAt: new Date(),
+      message: `Crisis flag removed by ${req.session.username}`
+    });
+
+    console.log(`Session ${sessionId} unflagged by ${req.session.username}`);
+
+    res.json({
+      success: true,
+      message: 'Crisis flag removed',
+      sessionId,
+      unflaggedBy: req.session.username,
+      unflaggedAt: new Date()
+    });
+  } catch (err) {
+    console.error("Failed to unflag session:", err);
+    res.status(500).json({ error: "Failed to unflag session" });
+  }
+});
+
+// GET /admin/api/crisis/all - Get all crisis management data (comprehensive view)
+app.get("/admin/api/crisis/all", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    console.log('[Crisis API] Fetching all crisis management data...');
+    // Fetch all crisis-related data in parallel
+    const [clinicalReviews, crisisEvents, humanHandoffs, interventionActions, riskScoreHistory] = await Promise.all([
+      // Clinical Reviews
+      pool.query(`
+        SELECT
+          cr.*,
+          ts.session_name
+        FROM clinical_reviews cr
+        LEFT JOIN therapy_sessions ts ON cr.session_id = ts.session_id
+        ORDER BY cr.requested_at DESC
+        LIMIT 500
+      `),
+
+      // Crisis Events
+      pool.query(`
+        SELECT
+          ce.*,
+          ts.session_name
+        FROM crisis_events ce
+        LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
+        ORDER BY ce.created_at DESC
+        LIMIT 500
+      `),
+
+      // Human Handoffs
+      pool.query(`
+        SELECT
+          hh.*,
+          ts.session_name
+        FROM human_handoffs hh
+        LEFT JOIN therapy_sessions ts ON hh.session_id = ts.session_id
+        ORDER BY hh.initiated_at DESC
+        LIMIT 500
+      `),
+
+      // Intervention Actions
+      pool.query(`
+        SELECT
+          ia.*,
+          ts.session_name
+        FROM intervention_actions ia
+        LEFT JOIN therapy_sessions ts ON ia.session_id = ts.session_id
+        ORDER BY ia.performed_at DESC
+        LIMIT 500
+      `),
+
+      // Risk Score History
+      pool.query(`
+        SELECT
+          rsh.*,
+          ts.session_name
+        FROM risk_score_history rsh
+        LEFT JOIN therapy_sessions ts ON rsh.session_id = ts.session_id
+        ORDER BY rsh.calculated_at DESC
+        LIMIT 1000
+      `)
+    ]);
+
+    console.log('[Crisis API] Successfully fetched all data');
+    res.json({
+      clinicalReviews: clinicalReviews.rows,
+      crisisEvents: crisisEvents.rows,
+      humanHandoffs: humanHandoffs.rows,
+      interventionActions: interventionActions.rows,
+      riskScoreHistory: riskScoreHistory.rows
+    });
+  } catch (err) {
+    console.error("[Crisis API] Failed to fetch comprehensive crisis data:", err);
+    console.error("[Crisis API] Error details:", {
+      message: err.message,
+      code: err.code,
+      detail: err.detail
+    });
+    res.status(500).json({
+      error: "Failed to fetch crisis management data",
+      details: err.message
+    });
+  }
+});
+
+// GET /admin/api/crisis/events - Get crisis events (all or by sessionId)
+app.get("/admin/api/crisis/events", requireRole('therapist', 'researcher'), async (req, res) => {
+  const { sessionId } = req.query;
+
+  try {
+    let result;
+    if (sessionId) {
+      const { getSessionCrisisEvents } = await import('./services/crisisDetection.service.js');
+      const events = await getSessionCrisisEvents(sessionId);
+      result = { events };
+    } else {
+      // Get all crisis events
+      const queryResult = await pool.query(`
+        SELECT
+          ce.*,
+          ts.session_name,
+          u.username
+        FROM crisis_events ce
+        LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
+        LEFT JOIN users u ON ts.user_id = u.userid
+        ORDER BY ce.created_at DESC
+        LIMIT 100
+      `);
+      result = { events: queryResult.rows };
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error("Failed to fetch crisis events:", err);
+    res.status(500).json({ error: "Failed to fetch crisis events" });
+  }
+});
+
+// GET /admin/api/crisis/active - Get all active crisis sessions
+app.get("/admin/api/crisis/active", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { getActiveCrisisSessions } = await import('./services/crisisDetection.service.js');
+    const sessions = await getActiveCrisisSessions();
+
+    res.json({ sessions });
+  } catch (err) {
+    console.error("Failed to fetch active crisis sessions:", err);
+    res.status(500).json({ error: "Failed to fetch active crisis sessions" });
+  }
+});
+
+// =============================================================================
+// REDACTION VERIFICATION API ROUTES
+// =============================================================================
+
+// GET /redact/api/messages - Get random messages (only content_redacted)
+app.get("/redact/api/messages", requireRole('researcher'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT message_id, content_redacted, role, message_type, created_at
+      FROM messages
+      WHERE content_redacted IS NOT NULL AND role IN ('user', 'assistant')
+      ORDER BY RANDOM()
+      LIMIT 20
+    `);
+    res.json({ messages: result.rows });
+  } catch (err) {
+    console.error("Failed to fetch redacted messages:", err);
+    res.status(500).json({ error: "Failed to fetch messages" });
+  }
+});
+
+// PUT /redact/api/messages/:id - Update redacted content
+app.put("/redact/api/messages/:id", requireRole('researcher'), async (req, res) => {
+  const { id } = req.params;
+  const { content_redacted } = req.body;
+
+  if (content_redacted === undefined) {
+    return res.status(400).json({ error: "content_redacted field is required" });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE messages SET content_redacted = $1 WHERE message_id = $2 RETURNING message_id',
+      [content_redacted, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Message not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Failed to update redacted content:", err);
+    res.status(500).json({ error: "Failed to update message" });
+  }
+});
+
 async function startProdServer() {
   console.log("Starting in production mode...");
 
@@ -1988,15 +4538,32 @@ async function startProdServer() {
   // Serve admin static assets (CSS, JS) - admin assets are prefixed with "admin-" so no conflicts
   app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets')));
 
-  // Dynamically import both SSR modules
+  // Dynamically import all SSR modules
   const { render } = await import('../../dist/server/entry-server.js');
   const { render: renderAdmin } = await import('../../dist/admin-server/admin-entry-server.js');
+  const { render: renderRedact } = await import('../../dist/redact-server/redact-entry-server.js');
+
+  // Serve redact static assets
+  app.use('/redact/assets', express.static(path.resolve(__dirname, '../../dist/redact-client/assets')));
 
   // Admin panel route
   app.get('/admin', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
       const template = fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8');
       const appHtml = await renderAdmin(req.originalUrl);
+      const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+    } catch (e) {
+      console.error(e.stack);
+      res.status(500).end(e.stack);
+    }
+  });
+
+  // Redact verification page route
+  app.get('/redact', requireRole('researcher'), async (req, res) => {
+    try {
+      const template = fs.readFileSync(path.resolve(__dirname, '../../dist/redact-client/redact.html'), 'utf-8');
+      const appHtml = await renderRedact(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
     } catch (e) {
@@ -2031,11 +4598,43 @@ async function startDevServer() {
   // Admin panel route in dev
   app.get("/admin", requireRole('therapist', 'researcher'), async (req, res, next) => {
     try {
-      const template = await vite.transformIndexHtml(
-        req.originalUrl,
-        fs.readFileSync(path.resolve(__dirname, "../client/admin/admin.html"), "utf-8")
+      // Read the admin HTML template
+      let template = fs.readFileSync(path.resolve(__dirname, "../client/admin/admin.html"), "utf-8");
+
+      // Manually fix the script path for Vite in dev mode
+      // Since Vite's root is src/client/main, we need to go up one level and into admin
+      template = template.replace(
+        'src="./admin-entry-client.jsx"',
+        'src="/@fs' + path.resolve(__dirname, "../client/admin/admin-entry-client.jsx") + '"'
       );
+
+      template = await vite.transformIndexHtml(req.originalUrl, template);
+
       const { render } = await vite.ssrLoadModule("src/client/admin/admin-entry-server.jsx");
+      const appHtml = await render(req.originalUrl);
+      const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
+      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      next(e);
+    }
+  });
+
+  // Redact verification page route in dev
+  app.get("/redact", requireRole('researcher'), async (req, res, next) => {
+    try {
+      // Read the redact HTML template
+      let template = fs.readFileSync(path.resolve(__dirname, "../client/redact/redact.html"), "utf-8");
+
+      // Manually fix the script path for Vite in dev mode
+      template = template.replace(
+        'src="./redact-entry-client.jsx"',
+        'src="/@fs' + path.resolve(__dirname, "../client/redact/redact-entry-client.jsx") + '"'
+      );
+
+      template = await vite.transformIndexHtml(req.originalUrl, template);
+
+      const { render } = await vite.ssrLoadModule("src/client/redact/redact-entry-server.jsx");
       const appHtml = await render(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
@@ -2081,7 +4680,15 @@ async function initializeServer() {
 
 initializeServer();
 
-httpServer.listen(port, () => {
-  console.log(`✅ Express server running on http://localhost:${port}`);
-  console.log(`✅ Socket.io server ready for real-time connections`);
+httpServer.listen(port, async () => {
+  console.log(`Express server running on http://localhost:${port}`);
+  console.log(`Socket.io server ready for real-time connections`);
+
+  // Start the content wipe scheduler
+  try {
+    await startContentWipeScheduler();
+    console.log(`Content wipe scheduler initialized`);
+  } catch (err) {
+    console.error('Failed to start content wipe scheduler:', err);
+  }
 });

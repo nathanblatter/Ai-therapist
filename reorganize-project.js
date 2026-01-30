@@ -84,13 +84,13 @@ function moveFile(from, to) {
   const toPath = path.join(__dirname, to);
 
   if (!fs.existsSync(fromPath)) {
-    console.log(`  ⚠️  Skipping (not found): ${from}`);
+    console.log(`  Skipping (not found): ${from}`);
     return false;
   }
 
   ensureDirectoryExists(toPath);
   fs.renameSync(fromPath, toPath);
-  console.log(`  ✅ Moved: ${from} → ${to}`);
+  console.log(`  Moved: ${from} → ${to}`);
   return true;
 }
 
@@ -103,14 +103,14 @@ function cleanupEmptyDirs() {
       const files = fs.readdirSync(dirPath);
       if (files.length === 0) {
         fs.rmdirSync(dirPath);
-        console.log(`  🗑️  Removed empty directory: ${dir}`);
+        console.log(`  Removed empty directory: ${dir}`);
       }
     }
   });
 }
 
 async function main() {
-  console.log('\n🚀 Starting project reorganization...\n');
+  console.log('\nStarting project reorganization...\n');
 
   let movedCount = 0;
   let skippedCount = 0;
@@ -129,9 +129,9 @@ async function main() {
 
   console.log('\n✨ Reorganization complete!');
   console.log(`   📦 Moved: ${movedCount} files`);
-  console.log(`   ⚠️  Skipped: ${skippedCount} files\n`);
+  console.log(`   Skipped: ${skippedCount} files\n`);
 
-  console.log('⚠️  NEXT STEPS:');
+  console.log('NEXT STEPS:');
   console.log('   1. Update import paths in your code');
   console.log('   2. Update vite.config.js and vite.admin.config.js');
   console.log('   3. Update package.json scripts if needed');
