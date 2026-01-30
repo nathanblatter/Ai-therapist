@@ -290,7 +290,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // Only use secure cookies when explicitly enabled (for HTTPS deployments)
+    secure: true, // Only use secure cookies when explicitly enabled (for HTTPS deployments)
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     sameSite: 'lax' // Prevent CSRF while allowing navigation
