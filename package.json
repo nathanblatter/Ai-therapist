@@ -3,11 +3,13 @@
   "scripts": {
     "dev": "node src/server/index.js --dev",
     "start": "NODE_ENV=production node src/server/index.js",
-    "build": "npm run build:client && npm run build:admin-client && npm run build:server && npm run build:admin-server",
+    "build": "npm run build:client && npm run build:admin-client && npm run build:redact-client && npm run build:server && npm run build:admin-server && npm run build:redact-server",
     "build:client": "vite build --outDir ../../../dist/client --ssrManifest",
     "build:admin-client": "vite build --config vite.admin.config.js --outDir ../../../dist/admin-client --ssrManifest",
+    "build:redact-client": "vite build --config vite.redact.config.js --outDir ../../../dist/redact-client --ssrManifest",
     "build:server": "vite build --ssr entry-server.jsx --outDir ../../../dist/server --emptyOutDir",
     "build:admin-server": "vite build --ssr admin-entry-server.jsx --config vite.admin.config.js --outDir ../../../dist/admin-server --emptyOutDir",
+    "build:redact-server": "vite build --ssr redact-entry-server.jsx --config vite.redact.config.js --outDir ../../../dist/redact-server --emptyOutDir",
     "devinstall": "zx ../../devinstall.mjs -- node src/server/index.js --dev",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx --fix"
   },

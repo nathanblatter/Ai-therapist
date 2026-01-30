@@ -14,6 +14,7 @@ import { requireAuth, requireRole, verifyCredentials, createUser, getAllUsers, g
 import { createSession, getSession, insertMessagesBatch, upsertSessionConfig, updateSessionStatus, getAiModel } from "./models/dbQueries.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
+import { getRetentionSettings, updateRetentionSettings, executeContentWipe, getWipeStats, startScheduler as startContentWipeScheduler, getSchedulerStatus } from "./services/contentWipe.service.js";
 
 // ES module-compatible __dirname replacement
 const __filename = fileURLToPath(import.meta.url);
@@ -203,19 +204,8 @@ function getHoursUntilReset() {
   return (resetTime - now) / (1000 * 60 * 60); // hours
 }
 
-async function getSystemPrompt(language = 'en') {
-  const config = await getSystemConfig();
-  const crisisContact = config.crisis_contact || {
-    hotline: 'BYU Counseling and Psychological Services',
-    phone: '(801) 422-3035',
-    text: 'HELLO to 741741'
-  };
-
-  const crisisText = crisisContact.enabled
-    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
-    : '911 or your local emergency services';
-
-  const basePrompt = `## Purpose & Scope
+// Default system prompt used as fallback if database config is unavailable
+const DEFAULT_SYSTEM_PROMPT = `## Purpose & Scope
 You are an AI **therapeutic assistant** for adults, providing **general emotional support and therapeutic conversation** only. Use empathy and evidence-based self-help (e.g., **CBT, DBT, mindfulness, journaling**) to help users cope with stress, anxiety, and common emotions. Make it clear: you **support and guide, not replace a human therapist**. Always **remind users you are not licensed**, and your help is **not a substitute for professional therapy/medical care**. Encourage seeking a **licensed therapist for serious issues**. Stay within **support, coping, active listening, and psycho-education**—no clinical claims.
 
 ## Boundaries & Limitations
@@ -224,7 +214,7 @@ You are an AI **therapeutic assistant** for adults, providing **general emotiona
 ## Crisis Protocol
 **If user expresses risk (suicidality, harm, acute crisis):**
 - **Immediately stop normal conversation**
-- Urge them to seek emergency help (e.g., ${crisisText}).
+- Urge them to seek emergency help (e.g., {{crisis_text}}).
 - State: you are **AI and cannot handle crises**
 - Give resources and ask if they'll seek help.
 - Do not provide advice or continue therapeutic conversation until user is safe.
@@ -237,7 +227,7 @@ Maintain a **calm, nonjudgmental, warm, and inclusive tone**. Validate user expe
 **Treat all communications as confidential**. Do not request or repeat unnecessary personal info. If users provide identifiers, do NOT store unless secure/HIPAA-compliant (if must, de-identify and encrypt). Gently remind users not to overshare sensitive details. At the session start, state: this chat is confidential, you are AI (not a healthcare provider), and users should not provide PHI unless comfortable. **Never share data with outside parties** except required by law or explicit, user-consented emergencies. No user info for ads or non-support purposes.
 
 ## Session Framing & Disclaimers
-At each session's start, present a brief disclaimer about your **AI identity, purpose, limits, and crisis response** (e.g.: "Hello, I'm an AI mental health support assistant—not a therapist/doctor. I can't diagnose, but I'll listen and offer coping ideas. If you're in crisis, contact ${crisisText}. What would you like to talk about?"). Remind users of limits if conversation goes off-scope (e.g., diagnosis, ongoing medical topics). If persistent, reinforce boundaries and suggest consulting professionals. Suggest healthy breaks and discourage dependency if user chats excessively.
+At each session's start, present a brief disclaimer about your **AI identity, purpose, limits, and crisis response** (e.g.: "Hello, I'm an AI mental health support assistant—not a therapist/doctor. I can't diagnose, but I'll listen and offer coping ideas. If you're in crisis, contact {{crisis_text}}. What would you like to talk about?"). Remind users of limits if conversation goes off-scope (e.g., diagnosis, ongoing medical topics). If persistent, reinforce boundaries and suggest consulting professionals. Suggest healthy breaks and discourage dependency if user chats excessively.
 
 At session close, remind users: you're a support tool and for ongoing or serious issues, professional help is best. Reiterate crisis resources as needed. Include legal/safety disclaimers ("This AI is not a licensed healthcare provider."). Encourage users to agree/acknowledge the service boundaries before chatting as required by your platform.
 
@@ -252,6 +242,29 @@ At session close, remind users: you're a support tool and for ongoing or serious
 
 **Summary:**
 You provide supportive, ethical guidance, never diagnose/prescribe, keep all conversations safe/private, transparently communicate limits, and always refer to professional help in crisis. Be calm, caring, and user-centered—empower, don't direct. Prioritize user safety, confidentiality, and professional boundaries at all times.`;
+
+async function getSystemPrompt(language = 'en', sessionType = 'realtime') {
+  const config = await getSystemConfig();
+  const crisisContact = config.crisis_contact || {
+    hotline: 'BYU Counseling and Psychological Services',
+    phone: '(801) 422-3035',
+    text: 'HELLO to 741741'
+  };
+
+  // Build the crisis text for interpolation
+  const crisisText = crisisContact.enabled
+    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
+    : '911 or your local emergency services';
+
+  // Get the prompt from database config, or use default fallback
+  let basePrompt = DEFAULT_SYSTEM_PROMPT;
+  const systemPrompts = config.system_prompts;
+  if (systemPrompts && systemPrompts[sessionType] && systemPrompts[sessionType].prompt) {
+    basePrompt = systemPrompts[sessionType].prompt;
+  }
+
+  // Interpolate {{crisis_text}} placeholder
+  basePrompt = basePrompt.replace(/\{\{crisis_text\}\}/g, crisisText);
 
   // Get language-specific addition from database config
   const languagesConfig = config.languages || { languages: [], default_language: 'en' };
@@ -277,7 +290,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.COOKIE_SECURE === 'true', // Only use secure cookies when explicitly enabled (for HTTPS deployments)
+    secure: false, // Only use secure cookies when explicitly enabled (for HTTPS deployments)
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     sameSite: 'lax' // Prevent CSRF while allowing navigation
@@ -457,7 +470,7 @@ const sessionConfig = JSON.stringify({
         ],
         tool_choice: "auto",
       model: "gpt-realtime-mini",
-      instructions: await getSystemPrompt('en'),
+      instructions: await getSystemPrompt('en', 'realtime'),
       audio: {
           input:{
             transcription:{
@@ -1232,7 +1245,7 @@ app.all("/token", async (req, res) => {
             tools: tools,
             tool_choice: "auto",
             model: aiModel,
-            instructions: await getSystemPrompt(userLanguage),
+            instructions: await getSystemPrompt(userLanguage, 'realtime'),
             audio: {
                 input:{
                   transcription:{
@@ -1326,6 +1339,9 @@ app.all("/token", async (req, res) => {
                 // End the session
                 const { updateSessionStatus } = await import("./models/dbQueries.js");
                 await updateSessionStatus(sessionId, 'ended', 'system');
+
+                // Handle room assignment cleanup and queue promotion
+                await handleSessionEndRoomCleanup(sessionId);
 
                 // Notify the user via Socket.io
                 global.io.to(`session:${sessionId}`).emit('session:status', {
@@ -1462,8 +1478,8 @@ app.post("/api/chat/start", async (req, res) => {
     // Generate unique session ID
     const sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-    // Get system prompt
-    const systemPrompt = await getSystemPrompt(userLanguage);
+    // Get system prompt for chat sessions
+    const systemPrompt = await getSystemPrompt(userLanguage, 'chat');
 
     // Initialize chat session in memory
     const { initializeChatSession } = await import('./services/chatTherapy.service.js');
@@ -1648,6 +1664,9 @@ app.post("/api/chat/end", async (req, res) => {
 
     // Update database
     const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
+
+    // Handle room assignment cleanup and queue promotion
+    await handleSessionEndRoomCleanup(sessionId);
 
     // Emit session ended events to Socket.io
     global.io.to('admin-broadcast').emit('session:ended', {
@@ -2039,6 +2058,9 @@ app.post("/api/sessions/:sessionId/end", async (req, res) => {
 
     const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 
+    // Handle room assignment cleanup and queue promotion
+    await handleSessionEndRoomCleanup(sessionId);
+
     // Emit session ended events to Socket.io
     global.io.to('admin-broadcast').emit('session:ended', {
       sessionId,
@@ -2344,6 +2366,9 @@ app.post("/admin/api/sessions/:sessionId/end", requireRole('therapist', 'researc
     */
 
     const updatedSession = await updateSessionStatus(sessionId, 'ended', req.session.username);
+
+    // Handle room assignment cleanup and queue promotion
+    await handleSessionEndRoomCleanup(sessionId);
 
     // Emit session ended events to Socket.io
     global.io.to('admin-broadcast').emit('session:ended', {
@@ -3153,6 +3178,487 @@ app.get("/admin/api/export", requireRole('therapist', 'researcher'), async (req,
   }
 });
 
+// ===================== Room Assignment API Routes =====================
+
+// Helper function to handle room assignment cleanup when a session ends
+async function handleSessionEndRoomCleanup(sessionId) {
+  try {
+    // Get the session to find the user_id
+    const sessionResult = await pool.query(
+      'SELECT user_id FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      return; // Session not found, nothing to do
+    }
+
+    const userId = sessionResult.rows[0].user_id;
+
+    if (!userId) {
+      return; // No user associated with session
+    }
+
+    // Check if this user has a room assignment
+    const assignmentResult = await pool.query(
+      `SELECT assignment_id, room_number
+       FROM room_assignments
+       WHERE user_id = $1 AND assignment_type = 'room'`,
+      [userId]
+    );
+
+    if (assignmentResult.rows.length === 0) {
+      return; // User not assigned to a room, nothing to do
+    }
+
+    const assignment = assignmentResult.rows[0];
+    const roomNumber = assignment.room_number;
+
+    console.log(`[Room Assignment] Session ended for user ${userId} in room ${roomNumber}, promoting queue...`);
+
+    // Use a transaction to handle the promotion atomically
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Delete the room assignment
+      await client.query(
+        'DELETE FROM room_assignments WHERE assignment_id = $1',
+        [assignment.assignment_id]
+      );
+
+      // Get the first person in the queue for this room
+      const queueResult = await client.query(
+        `SELECT * FROM room_queue
+         WHERE room_number = $1
+         ORDER BY queue_position
+         LIMIT 1`,
+        [roomNumber]
+      );
+
+      if (queueResult.rows.length > 0) {
+        const firstInQueue = queueResult.rows[0];
+
+        // Assign them to the room
+        const newAssignmentResult = await client.query(
+          `INSERT INTO room_assignments (assignment_type, room_number, position, user_id)
+           VALUES ('room', $1, NULL, $2)
+           RETURNING *`,
+          [roomNumber, firstInQueue.user_id]
+        );
+
+        // Remove them from the queue
+        await client.query(
+          'DELETE FROM room_queue WHERE queue_id = $1',
+          [firstInQueue.queue_id]
+        );
+
+        // Get user info for socket event
+        const userResult = await client.query(
+          'SELECT userid, username, role FROM users WHERE userid = $1',
+          [firstInQueue.user_id]
+        );
+
+        const user = userResult.rows[0];
+        const newAssignment = newAssignmentResult.rows[0];
+
+        await client.query('COMMIT');
+
+        // Emit real-time updates
+        global.io.to('admin-broadcast').emit('room-assignment:removed', {
+          assignmentId: assignment.assignment_id
+        });
+
+        global.io.to('admin-broadcast').emit('room-assignment:updated', {
+          assignment: {
+            ...newAssignment,
+            username: user.username,
+            role: user.role
+          }
+        });
+
+        global.io.to('admin-broadcast').emit('room-queue:removed', {
+          queueId: firstInQueue.queue_id
+        });
+
+        console.log(`[Room Assignment] Auto-promoted ${user.username} from queue to room ${roomNumber}`);
+      } else {
+        // No one in queue, just remove the assignment
+        await client.query('COMMIT');
+
+        global.io.to('admin-broadcast').emit('room-assignment:removed', {
+          assignmentId: assignment.assignment_id
+        });
+
+        console.log(`[Room Assignment] Room ${roomNumber} is now empty (no queue)`);
+      }
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Failed to handle room cleanup:', err);
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Error in handleSessionEndRoomCleanup:', err);
+    // Don't throw - we don't want to break session ending if room cleanup fails
+  }
+}
+
+// GET /admin/api/room-assignments - Get all current room assignments and queues
+app.get("/admin/api/room-assignments", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    // Get all room assignments
+    const assignmentsResult = await pool.query(`
+      SELECT
+        ra.assignment_id,
+        ra.assignment_type,
+        ra.room_number,
+        ra.position,
+        ra.user_id,
+        u.username,
+        u.role,
+        ra.created_at,
+        ra.updated_at
+      FROM room_assignments ra
+      LEFT JOIN users u ON ra.user_id = u.userid
+      ORDER BY ra.assignment_type, ra.room_number, ra.position
+    `);
+
+    // Get all queue positions
+    const queueResult = await pool.query(`
+      SELECT
+        rq.queue_id,
+        rq.room_number,
+        rq.queue_position,
+        rq.user_id,
+        u.username,
+        u.role,
+        rq.created_at
+      FROM room_queue rq
+      LEFT JOIN users u ON rq.user_id = u.userid
+      ORDER BY rq.room_number, rq.queue_position
+    `);
+
+    // Get active sessions to show which participants are currently in a session
+    const activeSessionsResult = await pool.query(`
+      SELECT
+        ts.user_id,
+        ts.session_id,
+        ts.created_at as session_started
+      FROM therapy_sessions ts
+      WHERE ts.status = 'active'
+    `);
+
+    res.json({
+      assignments: assignmentsResult.rows,
+      queue: queueResult.rows,
+      activeSessions: activeSessionsResult.rows
+    });
+  } catch (err) {
+    console.error("Failed to fetch room assignments:", err);
+    res.status(500).json({ error: "Failed to fetch room assignments" });
+  }
+});
+
+// POST /admin/api/room-assignments - Set a room assignment
+app.post("/admin/api/room-assignments", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { assignmentType, roomNumber, position, userId } = req.body;
+
+    // Validate inputs
+    if (!assignmentType || !userId) {
+      return res.status(400).json({ error: "assignmentType and userId are required" });
+    }
+
+    if (assignmentType === 'room' && (!roomNumber || roomNumber < 1 || roomNumber > 5)) {
+      return res.status(400).json({ error: "Valid room number (1-5) is required for room assignments" });
+    }
+
+    if (assignmentType === 'monitoring' && (!position || position < 1 || position > 3)) {
+      return res.status(400).json({ error: "Valid position (1-3) is required for monitoring assignments" });
+    }
+
+    if (assignmentType === 'checkin' && (!position || position < 1 || position > 2)) {
+      return res.status(400).json({ error: "Valid position (1-2) is required for checkin assignments" });
+    }
+
+    // Check if user exists
+    const userResult = await pool.query('SELECT userid, username, role FROM users WHERE userid = $1', [userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = userResult.rows[0];
+
+    // Validate role restrictions
+    if (assignmentType === 'room' && user.role !== 'participant') {
+      return res.status(400).json({ error: "Only participants can be assigned to rooms" });
+    }
+
+    if ((assignmentType === 'monitoring' || assignmentType === 'checkin') && user.role !== 'researcher') {
+      return res.status(400).json({ error: "Only researchers can be assigned to monitoring/checkin stations" });
+    }
+
+    // Remove user from any existing assignments first
+    await pool.query('DELETE FROM room_assignments WHERE user_id = $1', [userId]);
+
+    // Remove user from any queue positions
+    await pool.query('DELETE FROM room_queue WHERE user_id = $1', [userId]);
+
+    // Insert new assignment using ON CONFLICT to handle slot already taken
+    const result = await pool.query(`
+      INSERT INTO room_assignments (assignment_type, room_number, position, user_id)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (assignment_type, room_number, position)
+      DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [
+      assignmentType,
+      assignmentType === 'room' ? roomNumber : null,
+      assignmentType !== 'room' ? position : null,
+      userId
+    ]);
+
+    const assignment = result.rows[0];
+
+    // Emit real-time update to all admin clients
+    global.io.to('admin-broadcast').emit('room-assignment:updated', {
+      assignment: {
+        ...assignment,
+        username: user.username,
+        role: user.role
+      }
+    });
+
+    console.log(`[Room Assignment] ${req.session.username} assigned ${user.username} to ${assignmentType} ${roomNumber || position}`);
+
+    res.json({
+      assignment: {
+        ...assignment,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (err) {
+    console.error("Failed to create room assignment:", err);
+    res.status(500).json({ error: "Failed to create room assignment" });
+  }
+});
+
+// DELETE /admin/api/room-assignments/:assignmentId - Remove a room assignment
+app.delete("/admin/api/room-assignments/:assignmentId", requireRole('therapist', 'researcher'), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { assignmentId } = req.params;
+
+    await client.query('BEGIN');
+
+    // Delete the assignment and get its info
+    const result = await client.query(
+      'DELETE FROM room_assignments WHERE assignment_id = $1 RETURNING *',
+      [assignmentId]
+    );
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: "Assignment not found" });
+    }
+
+    const deletedAssignment = result.rows[0];
+
+    // If it was a room assignment, check if there's someone in the queue to promote
+    if (deletedAssignment.assignment_type === 'room' && deletedAssignment.room_number) {
+      const roomNumber = deletedAssignment.room_number;
+
+      // Get the first person in the queue for this room
+      const queueResult = await client.query(
+        `SELECT * FROM room_queue
+         WHERE room_number = $1
+         ORDER BY queue_position
+         LIMIT 1`,
+        [roomNumber]
+      );
+
+      if (queueResult.rows.length > 0) {
+        const firstInQueue = queueResult.rows[0];
+
+        // Assign them to the room
+        const newAssignmentResult = await client.query(
+          `INSERT INTO room_assignments (assignment_type, room_number, position, user_id)
+           VALUES ('room', $1, NULL, $2)
+           RETURNING *`,
+          [roomNumber, firstInQueue.user_id]
+        );
+
+        // Remove them from the queue
+        await client.query(
+          'DELETE FROM room_queue WHERE queue_id = $1',
+          [firstInQueue.queue_id]
+        );
+
+        // Get user info for socket event
+        const userResult = await client.query(
+          'SELECT userid, username, role FROM users WHERE userid = $1',
+          [firstInQueue.user_id]
+        );
+
+        const user = userResult.rows[0];
+        const newAssignment = newAssignmentResult.rows[0];
+
+        await client.query('COMMIT');
+
+        // Emit real-time updates
+        global.io.to('admin-broadcast').emit('room-assignment:removed', {
+          assignmentId: parseInt(assignmentId)
+        });
+
+        global.io.to('admin-broadcast').emit('room-assignment:updated', {
+          assignment: {
+            ...newAssignment,
+            username: user.username,
+            role: user.role
+          }
+        });
+
+        global.io.to('admin-broadcast').emit('room-queue:removed', {
+          queueId: firstInQueue.queue_id
+        });
+
+        console.log(`[Room Assignment] ${req.session.username} removed assignment ${assignmentId}`);
+        console.log(`[Room Assignment] Auto-promoted ${user.username} from queue to room ${roomNumber}`);
+
+        return res.json({
+          message: "Assignment removed successfully",
+          promoted: {
+            username: user.username,
+            roomNumber: roomNumber
+          }
+        });
+      }
+    }
+
+    await client.query('COMMIT');
+
+    // Emit real-time update to all admin clients
+    global.io.to('admin-broadcast').emit('room-assignment:removed', {
+      assignmentId: parseInt(assignmentId)
+    });
+
+    console.log(`[Room Assignment] ${req.session.username} removed assignment ${assignmentId}`);
+
+    res.json({ message: "Assignment removed successfully" });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error("Failed to remove room assignment:", err);
+    res.status(500).json({ error: "Failed to remove room assignment" });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /admin/api/room-queue - Add user to room queue
+app.post("/admin/api/room-queue", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { roomNumber, queuePosition, userId } = req.body;
+
+    // Validate inputs
+    if (!roomNumber || roomNumber < 1 || roomNumber > 5) {
+      return res.status(400).json({ error: "Valid room number (1-5) is required" });
+    }
+
+    if (!queuePosition || queuePosition < 1 || queuePosition > 4) {
+      return res.status(400).json({ error: "Valid queue position (1-4) is required" });
+    }
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required" });
+    }
+
+    // Check if user exists and is a participant
+    const userResult = await pool.query('SELECT userid, username, role FROM users WHERE userid = $1', [userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = userResult.rows[0];
+
+    if (user.role !== 'participant') {
+      return res.status(400).json({ error: "Only participants can be added to room queues" });
+    }
+
+    // Remove user from any existing queue positions or room assignments
+    await pool.query('DELETE FROM room_queue WHERE user_id = $1', [userId]);
+    await pool.query('DELETE FROM room_assignments WHERE user_id = $1', [userId]);
+
+    // Insert into queue using ON CONFLICT
+    const result = await pool.query(`
+      INSERT INTO room_queue (room_number, queue_position, user_id)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (room_number, queue_position)
+      DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        created_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `, [roomNumber, queuePosition, userId]);
+
+    const queueEntry = result.rows[0];
+
+    // Emit real-time update
+    global.io.to('admin-broadcast').emit('room-queue:updated', {
+      queueEntry: {
+        ...queueEntry,
+        username: user.username,
+        role: user.role
+      }
+    });
+
+    console.log(`[Room Queue] ${req.session.username} added ${user.username} to room ${roomNumber} queue position ${queuePosition}`);
+
+    res.json({
+      queueEntry: {
+        ...queueEntry,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (err) {
+    console.error("Failed to add to room queue:", err);
+    res.status(500).json({ error: "Failed to add to room queue" });
+  }
+});
+
+// DELETE /admin/api/room-queue/:queueId - Remove from room queue
+app.delete("/admin/api/room-queue/:queueId", requireRole('therapist', 'researcher'), async (req, res) => {
+  try {
+    const { queueId } = req.params;
+
+    const result = await pool.query(
+      'DELETE FROM room_queue WHERE queue_id = $1 RETURNING *',
+      [queueId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Queue entry not found" });
+    }
+
+    // Emit real-time update
+    global.io.to('admin-broadcast').emit('room-queue:removed', {
+      queueId: parseInt(queueId)
+    });
+
+    console.log(`[Room Queue] ${req.session.username} removed queue entry ${queueId}`);
+
+    res.json({ message: "Queue entry removed successfully" });
+  } catch (err) {
+    console.error("Failed to remove from room queue:", err);
+    res.status(500).json({ error: "Failed to remove from room queue" });
+  }
+});
+
 // ===================== System Configuration API Routes =====================
 
 // GET /api/config/crisis - Get crisis contact info (public endpoint for clients)
@@ -3331,6 +3837,32 @@ app.get("/admin/api/config", requireRole('therapist', 'researcher'), async (req,
   }
 });
 
+// GET /admin/api/config/system-prompt-preview - Get fully interpolated system prompt for preview
+// NOTE: This route must be defined BEFORE /admin/api/config/:key to avoid being matched as a key
+app.get("/admin/api/config/system-prompt-preview", requireRole('researcher'), async (req, res) => {
+  const { sessionType = 'realtime', language = 'en' } = req.query;
+
+  // Validate sessionType
+  if (!['realtime', 'chat'].includes(sessionType)) {
+    return res.status(400).json({ error: 'sessionType must be either "realtime" or "chat"' });
+  }
+
+  try {
+    const interpolatedPrompt = await getSystemPrompt(language, sessionType);
+
+    res.json({
+      success: true,
+      sessionType,
+      language,
+      prompt: interpolatedPrompt,
+      characterCount: interpolatedPrompt.length
+    });
+  } catch (err) {
+    console.error("Failed to generate system prompt preview:", err);
+    res.status(500).json({ error: "Failed to generate system prompt preview" });
+  }
+});
+
 // GET /admin/api/config/:key - Get specific configuration
 app.get("/admin/api/config/:key", requireRole('therapist', 'researcher'), async (req, res) => {
   const { key } = req.params;
@@ -3414,6 +3946,27 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
       }
     }
 
+    // Validate system_prompts config
+    if (key === 'system_prompts') {
+      // Validate both realtime and chat prompts exist
+      if (!value.realtime || !value.chat) {
+        return res.status(400).json({ error: 'system_prompts must have both realtime and chat prompts' });
+      }
+      // Validate each prompt has required fields and minimum length
+      for (const promptType of ['realtime', 'chat']) {
+        if (!value[promptType].prompt) {
+          return res.status(400).json({ error: `${promptType} prompt is required` });
+        }
+        if (value[promptType].prompt.length < 100) {
+          return res.status(400).json({ error: `${promptType} prompt must be at least 100 characters` });
+        }
+      }
+      // Update last_modified timestamps
+      const now = new Date().toISOString();
+      value.realtime.last_modified = now;
+      value.chat.last_modified = now;
+    }
+
     const result = await pool.query(
       `UPDATE system_config
        SET config_value = $1, updated_at = CURRENT_TIMESTAMP, updated_by = $2
@@ -3442,6 +3995,121 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
   } catch (err) {
     console.error("Failed to update configuration:", err);
     res.status(500).json({ error: "Failed to update configuration" });
+  }
+});
+
+// ============================================
+// Content Retention / Data Wipe Endpoints
+// ============================================
+
+// GET /admin/api/content-retention - Get retention settings and stats
+app.get("/admin/api/content-retention", requireRole('researcher'), async (req, res) => {
+  try {
+    const stats = await getWipeStats();
+    const schedulerStatus = getSchedulerStatus();
+
+    res.json({
+      ...stats,
+      scheduler: schedulerStatus
+    });
+  } catch (err) {
+    console.error("Failed to fetch content retention stats:", err);
+    res.status(500).json({ error: "Failed to fetch content retention stats" });
+  }
+});
+
+// PUT /admin/api/content-retention - Update retention settings
+app.put("/admin/api/content-retention", requireRole('researcher'), async (req, res) => {
+  const { settings } = req.body;
+
+  if (!settings) {
+    return res.status(400).json({ error: 'Settings are required' });
+  }
+
+  // Validate settings
+  if (typeof settings.enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be a boolean' });
+  }
+
+  if (typeof settings.retention_hours !== 'number' || settings.retention_hours < 1 || settings.retention_hours > 8760) {
+    return res.status(400).json({ error: 'retention_hours must be between 1 and 8760 (1 year)' });
+  }
+
+  // Validate wipe_time format (HH:MM)
+  const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+  if (!timeRegex.test(settings.wipe_time)) {
+    return res.status(400).json({ error: 'wipe_time must be in HH:MM format' });
+  }
+
+  if (typeof settings.require_redaction_complete !== 'boolean') {
+    return res.status(400).json({ error: 'require_redaction_complete must be a boolean' });
+  }
+
+  try {
+    const updatedSettings = await updateRetentionSettings(settings, req.session.username);
+
+    console.log(`Content retention settings updated by ${req.session.username}`);
+
+    res.json({
+      success: true,
+      settings: updatedSettings
+    });
+  } catch (err) {
+    console.error("Failed to update content retention settings:", err);
+    res.status(500).json({ error: "Failed to update content retention settings" });
+  }
+});
+
+// POST /admin/api/content-retention/wipe - Trigger manual content wipe
+app.post("/admin/api/content-retention/wipe", requireRole('researcher'), async (req, res) => {
+  try {
+    console.log(`Manual content wipe triggered by ${req.session.username}`);
+
+    const result = await executeContentWipe('manual', req.session.username);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        wipeId: result.wipeId,
+        messagesWiped: result.messagesWiped,
+        messagesSkipped: result.messagesSkipped
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (err) {
+    console.error("Failed to execute content wipe:", err);
+    res.status(500).json({ error: "Failed to execute content wipe" });
+  }
+});
+
+// GET /admin/api/content-retention/log - Get wipe history log
+app.get("/admin/api/content-retention/log", requireRole('researcher'), async (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  const offset = parseInt(req.query.offset) || 0;
+
+  try {
+    const result = await pool.query(
+      `SELECT * FROM content_wipe_log
+       ORDER BY started_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    const countResult = await pool.query('SELECT COUNT(*) as count FROM content_wipe_log');
+
+    res.json({
+      wipes: result.rows,
+      total: parseInt(countResult.rows[0].count),
+      limit,
+      offset
+    });
+  } catch (err) {
+    console.error("Failed to fetch content wipe log:", err);
+    res.status(500).json({ error: "Failed to fetch content wipe log" });
   }
 });
 
@@ -3814,6 +4482,53 @@ app.get("/admin/api/crisis/active", requireRole('therapist', 'researcher'), asyn
   }
 });
 
+// =============================================================================
+// REDACTION VERIFICATION API ROUTES
+// =============================================================================
+
+// GET /redact/api/messages - Get random messages (only content_redacted)
+app.get("/redact/api/messages", requireRole('researcher'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT message_id, content_redacted, role, message_type, created_at
+      FROM messages
+      WHERE content_redacted IS NOT NULL AND role IN ('user', 'assistant')
+      ORDER BY RANDOM()
+      LIMIT 20
+    `);
+    res.json({ messages: result.rows });
+  } catch (err) {
+    console.error("Failed to fetch redacted messages:", err);
+    res.status(500).json({ error: "Failed to fetch messages" });
+  }
+});
+
+// PUT /redact/api/messages/:id - Update redacted content
+app.put("/redact/api/messages/:id", requireRole('researcher'), async (req, res) => {
+  const { id } = req.params;
+  const { content_redacted } = req.body;
+
+  if (content_redacted === undefined) {
+    return res.status(400).json({ error: "content_redacted field is required" });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE messages SET content_redacted = $1 WHERE message_id = $2 RETURNING message_id',
+      [content_redacted, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Message not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Failed to update redacted content:", err);
+    res.status(500).json({ error: "Failed to update message" });
+  }
+});
+
 async function startProdServer() {
   console.log("Starting in production mode...");
 
@@ -3823,15 +4538,32 @@ async function startProdServer() {
   // Serve admin static assets (CSS, JS) - admin assets are prefixed with "admin-" so no conflicts
   app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets')));
 
-  // Dynamically import both SSR modules
+  // Dynamically import all SSR modules
   const { render } = await import('../../dist/server/entry-server.js');
   const { render: renderAdmin } = await import('../../dist/admin-server/admin-entry-server.js');
+  const { render: renderRedact } = await import('../../dist/redact-server/redact-entry-server.js');
+
+  // Serve redact static assets
+  app.use('/redact/assets', express.static(path.resolve(__dirname, '../../dist/redact-client/assets')));
 
   // Admin panel route
   app.get('/admin', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
       const template = fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8');
       const appHtml = await renderAdmin(req.originalUrl);
+      const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+    } catch (e) {
+      console.error(e.stack);
+      res.status(500).end(e.stack);
+    }
+  });
+
+  // Redact verification page route
+  app.get('/redact', requireRole('researcher'), async (req, res) => {
+    try {
+      const template = fs.readFileSync(path.resolve(__dirname, '../../dist/redact-client/redact.html'), 'utf-8');
+      const appHtml = await renderRedact(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
     } catch (e) {
@@ -3888,6 +4620,30 @@ async function startDevServer() {
     }
   });
 
+  // Redact verification page route in dev
+  app.get("/redact", requireRole('researcher'), async (req, res, next) => {
+    try {
+      // Read the redact HTML template
+      let template = fs.readFileSync(path.resolve(__dirname, "../client/redact/redact.html"), "utf-8");
+
+      // Manually fix the script path for Vite in dev mode
+      template = template.replace(
+        'src="./redact-entry-client.jsx"',
+        'src="/@fs' + path.resolve(__dirname, "../client/redact/redact-entry-client.jsx") + '"'
+      );
+
+      template = await vite.transformIndexHtml(req.originalUrl, template);
+
+      const { render } = await vite.ssrLoadModule("src/client/redact/redact-entry-server.jsx");
+      const appHtml = await render(req.originalUrl);
+      const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
+      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      next(e);
+    }
+  });
+
   // Main app SSR (catch-all)
   app.use("/", async (req, res, next) => {
     try {
@@ -3924,7 +4680,15 @@ async function initializeServer() {
 
 initializeServer();
 
-httpServer.listen(port, () => {
+httpServer.listen(port, async () => {
   console.log(`Express server running on http://localhost:${port}`);
   console.log(`Socket.io server ready for real-time connections`);
+
+  // Start the content wipe scheduler
+  try {
+    await startContentWipeScheduler();
+    console.log(`Content wipe scheduler initialized`);
+  } catch (err) {
+    console.error('Failed to start content wipe scheduler:', err);
+  }
 });

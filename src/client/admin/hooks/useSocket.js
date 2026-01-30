@@ -37,6 +37,11 @@ export function useSocket() {
       });
     }
 
+    // Check if socket is already connected when component mounts
+    if (socketInstance && socketInstance.connected) {
+      setConnected(true);
+    }
+
     setSocket(socketInstance);
 
     return () => {

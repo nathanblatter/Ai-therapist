@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2 } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SessionList from "./SessionList";
 import SessionDetail from "./SessionDetail";
@@ -8,10 +8,12 @@ import ExportPanel from "./ExportPanel";
 import UserManagement from "./UserManagement";
 import LiveMonitoring from "./LiveMonitoring";
 import SystemConfig from "./SystemConfig";
+import SystemPrompts from "./SystemPrompts";
 import RateLimitedUsers from "./RateLimitedUsers";
 import UserSessions from "./UserSessions";
 import CrisisManagement from "./CrisisManagement";
 import MFASetup from "./MFASetup";
+import DataRetention from "./DataRetention";
 import ToastContainer from "../../shared/components/Toast";
 
 export default function AdminApp() {
@@ -67,9 +69,10 @@ export default function AdminApp() {
     { id: 'mfa', label: 'MFA Security', icon: Shield },
     { id: 'users', label: 'Users', icon: Users, researcherOnly: true },
     { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
+    { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
+    { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
     { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
     { id: 'export', label: 'Export', icon: Download },
-
   ];
 
   // Filter nav items based on user role
@@ -116,9 +119,10 @@ export default function AdminApp() {
           {currentView === 'mfa' && <MFASetup />}
           {currentView === 'users' && <UserManagement />}
           {currentView === 'user-sessions' && <UserSessions />}
+          {currentView === 'prompts' && <SystemPrompts />}
+          {currentView === 'retention' && <DataRetention />}
           {currentView === 'config' && <SystemConfig />}
           {currentView === 'export' && <ExportPanel />}
-
         </div>
       </main>
 
