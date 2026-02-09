@@ -3,6 +3,7 @@
 Deploy AI Therapist to EC2 with domain **ai.byuisresearch.com** in ~30 minutes.
 
 ## Prerequisites
+
 - [ ] EC2 instance (Ubuntu 22.04) with SSH access
 - [ ] Domain `ai.byuisresearch.com` pointing to EC2 IP
 - [ ] OpenAI API key
@@ -19,18 +20,19 @@ Deploy AI Therapist to EC2 with domain **ai.byuisresearch.com** in ~30 minutes.
 ssh -i your-key.pem ubuntu@ai.byuisresearch.com
 
 # Download and run setup script
-curl -o setup-server.sh https://raw.githubusercontent.com/your-repo/ai-therapist/main/setup-server.sh
+curl -o setup-server.sh https://raw.githubusercontent.com/your-repo/ai-therapist/main/scripts/setup-server.sh
 sudo bash setup-server.sh
 ```
 
 Or manually:
+
 ```bash
 # Copy setup-server.sh to EC2
-scp -i ~/Desktop/nathangaskinbackend.pem setup-server.sh ubuntu@ai.byuisresearch.com:/home/ubuntu/
+scp -i ~/Desktop/nathangaskinbackend.pem scripts/setup-server.sh ubuntu@ai.byuisresearch.com:/home/ubuntu/
 
 # SSH in and run
 ssh -i your-key.pem ubuntu@ai.byuisresearch.com
-sudo bash setup-server.sh
+sudo bash /home/ubuntu/setup-server.sh
 ```
 
 ### Step 2: Deploy Application
@@ -59,7 +61,7 @@ sudo -u postgres psql
 # Run: ALTER USER therapist_admin PASSWORD 'your_secure_password';
 
 # 3. Setup Nginx
-sudo cp nginx.conf /etc/nginx/sites-available/ai-therapist
+sudo cp infra/nginx.conf /etc/nginx/sites-available/ai-therapist
 sudo ln -s /etc/nginx/sites-available/ai-therapist /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
@@ -75,7 +77,7 @@ done
 # 6. Build and start
 npm install
 npm run build
-pm2 start ecosystem.config.cjs --env production
+pm2 start infra/ecosystem.config.cjs --env production
 pm2 save
 pm2 startup  # Follow the instructions shown
 ```
@@ -113,6 +115,7 @@ git pull origin main
 ```
 
 Or manually:
+
 ```bash
 git pull
 npm install
@@ -125,12 +128,14 @@ pm2 restart ai-therapist
 ## Troubleshooting
 
 ### App won't start
+
 ```bash
 pm2 logs ai-therapist  # Check logs
 pm2 restart ai-therapist
 ```
 
 ### Database connection issues
+
 ```bash
 # Test connection
 psql -U therapist_admin -d ai_therapist -c "SELECT version();"
@@ -140,12 +145,14 @@ cat .env | grep DB_
 ```
 
 ### SSL certificate issues
+
 ```bash
 sudo certbot renew --dry-run
 sudo certbot certificates
 ```
 
 ### Nginx issues
+
 ```bash
 sudo nginx -t  # Test configuration
 sudo systemctl status nginx
@@ -181,11 +188,11 @@ htop                        # Monitor processes
 
 ## Files Created
 
-- `DEPLOYMENT.md` - Full deployment guide
-- `nginx.conf` - Nginx configuration
-- `ecosystem.config.cjs` - PM2 configuration
-- `deploy.sh` - Deployment automation script
-- `setup-server.sh` - Initial server setup script
+- `infra/DEPLOYMENT.md` - Full deployment guide
+- `infra/nginx.conf` - Nginx configuration
+- `infra/ecosystem.config.cjs` - PM2 configuration
+- `scripts/deploy.sh` - Deployment automation script
+- `scripts/setup-server.sh` - Initial server setup script
 - `.env.example` - Environment variables template
 
 ---
