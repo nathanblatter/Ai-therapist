@@ -729,14 +729,43 @@ export default function App() {
     peerConnection.current = null;
   }
 
-  // flush on page unload
+  // Handle page unload - warn user and end session
   useEffect(() => {
-    const handler = () => {
-      navigator.sendBeacon?.("/logs/batch", JSON.stringify({ records: logBufferRef.current })) || void flushLogs();
+    // Show warning dialog when user tries to leave during active session
+    const handleBeforeUnload = (e) => {
+      if (isSessionActive && sessionId) {
+        // Show browser's built-in "Leave site?" dialog
+        e.preventDefault();
+        e.returnValue = 'You have an active therapy session. Leaving will end your session.';
+        return e.returnValue;
+      }
     };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, []);
+
+    // Actually end the session when page is being unloaded
+    const handlePageHide = () => {
+      // Flush logs regardless of session state
+      const logBlob = new Blob([JSON.stringify({ records: logBufferRef.current })], { type: 'application/json' });
+      navigator.sendBeacon?.("/logs/batch", logBlob);
+
+      // If session is active, end it
+      if (isSessionActive && sessionId) {
+        const endBlob = new Blob([JSON.stringify({ sessionId })], { type: 'application/json' });
+        if (sessionType === 'chat') {
+          navigator.sendBeacon?.("/api/chat/end", endBlob);
+        } else {
+          navigator.sendBeacon?.(`/api/sessions/${sessionId}/end`, endBlob);
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [isSessionActive, sessionId, sessionType]);
 
 
   function sendClientEvent(message) {
