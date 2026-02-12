@@ -6,7 +6,7 @@ const dbCredentials = await getDbCredentials();
 
 
 const pool = new Pool({
-  host: 'ai-therapist-conversationlog-db.cduiqimmkaym.us-west-1.rds.amazonaws.com',
+  host: "ai-therapist.czmi8yuy2p4d.us-west-1.rds.amazonaws.com",
   port: 5432,
   user: dbCredentials.user, // or whatever your master username is
   password: dbCredentials.password,

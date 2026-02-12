@@ -4,7 +4,7 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import "dotenv/config";
 export async function getOpenAIKey() {
-const secret_name = "prod/ai-therapist/oaiAPIKey";
+const secret_name = "OpenAI-APIKEY";
 
 const client = new SecretsManagerClient({
 
@@ -34,7 +34,7 @@ const secret = response.SecretString;
 return secret;
 }
 export async function getDbCredentials() {
-  const secret_name = "rds!db-9fa8f192-60a6-4918-ac0d-4c26a8a7bad3";
+  const secret_name = "rds!db-f7c70001-91ed-4b97-aa7a-8ecf922d7013";
   
   const client = new SecretsManagerClient({
   
@@ -66,41 +66,8 @@ export async function getDbCredentials() {
   return {
     user: secret.username, // or whatever your master username is
     password: secret.password,
-    host: 'ai-therapist-conversationlog-db.cduiqimmkaym.us-west-1.rds.amazonaws.com',
+    host: "ai-therapist.czmi8yuy2p4d.us-west-1.rds.amazonaws.com",
     port: 5432,
     database: 'postgres'
   }
 }
-export async function getAnthropicKey() {
-const secret_name = "anthopicAPIkey";
-
-const client = new SecretsManagerClient({
-
-
-    region: process.env.AWS_REGION || 'us-west-1'
-    
-});
-
-let response;
-
-try {
-  response = await client.send(
-    new GetSecretValueCommand({
-      SecretId: secret_name,
-      VersionStage: "AWSCURRENT", // VersionStage defaults to AWSCURRENT if unspecified
-    })
-  );
-} catch (error) {
-  // For a list of exceptions thrown, see
-  // https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
-  throw error;
-}
-
-const secret = response.SecretString;
-
-// Your code goes here
-return secret;
-}
-
-
-
