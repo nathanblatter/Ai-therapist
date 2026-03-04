@@ -384,44 +384,7 @@ export default function App() {
       if (messageType === 'visible') {
         console.log('[Admin] Received visible message:', message);
 
-        // Use the EXACT same format as the initial prompt that works
-        // Escape single quotes in the message
-        const escapedMessage = message.replace(/'/g, "\\'");
-        const promptToSpeak = `Say this phrase exactly: '${escapedMessage}'`;
-
-        console.log('[Admin] Prompt to speak:', promptToSpeak);
-
-        const trySendMessage = (attempt = 0) => {
-          const maxAttempts = 10;
-          if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
-            console.log('[Admin] DataChannel is open, sending verbatim instruction');
-            console.log('[Admin] Full message being sent:', promptToSpeak);
-
-            // Cancel any pending AI response first
-            try {
-              const cancelEvent = { type: "response.cancel" };
-              dataChannelRef.current.send(JSON.stringify(cancelEvent));
-              console.log('[Admin] Cancelled any pending AI response');
-            } catch (err) {
-              console.warn('[Admin] Could not cancel response:', err);
-            }
-
-            // Wait a moment for cancellation to process, then send the message
-            setTimeout(() => {
-              sendInvisiblePrompt(promptToSpeak);
-            }, 100);
-          } else if (attempt < maxAttempts) {
-            const state = dataChannelRef.current ? dataChannelRef.current.readyState : 'null';
-            console.log(`[Admin] DataChannel not ready (${state}), retry ${attempt + 1}/${maxAttempts} in 500ms`);
-            setTimeout(() => trySendMessage(attempt + 1), 500);
-          } else {
-            console.error('[Admin] Failed to send message after max retries - data channel never opened');
-          }
-        };
-
-        trySendMessage();
-
-        // Display message to user with prefix for context
+        // Display message to user only — do NOT forward to the bot
         const fullMessage = `[Message from ${senderName}]: ${message}`;
         setMessages((prev) => [
           ...prev,
