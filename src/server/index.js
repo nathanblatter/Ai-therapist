@@ -2214,8 +2214,8 @@ app.post("/logs/batch", async (req, res) => {
           const session = sessionCheck.rows[0];
           const currentScore = session?.crisis_risk_score || 0;
 
-          // Flag if score exceeds threshold (>30) or increases significantly
-          const shouldFlag = riskAnalysis.riskScore > 30 &&
+          // Flag only on imminent/explicit crisis keywords (severity === 'high')
+          const shouldFlag = riskAnalysis.severity === 'high' &&
             (!session.crisis_flagged || riskAnalysis.riskScore > currentScore + 10);
 
           if (shouldFlag) {
