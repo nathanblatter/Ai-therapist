@@ -278,6 +278,15 @@ async function getSystemPrompt(language = 'en', sessionType = 'realtime') {
 
 app.use(express.json()); // Needed to parse JSON bodies
 
+// Health check - no auth required
+const SERVER_START_TIME = Date.now();
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: Math.floor((Date.now() - SERVER_START_TIME) / 1000)
+  });
+});
+
 // Session configuration with PostgreSQL store
 const PgSession = connectPgSimple(session);
 app.use(session({
