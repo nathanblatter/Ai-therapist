@@ -8,9 +8,9 @@
     "build:client": "APP=main vite build --outDir ../../../dist/client --ssrManifest",
     "build:admin-client": "APP=admin vite build --outDir ../../../dist/admin-client --ssrManifest",
     "build:redact-client": "APP=redact vite build --outDir ../../../dist/redact-client --ssrManifest",
-    "build:server": "APP=main vite build --ssr entry-server.jsx --outDir ../../../dist/server --emptyOutDir",
-    "build:admin-server": "APP=admin vite build --ssr admin-entry-server.jsx --outDir ../../../dist/admin-server --emptyOutDir",
-    "build:redact-server": "APP=redact vite build --ssr redact-entry-server.jsx --outDir ../../../dist/redact-server --emptyOutDir",
+    "build:server": "APP=main vite build --ssr entry-server.tsx --outDir ../../../dist/server --emptyOutDir",
+    "build:admin-server": "APP=admin vite build --ssr admin-entry-server.tsx --outDir ../../../dist/admin-server --emptyOutDir",
+    "build:redact-server": "APP=redact vite build --ssr redact-entry-server.tsx --outDir ../../../dist/redact-server --emptyOutDir",
     "devinstall": "zx ../../devinstall.mjs -- node src/server/index.js --dev",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx --fix"
   },
