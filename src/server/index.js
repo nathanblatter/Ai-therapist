@@ -24,7 +24,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Trust first proxy (Nginx) for secure cookies and correct client IP
+// Trust first proxy (Cloudflare Tunnel / cloudflared) for secure cookies and correct client IP
 app.set('trust proxy', 1);
 
 const httpServer = createServer(app);
