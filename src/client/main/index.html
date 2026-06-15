@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>AI Therapist</title>
+    <title>[DEMO] AI Therapist</title>
     <meta name="description" content="AI Therapist" />
     <meta name="author" content="Nathan Blatter" />
     <link rel="icon" href="assets/byulogo.png" />
@@ -13,6 +13,23 @@
   </head>
   <body>
     <div id="root"><!--ssr-outlet--></div>
+
+    <!-- ===== DEMO NOTICE (added for demo deployment) ===== -->
+    <div id="demo-pill" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483646;pointer-events:none;background:#B00020;color:#fff;font:600 12px/1 system-ui,'Segoe UI',Roboto,sans-serif;letter-spacing:.04em;padding:6px 12px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap;">
+      DEMO · fictitious data · not a real service
+    </div>
+    <div id="demo-overlay" style="display:none;position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);align-items:center;justify-content:center;padding:16px;">
+      <div style="background:#fff;color:#1f2937;max-width:520px;width:100%;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.3);padding:24px 28px;font-family:system-ui,'Segoe UI',Roboto,sans-serif;line-height:1.55;">
+        <h2 style="margin:0 0 12px;font-size:1.35rem;color:#B00020;">⚠️ Demonstration Site</h2>
+        <p style="margin:0 0 10px;font-size:.95rem;">This is a <strong>demo</strong> of the AI Therapist application. It is <strong>not</strong> a real mental-health service and must not be used for actual therapy.</p>
+        <p style="margin:0 0 10px;font-size:.95rem;">All accounts and conversations are <strong>fictitious</strong> and may be reset or deleted at any time. Please do <strong>not</strong> enter real personal information.</p>
+        <p style="margin:0 0 18px;font-size:.95rem;">If you are in crisis, this demo cannot help you — please contact a licensed professional or call or text <strong>988</strong> (US).</p>
+        <button type="button" onclick="document.getElementById('demo-overlay').style.display='none';try{sessionStorage.setItem('demoAck','1')}catch(e){}" style="background:#B00020;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:1rem;font-weight:600;cursor:pointer;">I Understand</button>
+      </div>
+    </div>
+    <script>(function(){var o=document.getElementById('demo-overlay');try{if(!sessionStorage.getItem('demoAck'))o.style.display='flex';}catch(e){o.style.display='flex';}})();</script>
+    <!-- ===== END DEMO NOTICE ===== -->
+
     <!-- hydration -->
     <script type="module" src="entry-client.jsx"></script>
   </body>
