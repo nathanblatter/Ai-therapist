@@ -1,8 +1,8 @@
 {
   "type": "module",
   "scripts": {
-    "dev": "tsx src/server/index.js --dev",
-    "start": "NODE_ENV=production tsx src/server/index.js",
+    "dev": "tsx src/server/index.ts --dev",
+    "start": "NODE_ENV=production tsx src/server/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "npm run build:client && npm run build:admin-client && npm run build:redact-client && npm run build:server && npm run build:admin-server && npm run build:redact-server",
     "build:client": "APP=main vite build --outDir ../../../dist/client --ssrManifest",
@@ -11,7 +11,7 @@
     "build:server": "APP=main vite build --ssr entry-server.tsx --outDir ../../../dist/server --emptyOutDir",
     "build:admin-server": "APP=admin vite build --ssr admin-entry-server.tsx --outDir ../../../dist/admin-server --emptyOutDir",
     "build:redact-server": "APP=redact vite build --ssr redact-entry-server.tsx --outDir ../../../dist/redact-server --emptyOutDir",
-    "devinstall": "zx ../../devinstall.mjs -- node src/server/index.js --dev",
+    "devinstall": "zx ../../devinstall.mjs -- tsx src/server/index.ts --dev",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx --fix"
   },
   "dependencies": {
