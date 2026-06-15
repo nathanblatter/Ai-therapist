@@ -1,8 +1,9 @@
 {
   "type": "module",
   "scripts": {
-    "dev": "node src/server/index.js --dev",
-    "start": "NODE_ENV=production node src/server/index.js",
+    "dev": "tsx src/server/index.js --dev",
+    "start": "NODE_ENV=production tsx src/server/index.js",
+    "typecheck": "tsc --noEmit",
     "build": "npm run build:client && npm run build:admin-client && npm run build:redact-client && npm run build:server && npm run build:admin-server && npm run build:redact-server",
     "build:client": "APP=main vite build --outDir ../../../dist/client --ssrManifest",
     "build:admin-client": "APP=admin vite build --outDir ../../../dist/admin-client --ssrManifest",
@@ -36,10 +37,15 @@
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "speakeasy": "^2.0.0",
+    "tsx": "^4.19.2",
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
     "autoprefixer": "^10.4.21",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.37.5",
