@@ -1,15 +1,26 @@
-import { join, dirname, resolve } from "path";
+import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import react from "@vitejs/plugin-react";
 
-const path = fileURLToPath(import.meta.url);
+const repoRoot = dirname(fileURLToPath(import.meta.url));
+
+// One config for all three SSR sub-apps. Select with the APP env var
+// (see the build:* scripts in package.json); defaults to "main".
+const APPS = {
+  main: { dir: "src/client/main", html: "index.html", base: "/" },
+  admin: { dir: "src/client/admin", html: "admin.html", base: "/" },
+  redact: { dir: "src/client/redact", html: "redact.html", base: "/redact/" },
+};
+
+const app = APPS[process.env.APP || "main"];
 
 export default {
-  root: join(dirname(path), "src/client/main"),
+  root: join(repoRoot, app.dir),
+  base: app.base,
   plugins: [react()],
-  // Add this 'server' section
-  server: {
-    host: true, // This will expose the server to the network
-    allowedHosts: ["www.byuisresearch.com","byuisresearch.com"], // Add your allowed hosts here
+  build: {
+    rollupOptions: {
+      input: join(repoRoot, app.dir, app.html),
+    },
   },
 };
