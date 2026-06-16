@@ -1,30 +1,102 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle } from 'react-feather';
 
+interface CrisisContact {
+  hotline: string;
+  phone: string;
+  text: string;
+  enabled: boolean;
+}
+
+interface SessionLimits {
+  max_duration_minutes: number;
+  max_sessions_per_day: number;
+  cooldown_minutes: number;
+  enabled: boolean;
+}
+
+interface Features {
+  voice_enabled: boolean;
+  chat_enabled: boolean;
+  file_upload_enabled: boolean;
+  session_recording_enabled: boolean;
+  output_modalities: string[];
+}
+
+interface AiModel {
+  model: string;
+  description: string;
+}
+
+interface ClientLogging {
+  enabled: boolean;
+}
+
+interface VoiceEntry {
+  value: string;
+  label: string;
+  description?: string;
+  enabled: boolean;
+}
+
+interface LanguageEntry {
+  value: string;
+  label: string;
+  description?: string;
+  systemPromptAddition?: string;
+  enabled: boolean;
+}
+
+interface VoicesConfig {
+  voices: VoiceEntry[];
+  default_voice: string;
+}
+
+interface LanguagesConfig {
+  languages: LanguageEntry[];
+  default_language: string;
+}
+
+interface ConfigEntry<T> {
+  value: T;
+  updated_at?: string;
+  updated_by?: string;
+}
+
+interface SystemConfigData {
+  crisis_contact?: ConfigEntry<CrisisContact>;
+  session_limits?: ConfigEntry<SessionLimits>;
+  features?: ConfigEntry<Features>;
+  ai_model?: ConfigEntry<AiModel>;
+  client_logging?: ConfigEntry<ClientLogging>;
+  voices?: ConfigEntry<VoicesConfig>;
+  languages?: ConfigEntry<LanguagesConfig>;
+}
+
 export default function SystemConfig() {
-  const [config, setConfig] = useState(null);
+  const [config, setConfig] = useState<SystemConfigData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
 
   // Local state for form fields
-  const [crisisContact, setCrisisContact] = useState({
+  const [crisisContact, setCrisisContact] = useState<CrisisContact>({
     hotline: '',
     phone: '',
     text: '',
     enabled: true
   });
 
-  const [sessionLimits, setSessionLimits] = useState({
+  const [sessionLimits, setSessionLimits] = useState<SessionLimits>({
     max_duration_minutes: 30,
     max_sessions_per_day: 3,
     cooldown_minutes: 30,
     enabled: true
   });
 
-  const [features, setFeatures] = useState({
+  const [features, setFeatures] = useState<Features>({
     voice_enabled: true,
     chat_enabled: true,
     file_upload_enabled: false,
@@ -32,28 +104,28 @@ export default function SystemConfig() {
     output_modalities: ["audio"]
   });
 
-  const [aiModel, setAiModel] = useState({
+  const [aiModel, setAiModel] = useState<AiModel>({
     model: 'gpt-realtime-mini',
     description: 'Fast, cost-effective realtime model'
   });
 
-  const [clientLogging, setClientLogging] = useState({
+  const [clientLogging, setClientLogging] = useState<ClientLogging>({
     enabled: false
   });
 
-  const [voices, setVoices] = useState({
+  const [voices, setVoices] = useState<VoicesConfig>({
     voices: [],
     default_voice: 'cedar'
   });
 
-  const [languages, setLanguages] = useState({
+  const [languages, setLanguages] = useState<LanguagesConfig>({
     languages: [],
     default_language: 'en'
   });
 
   // New voice/language form states
-  const [newVoice, setNewVoice] = useState({ value: '', label: '', description: '' });
-  const [newLanguage, setNewLanguage] = useState({
+  const [newVoice, setNewVoice] = useState<Omit<VoiceEntry, 'enabled'>>({ value: '', label: '', description: '' });
+  const [newLanguage, setNewLanguage] = useState<Omit<LanguageEntry, 'enabled'>>({
     value: '',
     label: '',
     description: '',
@@ -72,7 +144,7 @@ export default function SystemConfig() {
       const response = await fetch('/admin/api/config');
       if (!response.ok) throw new Error('Failed to fetch configuration');
 
-      const data = await response.json();
+      const data: SystemConfigData = await response.json();
       setConfig(data);
 
       // Populate form fields
@@ -99,8 +171,8 @@ export default function SystemConfig() {
       }
 
       setHasChanges(false);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -179,8 +251,8 @@ export default function SystemConfig() {
 
       // Refresh config to get updated timestamps
       await fetchConfig();
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -192,48 +264,50 @@ export default function SystemConfig() {
     }
   };
 
-  const updateCrisisContact = (field, value) => {
+  const updateCrisisContact = (field: keyof CrisisContact, value: string | boolean) => {
     setCrisisContact(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
-  const updateSessionLimits = (field, value) => {
+  const updateSessionLimits = (field: keyof SessionLimits, value: number | boolean) => {
     setSessionLimits(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
-  const updateFeatures = (field, value) => {
+  const updateFeatures = (field: keyof Features, value: boolean | string[]) => {
     setFeatures(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
-  const updateAiModel = (field, value) => {
+  const updateAiModel = (field: keyof AiModel, value: string) => {
     setAiModel(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
-  const updateClientLogging = (field, value) => {
+  const updateClientLogging = (field: keyof ClientLogging, value: boolean) => {
     setClientLogging(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
-  const updateVoiceField = (index, field, value) => {
+  const updateVoiceField = (index: number, field: keyof VoiceEntry, value: string | boolean) => {
     const updated = { ...voices };
-    updated.voices[index][field] = value;
+    updated.voices = [...updated.voices];
+    updated.voices[index] = { ...updated.voices[index], [field]: value };
     setVoices(updated);
     setHasChanges(true);
   };
 
-  const toggleVoiceEnabled = (index) => {
+  const toggleVoiceEnabled = (index: number) => {
     const updated = { ...voices };
-    updated.voices[index].enabled = !updated.voices[index].enabled;
+    updated.voices = [...updated.voices];
+    updated.voices[index] = { ...updated.voices[index], enabled: !updated.voices[index].enabled };
     setVoices(updated);
     setHasChanges(true);
   };
 
-  const deleteVoice = (index) => {
+  const deleteVoice = (index: number) => {
     const updated = { ...voices };
-    updated.voices.splice(index, 1);
+    updated.voices = updated.voices.filter((_, i) => i !== index);
     setVoices(updated);
     setHasChanges(true);
   };
@@ -244,29 +318,31 @@ export default function SystemConfig() {
       return;
     }
     const updated = { ...voices };
-    updated.voices.push({ ...newVoice, enabled: true });
+    updated.voices = [...updated.voices, { ...newVoice, enabled: true }];
     setVoices(updated);
     setNewVoice({ value: '', label: '', description: '' });
     setHasChanges(true);
   };
 
-  const updateLanguageField = (index, field, value) => {
+  const updateLanguageField = (index: number, field: keyof LanguageEntry, value: string | boolean) => {
     const updated = { ...languages };
-    updated.languages[index][field] = value;
+    updated.languages = [...updated.languages];
+    updated.languages[index] = { ...updated.languages[index], [field]: value };
     setLanguages(updated);
     setHasChanges(true);
   };
 
-  const toggleLanguageEnabled = (index) => {
+  const toggleLanguageEnabled = (index: number) => {
     const updated = { ...languages };
-    updated.languages[index].enabled = !updated.languages[index].enabled;
+    updated.languages = [...updated.languages];
+    updated.languages[index] = { ...updated.languages[index], enabled: !updated.languages[index].enabled };
     setLanguages(updated);
     setHasChanges(true);
   };
 
-  const deleteLanguage = (index) => {
+  const deleteLanguage = (index: number) => {
     const updated = { ...languages };
-    updated.languages.splice(index, 1);
+    updated.languages = updated.languages.filter((_, i) => i !== index);
     setLanguages(updated);
     setHasChanges(true);
   };
@@ -277,7 +353,7 @@ export default function SystemConfig() {
       return;
     }
     const updated = { ...languages };
-    updated.languages.push({ ...newLanguage, enabled: true });
+    updated.languages = [...updated.languages, { ...newLanguage, enabled: true }];
     setLanguages(updated);
     setNewLanguage({ value: '', label: '', description: '', systemPromptAddition: '' });
     setHasChanges(true);
@@ -937,7 +1013,7 @@ export default function SystemConfig() {
               </div>
             </div>
 
-            
+
           </div>
         </div>
       )}

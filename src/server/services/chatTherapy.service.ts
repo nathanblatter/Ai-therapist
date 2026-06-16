@@ -8,16 +8,22 @@ import { getOpenAIKey } from "../config/secrets.js";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 dotenv.config();
+
+interface ChatMessage {
+  role: string;
+  content: string;
+}
+
 // In-memory conversation history for active sessions
 // Structure: sessionId → [{ role, content }, ...]
-const conversationHistory = new Map();
+const conversationHistory = new Map<string, ChatMessage[]>();
 
 /**
  * Initialize a new chat therapy session
  * @param {string} sessionId - Unique session identifier
  * @param {string} systemPrompt - System instructions for the AI
  */
-export function initializeChatSession(sessionId, systemPrompt) {
+export function initializeChatSession(sessionId: string, systemPrompt: string): void {
   conversationHistory.set(sessionId, [
     {
       role: 'system',
@@ -33,7 +39,7 @@ export function initializeChatSession(sessionId, systemPrompt) {
  * @param {string} userMessage - User's message
  * @returns {Promise<string>} - AI assistant's response
  */
-export async function sendMessage(sessionId, userMessage) {
+export async function sendMessage(sessionId: string, userMessage: string): Promise<string> {
   const apiKey = await getOpenAIKey();
   const client = new OpenAI({ apiKey });
 
@@ -42,16 +48,16 @@ export async function sendMessage(sessionId, userMessage) {
     throw new Error(`Session ${sessionId} not initialized. Call initializeChatSession first.`);
   }
 
-  const messages = conversationHistory.get(sessionId);
+  const messages = conversationHistory.get(sessionId)!;
 
   try {
     // Extract system message and conversation history
-    const systemMessage = messages.find(m => m.role === 'system')?.content || '';
-    const conversationMessages = messages.filter(m => m.role !== 'system');
+    const systemMessage = messages.find((m: ChatMessage) => m.role === 'system')?.content || '';
+    const conversationMessages = messages.filter((m: ChatMessage) => m.role !== 'system');
 
     // Build input array for OpenAI Responses API
     // Convert system role to developer role, keep user and assistant roles
-    const inputMessages = [];
+    const inputMessages: ChatMessage[] = [];
 
     // Add system instructions as developer message if present
     if (systemMessage) {
@@ -71,7 +77,7 @@ export async function sendMessage(sessionId, userMessage) {
     });
 
     // Call OpenAI Responses API
-    const response = await client.responses.create({
+    const response = await (client as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<{ output_text: string }> } }).responses.create({
       model: 'gpt-5.2',
       input: inputMessages,
       store: false
@@ -97,9 +103,10 @@ export async function sendMessage(sessionId, userMessage) {
 
     return assistantMessage;
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('[ChatTherapy] Error generating response:', error);
-    throw new Error(`Failed to generate response: ${error.message}`);
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to generate response: ${msg}`);
   }
 }
 
@@ -108,7 +115,7 @@ export async function sendMessage(sessionId, userMessage) {
  * @param {string} sessionId
  * @returns {Array} Array of message objects
  */
-export function getConversationHistory(sessionId) {
+export function getConversationHistory(sessionId: string): ChatMessage[] {
   return conversationHistory.get(sessionId) || [];
 }
 
@@ -116,7 +123,7 @@ export function getConversationHistory(sessionId) {
  * End a chat therapy session and clean up memory
  * @param {string} sessionId
  */
-export function endChatSession(sessionId) {
+export function endChatSession(sessionId: string): void {
   const hadSession = conversationHistory.has(sessionId);
   conversationHistory.delete(sessionId);
 
@@ -129,6 +136,6 @@ export function endChatSession(sessionId) {
  * Get active session count
  * @returns {number}
  */
-export function getActiveSessionCount() {
+export function getActiveSessionCount(): number {
   return conversationHistory.size;
 }

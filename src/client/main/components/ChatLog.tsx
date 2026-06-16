@@ -1,6 +1,18 @@
 import React from "react";
 
-export default function ChatLog({ messages, assistantStream }) {
+interface ChatMessage {
+  id: string;
+  role: string;
+  text: string;
+  isAdminMessage?: boolean;
+}
+
+interface ChatLogProps {
+  messages: ChatMessage[];
+  assistantStream: string;
+}
+
+export default function ChatLog({ messages, assistantStream }: ChatLogProps) {
   return (
     <div
       className="flex-grow flex-col gap-3 p-4 overflow-y-auto h-full"
@@ -12,7 +24,7 @@ export default function ChatLog({ messages, assistantStream }) {
       {messages.length === 0 && !assistantStream ? (
         <p className="text-gray-400 text-2xl text-center" role="status">Start talking or type in the chat bar to begin...</p>
       ) : (
-        messages.map((msg) => (
+        messages.map((msg: ChatMessage) => (
           <div
             key={msg.id}
             className={`flex w-full ${

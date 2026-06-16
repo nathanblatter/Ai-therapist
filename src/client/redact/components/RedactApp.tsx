@@ -1,14 +1,22 @@
 import { useState, useEffect } from "react";
 import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare, LogOut } from "react-feather";
 
+interface RedactMessage {
+  message_id: string;
+  role: string;
+  message_type: string;
+  created_at: string;
+  content_redacted: string | null;
+}
+
 export default function RedactApp() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<RedactMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [saving, setSaving] = useState(null);
-  const [saveSuccess, setSaveSuccess] = useState(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
   const handleLogout = async () => {
     try {
@@ -19,7 +27,7 @@ export default function RedactApp() {
       if (response.ok) {
         window.location.href = '/login';
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Logout failed:', err);
     }
   };
@@ -36,8 +44,8 @@ export default function RedactApp() {
       }
       const data = await response.json();
       setMessages(data.messages);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -47,7 +55,7 @@ export default function RedactApp() {
     fetchMessages();
   }, []);
 
-  const handleEdit = (message) => {
+  const handleEdit = (message: RedactMessage) => {
     setEditingId(message.message_id);
     setEditValue(message.content_redacted || "");
   };
@@ -57,7 +65,7 @@ export default function RedactApp() {
     setEditValue("");
   };
 
-  const handleSave = async (messageId) => {
+  const handleSave = async (messageId: string) => {
     setSaving(messageId);
     setSaveSuccess(null);
     try {
@@ -84,14 +92,14 @@ export default function RedactApp() {
       setEditValue("");
       setSaveSuccess(messageId);
       setTimeout(() => setSaveSuccess(null), 2000);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setSaving(null);
     }
   };
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string): string => {
     return new Date(dateString).toLocaleString();
   };
 

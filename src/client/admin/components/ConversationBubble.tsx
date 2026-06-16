@@ -1,3 +1,33 @@
+interface MessageData {
+  message_id?: string;
+  role: string;
+  message_type?: string;
+  created_at?: string;
+  message?: string;
+  metadata?: {
+    tool_name?: string;
+    status?: string;
+  };
+  extras?: {
+    edited?: boolean;
+    edited_at?: string;
+    [key: string]: unknown;
+  };
+}
+
+interface ConversationBubbleProps {
+  message: MessageData;
+  isEditMode?: boolean;
+  isEditing?: boolean;
+  editedContent?: string;
+  onEdit?: () => void;
+  onSave?: () => void;
+  onDelete?: () => void;
+  onCancel?: () => void;
+  onContentChange?: (value: string) => void;
+  userRole?: string;
+}
+
 export default function ConversationBubble({
   message,
   isEditMode = false,
@@ -9,8 +39,8 @@ export default function ConversationBubble({
   onCancel,
   onContentChange,
   userRole
-}) {
-  const formatTime = (timestamp) => {
+}: ConversationBubbleProps) {
+  const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleString();
   };
 
@@ -37,7 +67,7 @@ export default function ConversationBubble({
     <div className={`flex w-full mb-3 ${message.role === 'user' ? 'justify-end' : message.role === 'assistant' ? 'justify-start' : 'justify-center'}`}>
       <div className={`max-w-xl px-4 py-3 rounded-2xl ${getBubbleClass()}`}>
         <div className="text-xs opacity-70 mb-1">
-          {message.role.toUpperCase()} | {message.message_type} | {formatTime(message.created_at)}
+          {message.role.toUpperCase()} | {message.message_type} | {message.created_at ? formatTime(message.created_at) : ''}
         </div>
 
         {/* Visual indicator for which field is being edited */}
@@ -51,7 +81,7 @@ export default function ConversationBubble({
         {isEditing ? (
           <textarea
             value={editedContent}
-            onChange={(e) => onContentChange(e.target.value)}
+            onChange={(e) => onContentChange && onContentChange(e.target.value)}
             className="w-full p-2 border rounded text-black min-h-[100px]"
             rows={4}
           />

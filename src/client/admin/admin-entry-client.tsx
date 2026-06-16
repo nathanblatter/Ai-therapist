@@ -7,7 +7,7 @@ import "../shared/base.css";
 document.body.classList.add('hydrated');
 
 ReactDOM.hydrateRoot(
-  document.getElementById("root"),
+  document.getElementById("root") as Element,
   <StrictMode>
     <AdminApp />
   </StrictMode>,

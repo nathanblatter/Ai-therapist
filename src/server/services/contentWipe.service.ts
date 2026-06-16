@@ -1,13 +1,22 @@
 import { pool } from '../config/db.js';
 
 // Scheduler state
-let wipeInterval = null;
-let nextScheduledWipe = null;
+let wipeInterval: ReturnType<typeof setTimeout> | null = null;
+let nextScheduledWipe: Date | null = null;
+
+interface RetentionSettings {
+  enabled: boolean;
+  retention_hours: number;
+  wipe_time: string;
+  require_redaction_complete: boolean;
+  last_wipe_at: string | null;
+  last_wipe_count: number;
+}
 
 /**
  * Get content retention settings from database
  */
-export async function getRetentionSettings() {
+export async function getRetentionSettings(): Promise<RetentionSettings> {
   try {
     const result = await pool.query(
       `SELECT config_value FROM system_config WHERE config_key = 'content_retention'`
@@ -15,14 +24,14 @@ export async function getRetentionSettings() {
     if (result.rows.length === 0) {
       return getDefaultSettings();
     }
-    return result.rows[0].config_value;
+    return result.rows[0].config_value as RetentionSettings;
   } catch (err) {
     console.error('Failed to fetch retention settings:', err);
     return getDefaultSettings();
   }
 }
 
-function getDefaultSettings() {
+function getDefaultSettings(): RetentionSettings {
   return {
     enabled: true,
     retention_hours: 24,
@@ -36,7 +45,7 @@ function getDefaultSettings() {
 /**
  * Update content retention settings
  */
-export async function updateRetentionSettings(settings, updatedBy) {
+export async function updateRetentionSettings(settings: RetentionSettings, updatedBy: string): Promise<RetentionSettings> {
   const result = await pool.query(
     `UPDATE system_config
      SET config_value = $1, updated_at = CURRENT_TIMESTAMP, updated_by = $2
@@ -48,7 +57,7 @@ export async function updateRetentionSettings(settings, updatedBy) {
   // Restart scheduler with new settings
   await startScheduler();
 
-  return result.rows[0]?.config_value || settings;
+  return (result.rows[0]?.config_value as RetentionSettings) || settings;
 }
 
 /**
@@ -57,7 +66,13 @@ export async function updateRetentionSettings(settings, updatedBy) {
  * @param {string} triggeredByUser - Username if manual trigger
  * @returns {Object} Wipe result with counts
  */
-export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByUser = null) {
+export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByUser: string | null = null): Promise<{
+  success: boolean;
+  wipeId: unknown;
+  messagesWiped?: number | null;
+  messagesSkipped?: number;
+  error?: string;
+}> {
   const settings = await getRetentionSettings();
 
   // Create log entry
@@ -77,8 +92,8 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
     cutoffTime.setHours(cutoffTime.getHours() - settings.retention_hours);
 
     // Build the wipe query based on settings
-    let wipeQuery;
-    let queryParams;
+    let wipeQuery: string;
+    let queryParams: unknown[];
 
     if (settings.require_redaction_complete) {
       // Only wipe content where redaction is complete
@@ -130,10 +145,10 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
     );
 
     // Update last wipe info in settings
-    const updatedSettings = {
+    const updatedSettings: RetentionSettings = {
       ...settings,
       last_wipe_at: new Date().toISOString(),
-      last_wipe_count: messagesWiped
+      last_wipe_count: messagesWiped ?? 0
     };
     await pool.query(
       `UPDATE system_config
@@ -162,8 +177,10 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
       messagesSkipped
     };
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Content wipe failed:', error);
+
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
     // Update log entry with error
     await pool.query(
@@ -172,13 +189,13 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
            status = 'failed',
            error_message = $1
        WHERE wipe_id = $2`,
-      [error.message, wipeId]
+      [errorMessage, wipeId]
     );
 
     return {
       success: false,
       wipeId,
-      error: error.message
+      error: errorMessage
     };
   }
 }
@@ -186,7 +203,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
 /**
  * Get wipe statistics and pending content info
  */
-export async function getWipeStats() {
+export async function getWipeStats(): Promise<Record<string, unknown>> {
   const settings = await getRetentionSettings();
 
   // Get pending wipe count (messages that would be wiped now)
@@ -244,7 +261,7 @@ export async function getWipeStats() {
 /**
  * Parse time string (HH:MM) and calculate next occurrence
  */
-function getNextWipeTime(wipeTimeStr) {
+function getNextWipeTime(wipeTimeStr: string): Date {
   const [hours, minutes] = wipeTimeStr.split(':').map(Number);
   const now = new Date();
   const next = new Date();
@@ -262,7 +279,7 @@ function getNextWipeTime(wipeTimeStr) {
 /**
  * Calculate milliseconds until next wipe time
  */
-function getMillisecondsUntilWipe(wipeTimeStr) {
+function getMillisecondsUntilWipe(wipeTimeStr: string): number {
   const next = getNextWipeTime(wipeTimeStr);
   return next.getTime() - Date.now();
 }
@@ -270,7 +287,7 @@ function getMillisecondsUntilWipe(wipeTimeStr) {
 /**
  * Schedule the next wipe and set up recurring schedule
  */
-async function scheduleNextWipe() {
+async function scheduleNextWipe(): Promise<void> {
   const settings = await getRetentionSettings();
 
   if (!settings.enabled) {
@@ -300,7 +317,7 @@ async function scheduleNextWipe() {
 /**
  * Start the content wipe scheduler
  */
-export async function startScheduler() {
+export async function startScheduler(): Promise<void> {
   console.log('🚀 Starting content wipe scheduler...');
   await scheduleNextWipe();
 }
@@ -308,7 +325,7 @@ export async function startScheduler() {
 /**
  * Stop the scheduler
  */
-export function stopScheduler() {
+export function stopScheduler(): void {
   if (wipeInterval) {
     clearTimeout(wipeInterval);
     wipeInterval = null;
@@ -319,7 +336,7 @@ export function stopScheduler() {
 /**
  * Get scheduler status
  */
-export function getSchedulerStatus() {
+export function getSchedulerStatus(): { running: boolean; nextScheduledWipe: string | null } {
   return {
     running: wipeInterval !== null,
     nextScheduledWipe: nextScheduledWipe?.toISOString() || null

@@ -1,8 +1,14 @@
 import redactPHI from './redaction.service.js';
 import { pool } from '../config/db.js';
 
+interface RedactionJob {
+  messageId: number;
+  content: string | null;
+  sessionId: string;
+}
+
 // In-memory queue for redaction jobs
-const redactionQueue = [];
+const redactionQueue: RedactionJob[] = [];
 let isProcessing = false;
 
 /**
@@ -11,7 +17,7 @@ let isProcessing = false;
  * @param {string} content - Original content to redact
  * @param {string} sessionId - Session ID for Socket.io event
  */
-export function queueRedaction(messageId, content, sessionId) {
+export function queueRedaction(messageId: number, content: string | null, sessionId: string): void {
   redactionQueue.push({ messageId, content, sessionId });
 
   // Start processing if not already running
@@ -31,13 +37,13 @@ async function processQueue() {
   isProcessing = true;
 
   while (redactionQueue.length > 0) {
-    const job = redactionQueue.shift();
+    const job = redactionQueue.shift()!; // safe: checked length > 0
 
     try {
       console.log(`🔒 Redacting message ${job.messageId}...`);
 
       // Perform double-pass redaction
-      const redactedContent = await redactPHI(job.content);
+      const redactedContent = await redactPHI(job.content ?? '');
 
       // Update the database with redacted content
       const redactedAt = new Date().toISOString();
@@ -59,15 +65,16 @@ async function processQueue() {
       }
 
       console.log(`Message ${job.messageId} redacted successfully`);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Failed to redact message ${job.messageId}:`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Store error in metadata for debugging
       await pool.query(
         `UPDATE messages
          SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('redaction_error', $1::text)
          WHERE message_id = $2`,
-        [error.message, job.messageId]
+        [errorMessage, job.messageId]
       ).catch(err => console.error('Failed to update error metadata:', err));
     }
   }
@@ -89,7 +96,7 @@ export function getQueueStatus() {
  * Batch queue multiple messages for redaction
  * @param {Array<{messageId: number, content: string, sessionId: string}>} messages
  */
-export function queueRedactionBatch(messages) {
+export function queueRedactionBatch(messages: Array<{ messageId: number; content: string | null; sessionId: string }>): void {
   for (const msg of messages) {
     queueRedaction(msg.messageId, msg.content, msg.sessionId);
   }

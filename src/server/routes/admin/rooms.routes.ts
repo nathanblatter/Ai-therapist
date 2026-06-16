@@ -10,7 +10,7 @@ const log = createLogger('admin:rooms');
  * Handle room cleanup when a session ends.
  * Removes room assignment and promotes next person from queue.
  */
-export async function handleSessionEndRoomCleanup(sessionId) {
+export async function handleSessionEndRoomCleanup(sessionId: string): Promise<void> {
   try {
     const sessionResult = await pool.query(
       'SELECT user_id FROM therapy_sessions WHERE session_id = $1',

@@ -1,20 +1,101 @@
-import express from "express";
+import express, { type Request, type Response } from "express";
 import { createServer } from "http";
-import { Server } from "socket.io";
+import { Server, type Socket } from "socket.io";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
-import session from "express-session";
+import session, { type Session, type SessionData } from "express-session";
+import type { IncomingMessage } from "http";
 import connectPgSimple from "connect-pg-simple";
 import {getOpenAIKey} from "./config/secrets.js"; // Import the function to get the OpenAI API key
 import {pool } from "./config/db.js";
 import { requireAuth, requireRole, verifyCredentials, createUser, getAllUsers, getUserById, updateUser, deleteUser } from "./middleware/auth.js";
-import { createSession, getSession, insertMessagesBatch, upsertSessionConfig, updateSessionStatus, getAiModel } from "./models/dbQueries.js";
+import { createSession, getSession, insertMessagesBatch, upsertSessionConfig, updateSessionStatus, getAiModel, type InsertMessageInput } from "./models/dbQueries.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { getRetentionSettings, updateRetentionSettings, executeContentWipe, getWipeStats, startScheduler as startContentWipeScheduler, getSchedulerStatus } from "./services/contentWipe.service.js";
+
+// ---------- local type helpers ----------
+
+/** Typed shape of a row in system_config.config_value (JSONB, arbitrary keys) */
+type SystemConfig = Record<string, unknown>;
+
+/** Minimal typed request used inside socket.io session middleware */
+type SessionRequest = IncomingMessage & {
+  session: Session & Partial<SessionData>;
+};
+
+/** Socket with extra per-connection fields we attach after auth */
+interface AuthSocket extends Socket {
+  userId?: number;
+  username?: string;
+  userRole?: string;
+}
+
+/** Return type of checkSessionLimits */
+type SessionLimitResult =
+  | { allowed: true; bypass?: string; limits?: { max_duration_minutes: number; max_sessions_per_day: number; sessions_today: number }; reason?: undefined; message?: undefined; limit?: undefined; current?: undefined; cooldown_minutes?: undefined; minutes_remaining?: undefined }
+  | { allowed: false; reason: string; message: string; limit?: number; current?: number; cooldown_minutes?: number; minutes_remaining?: number };
+
+/** Shape of user update fields */
+interface UserUpdates {
+  username?: string;
+  password?: string;
+  role?: string;
+}
+
+/** Typed voice/language option entry from system_config */
+interface VoiceOption {
+  value: string;
+  label: string;
+  description?: string;
+  enabled: boolean;
+  systemPromptAddition?: string;
+}
+
+interface VoicesConfig {
+  voices?: VoiceOption[];
+  default_voice: string;
+}
+
+interface LanguageOption {
+  value: string;
+  label: string;
+  description?: string;
+  enabled: boolean;
+  systemPromptAddition?: string;
+}
+
+interface LanguagesConfig {
+  languages?: LanguageOption[];
+  default_language: string;
+}
+
+interface SessionLimitsConfig {
+  enabled: boolean;
+  max_sessions_per_day: number;
+  cooldown_minutes: number;
+  max_duration_minutes: number;
+}
+
+interface CrisisContactConfig {
+  hotline: string;
+  phone: string;
+  text?: string;
+  enabled: boolean;
+}
+
+interface SystemPromptEntry {
+  prompt: string;
+  last_modified?: string;
+}
+
+interface SystemPromptsConfig {
+  realtime: SystemPromptEntry;
+  chat: SystemPromptEntry;
+}
 
 // ES module-compatible __dirname replacement
 const __filename = fileURLToPath(import.meta.url);
@@ -52,11 +133,11 @@ const apiKey = await getOpenAIKey();
 // They will be loaded dynamically from the 'languages' config
 
 // Cache for system config to avoid database hits on every request
-let systemConfigCache = null;
-let configCacheTime = null;
+let systemConfigCache: SystemConfig | null = null;
+let configCacheTime: number | null = null;
 const CONFIG_CACHE_TTL = 60000; // 1 minute
 
-async function getSystemConfig() {
+async function getSystemConfig(): Promise<SystemConfig> {
   const now = Date.now();
 
   // Return cached config if still valid
@@ -66,8 +147,8 @@ async function getSystemConfig() {
 
   try {
     const result = await pool.query('SELECT * FROM system_config');
-    const config = {};
-    result.rows.forEach(row => {
+    const config: SystemConfig = {};
+    result.rows.forEach((row: { config_key: string; config_value: unknown }) => {
       config[row.config_key] = row.config_value;
     });
 
@@ -95,7 +176,7 @@ async function getSystemConfig() {
 }
 
 // Session limit enforcement helpers
-async function checkSessionLimits(userId, userRole = null) {
+async function checkSessionLimits(userId: number | string | null, userRole: string | null = null): Promise<SessionLimitResult> {
   if (!userId) {
     // Anonymous users don't have limits enforced
     return { allowed: true };
@@ -108,7 +189,7 @@ async function checkSessionLimits(userId, userRole = null) {
   }
 
   const config = await getSystemConfig();
-  const limits = config.session_limits || { enabled: false };
+  const limits = (config.session_limits as SessionLimitsConfig | undefined) ?? ({ enabled: false } as SessionLimitsConfig);
 
   if (!limits.enabled) {
     return { allowed: true };
@@ -151,7 +232,7 @@ async function checkSessionLimits(userId, userRole = null) {
     if (recentSessionResult.rows.length > 0) {
       const lastEndedAt = new Date(recentSessionResult.rows[0].ended_at);
       const now = new Date();
-      const timeSinceEndMs = now - lastEndedAt;
+      const timeSinceEndMs = now.getTime() - lastEndedAt.getTime();
       const cooldownMs = limits.cooldown_minutes * 60 * 1000;
 
       // Debug logging
@@ -201,7 +282,7 @@ function getNextMidnightSLC() {
 function getHoursUntilReset() {
   const now = new Date();
   const resetTime = getNextMidnightSLC();
-  return (resetTime - now) / (1000 * 60 * 60); // hours
+  return (resetTime.getTime() - now.getTime()) / (1000 * 60 * 60); // hours
 }
 
 // Default system prompt used as fallback if database config is unavailable
@@ -245,11 +326,12 @@ You provide supportive, ethical guidance, never diagnose/prescribe, keep all con
 
 async function getSystemPrompt(language = 'en', sessionType = 'realtime') {
   const config = await getSystemConfig();
-  const crisisContact = config.crisis_contact || {
+  const crisisContact = (config.crisis_contact as CrisisContactConfig | undefined) ?? {
     hotline: 'BYU Counseling and Psychological Services',
     phone: '(801) 422-3035',
-    text: 'HELLO to 741741'
-  };
+    text: 'HELLO to 741741',
+    enabled: true
+  } as CrisisContactConfig;
 
   // Build the crisis text for interpolation
   const crisisText = crisisContact.enabled
@@ -258,18 +340,18 @@ async function getSystemPrompt(language = 'en', sessionType = 'realtime') {
 
   // Get the prompt from database config, or use default fallback
   let basePrompt = DEFAULT_SYSTEM_PROMPT;
-  const systemPrompts = config.system_prompts;
-  if (systemPrompts && systemPrompts[sessionType] && systemPrompts[sessionType].prompt) {
-    basePrompt = systemPrompts[sessionType].prompt;
+  const systemPrompts = config.system_prompts as SystemPromptsConfig | undefined;
+  if (systemPrompts && systemPrompts[sessionType as keyof SystemPromptsConfig] && systemPrompts[sessionType as keyof SystemPromptsConfig].prompt) {
+    basePrompt = systemPrompts[sessionType as keyof SystemPromptsConfig].prompt;
   }
 
   // Interpolate {{crisis_text}} placeholder
   basePrompt = basePrompt.replace(/\{\{crisis_text\}\}/g, crisisText);
 
   // Get language-specific addition from database config
-  const languagesConfig = config.languages || { languages: [], default_language: 'en' };
+  const languagesConfig = (config.languages as { languages?: Array<{ value: string; systemPromptAddition?: string }>; default_language?: string }) || { languages: [], default_language: 'en' };
   const languageObj = languagesConfig.languages
-    ? languagesConfig.languages.find(l => l.value === language)
+    ? languagesConfig.languages.find((l: { value: string; systemPromptAddition?: string }) => l.value === language)
     : null;
   const languageAddition = languageObj?.systemPromptAddition || '';
 
@@ -313,8 +395,8 @@ app.use(restrictParticipantsToUs);
 
 // ==================== SOCKET.IO SETUP ====================
 // Socket.io authentication middleware
-io.use((socket, next) => {
-  const req = socket.request;
+io.use((socket: AuthSocket, next) => {
+  const req = socket.request as SessionRequest;
 
   // Get session from socket handshake
   const sessionMiddleware = session({
@@ -330,7 +412,7 @@ io.use((socket, next) => {
     }
   });
 
-  sessionMiddleware(req, {}, (err) => {
+  sessionMiddleware(req as unknown as Request, {} as Response, (err) => {
     if (err) {
       console.error('[Socket.io] Session middleware error:', err);
       return next(new Error('Session error'));
@@ -353,7 +435,7 @@ io.use((socket, next) => {
 });
 
 // Connection handler
-io.on('connection', (socket) => {
+io.on('connection', (socket: AuthSocket) => {
   const isAdmin = socket.userRole === 'therapist' || socket.userRole === 'researcher';
 
   if (isAdmin) {
@@ -537,10 +619,10 @@ app.post("/api/auth/login", async (req, res) => {
 
       if (mfaToken) {
         // Verify TOTP token
-        mfaValid = verifyTOTP(mfaToken, user.mfa_secret);
+        mfaValid = verifyTOTP(mfaToken, user.mfa_secret ?? '');
       } else if (backupCode) {
         // Verify backup code
-        const verification = await verifyBackupCode(backupCode, user.mfa_backup_codes);
+        const verification = await verifyBackupCode(backupCode, user.mfa_backup_codes ?? []);
         mfaValid = verification.valid;
 
         if (mfaValid) {
@@ -615,8 +697,8 @@ app.post("/api/auth/register", requireRole('researcher'), async (req, res) => {
         role: user.role
       }
     });
-  } catch (error) {
-    if (error.message === 'Username already exists') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'Username already exists') {
       return res.status(409).json({ error: 'Username already exists' });
     }
     console.error('Registration error:', error);
@@ -657,16 +739,16 @@ app.get("/api/auth/status", (req, res) => {
 app.get("/api/mfa/status", requireAuth, async (req, res) => {
   try {
     const { getMFAStatus } = await import('./services/mfa.service.js');
-    const status = await getMFAStatus(req.session.userId);
+    const status = await getMFAStatus(req.session.userId!);
 
     // Don't send the secret to the client
-    delete status.secret;
+    const { secret: _secret, ...statusWithoutSecret } = status;
 
     res.json({
       success: true,
-      mfa: status
+      mfa: statusWithoutSecret
     });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to get MFA status:', error);
     res.status(500).json({ error: 'Failed to get MFA status' });
   }
@@ -683,10 +765,10 @@ app.post("/api/mfa/setup/init", requireAuth, async (req, res) => {
     }
 
     // Generate secret
-    const { secret, otpauthUrl } = generateMFASecret(req.session.username);
+    const { secret, otpauthUrl } = generateMFASecret(req.session.username!);
 
     // Generate QR code
-    const qrCode = await generateQRCode(otpauthUrl);
+    const qrCode = await generateQRCode(otpauthUrl!);
 
     // Store secret in session temporarily (not in database yet)
     req.session.tempMFASecret = secret;
@@ -731,7 +813,7 @@ app.post("/api/mfa/setup/verify", requireAuth, async (req, res) => {
     const { codes, hashedCodes } = await generateBackupCodes(10);
 
     // Enable MFA in database
-    await enableMFA(req.session.userId, secret, hashedCodes);
+    await enableMFA(req.session.userId!, secret, hashedCodes);
 
     // Clear temporary secret from session
     delete req.session.tempMFASecret;
@@ -762,14 +844,14 @@ app.post("/api/mfa/disable", requireAuth, async (req, res) => {
     const { disableMFA } = await import('./services/mfa.service.js');
 
     // Verify password before disabling MFA
-    const user = await verifyCredentials(req.session.username, password);
+    const user = await verifyCredentials(req.session.username!, password);
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid password' });
     }
 
     // Disable MFA
-    await disableMFA(req.session.userId);
+    await disableMFA(req.session.userId!);
 
     console.log(`MFA disabled for user ${req.session.username}`);
 
@@ -796,14 +878,14 @@ app.post("/api/mfa/regenerate-backup-codes", requireAuth, async (req, res) => {
     const { generateBackupCodes, updateBackupCodes, getMFAStatus } = await import('./services/mfa.service.js');
 
     // Verify password
-    const user = await verifyCredentials(req.session.username, password);
+    const user = await verifyCredentials(req.session.username!, password);
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid password' });
     }
 
     // Check if MFA is enabled
-    const mfaStatus = await getMFAStatus(req.session.userId);
+    const mfaStatus = await getMFAStatus(req.session.userId!);
 
     if (!mfaStatus.enabled) {
       return res.status(400).json({ error: 'MFA is not enabled' });
@@ -813,7 +895,7 @@ app.post("/api/mfa/regenerate-backup-codes", requireAuth, async (req, res) => {
     const { codes, hashedCodes } = await generateBackupCodes(10);
 
     // Update backup codes in database
-    await updateBackupCodes(req.session.userId, hashedCodes);
+    await updateBackupCodes(req.session.userId!, hashedCodes);
 
     console.log(`Backup codes regenerated for user ${req.session.username}`);
 
@@ -844,7 +926,7 @@ app.get('/api/rate-limits/status', requireAuth, async (req, res) => {
     }
 
     const config = await getSystemConfig();
-    const limits = config.session_limits || { enabled: false };
+    const limits = (config.session_limits as SessionLimitsConfig | undefined) ?? ({ enabled: false } as SessionLimitsConfig);
 
     if (!limits.enabled) {
       return res.json({ is_rate_limited: false, is_exempt: true, exemption_reason: 'limits_disabled' });
@@ -907,32 +989,32 @@ app.get("/api/users/preferences", requireAuth, async (req, res) => {
 
     // Get system config for enabled voices/languages
     const config = await getSystemConfig();
-    const voicesConfig = config.voices || {
+    const voicesConfig = (config.voices as VoicesConfig | undefined) ?? {
       voices: [
         { value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }
-      ],
+      ] as VoiceOption[],
       default_voice: 'cedar'
-    };
-    const languagesConfig = config.languages || {
+    } as VoicesConfig;
+    const languagesConfig = (config.languages as LanguagesConfig | undefined) ?? {
       languages: [
         { value: 'en', label: 'English', description: 'English', enabled: true }
-      ],
+      ] as LanguageOption[],
       default_language: 'en'
-    };
+    } as LanguagesConfig;
 
     let voice = voicesConfig.default_voice;
     let language = languagesConfig.default_language;
 
     if (result.rows.length > 0) {
-      const userVoice = result.rows[0].preferred_voice;
-      const userLanguage = result.rows[0].preferred_language;
+      const userVoice: string = result.rows[0].preferred_voice;
+      const userLanguage: string = result.rows[0].preferred_language;
 
       // Check if user's preference is still enabled
       const voiceEnabled = voicesConfig.voices
-        ? voicesConfig.voices.find(v => v.value === userVoice && v.enabled)
+        ? voicesConfig.voices.find((v: VoiceOption) => v.value === userVoice && v.enabled)
         : null;
       const languageEnabled = languagesConfig.languages
-        ? languagesConfig.languages.find(l => l.value === userLanguage && l.enabled)
+        ? languagesConfig.languages.find((l: LanguageOption) => l.value === userLanguage && l.enabled)
         : null;
 
       voice = voiceEnabled ? userVoice : voicesConfig.default_voice;
@@ -966,24 +1048,20 @@ app.put("/api/users/preferences", requireAuth, async (req, res) => {
   try {
     // Validate against enabled options
     const config = await getSystemConfig();
-    const voicesConfig = config.voices || {
-      voices: [
-        { value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }
-      ],
+    const voicesConfig = (config.voices as VoicesConfig | undefined) ?? {
+      voices: [{ value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }] as VoiceOption[],
       default_voice: 'cedar'
-    };
-    const languagesConfig = config.languages || {
-      languages: [
-        { value: 'en', label: 'English', description: 'English', enabled: true }
-      ],
+    } as VoicesConfig;
+    const languagesConfig = (config.languages as LanguagesConfig | undefined) ?? {
+      languages: [{ value: 'en', label: 'English', description: 'English', enabled: true }] as LanguageOption[],
       default_language: 'en'
-    };
+    } as LanguagesConfig;
 
     const voiceEnabled = voicesConfig.voices
-      ? voicesConfig.voices.find(v => v.value === voice && v.enabled)
+      ? voicesConfig.voices.find((v: VoiceOption) => v.value === voice && v.enabled)
       : null;
     const languageEnabled = languagesConfig.languages
-      ? languagesConfig.languages.find(l => l.value === language && l.enabled)
+      ? languagesConfig.languages.find((l: LanguageOption) => l.value === language && l.enabled)
       : null;
 
     if (!voiceEnabled) {
@@ -1053,7 +1131,7 @@ app.put("/api/users/:userid", requireAuth, async (req, res) => {
   }
 
   try {
-    const updates = {};
+    const updates: UserUpdates = {};
     if (username !== undefined) updates.username = username;
     if (password !== undefined) updates.password = password;
     if (role !== undefined && isResearcher) updates.role = role;
@@ -1062,7 +1140,7 @@ app.put("/api/users/:userid", requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    const updatedUser = await updateUser(userid, updates);
+    const updatedUser = await updateUser(userid, updates as Record<string, string>);
 
     // Update session if user updated their own info
     if (isSelf) {
@@ -1074,11 +1152,11 @@ app.put("/api/users/:userid", requireAuth, async (req, res) => {
       success: true,
       user: updatedUser
     });
-  } catch (error) {
-    if (error.message === 'Username already exists') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'Username already exists') {
       return res.status(409).json({ error: 'Username already exists' });
     }
-    if (error.message === 'User not found') {
+    if (error instanceof Error && error.message === 'User not found') {
       return res.status(404).json({ error: 'User not found' });
     }
     console.error('Error updating user:', error);
@@ -1096,8 +1174,8 @@ app.delete("/api/users/:userid", requireRole('researcher'), async (req, res) => 
       success: true,
       message: `User ${deletedUser.username} deleted successfully`
     });
-  } catch (error) {
-    if (error.message === 'User not found') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'User not found') {
       return res.status(404).json({ error: 'User not found' });
     }
     console.error('Error deleting user:', error);
@@ -1128,8 +1206,8 @@ app.post("/api/users", requireRole('researcher'), async (req, res) => {
         role: user.role
       }
     });
-  } catch (error) {
-    if (error.message === 'Username already exists') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'Username already exists') {
       return res.status(409).json({ error: 'Username already exists' });
     }
     console.error('User creation error:', error);
@@ -1333,7 +1411,8 @@ app.all("/token", async (req, res) => {
 
         // Schedule auto-termination if session limits are enabled (not for researchers)
         if (limitCheck.limits && limitCheck.limits.max_duration_minutes && !limitCheck.bypass) {
-          const durationMs = limitCheck.limits.max_duration_minutes * 60 * 1000;
+          const sessionLimits = limitCheck.limits; // captured for closure
+          const durationMs = sessionLimits.max_duration_minutes * 60 * 1000;
           setTimeout(async () => {
             try {
               // Check if session is still active
@@ -1343,7 +1422,7 @@ app.all("/token", async (req, res) => {
               );
 
               if (checkResult.rows.length > 0 && checkResult.rows[0].status === 'active') {
-                console.log(`⏰ Auto-terminating session ${sessionId} after ${limitCheck.limits.max_duration_minutes} minutes`);
+                console.log(`⏰ Auto-terminating session ${sessionId} after ${sessionLimits.max_duration_minutes} minutes`);
 
                 // End the session
                 const { updateSessionStatus } = await import("./models/dbQueries.js");
@@ -1357,7 +1436,7 @@ app.all("/token", async (req, res) => {
                   status: 'ended',
                   endedBy: 'system',
                   reason: 'duration_limit',
-                  message: `Your session has ended after ${limitCheck.limits.max_duration_minutes} minutes (maximum session duration).`,
+                  message: `Your session has ended after ${sessionLimits.max_duration_minutes} minutes (maximum session duration).`,
                   remoteTermination: true
                 });
 
@@ -1374,7 +1453,7 @@ app.all("/token", async (req, res) => {
             }
           }, durationMs);
 
-          console.log(`Session ${sessionId} will auto-terminate in ${limitCheck.limits.max_duration_minutes} minutes`);
+          console.log(`Session ${sessionId} will auto-terminate in ${sessionLimits.max_duration_minutes} minutes`);
         }
 
         // Insert session configuration
@@ -1413,7 +1492,8 @@ app.all("/token", async (req, res) => {
 
 // POST /api/chat/start - Start a chat-only therapy session
 app.post("/api/chat/start", async (req, res) => {
-  const userId = req.session?.userId || req.sessionID; // Use session userId or fallback to sessionID for anonymous
+  const userId: number | string = req.session?.userId ?? req.sessionID; // Use session userId or fallback to sessionID for anonymous
+  const numericUserId: number | null = typeof userId === 'number' ? userId : null;
 
   try {
     // Check session limits (same as /token endpoint)
@@ -1424,7 +1504,7 @@ app.post("/api/chat/start", async (req, res) => {
       return res.status(429).json({
         error: 'Session limit exceeded',
         reason: limitCheck.reason,
-        timeRemaining: limitCheck.timeRemaining
+        minutes_remaining: limitCheck.minutes_remaining
       });
     }
 
@@ -1498,7 +1578,7 @@ app.post("/api/chat/start", async (req, res) => {
     const username = req.session?.username || null;
     await createSession({
       sessionId,
-      userId,
+      userId: numericUserId,
       sessionName: null,  // Will be generated from conversation when session ends
       status: 'active',
       sessionType: 'chat'  // Mark as chat-only session
@@ -1522,11 +1602,11 @@ app.post("/api/chat/start", async (req, res) => {
       message: 'Chat therapy session started'
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to start chat session:', error);
     res.status(500).json({
       error: 'Failed to start chat session',
-      details: error.message
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
@@ -1621,11 +1701,11 @@ app.post("/api/chat/message", async (req, res) => {
       sessionId
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to process chat message:', error);
     res.status(500).json({
       error: 'Failed to process message',
-      details: error.message
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
@@ -1700,11 +1780,11 @@ app.post("/api/chat/end", async (req, res) => {
       session: updatedSession
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to end chat session:', error);
     res.status(500).json({
       error: 'Failed to end session',
-      details: error.message
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
@@ -1762,11 +1842,11 @@ app.post("/api/sessions/:sessionId/register-call", async (req, res) => {
       call_id
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to establish sideband connection:', error);
     res.status(500).json({
       error: 'Failed to establish sideband connection',
-      details: error.message
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
@@ -1806,11 +1886,11 @@ app.post("/admin/api/sessions/:sessionId/update-instructions", requireRole('ther
       message: 'Instructions updated successfully'
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to update instructions:', error);
     res.status(500).json({
       error: 'Failed to update instructions',
-      details: error.message
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
@@ -1847,11 +1927,11 @@ app.get("/admin/api/sideband/status", requireRole('therapist', 'researcher'), as
       sessions
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to fetch sideband status:', error);
     res.status(500).json({
       error: 'Failed to fetch sideband status',
-      details: error.message
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
@@ -1897,11 +1977,11 @@ app.post("/admin/api/sideband/update-session", requireRole('therapist', 'researc
       message: 'Session instructions updated successfully'
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to update session via sideband:', error);
     res.status(500).json({
       error: 'Failed to update session',
-      details: error.message
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
@@ -1943,11 +2023,11 @@ app.post("/admin/api/sideband/disconnect", requireRole('therapist', 'researcher'
       message: 'Sideband connection disconnected successfully'
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Failed to disconnect sideband:', error);
     res.status(500).json({
       error: 'Failed to disconnect sideband connection',
-      details: error.message
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
@@ -1993,7 +2073,7 @@ app.post("/api/sessions/create", async (req, res) => {
 app.get("/api/sessions", requireAuth, async (req, res) => {
   try {
     const { getUserSessions } = await import("./models/dbQueries.js");
-    const sessions = await getUserSessions(req.session.userId);
+    const sessions = await getUserSessions(req.session.userId!);
     res.json(sessions);
   } catch (err) {
     console.error("Failed to fetch sessions:", err);
@@ -2102,8 +2182,8 @@ app.post("/logs/batch", async (req, res) => {
   }
 
   try {
-    const messages = [];
-    const sessionIds = new Set();
+    const messages: InsertMessageInput[] = [];
+    const sessionIds = new Set<string>();
 
     // Process records and collect unique session IDs
     for (const record of records) {
@@ -2114,13 +2194,13 @@ app.post("/logs/batch", async (req, res) => {
 
       // Save immediately without waiting for redaction (async queue processing)
       messages.push({
-        session_id: sessionId,
-        role: role,
-        message_type: type,
-        content: message,
+        session_id: sessionId as string,
+        role: role as string,
+        message_type: type as string,
+        content: (message as string | null) ?? null,
         content_redacted: null, // Will be updated asynchronously
-        metadata: extras || null,
-        created_at: new Date(timestamp)
+        metadata: (extras as Record<string, unknown> | null) || null,
+        created_at: new Date(timestamp as string | number)
       });
     }
 
@@ -2204,7 +2284,10 @@ app.post("/logs/batch", async (req, res) => {
         const conversationHistory = historyResult.rows.reverse(); // Chronological order
 
         // Perform multi-layered risk analysis
-        const riskAnalysis = await analyzeMessageRisk(msg, conversationHistory);
+        const riskAnalysis = await analyzeMessageRisk(
+          { content: msg.content ?? '', session_id: msg.session_id, message_id: msg.message_id },
+          conversationHistory
+        );
 
         if (riskAnalysis.riskScore > 0) {
           console.log(` Risk detected in session ${msg.session_id}:
@@ -2271,7 +2354,8 @@ app.post("/logs/batch", async (req, res) => {
 
     // ========== SOCKET.IO EVENT EMISSION ==========
     // Group messages by session for efficient emission
-    const sessionGroups = {};
+    type MsgSummary = { message_id: number; role: string; message_type: string; content: string | null; content_redacted: string | null; created_at: Date };
+    const sessionGroups: Record<string, MsgSummary[]> = {};
     insertedMessages.forEach(msg => {
       if (!sessionGroups[msg.session_id]) sessionGroups[msg.session_id] = [];
       sessionGroups[msg.session_id].push({
@@ -2418,15 +2502,15 @@ app.get("/admin/api/sessions", requireRole('therapist', 'researcher'), async (re
   } = req.query;
 
   try {
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const offset = (parseInt(String(page)) - 1) * parseInt(String(limit));
 
     // Parse comma-separated arrays
-    const voiceArray = voices ? voices.split(',').filter(Boolean) : null;
-    const languageArray = languages ? languages.split(',').filter(Boolean) : null;
-    const durationArray = durations ? durations.split(',').filter(Boolean) : null;
-    const sessionTypeArray = sessionTypes ? sessionTypes.split(',').filter(Boolean) : null;
-    const statusArray = statuses ? statuses.split(',').filter(Boolean) : null;
-    const endedByArray = endedBy ? endedBy.split(',').filter(Boolean) : null;
+    const voiceArray = voices ? String(voices).split(',').filter(Boolean) : null;
+    const languageArray = languages ? String(languages).split(',').filter(Boolean) : null;
+    const durationArray = durations ? String(durations).split(',').filter(Boolean) : null;
+    const sessionTypeArray = sessionTypes ? String(sessionTypes).split(',').filter(Boolean) : null;
+    const statusArray = statuses ? String(statuses).split(',').filter(Boolean) : null;
+    const endedByArray = endedBy ? String(endedBy).split(',').filter(Boolean) : null;
 
     const result = await pool.query(`
       WITH session_stats AS (
@@ -2483,10 +2567,10 @@ app.get("/admin/api/sessions", requireRole('therapist', 'researcher'), async (re
       search || null,                                    // $1
       startDate || null,                                 // $2
       endDate || null,                                   // $3
-      minMessages ? parseInt(minMessages) : null,        // $4
-      maxMessages ? parseInt(maxMessages) : null,        // $5
-      parseInt(limit),                                   // $6
-      offset,                                            // $7
+      minMessages ? parseInt(String(minMessages)) : null, // $4
+      maxMessages ? parseInt(String(maxMessages)) : null, // $5
+      parseInt(String(limit)),                            // $6
+      offset,                                             // $7
       voiceArray,                                        // $8
       languageArray,                                     // $9
       sessionTypeArray,                                  // $10
@@ -2531,8 +2615,8 @@ app.get("/admin/api/sessions", requireRole('therapist', 'researcher'), async (re
     res.json({
       sessions: result.rows,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: parseInt(String(page)),
+        limit: parseInt(String(limit)),
         totalCount: parseInt(countResult.rows[0].total)
       }
     });
@@ -2599,8 +2683,8 @@ app.delete("/admin/api/sessions/:sessionId", requireRole('therapist', 'researche
       success: true,
       message: `Session ${deletedSession.session_name || sessionId} deleted successfully`
     });
-  } catch (error) {
-    if (error.message === 'Session not found') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'Session not found') {
       return res.status(404).json({ error: 'Session not found' });
     }
     console.error("Failed to delete session:", error);
@@ -2649,8 +2733,8 @@ app.put("/admin/api/messages/:messageId", requireRole('therapist', 'researcher')
       success: true,
       message: formattedMessage
     });
-  } catch (error) {
-    if (error.message === 'Message not found') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'Message not found') {
       return res.status(404).json({ error: 'Message not found' });
     }
     console.error("Failed to update message:", error);
@@ -2671,11 +2755,11 @@ app.delete("/admin/api/messages/:messageId", requireRole('therapist', 'researche
       message: "Message deleted successfully",
       deletedMessage
     });
-  } catch (error) {
-    if (error.message === 'Message not found') {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'Message not found') {
       return res.status(404).json({ error: 'Message not found' });
     }
-    if (error.message === 'Cannot delete the last message in a session') {
+    if (error instanceof Error && error.message === 'Cannot delete the last message in a session') {
       return res.status(400).json({ error: 'Cannot delete the last message in a session' });
     }
     console.error("Failed to delete message:", error);
@@ -2693,11 +2777,11 @@ app.get("/admin/api/analytics", requireRole('therapist', 'researcher'), async (r
 
   try {
     // Parse comma-separated arrays
-    const voiceArray = voices ? voices.split(',').filter(Boolean) : null;
-    const languageArray = languages ? languages.split(',').filter(Boolean) : null;
-    const sessionTypeArray = sessionTypes ? sessionTypes.split(',').filter(Boolean) : null;
-    const statusArray = statuses ? statuses.split(',').filter(Boolean) : null;
-    const endedByArray = endedBy ? endedBy.split(',').filter(Boolean) : null;
+    const voiceArray = voices ? String(voices).split(',').filter(Boolean) : null;
+    const languageArray = languages ? String(languages).split(',').filter(Boolean) : null;
+    const sessionTypeArray = sessionTypes ? String(sessionTypes).split(',').filter(Boolean) : null;
+    const statusArray = statuses ? String(statuses).split(',').filter(Boolean) : null;
+    const endedByArray = endedBy ? String(endedBy).split(',').filter(Boolean) : null;
 
     const result = await pool.query(`
       WITH date_filtered_sessions AS (
@@ -3190,7 +3274,7 @@ app.get("/admin/api/export", requireRole('therapist', 'researcher'), async (req,
 // ===================== Room Assignment API Routes =====================
 
 // Helper function to handle room assignment cleanup when a session ends
-async function handleSessionEndRoomCleanup(sessionId) {
+async function handleSessionEndRoomCleanup(sessionId: string): Promise<void> {
   try {
     // Get the session to find the user_id
     const sessionResult = await pool.query(
@@ -3734,18 +3818,18 @@ app.get("/api/config/client-logging", async (req, res) => {
 app.get("/api/config/voices", async (req, res) => {
   try {
     const config = await getSystemConfig();
-    const voicesConfig = config.voices || {
+    const voicesConfig = (config.voices as VoicesConfig | undefined) ?? {
       voices: [
         { value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }
-      ],
+      ] as VoiceOption[],
       default_voice: 'cedar'
-    };
+    } as VoicesConfig;
 
     // Filter to only enabled voices for users
     const enabledVoices = voicesConfig.voices
       ? voicesConfig.voices
-          .filter(v => v.enabled)
-          .map(v => ({ value: v.value, label: v.label, description: v.description }))
+          .filter((v: VoiceOption) => v.enabled)
+          .map((v: VoiceOption) => ({ value: v.value, label: v.label, description: v.description }))
       : [];
 
     res.json({
@@ -3762,18 +3846,18 @@ app.get("/api/config/voices", async (req, res) => {
 app.get("/api/config/languages", async (req, res) => {
   try {
     const config = await getSystemConfig();
-    const languagesConfig = config.languages || {
+    const languagesConfig = (config.languages as LanguagesConfig | undefined) ?? {
       languages: [
         { value: 'en', label: 'English', description: 'English', enabled: true }
-      ],
+      ] as LanguageOption[],
       default_language: 'en'
-    };
+    } as LanguagesConfig;
 
     // Filter to only enabled languages for users
     const enabledLanguages = languagesConfig.languages
       ? languagesConfig.languages
-          .filter(l => l.enabled)
-          .map(l => ({ value: l.value, label: l.label, description: l.description }))
+          .filter((l: LanguageOption) => l.enabled)
+          .map((l: LanguageOption) => ({ value: l.value, label: l.label, description: l.description }))
       : [];
 
     res.json({
@@ -3829,7 +3913,7 @@ app.get("/admin/api/config", requireRole('therapist', 'researcher'), async (req,
     const result = await pool.query('SELECT * FROM system_config ORDER BY config_key');
 
     // Transform into a more usable object format
-    const config = {};
+    const config: Record<string, unknown> = {};
     result.rows.forEach(row => {
       config[row.config_key] = {
         value: row.config_value,
@@ -3849,7 +3933,8 @@ app.get("/admin/api/config", requireRole('therapist', 'researcher'), async (req,
 // GET /admin/api/config/system-prompt-preview - Get fully interpolated system prompt for preview
 // NOTE: This route must be defined BEFORE /admin/api/config/:key to avoid being matched as a key
 app.get("/admin/api/config/system-prompt-preview", requireRole('researcher'), async (req, res) => {
-  const { sessionType = 'realtime', language = 'en' } = req.query;
+  const sessionType = typeof req.query.sessionType === 'string' ? req.query.sessionType : 'realtime';
+  const language = typeof req.query.language === 'string' ? req.query.language : 'en';
 
   // Validate sessionType
   if (!['realtime', 'chat'].includes(sessionType)) {
@@ -3914,11 +3999,11 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
       if (!value.voices || !Array.isArray(value.voices)) {
         return res.status(400).json({ error: 'voices must be an array' });
       }
-      const enabledVoices = value.voices.filter(v => v.enabled);
+      const enabledVoices = (value.voices as VoiceOption[]).filter((v: VoiceOption) => v.enabled);
       if (enabledVoices.length === 0) {
         return res.status(400).json({ error: 'At least one voice must be enabled' });
       }
-      const defaultVoice = value.voices.find(v => v.value === value.default_voice && v.enabled);
+      const defaultVoice = (value.voices as VoiceOption[]).find((v: VoiceOption) => v.value === value.default_voice && v.enabled);
       if (!defaultVoice) {
         return res.status(400).json({
           error: 'default_voice must be one of the enabled voices'
@@ -3937,11 +4022,11 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
       if (!value.languages || !Array.isArray(value.languages)) {
         return res.status(400).json({ error: 'languages must be an array' });
       }
-      const enabledLanguages = value.languages.filter(l => l.enabled);
+      const enabledLanguages = (value.languages as LanguageOption[]).filter((l: LanguageOption) => l.enabled);
       if (enabledLanguages.length === 0) {
         return res.status(400).json({ error: 'At least one language must be enabled' });
       }
-      const defaultLanguage = value.languages.find(l => l.value === value.default_language && l.enabled);
+      const defaultLanguage = (value.languages as LanguageOption[]).find((l: LanguageOption) => l.value === value.default_language && l.enabled);
       if (!defaultLanguage) {
         return res.status(400).json({
           error: 'default_language must be one of the enabled languages'
@@ -4055,7 +4140,7 @@ app.put("/admin/api/content-retention", requireRole('researcher'), async (req, r
   }
 
   try {
-    const updatedSettings = await updateRetentionSettings(settings, req.session.username);
+    const updatedSettings = await updateRetentionSettings(settings, req.session.username!);
 
     console.log(`Content retention settings updated by ${req.session.username}`);
 
@@ -4097,8 +4182,8 @@ app.post("/admin/api/content-retention/wipe", requireRole('researcher'), async (
 
 // GET /admin/api/content-retention/log - Get wipe history log
 app.get("/admin/api/content-retention/log", requireRole('researcher'), async (req, res) => {
-  const limit = parseInt(req.query.limit) || 50;
-  const offset = parseInt(req.query.offset) || 0;
+  const limit = parseInt(String(req.query.limit ?? '')) || 50;
+  const offset = parseInt(String(req.query.offset ?? '')) || 0;
 
   try {
     const result = await pool.query(
@@ -4136,9 +4221,9 @@ app.get("/admin/api/user-sessions", requireRole('researcher'), async (req, res) 
 
     // Parse the sess JSON and extract relevant fields
     const sessions = result.rows.map(row => {
-      let sessData = {};
+      let sessData: Record<string, unknown> = {};
       try {
-        sessData = typeof row.sess === 'string' ? JSON.parse(row.sess) : row.sess;
+        sessData = typeof row.sess === 'string' ? JSON.parse(row.sess) as Record<string, unknown> : row.sess as Record<string, unknown>;
       } catch (err) {
         console.error('Failed to parse session data:', err);
       }
@@ -4146,10 +4231,10 @@ app.get("/admin/api/user-sessions", requireRole('researcher'), async (req, res) 
       return {
         sid: row.sid,
         expire: row.expire,
-        userId: sessData.userId,
-        username: sessData.username,
-        userRole: sessData.userRole,
-        cookie: sessData.cookie
+        userId: sessData['userId'],
+        username: sessData['username'],
+        userRole: sessData['userRole'],
+        cookie: sessData['cookie']
       };
     });
 
@@ -4189,7 +4274,7 @@ app.delete("/admin/api/user-sessions/:sid", requireRole('researcher'), async (re
 app.get('/admin/api/rate-limits/users', requireRole('therapist', 'researcher'), async (req, res) => {
   try {
     const config = await getSystemConfig();
-    const limits = config.session_limits || { enabled: false };
+    const limits = (config.session_limits as SessionLimitsConfig | undefined) ?? { enabled: false } as SessionLimitsConfig;
 
     if (!limits.enabled) {
       return res.json({ rateLimitedUsers: [], config: limits });
@@ -4259,7 +4344,7 @@ app.post("/admin/api/sessions/:sessionId/crisis/flag", requireRole('therapist', 
     }
 
     // Calculate risk score based on severity
-    const riskScoreMap = { low: 25, medium: 50, high: 85 };
+    const riskScoreMap: Record<string, number> = { low: 25, medium: 50, high: 85 };
     const riskScore = riskScoreMap[severity];
 
     // Flag the session
@@ -4267,7 +4352,7 @@ app.post("/admin/api/sessions/:sessionId/crisis/flag", requireRole('therapist', 
       sessionId,
       severity,
       riskScore,
-      req.session.username,
+      req.session.username!,
       'manual',
       null,
       [],
@@ -4334,7 +4419,7 @@ app.delete("/admin/api/sessions/:sessionId/crisis/flag", requireRole('therapist'
     // Unflag the session
     await unflagSessionCrisis(
       sessionId,
-      req.session.username,
+      req.session.username!,
       notes || 'Manually unflagged by admin'
     );
 
@@ -4431,16 +4516,18 @@ app.get("/admin/api/crisis/all", requireRole('therapist', 'researcher'), async (
       interventionActions: interventionActions.rows,
       riskScoreHistory: riskScoreHistory.rows
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[Crisis API] Failed to fetch comprehensive crisis data:", err);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const errAny = err as Record<string, unknown>;
     console.error("[Crisis API] Error details:", {
-      message: err.message,
-      code: err.code,
-      detail: err.detail
+      message: errMsg,
+      code: errAny['code'],
+      detail: errAny['detail']
     });
     res.status(500).json({
       error: "Failed to fetch crisis management data",
-      details: err.message
+      details: errMsg
     });
   }
 });
@@ -4453,7 +4540,7 @@ app.get("/admin/api/crisis/events", requireRole('therapist', 'researcher'), asyn
     let result;
     if (sessionId) {
       const { getSessionCrisisEvents } = await import('./services/crisisDetection.service.js');
-      const events = await getSessionCrisisEvents(sessionId);
+      const events = await getSessionCrisisEvents(String(sessionId));
       result = { events };
     } else {
       // Get all crisis events
@@ -4548,9 +4635,12 @@ async function startProdServer() {
   app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets')));
 
   // Dynamically import all SSR modules
-  const { render } = await import('../../dist/server/entry-server.js');
-  const { render: renderAdmin } = await import('../../dist/admin-server/admin-entry-server.js');
-  const { render: renderRedact } = await import('../../dist/redact-server/redact-entry-server.js');
+  // @ts-ignore – these modules are generated at build time and not available during type-check
+  const { render } = await import('../../dist/server/entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
+  // @ts-ignore
+  const { render: renderAdmin } = await import('../../dist/admin-server/admin-entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
+  // @ts-ignore
+  const { render: renderRedact } = await import('../../dist/redact-server/redact-entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
 
   // Serve redact static assets
   app.use('/redact/assets', express.static(path.resolve(__dirname, '../../dist/redact-client/assets')));
@@ -4562,9 +4652,10 @@ async function startProdServer() {
       const appHtml = await renderAdmin(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
-    } catch (e) {
-      console.error(e.stack);
-      res.status(500).end(e.stack);
+    } catch (e: unknown) {
+      const stack = e instanceof Error ? e.stack : String(e);
+      console.error(stack);
+      res.status(500).end(stack);
     }
   });
 
@@ -4575,9 +4666,10 @@ async function startProdServer() {
       const appHtml = await renderRedact(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
-    } catch (e) {
-      console.error(e.stack);
-      res.status(500).end(e.stack);
+    } catch (e: unknown) {
+      const stack = e instanceof Error ? e.stack : String(e);
+      console.error(stack);
+      res.status(500).end(stack);
     }
   });
 
@@ -4588,9 +4680,10 @@ async function startProdServer() {
       const appHtml = await render(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
-    } catch (e) {
-      console.error(e.stack);
-      res.status(500).end(e.stack);
+    } catch (e: unknown) {
+      const stack = e instanceof Error ? e.stack : String(e);
+      console.error(stack);
+      res.status(500).end(stack);
     }
   });
 }
@@ -4623,8 +4716,8 @@ async function startDevServer() {
       const appHtml = await render(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
-    } catch (e) {
-      vite.ssrFixStacktrace(e);
+    } catch (e: unknown) {
+      vite.ssrFixStacktrace(e as Error);
       next(e);
     }
   });
@@ -4647,8 +4740,8 @@ async function startDevServer() {
       const appHtml = await render(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
-    } catch (e) {
-      vite.ssrFixStacktrace(e);
+    } catch (e: unknown) {
+      vite.ssrFixStacktrace(e as Error);
       next(e);
     }
   });
@@ -4668,8 +4761,8 @@ async function startDevServer() {
       const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
 
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
-    } catch (e) {
-      vite.ssrFixStacktrace(e);
+    } catch (e: unknown) {
+      vite.ssrFixStacktrace(e as Error);
       next(e);
     }
   });

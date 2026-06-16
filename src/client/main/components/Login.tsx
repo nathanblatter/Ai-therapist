@@ -2,19 +2,26 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Key } from 'react-feather';
 
+interface LoginBody {
+  username: string;
+  password: string;
+  backupCode?: string;
+  mfaToken?: string;
+}
+
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
-  const [userId, setUserId] = useState(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [mfaToken, setMfaToken] = useState('');
   const [useBackupCode, setUseBackupCode] = useState(false);
   const [backupCode, setBackupCode] = useState('');
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -58,13 +65,13 @@ export default function Login() {
     }
   };
 
-  const handleMFASubmit = async (e) => {
+  const handleMFASubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      const body = { username, password };
+      const body: LoginBody = { username, password };
 
       if (useBackupCode) {
         body.backupCode = backupCode.trim().toUpperCase();
@@ -187,7 +194,7 @@ export default function Login() {
                       name="mfaToken"
                       type="text"
                       required
-                      maxLength="6"
+                      maxLength={6}
                       className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal focus:border-transparent transition-all text-center text-2xl font-mono tracking-widest"
                       placeholder="000000"
                       value={mfaToken}
@@ -206,7 +213,7 @@ export default function Login() {
                       name="backupCode"
                       type="text"
                       required
-                      maxLength="8"
+                      maxLength={8}
                       className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal focus:border-transparent transition-all text-center text-xl font-mono tracking-wider uppercase"
                       placeholder="A1B2C3D4"
                       value={backupCode}

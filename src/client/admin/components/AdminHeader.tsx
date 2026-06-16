@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 
 export default function AdminHeader() {
-  const [username, setUsername] = useState(null);
-  const [userRole, setUserRole] = useState(null);
+  const [username, setUsername] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAuthStatus = async () => {
@@ -37,7 +37,7 @@ export default function AdminHeader() {
     }
   };
 
-  const capitalizeFirst = (str) => {
+  const capitalizeFirst = (str: string | null) => {
     if (!str || typeof str !== "string") return str;
     return str.charAt(0).toUpperCase() + str.slice(1);
   };

@@ -1,12 +1,28 @@
 import { useState, useEffect } from 'react';
 import { AlertCircle, RefreshCw, Clock, User } from 'react-feather';
 
+interface RateLimitConfig {
+  max_sessions_per_day: number;
+  max_duration_minutes: number;
+  cooldown_minutes: number;
+}
+
+interface RateLimitedUser {
+  userid: number;
+  username: string;
+  role: string;
+  sessions_used_today: number;
+  session_limit: number;
+  last_session_at: string | null;
+  hours_until_reset: number | null;
+}
+
 export default function RateLimitedUsers() {
-  const [rateLimitedUsers, setRateLimitedUsers] = useState([]);
-  const [config, setConfig] = useState(null);
+  const [rateLimitedUsers, setRateLimitedUsers] = useState<RateLimitedUser[]>([]);
+  const [config, setConfig] = useState<RateLimitConfig | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [lastRefresh, setLastRefresh] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -20,8 +36,8 @@ export default function RateLimitedUsers() {
       setRateLimitedUsers(data.rateLimitedUsers);
       setConfig(data.config);
       setLastRefresh(new Date());
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -36,7 +52,7 @@ export default function RateLimitedUsers() {
     return () => clearInterval(interval);
   }, []);
 
-  const formatResetTime = (hoursUntilReset) => {
+  const formatResetTime = (hoursUntilReset: number | null): string => {
     if (!hoursUntilReset) return 'less than 1 hour';
     const hours = Math.floor(hoursUntilReset);
     const minutes = Math.round((hoursUntilReset - hours) * 60);
@@ -44,11 +60,11 @@ export default function RateLimitedUsers() {
     return `${hours} hour${hours !== 1 ? 's' : ''}, ${minutes} minute${minutes !== 1 ? 's' : ''}`;
   };
 
-  const formatTimeAgo = (timestamp) => {
+  const formatTimeAgo = (timestamp: string | null): string => {
     if (!timestamp) return 'Never';
     const date = new Date(timestamp);
     const now = new Date();
-    const diffMs = now - date;
+    const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
 
     if (diffMins < 1) return 'Just now';

@@ -1,8 +1,111 @@
-// dbQueries.js
+// dbQueries.ts
 // Helper functions for interacting with normalized database schema
 
 import { pool } from '../config/db.js';
 import redactPHI from '../services/redaction.service.js';
+
+// ============================================
+// ROW INTERFACES (exported for callers)
+// ============================================
+
+export interface SessionRow {
+  session_id: string;
+  user_id: number | null;
+  session_name: string | null;
+  status: string;
+  session_type: string;
+  created_at: Date;
+  updated_at: Date;
+  ended_at: Date | null;
+  ended_by: string | null;
+  crisis_flagged?: boolean;
+  crisis_severity?: string | null;
+  crisis_risk_score?: number | null;
+  crisis_flagged_at?: Date | null;
+  crisis_flagged_by?: string | null;
+  openai_call_id?: string | null;
+  sideband_connected?: boolean;
+  sideband_connected_at?: Date | null;
+  sideband_disconnected_at?: Date | null;
+  sideband_error?: string | null;
+}
+
+export interface MessageRow {
+  message_id: number;
+  session_id: string;
+  role: string;
+  message_type: string;
+  content: string | null;
+  content_redacted: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: Date;
+}
+
+export interface UserRow {
+  userid: number;
+  username: string;
+  role: string;
+  password?: string;
+  preferred_voice?: string | null;
+  preferred_language?: string | null;
+  mfa_enabled?: boolean;
+  mfa_secret?: string | null;
+  mfa_backup_codes?: string[] | null;
+  mfa_enabled_at?: Date | null;
+  created_at?: Date;
+  updated_at?: Date;
+}
+
+export interface SessionConfigRow {
+  session_id: string;
+  voice: string | null;
+  modalities: string[] | null;
+  instructions: string | null;
+  turn_detection: Record<string, unknown> | null;
+  tools: unknown[] | null;
+  temperature: number | null;
+  max_response_output_tokens: number | null;
+  language: string | null;
+}
+
+export interface SessionStatsRow {
+  total_sessions: string;
+  authenticated_sessions: string;
+  active_sessions: string;
+  ended_sessions: string;
+  avg_duration_minutes: string | null;
+}
+
+export interface MessageStatsRow {
+  total_messages: string;
+  user_messages: string;
+  assistant_messages: string;
+  sessions_with_messages: string;
+}
+
+export interface LanguageStatRow {
+  language: string;
+  session_count: string;
+  percentage: string;
+}
+
+export interface VoiceStatRow {
+  voice: string;
+  session_count: string;
+  percentage: string;
+}
+
+export interface SystemConfigRow {
+  config_value: Record<string, unknown> & { model?: string };
+}
+
+export interface CreateSessionConfig {
+  sessionId: string;
+  userId?: number | null;
+  sessionName?: string | null;
+  status?: string;
+  sessionType?: string;
+}
 
 // ============================================
 // THERAPY SESSIONS
@@ -10,15 +113,15 @@ import redactPHI from '../services/redaction.service.js';
 
 /**
  * Create a new therapy session
- * @param {number|object|null} userId - User ID (null for anonymous) OR session config object
- * @param {string|null} sessionName - Optional session name (only used if first param is userId)
- * @returns {Promise<object>} Created session object
+ * @param userId - User ID (null for anonymous) OR session config object
+ * @param sessionName - Optional session name (only used if first param is userId)
+ * @returns Created session object
  */
-export async function createSession(userId = null, sessionName = null) {
+export async function createSession(userId: number | CreateSessionConfig | null = null, sessionName: string | null = null): Promise<SessionRow> {
   // Support both object-based and parameter-based calls
   if (typeof userId === 'object' && userId !== null) {
-    const config = userId;
-    const result = await pool.query(
+    const config = userId as CreateSessionConfig;
+    const result = await pool.query<SessionRow>(
       `INSERT INTO therapy_sessions (session_id, user_id, session_name, status, session_type, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
@@ -33,7 +136,7 @@ export async function createSession(userId = null, sessionName = null) {
     return result.rows[0];
   } else {
     // Legacy parameter-based call
-    const result = await pool.query(
+    const result = await pool.query<SessionRow>(
       `INSERT INTO therapy_sessions (user_id, session_name, status, created_at, updated_at)
        VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
@@ -45,11 +148,11 @@ export async function createSession(userId = null, sessionName = null) {
 
 /**
  * Get session by ID
- * @param {string} sessionId - UUID of session
- * @returns {Promise<object|null>} Session object or null
+ * @param sessionId - UUID of session
+ * @returns Session object or null
  */
-export async function getSession(sessionId) {
-  const result = await pool.query(
+export async function getSession(sessionId: string): Promise<SessionRow | null> {
+  const result = await pool.query<SessionRow>(
     'SELECT * FROM therapy_sessions WHERE session_id = $1',
     [sessionId]
   );
@@ -58,13 +161,13 @@ export async function getSession(sessionId) {
 
 /**
  * Get active session for a user (for idempotency checks)
- * @param {number} userId - User ID
- * @returns {Promise<object|null>} Active session or null
+ * @param userId - User ID
+ * @returns Active session or null
  */
-export async function getActiveSessionForUser(userId) {
+export async function getActiveSessionForUser(userId: number | string): Promise<SessionRow | null> {
   if (!userId) return null;
 
-  const result = await pool.query(
+  const result = await pool.query<SessionRow>(
     `SELECT * FROM therapy_sessions
      WHERE user_id = $1 AND status = 'active'
      ORDER BY created_at DESC
@@ -76,28 +179,28 @@ export async function getActiveSessionForUser(userId) {
 
 /**
  * Get all sessions for a user
- * @param {number} userId - User ID
- * @param {string} status - Optional status filter ('active', 'ended', 'archived')
- * @returns {Promise<Array>} Array of session objects
+ * @param userId - User ID
+ * @param status - Optional status filter ('active', 'ended', 'archived')
+ * @returns Array of session objects
  */
-export async function getUserSessions(userId, status = null) {
+export async function getUserSessions(userId: number | string, status: string | null = null): Promise<SessionRow[]> {
   const query = status
     ? 'SELECT * FROM therapy_sessions WHERE user_id = $1 AND status = $2 ORDER BY created_at DESC'
     : 'SELECT * FROM therapy_sessions WHERE user_id = $1 ORDER BY created_at DESC';
 
   const params = status ? [userId, status] : [userId];
-  const result = await pool.query(query, params);
+  const result = await pool.query<SessionRow>(query, params);
   return result.rows;
 }
 
 /**
  * Get all sessions (admin view)
- * @param {number} limit - Max sessions to return
- * @param {number} offset - Offset for pagination
- * @returns {Promise<Array>} Array of session objects with message counts
+ * @param limit - Max sessions to return
+ * @param offset - Offset for pagination
+ * @returns Array of session objects with message counts
  */
-export async function getAllSessions(limit = 50, offset = 0) {
-  const result = await pool.query(
+export async function getAllSessions(limit = 50, offset = 0): Promise<Array<SessionRow & { username?: string; message_count?: string }>> {
+  const result = await pool.query<SessionRow & { username?: string; message_count?: string }>(
     `SELECT
       ts.*,
       u.username,
@@ -115,12 +218,12 @@ export async function getAllSessions(limit = 50, offset = 0) {
 
 /**
  * Update session status (idempotent)
- * @param {string} sessionId - UUID of session
- * @param {string} status - New status ('active', 'ended', 'archived')
- * @param {string|null} endedBy - Who ended the session ('user', admin username, or null)
- * @returns {Promise<object>} Updated session object, or existing session if no change needed
+ * @param sessionId - UUID of session
+ * @param status - New status ('active', 'ended', 'archived')
+ * @param endedBy - Who ended the session ('user', admin username, or null)
+ * @returns Updated session object, or existing session if no change needed
  */
-export async function updateSessionStatus(sessionId, status, endedBy = null) {
+export async function updateSessionStatus(sessionId: string, status: string, endedBy: string | null = null): Promise<SessionRow> {
   // First check current status
   const currentSession = await getSession(sessionId);
   if (!currentSession) {
@@ -133,7 +236,7 @@ export async function updateSessionStatus(sessionId, status, endedBy = null) {
   }
 
   // Only update if status is different
-  const result = await pool.query(
+  const result = await pool.query<SessionRow>(
     `UPDATE therapy_sessions
      SET status = $1,
          updated_at = CURRENT_TIMESTAMP,
@@ -148,12 +251,12 @@ export async function updateSessionStatus(sessionId, status, endedBy = null) {
 
 /**
  * Update session name (typically auto-generated after session ends)
- * @param {string} sessionId - UUID of session
- * @param {string} sessionName - New session name
- * @returns {Promise<object>} Updated session object
+ * @param sessionId - UUID of session
+ * @param sessionName - New session name
+ * @returns Updated session object
  */
-export async function updateSessionName(sessionId, sessionName) {
-  const result = await pool.query(
+export async function updateSessionName(sessionId: string, sessionName: string): Promise<SessionRow> {
+  const result = await pool.query<SessionRow>(
     `UPDATE therapy_sessions
      SET session_name = $1, updated_at = CURRENT_TIMESTAMP
      WHERE session_id = $2
@@ -165,16 +268,16 @@ export async function updateSessionName(sessionId, sessionName) {
 
 /**
  * Delete a therapy session and all associated data
- * @param {string} sessionId - UUID of session
- * @returns {Promise<object>} Deleted session object
+ * @param sessionId - UUID of session
+ * @returns Deleted session object
  */
-export async function deleteSession(sessionId) {
+export async function deleteSession(sessionId: string): Promise<SessionRow> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // First get the session to return it
-    const sessionResult = await client.query(
+    const sessionResult = await client.query<SessionRow>(
       'SELECT * FROM therapy_sessions WHERE session_id = $1',
       [sessionId]
     );
@@ -217,13 +320,24 @@ export async function deleteSession(sessionId) {
 // SESSION CONFIGURATIONS
 // ============================================
 
+export interface UpsertSessionConfigInput {
+  voice?: string;
+  modalities?: string[];
+  instructions?: string | null;
+  turn_detection?: Record<string, unknown> | null;
+  tools?: unknown[] | null;
+  temperature?: number;
+  max_response_output_tokens?: number;
+  language?: string;
+}
+
 /**
  * Create or update session configuration
- * @param {string} sessionId - UUID of session
- * @param {object} config - Configuration object
- * @returns {Promise<object>} Created/updated configuration
+ * @param sessionId - UUID of session
+ * @param config - Configuration object
+ * @returns Created/updated configuration
  */
-export async function upsertSessionConfig(sessionId, config) {
+export async function upsertSessionConfig(sessionId: string, config: UpsertSessionConfigInput): Promise<SessionConfigRow> {
   const {
     voice = 'alloy',
     modalities = ['text', 'audio'],
@@ -239,7 +353,7 @@ export async function upsertSessionConfig(sessionId, config) {
   const turnDetectionJson = turn_detection ? JSON.stringify(turn_detection) : null;
   const toolsJson = tools ? JSON.stringify(tools) : null;
 
-  const result = await pool.query(
+  const result = await pool.query<SessionConfigRow>(
     `INSERT INTO session_configurations
      (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language)
      VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)
@@ -261,11 +375,11 @@ export async function upsertSessionConfig(sessionId, config) {
 
 /**
  * Get session configuration
- * @param {string} sessionId - UUID of session
- * @returns {Promise<object|null>} Configuration object or null
+ * @param sessionId - UUID of session
+ * @returns Configuration object or null
  */
-export async function getSessionConfig(sessionId) {
-  const result = await pool.query(
+export async function getSessionConfig(sessionId: string): Promise<SessionConfigRow | null> {
+  const result = await pool.query<SessionConfigRow>(
     'SELECT * FROM session_configurations WHERE session_id = $1',
     [sessionId]
   );
@@ -276,18 +390,35 @@ export async function getSessionConfig(sessionId) {
 // MESSAGES
 // ============================================
 
+export interface InsertMessageInput {
+  session_id: string;
+  role: string;
+  message_type: string;
+  content: string | null;
+  content_redacted: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at?: Date;
+}
+
 /**
  * Insert a new message
- * @param {string} sessionId - UUID of session
- * @param {string} role - Message role ('user', 'assistant', 'system')
- * @param {string} messageType - Message type ('voice', 'chat', 'session_start', etc.)
- * @param {string} content - Original message content
- * @param {string} contentRedacted - HIPAA-compliant redacted content
- * @param {object} metadata - Additional metadata
- * @returns {Promise<object>} Created message object
+ * @param sessionId - UUID of session
+ * @param role - Message role ('user', 'assistant', 'system')
+ * @param messageType - Message type ('voice', 'chat', 'session_start', etc.)
+ * @param content - Original message content
+ * @param contentRedacted - HIPAA-compliant redacted content
+ * @param metadata - Additional metadata
+ * @returns Created message object
  */
-export async function insertMessage(sessionId, role, messageType, content, contentRedacted, metadata = null) {
-  const result = await pool.query(
+export async function insertMessage(
+  sessionId: string,
+  role: string,
+  messageType: string,
+  content: string | null,
+  contentRedacted: string | null,
+  metadata: Record<string, unknown> | null = null
+): Promise<MessageRow> {
+  const result = await pool.query<MessageRow>(
     `INSERT INTO messages (session_id, role, message_type, content, content_redacted, metadata, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
      RETURNING *`,
@@ -298,17 +429,17 @@ export async function insertMessage(sessionId, role, messageType, content, conte
 
 /**
  * Insert multiple messages in a batch
- * @param {Array<object>} messages - Array of message objects
- * @returns {Promise<Array>} Array of created message objects
+ * @param messages - Array of message objects
+ * @returns Array of created message objects
  */
-export async function insertMessagesBatch(messages) {
+export async function insertMessagesBatch(messages: InsertMessageInput[]): Promise<MessageRow[]> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const results = [];
+    const results: MessageRow[] = [];
 
     for (const msg of messages) {
-      const result = await client.query(
+      const result = await client.query<MessageRow>(
         `INSERT INTO messages (session_id, role, message_type, content, content_redacted, metadata, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`,
@@ -329,12 +460,12 @@ export async function insertMessagesBatch(messages) {
 
 /**
  * Get all messages for a session
- * @param {string} sessionId - UUID of session
- * @param {boolean} redactedOnly - If true, only return redacted content
- * @returns {Promise<Array>} Array of message objects
+ * @param sessionId - UUID of session
+ * @param redactedOnly - If true, only return redacted content
+ * @returns Array of message objects
  */
-export async function getSessionMessages(sessionId, redactedOnly = false) {
-  const result = await pool.query(
+export async function getSessionMessages(sessionId: string, redactedOnly = false): Promise<MessageRow[]> {
+  const result = await pool.query<MessageRow>(
     `SELECT
       message_id,
       session_id,
@@ -353,11 +484,11 @@ export async function getSessionMessages(sessionId, redactedOnly = false) {
 
 /**
  * Get message count for a session
- * @param {string} sessionId - UUID of session
- * @returns {Promise<number>} Message count
+ * @param sessionId - UUID of session
+ * @returns Message count
  */
-export async function getSessionMessageCount(sessionId) {
-  const result = await pool.query(
+export async function getSessionMessageCount(sessionId: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
     'SELECT COUNT(*) as count FROM messages WHERE session_id = $1',
     [sessionId]
   );
@@ -366,13 +497,18 @@ export async function getSessionMessageCount(sessionId) {
 
 /**
  * Update a message (either content or content_redacted based on role)
- * @param {number} messageId - Message ID
- * @param {string} newContent - Updated message content
- * @param {string} fieldToUpdate - Either 'content' or 'content_redacted'
- * @param {object} editMetadata - Information about who edited and when
- * @returns {Promise<object>} Updated message object
+ * @param messageId - Message ID
+ * @param newContent - Updated message content
+ * @param fieldToUpdate - Either 'content' or 'content_redacted'
+ * @param editMetadata - Information about who edited and when
+ * @returns Updated message object
  */
-export async function updateMessage(messageId, newContent, fieldToUpdate, editMetadata) {
+export async function updateMessage(
+  messageId: number | string,
+  newContent: string,
+  fieldToUpdate: 'content' | 'content_redacted',
+  editMetadata: Record<string, unknown>
+): Promise<MessageRow> {
   // Validate field parameter
   if (fieldToUpdate !== 'content' && fieldToUpdate !== 'content_redacted') {
     throw new Error('fieldToUpdate must be either "content" or "content_redacted"');
@@ -388,7 +524,7 @@ export async function updateMessage(messageId, newContent, fieldToUpdate, editMe
       // Therapist edit: update both content and regenerate content_redacted
       const redactedContent = await redactPHI(newContent);
 
-      result = await client.query(
+      result = await client.query<MessageRow>(
         `UPDATE messages
          SET content = $1,
              content_redacted = $2,
@@ -399,7 +535,7 @@ export async function updateMessage(messageId, newContent, fieldToUpdate, editMe
       );
     } else {
       // Researcher edit: update only content_redacted
-      result = await client.query(
+      result = await client.query<MessageRow>(
         `UPDATE messages
          SET content_redacted = $1,
              metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
@@ -425,16 +561,16 @@ export async function updateMessage(messageId, newContent, fieldToUpdate, editMe
 
 /**
  * Delete a message (with validation to prevent deleting last message)
- * @param {number} messageId - Message ID
- * @returns {Promise<object>} Deleted message object
+ * @param messageId - Message ID
+ * @returns Deleted message object
  */
-export async function deleteMessage(messageId) {
+export async function deleteMessage(messageId: number | string): Promise<MessageRow> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // Get the message to find its session_id
-    const messageResult = await client.query(
+    const messageResult = await client.query<{ session_id: string }>(
       'SELECT session_id FROM messages WHERE message_id = $1',
       [messageId]
     );
@@ -446,7 +582,7 @@ export async function deleteMessage(messageId) {
     const sessionId = messageResult.rows[0].session_id;
 
     // Check message count for the session
-    const countResult = await client.query(
+    const countResult = await client.query<{ count: string }>(
       'SELECT COUNT(*) as count FROM messages WHERE session_id = $1',
       [sessionId]
     );
@@ -458,7 +594,7 @@ export async function deleteMessage(messageId) {
     }
 
     // Proceed with deletion
-    const deleteResult = await client.query(
+    const deleteResult = await client.query<MessageRow>(
       'DELETE FROM messages WHERE message_id = $1 RETURNING *',
       [messageId]
     );
@@ -479,10 +615,10 @@ export async function deleteMessage(messageId) {
 
 /**
  * Get session statistics
- * @returns {Promise<object>} Statistics object
+ * @returns Statistics object
  */
-export async function getSessionStats() {
-  const result = await pool.query(
+export async function getSessionStats(): Promise<SessionStatsRow> {
+  const result = await pool.query<SessionStatsRow>(
     `SELECT
       COUNT(DISTINCT session_id) as total_sessions,
       COUNT(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL) as authenticated_sessions,
@@ -496,10 +632,10 @@ export async function getSessionStats() {
 
 /**
  * Get message statistics
- * @returns {Promise<object>} Statistics object
+ * @returns Statistics object
  */
-export async function getMessageStats() {
-  const result = await pool.query(
+export async function getMessageStats(): Promise<MessageStatsRow> {
+  const result = await pool.query<MessageStatsRow>(
     `SELECT
       COUNT(*) as total_messages,
       COUNT(*) FILTER (WHERE role = 'user') as user_messages,
@@ -512,10 +648,10 @@ export async function getMessageStats() {
 
 /**
  * Get language usage statistics
- * @returns {Promise<Array>} Array of language stats with counts and percentages
+ * @returns Array of language stats with counts and percentages
  */
-export async function getLanguageStats() {
-  const result = await pool.query(
+export async function getLanguageStats(): Promise<LanguageStatRow[]> {
+  const result = await pool.query<LanguageStatRow>(
     `SELECT
       sc.language,
       COUNT(*) as session_count,
@@ -531,10 +667,10 @@ export async function getLanguageStats() {
 
 /**
  * Get voice usage statistics
- * @returns {Promise<Array>} Array of voice stats with counts and percentages
+ * @returns Array of voice stats with counts and percentages
  */
-export async function getVoiceStats() {
-  const result = await pool.query(
+export async function getVoiceStats(): Promise<VoiceStatRow[]> {
+  const result = await pool.query<VoiceStatRow>(
     `SELECT
       sc.voice,
       COUNT(*) as session_count,
@@ -550,9 +686,9 @@ export async function getVoiceStats() {
 
 /**
  * Get combined session configuration statistics
- * @returns {Promise<object>} Object containing language and voice statistics
+ * @returns Object containing language and voice statistics
  */
-export async function getConfigStats() {
+export async function getConfigStats(): Promise<{ languages: LanguageStatRow[]; voices: VoiceStatRow[] }> {
   const languageStats = await getLanguageStats();
   const voiceStats = await getVoiceStats();
 
@@ -568,11 +704,11 @@ export async function getConfigStats() {
 
 /**
  * Get AI model configuration from system_config
- * @returns {Promise<string>} Model name (defaults to 'gpt-realtime-mini')
+ * @returns Model name (defaults to 'gpt-realtime-mini')
  */
-export async function getAiModel() {
+export async function getAiModel(): Promise<string> {
   try {
-    const result = await pool.query(
+    const result = await pool.query<SystemConfigRow>(
       `SELECT config_value FROM system_config WHERE config_key = 'ai_model'`
     );
 

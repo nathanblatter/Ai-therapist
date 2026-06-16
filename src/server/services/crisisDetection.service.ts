@@ -18,16 +18,28 @@ const CRISIS_KEYWORDS = {
   }
 };
 
+interface DetectedKeyword {
+  keyword: string;
+  level: string;
+  score: number;
+}
+
+interface KeywordAnalysis {
+  keywords: string[];
+  keywordScore: number;
+  detectedKeywords: DetectedKeyword[];
+}
+
 /**
  * Detect crisis keywords in message content
  * @param {string} content - Message content
  * @returns {object} { keywords: string[], keywordScore: number, detectedKeywords: array }
  */
-function detectCrisisKeywords(content) {
+function detectCrisisKeywords(content: string): KeywordAnalysis {
   if (!content) return { keywords: [], keywordScore: 0, detectedKeywords: [] };
 
   const lowerContent = content.toLowerCase();
-  const detectedKeywords = [];
+  const detectedKeywords: DetectedKeyword[] = [];
   let totalScore = 0;
 
   for (const [level, data] of Object.entries(CRISIS_KEYWORDS)) {
@@ -51,15 +63,20 @@ function detectCrisisKeywords(content) {
 // EMOTIONAL TRAJECTORY TRACKING (passive history logging)
 // ============================================
 
+interface TrajectoryResult {
+  trajectoryScore: number;
+  trend: string;
+}
+
 /**
  * Track emotional trajectory across recent messages
  * @param {string} sessionId - Session ID
  * @returns {object} { trajectoryScore: number, trend: string }
  */
-async function trackEmotionalTrajectory(sessionId) {
+async function trackEmotionalTrajectory(sessionId: string): Promise<TrajectoryResult> {
   try {
     // Get risk score history for this session
-    const historyResult = await pool.query(
+    const historyResult = await pool.query<{ risk_score: number; calculated_at: Date }>(
       `SELECT risk_score, calculated_at
        FROM risk_score_history
        WHERE session_id = $1
@@ -109,6 +126,19 @@ async function trackEmotionalTrajectory(sessionId) {
 // RISK ANALYSIS
 // ============================================
 
+interface MessageInput {
+  content: string;
+  session_id: string;
+  message_id?: string | number;
+}
+
+interface RiskAnalysisResult {
+  riskScore: number;
+  severity: string;
+  factors: string[];
+  breakdown: Record<string, number>;
+}
+
 /**
  * Analyze message risk using keyword detection only.
  * Trajectory is tracked passively for history but does not affect score.
@@ -116,7 +146,7 @@ async function trackEmotionalTrajectory(sessionId) {
  * @param {array} conversationHistory - Unused, kept for call-site compatibility
  * @returns {object} Risk analysis result
  */
-export async function analyzeMessageRisk(message, conversationHistory = []) {
+export async function analyzeMessageRisk(message: MessageInput, conversationHistory: unknown[] = []): Promise<RiskAnalysisResult> {
   try {
     const keywordAnalysis = detectCrisisKeywords(message.content);
 
@@ -172,7 +202,16 @@ export async function analyzeMessageRisk(message, conversationHistory = []) {
 /**
  * Flag a session as crisis
  */
-export async function flagSessionCrisis(sessionId, severity, riskScore, triggeredBy, triggerMethod, messageId, factors, notes) {
+export async function flagSessionCrisis(
+  sessionId: string,
+  severity: string,
+  riskScore: number,
+  triggeredBy: string,
+  triggerMethod: string,
+  messageId: string | number | null,
+  factors: string[],
+  notes: string | null
+): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -214,7 +253,7 @@ export async function flagSessionCrisis(sessionId, severity, riskScore, triggere
 /**
  * Unflag a session
  */
-export async function unflagSessionCrisis(sessionId, unflaggedBy, notes) {
+export async function unflagSessionCrisis(sessionId: string, unflaggedBy: string, notes: string | null): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -250,13 +289,19 @@ export async function unflagSessionCrisis(sessionId, unflaggedBy, notes) {
 /**
  * Update risk score
  */
-export async function updateRiskScore(sessionId, newScore, newSeverity, changedBy, notes) {
+export async function updateRiskScore(
+  sessionId: string,
+  newScore: number,
+  newSeverity: string,
+  changedBy: string,
+  notes: string | null
+): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // Get previous values
-    const prevResult = await client.query(
+    const prevResult = await client.query<{ crisis_risk_score: number; crisis_severity: string }>(
       `SELECT crisis_risk_score, crisis_severity FROM therapy_sessions WHERE session_id = $1`,
       [sessionId]
     );
@@ -288,10 +333,15 @@ export async function updateRiskScore(sessionId, newScore, newSeverity, changedB
   }
 }
 
+interface ActionDetails {
+  riskScore?: number;
+  [key: string]: unknown;
+}
+
 /**
  * Log intervention action
  */
-export async function logInterventionAction(sessionId, actionType, actionDetails) {
+export async function logInterventionAction(sessionId: string, actionType: string, actionDetails: ActionDetails): Promise<void> {
   try {
     await pool.query(
       `INSERT INTO intervention_actions
@@ -312,7 +362,7 @@ export async function logInterventionAction(sessionId, actionType, actionDetails
 /**
  * Get session crisis events
  */
-export async function getSessionCrisisEvents(sessionId) {
+export async function getSessionCrisisEvents(sessionId: string): Promise<unknown[]> {
   const result = await pool.query(
     `SELECT * FROM crisis_events
      WHERE session_id = $1
@@ -325,7 +375,7 @@ export async function getSessionCrisisEvents(sessionId) {
 /**
  * Get active crisis sessions
  */
-export async function getActiveCrisisSessions() {
+export async function getActiveCrisisSessions(): Promise<unknown[]> {
   const result = await pool.query(
     `SELECT
        ts.session_id,
@@ -346,7 +396,7 @@ export async function getActiveCrisisSessions() {
 /**
  * Get session risk history
  */
-export async function getSessionRiskHistory(sessionId) {
+export async function getSessionRiskHistory(sessionId: string): Promise<unknown[]> {
   const result = await pool.query(
     `SELECT * FROM risk_score_history
      WHERE session_id = $1

@@ -1,5 +1,125 @@
-import { io } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 import { toast } from '../../shared/components/Toast';
+
+// ── Domain types ──────────────────────────────────────────────────────────────
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  isAdminMessage?: boolean;
+}
+
+interface RealtimeEvent {
+  type: string;
+  event_id?: string;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
+interface SessionSettings {
+  voice: string;
+  language: string;
+}
+
+interface CrisisContactFeature {
+  enabled: boolean;
+  hotline: string;
+  phone: string;
+  text?: string;
+}
+
+interface Features {
+  _crisisContact?: CrisisContactFeature;
+  output_modalities?: string[];
+  voice_enabled?: boolean;
+  chat_enabled?: boolean;
+}
+
+interface LogConversationArgs {
+  sessionId: string | null | undefined;
+  role: string;
+  type: string;
+  message: string;
+  extras?: unknown;
+  extra?: unknown;
+}
+
+// Shape of data returned by the /token endpoint
+interface TokenResponseData {
+  value: string;
+  session: {
+    id: string;
+    exists?: boolean;
+    instructions?: string;
+    [key: string]: unknown;
+  };
+  message?: string;
+  session_limits?: {
+    max_duration_minutes?: number;
+  };
+}
+
+// ── Hook params ───────────────────────────────────────────────────────────────
+
+interface UseRealtimeSessionParams {
+  sessionId: string | null;
+  setSessionId: (id: string | null) => void;
+  setSessionType: (type: string | null) => void;
+  setIsSessionActive: (active: boolean) => void;
+  setEvents: React.Dispatch<React.SetStateAction<RealtimeEvent[]>>;
+  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  setAssistantStream: (stream: string) => void;
+  setLocalStream: (stream: MediaStream | null) => void;
+  assistantBuffer: React.MutableRefObject<string>;
+  dataChannelRef: React.MutableRefObject<RTCDataChannel | null>;
+  peerConnection: React.MutableRefObject<RTCPeerConnection | null>;
+  audioElement: React.MutableRefObject<HTMLAudioElement | null>;
+  socketRef: React.MutableRefObject<Socket | null>;
+  setSessionEndTime: (time: number | null) => void;
+  setTimeRemaining: (time: number | null) => void;
+  sessionSettings: SessionSettings;
+  logConversation: (args: LogConversationArgs) => void;
+  startPeriodicFlush: () => void;
+  stopPeriodicFlush: () => void;
+  flushLogs: () => Promise<void>;
+  features: Features;
+}
+
+// ── Hook return type ──────────────────────────────────────────────────────────
+
+interface UseRealtimeSessionReturn {
+  startSession: () => Promise<void>;
+  stopSession: () => Promise<void>;
+  sendTextMessage: (message: string) => void;
+  sendInvisiblePrompt: (text: string, logMessage?: string | null) => void;
+  getPreambleForLanguage: (language: string, includeVoiceInstructions?: boolean) => string;
+  getInitialPromptForLanguage: (language: string) => string;
+}
+
+// ── Language map type ─────────────────────────────────────────────────────────
+
+type LanguageCode = 'en' | 'es-ES' | 'es-419' | 'fr-FR' | 'fr-CA' | 'pt-BR' | 'pt-PT' | 'de' | 'it' | 'zh' | 'ja' | 'ko' | 'ar' | 'hi' | 'ru';
+
+const languageNames: Record<LanguageCode, string> = {
+  'en': 'English',
+  'es-ES': 'Spanish from Spain (Español de España)',
+  'es-419': 'Latin American Spanish (Español Latinoamericano)',
+  'fr-FR': 'French from France (Français de France)',
+  'fr-CA': 'Québécois French (Français Québécois)',
+  'pt-BR': 'Brazilian Portuguese (Português Brasileiro)',
+  'pt-PT': 'European Portuguese (Português Europeu)',
+  'de': 'German',
+  'it': 'Italian',
+  'zh': 'Chinese',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'ar': 'Arabic',
+  'hi': 'Hindi',
+  'ru': 'Russian'
+};
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useRealtimeSession({
   sessionId, setSessionId,
@@ -14,9 +134,9 @@ export function useRealtimeSession({
   sessionSettings,
   logConversation, startPeriodicFlush, stopPeriodicFlush, flushLogs,
   features
-}) {
+}: UseRealtimeSessionParams): UseRealtimeSessionReturn {
 
-  function sendClientEvent(message) {
+  function sendClientEvent(message: RealtimeEvent) {
     if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
       const timestamp = new Date().toLocaleTimeString();
       message.event_id = message.event_id || crypto.randomUUID();
@@ -31,11 +151,11 @@ export function useRealtimeSession({
     }
   }
 
-  function sendInvisiblePrompt(text, logMessage = null) {
+  function sendInvisiblePrompt(text: string, logMessage: string | null = null) {
     console.log('[sendInvisiblePrompt] Sending text:', text);
     console.log('[sendInvisiblePrompt] Text length:', text.length);
 
-    const event = {
+    const event: RealtimeEvent = {
       type: "conversation.item.create",
       item: {
         type: "message",
@@ -52,7 +172,7 @@ export function useRealtimeSession({
     }
   }
 
-  function getPreambleForLanguage(language, includeVoiceInstructions = true) {
+  function getPreambleForLanguage(language: string, includeVoiceInstructions = true) {
     const crisisText = features._crisisContact?.enabled
       ? `call the ${features._crisisContact.hotline} crisis line at ${features._crisisContact.phone}${features._crisisContact.text ? ' or text ' + features._crisisContact.text : ''}`
       : 'call 911 or your local emergency services';
@@ -64,31 +184,13 @@ export function useRealtimeSession({
     return `Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. Please remember, if you're in crisis, you should ${crisisText}.${voiceNote} Thanks again for being willing to talk, I'm glad you're here with me today.`;
   }
 
-  function getInitialPromptForLanguage(language) {
+  function getInitialPromptForLanguage(language: string) {
     const basePrompt = getPreambleForLanguage(language, true);
-
-    const languageNames = {
-      'en': 'English',
-      'es-ES': 'Spanish from Spain (Español de España)',
-      'es-419': 'Latin American Spanish (Español Latinoamericano)',
-      'fr-FR': 'French from France (Français de France)',
-      'fr-CA': 'Québécois French (Français Québécois)',
-      'pt-BR': 'Brazilian Portuguese (Português Brasileiro)',
-      'pt-PT': 'European Portuguese (Português Europeu)',
-      'de': 'German',
-      'it': 'Italian',
-      'zh': 'Chinese',
-      'ja': 'Japanese',
-      'ko': 'Korean',
-      'ar': 'Arabic',
-      'hi': 'Hindi',
-      'ru': 'Russian'
-    };
 
     if (language === 'en') {
       return `Say this phrase exactly: '${basePrompt}'`;
     } else {
-      const langName = languageNames[language] || language;
+      const langName = (languageNames as Record<string, string>)[language] ?? language;
       return `Say this phrase exactly in ${langName}: '${basePrompt}'`;
     }
   }
@@ -101,13 +203,13 @@ export function useRealtimeSession({
     });
 
     if (tokenResponse.status === 429) {
-      const errorData = await tokenResponse.json();
+      const errorData = await tokenResponse.json() as { message?: string };
       toast.error(errorData.message || "You have reached your session limit. Please try again later.");
       console.warn("Rate limit exceeded:", errorData);
       return;
     }
 
-    const data = await tokenResponse.json();
+    const data = await tokenResponse.json() as TokenResponseData;
     console.log("Session token data:", data);
 
     if (data.session?.exists) {
@@ -137,30 +239,31 @@ export function useRealtimeSession({
       socket.emit('session:join', { sessionId: newSessionId });
     });
 
-    socket.on('session:status', (data) => {
-      console.log('Received session:status event:', data);
-      if (data.status === 'ended' && data.remoteTermination) {
-        if (data.endedBy === 'system' && data.reason === 'duration_limit') {
-          toast.warning(data.message || 'Your session has ended due to time limit.');
+    socket.on('session:status', (statusData: { status: string; remoteTermination?: boolean; endedBy?: string; reason?: string; message?: string }) => {
+      console.log('Received session:status event:', statusData);
+      if (statusData.status === 'ended' && statusData.remoteTermination) {
+        if (statusData.endedBy === 'system' && statusData.reason === 'duration_limit') {
+          toast.warning(statusData.message || 'Your session has ended due to time limit.');
         } else {
-          toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
+          toast.warning(`Your session has been remotely ended by ${statusData.endedBy}. The session will now close.`);
         }
         stopSession();
       }
     });
 
     // Crisis intervention messages
-    socket.on('messages:new', (data) => {
-      console.log('[Crisis] Received messages:new event:', data);
-      const messages = Array.isArray(data) ? data : [data];
+    socket.on('messages:new', (msgData: unknown) => {
+      console.log('[Crisis] Received messages:new event:', msgData);
+      const rawMessages = Array.isArray(msgData) ? msgData : [msgData];
 
-      messages.forEach(msg => {
+      (rawMessages as Array<{ message_type?: string; metadata?: { hidden_from_user?: boolean }; content?: string }>).forEach(msg => {
         if (msg.message_type === 'ai_guidance' && msg.metadata?.hidden_from_user) {
           console.log('[Crisis] Sending AI guidance to OpenAI');
-          sendInvisiblePrompt(msg.content);
+          sendInvisiblePrompt(msg.content ?? '');
         } else if (msg.message_type === 'crisis_intervention' || msg.message_type === 'crisis_emergency' || msg.message_type === 'admin_visible') {
-          console.log('[Crisis] Sending intervention message to AI to speak:', msg.content.substring(0, 100));
-          const escapedContent = msg.content.replace(/'/g, "\\'");
+          const content = msg.content ?? '';
+          console.log('[Crisis] Sending intervention message to AI to speak:', content.substring(0, 100));
+          const escapedContent = content.replace(/'/g, "\\'");
           const promptToSpeak = `Say this phrase exactly: '${escapedContent}'`;
 
           const trySendMessage = (attempt = 0) => {
@@ -178,16 +281,16 @@ export function useRealtimeSession({
 
           setMessages((prev) => [
             ...prev,
-            { id: crypto.randomUUID(), role: "system", text: msg.content }
+            { id: crypto.randomUUID(), role: "system", text: content }
           ]);
         }
       });
     });
 
     // Admin messages
-    socket.on('admin:message', (data) => {
-      console.log('Received admin message:', data);
-      const { message, messageType, senderName } = data;
+    socket.on('admin:message', (adminData: { message: string; messageType: string; senderName: string }) => {
+      console.log('Received admin message:', adminData);
+      const { message, messageType, senderName } = adminData;
 
       if (messageType === 'visible') {
         const fullMessage = `[Message from ${senderName}]: ${message}`;
@@ -197,7 +300,7 @@ export function useRealtimeSession({
         ]);
       } else if (messageType === 'invisible') {
         if (dataChannelRef.current) {
-          const event = {
+          const event: RealtimeEvent = {
             type: "conversation.item.create",
             item: {
               type: "message",
@@ -224,21 +327,27 @@ export function useRealtimeSession({
 
     socketRef.current = socket;
 
-    const fns = { stopSession: () => stopSession() };
+    const fns: Record<string, (args: unknown) => Promise<unknown>> = {
+      stopSession: async () => { await stopSession(); }
+    };
 
     const trimmedData = {
       ...data.session,
       instructions: "[[ OMITTED FOR LOGGING ]]",
     };
 
-    logConversation({ sessionId: trimmedData.id, role: "system", type: "session_start", message: "Session started" });
-    logConversation({ sessionId: trimmedData.id, role: "system", type: "system", message: "Session settings", extras: trimmedData });
+    logConversation({ sessionId: trimmedData.id as string, role: "system", type: "session_start", message: "Session started" });
+    logConversation({ sessionId: trimmedData.id as string, role: "system", type: "system", message: "Session settings", extras: trimmedData });
 
     // Create peer connection
     const pc = new RTCPeerConnection();
     audioElement.current = document.createElement("audio");
     audioElement.current.autoplay = true;
-    pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
+    pc.ontrack = (e) => {
+      if (audioElement.current) {
+        audioElement.current.srcObject = e.streams[0];
+      }
+    };
 
     const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
     setLocalStream(ms);
@@ -247,26 +356,30 @@ export function useRealtimeSession({
     const dc = pc.createDataChannel("oai-events");
     dataChannelRef.current = dc;
 
-    dc.addEventListener("message", async (e) => {
-      const event = JSON.parse(e.data);
+    dc.addEventListener("message", async (e: MessageEvent<string>) => {
+      const event = JSON.parse(e.data) as RealtimeEvent;
       console.log(event);
       if (!event.timestamp) {
         event.timestamp = new Date().toLocaleTimeString();
       }
 
       if (event.type === 'response.function_call_arguments.done') {
-        const fn = fns[event.name];
-        if (fn !== undefined) {
-          const args = JSON.parse(event.arguments);
-          const result = await fn(args);
-          logConversation({ sessionId: newSessionId, role: "system", type: "function_call", message: `Function ${event.name} called`, extra: { args, result } });
+        const fnName = event.name as string | undefined;
+        if (fnName !== undefined) {
+          const fn = fns[fnName];
+          if (fn !== undefined) {
+            const args = JSON.parse(event.arguments as string);
+            const result = await fn(args);
+            logConversation({ sessionId: newSessionId, role: "system", type: "function_call", message: `Function ${fnName} called`, extra: { args, result } });
+          }
         }
       }
 
       if (event.type && event.type.startsWith("response")) {
-        if (event.response && event.response.output) {
-          event.response.output.forEach((out) => {
-            if (out.type === "text") {
+        const response = event.response as { output?: Array<{ type: string; text?: string }> } | undefined;
+        if (response && response.output) {
+          response.output.forEach((out) => {
+            if (out.type === "text" && out.text) {
               assistantBuffer.current += out.text;
               setAssistantStream(assistantBuffer.current.trim());
             }
@@ -274,8 +387,9 @@ export function useRealtimeSession({
         }
 
         if (event.type === "response.content_part.done") {
-          if (event.part?.type === "audio" && event.part.transcript) {
-            const assistantMessage = event.part.transcript.trim();
+          const part = event.part as { type?: string; transcript?: string } | undefined;
+          if (part?.type === "audio" && part.transcript) {
+            const assistantMessage = part.transcript.trim();
             setMessages((prev) => [
               ...prev,
               { id: crypto.randomUUID(), role: "assistant", text: assistantMessage },
@@ -290,7 +404,7 @@ export function useRealtimeSession({
       }
 
       if (event.type === "conversation.item.input_audio_transcription.completed") {
-        const transcript = event.transcript;
+        const transcript = event.transcript as string | undefined;
         if (transcript) {
           setMessages((prev) => [
             ...prev,
@@ -318,7 +432,7 @@ export function useRealtimeSession({
     await pc.setLocalDescription(offer);
 
     const modelResponse = await fetch("/api/config/ai-model");
-    const modelData = await modelResponse.json();
+    const modelData = await modelResponse.json() as { model?: string };
     const model = modelData.model || "gpt-realtime-mini";
 
     const baseUrl = "https://api.openai.com/v1/realtime/calls";
@@ -331,7 +445,7 @@ export function useRealtimeSession({
       },
     });
 
-    const answer = {
+    const answer: RTCSessionDescriptionInit = {
       type: "answer",
       sdp: await sdpResponse.text(),
     };
@@ -351,7 +465,7 @@ export function useRealtimeSession({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('Failed to end session:', error);
       }
     }
@@ -369,7 +483,7 @@ export function useRealtimeSession({
     }
 
     if (peerConnection.current) {
-      peerConnection.current.getSenders().forEach((sender) => {
+      peerConnection.current.getSenders().forEach((sender: RTCRtpSender) => {
         if (sender.track) sender.track.stop();
       });
       peerConnection.current.close();
@@ -385,8 +499,8 @@ export function useRealtimeSession({
     peerConnection.current = null;
   }
 
-  function sendTextMessage(message) {
-    const event = {
+  function sendTextMessage(message: string) {
+    const event: RealtimeEvent = {
       type: "conversation.item.create",
       item: {
         type: "message",

@@ -1,6 +1,11 @@
 import { useState, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import type { PieLabelRenderProps } from "recharts";
+import type { TooltipContentProps } from "recharts";
+import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
 import { Activity, MessageSquare, Clock, Mic } from "react-feather";
+import type { Icon as FeatherIcon, IconProps } from "react-feather";
+import type { FC } from "react";
 
 const COLORS = ['#0047BA', '#002E5D', '#BDD6E6', '#8B959E'];
 
@@ -53,18 +58,152 @@ const ENDED_BY_OPTIONS = [
   { value: 'system', label: 'System' }
 ];
 
+// ---- Local types ----
+
+interface FilterOption {
+  value: string;
+  label: string;
+}
+
+interface MultiSelectFilterProps {
+  label: string;
+  options: FilterOption[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+}
+
+interface MetricCardProps {
+  title: string;
+  value: string | number;
+  icon: FC<IconProps>;
+}
+
+interface AnalyticsMetrics {
+  total_sessions: number;
+  avg_messages_per_session: number;
+  avg_duration_seconds: number;
+}
+
+interface AnalyticsBreakdown {
+  voice_messages: number;
+  chat_messages: number;
+  user_messages: number;
+  assistant_messages: number;
+}
+
+interface DailyTrendItem {
+  date: string;
+  session_count: number;
+}
+
+interface UserSessionItem {
+  userid: string | number;
+  username: string | null;
+  session_count: number;
+}
+
+interface TimeDistributionItem {
+  time_period: string;
+  session_count: number;
+}
+
+interface DurationDistributionItem {
+  duration_category: string;
+  session_count: number;
+}
+
+interface DurationTrendItem {
+  date: string;
+  avg_duration_seconds: number;
+}
+
+interface LanguageDistributionItem {
+  language: string;
+  session_count: number;
+  percentage: number;
+}
+
+interface VoiceDistributionItem {
+  voice: string;
+  session_count: number;
+  percentage: number;
+}
+
+interface CompletionPatternItem {
+  ended_by: string;
+  session_count: number;
+  percentage: number;
+}
+
+interface AbandonmentStats {
+  abandonment_rate_percentage: number;
+  abandoned_sessions: number;
+  completed_sessions: number;
+}
+
+interface SessionDepthItem {
+  user_type: string;
+  avg_messages: string | number;
+  session_count: number;
+}
+
+interface EngagementPace {
+  avg_messages_per_minute: string | number | null;
+}
+
+interface ResponseTimes {
+  avg_response_time_seconds: string | number | null;
+  median_response_time_seconds: string | number | null;
+  p95_response_time_seconds: string | number | null;
+}
+
+interface TurnTaking {
+  user_to_assistant_ratio: string | number | null;
+  total_user_messages: number;
+  total_assistant_messages: number;
+}
+
+interface AnalyticsData {
+  metrics: AnalyticsMetrics;
+  breakdown: AnalyticsBreakdown;
+  daily_trend?: DailyTrendItem[];
+  user_sessions?: UserSessionItem[];
+  time_distribution?: TimeDistributionItem[];
+  duration_distribution?: DurationDistributionItem[];
+  duration_trend?: DurationTrendItem[];
+  language_distribution?: LanguageDistributionItem[];
+  voice_distribution?: VoiceDistributionItem[];
+  completion_patterns?: CompletionPatternItem[];
+  abandonment_stats?: AbandonmentStats;
+  session_depth?: SessionDepthItem[];
+  engagement_pace?: EngagementPace;
+  response_times?: ResponseTimes;
+  turn_taking?: TurnTaking;
+}
+
+interface AnalyticsFilters {
+  startDate: string;
+  endDate: string;
+  voices: string[];
+  languages: string[];
+  sessionTypes: string[];
+  statuses: string[];
+  endedBy: string[];
+  crisisFlagged: string;
+}
+
 // Reusable MultiSelectFilter component
-function MultiSelectFilter({ label, options, selected, onChange }) {
-  const handleToggle = (value) => {
+function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFilterProps) {
+  const handleToggle = (value: string) => {
     if (selected.includes(value)) {
-      onChange(selected.filter(v => v !== value));
+      onChange(selected.filter((v: string) => v !== value));
     } else {
       onChange([...selected, value]);
     }
   };
 
   const handleSelectAll = () => {
-    onChange(options.map(opt => opt.value));
+    onChange(options.map((opt: FilterOption) => opt.value));
   };
 
   const handleClearAll = () => {
@@ -93,7 +232,7 @@ function MultiSelectFilter({ label, options, selected, onChange }) {
         </div>
       </div>
       <div className="flex flex-col gap-1 max-h-32 overflow-y-auto border rounded p-2 bg-gray-50">
-        {options.map(option => (
+        {options.map((option: FilterOption) => (
           <label key={option.value} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 px-1 rounded">
             <input
               type="checkbox"
@@ -109,7 +248,7 @@ function MultiSelectFilter({ label, options, selected, onChange }) {
   );
 }
 
-function MetricCard({ title, value, icon: Icon }) {
+function MetricCard({ title, value, icon: Icon }: MetricCardProps) {
   return (
     <div className="bg-white p-6 rounded-lg shadow">
       <div className="flex items-center justify-between">
@@ -126,10 +265,10 @@ function MetricCard({ title, value, icon: Icon }) {
 }
 
 export default function Analytics() {
-  const [analytics, setAnalytics] = useState(null);
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [filters, setFilters] = useState({
+  const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<AnalyticsFilters>({
     startDate: '',
     endDate: '',
     voices: [],
@@ -161,10 +300,10 @@ export default function Analytics() {
       const response = await fetch(`/admin/api/analytics?${params}`);
       if (!response.ok) throw new Error('Failed to fetch analytics');
 
-      const data = await response.json();
+      const data: AnalyticsData = await response.json();
       setAnalytics(data);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -178,7 +317,7 @@ export default function Analytics() {
     return () => clearTimeout(timer);
   }, [filters]);
 
-  const formatDuration = (seconds) => {
+  const formatDuration = (seconds: number | null | undefined): string => {
     if (!seconds) return '0s';
     const hours = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
@@ -193,7 +332,7 @@ export default function Analytics() {
     }
   };
 
-  const handleFilterChange = (field, value) => {
+  const handleFilterChange = (field: keyof AnalyticsFilters, value: string | string[]) => {
     setFilters(prev => ({ ...prev, [field]: value }));
   };
 
@@ -280,65 +419,65 @@ export default function Analytics() {
     { name: 'Assistant', value: analytics.breakdown.assistant_messages || 0 }
   ];
 
-  const dailyTrendData = (analytics.daily_trend || []).reverse().map(item => ({
+  const dailyTrendData = (analytics.daily_trend || []).reverse().map((item: DailyTrendItem) => ({
     date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     sessions: item.session_count
   }));
 
   // Top 20 users by session count
   const userSessionData = (analytics.user_sessions || [])
-    .sort((a, b) => b.session_count - a.session_count)
+    .sort((a: UserSessionItem, b: UserSessionItem) => b.session_count - a.session_count)
     .slice(0, 20)
-    .map(item => ({
+    .map((item: UserSessionItem) => ({
       username: item.username || `User ${item.userid}`,
       sessions: item.session_count
     }));
 
   // Time distribution sorted by time order
+  const timeOrder: Record<string, number> = { 'Morning': 0, 'Afternoon': 1, 'Evening': 2 };
   const timeDistributionData = (analytics.time_distribution || [])
-    .map(item => ({
+    .map((item: TimeDistributionItem) => ({
       name: item.time_period,
       value: item.session_count
     }))
-    .sort((a, b) => {
-      const order = { 'Morning': 0, 'Afternoon': 1, 'Evening': 2 };
-      return order[a.name] - order[b.name];
+    .sort((a: { name: string; value: number }, b: { name: string; value: number }) => {
+      return (timeOrder[a.name] ?? 99) - (timeOrder[b.name] ?? 99);
     });
 
   // Duration distribution sorted by duration length
+  const durationOrder: Record<string, number> = { 'Short (0-5 min)': 0, 'Medium (5-30 min)': 1, 'Long (30+ min)': 2 };
   const durationDistributionData = (analytics.duration_distribution || [])
-    .map(item => ({
+    .map((item: DurationDistributionItem) => ({
       name: item.duration_category,
       value: item.session_count
     }))
-    .sort((a, b) => {
-      const order = { 'Short (0-5 min)': 0, 'Medium (5-30 min)': 1, 'Long (30+ min)': 2 };
-      return order[a.name] - order[b.name];
+    .sort((a: { name: string; value: number }, b: { name: string; value: number }) => {
+      return (durationOrder[a.name] ?? 99) - (durationOrder[b.name] ?? 99);
     });
 
   // Duration trend over time (last 30 days)
-  const durationTrendData = (analytics.duration_trend || []).reverse().map(item => ({
+  const durationTrendData = (analytics.duration_trend || []).reverse().map((item: DurationTrendItem) => ({
     date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     duration: Math.round(item.avg_duration_seconds / 60) // Convert to minutes
   }));
 
   // Language distribution data
   const languageDistributionData = (analytics.language_distribution || [])
-    .map(item => ({
+    .map((item: LanguageDistributionItem) => ({
       language: item.language.toUpperCase(),
       sessions: item.session_count,
       percentage: item.percentage
     }))
-    .sort((a, b) => b.sessions - a.sessions);
+    .sort((a: { language: string; sessions: number; percentage: number }, b: { language: string; sessions: number; percentage: number }) => b.sessions - a.sessions);
 
   // Voice distribution data
   const voiceDistributionData = (analytics.voice_distribution || [])
-    .map(item => ({
+    .map((item: VoiceDistributionItem) => ({
       voice: item.voice.charAt(0).toUpperCase() + item.voice.slice(1),
       sessions: item.session_count,
       percentage: item.percentage
     }))
-    .sort((a, b) => b.sessions - a.sessions);
+    .sort((a: { voice: string; sessions: number; percentage: number }, b: { voice: string; sessions: number; percentage: number }) => b.sessions - a.sessions);
 
   const voicePercentage = analytics.breakdown.voice_messages && analytics.breakdown.voice_messages + analytics.breakdown.chat_messages
     ? Math.round((analytics.breakdown.voice_messages / (analytics.breakdown.voice_messages + analytics.breakdown.chat_messages)) * 100)
@@ -404,7 +543,7 @@ export default function Analytics() {
                 label="Voice"
                 options={VOICE_OPTIONS}
                 selected={filters.voices}
-                onChange={(value) => handleFilterChange('voices', value)}
+                onChange={(value: string[]) => handleFilterChange('voices', value)}
               />
 
               {/* Language Filter */}
@@ -412,7 +551,7 @@ export default function Analytics() {
                 label="Language"
                 options={LANGUAGE_OPTIONS}
                 selected={filters.languages}
-                onChange={(value) => handleFilterChange('languages', value)}
+                onChange={(value: string[]) => handleFilterChange('languages', value)}
               />
 
               {/* Session Type Filter */}
@@ -420,7 +559,7 @@ export default function Analytics() {
                 label="Session Type"
                 options={SESSION_TYPE_OPTIONS}
                 selected={filters.sessionTypes}
-                onChange={(value) => handleFilterChange('sessionTypes', value)}
+                onChange={(value: string[]) => handleFilterChange('sessionTypes', value)}
               />
 
               {/* Status Filter */}
@@ -428,7 +567,7 @@ export default function Analytics() {
                 label="Status"
                 options={STATUS_OPTIONS}
                 selected={filters.statuses}
-                onChange={(value) => handleFilterChange('statuses', value)}
+                onChange={(value: string[]) => handleFilterChange('statuses', value)}
               />
 
               {/* Ended By Filter */}
@@ -436,7 +575,7 @@ export default function Analytics() {
                 label="Ended By"
                 options={ENDED_BY_OPTIONS}
                 selected={filters.endedBy}
-                onChange={(value) => handleFilterChange('endedBy', value)}
+                onChange={(value: string[]) => handleFilterChange('endedBy', value)}
               />
 
               {/* Crisis Flagged Filter */}
@@ -539,7 +678,7 @@ export default function Analytics() {
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent }: PieLabelRenderProps) => `${String(name ?? '')}: ${((Number(percent ?? 0)) * 100).toFixed(0)}%`}
                 outerRadius={80}
                 fill="#8884d8"
                 dataKey="value"
@@ -562,7 +701,7 @@ export default function Analytics() {
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                label={({ name, percent }: PieLabelRenderProps) => `${String(name ?? '')}: ${((Number(percent ?? 0)) * 100).toFixed(0)}%`}
                 outerRadius={80}
                 fill="#8884d8"
                 dataKey="value"
@@ -604,12 +743,12 @@ export default function Analytics() {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }: PieLabelRenderProps) => `${String(name ?? '')}: ${((Number(percent ?? 0)) * 100).toFixed(0)}%`}
                   outerRadius={100}
                   fill="#8884d8"
                   dataKey="value"
                 >
-                  {timeDistributionData.map((entry, index) => (
+                  {timeDistributionData.map((entry: { name: string; value: number }, index: number) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -643,12 +782,12 @@ export default function Analytics() {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }: PieLabelRenderProps) => `${String(name ?? '')}: ${((Number(percent ?? 0)) * 100).toFixed(0)}%`}
                   outerRadius={100}
                   fill="#8884d8"
                   dataKey="value"
                 >
-                  {durationDistributionData.map((entry, index) => (
+                  {durationDistributionData.map((entry: { name: string; value: number }, index: number) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -686,13 +825,15 @@ export default function Analytics() {
                 <XAxis dataKey="language" />
                 <YAxis />
                 <Tooltip
-                  content={({ active, payload }) => {
+                  content={(props: TooltipContentProps<ValueType, NameType>) => {
+                    const { active, payload } = props;
                     if (active && payload && payload.length) {
+                      const entry = payload[0].payload as { language: string; percentage: number };
                       return (
                         <div className="bg-white p-2 border rounded shadow">
-                          <p className="font-semibold">{payload[0].payload.language}</p>
+                          <p className="font-semibold">{entry.language}</p>
                           <p className="text-sm">Sessions: {payload[0].value}</p>
-                          <p className="text-sm text-gray-600">{payload[0].payload.percentage}%</p>
+                          <p className="text-sm text-gray-600">{entry.percentage}%</p>
                         </div>
                       );
                     }
@@ -715,13 +856,15 @@ export default function Analytics() {
                 <XAxis dataKey="voice" angle={-45} textAnchor="end" height={80} />
                 <YAxis />
                 <Tooltip
-                  content={({ active, payload }) => {
+                  content={(props: TooltipContentProps<ValueType, NameType>) => {
+                    const { active, payload } = props;
                     if (active && payload && payload.length) {
+                      const entry = payload[0].payload as { voice: string; percentage: number };
                       return (
                         <div className="bg-white p-2 border rounded shadow">
-                          <p className="font-semibold">{payload[0].payload.voice}</p>
+                          <p className="font-semibold">{entry.voice}</p>
                           <p className="text-sm">Sessions: {payload[0].value}</p>
-                          <p className="text-sm text-gray-600">{payload[0].payload.percentage}%</p>
+                          <p className="text-sm text-gray-600">{entry.percentage}%</p>
                         </div>
                       );
                     }
@@ -744,19 +887,19 @@ export default function Analytics() {
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
-                  data={analytics.completion_patterns.map(item => ({
+                  data={analytics.completion_patterns.map((item: CompletionPatternItem) => ({
                     name: item.ended_by.charAt(0).toUpperCase() + item.ended_by.slice(1),
                     value: item.session_count
                   }))}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }: PieLabelRenderProps) => `${String(name ?? '')}: ${((Number(percent ?? 0)) * 100).toFixed(0)}%`}
                   outerRadius={100}
                   fill="#8884d8"
                   dataKey="value"
                 >
-                  {analytics.completion_patterns.map((entry, index) => (
+                  {analytics.completion_patterns.map((entry: CompletionPatternItem, index: number) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -766,7 +909,7 @@ export default function Analytics() {
             </ResponsiveContainer>
 
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={analytics.completion_patterns.map(item => ({
+              <BarChart data={analytics.completion_patterns.map((item: CompletionPatternItem) => ({
                 ended_by: item.ended_by.charAt(0).toUpperCase() + item.ended_by.slice(1),
                 sessions: item.session_count,
                 percentage: item.percentage
@@ -775,13 +918,15 @@ export default function Analytics() {
                 <XAxis dataKey="ended_by" />
                 <YAxis />
                 <Tooltip
-                  content={({ active, payload }) => {
+                  content={(props: TooltipContentProps<ValueType, NameType>) => {
+                    const { active, payload } = props;
                     if (active && payload && payload.length) {
+                      const entry = payload[0].payload as { ended_by: string; percentage: number };
                       return (
                         <div className="bg-white p-2 border rounded shadow">
-                          <p className="font-semibold">Ended by {payload[0].payload.ended_by}</p>
+                          <p className="font-semibold">Ended by {entry.ended_by}</p>
                           <p className="text-sm">Sessions: {payload[0].value}</p>
-                          <p className="text-sm text-gray-600">{payload[0].payload.percentage}%</p>
+                          <p className="text-sm text-gray-600">{entry.percentage}%</p>
                         </div>
                       );
                     }
@@ -815,22 +960,24 @@ export default function Analytics() {
           <div className="bg-white p-6 rounded-lg shadow col-span-2">
             <h3 className="text-lg font-semibold mb-4">Average Session Depth by User Type</h3>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={analytics.session_depth.map(item => ({
+              <BarChart data={analytics.session_depth.map((item: SessionDepthItem) => ({
                 user_type: item.user_type.charAt(0).toUpperCase() + item.user_type.slice(1),
-                avg_messages: parseFloat(item.avg_messages).toFixed(1),
+                avg_messages: parseFloat(String(item.avg_messages)).toFixed(1),
                 session_count: item.session_count
               }))}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="user_type" />
                 <YAxis />
                 <Tooltip
-                  content={({ active, payload }) => {
+                  content={(props: TooltipContentProps<ValueType, NameType>) => {
+                    const { active, payload } = props;
                     if (active && payload && payload.length) {
+                      const entry = payload[0].payload as { user_type: string; session_count: number };
                       return (
                         <div className="bg-white p-2 border rounded shadow">
-                          <p className="font-semibold">{payload[0].payload.user_type} Users</p>
+                          <p className="font-semibold">{entry.user_type} Users</p>
                           <p className="text-sm">Avg Messages: {payload[0].value}</p>
-                          <p className="text-sm text-gray-600">{payload[0].payload.session_count} sessions</p>
+                          <p className="text-sm text-gray-600">{entry.session_count} sessions</p>
                         </div>
                       );
                     }
@@ -854,7 +1001,7 @@ export default function Analytics() {
               <p className="text-sm text-gray-600">Messages Per Minute</p>
               <p className="text-2xl font-bold text-byuNavy mt-1">
                 {analytics.engagement_pace.avg_messages_per_minute
-                  ? parseFloat(analytics.engagement_pace.avg_messages_per_minute).toFixed(2)
+                  ? parseFloat(String(analytics.engagement_pace.avg_messages_per_minute)).toFixed(2)
                   : '0.00'}
               </p>
               <p className="text-xs text-gray-500 mt-1">Conversation pace</p>
@@ -867,7 +1014,7 @@ export default function Analytics() {
                 <p className="text-sm text-gray-600">Avg Response Time</p>
                 <p className="text-2xl font-bold text-byuNavy mt-1">
                   {analytics.response_times.avg_response_time_seconds
-                    ? parseFloat(analytics.response_times.avg_response_time_seconds).toFixed(2) + 's'
+                    ? parseFloat(String(analytics.response_times.avg_response_time_seconds)).toFixed(2) + 's'
                     : 'N/A'}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">System latency</p>
@@ -877,7 +1024,7 @@ export default function Analytics() {
                 <p className="text-sm text-gray-600">Median Response Time</p>
                 <p className="text-2xl font-bold text-byuNavy mt-1">
                   {analytics.response_times.median_response_time_seconds
-                    ? parseFloat(analytics.response_times.median_response_time_seconds).toFixed(2) + 's'
+                    ? parseFloat(String(analytics.response_times.median_response_time_seconds)).toFixed(2) + 's'
                     : 'N/A'}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">50th percentile</p>
@@ -887,7 +1034,7 @@ export default function Analytics() {
                 <p className="text-sm text-gray-600">P95 Response Time</p>
                 <p className="text-2xl font-bold text-byuNavy mt-1">
                   {analytics.response_times.p95_response_time_seconds
-                    ? parseFloat(analytics.response_times.p95_response_time_seconds).toFixed(2) + 's'
+                    ? parseFloat(String(analytics.response_times.p95_response_time_seconds)).toFixed(2) + 's'
                     : 'N/A'}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">95th percentile</p>
@@ -903,7 +1050,7 @@ export default function Analytics() {
                 <p className="text-sm text-gray-600">Turn-Taking Ratio</p>
                 <p className="text-2xl font-bold text-byuNavy mt-1">
                   {analytics.turn_taking.user_to_assistant_ratio
-                    ? parseFloat(analytics.turn_taking.user_to_assistant_ratio).toFixed(2)
+                    ? parseFloat(String(analytics.turn_taking.user_to_assistant_ratio)).toFixed(2)
                     : 'N/A'}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">User : Assistant</p>

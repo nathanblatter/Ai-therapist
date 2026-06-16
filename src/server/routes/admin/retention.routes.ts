@@ -79,7 +79,7 @@ export default function adminRetentionRoutes() {
     };
 
     // Save settings
-    const result = await updateRetentionSettings(updatedSettings, adminUsername);
+    const result = await updateRetentionSettings(updatedSettings, adminUsername ?? '');
 
     log.info({ adminUsername, settings: result }, 'Content retention settings updated');
 
@@ -102,8 +102,8 @@ export default function adminRetentionRoutes() {
     log.info({ adminUsername, result }, 'Manual content wipe completed');
 
     res.json({
-      success: true,
       ...result,
+      success: true,
       message: 'Content wipe completed'
     });
   }));
@@ -111,10 +111,12 @@ export default function adminRetentionRoutes() {
   // GET /admin/api/content-retention/log - Get wipe history with pagination
   router.get('/admin/api/content-retention/log', requireRole('researcher'), asyncHandler(async (req, res) => {
     const { page = '1', limit = '50' } = req.query;
+    const pageStr = typeof page === 'string' ? page : '1';
+    const limitStr = typeof limit === 'string' ? limit : '50';
 
-    log.info({ page, limit }, 'Fetching content wipe log');
+    log.info({ page: pageStr, limit: limitStr }, 'Fetching content wipe log');
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const offset = (parseInt(pageStr) - 1) * parseInt(limitStr);
 
     // Get wipe history
     const result = await pool.query(
@@ -131,7 +133,7 @@ export default function adminRetentionRoutes() {
       FROM content_wipe_log
       ORDER BY started_at DESC
       LIMIT $1 OFFSET $2`,
-      [parseInt(limit), offset]
+      [parseInt(limitStr), offset]
     );
 
     // Get total count
@@ -142,9 +144,9 @@ export default function adminRetentionRoutes() {
       wipes: result.rows,
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
+        page: parseInt(pageStr),
+        limit: parseInt(limitStr),
+        pages: Math.ceil(total / parseInt(limitStr))
       }
     });
   }));

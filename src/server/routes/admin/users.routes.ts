@@ -25,10 +25,17 @@ export default function adminUsersRoutes() {
     );
 
     // Parse the sess JSON and extract relevant fields
+    interface SessData {
+      userId?: number;
+      username?: string;
+      userRole?: string;
+      cookie?: unknown;
+    }
+
     const sessions = result.rows.map(row => {
-      let sessData = {};
+      let sessData: SessData = {};
       try {
-        sessData = typeof row.sess === 'string' ? JSON.parse(row.sess) : row.sess;
+        sessData = typeof row.sess === 'string' ? (JSON.parse(row.sess) as SessData) : (row.sess as SessData);
       } catch (err) {
         log.error({ err, sid: row.sid }, 'Failed to parse session data');
       }
@@ -99,7 +106,7 @@ export default function adminUsersRoutes() {
       GROUP BY u.userid, u.username, u.role
       HAVING COUNT(ts.session_id) >= $2
       ORDER BY last_session_at DESC
-    `, [todayStart, limits.max_sessions_per_day]);
+    `, [todayStart, limits.max_sessions_per_day ?? 0]);
 
     const rateLimitedUsers = result.rows.map(row => ({
       userid: row.userid,

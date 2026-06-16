@@ -38,17 +38,53 @@ const ROLE_OPTIONS = [
   { value: 'researcher', label: 'Researcher' }
 ];
 
+interface User {
+  userid: number;
+  username: string;
+  role: string;
+  preferred_voice?: string;
+  preferred_language?: string;
+  mfa_enabled: boolean;
+  created_at: string;
+}
+
+interface UserUpdates {
+  username: string;
+  role: string;
+  password?: string;
+}
+
+interface UserFormData {
+  username: string;
+  password: string;
+  role: string;
+}
+
+interface Filters {
+  search: string;
+  roles: string[];
+  voices: string[];
+  languages: string[];
+  mfaStatus: string;
+}
+
+interface EditModalProps {
+  user: User;
+  onClose: () => void;
+  onSave: (userid: number, updates: UserUpdates) => void;
+}
+
 export default function UserManagement() {
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [editingUser, setEditingUser] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [formData, setFormData] = useState({ username: '', password: '', role: 'participant' });
-  const [formError, setFormError] = useState(null);
+  const [formData, setFormData] = useState<UserFormData>({ username: '', password: '', role: 'participant' });
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Filter state
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<Filters>({
     search: '',
     roles: [],
     voices: [],
@@ -61,7 +97,7 @@ export default function UserManagement() {
     fetchUsers();
   }, []);
 
-  const generateSecurePassword = () => {
+  const generateSecurePassword = (): string => {
     const length = 16;
     const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?";
     const array = new Uint8Array(length);
@@ -83,14 +119,14 @@ export default function UserManagement() {
       const data = await response.json();
       setUsers(data.users);
       setError(null);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAddUser = async (e) => {
+  const handleAddUser = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormError(null);
 
@@ -114,12 +150,12 @@ export default function UserManagement() {
       setShowAddModal(false);
       setFormData({ username: '', password: '', role: 'participant' });
       await fetchUsers();
-    } catch (err) {
-      setFormError(err.message);
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : String(err));
     }
   };
 
-  const handleEditUser = async (userid, updates) => {
+  const handleEditUser = async (userid: number, updates: UserUpdates) => {
     setFormError(null);
 
     try {
@@ -136,12 +172,12 @@ export default function UserManagement() {
 
       setEditingUser(null);
       await fetchUsers();
-    } catch (err) {
-      setFormError(err.message);
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : String(err));
     }
   };
 
-  const handleDeleteUser = async (userid, username) => {
+  const handleDeleteUser = async (userid: number, username: string) => {
     if (!confirm(`Are you sure you want to delete user "${username}"? This action cannot be undone.`)) {
       return;
     }
@@ -157,18 +193,18 @@ export default function UserManagement() {
       }
 
       await fetchUsers();
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
-  const EditModal = ({ user, onClose, onSave }) => {
-    const [editData, setEditData] = useState({
+  const EditModal = ({ user, onClose, onSave }: EditModalProps) => {
+    const [editData, setEditData] = useState<UserUpdates>({
       username: user.username,
       role: user.role,
       password: ''
     });
-    const usernameInputRef = useRef(null);
+    const usernameInputRef = useRef<HTMLInputElement>(null);
 
     // Focus first input when modal opens
     useEffect(() => {
@@ -179,7 +215,7 @@ export default function UserManagement() {
 
     // Handle Escape key to close modal
     useEffect(() => {
-      const handleEscape = (e) => {
+      const handleEscape = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
           onClose();
         }
@@ -189,9 +225,9 @@ export default function UserManagement() {
       return () => document.removeEventListener('keydown', handleEscape);
     }, [onClose]);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
-      const updates = { username: editData.username, role: editData.role };
+      const updates: UserUpdates = { username: editData.username, role: editData.role };
       if (editData.password) {
         updates.password = editData.password;
       }
@@ -250,7 +286,7 @@ export default function UserManagement() {
                 <input
                   id="edit-password"
                   type="text"
-                  value={editData.password}
+                  value={editData.password ?? ''}
                   onChange={(e) => setEditData(prev => ({ ...prev, password: e.target.value }))}
                   aria-label="New password (optional)"
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
@@ -300,7 +336,7 @@ export default function UserManagement() {
   };
 
   const AddUserModal = () => {
-    const addUsernameInputRef = useRef(null);
+    const addUsernameInputRef = useRef<HTMLInputElement>(null);
 
     // Focus first input when modal opens
     useEffect(() => {
@@ -311,7 +347,7 @@ export default function UserManagement() {
 
     // Handle Escape key to close modal
     useEffect(() => {
-      const handleEscape = (e) => {
+      const handleEscape = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
           setShowAddModal(false);
         }
@@ -461,11 +497,11 @@ export default function UserManagement() {
     return true;
   });
 
-  const toggleFilter = (filterKey, value) => {
+  const toggleFilter = (filterKey: keyof Pick<Filters, 'roles' | 'voices' | 'languages'>, value: string) => {
     setFilters(prev => {
       const currentValues = prev[filterKey];
       const newValues = currentValues.includes(value)
-        ? currentValues.filter(v => v !== value)
+        ? currentValues.filter((v: string) => v !== value)
         : [...currentValues, value];
       return { ...prev, [filterKey]: newValues };
     });

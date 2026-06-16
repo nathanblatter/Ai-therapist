@@ -1,7 +1,20 @@
 import { ArrowUp, ArrowDown } from "react-feather";
 import { useState } from "react";
+import React from "react";
 
-function Event({ event, timestamp }) {
+interface RealtimeEvent {
+  event_id?: string;
+  type: string;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
+interface EventProps {
+  event: RealtimeEvent;
+  timestamp: string | undefined;
+}
+
+function Event({ event, timestamp }: EventProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isClient = event.event_id && !event.event_id.startsWith("event_");
@@ -33,11 +46,15 @@ function Event({ event, timestamp }) {
   );
 }
 
-export default function EventLog({ events }) {
-  const eventsToDisplay = [];
-  let deltaEvents = {};
+interface EventLogProps {
+  events: RealtimeEvent[];
+}
 
-  events.forEach((event) => {
+export default function EventLog({ events }: EventLogProps) {
+  const eventsToDisplay: React.ReactElement[] = [];
+  const deltaEvents: Record<string, RealtimeEvent> = {};
+
+  events.forEach((event: RealtimeEvent) => {
     if (event.type.endsWith("delta")) {
       if (deltaEvents[event.type]) {
         // for now just log a single event per render pass

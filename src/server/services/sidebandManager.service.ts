@@ -9,6 +9,11 @@ import { insertMessagesBatch } from '../models/dbQueries.js';
 import { getOpenAIKey } from '../config/secrets.js';
 
 export class SidebandManager {
+  private connections: Map<string, WebSocket>;
+  private reconnectAttempts: Map<string, number>;
+  private maxReconnectAttempts: number;
+  private reconnectDelayMs: number;
+
   constructor() {
     this.connections = new Map(); // sessionId → WebSocket
     this.reconnectAttempts = new Map(); // sessionId → attempt count
@@ -23,11 +28,11 @@ export class SidebandManager {
    * @param {string} apiKey - OpenAI API key
    * @returns {Promise<WebSocket>} - The WebSocket connection
    */
-  async connect(sessionId, callId, apiKey) {
+  async connect(sessionId: string, callId: string, apiKey: string): Promise<WebSocket> {
     // Check if already connected
     if (this.connections.has(sessionId)) {
       console.warn(`[Sideband] Already connected for session ${sessionId.substring(0, 12)}...`);
-      return this.connections.get(sessionId);
+      return this.connections.get(sessionId)!;
     }
 
     const wsUrl = `wss://api.openai.com/v1/realtime?call_id=${callId}`;
@@ -63,7 +68,7 @@ export class SidebandManager {
   /**
    * Handle WebSocket open event
    */
-  async handleOpen(sessionId, callId) {
+  async handleOpen(sessionId: string, callId: string): Promise<void> {
     try {
       // Update database
       await pool.query(
@@ -94,9 +99,9 @@ export class SidebandManager {
   /**
    * Handle incoming WebSocket messages
    */
-  async handleMessage(sessionId, data) {
+  async handleMessage(sessionId: string, data: WebSocket.RawData): Promise<void> {
     try {
-      const event = JSON.parse(data.toString());
+      const event = JSON.parse(data.toString()) as { type: string; [key: string]: unknown };
 
       // Log event for debugging (minimal logging)
       if (event.type !== 'response.audio.delta' && event.type !== 'input_audio_buffer.speech_started') {
@@ -114,7 +119,7 @@ export class SidebandManager {
   /**
    * Route events to appropriate handlers
    */
-  async handleEvent(sessionId, event) {
+  async handleEvent(sessionId: string, event: { type: string; [key: string]: unknown }): Promise<void> {
     switch (event.type) {
       case 'session.created':
       case 'session.updated':
@@ -134,20 +139,20 @@ export class SidebandManager {
         break;
 
       case 'error':
-        console.error(`[Sideband] OpenAI error for session ${sessionId}:`, event.error);
-        await this.logError(sessionId, event.error);
+        console.error(`[Sideband] OpenAI error for session ${sessionId}:`, event['error']);
+        await this.logError(sessionId, event['error']);
 
         if (global.io) {
           global.io.to('admin-broadcast').emit('sideband:error', {
             sessionId,
-            error: event.error
+            error: event['error']
           });
         }
         break;
 
       case 'rate_limits.updated':
         // Monitor rate limits (log only, no action)
-        console.log(`[Sideband] Rate limits for session ${sessionId}:`, event.rate_limits);
+        console.log(`[Sideband] Rate limits for session ${sessionId}:`, event['rate_limits']);
         break;
 
       default:
@@ -159,25 +164,29 @@ export class SidebandManager {
   /**
    * Handle tool/function call requests from OpenAI
    */
-  async handleToolCall(sessionId, event) {
-    const { call_id, name: toolName, arguments: argsString } = event;
+  async handleToolCall(sessionId: string, event: { type: string; [key: string]: unknown }): Promise<void> {
+    const call_id = event['call_id'] as string;
+    const toolName = event['name'] as string;
+    const argsString = event['arguments'] as string;
 
     try {
       // Parse function arguments
-      let args;
+      let args: Record<string, unknown>;
       try {
-        args = JSON.parse(argsString);
-      } catch (parseError) {
+        args = JSON.parse(argsString) as Record<string, unknown>;
+      } catch (parseError: unknown) {
         console.error(`[Sideband] Failed to parse arguments:`, parseError);
-        throw new Error(`Invalid function arguments: ${parseError.message}`);
+        const msg = parseError instanceof Error ? parseError.message : String(parseError);
+        throw new Error(`Invalid function arguments: ${msg}`);
       }
 
       // Log tool call to messages table
       await insertMessagesBatch([{
-        sessionId,
+        session_id: sessionId,
         role: 'system',
-        type: 'tool_call',
-        message: `Tool called: ${toolName}`,
+        message_type: 'tool_call',
+        content: `Tool called: ${toolName}`,
+        content_redacted: null,
         metadata: {
           tool_name: toolName,
           call_id,
@@ -211,10 +220,11 @@ export class SidebandManager {
 
       // Log tool response to messages table
       await insertMessagesBatch([{
-        sessionId,
+        session_id: sessionId,
         role: 'system',
-        type: 'tool_response',
-        message: `Tool response: ${toolName}`,
+        message_type: 'tool_response',
+        content: `Tool response: ${toolName}`,
+        content_redacted: null,
         metadata: {
           tool_name: toolName,
           call_id,
@@ -225,8 +235,10 @@ export class SidebandManager {
 
       console.log(`[Sideband] Tool ${toolName} executed for session ${sessionId.substring(0, 12)}...`);
 
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`[Sideband] Tool execution failed:`, error);
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Send error response back to OpenAI
       const ws = this.connections.get(sessionId);
@@ -238,7 +250,7 @@ export class SidebandManager {
             type: 'function_call_output',
             call_id,
             output: JSON.stringify({
-              error: error.message,
+              error: errorMessage,
               success: false
             })
           }
@@ -252,14 +264,15 @@ export class SidebandManager {
 
       // Log error to messages table
       await insertMessagesBatch([{
-        sessionId,
+        session_id: sessionId,
         role: 'system',
-        type: 'tool_response',
-        message: `Tool error: ${toolName}`,
+        message_type: 'tool_response',
+        content: `Tool error: ${toolName}`,
+        content_redacted: null,
         metadata: {
           tool_name: toolName,
           call_id,
-          error: error.message,
+          error: errorMessage,
           status: 'failed'
         }
       }]);
@@ -271,7 +284,7 @@ export class SidebandManager {
    * @param {string} sessionId
    * @param {object} updates - { instructions?, tools?, temperature? }
    */
-  async updateSession(sessionId, updates) {
+  async updateSession(sessionId: string, updates: Record<string, unknown>): Promise<void> {
     const ws = this.connections.get(sessionId);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       throw new Error('Sideband connection not active');
@@ -290,7 +303,7 @@ export class SidebandManager {
   /**
    * Handle WebSocket errors
    */
-  async handleError(sessionId, error) {
+  async handleError(sessionId: string, error: Error): Promise<void> {
     console.error(`[Sideband] WebSocket error for session ${sessionId.substring(0, 12)}...:`, error.message);
 
     await pool.query(
@@ -314,7 +327,7 @@ export class SidebandManager {
   /**
    * Handle WebSocket close event
    */
-  async handleClose(sessionId, code, reason) {
+  async handleClose(sessionId: string, code: number, reason: Buffer): Promise<void> {
     console.log(`[Sideband] Connection closed for session ${sessionId.substring(0, 12)}...: ${code} - ${reason || 'No reason'}`);
 
     this.connections.delete(sessionId);
@@ -356,13 +369,15 @@ export class SidebandManager {
                 'SELECT openai_call_id FROM therapy_sessions WHERE session_id = $1',
                 [sessionId]
               );
-              const callId = callIdResult.rows[0]?.openai_call_id;
+              const callId = callIdResult.rows[0]?.openai_call_id as string | undefined;
               if (callId) {
                 // Get API key from AWS Secrets Manager
                 const apiKey = await getOpenAIKey();
-                await this.connect(sessionId, callId, apiKey);
+                if (apiKey) {
+                  await this.connect(sessionId, callId, apiKey);
+                }
               }
-            } catch (error) {
+            } catch (error: unknown) {
               console.error('[Sideband] Reconnection failed:', error);
             }
           }, this.reconnectDelayMs * (attempts + 1));
@@ -370,7 +385,7 @@ export class SidebandManager {
           console.error(`[Sideband] Max reconnection attempts reached for session ${sessionId.substring(0, 12)}...`);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`[Sideband] Error in handleClose:`, error);
     }
   }
@@ -379,7 +394,7 @@ export class SidebandManager {
    * Gracefully close sideband connection
    * @param {string} sessionId
    */
-  async disconnect(sessionId) {
+  async disconnect(sessionId: string): Promise<void> {
     const ws = this.connections.get(sessionId);
     if (ws) {
       console.log(`[Sideband] Disconnecting session ${sessionId.substring(0, 12)}...`);
@@ -392,14 +407,15 @@ export class SidebandManager {
   /**
    * Log connection error to database
    */
-  async logConnectionError(sessionId, error) {
+  async logConnectionError(sessionId: string, error: unknown): Promise<void> {
     try {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       await pool.query(
         `UPDATE therapy_sessions
          SET sideband_error = $1,
              sideband_connected = FALSE
          WHERE session_id = $2`,
-        [error.message, sessionId]
+        [errorMessage, sessionId]
       );
     } catch (err) {
       console.error('[Sideband] Failed to log connection error:', err);
@@ -409,9 +425,9 @@ export class SidebandManager {
   /**
    * Log error to database
    */
-  async logError(sessionId, error) {
+  async logError(sessionId: string, error: unknown): Promise<void> {
     try {
-      const errorMessage = typeof error === 'string' ? error : (error.message || JSON.stringify(error));
+      const errorMessage = typeof error === 'string' ? error : (error instanceof Error ? error.message : JSON.stringify(error));
       await pool.query(
         `UPDATE therapy_sessions
          SET sideband_error = $1
@@ -427,7 +443,7 @@ export class SidebandManager {
    * Get all active sideband connections
    * @returns {string[]} Array of session IDs with active connections
    */
-  getActiveConnections() {
+  getActiveConnections(): string[] {
     return Array.from(this.connections.keys());
   }
 
@@ -436,15 +452,15 @@ export class SidebandManager {
    * @param {string} sessionId
    * @returns {boolean}
    */
-  isConnected(sessionId) {
+  isConnected(sessionId: string): boolean {
     const ws = this.connections.get(sessionId);
-    return ws && ws.readyState === WebSocket.OPEN;
+    return !!(ws && ws.readyState === WebSocket.OPEN);
   }
 
   /**
    * Clean up all connections (called on server shutdown)
    */
-  async shutdown() {
+  async shutdown(): Promise<void> {
     console.log('[Sideband] Shutting down all sideband connections...');
     for (const [sessionId, ws] of this.connections.entries()) {
       ws.close(1000, 'Server shutdown');

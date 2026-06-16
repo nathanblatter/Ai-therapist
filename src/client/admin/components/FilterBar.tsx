@@ -62,9 +62,21 @@ const CRISIS_SEVERITY_OPTIONS = [
   { value: 'high', label: 'High' }
 ];
 
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
+interface MultiSelectFilterProps {
+  label: string;
+  options: SelectOption[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+}
+
 // Reusable MultiSelectFilter component
-function MultiSelectFilter({ label, options, selected, onChange }) {
-  const handleToggle = (value) => {
+function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFilterProps) {
+  const handleToggle = (value: string) => {
     if (selected.includes(value)) {
       onChange(selected.filter(v => v !== value));
     } else {
@@ -118,8 +130,44 @@ function MultiSelectFilter({ label, options, selected, onChange }) {
   );
 }
 
-export default function FilterBar({ onFilterChange }) {
-  const [filters, setFilters] = useState({
+interface Filters {
+  search: string;
+  startDate: string;
+  endDate: string;
+  minMessages: string;
+  maxMessages: string;
+  voices: string[];
+  languages: string[];
+  durations: string[];
+  sessionTypes: string[];
+  statuses: string[];
+  endedBy: string[];
+  crisisFlagged: string;
+  crisisSeverity: string;
+}
+
+interface SerializedFilters {
+  search: string;
+  startDate: string;
+  endDate: string;
+  minMessages: string;
+  maxMessages: string;
+  voices: string;
+  languages: string;
+  durations: string;
+  sessionTypes: string;
+  statuses: string;
+  endedBy: string;
+  crisisFlagged: string;
+  crisisSeverity: string;
+}
+
+interface FilterBarProps {
+  onFilterChange: (filters: SerializedFilters) => void;
+}
+
+export default function FilterBar({ onFilterChange }: FilterBarProps) {
+  const [filters, setFilters] = useState<Filters>({
     // Existing filters
     search: '',
     startDate: '',
@@ -143,7 +191,7 @@ export default function FilterBar({ onFilterChange }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       // Serialize array filters to CSV strings
-      const serializedFilters = {
+      const serializedFilters: SerializedFilters = {
         ...filters,
         voices: filters.voices.length > 0 ? filters.voices.join(',') : '',
         languages: filters.languages.length > 0 ? filters.languages.join(',') : '',
@@ -158,12 +206,12 @@ export default function FilterBar({ onFilterChange }) {
     return () => clearTimeout(timer);
   }, [filters, onFilterChange]);
 
-  const handleChange = (field, value) => {
+  const handleChange = (field: keyof Filters, value: string | string[]) => {
     setFilters(prev => ({ ...prev, [field]: value }));
   };
 
   const handleClear = () => {
-    const clearedFilters = {
+    const clearedFilters: Filters = {
       search: '',
       startDate: '',
       endDate: '',

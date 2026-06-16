@@ -3,12 +3,29 @@ import { useRef } from 'react';
 const FLUSH_SIZE = 200;
 const FLUSH_INTERVAL_MS = 15000;
 
-export function useSessionLogging() {
-  const logBufferRef = useRef([]);
-  const flushInFlightRef = useRef(false);
-  const flushTimerRef = useRef(null);
+interface LogRecord {
+  timestamp: string;
+  sessionId: string | null;
+  role: string;
+  type: string;
+  message: string | null;
+  extras: unknown;
+}
 
-  function logConversation({ sessionId, role, type, message, extras }) {
+interface LogConversationParams {
+  sessionId: string | null;
+  role: string;
+  type: string;
+  message: string;
+  extras?: unknown;
+}
+
+export function useSessionLogging() {
+  const logBufferRef = useRef<LogRecord[]>([]);
+  const flushInFlightRef = useRef<boolean>(false);
+  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function logConversation({ sessionId, role, type, message, extras }: LogConversationParams) {
     if (!sessionId || !type) return;
     logBufferRef.current.push({
       timestamp: new Date().toISOString(),

@@ -1,12 +1,37 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Volume2, Square } from 'react-feather';
 
-export default function SessionSettings({ isOpen, onClose, settings, onSettingsChange, disabled }) {
-  const audioRef = useRef(null);
-  const [availableVoices, setAvailableVoices] = useState([]);
-  const [availableLanguages, setAvailableLanguages] = useState([]);
+interface VoiceOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+interface LanguageOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+interface SessionSettingsConfig {
+  voice: string;
+  language: string;
+}
+
+interface SessionSettingsProps {
+  isOpen: boolean;
+  onClose: () => void;
+  settings: SessionSettingsConfig;
+  onSettingsChange: (newSettings: SessionSettingsConfig) => void;
+  disabled: boolean;
+}
+
+export default function SessionSettings({ isOpen, onClose, settings, onSettingsChange, disabled }: SessionSettingsProps) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
+  const [availableLanguages, setAvailableLanguages] = useState<LanguageOption[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
-  const [playingVoice, setPlayingVoice] = useState(null);
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
 
   // Load available voices and languages when modal opens
   useEffect(() => {
@@ -22,14 +47,14 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
 
         if (voicesRes.ok) {
           const data = await voicesRes.json();
-          setAvailableVoices(data.voices || []);
+          setAvailableVoices((data.voices as VoiceOption[]) || []);
         }
 
         if (languagesRes.ok) {
           const data = await languagesRes.json();
-          setAvailableLanguages(data.languages || []);
+          setAvailableLanguages((data.languages as LanguageOption[]) || []);
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Failed to fetch voice/language options:', err);
         setAvailableVoices([{ value: 'cedar', label: 'Cedar', description: 'Warm & natural' }]);
         setAvailableLanguages([{ value: 'en', label: 'English', description: 'English' }]);
@@ -45,7 +70,7 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
   useEffect(() => {
     if (!isOpen) return;
 
-    const handleEscape = (e) => {
+    const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
 
@@ -63,7 +88,7 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
   }, [isOpen]);
 
   // Save user preferences to server
-  const savePreferences = async (newSettings) => {
+  const savePreferences = async (newSettings: SessionSettingsConfig) => {
     try {
       const response = await fetch('/api/users/preferences', {
         method: 'PUT',
@@ -82,13 +107,13 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
       }
 
       console.log('Saved user preferences:', newSettings);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to save preferences:', err);
     }
   };
 
   // Handle voice selection
-  const handleVoiceSelect = (voiceValue) => {
+  const handleVoiceSelect = (voiceValue: string) => {
     if (disabled) return;
     const newSettings = { ...settings, voice: voiceValue };
     onSettingsChange(newSettings);
@@ -96,14 +121,14 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
   };
 
   // Handle language selection
-  const handleLanguageChange = (e) => {
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newSettings = { ...settings, language: e.target.value };
     onSettingsChange(newSettings);
     savePreferences(newSettings);
   };
 
   // Handle voice preview playback
-  const handlePlayPreview = (voiceValue) => {
+  const handlePlayPreview = (voiceValue: string) => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
     }
@@ -122,7 +147,7 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
     audioRef.current.src = `/api/voices/preview/${voiceValue}`;
     audioRef.current.play()
       .then(() => setPlayingVoice(voiceValue))
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error('Failed to play voice preview:', err);
         setPlayingVoice(null);
       });
@@ -215,8 +240,18 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
   );
 }
 
+interface VoiceSelectorProps {
+  voices: VoiceOption[];
+  selectedVoice: string;
+  playingVoice: string | null;
+  onSelect: (voiceValue: string) => void;
+  onPlayPreview: (voiceValue: string) => void;
+  loading: boolean;
+  disabled: boolean;
+}
+
 // Voice Selector Component
-function VoiceSelector({ voices, selectedVoice, playingVoice, onSelect, onPlayPreview, loading, disabled }) {
+function VoiceSelector({ voices, selectedVoice, playingVoice, onSelect, onPlayPreview, loading, disabled }: VoiceSelectorProps) {
   if (loading) {
     return (
       <div className="space-y-2">
@@ -235,13 +270,13 @@ function VoiceSelector({ voices, selectedVoice, playingVoice, onSelect, onPlayPr
       </label>
       <div className="grid grid-cols-2 gap-2">
         {voices.map((voice) => (
-          <VoiceOption
+          <VoiceOptionCard
             key={voice.value}
             voice={voice}
             isSelected={selectedVoice === voice.value}
             isPlaying={playingVoice === voice.value}
             onSelect={() => onSelect(voice.value)}
-            onPlayPreview={(e) => {
+            onPlayPreview={(e: React.MouseEvent) => {
               e.stopPropagation();
               onPlayPreview(voice.value);
             }}
@@ -253,8 +288,17 @@ function VoiceSelector({ voices, selectedVoice, playingVoice, onSelect, onPlayPr
   );
 }
 
+interface VoiceOptionCardProps {
+  voice: VoiceOption;
+  isSelected: boolean;
+  isPlaying: boolean;
+  onSelect: () => void;
+  onPlayPreview: (e: React.MouseEvent) => void;
+  disabled: boolean;
+}
+
 // Voice Option Component
-function VoiceOption({ voice, isSelected, isPlaying, onSelect, onPlayPreview, disabled }) {
+function VoiceOptionCard({ voice, isSelected, isPlaying, onSelect, onPlayPreview, disabled }: VoiceOptionCardProps) {
   const containerClasses = [
     'flex items-center gap-3 p-3 rounded-lg border-2 transition-all',
     isSelected ? 'border-gray-800 bg-gray-50' : 'border-gray-200 bg-white hover:border-gray-300',
@@ -293,8 +337,16 @@ function VoiceOption({ voice, isSelected, isPlaying, onSelect, onPlayPreview, di
   );
 }
 
+interface LanguageSelectorProps {
+  languages: LanguageOption[];
+  selectedLanguage: string;
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  loading: boolean;
+  disabled: boolean;
+}
+
 // Language Selector Component
-function LanguageSelector({ languages, selectedLanguage, onChange, loading, disabled }) {
+function LanguageSelector({ languages, selectedLanguage, onChange, loading, disabled }: LanguageSelectorProps) {
   const selectClasses = [
     'w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-sm',
     'focus:outline-none focus:border-gray-400 focus:ring-0 transition-colors',

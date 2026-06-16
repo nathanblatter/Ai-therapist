@@ -6,6 +6,13 @@
  * to keep production logs clean. Can be enabled via Admin > System Config.
  */
 
+declare global {
+  interface Window {
+    enableDebugLogging: () => void;
+    disableDebugLogging: () => void;
+  }
+}
+
 // Store original console methods
 const originalConsole = {
   log: console.log.bind(console),

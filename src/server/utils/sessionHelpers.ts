@@ -3,12 +3,72 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('sessionHelpers');
 
+interface CrisisContact {
+  hotline: string;
+  phone: string;
+  text?: string;
+  enabled?: boolean;
+}
+
+interface SessionLimits {
+  enabled: boolean;
+  max_duration_minutes?: number;
+  max_sessions_per_day?: number;
+  cooldown_minutes?: number;
+}
+
+interface VoiceConfig {
+  value: string;
+  label: string;
+  description?: string;
+  enabled: boolean;
+}
+
+interface VoicesConfig {
+  voices?: VoiceConfig[];
+  default_voice?: string;
+}
+
+interface LanguageConfig {
+  value: string;
+  label: string;
+  description?: string;
+  enabled: boolean;
+  systemPromptAddition?: string;
+}
+
+interface LanguagesConfig {
+  languages?: LanguageConfig[];
+  default_language?: string;
+}
+
+interface SystemPromptEntry {
+  prompt: string;
+  last_modified?: string;
+}
+
+interface SystemPromptsConfig {
+  realtime?: SystemPromptEntry;
+  chat?: SystemPromptEntry;
+}
+
+interface SystemConfig {
+  crisis_contact?: CrisisContact;
+  session_limits?: SessionLimits;
+  voices?: VoicesConfig;
+  languages?: LanguagesConfig;
+  system_prompts?: SystemPromptsConfig;
+  features?: Record<string, unknown>;
+  client_logging?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 // Cache for system config to avoid database hits on every request
-let systemConfigCache = null;
-let configCacheTime = null;
+let systemConfigCache: SystemConfig | null = null;
+let configCacheTime: number | null = null;
 const CONFIG_CACHE_TTL = 600000; // 10 minutes
 
-export async function getSystemConfig() {
+export async function getSystemConfig(): Promise<SystemConfig> {
   const now = Date.now();
 
   // Return cached config if still valid
@@ -17,8 +77,10 @@ export async function getSystemConfig() {
   }
 
   try {
-    const result = await pool.query('SELECT config_key, config_value FROM system_config');
-    const config = {};
+    const result = await pool.query<{ config_key: string; config_value: unknown }>(
+      'SELECT config_key, config_value FROM system_config'
+    );
+    const config: SystemConfig = {};
     result.rows.forEach(row => {
       config[row.config_key] = row.config_value;
     });
@@ -46,12 +108,40 @@ export async function getSystemConfig() {
   }
 }
 
-export function invalidateConfigCache() {
+export function invalidateConfigCache(): void {
   systemConfigCache = null;
   configCacheTime = null;
 }
 
-export async function checkSessionLimits(userId, userRole = null) {
+interface SessionLimitAllowed {
+  allowed: true;
+  bypass?: string;
+  limits?: {
+    max_duration_minutes?: number;
+    max_sessions_per_day?: number;
+    sessions_today?: number;
+  };
+}
+
+interface SessionLimitDeniedDailyLimit {
+  allowed: false;
+  reason: 'daily_limit';
+  message: string;
+  limit: number;
+  current: number;
+}
+
+interface SessionLimitDeniedCooldown {
+  allowed: false;
+  reason: 'cooldown';
+  message: string;
+  cooldown_minutes: number;
+  minutes_remaining: number;
+}
+
+export type SessionLimitResult = SessionLimitAllowed | SessionLimitDeniedDailyLimit | SessionLimitDeniedCooldown;
+
+export async function checkSessionLimits(userId: unknown, userRole: string | null = null): Promise<SessionLimitResult> {
   if (!userId) {
     // Anonymous users don't have limits enforced
     return { allowed: true };
@@ -64,7 +154,7 @@ export async function checkSessionLimits(userId, userRole = null) {
   }
 
   const config = await getSystemConfig();
-  const limits = config.session_limits || { enabled: false };
+  const limits = (config.session_limits as SessionLimits | undefined) || { enabled: false };
 
   if (!limits.enabled) {
     return { allowed: true };
@@ -74,7 +164,7 @@ export async function checkSessionLimits(userId, userRole = null) {
   const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
   todayStart.setHours(0, 0, 0, 0);
 
-  const todaySessionsResult = await pool.query(
+  const todaySessionsResult = await pool.query<{ session_count: string }>(
     `SELECT COUNT(*) as session_count
      FROM therapy_sessions
      WHERE user_id = $1 AND created_at >= $2`,
@@ -83,7 +173,7 @@ export async function checkSessionLimits(userId, userRole = null) {
 
   const todaySessionCount = parseInt(todaySessionsResult.rows[0].session_count);
 
-  if (todaySessionCount >= limits.max_sessions_per_day) {
+  if (limits.max_sessions_per_day !== undefined && todaySessionCount >= limits.max_sessions_per_day) {
     return {
       allowed: false,
       reason: 'daily_limit',
@@ -94,8 +184,8 @@ export async function checkSessionLimits(userId, userRole = null) {
   }
 
   // Check cooldown period
-  if (limits.cooldown_minutes > 0) {
-    const recentSessionResult = await pool.query(
+  if (limits.cooldown_minutes && limits.cooldown_minutes > 0) {
+    const recentSessionResult = await pool.query<{ ended_at: Date }>(
       `SELECT ended_at
        FROM therapy_sessions
        WHERE user_id = $1 AND ended_at IS NOT NULL
@@ -107,7 +197,7 @@ export async function checkSessionLimits(userId, userRole = null) {
     if (recentSessionResult.rows.length > 0) {
       const lastEndedAt = new Date(recentSessionResult.rows[0].ended_at);
       const now = new Date();
-      const timeSinceEndMs = now - lastEndedAt;
+      const timeSinceEndMs = now.getTime() - lastEndedAt.getTime();
       const cooldownMs = limits.cooldown_minutes * 60 * 1000;
 
       log.debug({
@@ -184,9 +274,9 @@ At session close, remind users: you're a support tool and for ongoing or serious
 **Summary:**
 You provide supportive, ethical guidance, never diagnose/prescribe, keep all conversations safe/private, transparently communicate limits, and always refer to professional help in crisis. Be calm, caring, and user-centered—empower, don't direct. Prioritize user safety, confidentiality, and professional boundaries at all times.`;
 
-export async function getSystemPrompt(language = 'en', sessionType = 'realtime') {
+export async function getSystemPrompt(language = 'en', sessionType = 'realtime'): Promise<string> {
   const config = await getSystemConfig();
-  const crisisContact = config.crisis_contact || {
+  const crisisContact = (config.crisis_contact as CrisisContact | undefined) || {
     hotline: 'BYU Counseling and Psychological Services',
     phone: '(801) 422-3035',
     text: 'HELLO to 741741'
@@ -199,18 +289,21 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime')
 
   // Get the prompt from database config, or use default fallback
   let basePrompt = DEFAULT_SYSTEM_PROMPT;
-  const systemPrompts = config.system_prompts;
-  if (systemPrompts && systemPrompts[sessionType] && systemPrompts[sessionType].prompt) {
-    basePrompt = systemPrompts[sessionType].prompt;
+  const systemPrompts = config.system_prompts as SystemPromptsConfig | undefined;
+  if (systemPrompts) {
+    const entry = systemPrompts[sessionType as keyof SystemPromptsConfig];
+    if (entry?.prompt) {
+      basePrompt = entry.prompt;
+    }
   }
 
   // Interpolate {{crisis_text}} placeholder
   basePrompt = basePrompt.replace(/\{\{crisis_text\}\}/g, crisisText);
 
   // Get language-specific addition from database config
-  const languagesConfig = config.languages || { languages: [], default_language: 'en' };
+  const languagesConfig = (config.languages as LanguagesConfig | undefined) || { languages: [], default_language: 'en' };
   const languageObj = languagesConfig.languages
-    ? languagesConfig.languages.find(l => l.value === language)
+    ? languagesConfig.languages.find((l: LanguageConfig) => l.value === language)
     : null;
   const languageAddition = languageObj?.systemPromptAddition || '';
 
@@ -220,7 +313,7 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime')
 export const sessionConfigDefault = {
   session: {
     type: "realtime",
-    tools: [],
+    tools: [] as unknown[],
     tool_choice: "auto",
     model: "gpt-realtime-mini",
     audio: {

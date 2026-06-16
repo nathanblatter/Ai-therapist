@@ -12,7 +12,7 @@ import { logInterventionAction } from './crisisDetection.service.js';
  * @param {string} severity - Risk severity ('high' or 'none')
  * @param {number} riskScore - Risk score (0-100)
  */
-export async function executeGraduatedResponse(sessionId, severity, riskScore) {
+export async function executeGraduatedResponse(sessionId: string, severity: string, riskScore: number): Promise<void> {
   try {
     if (severity === 'high') {
       await executeHighRiskResponse(sessionId, riskScore);
@@ -29,7 +29,7 @@ export async function executeGraduatedResponse(sessionId, severity, riskScore) {
 /**
  * Execute high risk intervention — admin alert only, no automated user message.
  */
-async function executeHighRiskResponse(sessionId, riskScore) {
+async function executeHighRiskResponse(sessionId: string, riskScore: number): Promise<void> {
   try {
     await logInterventionAction(sessionId, 'high_risk_emergency', {
       riskScore,
@@ -68,7 +68,7 @@ async function executeHighRiskResponse(sessionId, riskScore) {
 /**
  * Update monitoring frequency for session
  */
-async function updateMonitoringFrequency(sessionId, frequency) {
+async function updateMonitoringFrequency(sessionId: string, frequency: string): Promise<void> {
   try {
     await pool.query(
       `UPDATE therapy_sessions

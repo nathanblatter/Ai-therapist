@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
+import { io, Socket } from "socket.io-client";
 import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import SessionSettings from "./SessionSettings";
@@ -7,41 +7,84 @@ import Header from './Header';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
 
+interface CrisisContact {
+  hotline: string;
+  phone: string;
+  text: string;
+  enabled: boolean;
+}
+
+interface Features {
+  output_modalities: string[];
+  voice_enabled: boolean;
+  chat_enabled: boolean;
+}
+
+interface SessionSettings {
+  voice: string;
+  language: string;
+}
+
+interface ChatMessage {
+  id: string;
+  role: string;
+  text: string;
+  isAdminMessage?: boolean;
+}
+
+interface LogRecord {
+  timestamp: string;
+  sessionId: string | null;
+  role: string;
+  type: string;
+  message: string | null;
+  extras: unknown;
+}
+
+interface LogConversationParams {
+  sessionId: string | null;
+  role: string;
+  type: string;
+  message: string;
+  extras?: unknown;
+  extra?: unknown;
+}
+
 export default function App() {
   const [isClient, setIsClient] = useState(false);
   const [isSessionActive, setIsSessionActive] = useState(false);
-  const [events, setEvents] = useState([]);
-  const [messages, setMessages] = useState([]);
+  const [events, setEvents] = useState<unknown[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [assistantStream, setAssistantStream] = useState("");
-  const [localStream, setLocalStream] = useState(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const assistantBuffer = useRef("");
   const userBuffer = useRef("");
-  const currentVoiceMessageId = useRef(null);
-  const dataChannelRef = useRef(null);
-  const peerConnection = useRef(null);
-  const audioElement = useRef(null);
-  const [sessionId, setSessionId] = useState(null);
-  const [sessionSettings, setSessionSettings] = useState({
+  const currentVoiceMessageId = useRef<string | null>(null);
+  const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const audioElement = useRef<HTMLAudioElement | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
     language: 'en'
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const socketRef = useRef(null);
-  const [crisisContact, setCrisisContact] = useState({
+  const socketRef = useRef<Socket | null>(null);
+  const [crisisContact, setCrisisContact] = useState<CrisisContact>({
     hotline: 'BYU Counseling and Psychological Services',
     phone: '(801) 422-3035',
     text: 'HELLO to 741741',
     enabled: true
   });
-  const [features, setFeatures] = useState({
+  const [features, setFeatures] = useState<Features>({
     output_modalities: ["audio"],
     voice_enabled: true,
     chat_enabled: true
   });
-  const [sessionEndTime, setSessionEndTime] = useState(null);
-  const [timeRemaining, setTimeRemaining] = useState(null);
-  const timerIntervalRef = useRef(null);
-  const [sessionType, setSessionType] = useState(null); // 'realtime' or 'chat'
+  const [sessionEndTime, setSessionEndTime] = useState<number | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [sessionType, setSessionType] = useState<string | null>(null); // 'realtime' or 'chat'
 
   useEffect(() => {
     setIsClient(true);
@@ -104,7 +147,7 @@ export default function App() {
       if (remaining <= 0) {
         // Time's up! End the session
         setTimeRemaining(0);
-        clearInterval(timerIntervalRef.current);
+        clearInterval(timerIntervalRef.current!);
         timerIntervalRef.current = null;
 
         toast.warning("Your session time has ended. The session will now close.");
@@ -123,13 +166,13 @@ export default function App() {
   }, [sessionEndTime, isSessionActive]);
 
   // ---- Batched logger ----
-  const logBufferRef = useRef([]);
+  const logBufferRef = useRef<LogRecord[]>([]);
   const flushInFlightRef = useRef(false);
-  const flushTimerRef = useRef(null);
+  const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const FLUSH_SIZE = 200;
   const FLUSH_INTERVAL_MS = 15000;
 
-  function logConversation({ sessionId, role, type, message, extras }) {
+  function logConversation({ sessionId, role, type, message, extras }: LogConversationParams) {
     if (!sessionId || !type) return;
     logBufferRef.current.push({
       timestamp: new Date().toISOString(),
@@ -456,9 +499,10 @@ export default function App() {
     // Create a peer connection
     const pc = new RTCPeerConnection();
     // Set up to play remote audio from the model
-    audioElement.current = document.createElement("audio");
-    audioElement.current.autoplay = true;
-    pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
+    const audioEl = document.createElement("audio");
+    audioEl.autoplay = true;
+    audioElement.current = audioEl;
+    pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; };
     // Add local audio track for microphone input in the browser
     const ms = await navigator.mediaDevices.getUserMedia({ audio: true,}); //video: true// });
     setLocalStream(ms);
@@ -476,17 +520,17 @@ export default function App() {
       }
 
       if (event.type === 'response.function_call_arguments.done') {
-        const fn = fns[event.name];
+        const fn = (fns as Record<string, ((args: unknown) => Promise<unknown>) | undefined>)[event.name as string];
         if (fn !== undefined) {
-          const args = JSON.parse(event.arguments);
+          const args = JSON.parse(event.arguments as string);
           const result = await fn(args);
-          logConversation({ sessionId: newSessionId, role: "system", type: "function_call", message: `Function ${event.name} called`, extra: { args, result } });
+          logConversation({ sessionId: newSessionId, role: "system", type: "function_call", message: `Function ${event.name as string} called`, extras: { args, result } });
         }
       }
 
       if (event.type && event.type.startsWith("response")) {
         if (event.response && event.response.output) {
-          event.response.output.forEach((out) => {
+          (event.response.output as Array<{ type: string; text?: string }>).forEach((out) => {
             if (out.type === "text") {
               assistantBuffer.current += out.text;
               setAssistantStream(assistantBuffer.current.trim());
@@ -574,7 +618,7 @@ export default function App() {
     }
     */
 
-    const answer = {
+    const answer: RTCSessionDescriptionInit = {
       type: "answer",
       sdp: await sdpResponse.text(),
     };
@@ -695,7 +739,7 @@ export default function App() {
   // Handle page unload - warn user and end session
   useEffect(() => {
     // Show warning dialog when user tries to leave during active session
-    const handleBeforeUnload = (e) => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (isSessionActive && sessionId) {
         // Show browser's built-in "Leave site?" dialog
         e.preventDefault();
@@ -731,10 +775,10 @@ export default function App() {
   }, [isSessionActive, sessionId, sessionType]);
 
 
-  function sendClientEvent(message) {
+  function sendClientEvent(message: Record<string, unknown>) {
     if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
       const timestamp = new Date().toLocaleTimeString();
-      message.event_id = message.event_id || crypto.randomUUID();
+      message.event_id = (message.event_id as string | undefined) || crypto.randomUUID();
       dataChannelRef.current.send(JSON.stringify(message));
       if (!message.timestamp) {
         message.timestamp = timestamp;
@@ -746,7 +790,7 @@ export default function App() {
     }
   }
 
-  async function sendTextMessage(message) {
+  async function sendTextMessage(message: string) {
     // Handle chat-only session
     if (sessionType === 'chat') {
       // Add user message to UI immediately
@@ -808,7 +852,7 @@ export default function App() {
     logConversation({ sessionId:sessionId, role: "user", type: "chat", message: message });
   }
 
-  function sendInvisiblePrompt(text, logMessage = null) {
+  function sendInvisiblePrompt(text: string, logMessage: string | null = null) {
     console.log('[sendInvisiblePrompt] Sending text:', text);
     console.log('[sendInvisiblePrompt] Text length:', text.length);
 
@@ -836,7 +880,7 @@ export default function App() {
     }
   }
 
-  function getPreambleForLanguage(language, includeVoiceInstructions = true) {
+  function getPreambleForLanguage(language: string, includeVoiceInstructions = true) {
     const crisisText = crisisContact.enabled
       ? `call the ${crisisContact.hotline} crisis line at ${crisisContact.phone}${crisisContact.text ? ' or text ' + crisisContact.text : ''}`
       : 'call 911 or your local emergency services';
@@ -850,10 +894,10 @@ export default function App() {
     return basePrompt;
   }
 
-  function getInitialPromptForLanguage(language) {
+  function getInitialPromptForLanguage(language: string) {
     const basePrompt = getPreambleForLanguage(language, true);
 
-    const languageNames = {
+    const languageNames: Record<string, string> = {
       'en': 'English',
       'es-ES': 'Spanish from Spain (Español de España)',
       'es-419': 'Latin American Spanish (Español Latinoamericano)',

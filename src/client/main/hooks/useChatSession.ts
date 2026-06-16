@@ -1,5 +1,31 @@
-import { io } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 import { toast } from '../../shared/components/Toast';
+import { MutableRefObject, Dispatch, SetStateAction } from 'react';
+
+interface ChatMessage {
+  id: string;
+  role: string;
+  text: string;
+  isAdminMessage?: boolean;
+}
+
+interface SessionSettings {
+  voice: string;
+  language: string;
+}
+
+interface UseChatSessionParams {
+  sessionId: string | null;
+  setSessionId: Dispatch<SetStateAction<string | null>>;
+  setSessionType: Dispatch<SetStateAction<string | null>>;
+  setIsSessionActive: Dispatch<SetStateAction<boolean>>;
+  setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
+  socketRef: MutableRefObject<Socket | null>;
+  setSessionEndTime: Dispatch<SetStateAction<number | null>>;
+  setTimeRemaining: Dispatch<SetStateAction<number | null>>;
+  sessionSettings: SessionSettings;
+  getPreambleForLanguage: (language: string, includeVoiceInstructions?: boolean) => string;
+}
 
 export function useChatSession({
   sessionId, setSessionId,
@@ -10,7 +36,7 @@ export function useChatSession({
   setSessionEndTime, setTimeRemaining,
   sessionSettings,
   getPreambleForLanguage
-}) {
+}: UseChatSessionParams) {
 
   async function startSession() {
     try {
@@ -106,8 +132,8 @@ export function useChatSession({
     setTimeRemaining(null);
   }
 
-  async function sendMessage(message) {
-    setMessages((prev) => [
+  async function sendMessage(message: string) {
+    setMessages((prev: ChatMessage[]) => [
       ...prev,
       { id: crypto.randomUUID(), role: "user", text: message },
     ]);
@@ -125,14 +151,14 @@ export function useChatSession({
 
       const data = await response.json();
 
-      setMessages((prev) => [
+      setMessages((prev: ChatMessage[]) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant", text: data.response },
       ]);
 
     } catch (error) {
       console.error('Failed to send chat message:', error);
-      setMessages((prev) => [
+      setMessages((prev: ChatMessage[]) => [
         ...prev,
         { id: crypto.randomUUID(), role: "system", text: "Error: Failed to send message. Please try again." },
       ]);

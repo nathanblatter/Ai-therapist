@@ -32,15 +32,15 @@ export default function adminCrisisRoutes() {
     }
 
     // Calculate risk score based on severity
-    const riskScoreMap = { low: 25, medium: 50, high: 85 };
-    const riskScore = riskScoreMap[severity];
+    const riskScoreMap: Record<string, number> = { low: 25, medium: 50, high: 85 };
+    const riskScore = riskScoreMap[severity as string];
 
     // Flag the session
     await flagSessionCrisis(
       sessionId,
       severity,
       riskScore,
-      req.session.username,
+      req.session.username ?? '',
       'manual',
       null,
       [],
@@ -102,7 +102,7 @@ export default function adminCrisisRoutes() {
     // Unflag the session
     await unflagSessionCrisis(
       sessionId,
-      req.session.username,
+      req.session.username ?? '',
       notes || 'Manually unflagged by admin'
     );
 
@@ -204,7 +204,7 @@ export default function adminCrisisRoutes() {
     let result;
     if (sessionId) {
       const { getSessionCrisisEvents } = await import('../../services/crisisDetection.service.js');
-      const events = await getSessionCrisisEvents(sessionId);
+      const events = await getSessionCrisisEvents(typeof sessionId === 'string' ? sessionId : String(sessionId));
       result = { events };
     } else {
       // Get all crisis events

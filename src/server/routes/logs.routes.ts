@@ -50,28 +50,37 @@ export default function logsRoutes() {
     }
 
     for (const sessionId of sessionIds) {
-      const existingSession = await getSession(sessionId);
+      const sidStr = String(sessionId);
+      const existingSession = await getSession(sidStr);
       if (!existingSession) {
         await pool.query(
           `INSERT INTO therapy_sessions (session_id, user_id, status, created_at, updated_at)
            VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
            ON CONFLICT (session_id) DO NOTHING`,
-          [sessionId, userId]
+          [sidStr, userId]
         );
-        log.info({ sessionId: sessionId.substring(0, 12) + '...', userId }, 'Created session');
+        log.info({ sessionId: sidStr.substring(0, 12) + '...', userId }, 'Created session');
 
         try {
           const sessionConfigObj = sessionConfigDefault;
-          await upsertSessionConfig(sessionId, {
-            voice: sessionConfigObj.session?.audio?.output?.voice || 'cedar',
+          const sessionDef = sessionConfigObj.session as {
+            audio?: { output?: { voice?: string } };
+            instructions?: string;
+            turn_detection?: Record<string, unknown>;
+            tools?: unknown[];
+            temperature?: number;
+            max_response_output_tokens?: number;
+          };
+          await upsertSessionConfig(sidStr, {
+            voice: sessionDef.audio?.output?.voice || 'cedar',
             modalities: ['text', 'audio'],
-            instructions: sessionConfigObj.session?.instructions || null,
-            turn_detection: sessionConfigObj.session?.turn_detection || null,
-            tools: sessionConfigObj.session?.tools || null,
-            temperature: sessionConfigObj.session?.temperature || 0.8,
-            max_response_output_tokens: sessionConfigObj.session?.max_response_output_tokens || 4096
+            instructions: sessionDef.instructions || null,
+            turn_detection: sessionDef.turn_detection || null,
+            tools: sessionDef.tools || null,
+            temperature: sessionDef.temperature || 0.8,
+            max_response_output_tokens: sessionDef.max_response_output_tokens || 4096
           });
-          log.info({ sessionId: sessionId.substring(0, 12) + '...' }, 'Session configuration created');
+          log.info({ sessionId: sidStr.substring(0, 12) + '...' }, 'Session configuration created');
         } catch (configError) {
           log.error({ err: configError, sessionId }, 'Failed to create session configuration');
         }
@@ -103,7 +112,10 @@ export default function logsRoutes() {
         );
 
         const conversationHistory = historyResult.rows.reverse();
-        const riskAnalysis = await analyzeMessageRisk(msg, conversationHistory);
+        const riskAnalysis = await analyzeMessageRisk(
+          { content: msg.content ?? '', session_id: msg.session_id, message_id: msg.message_id },
+          conversationHistory
+        );
 
         if (riskAnalysis.riskScore > 0) {
           log.info({
@@ -159,7 +171,8 @@ export default function logsRoutes() {
     }
 
     // Socket.io event emission
-    const sessionGroups = {};
+    interface MsgEntry { message_id: number; role: string; message_type: string; content: string | null; content_redacted: string | null; created_at: Date }
+    const sessionGroups: Record<string, MsgEntry[]> = {};
     insertedMessages.forEach(msg => {
       if (!sessionGroups[msg.session_id]) sessionGroups[msg.session_id] = [];
       sessionGroups[msg.session_id].push({

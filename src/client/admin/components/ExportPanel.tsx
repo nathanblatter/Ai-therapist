@@ -1,20 +1,25 @@
 import { useState, useEffect } from "react";
 import { Download } from "react-feather";
 
+interface ExportSession {
+  session_id: string;
+  session_name?: string | null;
+}
+
 export default function ExportPanel() {
   const [format, setFormat] = useState('json');
   const [exportType, setExportType] = useState('full'); // 'full', 'metadata', 'anonymized', 'aggregated'
   const [sessionId, setSessionId] = useState('');
-  const [sessions, setSessions] = useState([]);
+  const [sessions, setSessions] = useState<ExportSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [aggregationPeriod, setAggregationPeriod] = useState('day'); // 'day', 'week', 'month'
   const [crisisFlaggedOnly, setCrisisFlaggedOnly] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [exportWarning, setExportWarning] = useState(null);
-  const [userRole, setUserRole] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [exportWarning, setExportWarning] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchSessions = async () => {
@@ -24,7 +29,7 @@ export default function ExportPanel() {
         if (!response.ok) throw new Error('Failed to fetch sessions');
         const data = await response.json();
         setSessions(data.sessions || []);
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Error fetching sessions:', err);
       } finally {
         setLoadingSessions(false);
@@ -38,7 +43,7 @@ export default function ExportPanel() {
           const data = await response.json();
           setUserRole(data.role);
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Failed to fetch user role:', err);
       }
     };
@@ -47,12 +52,12 @@ export default function ExportPanel() {
     fetchUserRole();
   }, []);
 
-  const checkRedactionStatus = async (sessionId) => {
-    const response = await fetch(`/admin/api/sessions/${sessionId}/redaction-status`, {
+  const checkRedactionStatus = async (sid: string): Promise<number> => {
+    const response = await fetch(`/admin/api/sessions/${sid}/redaction-status`, {
       credentials: 'include'
     });
     const data = await response.json();
-    return data.pendingCount;
+    return data.pendingCount as number;
   };
 
   const handleExport = async () => {
@@ -95,8 +100,8 @@ export default function ExportPanel() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }

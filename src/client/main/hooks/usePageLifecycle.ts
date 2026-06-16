@@ -1,8 +1,24 @@
-import { useEffect } from 'react';
+import { useEffect, MutableRefObject } from 'react';
 
-export function usePageLifecycle({ isSessionActive, sessionId, sessionType, logBufferRef }) {
+interface LogRecord {
+  timestamp: string;
+  sessionId: string | null;
+  role: string;
+  type: string;
+  message: string | null;
+  extras: unknown;
+}
+
+interface UsePageLifecycleParams {
+  isSessionActive: boolean;
+  sessionId: string | null;
+  sessionType: string | null;
+  logBufferRef: MutableRefObject<LogRecord[]>;
+}
+
+export function usePageLifecycle({ isSessionActive, sessionId, sessionType, logBufferRef }: UsePageLifecycleParams) {
   useEffect(() => {
-    const handleBeforeUnload = (e) => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (isSessionActive && sessionId) {
         e.preventDefault();
         e.returnValue = 'You have an active therapy session. Leaving will end your session.';

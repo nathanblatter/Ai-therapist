@@ -3,24 +3,27 @@
 // Allows therapists and researchers to access from anywhere
 
 import geoip from 'geoip-lite';
+import type { Request, Response, NextFunction } from 'express';
 
 /**
  * Get client IP address from request
  * Handles proxies and load balancers
  */
-function getClientIp(req) {
+function getClientIp(req: Request): string | undefined {
   // Check common headers for proxied requests
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
     // x-forwarded-for can contain multiple IPs, take the first one
-    return forwarded.split(',')[0].trim();
+    const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0];
+    return first.trim();
   }
 
   // Check other common proxy headers
-  return req.headers['x-real-ip'] ||
-         req.connection.remoteAddress ||
-         req.socket.remoteAddress ||
-         req.connection.socket?.remoteAddress;
+  const realIp = req.headers['x-real-ip'];
+  if (realIp) {
+    return Array.isArray(realIp) ? realIp[0] : realIp;
+  }
+  return (req.socket.remoteAddress) ?? undefined;
 }
 
 /**
@@ -28,7 +31,7 @@ function getClientIp(req) {
  * @param {string} ip - IP address to check
  * @returns {boolean} - True if US-based, false otherwise
  */
-function isUsBasedIp(ip) {
+function isUsBasedIp(ip: string | undefined): boolean {
   // Handle localhost/development IPs
   if (!ip || ip === '::1' || ip === '127.0.0.1' || ip.startsWith('::ffff:127.0.0.1')) {
     // In development, allow localhost
@@ -51,7 +54,7 @@ function isUsBasedIp(ip) {
  * Middleware to restrict participant access to US-based IPs only
  * Therapists and researchers can access from anywhere
  */
-export function restrictParticipantsToUs(req, res, next) {
+export function restrictParticipantsToUs(req: Request, res: Response, next: NextFunction): Response | void {
   // Skip IP check for admin routes - therapists/researchers handle their own auth
   if (req.path.startsWith('/admin')) {
     return next();

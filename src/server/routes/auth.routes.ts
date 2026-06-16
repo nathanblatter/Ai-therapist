@@ -56,9 +56,9 @@ export default function authRoutes() {
       let mfaValid = false;
 
       if (mfaToken) {
-        mfaValid = verifyTOTP(mfaToken, user.mfa_secret);
+        mfaValid = user.mfa_secret ? verifyTOTP(mfaToken, user.mfa_secret) : false;
       } else if (backupCode) {
-        const verification = await verifyBackupCode(backupCode, user.mfa_backup_codes);
+        const verification = await verifyBackupCode(backupCode, user.mfa_backup_codes ?? []);
         mfaValid = verification.valid;
 
         if (mfaValid) {
@@ -115,8 +115,8 @@ export default function authRoutes() {
         success: true,
         user: { userid: user.userid, username: user.username, role: user.role }
       });
-    } catch (error) {
-      if (error.message === 'Username already exists') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'Username already exists') {
         return res.status(409).json({ error: 'Username already exists' });
       }
       throw error;
@@ -155,9 +155,9 @@ export default function authRoutes() {
   // GET /api/mfa/status
   router.get("/api/mfa/status", requireAuth, asyncHandler(async (req, res) => {
     const { getMFAStatus } = await import('../services/mfa.service.js');
-    const status = await getMFAStatus(req.session.userId);
-    delete status.secret;
-    res.json({ success: true, mfa: status });
+    const status = await getMFAStatus(req.session.userId!);
+    const { secret: _secret, ...statusWithoutSecret } = status;
+    res.json({ success: true, mfa: statusWithoutSecret });
   }));
 
   // POST /api/mfa/setup/init
@@ -168,7 +168,10 @@ export default function authRoutes() {
       return res.status(403).json({ error: 'MFA is only available for therapist and researcher accounts' });
     }
 
-    const { secret, otpauthUrl } = generateMFASecret(req.session.username);
+    const { secret, otpauthUrl } = generateMFASecret(req.session.username ?? '');
+    if (!otpauthUrl) {
+      return res.status(500).json({ error: 'Failed to generate MFA secret URL' });
+    }
     const qrCode = await generateQRCode(otpauthUrl);
     req.session.tempMFASecret = secret;
 
@@ -196,8 +199,8 @@ export default function authRoutes() {
     }
 
     const { codes, hashedCodes } = await generateBackupCodes(10);
-    await enableMFA(req.session.userId, secret, hashedCodes);
-    delete req.session.tempMFASecret;
+    await enableMFA(req.session.userId!, secret, hashedCodes);
+    req.session.tempMFASecret = undefined;
 
     log.info(`MFA enabled for user ${req.session.username}`);
 
@@ -219,12 +222,12 @@ export default function authRoutes() {
     const { verifyCredentials: verify } = await import('../middleware/auth.js');
     const { disableMFA } = await import('../services/mfa.service.js');
 
-    const user = await verify(req.session.username, password);
+    const user = await verify(req.session.username ?? '', password);
     if (!user) {
       return res.status(401).json({ error: 'Invalid password' });
     }
 
-    await disableMFA(req.session.userId);
+    await disableMFA(req.session.userId!);
     log.info(`MFA disabled for user ${req.session.username}`);
 
     res.json({ success: true, message: 'MFA disabled successfully' });
@@ -241,18 +244,18 @@ export default function authRoutes() {
     const { verifyCredentials: verify } = await import('../middleware/auth.js');
     const { generateBackupCodes, updateBackupCodes, getMFAStatus } = await import('../services/mfa.service.js');
 
-    const user = await verify(req.session.username, password);
+    const user = await verify(req.session.username ?? '', password);
     if (!user) {
       return res.status(401).json({ error: 'Invalid password' });
     }
 
-    const mfaStatus = await getMFAStatus(req.session.userId);
+    const mfaStatus = await getMFAStatus(req.session.userId!);
     if (!mfaStatus.enabled) {
       return res.status(400).json({ error: 'MFA is not enabled' });
     }
 
     const { codes, hashedCodes } = await generateBackupCodes(10);
-    await updateBackupCodes(req.session.userId, hashedCodes);
+    await updateBackupCodes(req.session.userId!, hashedCodes);
 
     log.info(`Backup codes regenerated for user ${req.session.username}`);
 

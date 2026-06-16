@@ -1,10 +1,77 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, Activity, Users, FileText, TrendingUp, Clock, RefreshCw, ChevronDown, ChevronUp } from 'react-feather';
 
+interface CrisisEvent {
+  event_id: string;
+  session_id: string;
+  severity?: string;
+  event_type: string;
+  risk_score?: number;
+  triggered_by: string;
+  trigger_method: string;
+  created_at: string;
+  notes?: string;
+  risk_factors?: unknown;
+  intervention_details?: unknown;
+}
+
+interface ClinicalReview {
+  review_id: string;
+  session_id: string;
+  review_type: string;
+  review_reason: string;
+  status: string;
+  risk_score?: number;
+  requested_at: string;
+  assigned_to?: string;
+}
+
+interface HumanHandoff {
+  handoff_id: string;
+  session_id: string;
+  status: string;
+  handoff_type: string;
+  risk_score: number;
+  initiated_by: string;
+  assigned_to?: string;
+  initiated_at: string;
+  completed_at?: string;
+  external_reference?: string;
+  outcome?: string;
+  notes?: string;
+}
+
+interface InterventionAction {
+  action_id: string;
+  session_id: string;
+  action_type: string;
+  risk_score?: number;
+  performed_by: string;
+  performed_at: string;
+  outcome?: string;
+}
+
+interface RiskScoreHistory {
+  history_id: string;
+  session_id: string;
+  risk_score: number;
+  severity?: string;
+  calculated_at: string;
+  score_factors?: unknown;
+}
+
+interface CrisisData {
+  clinicalReviews: ClinicalReview[];
+  crisisEvents: CrisisEvent[];
+  humanHandoffs: HumanHandoff[];
+  interventionActions: InterventionAction[];
+  riskScoreHistory: RiskScoreHistory[];
+}
+
 export default function CrisisManagement() {
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [data, setData] = useState({
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<CrisisData>({
     clinicalReviews: [],
     crisisEvents: [],
     humanHandoffs: [],
@@ -42,15 +109,15 @@ export default function CrisisManagement() {
         riskScoreHistory: crisisData.riskScoreHistory?.length || 0
       });
       setData(crisisData);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('[CrisisManagement] Error fetching data:', err);
-      setError(err.message);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleSession = (sessionId) => {
+  const toggleSession = (sessionId: string) => {
     const newExpanded = new Set(expandedSessions);
     if (newExpanded.has(sessionId)) {
       newExpanded.delete(sessionId);
@@ -60,7 +127,7 @@ export default function CrisisManagement() {
     setExpandedSessions(newExpanded);
   };
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleString('en-US', {
       month: 'short',
@@ -72,7 +139,7 @@ export default function CrisisManagement() {
     });
   };
 
-  const getSeverityColor = (severity) => {
+  const getSeverityColor = (severity: string | undefined) => {
     switch (severity?.toLowerCase()) {
       case 'high': return 'bg-red-100 text-red-800 border-red-300';
       case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
@@ -81,7 +148,7 @@ export default function CrisisManagement() {
     }
   };
 
-  const getStatusColor = (status) => {
+  const getStatusColor = (status: string | undefined) => {
     switch (status?.toLowerCase()) {
       case 'completed': return 'bg-green-100 text-green-800';
       case 'in_progress': return 'bg-blue-100 text-blue-800';
@@ -91,7 +158,7 @@ export default function CrisisManagement() {
     }
   };
 
-  const getRiskScoreColor = (score) => {
+  const getRiskScoreColor = (score: number) => {
     if (score >= 70) return 'text-red-600 font-bold';
     if (score >= 40) return 'text-yellow-600 font-semibold';
     return 'text-green-600';
@@ -116,7 +183,7 @@ export default function CrisisManagement() {
   });
 
   // Group events by session
-  const eventsBySession = filteredEvents.reduce((acc, event) => {
+  const eventsBySession = filteredEvents.reduce<Record<string, CrisisEvent[]>>((acc, event) => {
     if (!acc[event.session_id]) {
       acc[event.session_id] = [];
     }
@@ -388,14 +455,14 @@ export default function CrisisManagement() {
                                 </div>
                               </div>
 
-                              {event.risk_factors && (
+                              {Boolean(event.risk_factors) && (
                                 <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
                                   <strong>Risk Factors:</strong>
                                   <pre className="mt-1 whitespace-pre-wrap">{JSON.stringify(event.risk_factors, null, 2)}</pre>
                                 </div>
                               )}
 
-                              {event.intervention_details && (
+                              {Boolean(event.intervention_details) && (
                                 <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
                                   <strong>Intervention Details:</strong>
                                   <pre className="mt-1 whitespace-pre-wrap">{JSON.stringify(event.intervention_details, null, 2)}</pre>

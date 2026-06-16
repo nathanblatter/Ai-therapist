@@ -4,17 +4,39 @@ import { ArrowLeft, AlertCircle } from 'react-feather';
 import UserSessionDetail from './UserSessionDetail';
 import { toast } from '../../shared/components/Toast';
 
+interface UserData {
+  username: string;
+  userid: number;
+  role: string;
+}
+
+interface SessionRecord {
+  session_id: string;
+  session_name: string | null;
+  status: string;
+  created_at: string;
+  ended_at: string | null;
+}
+
+interface RateLimitStatus {
+  sessions_used_today: number;
+  session_limit: number;
+  hours_until_reset: number;
+  is_rate_limited: boolean;
+  is_exempt: boolean;
+}
+
 export default function Profile() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-  const [sessions, setSessions] = useState([]);
-  const [filteredSessions, setFilteredSessions] = useState([]);
-  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [user, setUser] = useState<UserData | null>(null);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [filteredSessions, setFilteredSessions] = useState<SessionRecord[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Rate limit states
-  const [rateLimitStatus, setRateLimitStatus] = useState(null);
+  const [rateLimitStatus, setRateLimitStatus] = useState<RateLimitStatus | null>(null);
   const [showRateLimitBanner, setShowRateLimitBanner] = useState(false);
 
   // Edit states
@@ -44,10 +66,10 @@ export default function Profile() {
       if (response.ok) {
         const data = await response.json();
         if (data.authenticated && data.user) {
-          setUser(data.user);
+          setUser(data.user as UserData);
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       setError('Failed to fetch user data');
     }
   };
@@ -58,10 +80,10 @@ export default function Profile() {
       const response = await fetch('/api/sessions');
       if (!response.ok) throw new Error('Failed to fetch sessions');
       const data = await response.json();
-      setSessions(data);
-      setFilteredSessions(data);
-    } catch (err) {
-      setError(err.message);
+      setSessions(data as SessionRecord[]);
+      setFilteredSessions(data as SessionRecord[]);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
@@ -71,11 +93,11 @@ export default function Profile() {
     try {
       const response = await fetch('/api/rate-limits/status');
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as RateLimitStatus;
         setRateLimitStatus(data);
         setShowRateLimitBanner(data.is_rate_limited && !data.is_exempt);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to fetch rate limit status:', err);
     }
   };
@@ -122,6 +144,8 @@ export default function Profile() {
       return;
     }
 
+    if (!user) return;
+
     try {
       const response = await fetch(`/api/users/${user.userid}`, {
         method: 'PUT',
@@ -131,7 +155,7 @@ export default function Profile() {
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || 'Failed to update password');
+        throw new Error((data as { error?: string }).error || 'Failed to update password');
       }
 
       setEditingPassword(false);
@@ -139,8 +163,8 @@ export default function Profile() {
       setNewPassword('');
       setConfirmPassword('');
       toast.success('Password updated successfully');
-    } catch (err) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update password');
     }
   };
 
@@ -155,7 +179,7 @@ export default function Profile() {
     let totalSeconds = 0;
     sessions.forEach(session => {
       if (session.created_at && session.ended_at) {
-        const duration = (new Date(session.ended_at) - new Date(session.created_at)) / 1000;
+        const duration = (new Date(session.ended_at).getTime() - new Date(session.created_at).getTime()) / 1000;
         totalSeconds += duration;
       }
     });
@@ -171,7 +195,7 @@ export default function Profile() {
     };
   };
 
-  const formatDuration = (seconds) => {
+  const formatDuration = (seconds: number) => {
     if (!seconds) return 'N/A';
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -181,7 +205,7 @@ export default function Profile() {
     return `${minutes}m`;
   };
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleString('en-US', {
       month: 'numeric',
@@ -193,7 +217,7 @@ export default function Profile() {
     });
   };
 
-  const formatResetTime = (hoursUntilReset) => {
+  const formatResetTime = (hoursUntilReset: number) => {
     if (!hoursUntilReset) return 'less than 1 hour';
     const hours = Math.floor(hoursUntilReset);
     const minutes = Math.round((hoursUntilReset - hours) * 60);

@@ -13,7 +13,7 @@ const openai = new OpenAI({ apiKey });
  * @param {string} sessionId - UUID of the session
  * @returns {Promise<string>} Generated session name
  */
-export async function generateSessionName(sessionId) {
+export async function generateSessionName(sessionId: string): Promise<string | null> {
   try {
     // Get session to check for existing name
     const { getSession } = await import("../models/dbQueries.js");
@@ -95,7 +95,7 @@ export async function generateSessionName(sessionId) {
  * Generate session name in the background (non-blocking)
  * @param {string} sessionId - UUID of the session
  */
-export function generateSessionNameAsync(sessionId) {
+export function generateSessionNameAsync(sessionId: string): void {
   // Fire and forget - don't wait for completion
   generateSessionName(sessionId)
     .then(name => console.log(`Generated name for session ${sessionId}: "${name}"`))

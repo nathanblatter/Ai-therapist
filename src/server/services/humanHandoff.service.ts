@@ -5,6 +5,13 @@ import { logInterventionAction } from './crisisDetection.service.js';
 // HUMAN HANDOFF WORKFLOWS
 // ============================================
 
+interface ReviewData {
+  assignedTo?: string;
+  findings?: string;
+  recommendations?: string;
+  complianceStatus?: string;
+}
+
 /**
  * Initiate handoff to human clinician or crisis service
  * @param {string} sessionId - Session ID
@@ -12,7 +19,7 @@ import { logInterventionAction } from './crisisDetection.service.js';
  * @param {string} handoffType - Type of handoff (default: crisis_hotline)
  * @returns {object} Handoff record
  */
-export async function initiateHumanHandoff(sessionId, riskScore, handoffType = 'crisis_hotline') {
+export async function initiateHumanHandoff(sessionId: string, riskScore: number, handoffType = 'crisis_hotline'): Promise<unknown> {
   try {
     // 1. Create handoff record
     const handoffRecord = await pool.query(
@@ -69,10 +76,10 @@ export async function initiateHumanHandoff(sessionId, riskScore, handoffType = '
  * @param {string} assignedTo - Person assigned to handle handoff
  * @param {string} notes - Additional notes
  */
-export async function updateHandoffStatus(handoffId, status, assignedTo = null, notes = null) {
+export async function updateHandoffStatus(handoffId: number, status: string, assignedTo: string | null = null, notes: string | null = null): Promise<unknown> {
   try {
-    const updates = ['status = $2'];
-    const params = [handoffId, status];
+    const updates: string[] = ['status = $2'];
+    const params: unknown[] = [handoffId, status];
     let paramIndex = 3;
 
     if (assignedTo) {
@@ -126,7 +133,7 @@ export async function updateHandoffStatus(handoffId, status, assignedTo = null, 
  * @param {string} sessionId - Session ID
  * @returns {array} Handoff records
  */
-export async function getSessionHandoffs(sessionId) {
+export async function getSessionHandoffs(sessionId: string): Promise<unknown[]> {
   try {
     const result = await pool.query(
       `SELECT * FROM human_handoffs
@@ -145,7 +152,7 @@ export async function getSessionHandoffs(sessionId) {
  * Get pending handoffs
  * @returns {array} Pending handoff records
  */
-export async function getPendingHandoffs() {
+export async function getPendingHandoffs(): Promise<unknown[]> {
   try {
     const result = await pool.query(
       `SELECT
@@ -176,7 +183,7 @@ export async function getPendingHandoffs() {
  * @param {string} reviewReason - Reason for review
  * @param {string} reviewType - Type of review (default: post_crisis)
  */
-export async function flagForClinicalReview(sessionId, riskScore, reviewReason, reviewType = 'post_crisis') {
+export async function flagForClinicalReview(sessionId: string, riskScore: number, reviewReason: string, reviewType = 'post_crisis'): Promise<unknown> {
   try {
     const result = await pool.query(
       `INSERT INTO clinical_reviews
@@ -216,10 +223,10 @@ export async function flagForClinicalReview(sessionId, riskScore, reviewReason, 
  * @param {string} status - New status
  * @param {object} data - Review data (assignedTo, findings, recommendations, complianceStatus)
  */
-export async function updateClinicalReview(reviewId, status, data = {}) {
+export async function updateClinicalReview(reviewId: number, status: string, data: ReviewData = {}): Promise<unknown> {
   try {
-    const updates = ['status = $2'];
-    const params = [reviewId, status];
+    const updates: string[] = ['status = $2'];
+    const params: unknown[] = [reviewId, status];
     let paramIndex = 3;
 
     if (data.assignedTo) {
@@ -283,7 +290,7 @@ export async function updateClinicalReview(reviewId, status, data = {}) {
  * Get pending clinical reviews
  * @returns {array} Pending review records
  */
-export async function getPendingClinicalReviews() {
+export async function getPendingClinicalReviews(): Promise<unknown[]> {
   try {
     const result = await pool.query(
       `SELECT
@@ -308,7 +315,7 @@ export async function getPendingClinicalReviews() {
  * @param {string} sessionId - Session ID
  * @returns {array} Clinical review records
  */
-export async function getSessionClinicalReviews(sessionId) {
+export async function getSessionClinicalReviews(sessionId: string): Promise<unknown[]> {
   try {
     const result = await pool.query(
       `SELECT * FROM clinical_reviews
@@ -332,7 +339,7 @@ export async function getSessionClinicalReviews(sessionId) {
  * @param {string} sessionId - Session ID
  * @param {number} riskScore - Risk score
  */
-export async function triggerExternalHandoffAPI(sessionId, riskScore) {
+export async function triggerExternalHandoffAPI(sessionId: string, riskScore: number): Promise<unknown> {
   // Placeholder for future integration with crisis services
   // Example: Crisis Text Line API, 988 Lifeline API
   try {

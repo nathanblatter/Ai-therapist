@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 
-export default function ProtectedRoute({ children }) {
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+}
+
+export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const [authStatus, setAuthStatus] = useState('loading');
   const [isClient, setIsClient] = useState(false);
   const location = useLocation();

@@ -41,7 +41,7 @@ export default function usersRoutes() {
     `, [userId, todayStart]);
 
     const sessionsToday = parseInt(result.rows[0].session_count);
-    const isRateLimited = sessionsToday >= limits.max_sessions_per_day;
+    const isRateLimited = limits.max_sessions_per_day !== undefined && sessionsToday >= limits.max_sessions_per_day;
 
     res.json({
       is_rate_limited: isRateLimited,
@@ -187,10 +187,10 @@ export default function usersRoutes() {
       return res.status(403).json({ error: 'Only researchers can change user roles' });
     }
 
-    const updates = {};
-    if (username !== undefined) updates.username = username;
-    if (password !== undefined) updates.password = password;
-    if (role !== undefined && isResearcher) updates.role = role;
+    const updates: Record<string, string> = {};
+    if (username !== undefined) updates.username = username as string;
+    if (password !== undefined) updates.password = password as string;
+    if (role !== undefined && isResearcher) updates.role = role as string;
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
@@ -205,11 +205,11 @@ export default function usersRoutes() {
       }
 
       res.json({ success: true, user: updatedUser });
-    } catch (error) {
-      if (error.message === 'Username already exists') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'Username already exists') {
         return res.status(409).json({ error: 'Username already exists' });
       }
-      if (error.message === 'User not found') {
+      if (error instanceof Error && error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
       throw error;
@@ -226,8 +226,8 @@ export default function usersRoutes() {
         success: true,
         message: `User ${deletedUser.username} deleted successfully`
       });
-    } catch (error) {
-      if (error.message === 'User not found') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
       throw error;
@@ -252,8 +252,8 @@ export default function usersRoutes() {
         success: true,
         user: { userid: user.userid, username: user.username, role: user.role }
       });
-    } catch (error) {
-      if (error.message === 'Username already exists') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'Username already exists') {
         return res.status(409).json({ error: 'Username already exists' });
       }
       throw error;

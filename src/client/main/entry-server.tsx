@@ -7,7 +7,7 @@ import Login from "./components/Login";
 import Profile from "./components/Profile";
 import ProtectedRoute from "../shared/components/ProtectedRoute";
 
-export function render(url) {
+export function render(url: string) {
   const html = renderToString(
     <StrictMode>
       <StaticRouter location={url}>

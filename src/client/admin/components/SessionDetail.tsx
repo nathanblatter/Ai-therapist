@@ -4,14 +4,79 @@ import ConversationBubble from "./ConversationBubble";
 import { useSocket } from '../hooks/useSocket';
 import { toast } from "../../shared/components/Toast";
 
-export default function SessionDetail({ sessionId, onClose, isEditMode = false }) {
-  const [messages, setMessages] = useState([]);
-  const [session, setSession] = useState(null);
+interface Message {
+  message_id: string;
+  session_id: string;
+  role: string;
+  message_type: string;
+  message: string;
+  created_at: string;
+  extras?: Record<string, unknown>;
+  content?: string;
+  content_redacted?: string;
+}
+
+interface Session {
+  session_id?: string;
+  session_name?: string;
+  username?: string;
+  status?: string;
+  created_at?: string;
+  ended_at?: string;
+  sideband_connected?: boolean;
+  openai_call_id?: string;
+  crisis_flagged?: boolean;
+  crisis_severity?: string;
+  crisis_risk_score?: number | null;
+  crisis_flagged_at?: string | null;
+  crisis_flagged_by?: string | null;
+}
+
+interface SessionDetailProps {
+  sessionId: string;
+  onClose: () => void;
+  isEditMode?: boolean;
+}
+
+interface NewMessagesData {
+  sessionId: string;
+  messages: Message[];
+}
+
+interface MessageRedactedData {
+  messageId: string;
+  content_redacted: string;
+}
+
+interface SessionStatusData {
+  status: string;
+}
+
+interface SidebandData {
+  sessionId: string;
+  error?: string;
+}
+
+interface InstructionsUpdatedData {
+  sessionId: string;
+  updatedBy: string;
+}
+
+interface FlagCrisisResponse {
+  severity: string;
+  riskScore: number;
+  flaggedAt: string;
+  flaggedBy: string;
+}
+
+export default function SessionDetail({ sessionId, onClose, isEditMode = false }: SessionDetailProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState('');
-  const [userRole, setUserRole] = useState(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [adminMessage, setAdminMessage] = useState('');
   const [messageType, setMessageType] = useState('visible'); // 'visible' or 'invisible'
@@ -27,10 +92,10 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [flagging, setFlagging] = useState(false);
 
   const { socket } = useSocket();
-  const messagesEndRef = useRef(null);
-  const messagesContainerRef = useRef(null);
-  const instructionsTextareaRef = useRef(null);
-  const severitySelectRef = useRef(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const instructionsTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const severitySelectRef = useRef<HTMLSelectElement>(null);
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -49,8 +114,8 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         if (data.session?.sideband_connected) {
           setSidebandConnected(true);
         }
-      } catch (err) {
-        setError(err.message);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : String(err));
       } finally {
         setLoading(false);
       }
@@ -67,7 +132,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
           const data = await response.json();
           setUserRole(data.role);
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Failed to fetch user role:', err);
       }
     };
@@ -98,14 +163,14 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     socket.emit('session:join', { sessionId });
     console.log(`Joined session room: ${sessionId}`);
 
-    const handleNewMessages = (data) => {
+    const handleNewMessages = (data: NewMessagesData) => {
       if (data.sessionId === sessionId) {
         console.log(`Received ${data.messages.length} new messages`);
 
         // Process messages with role-based content selection
-        const processedMessages = data.messages.map(msg => ({
+        const processedMessages: Message[] = data.messages.map((msg: Message) => ({
           ...msg,
-          message: userRole === 'therapist' ? msg.content : msg.content_redacted
+          message: (userRole === 'therapist' ? msg.content : msg.content_redacted) ?? msg.message
         }));
 
         setMessages(prev => [...prev, ...processedMessages]);
@@ -119,7 +184,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       }
     };
 
-    const handleMessageRedacted = (data) => {
+    const handleMessageRedacted = (data: MessageRedactedData) => {
       // Update message with redacted content when redaction completes
       setMessages(prev => prev.map(msg =>
         msg.message_id === data.messageId
@@ -129,35 +194,35 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       console.log(`Message ${data.messageId} redaction completed`);
     };
 
-    const handleSessionStatus = (data) => {
+    const handleSessionStatus = (data: SessionStatusData) => {
       if (data.status === 'ended') {
-        setSession(prev => ({ ...prev, status: 'ended' }));
+        setSession(prev => prev ? { ...prev, status: 'ended' } : prev);
       }
     };
 
-    const handleSidebandConnected = (data) => {
+    const handleSidebandConnected = (data: SidebandData) => {
       if (data.sessionId === sessionId) {
         console.log('Sideband connected:', data);
         setSidebandConnected(true);
-        setSession(prev => ({ ...prev, sideband_connected: true }));
+        setSession(prev => prev ? { ...prev, sideband_connected: true } : prev);
       }
     };
 
-    const handleSidebandDisconnected = (data) => {
+    const handleSidebandDisconnected = (data: SidebandData) => {
       if (data.sessionId === sessionId) {
         console.log('Sideband disconnected:', data);
         setSidebandConnected(false);
-        setSession(prev => ({ ...prev, sideband_connected: false }));
+        setSession(prev => prev ? { ...prev, sideband_connected: false } : prev);
       }
     };
 
-    const handleSidebandError = (data) => {
+    const handleSidebandError = (data: SidebandData) => {
       if (data.sessionId === sessionId) {
         console.error('Sideband error:', data.error);
       }
     };
 
-    const handleInstructionsUpdated = (data) => {
+    const handleInstructionsUpdated = (data: InstructionsUpdatedData) => {
       if (data.sessionId === sessionId) {
         console.log('Instructions updated by:', data.updatedBy);
         toast.info(`Instructions updated by ${data.updatedBy}`);
@@ -188,7 +253,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   useEffect(() => {
     if (!showInstructionsModal) return;
 
-    const handleEscape = (e) => {
+    const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setShowInstructionsModal(false);
         setNewInstructions('');
@@ -208,7 +273,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   useEffect(() => {
     if (!showFlagModal) return;
 
-    const handleEscape = (e) => {
+    const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setShowFlagModal(false);
         setFlagNotes('');
@@ -225,7 +290,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     return () => document.removeEventListener('keydown', handleEscape);
   }, [showFlagModal]);
 
-  const handleExport = async (format) => {
+  const handleExport = async (format: string) => {
     try {
       const response = await fetch(`/admin/api/export?format=${format}&sessionId=${sessionId}`);
       if (!response.ok) throw new Error('Failed to export session');
@@ -239,17 +304,17 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (err) {
-      toast.error(`Export failed: ${err.message}`);
+    } catch (err: unknown) {
+      toast.error(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  const handleEditMessage = (messageId, currentContent) => {
+  const handleEditMessage = (messageId: string, currentContent: string) => {
     setEditingMessageId(messageId);
     setEditedContent(currentContent);
   };
 
-  const handleSaveMessage = async (messageId) => {
+  const handleSaveMessage = async (messageId: string) => {
     if (!editedContent.trim()) {
       setError('Message content cannot be empty');
       return;
@@ -279,12 +344,12 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       setEditingMessageId(null);
       setEditedContent('');
       setError(null);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
-  const handleDeleteMessage = async (messageId) => {
+  const handleDeleteMessage = async (messageId: string) => {
     if (!window.confirm('Are you sure you want to delete this message?')) {
       return;
     }
@@ -302,8 +367,8 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       // Remove from local state
       setMessages(messages.filter(msg => msg.message_id !== messageId));
       setError(null);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -312,7 +377,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     setEditedContent('');
   };
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString();
   };
 
@@ -383,7 +448,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         const errorData = await response.json();
         toast.error(`Failed to update instructions: ${errorData.error}`);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error updating instructions:', error);
       toast.error('Error updating instructions');
     } finally {
@@ -411,16 +476,16 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const data: FlagCrisisResponse = await response.json();
         // Update local session state
-        setSession(prev => ({
+        setSession(prev => prev ? ({
           ...prev,
           crisis_flagged: true,
           crisis_severity: data.severity,
           crisis_risk_score: data.riskScore,
           crisis_flagged_at: data.flaggedAt,
           crisis_flagged_by: data.flaggedBy
-        }));
+        }) : prev);
         setShowFlagModal(false);
         setFlagNotes('');
         toast.success(`Session flagged as ${flagSeverity} risk`);
@@ -428,7 +493,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         const errorData = await response.json();
         toast.error(`Failed to flag session: ${errorData.error}`);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error flagging crisis:', error);
       toast.error('Error flagging session');
     } finally {
@@ -453,32 +518,32 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
       if (response.ok) {
         // Update local session state
-        setSession(prev => ({
+        setSession(prev => prev ? ({
           ...prev,
           crisis_flagged: false,
-          crisis_severity: null,
+          crisis_severity: undefined,
           crisis_risk_score: null,
           crisis_flagged_at: null,
           crisis_flagged_by: null
-        }));
+        }) : prev);
         toast.success('Crisis flag removed');
       } else {
         const errorData = await response.json();
         toast.error(`Failed to unflag session: ${errorData.error}`);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error unflagging crisis:', error);
       toast.error('Error unflagging session');
     }
   };
 
-  const getCrisisBadgeClasses = (severity) => {
-    const badges = {
+  const getCrisisBadgeClasses = (severity: string | undefined): string => {
+    const badges: Record<string, string> = {
       high: 'bg-red-600 text-white animate-pulse',
       medium: 'bg-yellow-500 text-yellow-900',
       low: 'bg-orange-400 text-orange-900'
     };
-    return badges[severity] || 'bg-gray-400 text-gray-900';
+    return (severity && badges[severity]) || 'bg-gray-400 text-gray-900';
   };
 
   // Filter messages for display
@@ -512,7 +577,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
               <div className="mt-2 text-xs bg-red-900 bg-opacity-30 px-3 py-2 rounded">
                 <div><strong>Risk Score:</strong> {session.crisis_risk_score}/100</div>
                 <div><strong>Flagged by:</strong> {session.crisis_flagged_by}</div>
-                <div><strong>Flagged at:</strong> {new Date(session.crisis_flagged_at).toLocaleString()}</div>
+                <div><strong>Flagged at:</strong> {session.crisis_flagged_at ? new Date(session.crisis_flagged_at).toLocaleString() : ''}</div>
               </div>
             )}
             {isEditMode && (
@@ -536,7 +601,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                     </span>
                   )}
                 </div>
-                <div>Started: {formatDate(session.created_at)}</div>
+                <div>Started: {session.created_at ? formatDate(session.created_at) : ''}</div>
                 {session.ended_at && (
                   <div>Ended: {formatDate(session.ended_at)}</div>
                 )}
@@ -646,7 +711,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                   onDelete={() => handleDeleteMessage(msg.message_id)}
                   onCancel={handleCancelEdit}
                   onContentChange={setEditedContent}
-                  userRole={userRole}
+                  userRole={userRole ?? undefined}
                 />
               ))}
               <div ref={messagesEndRef} />

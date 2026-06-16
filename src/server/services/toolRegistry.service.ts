@@ -5,7 +5,25 @@
 
 import { pool } from '../config/db.js';
 
+interface ToolDefinition {
+  type: string;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
+
+interface RegisteredTool {
+  definition: ToolDefinition;
+  handler: ToolHandler;
+}
+
+type ResourceKey = 'suicide' | 'domestic_violence' | 'substance_abuse' | 'mental_health';
+
 export class ToolRegistry {
+  private tools: Map<string, RegisteredTool>;
+
   constructor() {
     this.tools = new Map(); // tool name → { definition, handler }
     this.registerDefaultTools();
@@ -17,7 +35,7 @@ export class ToolRegistry {
    * @param {object} definition - OpenAI function definition
    * @param {function} handler - async function(args) => result
    */
-  registerTool(name, definition, handler) {
+  registerTool(name: string, definition: ToolDefinition, handler: ToolHandler): void {
     this.tools.set(name, { definition, handler });
     console.log(`[ToolRegistry] Registered tool: ${name}`);
   }
@@ -26,9 +44,9 @@ export class ToolRegistry {
    * Execute a registered tool
    * @param {string} name - Tool name
    * @param {object} args - Tool arguments
-   * @returns {Promise<object>} - Tool execution result
+   * @returns {Promise<unknown>} - Tool execution result
    */
-  async executeTool(name, args) {
+  async executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
     const tool = this.tools.get(name);
     if (!tool) {
       throw new Error(`Tool not found: ${name}`);
@@ -46,9 +64,9 @@ export class ToolRegistry {
 
   /**
    * Get all tool definitions for session configuration
-   * @returns {array} Array of OpenAI function definitions
+   * @returns {ToolDefinition[]} Array of OpenAI function definitions
    */
-  getAllToolDefinitions() {
+  getAllToolDefinitions(): ToolDefinition[] {
     return Array.from(this.tools.values()).map(tool => tool.definition);
   }
 
@@ -56,7 +74,7 @@ export class ToolRegistry {
    * Get list of registered tool names
    * @returns {string[]}
    */
-  getToolNames() {
+  getToolNames(): string[] {
     return Array.from(this.tools.keys());
   }
 
@@ -65,14 +83,14 @@ export class ToolRegistry {
    * @param {string} name
    * @returns {boolean}
    */
-  hasTool(name) {
+  hasTool(name: string): boolean {
     return this.tools.has(name);
   }
 
   /**
    * Register default tools
    */
-  registerDefaultTools() {
+  registerDefaultTools(): void {
     // Tool 1: Get session summary
     this.registerTool(
       'get_session_summary',
@@ -91,8 +109,8 @@ export class ToolRegistry {
           required: ['session_id']
         }
       },
-      async (args) => {
-        const { session_id } = args;
+      async (args: Record<string, unknown>) => {
+        const session_id = args['session_id'] as string;
 
         try {
           const result = await pool.query(`
@@ -126,11 +144,11 @@ export class ToolRegistry {
             system_messages: parseInt(session.system_messages),
             started_at: session.created_at
           };
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('[ToolRegistry] Error in get_session_summary:', error);
           return {
             error: 'Failed to retrieve session summary',
-            details: error.message
+            details: error instanceof Error ? error.message : String(error)
           };
         }
       }
@@ -155,10 +173,10 @@ export class ToolRegistry {
           required: []
         }
       },
-      async (args) => {
-        const { resource_type = 'all' } = args;
+      async (args: Record<string, unknown>) => {
+        const resource_type = (args['resource_type'] as string | undefined) ?? 'all';
 
-        const resources = {
+        const resources: Record<ResourceKey, { name: string; phone: string; text?: string; chat?: string; available: string; description: string }> = {
           suicide: {
             name: '988 Suicide & Crisis Lifeline',
             phone: '988',
@@ -196,10 +214,11 @@ export class ToolRegistry {
             resources: resources,
             important_note: 'If you are in immediate danger, please call 911 or go to your nearest emergency room.'
           };
-        } else if (resources[resource_type]) {
+        } else if (resource_type in resources) {
+          const key = resource_type as ResourceKey;
           return {
             message: `Here is the ${resource_type.replace('_', ' ')} support resource:`,
-            resource: resources[resource_type],
+            resource: resources[key],
             important_note: 'If you are in immediate danger, please call 911 or go to your nearest emergency room.'
           };
         } else {
@@ -220,7 +239,7 @@ export class ToolRegistry {
    * @param {string} name
    * @returns {boolean} - true if tool was removed, false if not found
    */
-  unregisterTool(name) {
+  unregisterTool(name: string): boolean {
     const deleted = this.tools.delete(name);
     if (deleted) {
       console.log(`[ToolRegistry] Unregistered tool: ${name}`);
@@ -231,7 +250,7 @@ export class ToolRegistry {
   /**
    * Clear all registered tools
    */
-  clearAll() {
+  clearAll(): void {
     this.tools.clear();
     console.log('[ToolRegistry] All tools cleared');
   }

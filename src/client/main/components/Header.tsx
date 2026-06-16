@@ -4,18 +4,22 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import CopyButton from '../../shared/components/CopyButton';
 
+interface HeaderProps {
+  sessionId: string | null;
+  timeRemaining: number | null;
+}
 
-const Header = ({ sessionId, timeRemaining }) => {
-  const [username, setUsername] = useState(null);
-  const [userRole, setUserRole] = useState(null);
+const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
+  const [username, setUsername] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const navigate = useNavigate();
-  function capitalizeFirst(str) {
+  function capitalizeFirst(str: string | null): string | null {
   if (!str || typeof str !== "string") return str;
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
   // Format time remaining as MM:SS
-  const formatTimeRemaining = (ms) => {
+  const formatTimeRemaining = (ms: number | null): string | null => {
     if (ms === null || ms === undefined) return null;
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
     const minutes = Math.floor(totalSeconds / 60);
@@ -24,7 +28,7 @@ const Header = ({ sessionId, timeRemaining }) => {
   };
 
   // Determine timer color based on time remaining
-  const getTimerColor = (ms) => {
+  const getTimerColor = (ms: number | null): string => {
     if (ms === null || ms === undefined) return '';
     const totalSeconds = Math.floor(ms / 1000);
     if (totalSeconds <= 60) return 'text-red-400 font-bold'; // Last minute - red

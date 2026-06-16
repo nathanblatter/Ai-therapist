@@ -3,39 +3,166 @@ import { Users, Monitor, CheckCircle, X, UserPlus, Activity, List } from 'react-
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../../shared/components/Toast';
 
+// ─── Domain interfaces ──────────────────────────────────────────────────────
+
+interface UserRecord {
+  userid: string;
+  username: string;
+  role: string;
+}
+
+interface AssignmentRecord {
+  assignment_id: string | null;
+  userid: string;
+  username: string;
+  role: string;
+}
+
+interface QueueRecord {
+  queue_id: string | null;
+  userid: string;
+  username: string;
+  role: string;
+}
+
+type RoomNumber = 1 | 2 | 3 | 4 | 5;
+
+interface Assignments {
+  rooms: Record<RoomNumber, AssignmentRecord | null>;
+  monitoring: Array<AssignmentRecord | null>;
+  checkIn: Array<AssignmentRecord | null>;
+}
+
+type Queues = Record<RoomNumber, Array<QueueRecord | null>>;
+
+// ─── Drag state ─────────────────────────────────────────────────────────────
+
+interface DragState {
+  type: string;
+  roomNumber: number;
+  queuePosition: number | null;
+  user: UserRecord;
+  startX: number;
+  startY: number;
+}
+
+interface DropTarget {
+  type: string;
+  roomNumber: number;
+  queuePosition: number | null;
+}
+
+// ─── showUserSelector state ──────────────────────────────────────────────────
+
+interface UserSelectorState {
+  type: string;
+  id: number;
+  queuePosition?: number | null;
+}
+
+// ─── API response shapes ─────────────────────────────────────────────────────
+
+interface ApiAssignment {
+  assignment_id: string;
+  user_id: string;
+  username: string;
+  role: string;
+  assignment_type: 'room' | 'monitoring' | 'checkin';
+  room_number: number;
+  position: number;
+}
+
+interface ApiQueueEntry {
+  queue_id: string;
+  user_id: string;
+  username: string;
+  role: string;
+  room_number: number;
+  queue_position: number;
+}
+
+interface ApiActiveSession {
+  user_id: string;
+}
+
+interface FetchAssignmentsResponse {
+  assignments: ApiAssignment[];
+  queue: ApiQueueEntry[];
+  activeSessions: ApiActiveSession[];
+}
+
+// ─── Sub-component prop interfaces ───────────────────────────────────────────
+
+interface AssignmentSlotProps {
+  user: AssignmentRecord | null;
+  onAssign: () => void;
+  onRemove: () => void;
+  label: string;
+  type: string;
+  showIcon?: boolean;
+  isActive?: boolean;
+  onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  isDropTarget?: boolean;
+  isBeingDragged?: boolean;
+  dropTargetRef?: React.Ref<HTMLDivElement>;
+  dragHandlers?: Record<string, unknown>;
+}
+
+interface QueueSlotProps {
+  user: QueueRecord | null;
+  onAssign: () => void;
+  onRemove: () => void;
+  position: number;
+  onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  isDropTarget?: boolean;
+  isBeingDragged?: boolean;
+  dropTargetRef?: React.Ref<HTMLDivElement>;
+}
+
+interface UserSelectorModalProps {
+  type: string;
+  id: number;
+  queuePosition?: number | null;
+  allowedUsers: UserRecord[];
+  onSelect: (user: UserRecord) => void;
+  onClose: () => void;
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
 export default function RoomAssignment() {
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [assignments, setAssignments] = useState({
+  const [assignments, setAssignments] = useState<Assignments>({
     rooms: { 1: null, 2: null, 3: null, 4: null, 5: null },
     monitoring: [null, null, null], // 3 monitoring RA positions
     checkIn: [null, null] // 2 check-in RA positions
   });
-  const [queues, setQueues] = useState({
+  const [queues, setQueues] = useState<Queues>({
     1: [null, null, null, null],
     2: [null, null, null, null],
     3: [null, null, null, null],
     4: [null, null, null, null],
     5: [null, null, null, null]
   });
-  const [activeSessions, setActiveSessions] = useState(new Set());
-  const [showUserSelector, setShowUserSelector] = useState(null);
+  const [activeSessions, setActiveSessions] = useState(new Set<string>());
+  const [showUserSelector, setShowUserSelector] = useState<UserSelectorState | null>(null);
   const { socket, connected } = useSocket();
 
   // Custom drag state
-  const [dragState, setDragState] = useState(null);
+  const [dragState, setDragState] = useState<DragState | null>(null);
   const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
-  const [dropTarget, setDropTarget] = useState(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const dropTargetsRef = useRef(new Map());
+  const dropTargetsRef = useRef(new Map<string, HTMLDivElement>());
 
   // Local state for unsaved changes
-  const [localAssignments, setLocalAssignments] = useState({
+  const [localAssignments, setLocalAssignments] = useState<Assignments>({
     rooms: { 1: null, 2: null, 3: null, 4: null, 5: null },
     monitoring: [null, null, null],
     checkIn: [null, null]
   });
-  const [localQueues, setLocalQueues] = useState({
+  const [localQueues, setLocalQueues] = useState<Queues>({
     1: [null, null, null, null],
     2: [null, null, null, null],
     3: [null, null, null, null],
@@ -70,34 +197,34 @@ export default function RoomAssignment() {
     };
   }, [socket]);
 
-  const handleAssignmentUpdated = (data) => {
+  const handleAssignmentUpdated = (data: unknown) => {
     console.log('[RoomAssignment] Assignment updated:', data);
     fetchAssignments(); // Refetch all assignments to stay in sync
   };
 
-  const handleAssignmentRemoved = (data) => {
+  const handleAssignmentRemoved = (data: unknown) => {
     console.log('[RoomAssignment] Assignment removed:', data);
     fetchAssignments();
   };
 
-  const handleQueueUpdated = (data) => {
+  const handleQueueUpdated = (data: unknown) => {
     console.log('[RoomAssignment] Queue updated:', data);
     fetchAssignments();
   };
 
-  const handleQueueRemoved = (data) => {
+  const handleQueueRemoved = (data: unknown) => {
     console.log('[RoomAssignment] Queue entry removed:', data);
     fetchAssignments();
   };
 
-  const handleSessionCreated = (data) => {
+  const handleSessionCreated = (data: { userId?: string }) => {
     console.log('[RoomAssignment] Session created:', data);
     if (data.userId) {
-      setActiveSessions(prev => new Set(prev).add(data.userId));
+      setActiveSessions(prev => new Set(prev).add(data.userId!));
     }
   };
 
-  const handleSessionEnded = (data) => {
+  const handleSessionEnded = (data: unknown) => {
     console.log('[RoomAssignment] Session ended:', data);
     // Need to fetch assignments again to get updated active sessions
     fetchAssignments();
@@ -109,7 +236,7 @@ export default function RoomAssignment() {
       if (!response.ok) throw new Error('Failed to fetch users');
       const data = await response.json();
       setUsers(data.users || []);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error fetching users:', err);
       toast.error('Failed to fetch users');
     }
@@ -120,17 +247,17 @@ export default function RoomAssignment() {
       setLoading(true);
       const response = await fetch('/admin/api/room-assignments');
       if (!response.ok) throw new Error('Failed to fetch assignments');
-      const data = await response.json();
+      const data: FetchAssignmentsResponse = await response.json();
 
       // Process assignments
-      const newAssignments = {
+      const newAssignments: Assignments = {
         rooms: { 1: null, 2: null, 3: null, 4: null, 5: null },
         monitoring: [null, null, null],
         checkIn: [null, null]
       };
 
-      data.assignments.forEach(assignment => {
-        const assignmentData = {
+      data.assignments.forEach((assignment: ApiAssignment) => {
+        const assignmentData: AssignmentRecord = {
           assignment_id: assignment.assignment_id,
           userid: assignment.user_id,
           username: assignment.username,
@@ -138,7 +265,8 @@ export default function RoomAssignment() {
         };
 
         if (assignment.assignment_type === 'room') {
-          newAssignments.rooms[assignment.room_number] = assignmentData;
+          const rn = assignment.room_number as RoomNumber;
+          newAssignments.rooms[rn] = assignmentData;
         } else if (assignment.assignment_type === 'monitoring') {
           newAssignments.monitoring[assignment.position - 1] = assignmentData;
         } else if (assignment.assignment_type === 'checkin') {
@@ -155,7 +283,7 @@ export default function RoomAssignment() {
       }
 
       // Process queues
-      const newQueues = {
+      const newQueues: Queues = {
         1: [null, null, null, null],
         2: [null, null, null, null],
         3: [null, null, null, null],
@@ -163,14 +291,15 @@ export default function RoomAssignment() {
         5: [null, null, null, null]
       };
 
-      data.queue.forEach(queueEntry => {
-        const queueData = {
+      data.queue.forEach((queueEntry: ApiQueueEntry) => {
+        const queueData: QueueRecord = {
           queue_id: queueEntry.queue_id,
           userid: queueEntry.user_id,
           username: queueEntry.username,
           role: queueEntry.role
         };
-        newQueues[queueEntry.room_number][queueEntry.queue_position - 1] = queueData;
+        const rn = queueEntry.room_number as RoomNumber;
+        newQueues[rn][queueEntry.queue_position - 1] = queueData;
       });
 
       setQueues(newQueues);
@@ -181,10 +310,10 @@ export default function RoomAssignment() {
       }
 
       // Always update active sessions (independent of unsaved changes)
-      const activeUserIds = new Set(data.activeSessions.map(s => s.user_id));
+      const activeUserIds = new Set<string>(data.activeSessions.map((s: ApiActiveSession) => s.user_id));
       setActiveSessions(activeUserIds);
 
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error fetching assignments:', err);
       toast.error('Failed to fetch assignments');
     } finally {
@@ -192,15 +321,16 @@ export default function RoomAssignment() {
     }
   };
 
-  const participants = users.filter(u => u.role === 'participant');
-  const researchers = users.filter(u => u.role === 'researcher');
+  const participants = users.filter((u: UserRecord) => u.role === 'participant');
+  const researchers = users.filter((u: UserRecord) => u.role === 'researcher');
 
   // Local assignment functions (don't hit API until save)
-  const assignUserLocally = (type, id, user, queuePosition = null) => {
+  const assignUserLocally = (type: string, id: number, user: UserRecord, queuePosition: number | null = null) => {
     if (type === 'queue') {
       setLocalQueues(prev => {
-        const newQueues = JSON.parse(JSON.stringify(prev)); // Deep copy
-        newQueues[id][queuePosition - 1] = {
+        const newQueues: Queues = JSON.parse(JSON.stringify(prev)); // Deep copy
+        const rn = id as RoomNumber;
+        newQueues[rn][(queuePosition ?? 1) - 1] = {
           userid: user.userid,
           username: user.username,
           role: user.role,
@@ -213,10 +343,11 @@ export default function RoomAssignment() {
       if (type === 'checkIn') assignmentType = 'checkin';
 
       setLocalAssignments(prev => {
-        const newAssignments = JSON.parse(JSON.stringify(prev)); // Deep copy
+        const newAssignments: Assignments = JSON.parse(JSON.stringify(prev)); // Deep copy
 
         if (type === 'room') {
-          newAssignments.rooms[id] = {
+          const rn = id as RoomNumber;
+          newAssignments.rooms[rn] = {
             userid: user.userid,
             username: user.username,
             role: user.role,
@@ -238,6 +369,7 @@ export default function RoomAssignment() {
           };
         }
 
+        void assignmentType; // used in API path for actual saves
         return newAssignments;
       });
     }
@@ -246,12 +378,13 @@ export default function RoomAssignment() {
     setShowUserSelector(null);
   };
 
-  const removeAssignmentLocally = (type, id) => {
+  const removeAssignmentLocally = (type: string, id: number) => {
     setLocalAssignments(prev => {
-      const newAssignments = JSON.parse(JSON.stringify(prev));
+      const newAssignments: Assignments = JSON.parse(JSON.stringify(prev));
 
       if (type === 'room') {
-        newAssignments.rooms[id] = null;
+        const rn = id as RoomNumber;
+        newAssignments.rooms[rn] = null;
       } else if (type === 'monitoring') {
         newAssignments.monitoring[id] = null;
       } else if (type === 'checkIn') {
@@ -264,17 +397,18 @@ export default function RoomAssignment() {
     setHasUnsavedChanges(true);
   };
 
-  const removeQueueEntryLocally = (roomNumber, position) => {
+  const removeQueueEntryLocally = (roomNumber: number, position: number) => {
     setLocalQueues(prev => {
-      const newQueues = JSON.parse(JSON.stringify(prev));
-      newQueues[roomNumber][position - 1] = null;
+      const newQueues: Queues = JSON.parse(JSON.stringify(prev));
+      const rn = roomNumber as RoomNumber;
+      newQueues[rn][position - 1] = null;
       return newQueues;
     });
 
     setHasUnsavedChanges(true);
   };
 
-  const assignUser = async (type, id, user, queuePosition = null) => {
+  const assignUser = async (type: string, id: number, user: UserRecord, queuePosition: number | null = null) => {
     try {
       if (type === 'queue') {
         // Add to queue
@@ -322,13 +456,14 @@ export default function RoomAssignment() {
 
       setShowUserSelector(null);
       // The Socket.io event will trigger a refetch
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error assigning user:', err);
-      toast.error(err.message);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      toast.error(message);
     }
   };
 
-  const removeAssignment = async (assignmentId) => {
+  const removeAssignment = async (assignmentId: string) => {
     try {
       const response = await fetch(`/admin/api/room-assignments/${assignmentId}`, {
         method: 'DELETE',
@@ -342,13 +477,14 @@ export default function RoomAssignment() {
 
       toast.success('Assignment removed');
       // The Socket.io event will trigger a refetch
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error removing assignment:', err);
-      toast.error(err.message);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      toast.error(message);
     }
   };
 
-  const removeQueueEntry = async (queueId) => {
+  const removeQueueEntry = async (queueId: string) => {
     try {
       const response = await fetch(`/admin/api/room-queue/${queueId}`, {
         method: 'DELETE',
@@ -362,14 +498,15 @@ export default function RoomAssignment() {
 
       toast.success('Removed from queue');
       // The Socket.io event will trigger a refetch
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error removing from queue:', err);
-      toast.error(err.message);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      toast.error(message);
     }
   };
 
   // Custom drag and drop handlers
-  const registerDropTarget = useCallback((key, element) => {
+  const registerDropTarget = useCallback((key: string, element: HTMLDivElement | null) => {
     if (element) {
       dropTargetsRef.current.set(key, element);
     } else {
@@ -377,7 +514,7 @@ export default function RoomAssignment() {
     }
   }, []);
 
-  const handleMouseDown = useCallback((e, type, roomNumber, user, queuePosition = null) => {
+  const handleMouseDown = useCallback((e: MouseEvent, type: string, roomNumber: number, user: UserRecord, queuePosition: number | null = null) => {
     if (e.button !== 0) return; // Only left click
     e.preventDefault();
 
@@ -392,7 +529,7 @@ export default function RoomAssignment() {
     setDragPosition({ x: e.clientX, y: e.clientY });
   }, []);
 
-  const handleMouseMove = useCallback((e) => {
+  const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!dragState) return;
 
     const dx = Math.abs(e.clientX - dragState.startX);
@@ -407,7 +544,7 @@ export default function RoomAssignment() {
       setDragPosition({ x: e.clientX, y: e.clientY });
 
       // Find drop target under cursor
-      let foundTarget = null;
+      let foundTarget: DropTarget | null = null;
       dropTargetsRef.current.forEach((element, key) => {
         const rect = element.getBoundingClientRect();
         if (
@@ -428,7 +565,7 @@ export default function RoomAssignment() {
     }
   }, [dragState, isDragging]);
 
-  const handleMouseUp = useCallback((e) => {
+  const handleMouseUp = useCallback((_e: MouseEvent) => {
     if (!dragState) return;
 
     if (isDragging && dropTarget) {
@@ -453,7 +590,7 @@ export default function RoomAssignment() {
         if (sourceType === 'room') {
           removeAssignmentLocally('room', sourceRoom);
         } else if (sourceType === 'queue') {
-          removeQueueEntryLocally(sourceRoom, sourceQueuePos);
+          removeQueueEntryLocally(sourceRoom, sourceQueuePos ?? 1);
         }
       }
     }
@@ -478,7 +615,7 @@ export default function RoomAssignment() {
   }, [dragState, handleMouseMove, handleMouseUp]);
 
   const getAssignedUserIds = () => {
-    const ids = new Set();
+    const ids = new Set<string>();
     Object.values(localAssignments.rooms).forEach(user => user && ids.add(user.userid));
     localAssignments.monitoring.forEach(user => user && ids.add(user.userid));
     localAssignments.checkIn.forEach(user => user && ids.add(user.userid));
@@ -493,7 +630,7 @@ export default function RoomAssignment() {
       setLoading(true);
 
       // First, clear all existing assignments and queues
-      const clearPromises = [];
+      const clearPromises: Promise<Response>[] = [];
 
       // Delete all existing room assignments
       Object.values(assignments.rooms).forEach(user => {
@@ -548,7 +685,7 @@ export default function RoomAssignment() {
       await Promise.all(clearPromises);
 
       // Now create all new assignments
-      const createPromises = [];
+      const createPromises: Promise<Response>[] = [];
 
       // Create room assignments
       Object.entries(localAssignments.rooms).forEach(([roomNum, user]) => {
@@ -634,7 +771,7 @@ export default function RoomAssignment() {
 
       // Refetch to get the authoritative state from server
       await fetchAssignments();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error saving changes:', err);
       toast.error('Failed to save changes');
     } finally {
@@ -649,12 +786,24 @@ export default function RoomAssignment() {
     toast.success('Changes discarded');
   };
 
-  const AssignmentSlot = ({ user, onAssign, onRemove, label, type, showIcon = true, isActive = false, onMouseDown, isDropTarget, isBeingDragged, dropTargetRef }) => {
+  const AssignmentSlot = ({
+    user,
+    onAssign,
+    onRemove,
+    label,
+    type,
+    showIcon = true,
+    isActive = false,
+    onMouseDown,
+    isDropTarget,
+    isBeingDragged,
+    dropTargetRef
+  }: AssignmentSlotProps) => {
     return (
       <div
-        ref={dropTargetRef}
+        ref={dropTargetRef as React.Ref<HTMLDivElement>}
         onClick={!user && !isBeingDragged ? onAssign : undefined}
-        onMouseDown={user ? onMouseDown : undefined}
+        onMouseDown={user ? (e: React.MouseEvent<HTMLDivElement>) => onMouseDown && onMouseDown(e) : undefined}
         style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
         className={`relative border-2 rounded-lg p-3 min-h-[80px] transition-all ${
           isDropTarget
@@ -709,12 +858,21 @@ export default function RoomAssignment() {
     );
   };
 
-  const QueueSlot = ({ user, onAssign, onRemove, position, onMouseDown, isDropTarget, isBeingDragged, dropTargetRef }) => {
+  const QueueSlot = ({
+    user,
+    onAssign,
+    onRemove,
+    position,
+    onMouseDown,
+    isDropTarget,
+    isBeingDragged,
+    dropTargetRef
+  }: QueueSlotProps) => {
     return (
       <div
-        ref={dropTargetRef}
+        ref={dropTargetRef as React.Ref<HTMLDivElement>}
         onClick={!user && !isBeingDragged ? onAssign : undefined}
-        onMouseDown={user ? onMouseDown : undefined}
+        onMouseDown={user ? (e: React.MouseEvent<HTMLDivElement>) => onMouseDown && onMouseDown(e) : undefined}
         style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
         className={`relative border rounded-lg p-2.5 min-h-[50px] transition-all ${
           isDropTarget
@@ -758,7 +916,7 @@ export default function RoomAssignment() {
     );
   };
 
-  const UserSelectorModal = ({ type, id, queuePosition, allowedUsers, onSelect, onClose }) => (
+  const UserSelectorModal = ({ type, id, queuePosition, allowedUsers, onSelect, onClose }: UserSelectorModalProps) => (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
@@ -777,7 +935,7 @@ export default function RoomAssignment() {
               No {type === 'room' || type === 'queue' ? 'participants' : 'researchers'} available
             </p>
           ) : (
-            allowedUsers.map(user => (
+            allowedUsers.map((user: UserRecord) => (
               <button
                 type="button"
                 key={user.userid}
@@ -876,7 +1034,6 @@ export default function RoomAssignment() {
                 onRemove={() => removeAssignmentLocally('checkIn', 0)}
                 label="Assign RA"
                 type="researcher"
-                dragHandlers={{}}
               />
             </div>
 
@@ -888,7 +1045,6 @@ export default function RoomAssignment() {
                 onRemove={() => removeAssignmentLocally('checkIn', 1)}
                 label="Assign RA"
                 type="researcher"
-                dragHandlers={{}}
               />
             </div>
           </div>
@@ -913,7 +1069,6 @@ export default function RoomAssignment() {
                   onRemove={() => removeAssignmentLocally('monitoring', idx)}
                   label="Assign RA"
                   type="researcher"
-                  dragHandlers={{}}
                 />
               </div>
             ))}
@@ -929,9 +1084,9 @@ export default function RoomAssignment() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {[1, 2, 3, 4, 5].map(roomNum => {
+          {([1, 2, 3, 4, 5] as RoomNumber[]).map(roomNum => {
             const roomUser = localAssignments.rooms[roomNum];
-            const isActive = roomUser && activeSessions.has(roomUser.userid);
+            const isActive = roomUser != null && activeSessions.has(roomUser.userid);
             const roomQueue = localQueues[roomNum];
             const isRoomBeingDragged = isDragging && dragState?.type === 'room' && dragState?.roomNumber === roomNum;
             const isRoomDropTarget = dropTarget?.type === 'room' && dropTarget?.roomNumber === roomNum;
@@ -948,10 +1103,10 @@ export default function RoomAssignment() {
                   label={`Assign to Room ${roomNum}`}
                   type="participant"
                   isActive={isActive}
-                  onMouseDown={(e) => handleMouseDown(e, 'room', roomNum, roomUser)}
+                  onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => handleMouseDown(e.nativeEvent, 'room', roomNum, roomUser!)}
                   isDropTarget={isRoomDropTarget && !isRoomBeingDragged}
                   isBeingDragged={isRoomBeingDragged}
-                  dropTargetRef={(el) => registerDropTarget(`room-${roomNum}`, el)}
+                  dropTargetRef={(el: HTMLDivElement | null) => registerDropTarget(`room-${roomNum}`, el)}
                 />
 
                 {/* Queue for this room */}
@@ -973,10 +1128,10 @@ export default function RoomAssignment() {
                           position={queuePos}
                           onAssign={() => setShowUserSelector({ type: 'queue', id: roomNum, queuePosition: queuePos })}
                           onRemove={() => removeQueueEntryLocally(roomNum, queuePos)}
-                          onMouseDown={(e) => handleMouseDown(e, 'queue', roomNum, queueUser, queuePos)}
+                          onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => handleMouseDown(e.nativeEvent, 'queue', roomNum, queueUser!, queuePos)}
                           isDropTarget={isQueueDropTarget && !isQueueBeingDragged}
                           isBeingDragged={isQueueBeingDragged}
-                          dropTargetRef={(el) => registerDropTarget(`queue-${roomNum}-${queuePos}`, el)}
+                          dropTargetRef={(el: HTMLDivElement | null) => registerDropTarget(`queue-${roomNum}-${queuePos}`, el)}
                         />
                       );
                     })}
@@ -1030,7 +1185,7 @@ export default function RoomAssignment() {
               ? availableParticipants
               : availableResearchers
           }
-          onSelect={(user) => assignUserLocally(showUserSelector.type, showUserSelector.id, user, showUserSelector.queuePosition)}
+          onSelect={(user) => assignUserLocally(showUserSelector.type, showUserSelector.id, user, showUserSelector.queuePosition ?? null)}
           onClose={() => setShowUserSelector(null)}
         />
       )}

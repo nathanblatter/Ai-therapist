@@ -1,12 +1,52 @@
 import { useState, useEffect } from "react";
 import FilterBar from "./FilterBar";
 
-export default function SessionList({ onViewSession }) {
-  const [sessions, setSessions] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, limit: 15, totalCount: 0 });
-  const [filters, setFilters] = useState({});
+interface Session {
+  session_id: string;
+  username?: string | null;
+  session_name?: string | null;
+  start_time: string;
+  end_time?: string | null;
+  ended_by?: string | null;
+  duration_seconds?: number | null;
+  status: string;
+  total_messages: number;
+  user_messages: number;
+  assistant_messages: number;
+}
+
+interface Pagination {
+  page: number;
+  limit: number;
+  totalCount: number;
+}
+
+interface SerializedFilters {
+  search: string;
+  startDate: string;
+  endDate: string;
+  minMessages: string;
+  maxMessages: string;
+  voices: string;
+  languages: string;
+  durations: string;
+  sessionTypes: string;
+  statuses: string;
+  endedBy: string;
+  crisisFlagged: string;
+  crisisSeverity: string;
+}
+
+interface SessionListProps {
+  onViewSession: (sessionId: string, isEditMode?: boolean) => void;
+}
+
+export default function SessionList({ onViewSession }: SessionListProps) {
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 15, totalCount: 0 });
+  const [filters, setFilters] = useState<Partial<SerializedFilters>>({});
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchSessions = async () => {
     setLoading(true);
@@ -14,8 +54,8 @@ export default function SessionList({ onViewSession }) {
 
     try {
       const params = new URLSearchParams({
-        page: pagination.page,
-        limit: pagination.limit,
+        page: String(pagination.page),
+        limit: String(pagination.limit),
         ...Object.fromEntries(
           Object.entries(filters).filter(([_, v]) => v !== '' && v !== null)
         )
@@ -27,8 +67,8 @@ export default function SessionList({ onViewSession }) {
       const data = await response.json();
       setSessions(data.sessions);
       setPagination(data.pagination);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -44,14 +84,14 @@ export default function SessionList({ onViewSession }) {
     fetchSessions();
   }, [filters, pagination.page]);
 
-  const formatDuration = (seconds) => {
+  const formatDuration = (seconds: number | null | undefined): string => {
     if (!seconds) return '0s';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   };
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
     return date.toLocaleString('en-US', {
       month: 'numeric',
@@ -63,11 +103,11 @@ export default function SessionList({ onViewSession }) {
     });
   };
 
-  const handlePageChange = (newPage) => {
+  const handlePageChange = (newPage: number) => {
     setPagination(prev => ({ ...prev, page: newPage }));
   };
 
-  const handleDelete = async (sessionId, sessionName) => {
+  const handleDelete = async (sessionId: string, sessionName: string | null | undefined) => {
     const confirmMessage = sessionName
       ? `Are you sure you want to delete the session "${sessionName}"? This will permanently delete all messages and data associated with this session.`
       : `Are you sure you want to delete this session? This will permanently delete all messages and data associated with this session.`;
@@ -88,8 +128,8 @@ export default function SessionList({ onViewSession }) {
 
       // Refresh the session list after successful deletion
       await fetchSessions();
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 

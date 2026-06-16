@@ -15,11 +15,17 @@ const LANGUAGES = [
   { code: "it-IT", label: "Italiano" },
 ];
 
-function useLocalStorage(key, initial) {
-  const [state, setState] = useState(() => {
+interface BrowserVoice {
+  lang: string;
+  voiceURI: string;
+  name: string;
+}
+
+function useLocalStorage<T>(key: string, initial: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [state, setState] = useState<T>(() => {
     try {
       const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : initial;
+      return raw ? (JSON.parse(raw) as T) : initial;
     } catch {
       return initial;
     }
@@ -32,27 +38,38 @@ function useLocalStorage(key, initial) {
   return [state, setState];
 }
 
-export function SettingsDropdown({ onOpenSettings, onSignOut }) {
+interface SettingsDropdownProps {
+  onOpenSettings?: () => void;
+  onSignOut?: () => void;
+}
+
+interface FeaturesConfig {
+  output_modalities: string[];
+  voice_enabled: boolean;
+  chat_enabled: boolean;
+}
+
+export function SettingsDropdown({ onOpenSettings, onSignOut }: SettingsDropdownProps) {
   const [open, setOpen] = useState(false);
-  const [voices, setVoices] = useState([]);
-  const [selectedVoiceURI, setSelectedVoiceURI] = useLocalStorage("settings.voiceURI", "");
-  const [language, setLanguage] = useLocalStorage("settings.lang", "en-US");
-  const [theme, setTheme] = useLocalStorage("settings.theme", "system"); // system | light | dark
-  const [features, setFeatures] = useState({
+  const [voices, setVoices] = useState<BrowserVoice[]>([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useLocalStorage<string>("settings.voiceURI", "");
+  const [language, setLanguage] = useLocalStorage<string>("settings.lang", "en-US");
+  const [theme, setTheme] = useLocalStorage<string>("settings.theme", "system"); // system | light | dark
+  const [features, setFeatures] = useState<FeaturesConfig>({
     output_modalities: ["audio"],
     voice_enabled: true,
     chat_enabled: true
   });
 
-  const rootRef = useRef(null);
-  const btnRef = useRef(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
 
   // Fetch features config to determine if voice is enabled
   useEffect(() => {
     fetch('/api/config/features')
       .then(res => res.json())
-      .then(data => setFeatures(data))
-      .catch(err => console.error('Failed to fetch features config:', err));
+      .then((data: FeaturesConfig) => setFeatures(data))
+      .catch((err: unknown) => console.error('Failed to fetch features config:', err));
   }, []);
 
   // Load voices from SpeechSynthesis API
@@ -60,11 +77,16 @@ export function SettingsDropdown({ onOpenSettings, onSignOut }) {
     function load() {
       try {
         const v = ['Alloy','Ash','Ballad','Cedar','Coral','Echo','Marin','Sage','Shimmer','Verse'];
-        setVoices(v);
-        if (!selectedVoiceURI && v.length) {
-          const preferred = v.find((x) => x.lang && x.lang.startsWith(language)) || v[0];
-          if (preferred) setSelectedVoiceURI(preferred.voiceURI);
+        // These are string voice names, not BrowserVoice objects — treat as plain string list
+        // The actual BrowserVoice objects come from window.speechSynthesis.getVoices()
+        const synthVoices = window.speechSynthesis?.getVoices() ?? [];
+        setVoices(synthVoices as BrowserVoice[]);
+        if (!selectedVoiceURI && synthVoices.length) {
+          const preferred = synthVoices.find((x) => (x as BrowserVoice).lang && (x as BrowserVoice).lang.startsWith(language)) || synthVoices[0];
+          if (preferred) setSelectedVoiceURI((preferred as BrowserVoice).voiceURI);
         }
+        // Keep the string list as a fallback reference (not used for UI directly)
+        void v;
       } catch {
         setVoices([]);
       }
@@ -78,18 +100,19 @@ export function SettingsDropdown({ onOpenSettings, onSignOut }) {
 
   // Close on outside click or Escape
   useEffect(() => {
-    function onDoc(e) {
+    function onDoc(e: MouseEvent | TouchEvent) {
       if (!open) return;
+      const target = e.target as Node | null;
       if (
         rootRef.current &&
-        !rootRef.current.contains(e.target) &&
+        !rootRef.current.contains(target) &&
         btnRef.current &&
-        !btnRef.current.contains(e.target)
+        !btnRef.current.contains(target)
       ) {
         setOpen(false);
       }
     }
-    function onKey(e) {
+    function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
     document.addEventListener("mousedown", onDoc);

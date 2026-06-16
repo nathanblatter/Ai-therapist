@@ -1,11 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { useSocket } from '../hooks/useSocket';
 
+interface SidebandConnection {
+  sessionId: string;
+  callId: string;
+  connectedAt: string;
+  status: string;
+}
+
+interface SidebandEvent {
+  type: string;
+  timestamp: Date;
+  data: unknown;
+}
+
+interface SidebandEvents {
+  [sessionId: string]: SidebandEvent[];
+}
+
 export default function SidebandMonitor() {
-  const socket = useSocket();
-  const [activeConnections, setActiveConnections] = useState([]);
-  const [selectedSession, setSelectedSession] = useState(null);
-  const [events, setEvents] = useState({});
+  const { socket } = useSocket();
+  const [activeConnections, setActiveConnections] = useState<SidebandConnection[]>([]);
+  const [selectedSession, setSelectedSession] = useState<SidebandConnection | null>(null);
+  const [events, setEvents] = useState<SidebandEvents>({});
   const [instructions, setInstructions] = useState('');
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
@@ -16,7 +33,7 @@ export default function SidebandMonitor() {
     socket.emit('admin:get-sideband-connections');
 
     // Listen for sideband connection events
-    socket.on('sideband:connected', (data) => {
+    socket.on('sideband:connected', (data: SidebandConnection) => {
       console.log('[SidebandMonitor] Connection established:', data);
       setActiveConnections(prev => {
         const exists = prev.find(c => c.sessionId === data.sessionId);
@@ -30,7 +47,7 @@ export default function SidebandMonitor() {
       });
     });
 
-    socket.on('sideband:disconnected', (data) => {
+    socket.on('sideband:disconnected', (data: { sessionId: string }) => {
       console.log('[SidebandMonitor] Connection closed:', data);
       setActiveConnections(prev =>
         prev.filter(c => c.sessionId !== data.sessionId)
@@ -40,7 +57,7 @@ export default function SidebandMonitor() {
       }
     });
 
-    socket.on('sideband:error', (data) => {
+    socket.on('sideband:error', (data: { sessionId: string; error: unknown }) => {
       console.error('[SidebandMonitor] Error:', data);
       setEvents(prev => ({
         ...prev,
@@ -55,7 +72,7 @@ export default function SidebandMonitor() {
       }));
     });
 
-    socket.on('session:openai-update', (data) => {
+    socket.on('session:openai-update', (data: { sessionId: string; eventType: string; data: unknown }) => {
       console.log('[SidebandMonitor] OpenAI event:', data);
       setEvents(prev => ({
         ...prev,
@@ -70,7 +87,7 @@ export default function SidebandMonitor() {
       }));
     });
 
-    socket.on('admin:sideband-connections', (connections) => {
+    socket.on('admin:sideband-connections', (connections: SidebandConnection[]) => {
       console.log('[SidebandMonitor] Active connections:', connections);
       setActiveConnections(connections);
     });
@@ -103,16 +120,16 @@ export default function SidebandMonitor() {
         setShowUpdateModal(false);
         setInstructions('');
       } else {
-        const error = await response.json();
+        const error = await response.json() as { message: string };
         alert(`Failed to update: ${error.message}`);
       }
-    } catch (error) {
-      console.error('Error updating session:', error);
+    } catch (e: unknown) {
+      console.error('Error updating session:', e);
       alert('Failed to update session');
     }
   };
 
-  const handleDisconnect = async (sessionId) => {
+  const handleDisconnect = async (sessionId: string) => {
     if (!confirm('Are you sure you want to disconnect this sideband connection?')) return;
 
     try {
@@ -129,11 +146,11 @@ export default function SidebandMonitor() {
           setSelectedSession(null);
         }
       } else {
-        const error = await response.json();
+        const error = await response.json() as { message: string };
         alert(`Failed to disconnect: ${error.message}`);
       }
-    } catch (error) {
-      console.error('Error disconnecting:', error);
+    } catch (e: unknown) {
+      console.error('Error disconnecting:', e);
       alert('Failed to disconnect');
     }
   };
@@ -323,7 +340,7 @@ export default function SidebandMonitor() {
                   </p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {sessionEvents.map((event, idx) => (
+                    {sessionEvents.map((event: SidebandEvent, idx: number) => (
                       <div
                         key={idx}
                         style={{

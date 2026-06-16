@@ -1,12 +1,28 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle, Eye, Code } from 'react-feather';
 
+interface PromptEntry {
+  prompt: string;
+  description: string;
+  last_modified: string | null;
+}
+
+interface PromptsMap {
+  [sessionType: string]: PromptEntry;
+}
+
+interface Language {
+  value: string;
+  label: string;
+  enabled: boolean;
+}
+
 export default function SystemPrompts() {
-  const [prompts, setPrompts] = useState(null);
+  const [prompts, setPrompts] = useState<PromptsMap | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   const [activeTab, setActiveTab] = useState('realtime');
 
@@ -15,10 +31,10 @@ export default function SystemPrompts() {
   const [previewLanguage, setPreviewLanguage] = useState('en');
   const [previewContent, setPreviewContent] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [languages, setLanguages] = useState([]);
+  const [languages, setLanguages] = useState<Language[]>([]);
 
   // Original prompts for reset functionality
-  const [originalPrompts, setOriginalPrompts] = useState(null);
+  const [originalPrompts, setOriginalPrompts] = useState<PromptsMap | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -32,54 +48,63 @@ export default function SystemPrompts() {
       const response = await fetch('/admin/api/config');
       if (!response.ok) throw new Error('Failed to fetch configuration');
 
-      const data = await response.json();
+      const data = await response.json() as {
+        system_prompts?: { value: PromptsMap };
+        languages?: { value: { languages: Language[] } };
+      };
 
       if (data.system_prompts) {
         setPrompts(data.system_prompts.value);
-        setOriginalPrompts(JSON.parse(JSON.stringify(data.system_prompts.value)));
+        setOriginalPrompts(JSON.parse(JSON.stringify(data.system_prompts.value)) as PromptsMap);
       } else {
         // Initialize with empty prompts if not in database yet
-        const defaultPrompts = {
+        const defaultPrompts: PromptsMap = {
           realtime: { prompt: '', description: 'System prompt for realtime voice therapy sessions', last_modified: null },
           chat: { prompt: '', description: 'System prompt for chat-only text therapy sessions', last_modified: null }
         };
         setPrompts(defaultPrompts);
-        setOriginalPrompts(JSON.parse(JSON.stringify(defaultPrompts)));
+        setOriginalPrompts(JSON.parse(JSON.stringify(defaultPrompts)) as PromptsMap);
       }
 
       // Load languages for preview selector
       if (data.languages?.value?.languages) {
-        setLanguages(data.languages.value.languages.filter(l => l.enabled));
+        setLanguages(data.languages.value.languages.filter((l: Language) => l.enabled));
       }
 
       setHasChanges(false);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
   };
 
-  const handlePromptChange = (sessionType, value) => {
-    setPrompts(prev => ({
-      ...prev,
-      [sessionType]: {
-        ...prev[sessionType],
-        prompt: value
-      }
-    }));
+  const handlePromptChange = (sessionType: string, value: string) => {
+    setPrompts(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        [sessionType]: {
+          ...prev[sessionType],
+          prompt: value
+        }
+      };
+    });
     setHasChanges(true);
     setSaveSuccess(null);
   };
 
-  const handleDescriptionChange = (sessionType, value) => {
-    setPrompts(prev => ({
-      ...prev,
-      [sessionType]: {
-        ...prev[sessionType],
-        description: value
-      }
-    }));
+  const handleDescriptionChange = (sessionType: string, value: string) => {
+    setPrompts(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        [sessionType]: {
+          ...prev[sessionType],
+          description: value
+        }
+      };
+    });
     setHasChanges(true);
     setSaveSuccess(null);
   };
@@ -97,18 +122,18 @@ export default function SystemPrompts() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json() as { error?: string };
         throw new Error(errorData.error || 'Failed to save system prompts');
       }
 
       setSaveSuccess('System prompts saved successfully!');
       setHasChanges(false);
-      setOriginalPrompts(JSON.parse(JSON.stringify(prompts)));
+      setOriginalPrompts(JSON.parse(JSON.stringify(prompts)) as PromptsMap);
 
       // Refresh to get updated timestamps
       await fetchData();
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -116,7 +141,7 @@ export default function SystemPrompts() {
 
   const handleReset = () => {
     if (window.confirm('Are you sure you want to discard unsaved changes?')) {
-      setPrompts(JSON.parse(JSON.stringify(originalPrompts)));
+      setPrompts(JSON.parse(JSON.stringify(originalPrompts)) as PromptsMap);
       setHasChanges(false);
       setError(null);
       setSaveSuccess(null);
@@ -131,10 +156,10 @@ export default function SystemPrompts() {
       );
       if (!response.ok) throw new Error('Failed to load preview');
 
-      const data = await response.json();
+      const data = await response.json() as { prompt: string };
       setPreviewContent(data.prompt);
-    } catch (err) {
-      setPreviewContent(`Error loading preview: ${err.message}`);
+    } catch (err: unknown) {
+      setPreviewContent(`Error loading preview: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setPreviewLoading(false);
     }
@@ -146,7 +171,7 @@ export default function SystemPrompts() {
     }
   }, [showPreview, activeTab, previewLanguage]);
 
-  const getCharacterCount = (text) => {
+  const getCharacterCount = (text: string | undefined) => {
     return text?.length || 0;
   };
 
@@ -307,7 +332,7 @@ export default function SystemPrompts() {
 
             {prompts?.[activeTab]?.last_modified && (
               <p className="text-xs text-gray-500 mt-3">
-                Last modified: {new Date(prompts[activeTab].last_modified).toLocaleString('en-US', {
+                Last modified: {new Date(prompts[activeTab].last_modified as string).toLocaleString('en-US', {
                   month: 'numeric',
                   day: 'numeric',
                   year: 'numeric',

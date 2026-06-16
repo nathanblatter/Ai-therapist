@@ -1,17 +1,23 @@
 import { useState, useEffect } from 'react';
 import { Shield, Key, Copy, CheckCircle } from 'react-feather';
 
+interface MFAStatus {
+  enabled: boolean;
+  backupCodesRemaining: number;
+  enabledAt?: string;
+}
+
 export default function MFASetup() {
-  const [mfaStatus, setMfaStatus] = useState(null);
+  const [mfaStatus, setMfaStatus] = useState<MFAStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [setupStep, setSetupStep] = useState(null); // 'init', 'verify', 'complete'
-  const [qrCode, setQrCode] = useState(null);
-  const [secret, setSecret] = useState(null);
+  const [setupStep, setSetupStep] = useState<string | null>(null); // 'init', 'verify', 'complete'
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
   const [token, setToken] = useState('');
-  const [backupCodes, setBackupCodes] = useState([]);
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [password, setPassword] = useState('');
-  const [error, setError] = useState(null);
-  const [successMessage, setSuccessMessage] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Fetch MFA status on load
   useEffect(() => {
@@ -29,10 +35,10 @@ export default function MFASetup() {
 
       if (!response.ok) throw new Error('Failed to fetch MFA status');
 
-      const data = await response.json();
+      const data = await response.json() as { mfa: MFAStatus };
       setMfaStatus(data.mfa);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -49,16 +55,16 @@ export default function MFASetup() {
       });
 
       if (!response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { error?: string };
         throw new Error(data.error || 'Failed to initialize MFA setup');
       }
 
-      const data = await response.json();
+      const data = await response.json() as { qrCode: string; secret: string };
       setQrCode(data.qrCode);
       setSecret(data.secret);
       setSetupStep('verify');
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -82,19 +88,19 @@ export default function MFASetup() {
       });
 
       if (!response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { error?: string };
         throw new Error(data.error || 'Failed to verify token');
       }
 
-      const data = await response.json();
+      const data = await response.json() as { backupCodes: string[] };
       setBackupCodes(data.backupCodes);
       setSetupStep('complete');
       setSuccessMessage('MFA enabled successfully!');
 
       // Refresh status after short delay
       setTimeout(fetchMFAStatus, 1000);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -122,15 +128,15 @@ export default function MFASetup() {
       });
 
       if (!response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { error?: string };
         throw new Error(data.error || 'Failed to disable MFA');
       }
 
       setSuccessMessage('MFA disabled successfully');
       setPassword('');
       fetchMFAStatus();
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -154,23 +160,23 @@ export default function MFASetup() {
       });
 
       if (!response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { error?: string };
         throw new Error(data.error || 'Failed to regenerate backup codes');
       }
 
-      const data = await response.json();
+      const data = await response.json() as { backupCodes: string[] };
       setBackupCodes(data.backupCodes);
       setSetupStep('complete');
       setSuccessMessage('Backup codes regenerated successfully!');
       setPassword('');
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
   };
 
-  const copyToClipboard = (text) => {
+  const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setSuccessMessage('Copied to clipboard!');
     setTimeout(() => setSuccessMessage(null), 2000);
@@ -307,7 +313,7 @@ export default function MFASetup() {
               <div className="flex items-center gap-2 bg-white px-4 py-2 rounded border">
                 <code className="text-sm font-mono">{secret}</code>
                 <button
-                  onClick={() => copyToClipboard(secret)}
+                  onClick={() => copyToClipboard(secret ?? '')}
                   className="text-byuRoyal hover:text-byuNavy"
                 >
                   <Copy size={16} />
@@ -328,7 +334,7 @@ export default function MFASetup() {
                 value={token}
                 onChange={(e) => setToken(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder="123456"
-                maxLength="6"
+                maxLength={6}
                 className="border rounded px-4 py-2 text-2xl font-mono tracking-wider w-48"
               />
 

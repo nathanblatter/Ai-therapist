@@ -1,21 +1,51 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle, Trash2, Clock, Shield, RefreshCw, AlertTriangle } from 'react-feather';
 
+interface RetentionSettings {
+  enabled: boolean;
+  retention_hours: number;
+  wipe_time: string;
+  require_redaction_complete: boolean;
+  last_wipe_at: string | null;
+  last_wipe_count: number;
+}
+
+interface RetentionStats {
+  pending_wipe: number;
+  awaiting_redaction: number;
+  redaction_errors: number;
+}
+
+interface WipeRecord {
+  wipe_id: string | number;
+  started_at: string;
+  triggered_by: string;
+  triggered_by_user?: string;
+  status: string;
+  messages_wiped: number;
+  messages_skipped: number;
+  retention_hours: number;
+}
+
+interface SchedulerInfo {
+  nextScheduledWipe?: string;
+}
+
 export default function DataRetention() {
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [saveSuccess, setSaveSuccess] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [wiping, setWiping] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
   // Data from server
-  const [stats, setStats] = useState(null);
-  const [recentWipes, setRecentWipes] = useState([]);
-  const [scheduler, setScheduler] = useState(null);
+  const [stats, setStats] = useState<RetentionStats | null>(null);
+  const [recentWipes, setRecentWipes] = useState<WipeRecord[]>([]);
+  const [scheduler, setScheduler] = useState<SchedulerInfo | null>(null);
 
   // Editable settings
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<RetentionSettings>({
     enabled: true,
     retention_hours: 24,
     wipe_time: '03:00',
@@ -36,14 +66,19 @@ export default function DataRetention() {
       const response = await fetch('/admin/api/content-retention');
       if (!response.ok) throw new Error('Failed to fetch retention data');
 
-      const data = await response.json();
+      const data = await response.json() as {
+        settings: RetentionSettings;
+        stats: RetentionStats;
+        recent_wipes?: WipeRecord[];
+        scheduler: SchedulerInfo;
+      };
       setSettings(data.settings);
       setStats(data.stats);
       setRecentWipes(data.recent_wipes || []);
       setScheduler(data.scheduler);
       setHasChanges(false);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -62,15 +97,15 @@ export default function DataRetention() {
       });
 
       if (!response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { error?: string };
         throw new Error(data.error || 'Failed to save settings');
       }
 
       setSaveSuccess('Settings saved successfully!');
       setHasChanges(false);
       await fetchData();
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -95,26 +130,26 @@ export default function DataRetention() {
       });
 
       if (!response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { error?: string };
         throw new Error(data.error || 'Wipe failed');
       }
 
-      const data = await response.json();
+      const data = await response.json() as { messagesWiped: number; messagesSkipped: number };
       setSaveSuccess(`Wipe completed: ${data.messagesWiped} messages wiped, ${data.messagesSkipped} skipped`);
       await fetchData();
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setWiping(false);
     }
   };
 
-  const updateSetting = (key, value) => {
+  const updateSetting = <K extends keyof RetentionSettings>(key: K, value: RetentionSettings[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
     setHasChanges(true);
   };
 
-  const formatDate = (dateStr) => {
+  const formatDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return 'Never';
     return new Date(dateStr).toLocaleString('en-US', {
       month: 'short',
@@ -234,7 +269,7 @@ export default function DataRetention() {
             <AlertTriangle size={16} />
             <span className="text-xs font-medium uppercase">With Errors</span>
           </div>
-          <p className={`text-lg font-bold ${stats?.redaction_errors > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+          <p className={`text-lg font-bold ${(stats?.redaction_errors ?? 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
             {stats?.redaction_errors || 0}
           </p>
           <p className="text-xs text-gray-500 mt-1">need attention</p>

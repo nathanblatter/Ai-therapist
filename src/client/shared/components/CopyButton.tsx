@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { Copy } from "react-feather";
 
-export default function CopyButton({ textToCopy }) {
+interface CopyButtonProps {
+  textToCopy: string;
+}
+
+export default function CopyButton({ textToCopy }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {

@@ -9,7 +9,7 @@ import { pool } from '../config/db.js';
  * @param {string} username - Username for the TOTP label
  * @returns {Object} - Secret object with base32 secret and otpauth URL
  */
-export function generateMFASecret(username) {
+export function generateMFASecret(username: string): { secret: string; otpauthUrl: string | undefined } {
   const secret = speakeasy.generateSecret({
     name: `AI Therapy (${username})`,
     issuer: 'AI Therapy Platform',
@@ -27,7 +27,7 @@ export function generateMFASecret(username) {
  * @param {string} otpauthUrl - The otpauth:// URL
  * @returns {Promise<string>} - Data URL for QR code image
  */
-export async function generateQRCode(otpauthUrl) {
+export async function generateQRCode(otpauthUrl: string): Promise<string> {
   try {
     const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
     return qrCodeDataUrl;
@@ -43,7 +43,7 @@ export async function generateQRCode(otpauthUrl) {
  * @param {string} secret - Base32-encoded secret
  * @returns {boolean} - Whether the token is valid
  */
-export function verifyTOTP(token, secret) {
+export function verifyTOTP(token: string, secret: string): boolean {
   return speakeasy.totp.verify({
     secret: secret,
     encoding: 'base32',
@@ -57,9 +57,9 @@ export function verifyTOTP(token, secret) {
  * @param {number} count - Number of backup codes to generate (default: 10)
  * @returns {Promise<{codes: string[], hashedCodes: string[]}>} - Plain codes and hashed versions
  */
-export async function generateBackupCodes(count = 10) {
-  const codes = [];
-  const hashedCodes = [];
+export async function generateBackupCodes(count = 10): Promise<{ codes: string[]; hashedCodes: string[] }> {
+  const codes: string[] = [];
+  const hashedCodes: string[] = [];
 
   for (let i = 0; i < count; i++) {
     // Generate 8-character alphanumeric code
@@ -80,7 +80,7 @@ export async function generateBackupCodes(count = 10) {
  * @param {string[]} hashedCodes - Array of hashed backup codes from database
  * @returns {Promise<{valid: boolean, remainingCodes: string[]}>} - Validation result and updated codes
  */
-export async function verifyBackupCode(code, hashedCodes) {
+export async function verifyBackupCode(code: string, hashedCodes: string[]): Promise<{ valid: boolean; remainingCodes: string[] }> {
   if (!hashedCodes || hashedCodes.length === 0) {
     return { valid: false, remainingCodes: [] };
   }
@@ -107,7 +107,7 @@ export async function verifyBackupCode(code, hashedCodes) {
  * @param {string} secret - Base32-encoded TOTP secret
  * @param {string[]} hashedBackupCodes - Array of hashed backup codes
  */
-export async function enableMFA(userId, secret, hashedBackupCodes) {
+export async function enableMFA(userId: number, secret: string, hashedBackupCodes: string[]): Promise<void> {
   await pool.query(
     `UPDATE users
      SET mfa_enabled = true,
@@ -123,7 +123,7 @@ export async function enableMFA(userId, secret, hashedBackupCodes) {
  * Disable MFA for a user
  * @param {number} userId - User ID
  */
-export async function disableMFA(userId) {
+export async function disableMFA(userId: number): Promise<void> {
   await pool.query(
     `UPDATE users
      SET mfa_enabled = false,
@@ -140,7 +140,7 @@ export async function disableMFA(userId) {
  * Update last MFA verification timestamp
  * @param {number} userId - User ID
  */
-export async function updateMFAVerificationTime(userId) {
+export async function updateMFAVerificationTime(userId: number): Promise<void> {
   await pool.query(
     `UPDATE users
      SET last_mfa_verified_at = CURRENT_TIMESTAMP
@@ -149,13 +149,27 @@ export async function updateMFAVerificationTime(userId) {
   );
 }
 
+interface MFAStatusRow {
+  mfa_enabled: boolean;
+  mfa_secret: string | null;
+  mfa_backup_codes: string[] | null;
+  mfa_enabled_at: Date | null;
+  last_mfa_verified_at: Date | null;
+}
+
 /**
  * Get MFA status for a user
  * @param {number} userId - User ID
  * @returns {Promise<Object>} - MFA status object
  */
-export async function getMFAStatus(userId) {
-  const result = await pool.query(
+export async function getMFAStatus(userId: number): Promise<{
+  enabled: boolean;
+  enabledAt: Date | null;
+  lastVerifiedAt: Date | null;
+  backupCodesRemaining: number;
+  secret: string | null;
+}> {
+  const result = await pool.query<MFAStatusRow>(
     `SELECT mfa_enabled, mfa_secret, mfa_backup_codes, mfa_enabled_at, last_mfa_verified_at
      FROM users
      WHERE userid = $1`,
@@ -182,7 +196,7 @@ export async function getMFAStatus(userId) {
  * @param {number} userId - User ID
  * @param {string[]} remainingCodes - Updated array of hashed backup codes
  */
-export async function updateBackupCodes(userId, remainingCodes) {
+export async function updateBackupCodes(userId: number, remainingCodes: string[]): Promise<void> {
   await pool.query(
     `UPDATE users
      SET mfa_backup_codes = $1

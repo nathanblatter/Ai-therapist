@@ -19,11 +19,11 @@ export default function adminAnalyticsRoutes() {
     log.info({ filters: req.query }, 'Fetching analytics');
 
     // Parse comma-separated arrays
-    const voiceArray = voices ? voices.split(',').filter(Boolean) : null;
-    const languageArray = languages ? languages.split(',').filter(Boolean) : null;
-    const sessionTypeArray = sessionTypes ? sessionTypes.split(',').filter(Boolean) : null;
-    const statusArray = statuses ? statuses.split(',').filter(Boolean) : null;
-    const endedByArray = endedBy ? endedBy.split(',').filter(Boolean) : null;
+    const voiceArray = voices && typeof voices === 'string' ? voices.split(',').filter(Boolean) : null;
+    const languageArray = languages && typeof languages === 'string' ? languages.split(',').filter(Boolean) : null;
+    const sessionTypeArray = sessionTypes && typeof sessionTypes === 'string' ? sessionTypes.split(',').filter(Boolean) : null;
+    const statusArray = statuses && typeof statuses === 'string' ? statuses.split(',').filter(Boolean) : null;
+    const endedByArray = endedBy && typeof endedBy === 'string' ? endedBy.split(',').filter(Boolean) : null;
 
     const result = await pool.query(`
       WITH date_filtered_sessions AS (

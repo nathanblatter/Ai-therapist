@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, Dispatch, SetStateAction } from 'react';
 import { toast } from '../../shared/components/Toast';
 
-export function useSessionTimer({ isSessionActive, onTimeExpired }) {
-  const [sessionEndTime, setSessionEndTime] = useState(null);
-  const [timeRemaining, setTimeRemaining] = useState(null);
-  const timerIntervalRef = useRef(null);
+interface UseSessionTimerParams {
+  isSessionActive: boolean;
+  onTimeExpired: () => void;
+}
+
+export function useSessionTimer({ isSessionActive, onTimeExpired }: UseSessionTimerParams) {
+  const [sessionEndTime, setSessionEndTime] = useState<number | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!sessionEndTime || !isSessionActive) {
@@ -21,7 +26,7 @@ export function useSessionTimer({ isSessionActive, onTimeExpired }) {
 
       if (remaining <= 0) {
         setTimeRemaining(0);
-        clearInterval(timerIntervalRef.current);
+        clearInterval(timerIntervalRef.current!);
         timerIntervalRef.current = null;
 
         toast.warning("Your session time has ended. The session will now close.");

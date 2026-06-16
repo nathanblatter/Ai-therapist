@@ -2,53 +2,65 @@ import { useState, useEffect } from 'react';
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'react-feather';
 
 let toastIdCounter = 0;
-const listeners = new Set();
+
+type ToastType = 'success' | 'error' | 'warning' | 'info';
+
+interface ToastMessage {
+  id: number;
+  type: ToastType;
+  message: string;
+  duration: number;
+}
+
+type ToastListener = (toast: ToastMessage) => void;
+
+const listeners = new Set<ToastListener>();
 
 // Global toast manager
 export const toast = {
-  success: (message, duration = 5000) => {
+  success: (message: string, duration = 5000) => {
     showToast({ type: 'success', message, duration });
   },
-  error: (message, duration = 7000) => {
+  error: (message: string, duration = 7000) => {
     showToast({ type: 'error', message, duration });
   },
-  warning: (message, duration = 6000) => {
+  warning: (message: string, duration = 6000) => {
     showToast({ type: 'warning', message, duration });
   },
-  info: (message, duration = 5000) => {
+  info: (message: string, duration = 5000) => {
     showToast({ type: 'info', message, duration });
   }
 };
 
-function showToast(toast) {
+function showToast(toastData: Omit<ToastMessage, 'id'>) {
   const id = toastIdCounter++;
-  const toastWithId = { ...toast, id };
-  listeners.forEach(listener => listener(toastWithId));
+  const toastWithId: ToastMessage = { ...toastData, id };
+  listeners.forEach((listener: ToastListener) => listener(toastWithId));
 }
 
 export default function ToastContainer() {
-  const [toasts, setToasts] = useState([]);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   useEffect(() => {
-    const listener = (toast) => {
-      setToasts(prev => [...prev, toast]);
+    const listener = (toastMsg: ToastMessage) => {
+      setToasts(prev => [...prev, toastMsg]);
 
-      if (toast.duration > 0) {
+      if (toastMsg.duration > 0) {
         setTimeout(() => {
-          removeToast(toast.id);
-        }, toast.duration);
+          removeToast(toastMsg.id);
+        }, toastMsg.duration);
       }
     };
 
     listeners.add(listener);
-    return () => listeners.delete(listener);
+    return () => { listeners.delete(listener); };
   }, []);
 
-  const removeToast = (id) => {
+  const removeToast = (id: number) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const getIcon = (type) => {
+  const getIcon = (type: ToastType) => {
     switch (type) {
       case 'success': return <CheckCircle size={20} />;
       case 'error': return <AlertCircle size={20} />;
@@ -58,7 +70,7 @@ export default function ToastContainer() {
     }
   };
 
-  const getColors = (type) => {
+  const getColors = (type: ToastType) => {
     switch (type) {
       case 'success': return 'bg-green-50 border-green-500 text-green-800';
       case 'error': return 'bg-red-50 border-red-500 text-red-800';
@@ -78,21 +90,21 @@ export default function ToastContainer() {
       role="region"
       aria-label="Notifications"
     >
-      {toasts.map((toast) => (
+      {toasts.map((toastItem) => (
         <div
-          key={toast.id}
-          className={`${getColors(toast.type)} border-l-4 p-4 rounded-lg shadow-lg flex items-start gap-3 animate-slideIn pointer-events-auto`}
+          key={toastItem.id}
+          className={`${getColors(toastItem.type)} border-l-4 p-4 rounded-lg shadow-lg flex items-start gap-3 animate-slideIn pointer-events-auto`}
           role="alert"
-          aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+          aria-live={toastItem.type === 'error' ? 'assertive' : 'polite'}
         >
           <div className="flex-shrink-0 mt-0.5">
-            {getIcon(toast.type)}
+            {getIcon(toastItem.type)}
           </div>
           <div className="flex-1 text-sm font-medium">
-            {toast.message}
+            {toastItem.message}
           </div>
           <button
-            onClick={() => removeToast(toast.id)}
+            onClick={() => removeToast(toastItem.id)}
             className="flex-shrink-0 hover:opacity-70 transition-opacity"
             aria-label="Dismiss notification"
           >

@@ -18,10 +18,10 @@ import ToastContainer from "../../shared/components/Toast";
 
 export default function AdminApp() {
   const [currentView, setCurrentView] = useState('sessions');
-  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isClient, setIsClient] = useState(false);
-  const [userRole, setUserRole] = useState(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   // Handle SSR - only render interactive parts on client
   useEffect(() => {
@@ -49,7 +49,7 @@ export default function AdminApp() {
     fetchUserRole();
   }, []);
 
-  const handleViewSession = (sessionId, editMode = false) => {
+  const handleViewSession = (sessionId: string, editMode = false) => {
     setSelectedSessionId(sessionId);
     setIsEditMode(editMode);
   };

@@ -8,7 +8,7 @@ import ProtectedRoute from "../shared/components/ProtectedRoute";
 import "../shared/base.css";
 
 ReactDOM.hydrateRoot(
-  document.getElementById("root"),
+  document.getElementById("root") as Element,
   <StrictMode>
     <BrowserRouter>
       <Routes>

@@ -24,15 +24,16 @@ export default function sessionsRoutes() {
     const limitCheck = await checkSessionLimits(userId, userRole);
     if (!limitCheck.allowed) {
       log.info({ userId, reason: limitCheck.reason }, 'Session limit exceeded');
+      const denied = limitCheck;
       return res.status(429).json({
         error: 'rate_limit_exceeded',
-        reason: limitCheck.reason,
-        message: limitCheck.message,
+        reason: denied.reason,
+        message: denied.message,
         details: {
-          limit: limitCheck.limit,
-          current: limitCheck.current,
-          cooldown_minutes: limitCheck.cooldown_minutes,
-          minutes_remaining: limitCheck.minutes_remaining
+          limit: denied.reason === 'daily_limit' ? denied.limit : undefined,
+          current: denied.reason === 'daily_limit' ? denied.current : undefined,
+          cooldown_minutes: denied.reason === 'cooldown' ? denied.cooldown_minutes : undefined,
+          minutes_remaining: denied.reason === 'cooldown' ? denied.minutes_remaining : undefined
         }
       });
     }
@@ -159,8 +160,10 @@ export default function sessionsRoutes() {
       });
 
       // Schedule auto-termination
-      if (limitCheck.limits && limitCheck.limits.max_duration_minutes && !limitCheck.bypass) {
-        const durationMs = limitCheck.limits.max_duration_minutes * 60 * 1000;
+      const checkedLimits = limitCheck.allowed ? limitCheck.limits : undefined;
+      if (checkedLimits && checkedLimits.max_duration_minutes && !('bypass' in limitCheck && limitCheck.bypass)) {
+        const maxDurationMinutes = checkedLimits.max_duration_minutes;
+        const durationMs = maxDurationMinutes * 60 * 1000;
         setTimeout(async () => {
           try {
             const checkResult = await pool.query(
@@ -169,7 +172,7 @@ export default function sessionsRoutes() {
             );
 
             if (checkResult.rows.length > 0 && checkResult.rows[0].status === 'active') {
-              log.info({ sessionId, minutes: limitCheck.limits.max_duration_minutes }, 'Auto-terminating session');
+              log.info({ sessionId, minutes: maxDurationMinutes }, 'Auto-terminating session');
 
               const { updateSessionStatus } = await import("../models/dbQueries.js");
               await updateSessionStatus(sessionId, 'ended', 'system');
@@ -181,7 +184,7 @@ export default function sessionsRoutes() {
                 status: 'ended',
                 endedBy: 'system',
                 reason: 'duration_limit',
-                message: `Your session has ended after ${limitCheck.limits.max_duration_minutes} minutes (maximum session duration).`,
+                message: `Your session has ended after ${maxDurationMinutes} minutes (maximum session duration).`,
                 remoteTermination: true
               });
 
@@ -194,7 +197,7 @@ export default function sessionsRoutes() {
           }
         }, durationMs);
 
-        log.info({ sessionId, minutes: limitCheck.limits.max_duration_minutes }, 'Session auto-terminate scheduled');
+        log.info({ sessionId, minutes: maxDurationMinutes }, 'Session auto-terminate scheduled');
       }
 
       const sessionConfigObj = JSON.parse(dynamicSessionConfig);
@@ -219,17 +222,19 @@ export default function sessionsRoutes() {
 
   // POST /api/chat/start
   router.post("/api/chat/start", asyncHandler(async (req, res) => {
-    const userId = req.session?.userId || req.sessionID;
+    const userId: number | string = req.session?.userId ?? req.sessionID;
+    const numericUserId: number | null = typeof userId === 'number' ? userId : null;
     const io = req.app.locals.io;
 
     const userRole = req.session?.userRole || 'participant';
     const limitCheck = await checkSessionLimits(userId, userRole);
 
     if (!limitCheck.allowed) {
+      const deniedCheck = limitCheck;
       return res.status(429).json({
         error: 'Session limit exceeded',
-        reason: limitCheck.reason,
-        timeRemaining: limitCheck.timeRemaining
+        reason: deniedCheck.reason,
+        timeRemaining: deniedCheck.reason === 'cooldown' ? deniedCheck.minutes_remaining : undefined
       });
     }
 
@@ -281,7 +286,7 @@ export default function sessionsRoutes() {
 
     const username = req.session?.username || null;
     await createSession({
-      sessionId, userId, sessionName: null, status: 'active', sessionType: 'chat'
+      sessionId, userId: numericUserId, sessionName: null, status: 'active', sessionType: 'chat'
     });
 
     io.to('admin-broadcast').emit('session:started', {
@@ -420,7 +425,7 @@ export default function sessionsRoutes() {
   // GET /api/sessions
   router.get("/api/sessions", requireAuth, asyncHandler(async (req, res) => {
     const { getUserSessions } = await import("../models/dbQueries.js");
-    const sessions = await getUserSessions(req.session.userId);
+    const sessions = await getUserSessions(req.session.userId!);
     res.json(sessions);
   }));
 

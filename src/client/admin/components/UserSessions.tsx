@@ -2,10 +2,27 @@ import { useState, useEffect } from 'react';
 import { Clock, User, Calendar, RefreshCw, Trash2 } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
 
+interface SessionCookie {
+  expires?: string;
+  originalMaxAge?: number;
+  secure?: boolean;
+  httpOnly?: boolean;
+  sameSite?: string;
+}
+
+interface UserSession {
+  sid: string;
+  expire: string;
+  username?: string;
+  userRole?: string;
+  userId?: number | string;
+  cookie?: SessionCookie;
+}
+
 export default function UserSessions() {
-  const [sessions, setSessions] = useState([]);
+  const [sessions, setSessions] = useState<UserSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState('expire'); // 'expire', 'username', 'created'
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' or 'desc'
 
@@ -25,16 +42,16 @@ export default function UserSessions() {
         throw new Error('Failed to fetch user sessions');
       }
 
-      const data = await response.json();
+      const data = await response.json() as UserSession[];
       setSessions(data);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
   };
 
-  const deleteSessions = async (sid) => {
+  const deleteSessions = async (sid: string) => {
     if (!confirm('Are you sure you want to delete this session? The user will be logged out.')) {
       return;
     }
@@ -51,12 +68,12 @@ export default function UserSessions() {
 
       // Refresh the sessions list
       fetchSessions();
-    } catch (err) {
-      toast.error(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleString('en-US', {
       month: 'short',
@@ -68,10 +85,10 @@ export default function UserSessions() {
     });
   };
 
-  const formatTimeRemaining = (expireDate) => {
+  const formatTimeRemaining = (expireDate: string) => {
     const now = new Date();
     const expire = new Date(expireDate);
-    const diff = expire - now;
+    const diff = expire.getTime() - now.getTime();
 
     if (diff < 0) {
       return <span className="text-red-600 font-semibold">Expired</span>;
@@ -88,11 +105,11 @@ export default function UserSessions() {
     return <span className="text-yellow-600">{hours}h {minutes}m</span>;
   };
 
-  const sortedSessions = [...sessions].sort((a, b) => {
+  const sortedSessions = [...sessions].sort((a: UserSession, b: UserSession) => {
     let compareValue = 0;
 
     if (sortBy === 'expire') {
-      compareValue = new Date(a.expire) - new Date(b.expire);
+      compareValue = new Date(a.expire).getTime() - new Date(b.expire).getTime();
     } else if (sortBy === 'username') {
       compareValue = (a.username || '').localeCompare(b.username || '');
     } else if (sortBy === 'created') {
@@ -104,7 +121,7 @@ export default function UserSessions() {
     return sortOrder === 'asc' ? compareValue : -compareValue;
   });
 
-  const toggleSort = (field) => {
+  const toggleSort = (field: string) => {
     if (sortBy === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {

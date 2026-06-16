@@ -1,11 +1,29 @@
 import { useState, useEffect } from "react";
 import { X } from "react-feather";
 
-export default function UserSessionDetail({ sessionId, onClose }) {
-  const [messages, setMessages] = useState([]);
-  const [session, setSession] = useState(null);
+interface SessionMessage {
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+interface SessionInfo {
+  session_name: string | null;
+  status: string;
+  created_at: string;
+  ended_at: string | null;
+}
+
+interface UserSessionDetailProps {
+  sessionId: string;
+  onClose: () => void;
+}
+
+export default function UserSessionDetail({ sessionId, onClose }: UserSessionDetailProps) {
+  const [messages, setMessages] = useState<SessionMessage[]>([]);
+  const [session, setSession] = useState<SessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -19,8 +37,8 @@ export default function UserSessionDetail({ sessionId, onClose }) {
         const data = await response.json();
         setMessages(data.messages);
         setSession(data.session);
-      } catch (err) {
-        setError(err.message);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
         setLoading(false);
       }
@@ -29,7 +47,7 @@ export default function UserSessionDetail({ sessionId, onClose }) {
     fetchSession();
   }, [sessionId]);
 
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
     return date.toLocaleString('en-US', {
       month: 'numeric',
@@ -42,7 +60,7 @@ export default function UserSessionDetail({ sessionId, onClose }) {
     });
   };
 
-  const formatTime = (timestamp) => {
+  const formatTime = (timestamp: string): string => {
     return new Date(timestamp).toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',

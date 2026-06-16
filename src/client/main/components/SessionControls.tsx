@@ -2,7 +2,12 @@ import { useState, useRef, useEffect } from "react";
 import { Mic, MicOff, PhoneOff, Send, Play, Settings, AlertCircle } from "react-feather";
 import { toast } from '../../shared/components/Toast';
 
-function SessionStopped({ startSession, onOpenSettings }) {
+interface SessionStoppedProps {
+  startSession: () => void;
+  onOpenSettings: () => void;
+}
+
+function SessionStopped({ startSession, onOpenSettings }: SessionStoppedProps) {
   const [isActivating, setIsActivating] = useState(false);
 
   function handleStartSession() {
@@ -32,11 +37,19 @@ function SessionStopped({ startSession, onOpenSettings }) {
   );
 }
 
-function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled, sessionType }) {
+interface SessionActiveProps {
+  stopSession: () => void;
+  sendTextMessage: (message: string) => void;
+  localStream: MediaStream | null;
+  chatEnabled: boolean;
+  sessionType: string | null;
+}
+
+function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled, sessionType }: SessionActiveProps) {
   const [message, setMessage] = useState("");
   const [isMicOn, setIsMicOn] = useState(true);
   const [micPermission, setMicPermission] = useState('unknown'); // 'granted', 'denied', 'prompt', 'unknown'
-  const streamRef = useRef(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     // Check microphone permission status
@@ -192,6 +205,17 @@ function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled,
   );
 }
 
+interface SessionControlsProps {
+  startSession: () => void;
+  stopSession: () => void;
+  sendTextMessage: (message: string) => void;
+  isSessionActive: boolean;
+  localStream: MediaStream | null;
+  onOpenSettings: () => void;
+  chatEnabled: boolean;
+  sessionType: string | null;
+}
+
 export default function SessionControls({
   startSession,
   stopSession,
@@ -201,7 +225,7 @@ export default function SessionControls({
   onOpenSettings,
   chatEnabled,
   sessionType,
-}) {
+}: SessionControlsProps) {
   return (
     <div className="flex gap-4 border-t-2 border-gray-200 h-full pt-4">
       {isSessionActive ? (

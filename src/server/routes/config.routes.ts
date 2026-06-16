@@ -65,8 +65,8 @@ export default function configRoutes() {
 
     const enabledVoices = voicesConfig.voices
       ? voicesConfig.voices
-          .filter(v => v.enabled)
-          .map(v => ({ value: v.value, label: v.label, description: v.description }))
+          .filter((v: { enabled?: boolean }) => v.enabled)
+          .map((v: { value: unknown; label: unknown; description?: unknown }) => ({ value: v.value, label: v.label, description: v.description }))
       : [];
 
     res.json({ voices: enabledVoices, default_voice: voicesConfig.default_voice });
@@ -82,8 +82,8 @@ export default function configRoutes() {
 
     const enabledLanguages = languagesConfig.languages
       ? languagesConfig.languages
-          .filter(l => l.enabled)
-          .map(l => ({ value: l.value, label: l.label, description: l.description }))
+          .filter((l: { enabled?: boolean }) => l.enabled)
+          .map((l: { value: unknown; label: unknown; description?: unknown }) => ({ value: l.value, label: l.label, description: l.description }))
       : [];
 
     res.json({ languages: enabledLanguages, default_language: languagesConfig.default_language });
@@ -123,7 +123,7 @@ export default function configRoutes() {
   router.get("/admin/api/config", requireRole('therapist', 'researcher'), asyncHandler(async (req, res) => {
     const result = await pool.query('SELECT config_key, config_value, description, updated_at, updated_by FROM system_config ORDER BY config_key');
 
-    const config = {};
+    const config: Record<string, { value: unknown; description: unknown; updated_at: unknown; updated_by: unknown }> = {};
     result.rows.forEach(row => {
       config[row.config_key] = {
         value: row.config_value,
@@ -139,7 +139,9 @@ export default function configRoutes() {
   // GET /admin/api/config/system-prompt-preview
   // NOTE: Must be defined BEFORE /admin/api/config/:key
   router.get("/admin/api/config/system-prompt-preview", requireRole('researcher'), asyncHandler(async (req, res) => {
-    const { sessionType = 'realtime', language = 'en' } = req.query;
+    const { sessionType: sessionTypeQ = 'realtime', language: languageQ = 'en' } = req.query;
+    const sessionType = typeof sessionTypeQ === 'string' ? sessionTypeQ : 'realtime';
+    const language = typeof languageQ === 'string' ? languageQ : 'en';
 
     if (!['realtime', 'chat'].includes(sessionType)) {
       return res.status(400).json({ error: 'sessionType must be either "realtime" or "chat"' });
@@ -181,7 +183,14 @@ export default function configRoutes() {
   // PUT /admin/api/config/:key
   router.put("/admin/api/config/:key", requireRole('researcher'), asyncHandler(async (req, res) => {
     const { key } = req.params;
-    const { value } = req.body;
+    const value = req.body.value as Record<string, unknown> & {
+      voices?: Array<{ value?: unknown; label?: unknown; enabled?: boolean }>;
+      languages?: Array<{ value?: unknown; label?: unknown; enabled?: boolean }>;
+      default_voice?: unknown;
+      default_language?: unknown;
+      realtime?: { prompt?: string; last_modified?: string };
+      chat?: { prompt?: string; last_modified?: string };
+    };
 
     if (!value) {
       return res.status(400).json({ error: 'Configuration value is required' });
@@ -192,11 +201,11 @@ export default function configRoutes() {
       if (!value.voices || !Array.isArray(value.voices)) {
         return res.status(400).json({ error: 'voices must be an array' });
       }
-      const enabledVoices = value.voices.filter(v => v.enabled);
+      const enabledVoices = value.voices.filter((v) => v.enabled);
       if (enabledVoices.length === 0) {
         return res.status(400).json({ error: 'At least one voice must be enabled' });
       }
-      const defaultVoice = value.voices.find(v => v.value === value.default_voice && v.enabled);
+      const defaultVoice = value.voices.find((v) => v.value === value.default_voice && v.enabled);
       if (!defaultVoice) {
         return res.status(400).json({ error: 'default_voice must be one of the enabled voices' });
       }
@@ -212,11 +221,11 @@ export default function configRoutes() {
       if (!value.languages || !Array.isArray(value.languages)) {
         return res.status(400).json({ error: 'languages must be an array' });
       }
-      const enabledLanguages = value.languages.filter(l => l.enabled);
+      const enabledLanguages = value.languages.filter((l) => l.enabled);
       if (enabledLanguages.length === 0) {
         return res.status(400).json({ error: 'At least one language must be enabled' });
       }
-      const defaultLanguage = value.languages.find(l => l.value === value.default_language && l.enabled);
+      const defaultLanguage = value.languages.find((l) => l.value === value.default_language && l.enabled);
       if (!defaultLanguage) {
         return res.status(400).json({ error: 'default_language must be one of the enabled languages' });
       }
@@ -232,17 +241,18 @@ export default function configRoutes() {
       if (!value.realtime || !value.chat) {
         return res.status(400).json({ error: 'system_prompts must have both realtime and chat prompts' });
       }
-      for (const promptType of ['realtime', 'chat']) {
-        if (!value[promptType].prompt) {
+      for (const promptType of ['realtime', 'chat'] as const) {
+        const entry = value[promptType];
+        if (!entry || !entry.prompt) {
           return res.status(400).json({ error: `${promptType} prompt is required` });
         }
-        if (value[promptType].prompt.length < 100) {
+        if (entry.prompt.length < 100) {
           return res.status(400).json({ error: `${promptType} prompt must be at least 100 characters` });
         }
       }
       const now = new Date().toISOString();
-      value.realtime.last_modified = now;
-      value.chat.last_modified = now;
+      if (value.realtime) value.realtime.last_modified = now;
+      if (value.chat) value.chat.last_modified = now;
     }
 
     const result = await pool.query(

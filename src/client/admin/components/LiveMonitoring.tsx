@@ -1,22 +1,77 @@
 import { useState, useEffect } from 'react';
+import type { Socket } from 'socket.io-client';
 import { Activity, Users, MessageSquare, AlertTriangle, X, Radio } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../../shared/components/Toast';
 import RoomAssignment from './RoomAssignment';
 
-export default function LiveMonitoring({ onViewSession }) {
-  const [activeSessions, setActiveSessions] = useState([]);
+// ---- Local types ----
+
+interface LiveSession {
+  session_id: string;
+  user_id: string;
+  username: string | null;
+  session_name: string | null;
+  status: string;
+  created_at: string;
+  message_count: number;
+  last_activity: string | null;
+  duration_seconds: number;
+  crisis_flagged?: boolean;
+  crisis_severity?: string | null;
+  crisis_risk_score?: number | null;
+  crisis_flagged_at?: string | null;
+  crisis_flagged_by?: string | null;
+}
+
+interface SidebandConnection {
+  sessionId: string;
+  callId: string;
+  connectedAt: string;
+  status: string;
+  disconnectedAt?: string;
+  closeCode?: number;
+  closeReason?: string;
+  error?: string;
+  lastUpdate?: string;
+}
+
+interface SidebandEvent {
+  type: string;
+  timestamp: Date;
+  data: unknown;
+}
+
+interface SidebandEventsMap {
+  [sessionId: string]: SidebandEvent[];
+}
+
+interface CrisisAlert {
+  sessionId: string;
+  severity: string;
+  riskScore: number;
+  message: string;
+  type: 'auto' | 'manual';
+}
+
+interface LiveMonitoringProps {
+  onViewSession: (sessionId: string, editMode: boolean) => void;
+}
+
+export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
+  const [activeSessions, setActiveSessions] = useState<LiveSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [showCrisisOnly, setShowCrisisOnly] = useState(false);
-  const [crisisAlert, setCrisisAlert] = useState(null);
+  const [crisisAlert, setCrisisAlert] = useState<CrisisAlert | null>(null);
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
-  const { socket, connected } = useSocket();
+  const { socket: rawSocket, connected } = useSocket();
+  const socket = rawSocket as Socket | null;
 
   // Sideband monitoring state
-  const [sidebandConnections, setSidebandConnections] = useState([]);
-  const [selectedSidebandSession, setSelectedSidebandSession] = useState(null);
-  const [sidebandEvents, setSidebandEvents] = useState({});
+  const [sidebandConnections, setSidebandConnections] = useState<SidebandConnection[]>([]);
+  const [selectedSidebandSession, setSelectedSidebandSession] = useState<SidebandConnection | null>(null);
+  const [sidebandEvents, setSidebandEvents] = useState<SidebandEventsMap>({});
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updateInstructions, setUpdateInstructions] = useState('');
 
@@ -82,20 +137,20 @@ export default function LiveMonitoring({ onViewSession }) {
       if (!response.ok) throw new Error('Failed to fetch active sessions');
       const data = await response.json();
       // Parse numeric fields to ensure they're numbers, not strings
-      const sessions = (data.sessions || []).map(session => ({
+      const sessions: LiveSession[] = (data.sessions || []).map((session: LiveSession) => ({
         ...session,
-        message_count: parseInt(session.message_count) || 0,
-        duration_seconds: parseFloat(session.duration_seconds) || 0
+        message_count: parseInt(String(session.message_count)) || 0,
+        duration_seconds: parseFloat(String(session.duration_seconds)) || 0
       }));
       setActiveSessions(sessions);
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSessionCreated = (data) => {
+  const handleSessionCreated = (data: { sessionId: string; userId: string; username: string; status: string; created_at: string }) => {
     setActiveSessions(prev => [{
       session_id: data.sessionId,
       user_id: data.userId,
@@ -109,19 +164,19 @@ export default function LiveMonitoring({ onViewSession }) {
     }, ...prev]);
   };
 
-  const handleSessionEnded = (data) => {
+  const handleSessionEnded = (data: { sessionId: string }) => {
     setActiveSessions(prev =>
       prev.filter(s => s.session_id !== data.sessionId)
     );
   };
 
-  const handleSessionActivity = (data) => {
+  const handleSessionActivity = (data: { sessionId: string; messageCount: number; lastActivity: string }) => {
     setActiveSessions(prev =>
       prev.map(session =>
         session.session_id === data.sessionId
           ? {
               ...session,
-              message_count: parseInt(session.message_count || 0) + parseInt(data.messageCount || 0),
+              message_count: parseInt(String(session.message_count || 0)) + parseInt(String(data.messageCount || 0)),
               last_activity: data.lastActivity
             }
           : session
@@ -129,7 +184,7 @@ export default function LiveMonitoring({ onViewSession }) {
     );
   };
 
-  const handleCrisisDetected = (data) => {
+  const handleCrisisDetected = (data: { sessionId: string; severity: string; riskScore: number; detectedAt: string; message: string }) => {
     // Update session in state
     setActiveSessions(prev =>
       prev.map(session =>
@@ -166,7 +221,7 @@ export default function LiveMonitoring({ onViewSession }) {
     }
   };
 
-  const handleCrisisFlagged = (data) => {
+  const handleCrisisFlagged = (data: { sessionId: string; severity: string; riskScore: number; flaggedAt: string; flaggedBy: string; message: string }) => {
     // Update session in state
     setActiveSessions(prev =>
       prev.map(session =>
@@ -194,7 +249,7 @@ export default function LiveMonitoring({ onViewSession }) {
     setTimeout(() => setCrisisAlert(null), 15000);
   };
 
-  const handleCrisisUnflagged = (data) => {
+  const handleCrisisUnflagged = (data: { sessionId: string }) => {
     // Update session in state
     setActiveSessions(prev =>
       prev.map(session =>
@@ -213,7 +268,7 @@ export default function LiveMonitoring({ onViewSession }) {
   };
 
   // Sideband event handlers
-  const handleSidebandConnected = (data) => {
+  const handleSidebandConnected = (data: { sessionId: string; callId: string; connectedAt: string }) => {
     console.log('[LiveMonitoring] Sideband connected:', data);
     setSidebandConnections(prev => {
       const exists = prev.find(c => c.sessionId === data.sessionId);
@@ -227,7 +282,7 @@ export default function LiveMonitoring({ onViewSession }) {
     });
   };
 
-  const handleSidebandDisconnected = (data) => {
+  const handleSidebandDisconnected = (data: { sessionId: string; disconnectedAt: string; code: number; reason: string }) => {
     console.log('[LiveMonitoring] Sideband disconnected:', data);
     // Update status instead of removing (keep visible for debugging)
     setSidebandConnections(prev =>
@@ -239,7 +294,7 @@ export default function LiveMonitoring({ onViewSession }) {
     );
   };
 
-  const handleSidebandStatusUpdate = (data) => {
+  const handleSidebandStatusUpdate = (data: { sessionId: string; status: string; error?: string; timestamp: string }) => {
     console.log('[LiveMonitoring] Sideband status update:', data);
     setSidebandConnections(prev =>
       prev.map(c =>
@@ -250,7 +305,7 @@ export default function LiveMonitoring({ onViewSession }) {
     );
   };
 
-  const handleSidebandError = (data) => {
+  const handleSidebandError = (data: { sessionId: string; error: string }) => {
     console.error('[LiveMonitoring] Sideband error:', data);
     setSidebandEvents(prev => ({
       ...prev,
@@ -265,7 +320,7 @@ export default function LiveMonitoring({ onViewSession }) {
     }));
   };
 
-  const handleOpenAIUpdate = (data) => {
+  const handleOpenAIUpdate = (data: { sessionId: string; eventType: string; data: unknown }) => {
     console.log('[LiveMonitoring] OpenAI event:', data);
     setSidebandEvents(prev => ({
       ...prev,
@@ -280,7 +335,7 @@ export default function LiveMonitoring({ onViewSession }) {
     }));
   };
 
-  const handleSidebandConnectionsList = (connections) => {
+  const handleSidebandConnectionsList = (connections: SidebandConnection[]) => {
     console.log('[LiveMonitoring] Sideband connections list:', connections);
     setSidebandConnections(connections);
   };
@@ -307,13 +362,13 @@ export default function LiveMonitoring({ onViewSession }) {
         const error = await response.json();
         toast.error(`Failed to update: ${error.message}`);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error updating session:', error);
       toast.error('Failed to update session');
     }
   };
 
-  const handleDisconnectSideband = async (sessionId) => {
+  const handleDisconnectSideband = async (sessionId: string) => {
     if (!confirm('Are you sure you want to disconnect this sideband connection?')) return;
 
     try {
@@ -334,30 +389,30 @@ export default function LiveMonitoring({ onViewSession }) {
         const error = await response.json();
         toast.error(`Failed to disconnect: ${error.message}`);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error disconnecting:', error);
       toast.error('Failed to disconnect');
     }
   };
 
-  const formatDuration = (seconds) => {
+  const formatDuration = (seconds: number): string => {
     if (!seconds) return '0s';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   };
 
-  const getTimeSince = (timestamp) => {
+  const getTimeSince = (timestamp: string | null): string => {
     if (!timestamp) return 'Never';
-    const seconds = Math.floor((Date.now() - new Date(timestamp)) / 1000);
+    const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
     if (seconds < 60) return `${seconds}s ago`;
     const mins = Math.floor(seconds / 60);
     if (mins < 60) return `${mins}m ago`;
     return `${Math.floor(mins / 60)}h ago`;
   };
 
-  const getCrisisBadgeClasses = (severity) => {
-    const badges = {
+  const getCrisisBadgeClasses = (severity: string): string => {
+    const badges: Record<string, string> = {
       high: 'bg-red-600 text-white animate-pulse',
       medium: 'bg-yellow-500 text-yellow-900',
       low: 'bg-orange-400 text-orange-900'
@@ -365,8 +420,8 @@ export default function LiveMonitoring({ onViewSession }) {
     return badges[severity] || 'bg-gray-400 text-gray-900';
   };
 
-  const getAlertBannerClasses = (severity) => {
-    const classes = {
+  const getAlertBannerClasses = (severity: string): string => {
+    const classes: Record<string, string> = {
       high: 'bg-red-100 border-red-500 text-red-900',
       medium: 'bg-yellow-100 border-yellow-500 text-yellow-900',
       low: 'bg-orange-100 border-orange-500 text-orange-900'
@@ -374,7 +429,7 @@ export default function LiveMonitoring({ onViewSession }) {
     return classes[severity] || 'bg-gray-100 border-gray-500 text-gray-900';
   };
 
-  const handleEndSession = async (sessionId, username) => {
+  const handleEndSession = async (sessionId: string, username: string | null) => {
     const confirmMessage = `Are you sure you want to remotely end ${username || 'this user'}'s session?\n\nThis will:\n- Terminate the active therapy session\n- Disconnect the user from the AI assistant\n- Save all messages to the database`;
 
     if (!window.confirm(confirmMessage)) {
@@ -398,9 +453,9 @@ export default function LiveMonitoring({ onViewSession }) {
       console.log('Session ended successfully:', data);
 
       // Session will be removed via Socket.io event, no need to update state manually
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to end session:', err);
-      toast.error(`Failed to end session: ${err.message}`);
+      toast.error(`Failed to end session: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -502,7 +557,7 @@ export default function LiveMonitoring({ onViewSession }) {
             <div>
               <p className="text-sm text-gray-600">Total Messages</p>
               <p className="text-3xl font-bold text-byuNavy mt-1">
-                {activeSessions.reduce((sum, s) => sum + parseInt(s.message_count || 0), 0)}
+                {activeSessions.reduce((sum, s) => sum + parseInt(String(s.message_count || 0)), 0)}
               </p>
             </div>
             <MessageSquare size={32} className="text-byuRoyal" aria-hidden="true" />
@@ -567,7 +622,7 @@ export default function LiveMonitoring({ onViewSession }) {
             <tbody>
               {displayedSessions.map((session, idx) => {
                 const isRecentlyActive = session.last_activity &&
-                  (Date.now() - new Date(session.last_activity)) < 30000; // 30s
+                  (Date.now() - new Date(session.last_activity).getTime()) < 30000; // 30s
 
                 return (
                   <tr
@@ -579,7 +634,7 @@ export default function LiveMonitoring({ onViewSession }) {
                     <td className="px-4 py-3">
                       {session.crisis_flagged ? (
                         <div className="flex flex-col gap-1">
-                          <span className={`px-2 py-1 rounded text-xs font-semibold uppercase ${getCrisisBadgeClasses(session.crisis_severity)}`}>
+                          <span className={`px-2 py-1 rounded text-xs font-semibold uppercase ${getCrisisBadgeClasses(session.crisis_severity ?? '')}`}>
                             {session.crisis_severity}
                           </span>
                           <span className="text-xs text-gray-600">

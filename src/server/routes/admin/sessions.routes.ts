@@ -119,26 +119,31 @@ export default function adminSessionsRoutes() {
 
     log.info({ filters: req.query }, 'Listing sessions with filters');
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const pageStr = typeof page === 'string' ? page : '1';
+    const limitStr = typeof limit === 'string' ? limit : '50';
+    const offset = (parseInt(pageStr) - 1) * parseInt(limitStr);
 
     // Parse comma-separated arrays
-    const voiceArray = voices ? voices.split(',').filter(Boolean) : null;
-    const languageArray = languages ? languages.split(',').filter(Boolean) : null;
-    const sessionTypeArray = sessionTypes ? sessionTypes.split(',').filter(Boolean) : null;
-    const statusArray = statuses ? statuses.split(',').filter(Boolean) : null;
-    const endedByArray = endedBy ? endedBy.split(',').filter(Boolean) : null;
-    const durationArray = durations ? durations.split(',').filter(Boolean) : null;
+    const voiceArray = voices && typeof voices === 'string' ? voices.split(',').filter(Boolean) : null;
+    const languageArray = languages && typeof languages === 'string' ? languages.split(',').filter(Boolean) : null;
+    const sessionTypeArray = sessionTypes && typeof sessionTypes === 'string' ? sessionTypes.split(',').filter(Boolean) : null;
+    const statusArray = statuses && typeof statuses === 'string' ? statuses.split(',').filter(Boolean) : null;
+    const endedByArray = endedBy && typeof endedBy === 'string' ? endedBy.split(',').filter(Boolean) : null;
+    const durationArray = durations && typeof durations === 'string' ? durations.split(',').filter(Boolean) : null;
 
     // Convert crisisFlagged to boolean
     const crisisFlaggedBool = crisisFlagged === 'true' ? true : crisisFlagged === 'false' ? false : null;
 
+    const minMessagesStr = typeof minMessages === 'string' ? minMessages : null;
+    const maxMessagesStr = typeof maxMessages === 'string' ? maxMessages : null;
+
     const params = [
-      search || null,
-      startDate || null,
-      endDate || null,
-      minMessages ? parseInt(minMessages) : null,
-      maxMessages ? parseInt(maxMessages) : null,
-      parseInt(limit),
+      typeof search === 'string' ? search : null,
+      typeof startDate === 'string' ? startDate : null,
+      typeof endDate === 'string' ? endDate : null,
+      minMessagesStr ? parseInt(minMessagesStr) : null,
+      maxMessagesStr ? parseInt(maxMessagesStr) : null,
+      parseInt(limitStr),
       offset,
       voiceArray,
       languageArray,
@@ -146,7 +151,7 @@ export default function adminSessionsRoutes() {
       statusArray,
       endedByArray,
       crisisFlaggedBool,
-      crisisSeverity || null,
+      typeof crisisSeverity === 'string' ? crisisSeverity : null,
       durationArray
     ];
 
@@ -214,23 +219,23 @@ export default function adminSessionsRoutes() {
         AND ($9::BOOLEAN IS NULL OR ts.crisis_flagged = $9)
         AND ($10::TEXT IS NULL OR ts.crisis_severity = $10)
     `, [
-      search || null,
-      startDate || null,
-      endDate || null,
+      typeof search === 'string' ? search : null,
+      typeof startDate === 'string' ? startDate : null,
+      typeof endDate === 'string' ? endDate : null,
       voiceArray,
       languageArray,
       sessionTypeArray,
       statusArray,
       endedByArray,
       crisisFlaggedBool,
-      crisisSeverity || null
+      typeof crisisSeverity === 'string' ? crisisSeverity : null
     ]);
 
     res.json({
       sessions: dataResult.rows,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: parseInt(pageStr),
+        limit: parseInt(limitStr),
         totalCount: parseInt(countResult.rows[0].total)
       }
     });

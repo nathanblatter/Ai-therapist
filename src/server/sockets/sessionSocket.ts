@@ -1,20 +1,31 @@
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
+import type { Server as SocketIOServer, Socket } from 'socket.io';
+import type { Pool } from 'pg';
 import { insertMessagesBatch } from '../models/dbQueries.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('socket');
 
-export function initializeSocketHandlers(io, pool) {
+// Extended socket type with our custom session fields
+interface AuthenticatedSocket extends Socket {
+  userId?: number;
+  username?: string;
+  userRole?: string;
+}
+
+export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
   const PgSession = connectPgSimple(session);
 
   // Socket.io authentication middleware
   io.use((socket, next) => {
-    const req = socket.request;
+    const req = socket.request as unknown as Express.Request & {
+      session?: { userId?: number; username?: string; userRole?: string };
+    };
 
     const sessionMiddleware = session({
       store: new PgSession({ pool, tableName: 'user_sessions', createTableIfMissing: false }),
-      secret: process.env.SESSION_SECRET,
+      secret: process.env.SESSION_SECRET ?? 'fallback-secret',
       resave: false,
       saveUninitialized: false,
       cookie: {
@@ -25,21 +36,26 @@ export function initializeSocketHandlers(io, pool) {
       }
     });
 
-    sessionMiddleware(req, {}, (err) => {
+    const authSocket = socket as AuthenticatedSocket;
+
+    // Cast to any to satisfy express-session's strict Request type requirement;
+    // socket.request is an IncomingMessage which is compatible at runtime.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sessionMiddleware(req as any, {} as any, (err: unknown) => {
       if (err) {
         log.error({ err }, 'Session middleware error');
         return next(new Error('Session error'));
       }
 
       if (req.session?.userId) {
-        socket.userId = req.session.userId;
-        socket.username = req.session.username;
-        socket.userRole = req.session.userRole;
-        log.info(`Authenticated: ${socket.username} (${socket.userRole || 'participant'})`);
+        authSocket.userId = req.session.userId;
+        authSocket.username = req.session.username;
+        authSocket.userRole = req.session.userRole;
+        log.info(`Authenticated: ${authSocket.username} (${authSocket.userRole || 'participant'})`);
         next();
       } else {
         log.info('Anonymous participant connected');
-        socket.userRole = 'anonymous';
+        authSocket.userRole = 'anonymous';
         next();
       }
     });
@@ -47,32 +63,33 @@ export function initializeSocketHandlers(io, pool) {
 
   // Connection handler
   io.on('connection', (socket) => {
-    const isAdmin = socket.userRole === 'therapist' || socket.userRole === 'researcher';
+    const authSocket = socket as AuthenticatedSocket;
+    const isAdmin = authSocket.userRole === 'therapist' || authSocket.userRole === 'researcher';
 
     if (isAdmin) {
-      log.info(`Admin connected: ${socket.username} (${socket.id})`);
-      socket.join('admin-broadcast');
-      socket.to('admin-broadcast').emit('admin:joined', {
-        username: socket.username,
-        role: socket.userRole
+      log.info(`Admin connected: ${authSocket.username} (${authSocket.id})`);
+      authSocket.join('admin-broadcast');
+      authSocket.to('admin-broadcast').emit('admin:joined', {
+        username: authSocket.username,
+        role: authSocket.userRole
       });
     } else {
-      log.info(`Participant connected (${socket.id})`);
+      log.info(`Participant connected (${authSocket.id})`);
     }
 
-    socket.on('session:join', ({ sessionId }) => {
+    authSocket.on('session:join', ({ sessionId }: { sessionId: string }) => {
       log.info(`User joining session ${sessionId}`);
-      socket.join(`session:${sessionId}`);
+      authSocket.join(`session:${sessionId}`);
     });
 
-    socket.on('session:leave', ({ sessionId }) => {
+    authSocket.on('session:leave', ({ sessionId }: { sessionId: string }) => {
       log.info(`User leaving session ${sessionId}`);
-      socket.leave(`session:${sessionId}`);
+      authSocket.leave(`session:${sessionId}`);
     });
 
-    socket.on('admin:get-sideband-connections', async () => {
+    authSocket.on('admin:get-sideband-connections', async () => {
       if (!isAdmin) {
-        log.warn(`Unauthorized admin:get-sideband-connections attempt from ${socket.id}`);
+        log.warn(`Unauthorized admin:get-sideband-connections attempt from ${authSocket.id}`);
         return;
       }
 
@@ -80,7 +97,13 @@ export function initializeSocketHandlers(io, pool) {
         const { sidebandManager } = await import('../services/sidebandManager.service.js');
         const activeSessions = sidebandManager.getActiveConnections();
 
-        const result = await pool.query(`
+        const result = await pool.query<{
+          session_id: string;
+          openai_call_id: string;
+          sideband_connected: boolean;
+          sideband_connected_at: Date;
+          status: string;
+        }>(`
           SELECT
             session_id,
             openai_call_id,
@@ -92,33 +115,33 @@ export function initializeSocketHandlers(io, pool) {
           ORDER BY sideband_connected_at DESC
         `, [activeSessions]);
 
-        const connections = result.rows.map(s => ({
+        const connections = result.rows.map((s) => ({
           sessionId: s.session_id,
           callId: s.openai_call_id,
           connectedAt: s.sideband_connected_at,
           status: s.sideband_connected ? 'connected' : 'disconnected'
         }));
 
-        socket.emit('admin:sideband-connections', connections);
+        authSocket.emit('admin:sideband-connections', connections);
       } catch (error) {
         log.error({ err: error }, 'Error fetching sideband connections');
-        socket.emit('admin:sideband-connections', []);
+        authSocket.emit('admin:sideband-connections', []);
       }
     });
 
-    socket.on('admin:sendMessage', async ({ sessionId, message, messageType }) => {
+    authSocket.on('admin:sendMessage', async ({ sessionId, message, messageType }: { sessionId: string; message: string; messageType: string }) => {
       if (!isAdmin) {
-        log.warn(`Unauthorized admin:sendMessage attempt from ${socket.id}`);
+        log.warn(`Unauthorized admin:sendMessage attempt from ${authSocket.id}`);
         return;
       }
 
-      log.info(`Admin ${socket.username} sending ${messageType} message to session ${sessionId}`);
+      log.info(`Admin ${authSocket.username} sending ${messageType} message to session ${sessionId}`);
 
-      socket.to(`session:${sessionId}`).emit('admin:message', {
+      authSocket.to(`session:${sessionId}`).emit('admin:message', {
         sessionId,
         message,
         messageType,
-        senderName: socket.username,
+        senderName: authSocket.username,
         timestamp: new Date().toISOString()
       });
 
@@ -129,7 +152,7 @@ export function initializeSocketHandlers(io, pool) {
         content: message,
         content_redacted: message,
         metadata: {
-          admin_username: socket.username,
+          admin_username: authSocket.username,
           message_type: messageType,
           sent_at: new Date().toISOString()
         },
@@ -144,10 +167,10 @@ export function initializeSocketHandlers(io, pool) {
       }
     });
 
-    socket.on('disconnect', (reason) => {
+    authSocket.on('disconnect', (reason: string) => {
       log.info(`User disconnected: ${reason}`);
       if (isAdmin) {
-        socket.to('admin-broadcast').emit('admin:left', { username: socket.username });
+        authSocket.to('admin-broadcast').emit('admin:left', { username: authSocket.username });
       }
     });
   });
