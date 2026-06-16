@@ -71,14 +71,14 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white w-full max-w-4xl h-5/6 rounded-lg shadow-xl flex flex-col">
-        <header className="bg-byuNavy text-white p-4 flex justify-between items-start rounded-t-lg">
+        <header className="bg-navy text-white p-4 flex justify-between items-start rounded-t-lg">
           <div className="flex-1">
             <h2 className="text-xl font-bold">
               {session?.session_name || 'Session Details'}
             </h2>
             <p className="text-xs text-gray-300 mt-1 font-mono">{sessionId}</p>
             {session && (
-              <div className="text-sm text-byuLightBlue mt-2 space-y-1">
+              <div className="text-sm text-lightBlue mt-2 space-y-1">
                 <div>Status: <span className={`font-semibold ${session.status === 'ended' ? 'text-gray-300' : 'text-green-300'}`}>{session.status}</span></div>
                 <div>Started: {formatDate(session.created_at)}</div>
                 {session.ended_at && (
@@ -124,9 +124,9 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
                 >
                   <div className={`max-w-xl px-4 py-3 rounded-2xl ${
                     msg.role === 'user'
-                      ? 'bg-byuRoyal text-white rounded-br-none'
+                      ? 'bg-royal text-white rounded-br-none'
                       : msg.role === 'assistant'
-                      ? 'bg-byuLightBlue text-black rounded-bl-none'
+                      ? 'bg-lightBlue text-black rounded-bl-none'
                       : 'bg-gray-200 text-gray-700 rounded-none'
                   }`}>
                     <div className="text-xs opacity-70 mb-1">
@@ -143,7 +143,7 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
         <footer className="border-t p-4 flex gap-2 bg-white rounded-b-lg">
           <button
             onClick={onClose}
-            className="bg-byuRoyal text-white px-4 py-2 rounded hover:bg-byuNavy transition ml-auto"
+            className="bg-royal text-white px-4 py-2 rounded hover:bg-navy transition ml-auto"
           >
             Close
           </button>

@@ -21,9 +21,9 @@ export default function configRoutes() {
   router.get("/api/config/crisis", asyncHandler(async (req, res) => {
     const config = await getSystemConfig();
     const crisisContact = config.crisis_contact || {
-      hotline: 'BYU Counseling and Psychological Services',
-      phone: '(801) 422-3035',
-      text: 'HELLO to 741741',
+      hotline: '988 Suicide & Crisis Lifeline',
+      phone: '988',
+      text: 'Text HOME to 741741',
       enabled: true
     };
     res.json(crisisContact);

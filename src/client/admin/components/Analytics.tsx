@@ -218,7 +218,7 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFi
           <button
             type="button"
             onClick={handleSelectAll}
-            className="text-xs text-byuRoyal hover:underline"
+            className="text-xs text-royal hover:underline"
           >
             All
           </button>
@@ -238,7 +238,7 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFi
               type="checkbox"
               checked={selected.includes(option.value)}
               onChange={() => handleToggle(option.value)}
-              className="accent-byuRoyal"
+              className="accent-royal"
             />
             <span className="text-sm">{option.label}</span>
           </label>
@@ -254,10 +254,10 @@ function MetricCard({ title, value, icon: Icon }: MetricCardProps) {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-gray-600">{title}</p>
-          <p className="text-3xl font-bold text-byuNavy mt-2">{value}</p>
+          <p className="text-3xl font-bold text-navy mt-2">{value}</p>
         </div>
-        <div className="bg-byuLightBlue p-3 rounded-full">
-          <Icon size={24} className="text-byuNavy" />
+        <div className="bg-lightBlue p-3 rounded-full">
+          <Icon size={24} className="text-navy" />
         </div>
       </div>
     </div>
@@ -507,7 +507,7 @@ export default function Analytics() {
           />
           <button
             onClick={setCurrentMonth}
-            className="bg-byuRoyal text-white px-4 py-2 rounded hover:bg-byuNavy"
+            className="bg-royal text-white px-4 py-2 rounded hover:bg-navy"
           >
             Current Month
           </button>
@@ -515,13 +515,13 @@ export default function Analytics() {
             onClick={() => setShowAdvanced(!showAdvanced)}
             className={`px-4 py-2 rounded font-medium transition-colors ${
               showAdvanced
-                ? 'bg-byuRoyal text-white'
+                ? 'bg-royal text-white'
                 : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
             }`}
           >
             Advanced Filters {showAdvanced ? '▲' : '▼'}
             {advancedFilterCount > 0 && (
-              <span className="ml-2 bg-white text-byuRoyal px-2 py-0.5 rounded-full text-xs font-bold">
+              <span className="ml-2 bg-white text-royal px-2 py-0.5 rounded-full text-xs font-bold">
                 {advancedFilterCount}
               </span>
             )}
@@ -589,7 +589,7 @@ export default function Analytics() {
                       value=""
                       checked={filters.crisisFlagged === ''}
                       onChange={(e) => handleFilterChange('crisisFlagged', e.target.value)}
-                      className="accent-byuRoyal"
+                      className="accent-royal"
                     />
                     <span className="text-sm">All</span>
                   </label>
@@ -600,7 +600,7 @@ export default function Analytics() {
                       value="true"
                       checked={filters.crisisFlagged === 'true'}
                       onChange={(e) => handleFilterChange('crisisFlagged', e.target.value)}
-                      className="accent-byuRoyal"
+                      className="accent-royal"
                     />
                     <span className="text-sm">Yes</span>
                   </label>
@@ -611,7 +611,7 @@ export default function Analytics() {
                       value="false"
                       checked={filters.crisisFlagged === 'false'}
                       onChange={(e) => handleFilterChange('crisisFlagged', e.target.value)}
-                      className="accent-byuRoyal"
+                      className="accent-royal"
                     />
                     <span className="text-sm">No</span>
                   </label>
@@ -946,7 +946,7 @@ export default function Analytics() {
         {analytics.abandonment_stats && (
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg font-semibold mb-2">Session Abandonment Rate</h3>
-            <p className="text-3xl font-bold text-byuNavy mt-2">
+            <p className="text-3xl font-bold text-navy mt-2">
               {analytics.abandonment_stats.abandonment_rate_percentage || 0}%
             </p>
             <p className="text-sm text-gray-600 mt-2">
@@ -999,7 +999,7 @@ export default function Analytics() {
           {analytics.engagement_pace && (
             <div className="border rounded p-4">
               <p className="text-sm text-gray-600">Messages Per Minute</p>
-              <p className="text-2xl font-bold text-byuNavy mt-1">
+              <p className="text-2xl font-bold text-navy mt-1">
                 {analytics.engagement_pace.avg_messages_per_minute
                   ? parseFloat(String(analytics.engagement_pace.avg_messages_per_minute)).toFixed(2)
                   : '0.00'}
@@ -1012,7 +1012,7 @@ export default function Analytics() {
             <>
               <div className="border rounded p-4">
                 <p className="text-sm text-gray-600">Avg Response Time</p>
-                <p className="text-2xl font-bold text-byuNavy mt-1">
+                <p className="text-2xl font-bold text-navy mt-1">
                   {analytics.response_times.avg_response_time_seconds
                     ? parseFloat(String(analytics.response_times.avg_response_time_seconds)).toFixed(2) + 's'
                     : 'N/A'}
@@ -1022,7 +1022,7 @@ export default function Analytics() {
 
               <div className="border rounded p-4">
                 <p className="text-sm text-gray-600">Median Response Time</p>
-                <p className="text-2xl font-bold text-byuNavy mt-1">
+                <p className="text-2xl font-bold text-navy mt-1">
                   {analytics.response_times.median_response_time_seconds
                     ? parseFloat(String(analytics.response_times.median_response_time_seconds)).toFixed(2) + 's'
                     : 'N/A'}
@@ -1032,7 +1032,7 @@ export default function Analytics() {
 
               <div className="border rounded p-4">
                 <p className="text-sm text-gray-600">P95 Response Time</p>
-                <p className="text-2xl font-bold text-byuNavy mt-1">
+                <p className="text-2xl font-bold text-navy mt-1">
                   {analytics.response_times.p95_response_time_seconds
                     ? parseFloat(String(analytics.response_times.p95_response_time_seconds)).toFixed(2) + 's'
                     : 'N/A'}
@@ -1048,7 +1048,7 @@ export default function Analytics() {
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <p className="text-sm text-gray-600">Turn-Taking Ratio</p>
-                <p className="text-2xl font-bold text-byuNavy mt-1">
+                <p className="text-2xl font-bold text-navy mt-1">
                   {analytics.turn_taking.user_to_assistant_ratio
                     ? parseFloat(String(analytics.turn_taking.user_to_assistant_ratio)).toFixed(2)
                     : 'N/A'}
@@ -1057,13 +1057,13 @@ export default function Analytics() {
               </div>
               <div>
                 <p className="text-sm text-gray-600">Total User Messages</p>
-                <p className="text-2xl font-bold text-byuNavy mt-1">
+                <p className="text-2xl font-bold text-navy mt-1">
                   {analytics.turn_taking.total_user_messages || 0}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-600">Total Assistant Messages</p>
-                <p className="text-2xl font-bold text-byuNavy mt-1">
+                <p className="text-2xl font-bold text-navy mt-1">
                   {analytics.turn_taking.total_assistant_messages || 0}
                 </p>
               </div>

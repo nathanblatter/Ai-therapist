@@ -197,7 +197,7 @@ export default function DataRetention() {
           <button
             onClick={handleSave}
             disabled={!hasChanges || saving}
-            className="flex items-center gap-2 px-4 py-2 bg-byuRoyal text-white rounded-lg hover:bg-byuNavy transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-royal text-white rounded-lg hover:bg-navy transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Save size={16} />
             {saving ? 'Saving...' : 'Save Changes'}
@@ -311,7 +311,7 @@ export default function DataRetention() {
                 onChange={(e) => updateSetting('enabled', e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-byuRoyal"></div>
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-royal"></div>
             </label>
           </div>
 
@@ -327,30 +327,30 @@ export default function DataRetention() {
                 onChange={(e) => updateSetting('retention_hours', parseInt(e.target.value) || 24)}
                 min="1"
                 max="8760"
-                className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+                className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
               />
               <div className="flex gap-2">
                 <button
                   onClick={() => updateSetting('retention_hours', 24)}
-                  className={`px-3 py-1 text-sm rounded ${settings.retention_hours === 24 ? 'bg-byuRoyal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  className={`px-3 py-1 text-sm rounded ${settings.retention_hours === 24 ? 'bg-royal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 >
                   24h
                 </button>
                 <button
                   onClick={() => updateSetting('retention_hours', 48)}
-                  className={`px-3 py-1 text-sm rounded ${settings.retention_hours === 48 ? 'bg-byuRoyal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  className={`px-3 py-1 text-sm rounded ${settings.retention_hours === 48 ? 'bg-royal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 >
                   48h
                 </button>
                 <button
                   onClick={() => updateSetting('retention_hours', 72)}
-                  className={`px-3 py-1 text-sm rounded ${settings.retention_hours === 72 ? 'bg-byuRoyal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  className={`px-3 py-1 text-sm rounded ${settings.retention_hours === 72 ? 'bg-royal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 >
                   72h
                 </button>
                 <button
                   onClick={() => updateSetting('retention_hours', 168)}
-                  className={`px-3 py-1 text-sm rounded ${settings.retention_hours === 168 ? 'bg-byuRoyal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  className={`px-3 py-1 text-sm rounded ${settings.retention_hours === 168 ? 'bg-royal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 >
                   1 week
                 </button>
@@ -370,7 +370,7 @@ export default function DataRetention() {
               type="time"
               value={settings.wipe_time}
               onChange={(e) => updateSetting('wipe_time', e.target.value)}
-              className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+              className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
             <p className="text-xs text-gray-500 mt-1">
               Automated wipe runs daily at this time (server timezone)

@@ -163,7 +163,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
         <>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full bg-white rounded-lg shadow">
-              <thead className="bg-byuNavy text-white">
+              <thead className="bg-navy text-white">
                 <tr>
                   <th className="px-4 py-3 text-left">User</th>
                   <th className="px-4 py-3 text-left">Session Name</th>
@@ -221,7 +221,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-byuRoyal font-semibold">{session.total_messages}</span>
+                      <span className="text-royal font-semibold">{session.total_messages}</span>
                       <span className="text-xs text-gray-500 ml-2">
                         ({session.user_messages}U / {session.assistant_messages}A)
                       </span>
@@ -230,7 +230,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
                       <div className="flex gap-2">
                         <button
                           onClick={() => onViewSession(session.session_id)}
-                          className="bg-byuRoyal text-white px-3 py-1 rounded hover:bg-byuNavy transition text-sm"
+                          className="bg-royal text-white px-3 py-1 rounded hover:bg-navy transition text-sm"
                         >
                           View
                         </button>

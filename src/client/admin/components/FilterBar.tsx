@@ -100,7 +100,7 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFi
           <button
             type="button"
             onClick={handleSelectAll}
-            className="text-xs text-byuRoyal hover:underline"
+            className="text-xs text-royal hover:underline"
           >
             All
           </button>
@@ -120,7 +120,7 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFi
               type="checkbox"
               checked={selected.includes(option.value)}
               onChange={() => handleToggle(option.value)}
-              className="accent-byuRoyal"
+              className="accent-royal"
             />
             <span className="text-sm">{option.label}</span>
           </label>
@@ -303,13 +303,13 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
           onClick={() => setShowAdvanced(!showAdvanced)}
           className={`px-4 py-2 rounded font-medium transition-colors ${
             showAdvanced
-              ? 'bg-byuRoyal text-white'
+              ? 'bg-royal text-white'
               : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
           }`}
         >
           Advanced Filters {showAdvanced ? '▲' : '▼'}
           {advancedFilterCount > 0 && (
-            <span className="ml-2 bg-white text-byuRoyal px-2 py-0.5 rounded-full text-xs font-bold">
+            <span className="ml-2 bg-white text-royal px-2 py-0.5 rounded-full text-xs font-bold">
               {advancedFilterCount}
             </span>
           )}
@@ -386,7 +386,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
                     value=""
                     checked={filters.crisisFlagged === ''}
                     onChange={(e) => handleChange('crisisFlagged', e.target.value)}
-                    className="accent-byuRoyal"
+                    className="accent-royal"
                   />
                   <span className="text-sm">All</span>
                 </label>
@@ -397,7 +397,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
                     value="true"
                     checked={filters.crisisFlagged === 'true'}
                     onChange={(e) => handleChange('crisisFlagged', e.target.value)}
-                    className="accent-byuRoyal"
+                    className="accent-royal"
                   />
                   <span className="text-sm">Yes</span>
                 </label>
@@ -408,7 +408,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
                     value="false"
                     checked={filters.crisisFlagged === 'false'}
                     onChange={(e) => handleChange('crisisFlagged', e.target.value)}
-                    className="accent-byuRoyal"
+                    className="accent-royal"
                   />
                   <span className="text-sm">No</span>
                 </label>

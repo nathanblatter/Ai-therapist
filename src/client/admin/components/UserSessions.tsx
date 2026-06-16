@@ -154,14 +154,14 @@ export default function UserSessions() {
     <div className="p-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-byuNavy">Active User Sessions</h1>
+          <h1 className="text-3xl font-bold text-navy">Active User Sessions</h1>
           <p className="text-gray-600 mt-1">
             Monitor and manage active login sessions
           </p>
         </div>
         <button
           onClick={fetchSessions}
-          className="flex items-center gap-2 bg-byuRoyal text-white px-4 py-2 rounded-lg hover:bg-byuNavy transition"
+          className="flex items-center gap-2 bg-royal text-white px-4 py-2 rounded-lg hover:bg-navy transition"
         >
           <RefreshCw size={16} />
           Refresh
@@ -174,9 +174,9 @@ export default function UserSessions() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Total Sessions</p>
-              <p className="text-2xl font-bold text-byuNavy">{sessions.length}</p>
+              <p className="text-2xl font-bold text-navy">{sessions.length}</p>
             </div>
-            <User className="text-byuRoyal" size={32} />
+            <User className="text-royal" size={32} />
           </div>
         </div>
 

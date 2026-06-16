@@ -4,8 +4,8 @@ import { initializeLogger } from '../utils/logger';
 export function useConfiguration() {
   const [isClient, setIsClient] = useState(false);
   const [crisisContact, setCrisisContact] = useState({
-    hotline: 'BYU Counseling and Psychological Services',
-    phone: '(801) 422-3035',
+    hotline: '988 Suicide & Crisis Lifeline',
+    phone: '988',
     text: 'HELLO to 741741',
     enabled: true
   });

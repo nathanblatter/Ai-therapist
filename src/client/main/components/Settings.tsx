@@ -163,7 +163,7 @@ export function SettingsDropdown({ onOpenSettings, onSignOut }: SettingsDropdown
         aria-expanded={open}
         aria-label="Open settings menu"
         onClick={() => setOpen((v) => !v)}
-        className="h-12 w-12 inline-flex items-center justify-center rounded-full bg-byuRoyal text-white shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-300 min-h-[44px] min-w-[44px]"
+        className="h-12 w-12 inline-flex items-center justify-center rounded-full bg-royal text-white shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-300 min-h-[44px] min-w-[44px]"
       >
         <span className="text-lg" aria-hidden="true">⚙️</span>
       </button>
@@ -215,7 +215,7 @@ export function SettingsDropdown({ onOpenSettings, onSignOut }: SettingsDropdown
                     type="button"
                     onClick={speakPreview}
                     aria-label="Preview selected voice"
-                    className="rounded-lg bg-byuRoyal px-3 py-2 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 min-h-[44px]"
+                    className="rounded-lg bg-royal px-3 py-2 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 min-h-[44px]"
                   >
                     Preview
                   </button>

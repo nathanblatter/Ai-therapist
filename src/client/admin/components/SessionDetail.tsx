@@ -559,7 +559,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       aria-labelledby="session-detail-title"
     >
       <div className="bg-white w-full max-w-4xl h-5/6 rounded-lg shadow-xl flex flex-col">
-        <header className="bg-byuNavy text-white p-4 flex justify-between items-start rounded-t-lg">
+        <header className="bg-navy text-white p-4 flex justify-between items-start rounded-t-lg">
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <h2 id="session-detail-title" className="text-xl font-bold">
@@ -586,7 +586,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
               </div>
             )}
             {session && (
-              <div className="text-sm text-byuLightBlue mt-2 space-y-1">
+              <div className="text-sm text-lightBlue mt-2 space-y-1">
                 <div>User: <span className="font-semibold">{session.username || 'Anonymous'}</span></div>
                 <div className="flex items-center gap-2">
                   <span>Status: <span className={`font-semibold ${session.status === 'ended' ? 'text-gray-300' : 'text-green-300'}`}>{session.status}</span></span>
@@ -768,14 +768,14 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
             <button
               onClick={() => handleExport('json')}
               aria-label="Export session as JSON file"
-              className="bg-byuRoyal text-white px-4 py-2 rounded hover:bg-byuNavy transition min-h-[44px]"
+              className="bg-royal text-white px-4 py-2 rounded hover:bg-navy transition min-h-[44px]"
             >
               Export JSON
             </button>
             <button
               onClick={() => handleExport('csv')}
               aria-label="Export session as CSV file"
-              className="bg-byuRoyal text-white px-4 py-2 rounded hover:bg-byuNavy transition min-h-[44px]"
+              className="bg-royal text-white px-4 py-2 rounded hover:bg-navy transition min-h-[44px]"
             >
               Export CSV
             </button>

@@ -199,7 +199,7 @@ export default function MFASetup() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold flex items-center gap-2">
-          <Shield className="text-byuRoyal" />
+          <Shield className="text-royal" />
           Multi-Factor Authentication (MFA)
         </h2>
       </div>
@@ -263,7 +263,7 @@ export default function MFASetup() {
                   <button
                     onClick={regenerateBackupCodes}
                     disabled={!password || loading}
-                    className="bg-byuRoyal text-white px-4 py-2 rounded hover:bg-byuNavy disabled:bg-gray-300"
+                    className="bg-royal text-white px-4 py-2 rounded hover:bg-navy disabled:bg-gray-300"
                   >
                     Regenerate Backup Codes
                   </button>
@@ -287,7 +287,7 @@ export default function MFASetup() {
               <button
                 onClick={startSetup}
                 disabled={loading}
-                className="bg-byuRoyal text-white px-6 py-3 rounded hover:bg-byuNavy disabled:bg-gray-300"
+                className="bg-royal text-white px-6 py-3 rounded hover:bg-navy disabled:bg-gray-300"
               >
                 Enable MFA
               </button>
@@ -314,7 +314,7 @@ export default function MFASetup() {
                 <code className="text-sm font-mono">{secret}</code>
                 <button
                   onClick={() => copyToClipboard(secret ?? '')}
-                  className="text-byuRoyal hover:text-byuNavy"
+                  className="text-royal hover:text-navy"
                 >
                   <Copy size={16} />
                 </button>
@@ -341,7 +341,7 @@ export default function MFASetup() {
               <button
                 onClick={verifySetup}
                 disabled={token.length !== 6 || loading}
-                className="bg-byuRoyal text-white px-6 py-2 rounded hover:bg-byuNavy disabled:bg-gray-300"
+                className="bg-royal text-white px-6 py-2 rounded hover:bg-navy disabled:bg-gray-300"
               >
                 Verify & Enable
               </button>
@@ -371,7 +371,7 @@ export default function MFASetup() {
               <h4 className="font-semibold">Your Backup Codes</h4>
               <button
                 onClick={copyAllBackupCodes}
-                className="text-byuRoyal hover:text-byuNavy flex items-center gap-1 text-sm"
+                className="text-royal hover:text-navy flex items-center gap-1 text-sm"
               >
                 <Copy size={16} />
                 Copy All
@@ -387,7 +387,7 @@ export default function MFASetup() {
                   <span>{code}</span>
                   <button
                     onClick={() => copyToClipboard(code)}
-                    className="text-gray-400 hover:text-byuRoyal"
+                    className="text-gray-400 hover:text-royal"
                   >
                     <Copy size={14} />
                   </button>
@@ -404,7 +404,7 @@ export default function MFASetup() {
               setSecret(null);
               setToken('');
             }}
-            className="bg-byuRoyal text-white px-6 py-2 rounded hover:bg-byuNavy"
+            className="bg-royal text-white px-6 py-2 rounded hover:bg-navy"
           >
             Done
           </button>

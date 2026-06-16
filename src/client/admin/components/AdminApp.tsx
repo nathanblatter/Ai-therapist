@@ -98,7 +98,7 @@ export default function AdminApp() {
                   onClick={() => setCurrentView(item.id)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
                     currentView === item.id
-                      ? 'bg-byuRoyal text-white'
+                      ? 'bg-royal text-white'
                       : 'text-gray-700 hover:bg-gray-100'
                   }`}
                 >

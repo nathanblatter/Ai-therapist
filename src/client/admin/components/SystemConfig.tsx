@@ -383,7 +383,7 @@ export default function SystemConfig() {
           <button
             onClick={handleSave}
             disabled={!hasChanges || saving}
-            className="flex items-center gap-2 px-4 py-2 bg-byuRoyal text-white rounded-lg hover:bg-byuNavy transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-royal text-white rounded-lg hover:bg-navy transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Save size={16} />
             {saving ? 'Saving...' : 'Save Changes'}
@@ -425,7 +425,7 @@ export default function SystemConfig() {
               id="crisis-enabled"
               checked={crisisContact.enabled}
               onChange={(e) => updateCrisisContact('enabled', e.target.checked)}
-              className="w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
             <label htmlFor="crisis-enabled" className="text-sm font-medium text-gray-700">
               Display crisis information to users
@@ -440,8 +440,8 @@ export default function SystemConfig() {
               type="text"
               value={crisisContact.hotline}
               onChange={(e) => updateCrisisContact('hotline', e.target.value)}
-              placeholder="BYU Counseling and Psychological Services"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+              placeholder="988 Suicide & Crisis Lifeline"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
           </div>
 
@@ -453,8 +453,8 @@ export default function SystemConfig() {
               type="text"
               value={crisisContact.phone}
               onChange={(e) => updateCrisisContact('phone', e.target.value)}
-              placeholder="(801) 422-3035"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+              placeholder="988"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
           </div>
 
@@ -467,7 +467,7 @@ export default function SystemConfig() {
               value={crisisContact.text}
               onChange={(e) => updateCrisisContact('text', e.target.value)}
               placeholder="Text HELLO to 741741"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
           </div>
         </div>
@@ -492,7 +492,7 @@ export default function SystemConfig() {
               id="limits-enabled"
               checked={sessionLimits.enabled}
               onChange={(e) => updateSessionLimits('enabled', e.target.checked)}
-              className="w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
             <label htmlFor="limits-enabled" className="text-sm font-medium text-gray-700">
               Enable session limits
@@ -510,7 +510,7 @@ export default function SystemConfig() {
                 onChange={(e) => updateSessionLimits('max_duration_minutes', parseInt(e.target.value))}
                 min="5"
                 max="180"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
               />
               <p className="text-xs text-gray-500 mt-1">Sessions will auto-end after this time</p>
             </div>
@@ -525,7 +525,7 @@ export default function SystemConfig() {
                 onChange={(e) => updateSessionLimits('max_sessions_per_day', parseInt(e.target.value))}
                 min="1"
                 max="20"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
               />
               <p className="text-xs text-gray-500 mt-1">Per user, per day</p>
             </div>
@@ -540,7 +540,7 @@ export default function SystemConfig() {
                 onChange={(e) => updateSessionLimits('cooldown_minutes', parseInt(e.target.value))}
                 min="0"
                 max="1440"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
               />
               <p className="text-xs text-gray-500 mt-1">Wait time between sessions</p>
             </div>
@@ -565,7 +565,7 @@ export default function SystemConfig() {
             onClick={() => updateAiModel('model', 'gpt-realtime-mini')}
             className={`flex items-center justify-between p-4 rounded-lg border-2 cursor-pointer transition ${
               aiModel.model === 'gpt-realtime-mini'
-                ? 'border-byuRoyal bg-blue-50'
+                ? 'border-royal bg-blue-50'
                 : 'border-gray-200 hover:border-gray-300 bg-white'
             }`}
           >
@@ -579,7 +579,7 @@ export default function SystemConfig() {
               name="ai_model"
               checked={aiModel.model === 'gpt-realtime-mini'}
               onChange={() => updateAiModel('model', 'gpt-realtime-mini')}
-              className="w-4 h-4 text-byuRoyal border-gray-300 focus:ring-byuRoyal"
+              className="w-4 h-4 text-royal border-gray-300 focus:ring-royal"
             />
           </div>
 
@@ -587,7 +587,7 @@ export default function SystemConfig() {
             onClick={() => updateAiModel('model', 'gpt-realtime')}
             className={`flex items-center justify-between p-4 rounded-lg border-2 cursor-pointer transition ${
               aiModel.model === 'gpt-realtime'
-                ? 'border-byuRoyal bg-blue-50'
+                ? 'border-royal bg-blue-50'
                 : 'border-gray-200 hover:border-gray-300 bg-white'
             }`}
           >
@@ -601,7 +601,7 @@ export default function SystemConfig() {
               name="ai_model"
               checked={aiModel.model === 'gpt-realtime'}
               onChange={() => updateAiModel('model', 'gpt-realtime')}
-              className="w-4 h-4 text-byuRoyal border-gray-300 focus:ring-byuRoyal"
+              className="w-4 h-4 text-royal border-gray-300 focus:ring-royal"
             />
           </div>
         </div>
@@ -623,7 +623,7 @@ export default function SystemConfig() {
                 checked={voice.enabled}
                 onChange={() => toggleVoiceEnabled(index)}
                 disabled={voices.voices.filter(v => v.enabled).length === 1 && voice.enabled}
-                className="mt-1 w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+                className="mt-1 w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
                 title={voices.voices.filter(v => v.enabled).length === 1 && voice.enabled ? "At least one voice must be enabled" : ""}
               />
               <div className="flex-1 grid grid-cols-3 gap-3">
@@ -632,14 +632,14 @@ export default function SystemConfig() {
                   value={voice.label}
                   onChange={(e) => updateVoiceField(index, 'label', e.target.value)}
                   placeholder="Label (e.g., Cedar)"
-                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
                 />
                 <input
                   type="text"
                   value={voice.description || ''}
                   onChange={(e) => updateVoiceField(index, 'description', e.target.value)}
                   placeholder="Description (e.g., Warm & natural)"
-                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
                 />
                 <div className="flex items-center gap-2">
                   <code className="text-xs bg-gray-200 px-2 py-1 rounded flex-1">{voice.value}</code>
@@ -665,7 +665,7 @@ export default function SystemConfig() {
           <select
             value={voices.default_voice}
             onChange={(e) => setVoices({...voices, default_voice: e.target.value})}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
           >
             {voices.voices && voices.voices
               .filter(v => v.enabled)
@@ -689,26 +689,26 @@ export default function SystemConfig() {
               value={newVoice.value}
               onChange={(e) => setNewVoice({...newVoice, value: e.target.value})}
               placeholder="Voice code (e.g., nova)"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
             />
             <input
               type="text"
               value={newVoice.label}
               onChange={(e) => setNewVoice({...newVoice, label: e.target.value})}
               placeholder="Label (e.g., Nova)"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
             />
             <input
               type="text"
               value={newVoice.description}
               onChange={(e) => setNewVoice({...newVoice, description: e.target.value})}
               placeholder="Description"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
             />
           </div>
           <button
             onClick={addNewVoiceToList}
-            className="mt-3 px-4 py-2 bg-byuRoyal text-white rounded-lg hover:bg-blue-800 text-sm font-medium"
+            className="mt-3 px-4 py-2 bg-royal text-white rounded-lg hover:bg-blue-800 text-sm font-medium"
           >
             Add Voice
           </button>
@@ -732,7 +732,7 @@ export default function SystemConfig() {
                   checked={language.enabled}
                   onChange={() => toggleLanguageEnabled(index)}
                   disabled={languages.languages.filter(l => l.enabled).length === 1 && language.enabled}
-                  className="mt-1 w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+                  className="mt-1 w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
                   title={languages.languages.filter(l => l.enabled).length === 1 && language.enabled ? "At least one language must be enabled" : ""}
                 />
                 <div className="flex-1 grid grid-cols-2 gap-3">
@@ -741,7 +741,7 @@ export default function SystemConfig() {
                     value={language.label}
                     onChange={(e) => updateLanguageField(index, 'label', e.target.value)}
                     placeholder="Label (e.g., English)"
-                    className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+                    className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
                   />
                   <div className="flex items-center gap-2">
                     <code className="text-xs bg-gray-200 px-2 py-1 rounded flex-1">{language.value}</code>
@@ -763,7 +763,7 @@ export default function SystemConfig() {
                   onChange={(e) => updateLanguageField(index, 'systemPromptAddition', e.target.value)}
                   placeholder="e.g., \n\n**IMPORTANT: Please respond in English.**"
                   rows={2}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs font-mono focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs font-mono focus:ring-1 focus:ring-royal focus:border-royal"
                 />
               </div>
             </div>
@@ -778,7 +778,7 @@ export default function SystemConfig() {
           <select
             value={languages.default_language}
             onChange={(e) => setLanguages({...languages, default_language: e.target.value})}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
           >
             {languages.languages && languages.languages
               .filter(l => l.enabled)
@@ -808,14 +808,14 @@ export default function SystemConfig() {
               value={newLanguage.value}
               onChange={(e) => setNewLanguage({...newLanguage, value: e.target.value})}
               placeholder="Language code (e.g., pt-BR)"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
             />
             <input
               type="text"
               value={newLanguage.label}
               onChange={(e) => setNewLanguage({...newLanguage, label: e.target.value})}
               placeholder="Label (e.g., Português (Brasil))"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
             />
           </div>
           <textarea
@@ -823,11 +823,11 @@ export default function SystemConfig() {
             onChange={(e) => setNewLanguage({...newLanguage, systemPromptAddition: e.target.value})}
             placeholder="System prompt addition for this language..."
             rows={3}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-1 focus:ring-byuRoyal focus:border-byuRoyal mb-3"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-1 focus:ring-royal focus:border-royal mb-3"
           />
           <button
             onClick={addNewLanguageToList}
-            className="px-4 py-2 bg-byuRoyal text-white rounded-lg hover:bg-blue-800 text-sm font-medium"
+            className="px-4 py-2 bg-royal text-white rounded-lg hover:bg-blue-800 text-sm font-medium"
           >
             Add Language
           </button>
@@ -960,7 +960,7 @@ export default function SystemConfig() {
                 type="checkbox"
                 checked={features.chat_enabled}
                 onChange={(e) => updateFeatures('chat_enabled', e.target.checked)}
-                className="w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+                className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
               />
             </div>
 
@@ -1035,7 +1035,7 @@ export default function SystemConfig() {
               type="checkbox"
               checked={features.file_upload_enabled}
               onChange={(e) => updateFeatures('file_upload_enabled', e.target.checked)}
-              className="w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
           </div>
         </div>
@@ -1055,7 +1055,7 @@ export default function SystemConfig() {
               id="client-logging-enabled"
               checked={clientLogging.enabled}
               onChange={(e) => updateClientLogging('enabled', e.target.checked)}
-              className="w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
             <label htmlFor="client-logging-enabled" className="text-sm font-medium text-gray-700">
               Enable client-side console logging

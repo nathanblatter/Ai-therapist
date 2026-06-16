@@ -51,9 +51,9 @@ export default function ConversationBubble({
     } else if (message.message_type === 'tool_response') {
       return 'bg-purple-50 text-purple-800 border border-purple-300 rounded-none justify-center';
     } else if (message.role === 'user') {
-      return 'bg-byuRoyal text-white rounded-br-none justify-end';
+      return 'bg-royal text-white rounded-br-none justify-end';
     } else if (message.role === 'assistant') {
-      return 'bg-byuLightBlue text-black rounded-bl-none justify-start';
+      return 'bg-lightBlue text-black rounded-bl-none justify-start';
     } else {
       return 'bg-gray-200 text-gray-700 rounded-none justify-center';
     }

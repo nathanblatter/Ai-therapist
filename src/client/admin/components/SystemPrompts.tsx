@@ -215,7 +215,7 @@ export default function SystemPrompts() {
           <button
             onClick={handleSave}
             disabled={!hasChanges || saving}
-            className="flex items-center gap-2 px-4 py-2 bg-byuRoyal text-white rounded-lg hover:bg-byuNavy transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-royal text-white rounded-lg hover:bg-navy transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Save size={16} />
             {saving ? 'Saving...' : 'Save Changes'}
@@ -272,7 +272,7 @@ export default function SystemPrompts() {
             onClick={() => setActiveTab('realtime')}
             className={`pb-3 px-1 border-b-2 font-medium text-sm transition ${
               activeTab === 'realtime'
-                ? 'border-byuRoyal text-byuRoyal'
+                ? 'border-royal text-royal'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
@@ -282,7 +282,7 @@ export default function SystemPrompts() {
             onClick={() => setActiveTab('chat')}
             className={`pb-3 px-1 border-b-2 font-medium text-sm transition ${
               activeTab === 'chat'
-                ? 'border-byuRoyal text-byuRoyal'
+                ? 'border-royal text-royal'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
@@ -304,7 +304,7 @@ export default function SystemPrompts() {
                 value={prompts?.[activeTab]?.description || ''}
                 onChange={(e) => handleDescriptionChange(activeTab, e.target.value)}
                 placeholder="Brief description of this prompt..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
               />
             </div>
 
@@ -325,7 +325,7 @@ export default function SystemPrompts() {
                 onChange={(e) => handlePromptChange(activeTab, e.target.value)}
                 placeholder="Enter the system prompt..."
                 rows={20}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal font-mono text-sm resize-y"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal font-mono text-sm resize-y"
                 style={{ minHeight: '400px' }}
               />
             </div>
@@ -356,7 +356,7 @@ export default function SystemPrompts() {
                   <select
                     value={previewLanguage}
                     onChange={(e) => setPreviewLanguage(e.target.value)}
-                    className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-byuRoyal"
+                    className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-royal"
                   >
                     <option value="en">English</option>
                     {languages.map(lang => (

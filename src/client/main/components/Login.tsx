@@ -104,11 +104,11 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-byuNavy to-byuRoyal">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-navy to-royal">
       <div className="max-w-md w-full mx-4">
         <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-8">
           <div className="text-center">
-            <h1 className="text-4xl font-bold text-byuNavy mb-2">
+            <h1 className="text-4xl font-bold text-navy mb-2">
               AI Therapist Assistant
             </h1>
             <p className="text-lg text-gray-600">
@@ -129,7 +129,7 @@ export default function Login() {
                     name="username"
                     type="text"
                     required
-                    className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal focus:border-transparent transition-all sm:text-sm"
+                    className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal focus:border-transparent transition-all sm:text-sm"
                     placeholder="Enter your username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -145,7 +145,7 @@ export default function Login() {
                     name="password"
                     type="password"
                     required
-                    className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal focus:border-transparent transition-all sm:text-sm"
+                    className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal focus:border-transparent transition-all sm:text-sm"
                     placeholder="Enter your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -163,7 +163,7 @@ export default function Login() {
               <button
                 type="submit"
                 disabled={loading}
-                className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-byuRoyal hover:bg-byuNavy focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-byuRoyal transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-royal hover:bg-navy focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
               >
                 {loading ? 'Signing in...' : 'Sign in'}
               </button>
@@ -172,7 +172,7 @@ export default function Login() {
             // MFA verification form
             <div className="space-y-6">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
-                <Shield className="text-byuRoyal flex-shrink-0 mt-0.5" size={20} />
+                <Shield className="text-royal flex-shrink-0 mt-0.5" size={20} />
                 <div>
                   <p className="text-sm text-blue-900 font-medium">
                     Two-factor authentication is enabled
@@ -195,7 +195,7 @@ export default function Login() {
                       type="text"
                       required
                       maxLength={6}
-                      className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal focus:border-transparent transition-all text-center text-2xl font-mono tracking-widest"
+                      className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal focus:border-transparent transition-all text-center text-2xl font-mono tracking-widest"
                       placeholder="000000"
                       value={mfaToken}
                       onChange={(e) => setMfaToken(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -214,7 +214,7 @@ export default function Login() {
                       type="text"
                       required
                       maxLength={8}
-                      className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal focus:border-transparent transition-all text-center text-xl font-mono tracking-wider uppercase"
+                      className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal focus:border-transparent transition-all text-center text-xl font-mono tracking-wider uppercase"
                       placeholder="A1B2C3D4"
                       value={backupCode}
                       onChange={(e) => setBackupCode(e.target.value.toUpperCase().slice(0, 8))}
@@ -233,7 +233,7 @@ export default function Login() {
                 <button
                   type="submit"
                   disabled={loading || (!useBackupCode && mfaToken.length !== 6) || (useBackupCode && backupCode.length !== 8)}
-                  className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-byuRoyal hover:bg-byuNavy focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-byuRoyal transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                  className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-royal hover:bg-navy focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                 >
                   {loading ? 'Verifying...' : 'Verify & Sign In'}
                 </button>
@@ -247,7 +247,7 @@ export default function Login() {
                       setBackupCode('');
                       setError('');
                     }}
-                    className="text-sm text-byuRoyal hover:text-byuNavy font-medium flex items-center justify-center gap-1"
+                    className="text-sm text-royal hover:text-navy font-medium flex items-center justify-center gap-1"
                   >
                     <Key size={14} />
                     {useBackupCode ? 'Use authenticator code instead' : 'Use backup code instead'}
@@ -274,8 +274,8 @@ export default function Login() {
           <div className="text-center pt-4 border-t border-gray-200">
             <p className="text-sm text-gray-500">
               If you experience emotional distress or crisis, please contact{' '}
-              <a href="tel:8014223035" className="text-byuRoyal hover:underline font-medium">
-                <br/>BYU CAPS: (801) 422-3035
+              <a href="tel:8014223035" className="text-royal hover:underline font-medium">
+                <br/>988 Suicide & Crisis Lifeline: 988
               </a>
             </p>
           </div>

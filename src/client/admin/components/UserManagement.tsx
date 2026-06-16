@@ -256,7 +256,7 @@ export default function UserManagement() {
                 value={editData.username}
                 onChange={(e) => setEditData(prev => ({ ...prev, username: e.target.value }))}
                 aria-label="Username"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                 required
               />
             </div>
@@ -270,7 +270,7 @@ export default function UserManagement() {
                 value={editData.role}
                 onChange={(e) => setEditData(prev => ({ ...prev, role: e.target.value }))}
                 aria-label="User role"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
               >
                 <option value="participant">Participant</option>
                 <option value="therapist">Therapist</option>
@@ -289,7 +289,7 @@ export default function UserManagement() {
                   value={editData.password ?? ''}
                   onChange={(e) => setEditData(prev => ({ ...prev, password: e.target.value }))}
                   aria-label="New password (optional)"
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                   placeholder="Leave blank to keep current password"
                 />
                 <button
@@ -322,7 +322,7 @@ export default function UserManagement() {
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-byuRoyal text-white rounded-md hover:bg-blue-700 flex items-center gap-2 min-h-[44px]"
+                className="px-4 py-2 bg-royal text-white rounded-md hover:bg-blue-700 flex items-center gap-2 min-h-[44px]"
                 aria-label="Save user changes"
               >
                 <Save size={16} aria-hidden="true" />
@@ -379,7 +379,7 @@ export default function UserManagement() {
               value={formData.username}
               onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
               aria-label="New user username"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
               required
             />
           </div>
@@ -395,7 +395,7 @@ export default function UserManagement() {
                 value={formData.password}
                 onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
                 aria-label="New user password"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                 required
               />
               <button
@@ -423,7 +423,7 @@ export default function UserManagement() {
               value={formData.role}
               onChange={(e) => setFormData(prev => ({ ...prev, role: e.target.value }))}
               aria-label="New user role"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
             >
               <option value="participant">Participant</option>
               <option value="therapist">Therapist</option>
@@ -446,7 +446,7 @@ export default function UserManagement() {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-byuRoyal text-white rounded-md hover:bg-blue-700 flex items-center gap-2 min-h-[44px]"
+              className="px-4 py-2 bg-royal text-white rounded-md hover:bg-blue-700 flex items-center gap-2 min-h-[44px]"
               aria-label="Submit new user"
             >
               <Plus size={16} aria-hidden="true" />
@@ -543,7 +543,7 @@ export default function UserManagement() {
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="bg-byuRoyal text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center gap-2 min-h-[44px]"
+          className="bg-royal text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center gap-2 min-h-[44px]"
           aria-label="Add new user"
         >
           <Plus size={20} aria-hidden="true" />
@@ -568,21 +568,21 @@ export default function UserManagement() {
               placeholder="Search by username or user ID..."
               value={filters.search}
               onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-byuRoyal"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
           </div>
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${
               showFilters || activeFilterCount > 0
-                ? 'bg-byuRoyal text-white border-byuRoyal'
+                ? 'bg-royal text-white border-royal'
                 : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
             }`}
           >
             <Filter size={20} />
             <span>Filters</span>
             {activeFilterCount > 0 && (
-              <span className="bg-white text-byuRoyal rounded-full px-2 py-0.5 text-xs font-bold">
+              <span className="bg-white text-royal rounded-full px-2 py-0.5 text-xs font-bold">
                 {activeFilterCount}
               </span>
             )}
@@ -610,7 +610,7 @@ export default function UserManagement() {
                       type="checkbox"
                       checked={filters.roles.includes(role.value)}
                       onChange={() => toggleFilter('roles', role.value)}
-                      className="rounded border-gray-300 text-byuRoyal focus:ring-byuRoyal"
+                      className="rounded border-gray-300 text-royal focus:ring-royal"
                     />
                     <span className="text-sm text-gray-700">{role.label}</span>
                   </label>
@@ -628,7 +628,7 @@ export default function UserManagement() {
                       type="checkbox"
                       checked={filters.voices.includes(voice.value)}
                       onChange={() => toggleFilter('voices', voice.value)}
-                      className="rounded border-gray-300 text-byuRoyal focus:ring-byuRoyal"
+                      className="rounded border-gray-300 text-royal focus:ring-royal"
                     />
                     <span className="text-sm text-gray-700">{voice.label}</span>
                   </label>
@@ -646,7 +646,7 @@ export default function UserManagement() {
                       type="checkbox"
                       checked={filters.languages.includes(lang.value)}
                       onChange={() => toggleFilter('languages', lang.value)}
-                      className="rounded border-gray-300 text-byuRoyal focus:ring-byuRoyal"
+                      className="rounded border-gray-300 text-royal focus:ring-royal"
                     />
                     <span className="text-sm text-gray-700">{lang.label}</span>
                   </label>
@@ -664,7 +664,7 @@ export default function UserManagement() {
                     name="mfaStatus"
                     checked={filters.mfaStatus === ''}
                     onChange={() => setFilters(prev => ({ ...prev, mfaStatus: '' }))}
-                    className="border-gray-300 text-byuRoyal focus:ring-byuRoyal"
+                    className="border-gray-300 text-royal focus:ring-royal"
                   />
                   <span className="text-sm text-gray-700">All</span>
                 </label>
@@ -674,7 +674,7 @@ export default function UserManagement() {
                     name="mfaStatus"
                     checked={filters.mfaStatus === 'enabled'}
                     onChange={() => setFilters(prev => ({ ...prev, mfaStatus: 'enabled' }))}
-                    className="border-gray-300 text-byuRoyal focus:ring-byuRoyal"
+                    className="border-gray-300 text-royal focus:ring-royal"
                   />
                   <span className="text-sm text-gray-700">MFA Enabled</span>
                 </label>
@@ -684,7 +684,7 @@ export default function UserManagement() {
                     name="mfaStatus"
                     checked={filters.mfaStatus === 'disabled'}
                     onChange={() => setFilters(prev => ({ ...prev, mfaStatus: 'disabled' }))}
-                    className="border-gray-300 text-byuRoyal focus:ring-byuRoyal"
+                    className="border-gray-300 text-royal focus:ring-royal"
                   />
                   <span className="text-sm text-gray-700">MFA Disabled</span>
                 </label>
@@ -772,7 +772,7 @@ export default function UserManagement() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => setEditingUser(user)}
-                      className="text-byuRoyal hover:text-blue-700 flex items-center gap-1 min-h-[44px]"
+                      className="text-royal hover:text-blue-700 flex items-center gap-1 min-h-[44px]"
                       aria-label={`Edit user ${user.username}`}
                     >
                       <Edit2 size={16} aria-hidden="true" />

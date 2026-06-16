@@ -71,8 +71,8 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const [crisisContact, setCrisisContact] = useState<CrisisContact>({
-    hotline: 'BYU Counseling and Psychological Services',
-    phone: '(801) 422-3035',
+    hotline: '988 Suicide & Crisis Lifeline',
+    phone: '988',
     text: 'HELLO to 741741',
     enabled: true
   });

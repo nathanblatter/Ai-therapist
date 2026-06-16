@@ -39,8 +39,8 @@ export default function ChatLog({ messages, assistantStream }: ChatLogProps) {
                 msg.role === "system"
                   ? "bg-yellow-100 text-yellow-900 border-2 border-yellow-400 italic text-sm font-medium mb-2"
                   : msg.role === "user"
-                  ? "bg-byuRoyal text-white rounded-br-none mb-1 font-semibold"
-                  : "bg-byuLightBlue text-black rounded-bl-none font-semibold mb-2"
+                  ? "bg-royal text-white rounded-br-none mb-1 font-semibold"
+                  : "bg-lightBlue text-black rounded-bl-none font-semibold mb-2"
               }`}
             >
               {msg.text}

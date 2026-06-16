@@ -510,7 +510,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-byuNavy">Live Session Monitoring</h2>
+          <h2 className="text-2xl font-bold text-navy">Live Session Monitoring</h2>
           <p className="text-gray-600 mt-1">
             Real-time view of active therapy sessions
             {connected && <span className="ml-2 text-green-600" role="status" aria-live="polite">● Connected</span>}
@@ -533,7 +533,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <button
             onClick={fetchActiveSessions}
             aria-label="Refresh active sessions list"
-            className="px-4 py-2 bg-byuRoyal text-white rounded hover:bg-byuNavy transition min-h-[44px]"
+            className="px-4 py-2 bg-royal text-white rounded hover:bg-navy transition min-h-[44px]"
           >
             Refresh
           </button>
@@ -546,9 +546,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Active Sessions</p>
-              <p className="text-3xl font-bold text-byuNavy mt-1">{activeSessions.length}</p>
+              <p className="text-3xl font-bold text-navy mt-1">{activeSessions.length}</p>
             </div>
-            <Activity size={32} className="text-byuRoyal" aria-hidden="true" />
+            <Activity size={32} className="text-royal" aria-hidden="true" />
           </div>
         </div>
 
@@ -556,11 +556,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Total Messages</p>
-              <p className="text-3xl font-bold text-byuNavy mt-1">
+              <p className="text-3xl font-bold text-navy mt-1">
                 {activeSessions.reduce((sum, s) => sum + parseInt(String(s.message_count || 0)), 0)}
               </p>
             </div>
-            <MessageSquare size={32} className="text-byuRoyal" aria-hidden="true" />
+            <MessageSquare size={32} className="text-royal" aria-hidden="true" />
           </div>
         </div>
 
@@ -568,11 +568,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Active Users</p>
-              <p className="text-3xl font-bold text-byuNavy mt-1">
+              <p className="text-3xl font-bold text-navy mt-1">
                 {new Set(activeSessions.map(s => s.user_id)).size}
               </p>
             </div>
-            <Users size={32} className="text-byuRoyal" aria-hidden="true" />
+            <Users size={32} className="text-royal" aria-hidden="true" />
           </div>
         </div>
 
@@ -580,7 +580,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Crisis Sessions</p>
-              <p className={`text-3xl font-bold mt-1 ${crisisCount > 0 ? 'text-red-600' : 'text-byuNavy'}`}>
+              <p className={`text-3xl font-bold mt-1 ${crisisCount > 0 ? 'text-red-600' : 'text-navy'}`}>
                 {crisisCount}
               </p>
             </div>
@@ -607,7 +607,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       {!loading && !error && displayedSessions.length > 0 && (
         <div className="bg-white rounded-lg shadow overflow-hidden" role="region" aria-label="Active sessions table">
           <table className="w-full" role="table">
-            <thead className="bg-byuNavy text-white">
+            <thead className="bg-navy text-white">
               <tr>
                 <th className="px-4 py-3 text-left" scope="col">Crisis</th>
                 <th className="px-4 py-3 text-left" scope="col">User</th>
@@ -683,7 +683,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       <div className="flex gap-2">
                         <button
                           onClick={() => onViewSession(session.session_id, false)}
-                          className="px-3 py-1 bg-byuRoyal text-white rounded hover:bg-byuNavy transition text-sm min-h-[44px]"
+                          className="px-3 py-1 bg-royal text-white rounded hover:bg-navy transition text-sm min-h-[44px]"
                           aria-label={`Monitor session for ${session.username || 'Anonymous'}`}
                         >
                           Monitor
@@ -710,15 +710,15 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
         <div className="mt-8">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <Radio size={24} className="text-byuRoyal" />
+              <Radio size={24} className="text-royal" />
               <div>
-                <h3 className="text-xl font-bold text-byuNavy">Sideband Connections</h3>
+                <h3 className="text-xl font-bold text-navy">Sideband Connections</h3>
                 <p className="text-sm text-gray-600">Server-side WebSocket connections to OpenAI Realtime API</p>
               </div>
             </div>
             <button
               onClick={() => socket?.emit('admin:get-sideband-connections')}
-              className="px-4 py-2 bg-byuRoyal text-white rounded hover:bg-byuNavy transition text-sm min-h-[44px]"
+              className="px-4 py-2 bg-royal text-white rounded hover:bg-navy transition text-sm min-h-[44px]"
             >
               Refresh Connections
             </button>
@@ -744,7 +744,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Connections List */}
             <div className="bg-white rounded-lg shadow p-4">
-              <h4 className="font-semibold text-byuNavy mb-3">
+              <h4 className="font-semibold text-navy mb-3">
                 Connection Attempts ({sidebandConnections.length})
               </h4>
               <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -754,7 +754,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                     onClick={() => setSelectedSidebandSession(conn)}
                     className={`w-full text-left p-3 rounded-lg transition ${
                       selectedSidebandSession?.sessionId === conn.sessionId
-                        ? 'bg-byuRoyal text-white'
+                        ? 'bg-royal text-white'
                         : 'bg-gray-50 hover:bg-gray-100 text-gray-900'
                     }`}
                   >
@@ -800,7 +800,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               {selectedSidebandSession ? (
                 <>
                   <div className="flex items-center justify-between mb-4">
-                    <h4 className="font-semibold text-byuNavy">
+                    <h4 className="font-semibold text-navy">
                       Session: {selectedSidebandSession.sessionId.substring(0, 16)}...
                     </h4>
                     <div className="flex gap-2">
@@ -904,7 +904,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       {showUpdateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-byuNavy mb-4">Update Session Instructions</h3>
+            <h3 className="text-xl font-bold text-navy mb-4">Update Session Instructions</h3>
             <p className="text-gray-600 text-sm mb-4">
               Update the AI instructions for this session in real-time via the sideband connection.
               This will modify how the AI behaves without ending the session.
@@ -914,7 +914,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               value={updateInstructions}
               onChange={(e) => setUpdateInstructions(e.target.value)}
               placeholder="Enter new instructions for the AI therapist..."
-              className="w-full min-h-[200px] p-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-byuRoyal resize-vertical"
+              className="w-full min-h-[200px] p-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-royal resize-vertical"
             />
 
             <div className="flex justify-end gap-2 mt-4">

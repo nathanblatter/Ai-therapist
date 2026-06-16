@@ -167,7 +167,7 @@ export default function ExportPanel() {
               id="crisisFlaggedOnly"
               checked={crisisFlaggedOnly}
               onChange={(e) => setCrisisFlaggedOnly(e.target.checked)}
-              className="w-4 h-4 text-byuRoyal border-gray-300 rounded focus:ring-byuRoyal"
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
             <label htmlFor="crisisFlaggedOnly" className="text-sm text-gray-700">
               Export only crisis-flagged sessions
@@ -246,7 +246,7 @@ export default function ExportPanel() {
           <button
             onClick={handleExport}
             disabled={loading}
-            className="w-full bg-byuRoyal text-white py-3 rounded-lg font-semibold hover:bg-byuNavy transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
+            className="w-full bg-royal text-white py-3 rounded-lg font-semibold hover:bg-navy transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
             aria-label={loading ? 'Exporting data' : 'Download export file'}
           >
             <Download size={20} aria-hidden="true" />
@@ -255,7 +255,7 @@ export default function ExportPanel() {
         </div>
       </div>
 
-      <div className="mt-6 bg-byuLightBlue bg-opacity-30 border border-byuRoyal border-opacity-30 rounded-lg p-4">
+      <div className="mt-6 bg-lightBlue bg-opacity-30 border border-royal border-opacity-30 rounded-lg p-4">
         <h3 className="font-semibold mb-2">Export Information</h3>
         <ul className="text-sm space-y-1 text-gray-700">
           <li>• <strong>Full Data:</strong> All messages with HIPAA redaction applied</li>

@@ -72,11 +72,11 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
   };
 
   return (
-    <header className="bg-byuNavy text-white p-4 md:p-6 font-sans" role="banner">
+    <header className="bg-navy text-white p-4 md:p-6 font-sans" role="banner">
       <div className="max-w-5xl mx-auto">
         <h1 className="text-3xl md:text-5xl font-bold text-center">AI Therapist Assistant</h1>
         {username && (
-          <p className="text-center text-lg text-byuLightBlue mt-2" aria-label={`Logged in as ${username}`}>
+          <p className="text-center text-lg text-lightBlue mt-2" aria-label={`Logged in as ${username}`}>
             Welcome, {capitalizeFirst(username)}
           </p>
         )}
@@ -84,7 +84,7 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
          {sessionId && (
           <p className="text-center text-lg text-gray-300 mt-1 flex justify-center items-center gap-2" role="status" aria-label="Active session">
           <span>Session ID:</span>
-          <code className="bg-byuRoyal px-2 py-1 rounded font-bold text-white" title="Session ID (Copy this value into the form)" aria-label={`Session ID: ${sessionId}`}>{sessionId}</code>
+          <code className="bg-royal px-2 py-1 rounded font-bold text-white" title="Session ID (Copy this value into the form)" aria-label={`Session ID: ${sessionId}`}>{sessionId}</code>
           <CopyButton textToCopy={sessionId} />
         </p>
 
@@ -104,24 +104,24 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
           </div>
         )}
         <p className="mt-2 text-sm md:text-base leading-relaxed">
-          If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your session please reach out immediately to BYU's Counseling and Psychological Services crisis line at 
-          <a href="tel:8014223035" className="text-blue-300 underline ml-1" title="BYU Counseling and Psychological Services Crisis Line">(801) 422-3035</a> or visit 
-          <a href="https://caps.byu.edu" target="_blank" rel="noopener noreferrer" className="text-blue-300 underline ml-1" title="BYU Counseling and Psychological services Website">caps.byu.edu</a> for support. You are not alone—help is available.
+          If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your session please reach out immediately to the 988 Suicide & Crisis Lifeline at
+          <a href="tel:988" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline">988</a> or visit
+          <a href="https://988lifeline.org" target="_blank" rel="noopener noreferrer" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline website">988lifeline.org</a> for support. You are not alone—help is available.
         </p>
         <nav className="mt-4 flex flex-col sm:flex-row items-center gap-2 sm:gap-4 justify-center" role="navigation" aria-label="Main navigation">
           <a
-            href="tel:8014223035"
-            className="bg-byuRoyal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
-            aria-label="Call BYU Counseling and Psychological Services at 801-422-3035"
+            href="tel:988"
+            className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
+            aria-label="Call the 988 Suicide & Crisis Lifeline at 988"
           >
-            Call CAPS
+            Call 988
           </a>
           <a
-            href="https://caps.byu.edu/for-students-in-crisis"
+            href="https://988lifeline.org"
             target="_blank"
             rel="noopener noreferrer"
-            className="bg-byuRoyal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
-            aria-label="Visit BYU Crisis Resources page (opens in new tab)"
+            className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
+            aria-label="Visit crisis resources page (opens in new tab)"
           >
             Crisis Resources
           </a>
@@ -131,7 +131,7 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
               href="/admin/"
               target="_blank"
               rel="noopener noreferrer"
-              className="bg-byuRoyal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
+              className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
               aria-label="Open Admin Portal (opens in new tab)"
             >
               Admin Portal
@@ -139,7 +139,7 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
           )}
           <button
             onClick={() => navigate('/profile')}
-            className="bg-byuRoyal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
+            className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
             aria-label="View my profile"
           >
             Profile

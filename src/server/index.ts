@@ -160,9 +160,9 @@ async function getSystemConfig(): Promise<SystemConfig> {
     // Return defaults if database fails
     return {
       crisis_contact: {
-        hotline: 'BYU Counseling and Psychological Services',
-        phone: '(801) 422-3035',
-        text: 'HELLO to 741741',
+        hotline: '988 Suicide & Crisis Lifeline',
+        phone: '988',
+        text: 'Text HOME to 741741',
         enabled: true
       },
       session_limits: {
@@ -327,9 +327,9 @@ You provide supportive, ethical guidance, never diagnose/prescribe, keep all con
 async function getSystemPrompt(language = 'en', sessionType = 'realtime') {
   const config = await getSystemConfig();
   const crisisContact = (config.crisis_contact as CrisisContactConfig | undefined) ?? {
-    hotline: 'BYU Counseling and Psychological Services',
-    phone: '(801) 422-3035',
-    text: 'HELLO to 741741',
+    hotline: '988 Suicide & Crisis Lifeline',
+    phone: '988',
+    text: 'Text HOME to 741741',
     enabled: true
   } as CrisisContactConfig;
 
@@ -3759,9 +3759,9 @@ app.get("/api/config/crisis", async (req, res) => {
   try {
     const config = await getSystemConfig();
     const crisisContact = config.crisis_contact || {
-      hotline: 'BYU Counseling and Psychological Services',
-      phone: '(801) 422-3035',
-      text: 'HELLO to 741741',
+      hotline: '988 Suicide & Crisis Lifeline',
+      phone: '988',
+      text: 'Text HOME to 741741',
       enabled: true
     };
 

@@ -10,16 +10,9 @@ export default {
   theme: {
     extend: {
       colors: {
-        byuNavy: "#002E5D",
-        byuRoyal: "#0047BA",
-        byuLightBlue :"#BDD6E6",
-        byuOrange: "#D14124",
-        byuPlum: "#A73A64",
-        byuSlateGray: "#7C878E",
-        byuSand: "#A39382",
-        byuLightSand: "#D1CCBD",
-        byuBlueGray: "#6E7CA0",
-
+        navy: "#002E5D",
+        royal: "#0047BA",
+        lightBlue: "#BDD6E6",
       },
     },
   },

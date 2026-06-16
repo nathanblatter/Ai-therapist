@@ -238,18 +238,18 @@ export default function Profile() {
   return (
     <div className="fixed inset-0 bg-gray-50 overflow-y-auto">
       {/* Header */}
-      <div className="bg-byuNavy text-white p-6" role="banner">
+      <div className="bg-navy text-white p-6" role="banner">
         <div className="max-w-6xl mx-auto">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-byuLightBlue hover:text-white transition mb-4 min-h-[44px]"
+            className="flex items-center gap-2 text-lightBlue hover:text-white transition mb-4 min-h-[44px]"
             aria-label="Back to main application"
           >
             <ArrowLeft size={20} />
             <span>Back to App</span>
           </button>
           <h1 className="text-4xl font-bold">My Profile</h1>
-          <p className="text-byuLightBlue mt-2">Manage your account and view your session history</p>
+          <p className="text-lightBlue mt-2">Manage your account and view your session history</p>
         </div>
       </div>
 
@@ -277,7 +277,7 @@ export default function Profile() {
 
         {/* Account Information Card */}
         <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-2xl font-bold text-byuNavy mb-4">Account Information</h2>
+          <h2 className="text-2xl font-bold text-navy mb-4">Account Information</h2>
 
           <div className="space-y-4">
             {/* Username */}
@@ -295,7 +295,7 @@ export default function Profile() {
             {/* Role */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Role</label>
-              <span className="px-3 py-1 bg-byuRoyal text-white rounded-full text-sm">
+              <span className="px-3 py-1 bg-royal text-white rounded-full text-sm">
                 {user.role}
               </span>
             </div>
@@ -305,7 +305,7 @@ export default function Profile() {
               {!editingPassword ? (
                 <button
                   onClick={() => setEditingPassword(true)}
-                  className="bg-byuRoyal text-white px-4 py-2 rounded hover:bg-byuNavy transition min-h-[44px]"
+                  className="bg-royal text-white px-4 py-2 rounded hover:bg-navy transition min-h-[44px]"
                   aria-label="Change account password"
                 >
                   Change Password
@@ -319,7 +319,7 @@ export default function Profile() {
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     aria-label="Enter current password"
-                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                   />
                   <input
                     type="password"
@@ -327,7 +327,7 @@ export default function Profile() {
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     aria-label="Enter new password (minimum 6 characters)"
-                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                   />
                   <input
                     type="password"
@@ -335,7 +335,7 @@ export default function Profile() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     aria-label="Confirm new password"
-                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+                    className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                   />
                   <div className="flex gap-2">
                     <button
@@ -366,30 +366,30 @@ export default function Profile() {
 
         {/* Session Statistics Card */}
         <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-2xl font-bold text-byuNavy mb-4">Session Statistics</h2>
+          <h2 className="text-2xl font-bold text-navy mb-4">Session Statistics</h2>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-byuLightBlue bg-opacity-20 p-4 rounded-lg">
+            <div className="bg-lightBlue bg-opacity-20 p-4 rounded-lg">
               <div className="text-sm text-gray-600">Total Sessions</div>
-              <div className="text-3xl font-bold text-byuNavy">{stats.totalSessions}</div>
+              <div className="text-3xl font-bold text-navy">{stats.totalSessions}</div>
             </div>
-            <div className="bg-byuLightBlue bg-opacity-20 p-4 rounded-lg">
+            <div className="bg-lightBlue bg-opacity-20 p-4 rounded-lg">
               <div className="text-sm text-gray-600">Completed</div>
-              <div className="text-3xl font-bold text-byuNavy">{stats.completedSessions}</div>
+              <div className="text-3xl font-bold text-navy">{stats.completedSessions}</div>
             </div>
-            <div className="bg-byuLightBlue bg-opacity-20 p-4 rounded-lg">
+            <div className="bg-lightBlue bg-opacity-20 p-4 rounded-lg">
               <div className="text-sm text-gray-600">Total Time</div>
-              <div className="text-3xl font-bold text-byuNavy">{formatDuration(stats.totalTime)}</div>
+              <div className="text-3xl font-bold text-navy">{formatDuration(stats.totalTime)}</div>
             </div>
-            <div className="bg-byuLightBlue bg-opacity-20 p-4 rounded-lg">
+            <div className="bg-lightBlue bg-opacity-20 p-4 rounded-lg">
               <div className="text-sm text-gray-600">Avg Duration</div>
-              <div className="text-3xl font-bold text-byuNavy">{formatDuration(stats.avgDuration)}</div>
+              <div className="text-3xl font-bold text-navy">{formatDuration(stats.avgDuration)}</div>
             </div>
           </div>
         </div>
 
         {/* Session History Card */}
         <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-2xl font-bold text-byuNavy mb-4">Session History</h2>
+          <h2 className="text-2xl font-bold text-navy mb-4">Session History</h2>
 
           {/* Filters */}
           <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3" role="search" aria-label="Filter sessions">
@@ -399,7 +399,7 @@ export default function Profile() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               aria-label="Search sessions by name or ID"
-              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
             />
             <input
               type="date"
@@ -407,7 +407,7 @@ export default function Profile() {
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
               aria-label="Filter by start date"
-              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
             />
             <input
               type="date"
@@ -415,7 +415,7 @@ export default function Profile() {
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               aria-label="Filter by end date"
-              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-byuRoyal min-h-[44px]"
+              className="px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
             />
           </div>
 
@@ -473,7 +473,7 @@ export default function Profile() {
                       <td className="px-4 py-3">
                         <button
                           onClick={() => setSelectedSessionId(session.session_id)}
-                          className="bg-byuRoyal text-white px-3 py-1 rounded hover:bg-byuNavy transition text-sm min-h-[44px]"
+                          className="bg-royal text-white px-3 py-1 rounded hover:bg-navy transition text-sm min-h-[44px]"
                           aria-label={`View details for session ${session.session_name || 'unnamed'}`}
                         >
                           View

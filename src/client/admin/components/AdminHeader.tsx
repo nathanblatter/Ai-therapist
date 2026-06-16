@@ -43,12 +43,12 @@ export default function AdminHeader() {
   };
 
   return (
-    <header className="bg-byuNavy text-white p-4 md:p-6">
+    <header className="bg-navy text-white p-4 md:p-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl md:text-4xl font-bold">AI Therapist Research & Therapist Audit Portal</h1>
           {username && (
-            <p className="text-byuLightBlue mt-2 text-lg">
+            <p className="text-lightBlue mt-2 text-lg">
               Welcome, {capitalizeFirst(username)} {userRole && <span className="text-sm">({userRole})</span>}
             </p>
           )}

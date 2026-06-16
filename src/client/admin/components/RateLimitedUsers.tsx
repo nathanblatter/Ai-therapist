@@ -90,14 +90,14 @@ export default function RateLimitedUsers() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-byuNavy">Rate-Limited Users</h1>
+          <h1 className="text-3xl font-bold text-navy">Rate-Limited Users</h1>
           <p className="text-gray-600 mt-1">
             Users who have reached their daily session limit
           </p>
         </div>
         <button
           onClick={fetchData}
-          className="flex items-center gap-2 px-4 py-2 bg-byuRoyal text-white rounded-lg hover:bg-byuNavy transition"
+          className="flex items-center gap-2 px-4 py-2 bg-royal text-white rounded-lg hover:bg-navy transition"
           disabled={loading}
         >
           <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />

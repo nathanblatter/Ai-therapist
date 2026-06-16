@@ -813,17 +813,17 @@ export default function RoomAssignment() {
               : user
                 ? isActive
                   ? 'border-green-500 bg-green-50 hover:bg-green-100 cursor-grab active:cursor-grabbing'
-                  : 'border-byuRoyal bg-blue-50 hover:bg-blue-100 cursor-grab active:cursor-grabbing'
-                : 'border-dashed border-gray-300 bg-white hover:border-byuRoyal hover:bg-gray-50 cursor-pointer'
+                  : 'border-royal bg-blue-50 hover:bg-blue-100 cursor-grab active:cursor-grabbing'
+                : 'border-dashed border-gray-300 bg-white hover:border-royal hover:bg-gray-50 cursor-pointer'
         }`}
       >
       {user ? (
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
-              {showIcon && type === 'participant' && <Users size={16} className="text-byuRoyal" />}
+              {showIcon && type === 'participant' && <Users size={16} className="text-royal" />}
               {showIcon && type === 'researcher' && <Monitor size={16} className="text-green-600" />}
-              <span className="font-semibold text-byuNavy text-sm">{user.username}</span>
+              <span className="font-semibold text-navy text-sm">{user.username}</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-600 capitalize">{user.role}</span>
@@ -889,7 +889,7 @@ export default function RoomAssignment() {
           <div className="flex items-center gap-2 flex-1">
             <Users size={14} className="text-blue-600 flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-byuNavy">{user.username}</div>
+              <div className="text-sm font-semibold text-navy">{user.username}</div>
               <div className="text-xs text-gray-500">Position {position}</div>
             </div>
           </div>
@@ -920,7 +920,7 @@ export default function RoomAssignment() {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-byuNavy">
+          <h3 className="text-lg font-bold text-navy">
             {type === 'queue' ? `Select Participant for Queue Position ${queuePosition}` :
              type === 'room' ? 'Select Participant' : 'Select Researcher'}
           </h3>
@@ -940,9 +940,9 @@ export default function RoomAssignment() {
                 type="button"
                 key={user.userid}
                 onClick={() => onSelect(user)}
-                className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-byuRoyal hover:bg-blue-50 transition"
+                className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-royal hover:bg-blue-50 transition"
               >
-                <div className="font-semibold text-byuNavy">{user.username}</div>
+                <div className="font-semibold text-navy">{user.username}</div>
                 <div className="text-xs text-gray-600 capitalize">{user.role}</div>
               </button>
             ))
@@ -969,7 +969,7 @@ export default function RoomAssignment() {
       <div className="mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-xl font-bold text-byuNavy mb-2">Room & Researcher Assignment</h3>
+            <h3 className="text-xl font-bold text-navy mb-2">Room & Researcher Assignment</h3>
             <p className="text-gray-600 text-sm">
               Assign participants to rooms and researchers to monitoring/check-in stations
               {connected && <span className="ml-2 text-green-600">● Live</span>}
@@ -1007,7 +1007,7 @@ export default function RoomAssignment() {
                   fetchAssignments();
                 }
               }}
-              className="px-3 py-1.5 bg-byuRoyal text-white rounded hover:bg-byuNavy transition text-sm"
+              className="px-3 py-1.5 bg-royal text-white rounded hover:bg-navy transition text-sm"
             >
               Refresh
             </button>
@@ -1193,7 +1193,7 @@ export default function RoomAssignment() {
       {/* Drag Preview */}
       {isDragging && dragState && (
         <div
-          className="fixed pointer-events-none z-50 bg-white border-2 border-byuRoyal rounded-lg p-3 shadow-xl opacity-90"
+          className="fixed pointer-events-none z-50 bg-white border-2 border-royal rounded-lg p-3 shadow-xl opacity-90"
           style={{
             left: dragPosition.x + 10,
             top: dragPosition.y + 10,
@@ -1201,8 +1201,8 @@ export default function RoomAssignment() {
           }}
         >
           <div className="flex items-center gap-2">
-            <Users size={16} className="text-byuRoyal" />
-            <span className="font-semibold text-byuNavy text-sm">{dragState.user.username}</span>
+            <Users size={16} className="text-royal" />
+            <span className="font-semibold text-navy text-sm">{dragState.user.username}</span>
           </div>
           <div className="text-xs text-gray-500 mt-1">
             {dragState.type === 'room' ? `From Room ${dragState.roomNumber}` : `From Queue ${dragState.roomNumber}-${dragState.queuePosition}`}

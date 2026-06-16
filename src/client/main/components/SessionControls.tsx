@@ -19,7 +19,7 @@ function SessionStopped({ startSession, onOpenSettings }: SessionStoppedProps) {
   return (
     <div className="flex items-center justify-center w-full h-full gap-3">
       <button
-        className="p-3 bg-byuRoyal hover:bg-green-700 text-white rounded-full font-semibold px-4 py-3 flex items-center justify-center gap-2 min-h-[44px] min-w-[44px]"
+        className="p-3 bg-royal hover:bg-green-700 text-white rounded-full font-semibold px-4 py-3 flex items-center justify-center gap-2 min-h-[44px] min-w-[44px]"
         onClick={handleStartSession}
         disabled={isActivating}
         aria-label="Start new therapy session"
@@ -106,7 +106,7 @@ function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled,
   return (
     <div className={`flex items-center gap-2 w-full h-full ${!showTextInput ? 'justify-center' : ''}`}>
       <button
-        className="p-3 sm:px-4 sm:py-2 bg-byuRoyal hover:bg-red-600 text-white rounded-full flex items-center justify-center"
+        className="p-3 sm:px-4 sm:py-2 bg-royal hover:bg-red-600 text-white rounded-full flex items-center justify-center"
         onClick={stopSession}
         title="Disconnect"
       >
@@ -188,7 +188,7 @@ function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled,
           />
 
           <button
-            className="p-3 sm:px-4 sm:py-2 bg-byuRoyal hover:bg-byuNavy text-white rounded-full flex items-center justify-center"
+            className="p-3 sm:px-4 sm:py-2 bg-royal hover:bg-navy text-white rounded-full flex items-center justify-center"
             onClick={handleSendTextMessage}
             title="Send"
           >
