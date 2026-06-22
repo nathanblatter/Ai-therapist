@@ -6,6 +6,7 @@ import SessionSettings from "./SessionSettings";
 import Header from './Header';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
+import BugReport from './BugReport';
 
 interface CrisisContact {
   hotline: string;
@@ -1015,6 +1016,7 @@ export default function App() {
 
       {/* Toast Notifications */}
       <ToastContainer />
+      <BugReport />
     </div>
 
   );
