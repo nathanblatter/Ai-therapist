@@ -4316,17 +4316,35 @@ async function initializeServer() {
   
 }
 
-initializeServer();
-
-httpServer.listen(port, async () => {
-  console.log(`Express server running on http://localhost:${port}`);
-  console.log(`Socket.io server ready for real-time connections`);
-
-  // Start the content wipe scheduler
+// Only boot the HTTP server / SSR when run as the entrypoint (npm start, Docker).
+// When imported (e.g. by integration tests), we export `app` without listening.
+// Compare via realpath so symlinked paths (e.g. macOS /tmp, tsx's resolution)
+// still match a direct invocation.
+function isRunAsEntrypoint(): boolean {
+  if (!process.argv[1]) return false;
   try {
-    await startContentWipeScheduler();
-    console.log(`Content wipe scheduler initialized`);
-  } catch (err) {
-    console.error('Failed to start content wipe scheduler:', err);
+    return fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(process.argv[1]);
+  } catch {
+    return false;
   }
-});
+}
+const isEntrypoint = isRunAsEntrypoint();
+
+if (isEntrypoint) {
+  initializeServer();
+
+  httpServer.listen(port, async () => {
+    console.log(`Express server running on http://localhost:${port}`);
+    console.log(`Socket.io server ready for real-time connections`);
+
+    // Start the content wipe scheduler
+    try {
+      await startContentWipeScheduler();
+      console.log(`Content wipe scheduler initialized`);
+    } catch (err) {
+      console.error('Failed to start content wipe scheduler:', err);
+    }
+  });
+}
+
+export { app, httpServer, io };
