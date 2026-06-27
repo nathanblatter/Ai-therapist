@@ -4,6 +4,8 @@
     "dev": "tsx src/server/index.ts --dev",
     "start": "NODE_ENV=production tsx src/server/index.ts",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "npm run build:client && npm run build:admin-client && npm run build:redact-client && npm run build:server && npm run build:admin-server && npm run build:redact-server",
     "build:client": "APP=main vite build --outDir ../../../dist/client --ssrManifest",
     "build:admin-client": "APP=admin vite build --outDir ../../../dist/admin-client --ssrManifest",
@@ -54,7 +56,6 @@
     "@types/speakeasy": "^2.0.10",
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "^5.7.2",
     "autoprefixer": "^10.4.21",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.37.5",
@@ -62,6 +63,8 @@
     "postcss-nesting": "^12.0.2",
     "postcss-preset-env": "^7.7.1",
     "tailwindcss": "^3.4.17",
-    "vite": "^6.2.0"
+    "typescript": "^5.7.2",
+    "vite": "^6.2.0",
+    "vitest": "^2.1.9"
   }
 }
