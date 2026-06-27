@@ -11,6 +11,7 @@ import {
   createActiveRealtimeSession,
   getRecentSessionMessages,
   getSessionCrisisState,
+  getSessionMessageCount,
   type InsertMessageInput,
 } from '../../db/index.js';
 import { getSystemPrompt } from '../../utils/sessionHelpers.js';
@@ -171,14 +172,17 @@ export default function logsRoutes(): Router {
         });
       });
 
-      Object.entries(sessionGroups).forEach(([sessionId, msgs]) => {
+      await Promise.all(Object.entries(sessionGroups).map(async ([sessionId, msgs]) => {
         global.io.to(`session:${sessionId}`).emit('messages:new', { sessionId, messages: msgs });
+        // Emit the ABSOLUTE count (not a delta) so it reconciles the live count
+        // the sideband has been incrementing between flushes — no double-counting.
+        const totalMessages = await getSessionMessageCount(sessionId);
         global.io.to('admin-broadcast').emit('session:activity', {
           sessionId,
-          messageCount: msgs.length,
+          totalMessages,
           lastActivity: new Date(),
         });
-      });
+      }));
       // ========== END SOCKET.IO EVENT EMISSION ==========
 
       res.sendStatus(200);

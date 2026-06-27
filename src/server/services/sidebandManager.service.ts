@@ -217,6 +217,15 @@ export class SidebandManager {
       ...payload,
       timestamp: new Date(),
     });
+
+    // Drive the active-sessions list live off the sideband instead of waiting
+    // for the participant's 15s log flush. Each finalized turn = one message;
+    // every fragment refreshes last-activity so the row never looks idle.
+    global.io.to('admin-broadcast').emit('session:activity', {
+      sessionId,
+      lastActivity: new Date(),
+      deltaMessages: payload.final ? 1 : 0,
+    });
   }
 
   /**

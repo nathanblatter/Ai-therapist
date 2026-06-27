@@ -94,6 +94,8 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   // Live two-sided transcript streamed from the sideband (no DB refresh).
   const [transcripts, setTranscripts] = useState<TranscriptMap>({});
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
+  // 1s tick so active-session durations and "time ago" advance smoothly.
+  const [nowTick, setNowTick] = useState(Date.now());
   // Inject-message modal state.
   const [showInjectModal, setShowInjectModal] = useState(false);
   const [injectText, setInjectText] = useState('');
@@ -103,6 +105,12 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   // Initial fetch
   useEffect(() => {
     fetchActiveSessions();
+  }, []);
+
+  // Drive live duration / "time ago" without waiting on socket events.
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
   }, []);
 
   // Request browser notification permission
@@ -234,17 +242,24 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     );
   };
 
-  const handleSessionActivity = (data: { sessionId: string; messageCount: number; lastActivity: string }) => {
+  // Activity arrives from two sources: the sideband (live, per-turn delta) and
+  // the 15s DB flush (absolute total, for reconciliation). totalMessages sets the
+  // count to truth; deltaMessages increments it live between flushes.
+  const handleSessionActivity = (data: { sessionId: string; totalMessages?: number; deltaMessages?: number; messageCount?: number; lastActivity: string }) => {
     setActiveSessions(prev =>
-      prev.map(session =>
-        session.session_id === data.sessionId
-          ? {
-              ...session,
-              message_count: parseInt(String(session.message_count || 0)) + parseInt(String(data.messageCount || 0)),
-              last_activity: data.lastActivity
-            }
-          : session
-      )
+      prev.map(session => {
+        if (session.session_id !== data.sessionId) return session;
+        const current = parseInt(String(session.message_count || 0));
+        let nextCount = current;
+        if (typeof data.totalMessages === 'number') {
+          nextCount = data.totalMessages;
+        } else if (typeof data.deltaMessages === 'number') {
+          nextCount = current + data.deltaMessages;
+        } else if (typeof data.messageCount === 'number') {
+          nextCount = current + data.messageCount; // legacy delta shape
+        }
+        return { ...session, message_count: nextCount, last_activity: data.lastActivity };
+      })
     );
   };
 
@@ -818,7 +833,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       })}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      {formatDuration(session.duration_seconds)}
+                      {formatDuration(
+                        session.status === 'active'
+                          ? Math.max(0, Math.floor((nowTick - new Date(session.created_at).getTime()) / 1000))
+                          : session.duration_seconds
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
