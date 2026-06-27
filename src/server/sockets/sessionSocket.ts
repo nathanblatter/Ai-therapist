@@ -192,6 +192,7 @@ export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
 
     // Admin asks to listen to a session's assistant audio.
     authSocket.on('admin:audio-listen-start', ({ sessionId }: { sessionId: string }) => {
+      log.info(`[audio] listen-start received: isAdmin=${isAdmin} role=${authSocket.userRole} sessionId=${sessionId}`);
       if (!isAdmin || !sessionId) return;
       authSocket.join(`audio:${sessionId}`);
       const first = addAudioListener(sessionId, authSocket.id);
