@@ -142,8 +142,16 @@ export class SidebandManager {
     try {
       const event = JSON.parse(data.toString()) as { type: string; [key: string]: unknown };
 
-      // Log event for debugging (minimal logging)
-      if (event.type !== 'response.audio.delta' && event.type !== 'input_audio_buffer.speech_started') {
+      // Log event for debugging, but skip the high-frequency streaming deltas
+      // (audio + transcript) that otherwise flood the logs hundreds of times.
+      const noisyEvents = new Set([
+        'response.audio.delta',
+        'response.output_audio.delta',
+        'response.output_audio_transcript.delta',
+        'response.audio_transcript.delta',
+        'input_audio_buffer.speech_started',
+      ]);
+      if (!noisyEvents.has(event.type)) {
         console.log(`[Sideband] ${sessionId.substring(0, 12)}... Event: ${event.type}`);
       }
 
@@ -329,9 +337,10 @@ export class SidebandManager {
       throw new Error('Sideband connection not active');
     }
 
+    // The GA Realtime API requires session.type on every session.update.
     const updateEvent = {
       type: 'session.update',
-      session: updates
+      session: { type: 'realtime', ...updates }
     };
 
     ws.send(JSON.stringify(updateEvent));

@@ -46,7 +46,7 @@ export async function logSidebandAction(
   metadata: Record<string, unknown>
 ): Promise<void> {
   await pool.query(`
-    INSERT INTO messages (session_id, role, type, message, metadata)
-    VALUES ($1, 'system', 'admin_action', $2, $3)
+    INSERT INTO messages (session_id, role, message_type, content, content_redacted, metadata, created_at)
+    VALUES ($1, 'system', 'admin_action', $2, NULL, $3, CURRENT_TIMESTAMP)
   `, [sessionId, message, JSON.stringify(metadata)]);
 }
