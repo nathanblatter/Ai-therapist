@@ -73,6 +73,15 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   const [sidebandEvents, setSidebandEvents] = useState<SidebandEventsMap>({});
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updateInstructions, setUpdateInstructions] = useState('');
+  // Advanced session.update: paste a raw JSON config (tools, tool_choice,
+  // temperature, turn_detection, ...) instead of just instructions.
+  const [advancedConfigMode, setAdvancedConfigMode] = useState(false);
+  const [advancedConfigText, setAdvancedConfigText] = useState('');
+  // Inject-message modal state.
+  const [showInjectModal, setShowInjectModal] = useState(false);
+  const [injectText, setInjectText] = useState('');
+  const [injectRole, setInjectRole] = useState<'system' | 'user'>('system');
+  const [injectRespond, setInjectRespond] = useState(false);
 
   // Initial fetch
   useEffect(() => {
@@ -353,30 +362,99 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   };
 
   const handleUpdateSession = async () => {
-    if (!selectedSidebandSession || !updateInstructions.trim()) return;
+    if (!selectedSidebandSession) return;
+
+    // Build payload: advanced mode sends a parsed JSON config; otherwise a
+    // simple instructions string.
+    let body: Record<string, unknown>;
+    if (advancedConfigMode) {
+      if (!advancedConfigText.trim()) return;
+      let config: unknown;
+      try {
+        config = JSON.parse(advancedConfigText);
+      } catch {
+        toast.error('Config is not valid JSON');
+        return;
+      }
+      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        toast.error('Config must be a JSON object');
+        return;
+      }
+      body = { sessionId: selectedSidebandSession.sessionId, config };
+    } else {
+      if (!updateInstructions.trim()) return;
+      body = { sessionId: selectedSidebandSession.sessionId, instructions: updateInstructions.trim() };
+    }
 
     try {
       const response = await fetch('/admin/api/sideband/update-session', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: selectedSidebandSession.sessionId,
-          instructions: updateInstructions.trim()
-        })
+        body: JSON.stringify(body)
       });
 
       if (response.ok) {
-        toast.success('Session instructions updated successfully');
+        toast.success('Session config updated successfully');
         setShowUpdateModal(false);
         setUpdateInstructions('');
+        setAdvancedConfigText('');
+        setAdvancedConfigMode(false);
       } else {
         const error = await response.json();
-        toast.error(`Failed to update: ${error.message}`);
+        toast.error(`Failed to update: ${error.details || error.error}`);
       }
     } catch (error: unknown) {
       console.error('Error updating session:', error);
       toast.error('Failed to update session');
+    }
+  };
+
+  // Simple POST helper for the one-shot sideband controls.
+  const postSideband = async (path: string, payload: Record<string, unknown>, successMsg: string) => {
+    try {
+      const response = await fetch(`/admin/api/sideband/${path}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (response.ok) {
+        toast.success(successMsg);
+        return true;
+      }
+      const error = await response.json();
+      toast.error(`Failed: ${error.details || error.error}`);
+      return false;
+    } catch (err: unknown) {
+      console.error(`Error on ${path}:`, err);
+      toast.error('Request failed');
+      return false;
+    }
+  };
+
+  const handleInterrupt = () => {
+    if (!selectedSidebandSession) return;
+    postSideband('interrupt', { sessionId: selectedSidebandSession.sessionId }, 'AI interrupted');
+  };
+
+  const handleForceResponse = () => {
+    if (!selectedSidebandSession) return;
+    postSideband('respond', { sessionId: selectedSidebandSession.sessionId }, 'Response triggered');
+  };
+
+  const handleInject = async () => {
+    if (!selectedSidebandSession || !injectText.trim()) return;
+    const ok = await postSideband('inject', {
+      sessionId: selectedSidebandSession.sessionId,
+      text: injectText.trim(),
+      role: injectRole,
+      respond: injectRespond,
+    }, `Injected ${injectRole} message`);
+    if (ok) {
+      setShowInjectModal(false);
+      setInjectText('');
+      setInjectRespond(false);
     }
   };
 
@@ -815,12 +893,33 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                     <h4 className="font-semibold text-navy">
                       Session: {selectedSidebandSession.sessionId.substring(0, 16)}...
                     </h4>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      <button
+                        onClick={handleInterrupt}
+                        title="Cancel the in-progress response and clear buffered audio"
+                        className="px-3 py-1.5 bg-orange-500 text-white rounded hover:bg-orange-600 transition text-sm min-h-[44px]"
+                      >
+                        ⏹ Interrupt
+                      </button>
+                      <button
+                        onClick={() => setShowInjectModal(true)}
+                        title="Inject a system or user message into the live conversation"
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm min-h-[44px]"
+                      >
+                        💬 Inject
+                      </button>
+                      <button
+                        onClick={handleForceResponse}
+                        title="Force the AI to respond now"
+                        className="px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition text-sm min-h-[44px]"
+                      >
+                        ▶ Respond
+                      </button>
                       <button
                         onClick={() => setShowUpdateModal(true)}
                         className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition text-sm min-h-[44px]"
                       >
-                        Update Instructions
+                        Update Config
                       </button>
                       <button
                         onClick={() => handleDisconnectSideband(selectedSidebandSession.sessionId)}
@@ -940,28 +1039,58 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
         </div>
       )}
 
-      {/* Update Instructions Modal */}
+      {/* Update Config Modal */}
       {showUpdateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-            <h3 className="text-xl font-bold text-navy mb-4">Update Session Instructions</h3>
-            <p className="text-gray-600 text-sm mb-4">
-              Update the AI instructions for this session in real-time via the sideband connection.
-              This will modify how the AI behaves without ending the session.
-            </p>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-navy">Update Session Config</h3>
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={advancedConfigMode}
+                  onChange={(e) => setAdvancedConfigMode(e.target.checked)}
+                />
+                Advanced (raw JSON)
+              </label>
+            </div>
 
-            <textarea
-              value={updateInstructions}
-              onChange={(e) => setUpdateInstructions(e.target.value)}
-              placeholder="Enter new instructions for the AI therapist..."
-              className="w-full min-h-[200px] p-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-royal resize-vertical"
-            />
+            {advancedConfigMode ? (
+              <>
+                <p className="text-gray-600 text-sm mb-4">
+                  Paste a <code>session</code> config object. Any RealtimeSession field is allowed:
+                  <code> instructions</code>, <code>tools</code>, <code>tool_choice</code>, <code>temperature</code>, <code>turn_detection</code>.
+                  Sent as a live <code>session.update</code>.
+                </p>
+                <textarea
+                  value={advancedConfigText}
+                  onChange={(e) => setAdvancedConfigText(e.target.value)}
+                  placeholder={'{\n  "temperature": 0.6,\n  "tool_choice": "auto"\n}'}
+                  className="w-full min-h-[200px] p-3 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-royal resize-vertical"
+                />
+              </>
+            ) : (
+              <>
+                <p className="text-gray-600 text-sm mb-4">
+                  Update the AI instructions for this session in real-time via the sideband connection.
+                  This will modify how the AI behaves without ending the session.
+                </p>
+                <textarea
+                  value={updateInstructions}
+                  onChange={(e) => setUpdateInstructions(e.target.value)}
+                  placeholder="Enter new instructions for the AI therapist..."
+                  className="w-full min-h-[200px] p-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-royal resize-vertical"
+                />
+              </>
+            )}
 
             <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => {
                   setShowUpdateModal(false);
                   setUpdateInstructions('');
+                  setAdvancedConfigText('');
+                  setAdvancedConfigMode(false);
                 }}
                 className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition min-h-[44px]"
               >
@@ -969,14 +1098,81 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               </button>
               <button
                 onClick={handleUpdateSession}
-                disabled={!updateInstructions.trim()}
+                disabled={advancedConfigMode ? !advancedConfigText.trim() : !updateInstructions.trim()}
                 className={`px-4 py-2 rounded transition min-h-[44px] ${
-                  updateInstructions.trim()
+                  (advancedConfigMode ? advancedConfigText.trim() : updateInstructions.trim())
                     ? 'bg-green-600 text-white hover:bg-green-700'
                     : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 }`}
               >
                 Update Session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inject Message Modal */}
+      {showInjectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <h3 className="text-xl font-bold text-navy mb-4">Inject Message</h3>
+            <p className="text-gray-600 text-sm mb-4">
+              Insert a message into the live conversation context. A <strong>system</strong> message is a
+              private steer (the participant won't see it as a turn); a <strong>user</strong> message acts as
+              the participant.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-4 mb-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                Role:
+                <select
+                  value={injectRole}
+                  onChange={(e) => setInjectRole(e.target.value as 'system' | 'user')}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="system">system (private steer)</option>
+                  <option value="user">user (as participant)</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={injectRespond}
+                  onChange={(e) => setInjectRespond(e.target.checked)}
+                />
+                Make AI respond immediately
+              </label>
+            </div>
+
+            <textarea
+              value={injectText}
+              onChange={(e) => setInjectText(e.target.value)}
+              placeholder="Message to inject..."
+              className="w-full min-h-[140px] p-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-royal resize-vertical"
+            />
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => {
+                  setShowInjectModal(false);
+                  setInjectText('');
+                  setInjectRespond(false);
+                }}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition min-h-[44px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleInject}
+                disabled={!injectText.trim()}
+                className={`px-4 py-2 rounded transition min-h-[44px] ${
+                  injectText.trim()
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                Inject
               </button>
             </div>
           </div>

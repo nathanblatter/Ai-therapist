@@ -58,6 +58,14 @@ export default function adminSessionsRoutes(): Router {
 
       const updatedSession = await updateSessionStatus(sessionId, 'ended', req.session.username);
 
+      // Tear down the sideband observer cleanly on remote end.
+      try {
+        const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+        await sidebandManager.disconnect(sessionId);
+      } catch (e) {
+        console.error('[Sideband] cleanup on admin session end failed:', e);
+      }
+
       // Notify admin dashboards and the participant's own session room.
       global.io.to('admin-broadcast').emit('session:ended', {
         sessionId,

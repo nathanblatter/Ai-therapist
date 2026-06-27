@@ -136,6 +136,15 @@ export default function sessionsRoutes(): Router {
 
       const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 
+      // Cleanly tear down the sideband observer so it doesn't 1006 and churn
+      // through reconnect attempts after the call ends.
+      try {
+        const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+        await sidebandManager.disconnect(sessionId);
+      } catch (e) {
+        console.error('[Sideband] cleanup on session end failed:', e);
+      }
+
       global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' });
       global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'user' });
 

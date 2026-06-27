@@ -71,14 +71,32 @@ export default function sidebandRoutes(): Router {
     }
   });
 
-  // POST /admin/api/sideband/update-session - update session instructions via sideband
+  // POST /admin/api/sideband/update-session - update session config via sideband.
+  // Accepts either a legacy `instructions` string or a full `config` object
+  // (instructions, tools, tool_choice, temperature, turn_detection, ...).
   router.post('/admin/api/sideband/update-session', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
-      const { sessionId, instructions } = req.body;
+      const { sessionId, instructions, config } = req.body;
 
-      if (!sessionId || !instructions) {
-        return res.status(400).json({ error: 'Missing required fields', details: 'sessionId and instructions are required' });
+      if (!sessionId) {
+        return res.status(400).json({ error: 'Missing required fields', details: 'sessionId is required' });
       }
+
+      // Build the update payload. A `config` object takes precedence; otherwise
+      // fall back to the single-field `instructions` form.
+      let updates: Record<string, unknown> | undefined;
+      if (config && typeof config === 'object' && Object.keys(config).length > 0) {
+        const cfg: Record<string, unknown> = { ...config };
+        if (typeof cfg.instructions === 'string') cfg.instructions = cfg.instructions.trim();
+        updates = cfg;
+      } else if (typeof instructions === 'string' && instructions.trim()) {
+        updates = { instructions: instructions.trim() };
+      }
+
+      if (!updates) {
+        return res.status(400).json({ error: 'Missing required fields', details: 'Provide instructions or a non-empty config object' });
+      }
+      const payload = updates;
 
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
 
@@ -86,20 +104,105 @@ export default function sidebandRoutes(): Router {
         return res.status(400).json({ error: 'No active sideband connection', details: 'Session must have an active sideband connection' });
       }
 
-      await sidebandManager.updateSession(sessionId, { instructions: instructions.trim() });
+      await sidebandManager.updateSession(sessionId, payload);
 
-      await logSidebandAction(sessionId, 'Instructions updated via sideband', {
+      await logSidebandAction(sessionId, 'Session config updated via sideband', {
         admin_user: req.session.user?.username,
-        action: 'update_instructions',
+        action: 'update_session',
+        fields: Object.keys(payload),
       });
 
-      res.json({ success: true, message: 'Session instructions updated successfully' });
+      res.json({ success: true, message: 'Session config updated successfully' });
     } catch (error: unknown) {
       console.error('Failed to update session via sideband:', error);
       res.status(500).json({
         error: 'Failed to update session',
         details: error instanceof Error ? error.message : String(error),
       });
+    }
+  });
+
+  // POST /admin/api/sideband/interrupt - cancel the in-progress response + clear audio
+  router.post('/admin/api/sideband/interrupt', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const { sessionId } = req.body;
+      if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+
+      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+      if (!sidebandManager.isConnected(sessionId)) {
+        return res.status(400).json({ error: 'No active sideband connection for this session' });
+      }
+
+      await sidebandManager.interrupt(sessionId);
+
+      await logSidebandAction(sessionId, 'AI response interrupted via sideband', {
+        admin_user: req.session.user?.username,
+        action: 'interrupt',
+      });
+
+      res.json({ success: true, message: 'Response interrupted' });
+    } catch (error: unknown) {
+      console.error('Failed to interrupt via sideband:', error);
+      res.status(500).json({ error: 'Failed to interrupt', details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // POST /admin/api/sideband/inject - inject a system/user message into the live conversation
+  router.post('/admin/api/sideband/inject', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const { sessionId, text, role = 'system', respond = false } = req.body;
+      if (!sessionId || !text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ error: 'Missing required fields', details: 'sessionId and non-empty text are required' });
+      }
+      if (role !== 'system' && role !== 'user') {
+        return res.status(400).json({ error: 'Invalid role', details: "role must be 'system' or 'user'" });
+      }
+
+      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+      if (!sidebandManager.isConnected(sessionId)) {
+        return res.status(400).json({ error: 'No active sideband connection for this session' });
+      }
+
+      await sidebandManager.injectMessage(sessionId, role, text.trim(), Boolean(respond));
+
+      await logSidebandAction(sessionId, `Injected ${role} message via sideband`, {
+        admin_user: req.session.user?.username,
+        action: 'inject_message',
+        role,
+        respond: Boolean(respond),
+        text: text.trim(),
+      });
+
+      res.json({ success: true, message: 'Message injected' });
+    } catch (error: unknown) {
+      console.error('Failed to inject message via sideband:', error);
+      res.status(500).json({ error: 'Failed to inject message', details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // POST /admin/api/sideband/respond - force the model to produce a response now
+  router.post('/admin/api/sideband/respond', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const { sessionId, response } = req.body;
+      if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+
+      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+      if (!sidebandManager.isConnected(sessionId)) {
+        return res.status(400).json({ error: 'No active sideband connection for this session' });
+      }
+
+      await sidebandManager.createResponse(sessionId, response && typeof response === 'object' ? response : undefined);
+
+      await logSidebandAction(sessionId, 'Forced response via sideband', {
+        admin_user: req.session.user?.username,
+        action: 'force_response',
+        out_of_band: Boolean(response),
+      });
+
+      res.json({ success: true, message: 'Response triggered' });
+    } catch (error: unknown) {
+      console.error('Failed to force response via sideband:', error);
+      res.status(500).json({ error: 'Failed to force response', details: error instanceof Error ? error.message : String(error) });
     }
   });
 

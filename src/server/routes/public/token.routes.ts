@@ -140,6 +140,13 @@ export default function tokenRoutes(): Router {
                 console.log(`⏰ Auto-terminating session ${sessionId} after ${maxDurationMinutes} minutes`);
                 await updateSessionStatus(sessionId, 'ended', 'system');
 
+                try {
+                  const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+                  await sidebandManager.disconnect(sessionId);
+                } catch (e) {
+                  console.error('[Sideband] cleanup on auto-terminate failed:', e);
+                }
+
                 global.io.to(`session:${sessionId}`).emit('session:status', {
                   status: 'ended',
                   endedBy: 'system',

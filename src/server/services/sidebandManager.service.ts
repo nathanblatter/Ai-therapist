@@ -13,15 +13,22 @@ export class SidebandManager {
   // Per-session ephemeral key used to authenticate the sideband WS. Stored so
   // reconnects reuse it (the standard API key returns 404 call_id_not_found).
   private sessionKeys: Map<string, string>;
+  // Per-session keepalive timer. The sideband is a passive observer that can sit
+  // idle for long stretches; without periodic pings the socket gets reaped and
+  // closes with code 1006. We ping every keepaliveMs to keep it warm.
+  private pingIntervals: Map<string, NodeJS.Timeout>;
   private maxReconnectAttempts: number;
   private reconnectDelayMs: number;
+  private keepaliveMs: number;
 
   constructor() {
     this.connections = new Map(); // sessionId → WebSocket
     this.reconnectAttempts = new Map(); // sessionId → attempt count
     this.sessionKeys = new Map(); // sessionId → ephemeral key
+    this.pingIntervals = new Map(); // sessionId → keepalive timer
     this.maxReconnectAttempts = 3;
     this.reconnectDelayMs = 2000;
+    this.keepaliveMs = 20000;
   }
 
   /**
@@ -129,9 +136,42 @@ export class SidebandManager {
         });
       }
 
+      this.startKeepalive(sessionId);
+
       console.log(`[Sideband] Connection established for session ${sessionId.substring(0, 12)}...`);
     } catch (error) {
       console.error(`[Sideband] Error in handleOpen:`, error);
+    }
+  }
+
+  /**
+   * Start a periodic WS ping so the idle observer connection isn't reaped (1006).
+   */
+  private startKeepalive(sessionId: string): void {
+    this.stopKeepalive(sessionId);
+    const timer = setInterval(() => {
+      const ws = this.connections.get(sessionId);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.ping();
+        } catch (err) {
+          console.error(`[Sideband] Keepalive ping failed for ${sessionId.substring(0, 12)}...:`, err);
+        }
+      } else {
+        this.stopKeepalive(sessionId);
+      }
+    }, this.keepaliveMs);
+    // Don't let the keepalive timer keep the process alive on its own.
+    timer.unref?.();
+    this.pingIntervals.set(sessionId, timer);
+  }
+
+  /** Stop and clear the keepalive timer for a session. */
+  private stopKeepalive(sessionId: string): void {
+    const timer = this.pingIntervals.get(sessionId);
+    if (timer) {
+      clearInterval(timer);
+      this.pingIntervals.delete(sessionId);
     }
   }
 
@@ -348,25 +388,75 @@ export class SidebandManager {
   }
 
   /**
-   * Update session configuration mid-session
-   * @param {string} sessionId
-   * @param {object} updates - { instructions?, tools?, temperature? }
+   * Low-level primitive: forward any OpenAI Realtime *client* event over the
+   * sideband WS for a session. All higher-level controls build on this.
+   * @throws if there is no active connection for the session.
    */
-  async updateSession(sessionId: string, updates: Record<string, unknown>): Promise<void> {
+  sendEvent(sessionId: string, event: Record<string, unknown>): void {
     const ws = this.connections.get(sessionId);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       throw new Error('Sideband connection not active');
     }
+    ws.send(JSON.stringify(event));
+    console.log(`[Sideband] Sent ${event.type} for ${sessionId.substring(0, 12)}...`);
+  }
 
+  /**
+   * Update session configuration mid-session.
+   * @param updates - any RealtimeSession fields: instructions, tools,
+   *   tool_choice, temperature, turn_detection, etc.
+   */
+  async updateSession(sessionId: string, updates: Record<string, unknown>): Promise<void> {
     // The GA Realtime API requires session.type on every session.update.
-    const updateEvent = {
+    this.sendEvent(sessionId, {
       type: 'session.update',
-      session: { type: 'realtime', ...updates }
-    };
+      session: { type: 'realtime', ...updates },
+    });
+  }
 
-    ws.send(JSON.stringify(updateEvent));
+  /**
+   * Interrupt the AI mid-response: cancel the in-progress response and clear any
+   * audio already buffered on the client (WebRTC). Safe to call even if nothing
+   * is currently being generated — OpenAI just no-ops the cancel.
+   */
+  async interrupt(sessionId: string): Promise<void> {
+    this.sendEvent(sessionId, { type: 'response.cancel' });
+    this.sendEvent(sessionId, { type: 'output_audio_buffer.clear' });
+  }
 
-    console.log(`[Sideband] Session updated for ${sessionId.substring(0, 12)}...`);
+  /**
+   * Inject a message into the live conversation as the admin.
+   * @param role - 'system' for a private steer the user won't see as a turn,
+   *   or 'user' to act as the participant.
+   * @param text - the message text.
+   * @param respond - if true, immediately trigger a model response.
+   */
+  async injectMessage(
+    sessionId: string,
+    role: 'system' | 'user',
+    text: string,
+    respond: boolean,
+  ): Promise<void> {
+    this.sendEvent(sessionId, {
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role,
+        content: [{ type: 'input_text', text }],
+      },
+    });
+    if (respond) {
+      this.sendEvent(sessionId, { type: 'response.create' });
+    }
+  }
+
+  /**
+   * Force the model to produce a response now. Pass response params to override
+   * session config for this response only (e.g. out-of-band summary with
+   * conversation: 'none').
+   */
+  async createResponse(sessionId: string, response?: Record<string, unknown>): Promise<void> {
+    this.sendEvent(sessionId, response ? { type: 'response.create', response } : { type: 'response.create' });
   }
 
   /**
@@ -400,6 +490,7 @@ export class SidebandManager {
     console.log(`[Sideband] Connection closed for session ${sessionId.substring(0, 12)}...: ${code} - ${reason || 'No reason'}`);
 
     this.connections.delete(sessionId);
+    this.stopKeepalive(sessionId);
 
     try {
       await pool.query(
@@ -472,6 +563,7 @@ export class SidebandManager {
       ws.close(1000, 'Session ended');
       this.connections.delete(sessionId);
     }
+    this.stopKeepalive(sessionId);
     this.reconnectAttempts.delete(sessionId);
     this.sessionKeys.delete(sessionId);
   }
@@ -537,6 +629,7 @@ export class SidebandManager {
     for (const [sessionId, ws] of this.connections.entries()) {
       ws.close(1000, 'Server shutdown');
       this.connections.delete(sessionId);
+      this.stopKeepalive(sessionId);
       this.reconnectAttempts.delete(sessionId);
       this.sessionKeys.delete(sessionId);
     }
