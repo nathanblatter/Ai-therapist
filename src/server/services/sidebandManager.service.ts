@@ -52,6 +52,28 @@ export class SidebandManager {
       ws.on('error', (error) => this.handleError(sessionId, error));
       ws.on('close', (code, reason) => this.handleClose(sessionId, code, reason));
 
+      // The WS upgrade can be rejected with a normal HTTP response (e.g. a 404
+      // when the call_id is unknown). The 'error' event only gives a generic
+      // message for these, so capture the real status + body here — this is the
+      // diagnostic that was missing when the feature was first shelved.
+      ws.on('unexpected-response', (_req, res) => {
+        let body = '';
+        res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        res.on('end', () => {
+          const detail = `Sideband upgrade rejected: HTTP ${res.statusCode} for call_id=${callId} — ${body || '(empty body)'}`;
+          console.error(`[Sideband] ${detail}`);
+          this.connections.delete(sessionId);
+          this.logConnectionError(sessionId, new Error(detail)).catch(() => {});
+          if (global.io) {
+            global.io.to('admin-broadcast').emit('sideband:error', {
+              sessionId,
+              error: detail,
+              statusCode: res.statusCode,
+            });
+          }
+        });
+      });
+
       this.connections.set(sessionId, ws);
       this.reconnectAttempts.set(sessionId, 0);
 

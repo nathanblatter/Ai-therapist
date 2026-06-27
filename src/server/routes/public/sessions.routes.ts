@@ -39,8 +39,25 @@ export default function sessionsRoutes(): Router {
 
       await setSessionCallId(sessionId, call_id);
 
-      // Sideband auto-connect is intentionally disabled (OpenAI returns 404 for
-      // WebRTC sessions); we just record the call id here.
+      // Attach the server-side sideband WebSocket to this in-progress WebRTC call
+      // so the backend can run tools / monitor / steer the session. Fire-and-forget
+      // and non-fatal: the user's call continues even if the sideband fails to
+      // attach (errors are logged to the session via sidebandManager).
+      // Kill switch: set SIDEBAND_ENABLED=false to stop attaching without a redeploy.
+      const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
+      const { getOpenAIKey } = await import('../../config/secrets.js');
+      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+      const apiKey = sidebandEnabled ? await getOpenAIKey() : null;
+      if (!sidebandEnabled) {
+        console.log('[Sideband] Disabled via SIDEBAND_ENABLED=false; call_id recorded only.');
+      } else if (apiKey) {
+        sidebandManager.connect(sessionId, call_id, apiKey).catch(err => {
+          console.warn(`[Sideband] connect() failed for ${sessionId}:`, err instanceof Error ? err.message : err);
+        });
+      } else {
+        console.warn('[Sideband] No OpenAI API key available; skipping sideband attach.');
+      }
+
       res.json({ success: true, message: 'Call registered', sessionId, call_id });
     } catch (error: unknown) {
       console.error('Failed to establish sideband connection:', error);

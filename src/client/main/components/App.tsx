@@ -603,21 +603,18 @@ export default function App() {
     },
 });
 
-    // TODO: Sideband connection - disabled (OpenAI returns 404 for WebRTC sessions)
-    // Re-enable when properly researched and implemented
-    /*
+    // Extract the call_id from the Location header so the server can attach a
+    // sideband WebSocket to this same Realtime call (tools/monitoring/control).
+    // Location format: /v1/realtime/calls/rtc_xxxxx
     const locationHeader = sdpResponse.headers.get('Location');
-    console.log('[Sideband] Location header:', locationHeader);
-    let callId = null;
-    if (locationHeader) {
-      // Location header format: /v1/realtime/calls/rtc_xxxxx
-      // Use split and pop to get the last segment (the call_id)
-      callId = locationHeader.split('/').pop();
-      console.log(`Extracted call_id: ${callId}`);
+    const callId = locationHeader ? locationHeader.split('/').pop() : null;
+    if (callId) {
+      console.log(`[Sideband] Extracted call_id: ${callId}`);
     } else {
-      console.warn('No Location header in response');
+      // If this is null the header likely isn't CORS-exposed to the browser —
+      // the server can't attach the sideband without it.
+      console.warn('[Sideband] No readable Location header on the SDP response; sideband will not attach.');
     }
-    */
 
     const answer: RTCSessionDescriptionInit = {
       type: "answer",
@@ -625,9 +622,8 @@ export default function App() {
     };
     await pc.setRemoteDescription(answer);
 
-    // TODO: Sideband connection - disabled (OpenAI returns 404 for WebRTC sessions)
-    // Re-enable when properly researched and implemented
-    /*
+    // Hand the call_id to the server so it can open its sideband WebSocket.
+    // Non-fatal: the voice session continues even if this fails.
     if (callId && newSessionId) {
       try {
         const registerResponse = await fetch(`/api/sessions/${newSessionId}/register-call`, {
@@ -637,21 +633,15 @@ export default function App() {
         });
 
         if (registerResponse.ok) {
-          console.log(`Server sideband connection established for session ${newSessionId}`);
+          console.log(`[Sideband] Registered call_id with server for session ${newSessionId}`);
         } else {
           const errorText = await registerResponse.text();
-          console.warn('Failed to register call_id with server:', errorText);
+          console.warn('[Sideband] Failed to register call_id with server:', errorText);
         }
       } catch (error) {
-        console.error('Error registering call_id:', error);
-        // Non-fatal: Session continues even if sideband fails
-      }
-    } else {
-      if (!callId) {
-        console.warn('Could not extract call_id from Location header - sideband connection unavailable');
+        console.error('[Sideband] Error registering call_id:', error);
       }
     }
-    */
 
     peerConnection.current = pc;
   }
@@ -928,46 +918,10 @@ export default function App() {
     stopSession: () => stopSession(),
   };
 
-  const event = {
-  type: "session.update",
-  session: {
-      type: "realtime",
-      model: "gpt-realtime",
-      // Output modalities from system config (can be ["audio"], ["text"], or ["audio", "text"])
-      output_modalities: features.output_modalities || ["audio"],
-      audio: {
-        input: {
-          format: {
-            type: "audio/pcm",
-            rate: 24000,
-            transcription:{
-              model: "whisper-1",
-            }
-          },
-          turn_detection: {
-            type: "semantic_vad"
-          }
-        },
-        output: {
-          format: {
-            type: "audio/pcm",
-          },
-          voice: "marin",
-        }
-      },
-      // Use a server-stored prompt by ID. Optionally pin a version and pass variables.
-      prompt: {
-        id: "pmpt_123",          // your stored prompt ID
-        version: "89",           // optional: pin a specific version
-        variables: {
-          city: "Paris"          // example variable used by your prompt
-        }
-      },
-      // You can still set direct session fields; these override prompt fields if they overlap:
-      instructions: "Speak clearly and briefly. Confirm understanding before taking actions."
-  },
-};
-
+  // NOTE: the realtime session config (model, voice, instructions, tools,
+  // transcription, modalities) is applied server-side when /token mints the
+  // OpenAI client secret — see routes/public/token.routes.ts. The client does
+  // not send its own session.update at start.
 
   if (!isClient) {
     // Render a placeholder or nothing on the server
