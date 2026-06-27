@@ -24,6 +24,8 @@ import contentRetentionRoutes from "./routes/admin/contentRetention.routes.js";
 import userSessionsRoutes from "./routes/admin/userSessions.routes.js";
 import crisisRoutes from "./routes/admin/crisis.routes.js";
 import redactionRoutes from "./routes/admin/redaction.routes.js";
+import adminConfigRoutes from "./routes/admin/config.routes.js";
+import { getSystemConfig, getSystemPrompt } from "./utils/sessionHelpers.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
@@ -143,48 +145,8 @@ const apiKey = await getOpenAIKey();
 // Language instructions are now stored in the database system_config table
 // They will be loaded dynamically from the 'languages' config
 
-// Cache for system config to avoid database hits on every request
-let systemConfigCache: SystemConfig | null = null;
-let configCacheTime: number | null = null;
-const CONFIG_CACHE_TTL = 60000; // 1 minute
-
-async function getSystemConfig(): Promise<SystemConfig> {
-  const now = Date.now();
-
-  // Return cached config if still valid
-  if (systemConfigCache && configCacheTime && (now - configCacheTime < CONFIG_CACHE_TTL)) {
-    return systemConfigCache;
-  }
-
-  try {
-    const result = await pool.query('SELECT * FROM system_config');
-    const config: SystemConfig = {};
-    result.rows.forEach((row: { config_key: string; config_value: unknown }) => {
-      config[row.config_key] = row.config_value;
-    });
-
-    systemConfigCache = config;
-    configCacheTime = now;
-    return config;
-  } catch (err) {
-    console.error('Failed to fetch system config:', err);
-    // Return defaults if database fails
-    return {
-      crisis_contact: {
-        hotline: '988 Suicide & Crisis Lifeline',
-        phone: '988',
-        text: 'Text HOME to 741741',
-        enabled: true
-      },
-      session_limits: {
-        max_duration_minutes: 30,
-        max_sessions_per_day: 3,
-        cooldown_minutes: 30,
-        enabled: true
-      }
-    };
-  }
-}
+// getSystemConfig / getSystemPrompt (and their shared cache) live in
+// utils/sessionHelpers.ts — imported above so config reads share one cache.
 
 // Session limit enforcement helpers
 async function checkSessionLimits(userId: number | string | null, userRole: string | null = null): Promise<SessionLimitResult> {
@@ -294,79 +256,6 @@ function getHoursUntilReset() {
   const now = new Date();
   const resetTime = getNextMidnightSLC();
   return (resetTime.getTime() - now.getTime()) / (1000 * 60 * 60); // hours
-}
-
-// Default system prompt used as fallback if database config is unavailable
-const DEFAULT_SYSTEM_PROMPT = `## Purpose & Scope
-You are an AI **therapeutic assistant** for adults, providing **general emotional support and therapeutic conversation** only. Use empathy and evidence-based self-help (e.g., **CBT, DBT, mindfulness, journaling**) to help users cope with stress, anxiety, and common emotions. Make it clear: you **support and guide, not replace a human therapist**. Always **remind users you are not licensed**, and your help is **not a substitute for professional therapy/medical care**. Encourage seeking a **licensed therapist for serious issues**. Stay within **support, coping, active listening, and psycho-education**—no clinical claims.
-
-## Boundaries & Limitations
-**Never diagnose, give medication, or legal advice.** Avoid medical or legal topics; instead, offer **non-medication coping, self-care, lifestyle tips, relaxation, and gentle suggestions**. Do not suggest specific drugs/supplements or treatment plans. If asked for diagnosis or medical/legal advice, **politely decline** and clarify your non-professional status. Never misrepresent your credentials. Do not set up treatment plans or contracts or act as a human/professional; **focus on user's goals and autonomy**, using open-ended questions and suggestions.
-
-## Crisis Protocol
-**If user expresses risk (suicidality, harm, acute crisis):**
-- **Immediately stop normal conversation**
-- Urge them to seek emergency help (e.g., {{crisis_text}}).
-- State: you are **AI and cannot handle crises**
-- Give resources and ask if they'll seek help.
-- Do not provide advice or continue therapeutic conversation until user is safe.
-- If user reports hallucinations/delusions, urge urgent professional evaluation. **Internally log crisis and referrals if possible.**
-
-## Tone & Interaction Guidelines
-Maintain a **calm, nonjudgmental, warm, and inclusive tone**. Validate user experiences and avoid any critical, dismissive, or biased responses. Respect all backgrounds and use **inclusive, trauma-informed language**—let users control how much they share. Avoid pushing for details; gently prompt for preferences. **Empower users**: offer choices, invitations, not commands. Use active listening without oversharing about yourself. Keep responses simple, clear, compassionate—avoid jargon or explain it simply if needed. Always prioritize user autonomy and safety.
-
-## Privacy (HIPAA) Principles
-**Treat all communications as confidential**. Do not request or repeat unnecessary personal info. If users provide identifiers, do NOT store unless secure/HIPAA-compliant (if must, de-identify and encrypt). Gently remind users not to overshare sensitive details. At the session start, state: this chat is confidential, you are AI (not a healthcare provider), and users should not provide PHI unless comfortable. **Never share data with outside parties** except required by law or explicit, user-consented emergencies. No user info for ads or non-support purposes.
-
-## Session Framing & Disclaimers
-At each session's start, present a brief disclaimer about your **AI identity, purpose, limits, and crisis response** (e.g.: "Hello, I'm an AI mental health support assistant—not a therapist/doctor. I can't diagnose, but I'll listen and offer coping ideas. If you're in crisis, contact {{crisis_text}}. What would you like to talk about?"). Remind users of limits if conversation goes off-scope (e.g., diagnosis, ongoing medical topics). If persistent, reinforce boundaries and suggest consulting professionals. Suggest healthy breaks and discourage dependency if user chats excessively.
-
-At session close, remind users: you're a support tool and for ongoing or serious issues, professional help is best. Reiterate crisis resources as needed. Include legal/safety disclaimers ("This AI is not a licensed healthcare provider."). Encourage users to agree/acknowledge the service boundaries before chatting as required by your platform.
-
-## Content Moderation & Guardrails
-- **No diagnosis, no medical or legal advice**
-- **Never facilitate harm or illegal activity**
-- If user requests inappropriate/graphic help, **refuse and redirect** (especially for non-therapy sexual, violent, or criminal content)
-- **Safely escalate to professional help** when issues seem severe/persistent
-- **Maintain boundaries**: Refuse inappropriate requests or dependency; reinforce you're AI, not a human/relationship/secret-keeper
-- **Technical guardrails**: Abide by system flags or moderation protocols—always prioritize user safety, not engagement
-- If a request risks harm or crosses ethical/safety lines, **refuse firmly but empathetically**; safety overrides user satisfaction
-
-**Summary:**
-You provide supportive, ethical guidance, never diagnose/prescribe, keep all conversations safe/private, transparently communicate limits, and always refer to professional help in crisis. Be calm, caring, and user-centered—empower, don't direct. Prioritize user safety, confidentiality, and professional boundaries at all times.`;
-
-async function getSystemPrompt(language = 'en', sessionType = 'realtime') {
-  const config = await getSystemConfig();
-  const crisisContact = (config.crisis_contact as CrisisContactConfig | undefined) ?? {
-    hotline: '988 Suicide & Crisis Lifeline',
-    phone: '988',
-    text: 'Text HOME to 741741',
-    enabled: true
-  } as CrisisContactConfig;
-
-  // Build the crisis text for interpolation
-  const crisisText = crisisContact.enabled
-    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
-    : '911 or your local emergency services';
-
-  // Get the prompt from database config, or use default fallback
-  let basePrompt = DEFAULT_SYSTEM_PROMPT;
-  const systemPrompts = config.system_prompts as SystemPromptsConfig | undefined;
-  if (systemPrompts && systemPrompts[sessionType as keyof SystemPromptsConfig] && systemPrompts[sessionType as keyof SystemPromptsConfig].prompt) {
-    basePrompt = systemPrompts[sessionType as keyof SystemPromptsConfig].prompt;
-  }
-
-  // Interpolate {{crisis_text}} placeholder
-  basePrompt = basePrompt.replace(/\{\{crisis_text\}\}/g, crisisText);
-
-  // Get language-specific addition from database config
-  const languagesConfig = (config.languages as { languages?: Array<{ value: string; systemPromptAddition?: string }>; default_language?: string }) || { languages: [], default_language: 'en' };
-  const languageObj = languagesConfig.languages
-    ? languagesConfig.languages.find((l: { value: string; systemPromptAddition?: string }) => l.value === language)
-    : null;
-  const languageAddition = languageObj?.systemPromptAddition || '';
-
-  return basePrompt + languageAddition;
 }
 
 app.use(express.json()); // Needed to parse JSON bodies
@@ -2696,191 +2585,9 @@ app.get("/admin/api/export", requireRole('therapist', 'researcher'), async (req,
 // Public config + voice-preview endpoints are defined in routes/public/.
 app.use(configRoutes());
 app.use(voicesRoutes());
+// Admin config read/write API -> routes/admin/config.routes.ts.
+app.use(adminConfigRoutes());
 
-// GET /admin/api/config - Get all system configuration
-app.get("/admin/api/config", requireRole('therapist', 'researcher'), async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM system_config ORDER BY config_key');
-
-    // Transform into a more usable object format
-    const config: Record<string, unknown> = {};
-    result.rows.forEach(row => {
-      config[row.config_key] = {
-        value: row.config_value,
-        description: row.description,
-        updated_at: row.updated_at,
-        updated_by: row.updated_by
-      };
-    });
-
-    res.json(config);
-  } catch (err) {
-    console.error("Failed to fetch system configuration:", err);
-    res.status(500).json({ error: "Failed to fetch system configuration" });
-  }
-});
-
-// GET /admin/api/config/system-prompt-preview - Get fully interpolated system prompt for preview
-// NOTE: This route must be defined BEFORE /admin/api/config/:key to avoid being matched as a key
-app.get("/admin/api/config/system-prompt-preview", requireRole('researcher'), async (req, res) => {
-  const sessionType = typeof req.query.sessionType === 'string' ? req.query.sessionType : 'realtime';
-  const language = typeof req.query.language === 'string' ? req.query.language : 'en';
-
-  // Validate sessionType
-  if (!['realtime', 'chat'].includes(sessionType)) {
-    return res.status(400).json({ error: 'sessionType must be either "realtime" or "chat"' });
-  }
-
-  try {
-    const interpolatedPrompt = await getSystemPrompt(language, sessionType);
-
-    res.json({
-      success: true,
-      sessionType,
-      language,
-      prompt: interpolatedPrompt,
-      characterCount: interpolatedPrompt.length
-    });
-  } catch (err) {
-    console.error("Failed to generate system prompt preview:", err);
-    res.status(500).json({ error: "Failed to generate system prompt preview" });
-  }
-});
-
-// GET /admin/api/config/:key - Get specific configuration
-app.get("/admin/api/config/:key", requireRole('therapist', 'researcher'), async (req, res) => {
-  const { key } = req.params;
-
-  try {
-    const result = await pool.query(
-      'SELECT * FROM system_config WHERE config_key = $1',
-      [key]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Configuration key not found' });
-    }
-
-    res.json({
-      key: result.rows[0].config_key,
-      value: result.rows[0].config_value,
-      description: result.rows[0].description,
-      updated_at: result.rows[0].updated_at,
-      updated_by: result.rows[0].updated_by
-    });
-  } catch (err) {
-    console.error("Failed to fetch configuration:", err);
-    res.status(500).json({ error: "Failed to fetch configuration" });
-  }
-});
-
-// PUT /admin/api/config/:key - Update specific configuration
-app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) => {
-  const { key } = req.params;
-  const { value } = req.body;
-
-  if (!value) {
-    return res.status(400).json({ error: 'Configuration value is required' });
-  }
-
-  try {
-    // Validate voices config
-    if (key === 'voices') {
-      if (!value.voices || !Array.isArray(value.voices)) {
-        return res.status(400).json({ error: 'voices must be an array' });
-      }
-      const enabledVoices = (value.voices as VoiceOption[]).filter((v: VoiceOption) => v.enabled);
-      if (enabledVoices.length === 0) {
-        return res.status(400).json({ error: 'At least one voice must be enabled' });
-      }
-      const defaultVoice = (value.voices as VoiceOption[]).find((v: VoiceOption) => v.value === value.default_voice && v.enabled);
-      if (!defaultVoice) {
-        return res.status(400).json({
-          error: 'default_voice must be one of the enabled voices'
-        });
-      }
-      // Validate each voice has required fields
-      for (const voice of value.voices) {
-        if (!voice.value || !voice.label) {
-          return res.status(400).json({ error: 'Each voice must have value and label' });
-        }
-      }
-    }
-
-    // Validate languages config
-    if (key === 'languages') {
-      if (!value.languages || !Array.isArray(value.languages)) {
-        return res.status(400).json({ error: 'languages must be an array' });
-      }
-      const enabledLanguages = (value.languages as LanguageOption[]).filter((l: LanguageOption) => l.enabled);
-      if (enabledLanguages.length === 0) {
-        return res.status(400).json({ error: 'At least one language must be enabled' });
-      }
-      const defaultLanguage = (value.languages as LanguageOption[]).find((l: LanguageOption) => l.value === value.default_language && l.enabled);
-      if (!defaultLanguage) {
-        return res.status(400).json({
-          error: 'default_language must be one of the enabled languages'
-        });
-      }
-      // Validate each language has required fields
-      for (const language of value.languages) {
-        if (!language.value || !language.label) {
-          return res.status(400).json({ error: 'Each language must have value and label' });
-        }
-      }
-    }
-
-    // Validate system_prompts config
-    if (key === 'system_prompts') {
-      // Validate both realtime and chat prompts exist
-      if (!value.realtime || !value.chat) {
-        return res.status(400).json({ error: 'system_prompts must have both realtime and chat prompts' });
-      }
-      // Validate each prompt has required fields and minimum length
-      for (const promptType of ['realtime', 'chat']) {
-        if (!value[promptType].prompt) {
-          return res.status(400).json({ error: `${promptType} prompt is required` });
-        }
-        if (value[promptType].prompt.length < 100) {
-          return res.status(400).json({ error: `${promptType} prompt must be at least 100 characters` });
-        }
-      }
-      // Update last_modified timestamps
-      const now = new Date().toISOString();
-      value.realtime.last_modified = now;
-      value.chat.last_modified = now;
-    }
-
-    const result = await pool.query(
-      `UPDATE system_config
-       SET config_value = $1, updated_at = CURRENT_TIMESTAMP, updated_by = $2
-       WHERE config_key = $3
-       RETURNING *`,
-      [JSON.stringify(value), req.session.username, key]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Configuration key not found' });
-    }
-
-    // Invalidate cache to force refresh
-    systemConfigCache = null;
-    configCacheTime = null;
-
-    console.log(`Config updated: ${key} by ${req.session.username}`);
-
-    res.json({
-      success: true,
-      key: result.rows[0].config_key,
-      value: result.rows[0].config_value,
-      updated_at: result.rows[0].updated_at,
-      updated_by: result.rows[0].updated_by
-    });
-  } catch (err) {
-    console.error("Failed to update configuration:", err);
-    res.status(500).json({ error: "Failed to update configuration" });
-  }
-});
 
 // Content Retention / Data Wipe Endpoints -> routes/admin/contentRetention.routes.ts
 app.use(contentRetentionRoutes());

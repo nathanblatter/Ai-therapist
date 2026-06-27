@@ -172,6 +172,23 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('admin config routes', () => {
+  it('GET /admin/api/config/system-prompt-preview is researcher-gated (401)', async () => {
+    const res = await request(app).get('/admin/api/config/system-prompt-preview');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /admin/api/config/:key is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/config/voices');
+    expect(res.status).toBe(401);
+  });
+
+  it('PUT /admin/api/config/:key is researcher-gated (401)', async () => {
+    const res = await request(app).put('/admin/api/config/voices').send({ value: {} });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('admin content-retention routes', () => {
   it('GET /admin/api/content-retention is researcher-gated (401)', async () => {
     const res = await request(app).get('/admin/api/content-retention');
