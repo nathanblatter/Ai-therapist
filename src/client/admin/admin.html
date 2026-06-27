@@ -18,8 +18,9 @@
     <div id="root"><!--ssr-outlet--></div>
 
     <!-- ===== DEMO NOTICE (added for demo deployment) ===== -->
-    <div id="demo-pill" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483646;pointer-events:none;background:#B00020;color:#fff;font:600 12px/1 system-ui,'Segoe UI',Roboto,sans-serif;letter-spacing:.04em;padding:6px 12px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap;">
-      DEMO · fictitious data · not a real system
+    <div id="demo-pill" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:2147483646;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 16px);background:#B00020;color:#fff;font:600 12px/1 system-ui,'Segoe UI',Roboto,sans-serif;letter-spacing:.04em;padding:6px 8px 6px 12px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.25);">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">DEMO · fictitious data · not a real system</span>
+      <button type="button" aria-label="Dismiss demo notice" onclick="this.parentNode.style.display='none';try{sessionStorage.setItem('demoPillDismissed','1')}catch(e){}" style="flex:0 0 auto;background:rgba(255,255,255,.18);border:none;color:#fff;font:600 13px/1 system-ui;width:18px;height:18px;border-radius:999px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">✕</button>
     </div>
     <div id="demo-overlay" style="display:none;position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);align-items:center;justify-content:center;padding:16px;">
       <div style="background:#fff;color:#1f2937;max-width:520px;width:100%;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.3);padding:24px 28px;font-family:system-ui,'Segoe UI',Roboto,sans-serif;line-height:1.55;">
@@ -29,7 +30,7 @@
         <button type="button" onclick="document.getElementById('demo-overlay').style.display='none';try{sessionStorage.setItem('demoAck','1')}catch(e){}" style="background:#B00020;color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:1rem;font-weight:600;cursor:pointer;">I Understand</button>
       </div>
     </div>
-    <script>(function(){var o=document.getElementById('demo-overlay');try{if(!sessionStorage.getItem('demoAck'))o.style.display='flex';}catch(e){o.style.display='flex';}})();</script>
+    <script>(function(){var o=document.getElementById('demo-overlay');try{if(!sessionStorage.getItem('demoAck'))o.style.display='flex';}catch(e){o.style.display='flex';}var p=document.getElementById('demo-pill');try{if(p&&sessionStorage.getItem('demoPillDismissed'))p.style.display='none';}catch(e){}})();</script>
     <!-- ===== END DEMO NOTICE ===== -->
 
     <script type="module" src="./admin-entry-client.tsx"></script>
