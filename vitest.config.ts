@@ -19,5 +19,14 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Set before any test module loads. OPENAI_API_KEY makes getOpenAIKey()
+    // short-circuit before touching AWS Secrets Manager — several modules call
+    // it at import time (e.g. redaction.service), so tests must never depend on
+    // AWS credentials being present.
+    env: {
+      OPENAI_API_KEY: 'sk-test-key',
+      SESSION_SECRET: 'test-session-secret',
+      NODE_ENV: 'test',
+    },
   },
 });
