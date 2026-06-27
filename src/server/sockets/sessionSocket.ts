@@ -17,6 +17,27 @@ interface AuthenticatedSocket extends Socket {
 export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
   const PgSession = connectPgSimple(session);
 
+  // Live audio monitoring: which admin sockets are listening to each session.
+  // The participant's browser only tees its assistant audio while at least one
+  // admin is listening (on-demand), so we track listeners to start/stop teeing.
+  const audioListeners = new Map<string, Set<string>>(); // sessionId → admin socket ids
+
+  function addAudioListener(sessionId: string, socketId: string): boolean {
+    let set = audioListeners.get(sessionId);
+    if (!set) { set = new Set(); audioListeners.set(sessionId, set); }
+    const wasEmpty = set.size === 0;
+    set.add(socketId);
+    return wasEmpty; // true if this is the first listener
+  }
+
+  function removeAudioListener(sessionId: string, socketId: string): boolean {
+    const set = audioListeners.get(sessionId);
+    if (!set) return false;
+    set.delete(socketId);
+    if (set.size === 0) { audioListeners.delete(sessionId); return true; } // now empty
+    return false;
+  }
+
   // Socket.io authentication middleware
   io.use((socket, next) => {
     const req = socket.request as unknown as Express.Request & {
@@ -167,10 +188,49 @@ export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
       }
     });
 
+    // ---- Live assistant-audio monitoring ----
+
+    // Admin asks to listen to a session's assistant audio.
+    authSocket.on('admin:audio-listen-start', ({ sessionId }: { sessionId: string }) => {
+      if (!isAdmin || !sessionId) return;
+      authSocket.join(`audio:${sessionId}`);
+      const first = addAudioListener(sessionId, authSocket.id);
+      if (first) {
+        // First listener — tell the participant's browser to start teeing.
+        io.to(`session:${sessionId}`).emit('audio:tee-start', { sessionId });
+      }
+      log.info(`Admin ${authSocket.username} listening to audio for ${sessionId}`);
+    });
+
+    // Admin stops listening.
+    authSocket.on('admin:audio-listen-stop', ({ sessionId }: { sessionId: string }) => {
+      if (!isAdmin || !sessionId) return;
+      authSocket.leave(`audio:${sessionId}`);
+      const nowEmpty = removeAudioListener(sessionId, authSocket.id);
+      if (nowEmpty) {
+        io.to(`session:${sessionId}`).emit('audio:tee-stop', { sessionId });
+      }
+    });
+
+    // Participant relays a chunk of teed assistant audio. Forward to listeners.
+    authSocket.on('client:audio-chunk', ({ sessionId, pcm, sampleRate }: { sessionId: string; pcm: string; sampleRate: number }) => {
+      if (!sessionId || !pcm) return;
+      const set = audioListeners.get(sessionId);
+      if (!set || set.size === 0) return; // nobody listening; drop
+      authSocket.to(`audio:${sessionId}`).emit('audio:chunk', { sessionId, pcm, sampleRate });
+    });
+
     authSocket.on('disconnect', (reason: string) => {
       log.info(`User disconnected: ${reason}`);
       if (isAdmin) {
         authSocket.to('admin-broadcast').emit('admin:left', { username: authSocket.username });
+        // Drop this admin from any audio sessions; stop teeing if last listener.
+        for (const [sessionId, set] of audioListeners) {
+          if (set.has(authSocket.id)) {
+            const nowEmpty = removeAudioListener(sessionId, authSocket.id);
+            if (nowEmpty) io.to(`session:${sessionId}`).emit('audio:tee-stop', { sessionId });
+          }
+        }
       }
     });
   });

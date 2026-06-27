@@ -7,6 +7,7 @@ import Header from './Header';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
 import BugReport from './BugReport';
+import { startAudioTee, type AudioTeeHandle } from '../lib/audioTee';
 
 interface CrisisContact {
   hotline: string;
@@ -64,6 +65,8 @@ export default function App() {
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const audioElement = useRef<HTMLAudioElement | null>(null);
+  // Active assistant-audio tee (only runs while an admin is listening).
+  const audioTeeRef = useRef<AudioTeeHandle | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
@@ -352,6 +355,28 @@ export default function App() {
       console.log('Socket.io connected for session monitoring');
       // Join the session-specific room to receive events for this session
       socket.emit('session:join', { sessionId: newSessionId });
+    });
+
+    // Live audio monitoring: tee the assistant's audio to admins on demand. The
+    // server signals start when an admin begins listening and stop when none are.
+    socket.on('audio:tee-start', () => {
+      if (audioTeeRef.current) return; // already teeing
+      const stream = audioElement.current?.srcObject as MediaStream | null;
+      if (!stream) {
+        console.warn('[AudioTee] No assistant stream available to tee yet');
+        return;
+      }
+      console.log('[AudioTee] Admin listening — starting assistant audio tee');
+      audioTeeRef.current = startAudioTee(stream, (pcm, sampleRate) => {
+        socket.emit('client:audio-chunk', { sessionId: newSessionId, pcm, sampleRate });
+      });
+    });
+
+    socket.on('audio:tee-stop', () => {
+      if (!audioTeeRef.current) return;
+      console.log('[AudioTee] No listeners — stopping assistant audio tee');
+      audioTeeRef.current.stop();
+      audioTeeRef.current = null;
     });
 
     // Listen for remote session termination by admin or system
@@ -721,6 +746,11 @@ export default function App() {
       }
       socketRef.current.disconnect();
       socketRef.current = null;
+    }
+
+    if (audioTeeRef.current) {
+      audioTeeRef.current.stop();
+      audioTeeRef.current = null;
     }
 
     if (dataChannelRef.current) {

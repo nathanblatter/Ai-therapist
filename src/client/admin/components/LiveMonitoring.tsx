@@ -3,6 +3,7 @@ import type { Socket } from 'socket.io-client';
 import { Activity, Users, MessageSquare, AlertTriangle, X, Radio } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../../shared/components/Toast';
+import { AudioStreamPlayer } from '../lib/audioStreamPlayer';
 
 // ---- Local types ----
 
@@ -96,6 +97,10 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
   // 1s tick so active-session durations and "time ago" advance smoothly.
   const [nowTick, setNowTick] = useState(Date.now());
+  // Live assistant-audio listening (which session, and the player instance).
+  const [listeningSessionId, setListeningSessionId] = useState<string | null>(null);
+  const listeningSessionIdRef = useRef<string | null>(null);
+  const audioPlayerRef = useRef<AudioStreamPlayer | null>(null);
   // Inject-message modal state.
   const [showInjectModal, setShowInjectModal] = useState(false);
   const [injectText, setInjectText] = useState('');
@@ -145,6 +150,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     socket.on('sideband:error', handleSidebandError);
     socket.on('sideband:tool-call', handleSidebandToolCall);
     socket.on('sideband:transcript', handleSidebandTranscript);
+    socket.on('audio:chunk', handleAudioChunk);
     socket.on('session:openai-update', handleOpenAIUpdate);
     socket.on('admin:sideband-connections', handleSidebandConnectionsList);
 
@@ -161,10 +167,43 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       socket.off('sideband:error', handleSidebandError);
       socket.off('sideband:tool-call', handleSidebandToolCall);
       socket.off('sideband:transcript', handleSidebandTranscript);
+      socket.off('audio:chunk', handleAudioChunk);
       socket.off('session:openai-update', handleOpenAIUpdate);
       socket.off('admin:sideband-connections', handleSidebandConnectionsList);
     };
   }, [socket]);
+
+  // Feed incoming audio chunks to the player (ref guards against stale closure).
+  const handleAudioChunk = (data: { sessionId: string; pcm: string; sampleRate: number }) => {
+    if (data.sessionId !== listeningSessionIdRef.current) return;
+    audioPlayerRef.current?.push(data.pcm, data.sampleRate);
+  };
+
+  const startListening = (sessionId: string) => {
+    if (!socket) return;
+    // Switch sources if already listening to a different session.
+    if (listeningSessionIdRef.current && listeningSessionIdRef.current !== sessionId) {
+      stopListening();
+    }
+    const player = new AudioStreamPlayer();
+    player.start(); // must run in the click handler (user gesture) to allow audio
+    audioPlayerRef.current = player;
+    listeningSessionIdRef.current = sessionId;
+    setListeningSessionId(sessionId);
+    socket.emit('admin:audio-listen-start', { sessionId });
+  };
+
+  const stopListening = () => {
+    const sessionId = listeningSessionIdRef.current;
+    if (socket && sessionId) socket.emit('admin:audio-listen-stop', { sessionId });
+    audioPlayerRef.current?.stop();
+    audioPlayerRef.current = null;
+    listeningSessionIdRef.current = null;
+    setListeningSessionId(null);
+  };
+
+  // Tear down audio on unmount.
+  useEffect(() => () => { stopListening(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the transcript pinned to the newest turn as it streams in.
   useEffect(() => {
@@ -972,6 +1011,19 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       Session: {selectedSidebandSession.sessionId.substring(0, 16)}...
                     </h4>
                     <div className="flex flex-wrap gap-2 justify-end">
+                      <button
+                        onClick={() => listeningSessionId === selectedSidebandSession.sessionId
+                          ? stopListening()
+                          : startListening(selectedSidebandSession.sessionId)}
+                        title="Listen to the assistant's audio live"
+                        className={`px-3 py-1.5 text-white rounded transition text-sm min-h-[44px] ${
+                          listeningSessionId === selectedSidebandSession.sessionId
+                            ? 'bg-emerald-600 hover:bg-emerald-700 animate-pulse'
+                            : 'bg-gray-600 hover:bg-gray-700'
+                        }`}
+                      >
+                        {listeningSessionId === selectedSidebandSession.sessionId ? '🔊 Listening' : '🔊 Listen'}
+                      </button>
                       <button
                         onClick={handleInterrupt}
                         title="Cancel the in-progress response and clear buffered audio"
