@@ -195,12 +195,33 @@ export class SidebandManager {
         console.log(`[Sideband] ${sessionId.substring(0, 12)}... Event: ${event.type}`);
       }
 
+      // DIAGNOSTIC: the first time we see an audio-bearing event for a session,
+      // report whether it actually carries raw audio bytes (the `delta` field).
+      // This tells us if assistant audio is forwardable over the sideband or if
+      // it only travels on the WebRTC media track.
+      this.diagnoseAudio(sessionId, event);
+
       // Handle specific events
       await this.handleEvent(sessionId, event);
 
     } catch (error) {
       console.error(`[Sideband] Message parse error:`, error);
     }
+  }
+
+  // DIAGNOSTIC: track which audio-bearing event types we've already reported.
+  private audioDiagSeen = new Set<string>();
+
+  private diagnoseAudio(sessionId: string, event: { type: string; [key: string]: unknown }): void {
+    const t = event.type;
+    const isAudioish = t.includes('audio') || t.startsWith('input_audio_buffer');
+    if (!isAudioish) return;
+    const key = `${sessionId}:${t}`;
+    if (this.audioDiagSeen.has(key)) return;
+    this.audioDiagSeen.add(key);
+    const delta = event['delta'];
+    const hasBytes = typeof delta === 'string' && delta.length > 0;
+    console.log(`[Sideband][audio-diag] ${sessionId.substring(0, 12)}... first '${t}' — carriesRawAudio=${hasBytes}${hasBytes ? ` (${(delta as string).length} b64 chars)` : ''}`);
   }
 
   /**
