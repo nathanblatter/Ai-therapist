@@ -197,9 +197,11 @@ export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
       const first = addAudioListener(sessionId, authSocket.id);
       if (first) {
         // First listener — tell the participant's browser to start teeing.
+        const room = io.sockets.adapter.rooms.get(`session:${sessionId}`);
+        log.info(`[audio] tee-start → session:${sessionId} (${room?.size ?? 0} sockets in room)`);
         io.to(`session:${sessionId}`).emit('audio:tee-start', { sessionId });
       }
-      log.info(`Admin ${authSocket.username} listening to audio for ${sessionId}`);
+      log.info(`[audio] Admin ${authSocket.username} listening to audio for ${sessionId}`);
     });
 
     // Admin stops listening.
@@ -213,10 +215,14 @@ export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
     });
 
     // Participant relays a chunk of teed assistant audio. Forward to listeners.
+    let audioChunkLogCount = 0;
     authSocket.on('client:audio-chunk', ({ sessionId, pcm, sampleRate }: { sessionId: string; pcm: string; sampleRate: number }) => {
       if (!sessionId || !pcm) return;
       const set = audioListeners.get(sessionId);
       if (!set || set.size === 0) return; // nobody listening; drop
+      if (audioChunkLogCount++ % 100 === 0) {
+        log.info(`[audio] relaying chunk #${audioChunkLogCount} for ${sessionId} → ${set.size} listener(s), ${pcm.length}b @ ${sampleRate}Hz`);
+      }
       authSocket.to(`audio:${sessionId}`).emit('audio:chunk', { sessionId, pcm, sampleRate });
     });
 
