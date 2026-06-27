@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
 import { Activity, Users, MessageSquare, AlertTriangle, X, Radio } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
@@ -45,6 +45,20 @@ interface SidebandEventsMap {
   [sessionId: string]: SidebandEvent[];
 }
 
+// A single conversation turn in the live transcript, accumulated from sideband
+// transcript deltas (keyed by the OpenAI item_id).
+interface TranscriptTurn {
+  itemId: string;
+  role: 'assistant' | 'user';
+  text: string;
+  final: boolean;
+  timestamp: string;
+}
+
+interface TranscriptMap {
+  [sessionId: string]: TranscriptTurn[];
+}
+
 interface CrisisAlert {
   sessionId: string;
   severity: string;
@@ -77,6 +91,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   // temperature, turn_detection, ...) instead of just instructions.
   const [advancedConfigMode, setAdvancedConfigMode] = useState(false);
   const [advancedConfigText, setAdvancedConfigText] = useState('');
+  // Live two-sided transcript streamed from the sideband (no DB refresh).
+  const [transcripts, setTranscripts] = useState<TranscriptMap>({});
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
   // Inject-message modal state.
   const [showInjectModal, setShowInjectModal] = useState(false);
   const [injectText, setInjectText] = useState('');
@@ -119,6 +136,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     socket.on('sideband:status-update', handleSidebandStatusUpdate);
     socket.on('sideband:error', handleSidebandError);
     socket.on('sideband:tool-call', handleSidebandToolCall);
+    socket.on('sideband:transcript', handleSidebandTranscript);
     socket.on('session:openai-update', handleOpenAIUpdate);
     socket.on('admin:sideband-connections', handleSidebandConnectionsList);
 
@@ -134,10 +152,46 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       socket.off('sideband:status-update', handleSidebandStatusUpdate);
       socket.off('sideband:error', handleSidebandError);
       socket.off('sideband:tool-call', handleSidebandToolCall);
+      socket.off('sideband:transcript', handleSidebandTranscript);
       socket.off('session:openai-update', handleOpenAIUpdate);
       socket.off('admin:sideband-connections', handleSidebandConnectionsList);
     };
   }, [socket]);
+
+  // Keep the transcript pinned to the newest turn as it streams in.
+  useEffect(() => {
+    const el = transcriptScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [transcripts, selectedSidebandSession]);
+
+  // Accumulate live transcript deltas (keyed by item_id) into ordered turns.
+  const handleSidebandTranscript = (data: {
+    sessionId: string; role: 'assistant' | 'user'; itemId: string;
+    delta?: string; text?: string; final: boolean; timestamp: string;
+  }) => {
+    setTranscripts(prev => {
+      const turns = prev[data.sessionId] ? [...prev[data.sessionId]] : [];
+      const idx = turns.findIndex(t => t.itemId === data.itemId);
+      if (idx === -1) {
+        turns.push({
+          itemId: data.itemId,
+          role: data.role,
+          text: data.text ?? data.delta ?? '',
+          final: data.final,
+          timestamp: data.timestamp,
+        });
+      } else {
+        const turn = turns[idx];
+        // A final event carries the canonical full text; deltas append.
+        if (data.final && data.text !== undefined) {
+          turns[idx] = { ...turn, text: data.text, final: true };
+        } else if (data.delta) {
+          turns[idx] = { ...turn, text: turn.text + data.delta };
+        }
+      }
+      return { ...prev, [data.sessionId]: turns.slice(-200) };
+    });
+  };
 
   const fetchActiveSessions = async () => {
     setLoading(true);
@@ -561,6 +615,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     ? (sidebandEvents[selectedSidebandSession.sessionId] || [])
     : [];
 
+  // Live transcript for the selected session.
+  const selectedTranscript = selectedSidebandSession
+    ? (transcripts[selectedSidebandSession.sessionId] || [])
+    : [];
+
   return (
     <div className="p-6 space-y-6">
       {/* Crisis Alert Banner */}
@@ -964,6 +1023,43 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                         <div className="text-xs text-gray-600">{selectedSidebandSession.closeReason || 'No reason provided'}</div>
                       </div>
                     )}
+                  </div>
+
+                  {/* Live transcript — streamed from the sideband, no refresh */}
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h5 className="font-medium text-gray-700 text-sm">Live Transcript</h5>
+                      <span className="flex items-center gap-1 text-xs text-green-600">
+                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                        live
+                      </span>
+                    </div>
+                    <div ref={transcriptScrollRef} className="bg-white border border-gray-200 rounded p-3 max-h-80 overflow-y-auto space-y-2">
+                      {selectedTranscript.length === 0 ? (
+                        <p className="text-gray-400 text-sm italic">Waiting for speech…</p>
+                      ) : (
+                        selectedTranscript.map((turn) => (
+                          <div
+                            key={turn.itemId}
+                            className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                          >
+                            <div
+                              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                                turn.role === 'user'
+                                  ? 'bg-royal text-white rounded-br-none'
+                                  : 'bg-gray-100 text-gray-900 rounded-bl-none'
+                              }`}
+                            >
+                              <div className={`text-[10px] uppercase tracking-wide mb-0.5 ${turn.role === 'user' ? 'text-blue-100' : 'text-gray-500'}`}>
+                                {turn.role === 'user' ? 'Participant' : 'AI'}
+                              </div>
+                              <span>{turn.text}</span>
+                              {!turn.final && <span className="inline-block ml-1 animate-pulse">▍</span>}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
 
                   <div className="mb-2">

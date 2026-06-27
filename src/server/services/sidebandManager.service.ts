@@ -195,12 +195,6 @@ export class SidebandManager {
         console.log(`[Sideband] ${sessionId.substring(0, 12)}... Event: ${event.type}`);
       }
 
-      // DIAGNOSTIC: the first time we see an audio-bearing event for a session,
-      // report whether it actually carries raw audio bytes (the `delta` field).
-      // This tells us if assistant audio is forwardable over the sideband or if
-      // it only travels on the WebRTC media track.
-      this.diagnoseAudio(sessionId, event);
-
       // Handle specific events
       await this.handleEvent(sessionId, event);
 
@@ -209,19 +203,20 @@ export class SidebandManager {
     }
   }
 
-  // DIAGNOSTIC: track which audio-bearing event types we've already reported.
-  private audioDiagSeen = new Set<string>();
-
-  private diagnoseAudio(sessionId: string, event: { type: string; [key: string]: unknown }): void {
-    const t = event.type;
-    const isAudioish = t.includes('audio') || t.startsWith('input_audio_buffer');
-    if (!isAudioish) return;
-    const key = `${sessionId}:${t}`;
-    if (this.audioDiagSeen.has(key)) return;
-    this.audioDiagSeen.add(key);
-    const delta = event['delta'];
-    const hasBytes = typeof delta === 'string' && delta.length > 0;
-    console.log(`[Sideband][audio-diag] ${sessionId.substring(0, 12)}... first '${t}' — carriesRawAudio=${hasBytes}${hasBytes ? ` (${(delta as string).length} b64 chars)` : ''}`);
+  /**
+   * Push a live transcript fragment (or finalized turn) to the admin monitoring
+   * room. `delta` accumulates; `text` + final replaces with the canonical turn.
+   */
+  private emitTranscript(
+    sessionId: string,
+    payload: { role: 'assistant' | 'user'; itemId: string; delta?: string; text?: string; final: boolean },
+  ): void {
+    if (!global.io) return;
+    global.io.to('admin-broadcast').emit('sideband:transcript', {
+      sessionId,
+      ...payload,
+      timestamp: new Date(),
+    });
   }
 
   /**
@@ -244,6 +239,35 @@ export class SidebandManager {
       case 'response.function_call_arguments.done':
         // Handle tool/function calls
         await this.handleToolCall(sessionId, event);
+        break;
+
+      // Live transcripts of both sides, streamed to admins so the monitoring
+      // view updates in real time without a DB refresh. Deltas accumulate on the
+      // client keyed by item_id; the *.done / *.completed event carries the full
+      // final text.
+      case 'response.output_audio_transcript.delta':
+        this.emitTranscript(sessionId, {
+          role: 'assistant', itemId: event['item_id'] as string,
+          delta: event['delta'] as string, final: false,
+        });
+        break;
+      case 'response.output_audio_transcript.done':
+        this.emitTranscript(sessionId, {
+          role: 'assistant', itemId: event['item_id'] as string,
+          text: event['transcript'] as string, final: true,
+        });
+        break;
+      case 'conversation.item.input_audio_transcription.delta':
+        this.emitTranscript(sessionId, {
+          role: 'user', itemId: event['item_id'] as string,
+          delta: event['delta'] as string, final: false,
+        });
+        break;
+      case 'conversation.item.input_audio_transcription.completed':
+        this.emitTranscript(sessionId, {
+          role: 'user', itemId: event['item_id'] as string,
+          text: event['transcript'] as string, final: true,
+        });
         break;
 
       case 'error': {
