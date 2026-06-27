@@ -18,6 +18,35 @@ export async function getSessionCrisisFlag(
   return result.rows[0] ?? null;
 }
 
+/** The most recent messages in a session, chronological order (oldest first). */
+export async function getRecentSessionMessages(sessionId: string, limit = 10): Promise<Record<string, unknown>[]> {
+  const result = await pool.query(
+    `SELECT * FROM messages
+     WHERE session_id = $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [sessionId, limit]
+  );
+  return result.rows.reverse();
+}
+
+export interface SessionCrisisState {
+  crisis_flagged: boolean;
+  crisis_severity: string | null;
+  crisis_risk_score: number | null;
+}
+
+/** Current crisis flag/severity/score for a session, or null if absent. */
+export async function getSessionCrisisState(sessionId: string): Promise<SessionCrisisState | null> {
+  const result = await pool.query<SessionCrisisState>(
+    `SELECT crisis_flagged, crisis_severity, crisis_risk_score
+     FROM therapy_sessions
+     WHERE session_id = $1`,
+    [sessionId]
+  );
+  return result.rows[0] ?? null;
+}
+
 export interface AllCrisisData {
   clinicalReviews: Record<string, unknown>[];
   crisisEvents: Record<string, unknown>[];

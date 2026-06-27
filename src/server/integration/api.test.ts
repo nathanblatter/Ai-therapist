@@ -172,6 +172,13 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('logs batch route', () => {
+  it('POST /logs/batch rejects an empty/invalid body (400)', async () => {
+    const res = await request(app).post('/logs/batch').send({});
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('session management routes', () => {
   it('GET /api/sessions requires auth (401)', async () => {
     const res = await request(app).get('/api/sessions');
