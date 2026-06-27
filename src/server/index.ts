@@ -9,7 +9,6 @@ import { fileURLToPath } from "url";
 import session, { type Session, type SessionData } from "express-session";
 import type { IncomingMessage } from "http";
 import connectPgSimple from "connect-pg-simple";
-import {getOpenAIKey} from "./config/secrets.js"; // Import the function to get the OpenAI API key
 import {pool } from "./config/db.js";
 import { requireAuth, requireRole } from "./middleware/auth.js";
 import { createSession, getSession, insertMessagesBatch, upsertSessionConfig, updateSessionStatus, getAiModel, type InsertMessageInput } from "./models/dbQueries.js";
@@ -33,6 +32,7 @@ import adminSessionsRoutes from "./routes/admin/sessions.routes.js";
 import sidebandRoutes from "./routes/admin/sideband.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
+import tokenRoutes from "./routes/public/token.routes.js";
 import { getSystemConfig, getSystemPrompt } from "./utils/sessionHelpers.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
@@ -145,9 +145,6 @@ const io = new Server(httpServer, {
 global.io = io;
 
 const port = process.env.PORT ;
-
-
-const apiKey = await getOpenAIKey();
 
 
 // Language instructions are now stored in the database system_config table
@@ -488,272 +485,9 @@ app.use(usersRoutes());
 
 // ===================== Session Token and Creation Endpoints =====================
 
-// An endpoint which would work with the client code above - it returns
-// the contents of a REST API request to this protected endpoint
-// Accept both GET (backward compatibility) and POST (with settings)
-app.all("/token", async (req, res) => {
-  try {
-      const userId = req.session?.userId || null;
-      const userRole = req.session?.userRole || null;
+// Realtime session token minting -> routes/public/token.routes.js.
+app.use(tokenRoutes());
 
-      // RATE LIMITING CHECK: Enforce session limits (researchers are exempt)
-      const limitCheck = await checkSessionLimits(userId, userRole);
-      if (!limitCheck.allowed) {
-        console.log(`Session limit exceeded for user ${userId}:`, limitCheck.reason);
-        return res.status(429).json({
-          error: 'rate_limit_exceeded',
-          reason: limitCheck.reason,
-          message: limitCheck.message,
-          details: {
-            limit: limitCheck.limit,
-            current: limitCheck.current,
-            cooldown_minutes: limitCheck.cooldown_minutes,
-            minutes_remaining: limitCheck.minutes_remaining
-          }
-        });
-      }
-
-      // IDEMPOTENCY CHECK: Look for existing active session
-      if (userId) {
-        const { getActiveSessionForUser } = await import("./models/dbQueries.js");
-        const existingSession = await getActiveSessionForUser(userId);
-
-        if (existingSession) {
-          console.log(`Returning existing active session for user ${userId}:`, {
-            sessionId: existingSession.session_id.substring(0, 12) + '...',
-            created_at: existingSession.created_at
-          });
-
-          return res.status(200).json({
-            session: {
-              id: existingSession.session_id,
-              exists: true,
-              created_at: existingSession.created_at
-            },
-            message: "Active session already exists. Please end current session before starting a new one."
-          });
-        }
-      }
-
-      // No active session - proceed with creating new one
-      // Get user settings: First check saved preferences, then request body, then defaults
-      let userVoice = req.body?.voice;
-      let userLanguage = req.body?.language;
-
-      console.log(`[Token] Request body - voice: ${userVoice}, language: ${userLanguage}`);
-      console.log(`[Token] User ID: ${userId}`);
-
-      // If not provided in request, load from user preferences
-      if (!userVoice || !userLanguage) {
-        console.log('[Token] Loading preferences from database...');
-        try {
-          const prefsResult = await pool.query(
-            'SELECT preferred_voice, preferred_language FROM users WHERE userid = $1',
-            [userId]
-          );
-
-          console.log(`[Token] Database query result:`, prefsResult.rows);
-
-          if (prefsResult.rows.length > 0) {
-            const dbVoice = prefsResult.rows[0].preferred_voice;
-            const dbLanguage = prefsResult.rows[0].preferred_language;
-            console.log(`[Token] DB values - voice: ${dbVoice}, language: ${dbLanguage}`);
-
-            userVoice = userVoice || dbVoice || 'cedar';
-            userLanguage = userLanguage || dbLanguage || 'en';
-
-            console.log(`[Token] Final values - voice: ${userVoice}, language: ${userLanguage}`);
-          } else {
-            console.log('[Token] No user found in database, using defaults');
-            userVoice = userVoice || 'cedar';
-            userLanguage = userLanguage || 'en';
-          }
-        } catch (err) {
-          console.error('[Token] Failed to load user preferences, using defaults:', err);
-          userVoice = userVoice || 'cedar';
-          userLanguage = userLanguage || 'en';
-        }
-      }
-
-      console.log(`[Token] Using voice: ${userVoice}, language: ${userLanguage} for user ${userId}`);
-
-      // Save preferences for next time (async, don't block)
-      if (userId) {
-        pool.query(
-          'UPDATE users SET preferred_voice = $1, preferred_language = $2 WHERE userid = $3',
-          [userVoice, userLanguage, userId]
-        ).then(() => {
-          console.log(`[Token] Saved preferences for user ${userId}: voice=${userVoice}, language=${userLanguage}`);
-        }).catch(err => console.error('[Token] Failed to save user preferences:', err));
-      }
-
-      const temperature = 0.8; // Fixed temperature
-
-      // Get AI model from system config
-      const aiModel = await getAiModel();
-
-      // Get tools from registry
-      const { toolRegistry } = await import('./services/toolRegistry.service.js');
-      const tools = toolRegistry.getAllToolDefinitions();
-
-      // Create dynamic session config with user settings
-      const dynamicSessionConfig = JSON.stringify({
-        session: {
-            type: "realtime",
-            tools: tools,
-            tool_choice: "auto",
-            model: aiModel,
-            instructions: await getSystemPrompt(userLanguage, 'realtime'),
-            audio: {
-                input:{
-                  transcription:{
-                    model: "whisper-1",
-                  }
-                },
-                output: {
-                    voice: userVoice,
-                },
-            },
-        },
-      });
-
-      console.log("Sending session config to OpenAI:", {
-        voice: userVoice,
-        language: userLanguage,
-        configLength: dynamicSessionConfig.length
-      });
-
-      const response = await fetch(
-          "https://api.openai.com/v1/realtime/client_secrets",
-          {
-              method: "POST",
-              headers: {
-                  Authorization: `Bearer ${apiKey}`,
-                  "Content-Type": "application/json",
-              },
-              body: dynamicSessionConfig,
-          }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("OpenAI API error:", response.status, errorText);
-        throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log("OpenAI response data:", JSON.stringify(data, null, 2));
-
-      if (!data || !data.session || !data.session.id) {
-        console.error("Invalid OpenAI response structure:", data);
-        throw new Error("Invalid response from OpenAI API - missing session.id");
-      }
-
-      // Create session in database with user association
-      const sessionId = data.session.id;
-      const username = req.session?.username || null;
-
-      // Debug logging
-      console.log('Creating therapy session:', {
-        sessionId: sessionId.substring(0, 12) + '...',
-        userId: userId,
-        username: username,
-        hasSession: !!req.session,
-        sessionData: req.session
-      });
-
-      try {
-        await pool.query(
-          `INSERT INTO therapy_sessions (session_id, user_id, status, created_at, updated_at)
-           VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-           ON CONFLICT (session_id) DO NOTHING`,
-          [sessionId, userId]
-        );
-        console.log(`Therapy session created with user_id: ${userId}`);
-
-        // Emit session created event to Socket.io
-        global.io.to('admin-broadcast').emit('session:created', {
-          sessionId,
-          userId,
-          username,
-          status: 'active',
-          created_at: new Date()
-        });
-
-        // Schedule auto-termination if session limits are enabled (not for researchers)
-        if (limitCheck.limits && limitCheck.limits.max_duration_minutes && !limitCheck.bypass) {
-          const sessionLimits = limitCheck.limits; // captured for closure
-          const durationMs = sessionLimits.max_duration_minutes * 60 * 1000;
-          setTimeout(async () => {
-            try {
-              // Check if session is still active
-              const checkResult = await pool.query(
-                'SELECT status FROM therapy_sessions WHERE session_id = $1',
-                [sessionId]
-              );
-
-              if (checkResult.rows.length > 0 && checkResult.rows[0].status === 'active') {
-                console.log(`⏰ Auto-terminating session ${sessionId} after ${sessionLimits.max_duration_minutes} minutes`);
-
-                // End the session
-                const { updateSessionStatus } = await import("./models/dbQueries.js");
-                await updateSessionStatus(sessionId, 'ended', 'system');
-
-                // Notify the user via Socket.io
-                global.io.to(`session:${sessionId}`).emit('session:status', {
-                  status: 'ended',
-                  endedBy: 'system',
-                  reason: 'duration_limit',
-                  message: `Your session has ended after ${sessionLimits.max_duration_minutes} minutes (maximum session duration).`,
-                  remoteTermination: true
-                });
-
-                // Notify admins
-                global.io.to('admin-broadcast').emit('session:ended', {
-                  sessionId,
-                  endedAt: new Date(),
-                  endedBy: 'system',
-                  reason: 'duration_limit'
-                });
-              }
-            } catch (err) {
-              console.error(`Failed to auto-terminate session ${sessionId}:`, err);
-            }
-          }, durationMs);
-
-          console.log(`Session ${sessionId} will auto-terminate in ${sessionLimits.max_duration_minutes} minutes`);
-        }
-
-        // Insert session configuration
-        const sessionConfigObj = JSON.parse(dynamicSessionConfig);
-        await upsertSessionConfig(sessionId, {
-          voice: userVoice,
-          modalities: ['text', 'audio'],
-          instructions: sessionConfigObj.session?.instructions || null,
-          turn_detection: sessionConfigObj.session?.turn_detection || null,
-          tools: sessionConfigObj.session?.tools || null,
-          temperature: temperature,
-          max_response_output_tokens: sessionConfigObj.session?.max_response_output_tokens || 4096,
-          language: userLanguage
-        });
-        console.log(`Session configuration created for session: ${sessionId.substring(0, 12)}... (voice: ${userVoice}, language: ${userLanguage})`);
-      } catch (dbError) {
-        console.error("Failed to create session in database:", dbError);
-        // Continue anyway - session will be created by logs/batch endpoint
-      }
-
-      // Include session limits in response for client-side timer
-      const responseData = {
-        ...data,
-        session_limits: limitCheck.limits || null
-      };
-
-      res.json(responseData);
-  } catch (error) {
-      console.error("Token generation error:", error);
-      res.status(500).json({ error: "Failed to generate token" });
-  }
-});
 
 // ===================== Chat-Only Therapy Endpoints =====================
 // Voice-disabled flow (GPT chat completions) -> routes/public/chat.routes.ts.

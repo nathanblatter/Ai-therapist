@@ -25,3 +25,13 @@ export async function setSessionCallId(sessionId: string, callId: string): Promi
     [callId, sessionId]
   );
 }
+
+/** Create an active realtime session for the OpenAI-issued id (no-op if it exists). */
+export async function createActiveRealtimeSession(sessionId: string, userId: number | string | null): Promise<void> {
+  await pool.query(
+    `INSERT INTO therapy_sessions (session_id, user_id, status, created_at, updated_at)
+     VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT (session_id) DO NOTHING`,
+    [sessionId, userId]
+  );
+}
