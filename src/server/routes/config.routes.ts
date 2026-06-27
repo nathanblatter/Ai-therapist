@@ -94,7 +94,7 @@ export default function configRoutes() {
     try {
       const { voiceName } = req.params;
       const sanitizedVoiceName = path.basename(voiceName);
-      const voiceFilePath = path.join(__dirname, '../../../OAI_VOICES', `${sanitizedVoiceName}.mp3`);
+      const voiceFilePath = path.join(__dirname, '../../../assets/audio/voices', `${sanitizedVoiceName}.mp3`);
 
       if (!fs.existsSync(voiceFilePath)) {
         return res.status(404).json({ error: 'Voice preview not found' });

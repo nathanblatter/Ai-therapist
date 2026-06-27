@@ -3908,7 +3908,7 @@ app.get("/api/voices/preview/:voiceName", async (req, res) => {
     const sanitizedVoiceName = path.basename(voiceName);
 
     // Construct the path to the voice file (MP3 for browser compatibility)
-    const voiceFilePath = path.join(__dirname, '../../OAI_VOICES', `${sanitizedVoiceName}.mp3`);
+    const voiceFilePath = path.join(__dirname, '../../assets/audio/voices', `${sanitizedVoiceName}.mp3`);
 
     // Check if file exists
     if (!fs.existsSync(voiceFilePath)) {

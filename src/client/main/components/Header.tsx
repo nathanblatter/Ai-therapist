@@ -72,11 +72,11 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
   };
 
   return (
-    <header className="bg-navy text-white p-3 md:p-6 font-sans" role="banner">
+    <header className="bg-navy text-white p-3 md:p-6 [@media(max-height:500px)]:py-1.5 font-sans" role="banner">
       <div className="max-w-5xl mx-auto">
-        <h1 className="text-2xl md:text-5xl font-bold text-center">AI Therapist Assistant</h1>
+        <h1 className="text-2xl md:text-5xl [@media(max-height:500px)]:text-base font-bold text-center">AI Therapist Assistant</h1>
         {username && (
-          <p className="text-center text-lg text-lightBlue mt-2" aria-label={`Logged in as ${username}`}>
+          <p className="text-center text-lg text-lightBlue mt-2 [@media(max-height:500px)]:hidden" aria-label={`Logged in as ${username}`}>
             Welcome, {capitalizeFirst(username)}
           </p>
         )}
@@ -103,12 +103,12 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
             )}
           </div>
         )}
-        <p className="mt-2 text-xs sm:text-sm md:text-base leading-relaxed">
+        <p className="mt-2 text-xs sm:text-sm md:text-base leading-relaxed [@media(max-height:500px)]:hidden">
           If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your session please reach out immediately to the 988 Suicide & Crisis Lifeline at
           <a href="tel:988" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline">988</a> or visit
           <a href="https://988lifeline.org" target="_blank" rel="noopener noreferrer" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline website">988lifeline.org</a> for support. You are not alone—help is available.
         </p>
-        <nav className="mt-3 md:mt-4 flex flex-row flex-wrap items-center gap-2 sm:gap-4 justify-center" role="navigation" aria-label="Main navigation">
+        <nav className="mt-3 md:mt-4 [@media(max-height:500px)]:mt-1.5 flex flex-row flex-wrap items-center gap-2 sm:gap-4 justify-center" role="navigation" aria-label="Main navigation">
           <a
             href="tel:988"
             className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"

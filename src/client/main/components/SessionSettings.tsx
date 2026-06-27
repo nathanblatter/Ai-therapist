@@ -171,7 +171,7 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
         aria-modal="true"
         aria-labelledby="settings-modal-title"
       >
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden animate-fadeIn">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto animate-fadeIn">
           {/* Header */}
           <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 id="settings-modal-title" className="text-lg font-semibold text-gray-800">
@@ -188,9 +188,9 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
 
           {/* Content */}
           <div className="px-6 py-6">
-            <div className="grid grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
               {/* Voice Selection - takes 2 columns */}
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <VoiceSelector
                   voices={availableVoices}
                   selectedVoice={settings.voice}
@@ -203,7 +203,7 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
               </div>
 
               {/* Language Selection - takes 1 column */}
-              <div className="col-span-1">
+              <div className="sm:col-span-1">
                 <LanguageSelector
                   languages={availableLanguages}
                   selectedLanguage={settings.language}
@@ -268,7 +268,7 @@ function VoiceSelector({ voices, selectedVoice, playingVoice, onSelect, onPlayPr
       <label className="block text-xs font-medium text-gray-600 uppercase tracking-wide">
         Voice
       </label>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {voices.map((voice) => (
           <VoiceOptionCard
             key={voice.value}

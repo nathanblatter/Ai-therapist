@@ -65,7 +65,7 @@ export default function BugReport() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Report a problem"
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-royal px-4 py-3
+        className="fixed bottom-24 right-4 sm:bottom-5 sm:right-5 z-30 flex items-center gap-2 rounded-full bg-royal px-4 py-3
                    text-sm font-medium text-white shadow-lg shadow-royal/25 transition
                    hover:-translate-y-0.5 hover:bg-navy focus:outline-none focus-visible:ring-2 focus-visible:ring-lightBlue"
       >
