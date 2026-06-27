@@ -225,7 +225,17 @@ export class SidebandManager {
         await this.handleToolCall(sessionId, event);
         break;
 
-      case 'error':
+      case 'error': {
+        const errObj = event['error'] as { code?: string; message?: string } | undefined;
+        // Some errors are expected no-ops from the control surface and should
+        // not alarm the admin: cancelling when nothing is generating, or
+        // clearing an already-empty audio buffer. The session is unaffected.
+        const benignCodes = new Set(['response_cancel_not_active', 'response_cancel_no_active_response']);
+        if (errObj?.code && benignCodes.has(errObj.code)) {
+          console.log(`[Sideband] Benign control no-op for ${sessionId.substring(0, 12)}...: ${errObj.code}`);
+          break;
+        }
+
         console.error(`[Sideband] OpenAI error for session ${sessionId}:`, event['error']);
         await this.logError(sessionId, event['error']);
 
@@ -236,6 +246,7 @@ export class SidebandManager {
           });
         }
         break;
+      }
 
       case 'rate_limits.updated':
         // Monitor rate limits (log only, no action)
