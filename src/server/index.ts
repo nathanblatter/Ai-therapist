@@ -11,7 +11,7 @@ import type { IncomingMessage } from "http";
 import connectPgSimple from "connect-pg-simple";
 import {pool } from "./config/db.js";
 import { requireAuth, requireRole } from "./middleware/auth.js";
-import { createSession, getSession, insertMessagesBatch, upsertSessionConfig, updateSessionStatus, getAiModel, type InsertMessageInput } from "./models/dbQueries.js";
+import { insertMessagesBatch, type InsertMessageInput } from "./models/dbQueries.js";
 import configRoutes from "./routes/public/config.routes.js";
 import voicesRoutes from "./routes/public/voices.routes.js";
 import authRoutes from "./routes/public/auth.routes.js";
@@ -34,15 +34,10 @@ import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
 import tokenRoutes from "./routes/public/token.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
-import { getSystemConfig, getSystemPrompt } from "./utils/sessionHelpers.js";
-import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
 
 // ---------- local type helpers ----------
-
-/** Typed shape of a row in system_config.config_value (JSONB, arbitrary keys) */
-type SystemConfig = Record<string, unknown>;
 
 /** Minimal typed request used inside socket.io session middleware */
 type SessionRequest = IncomingMessage & {
@@ -54,69 +49,6 @@ interface AuthSocket extends Socket {
   userId?: number;
   username?: string;
   userRole?: string;
-}
-
-/** Return type of checkSessionLimits */
-type SessionLimitResult =
-  | { allowed: true; bypass?: string; limits?: { max_duration_minutes: number; max_sessions_per_day: number; sessions_today: number }; reason?: undefined; message?: undefined; limit?: undefined; current?: undefined; cooldown_minutes?: undefined; minutes_remaining?: undefined }
-  | { allowed: false; reason: string; message: string; limit?: number; current?: number; cooldown_minutes?: number; minutes_remaining?: number };
-
-/** Shape of user update fields */
-interface UserUpdates {
-  username?: string;
-  password?: string;
-  role?: string;
-}
-
-/** Typed voice/language option entry from system_config */
-interface VoiceOption {
-  value: string;
-  label: string;
-  description?: string;
-  enabled: boolean;
-  systemPromptAddition?: string;
-}
-
-interface VoicesConfig {
-  voices?: VoiceOption[];
-  default_voice: string;
-}
-
-interface LanguageOption {
-  value: string;
-  label: string;
-  description?: string;
-  enabled: boolean;
-  systemPromptAddition?: string;
-}
-
-interface LanguagesConfig {
-  languages?: LanguageOption[];
-  default_language: string;
-}
-
-interface SessionLimitsConfig {
-  enabled: boolean;
-  max_sessions_per_day: number;
-  cooldown_minutes: number;
-  max_duration_minutes: number;
-}
-
-interface CrisisContactConfig {
-  hotline: string;
-  phone: string;
-  text?: string;
-  enabled: boolean;
-}
-
-interface SystemPromptEntry {
-  prompt: string;
-  last_modified?: string;
-}
-
-interface SystemPromptsConfig {
-  realtime: SystemPromptEntry;
-  chat: SystemPromptEntry;
 }
 
 // ES module-compatible __dirname replacement
@@ -151,104 +83,8 @@ const port = process.env.PORT ;
 // Language instructions are now stored in the database system_config table
 // They will be loaded dynamically from the 'languages' config
 
-// getSystemConfig / getSystemPrompt (and their shared cache) live in
-// utils/sessionHelpers.ts — imported above so config reads share one cache.
-
-// Session limit enforcement helpers
-async function checkSessionLimits(userId: number | string | null, userRole: string | null = null): Promise<SessionLimitResult> {
-  if (!userId) {
-    // Anonymous users don't have limits enforced
-    return { allowed: true };
-  }
-
-  // Researcher accounts are exempt from limits
-  if (userRole === 'researcher') {
-    console.log(`Researcher ${userId} bypassing session limits`);
-    return { allowed: true, bypass: 'researcher' };
-  }
-
-  const config = await getSystemConfig();
-  const limits = (config.session_limits as SessionLimitsConfig | undefined) ?? ({ enabled: false } as SessionLimitsConfig);
-
-  if (!limits.enabled) {
-    return { allowed: true };
-  }
-
-  // Check daily session count (using Salt Lake City timezone)
-  const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
-  todayStart.setHours(0, 0, 0, 0);
-
-  const todaySessionsResult = await pool.query(
-    `SELECT COUNT(*) as session_count
-     FROM therapy_sessions
-     WHERE user_id = $1 AND created_at >= $2`,
-    [userId, todayStart]
-  );
-
-  const todaySessionCount = parseInt(todaySessionsResult.rows[0].session_count);
-
-  if (todaySessionCount >= limits.max_sessions_per_day) {
-    return {
-      allowed: false,
-      reason: 'daily_limit',
-      message: `You have reached your daily limit of ${limits.max_sessions_per_day} sessions. Please try again tomorrow.`,
-      limit: limits.max_sessions_per_day,
-      current: todaySessionCount
-    };
-  }
-
-  // Check cooldown period
-  if (limits.cooldown_minutes > 0) {
-    const recentSessionResult = await pool.query(
-      `SELECT ended_at
-       FROM therapy_sessions
-       WHERE user_id = $1 AND ended_at IS NOT NULL
-       ORDER BY ended_at DESC
-       LIMIT 1`,
-      [userId]
-    );
-
-    if (recentSessionResult.rows.length > 0) {
-      const lastEndedAt = new Date(recentSessionResult.rows[0].ended_at);
-      const now = new Date();
-      const timeSinceEndMs = now.getTime() - lastEndedAt.getTime();
-      const cooldownMs = limits.cooldown_minutes * 60 * 1000;
-
-      // Debug logging
-      console.log('Cooldown check:', {
-        lastEndedAt: lastEndedAt.toISOString(),
-        now: now.toISOString(),
-        timeSinceEndMs,
-        timeSinceEndMinutes: timeSinceEndMs / 60000,
-        cooldownMinutes: limits.cooldown_minutes,
-        cooldownMs,
-        isInCooldown: timeSinceEndMs < cooldownMs
-      });
-
-      if (timeSinceEndMs < cooldownMs) {
-        const remainingMs = cooldownMs - timeSinceEndMs;
-        const minutesRemaining = Math.ceil(remainingMs / 60000);
-
-        return {
-          allowed: false,
-          reason: 'cooldown',
-          message: `Please wait ${minutesRemaining} more minute${minutesRemaining !== 1 ? 's' : ''} before starting a new session.`,
-          cooldown_minutes: limits.cooldown_minutes,
-          minutes_remaining: minutesRemaining
-        };
-      }
-    }
-  }
-
-  return {
-    allowed: true,
-    limits: {
-      max_duration_minutes: limits.max_duration_minutes,
-      max_sessions_per_day: limits.max_sessions_per_day,
-      sessions_today: todaySessionCount
-    }
-  };
-}
+// Session config + limits (getSystemConfig/getSystemPrompt/checkSessionLimits)
+// live in utils/sessionHelpers.ts and are used directly by the route modules.
 
 // SLC timezone helpers (getNextMidnightSLC/getHoursUntilReset/getStartOfTodaySLC)
 // live in utils/timezoneHelpers.ts and are used by the rate-limit route modules.
