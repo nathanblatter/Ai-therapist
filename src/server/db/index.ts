@@ -7,6 +7,7 @@
 export * from './config.queries.js';
 export * from './analytics.queries.js';
 export * from './export.queries.js';
+export * from './rateLimits.queries.js';
 export * from './users.queries.js';
 export * from './contentRetention.queries.js';
 export * from './userSessions.queries.js';

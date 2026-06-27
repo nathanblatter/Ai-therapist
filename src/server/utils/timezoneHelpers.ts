@@ -22,3 +22,11 @@ export function getHoursUntilReset(): number {
   const resetTime = getNextMidnightSLC();
   return (resetTime.getTime() - now.getTime()) / (1000 * 60 * 60); // hours
 }
+
+// Start of the current day in Salt Lake City time, as a Date for created_at
+// comparisons. Used to count "sessions today" for rate limiting.
+export function getStartOfTodaySLC(): Date {
+  const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+  todayStart.setHours(0, 0, 0, 0);
+  return todayStart;
+}

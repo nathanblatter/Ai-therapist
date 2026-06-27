@@ -27,6 +27,8 @@ import redactionRoutes from "./routes/admin/redaction.routes.js";
 import adminConfigRoutes from "./routes/admin/config.routes.js";
 import analyticsRoutes from "./routes/admin/analytics.routes.js";
 import exportRoutes from "./routes/admin/export.routes.js";
+import adminRateLimitsRoutes from "./routes/admin/rateLimits.routes.js";
+import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
 import { getSystemConfig, getSystemPrompt } from "./utils/sessionHelpers.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
@@ -246,19 +248,8 @@ async function checkSessionLimits(userId: number | string | null, userRole: stri
   };
 }
 
-// Helper functions for Salt Lake City timezone calculations
-function getNextMidnightSLC() {
-  const nowSLC = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
-  const nextMidnight = new Date(nowSLC);
-  nextMidnight.setHours(24, 0, 0, 0); // Next midnight SLC time
-  return nextMidnight;
-}
-
-function getHoursUntilReset() {
-  const now = new Date();
-  const resetTime = getNextMidnightSLC();
-  return (resetTime.getTime() - now.getTime()) / (1000 * 60 * 60); // hours
-}
+// SLC timezone helpers (getNextMidnightSLC/getHoursUntilReset/getStartOfTodaySLC)
+// live in utils/timezoneHelpers.ts and are used by the rate-limit route modules.
 
 app.use(express.json()); // Needed to parse JSON bodies
 
@@ -483,57 +474,9 @@ app.use(authRoutes());
 
 // MFA setup/verify/disable + backup codes live in routes/public/mfa.routes.ts.
 app.use(mfaRoutes());
+// Per-user rate-limit status -> routes/public/rateLimits.routes.ts.
+app.use(rateLimitsRoutes());
 
-// GET /api/rate-limits/status - Get current user's rate limit status
-app.get('/api/rate-limits/status', requireAuth, async (req, res) => {
-  try {
-    const userId = req.session.userId;
-    const userRole = req.session.userRole;
-
-    // Check if user is exempt
-    if (userRole === 'researcher') {
-      return res.json({
-        is_rate_limited: false,
-        is_exempt: true,
-        exemption_reason: 'researcher'
-      });
-    }
-
-    const config = await getSystemConfig();
-    const limits = (config.session_limits as SessionLimitsConfig | undefined) ?? ({ enabled: false } as SessionLimitsConfig);
-
-    if (!limits.enabled) {
-      return res.json({ is_rate_limited: false, is_exempt: true, exemption_reason: 'limits_disabled' });
-    }
-
-    // Get today's session count
-    const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
-    todayStart.setHours(0, 0, 0, 0);
-
-    const result = await pool.query(`
-      SELECT COUNT(*) as session_count, MAX(created_at) as last_session_at
-      FROM therapy_sessions
-      WHERE user_id = $1 AND created_at >= $2
-    `, [userId, todayStart]);
-
-    const sessionsToday = parseInt(result.rows[0].session_count);
-    const isRateLimited = sessionsToday >= limits.max_sessions_per_day;
-
-    res.json({
-      is_rate_limited: isRateLimited,
-      sessions_used_today: sessionsToday,
-      session_limit: limits.max_sessions_per_day,
-      limit_resets_at: getNextMidnightSLC().toISOString(),
-      hours_until_reset: getHoursUntilReset(),
-      last_session_at: result.rows[0].last_session_at,
-      is_exempt: false,
-      exemption_reason: null
-    });
-  } catch (err) {
-    console.error('Error fetching rate limit status:', err);
-    res.status(500).json({ error: 'Failed to fetch rate limit status' });
-  }
-});
 
 // ===================== User Management API Routes =====================
 // /api/users + /api/users/preferences live in routes/public/users.routes.ts.
@@ -2124,54 +2067,10 @@ app.use(contentRetentionRoutes());
 
 // User session admin (list/force-logout) -> routes/admin/userSessions.routes.ts.
 app.use(userSessionsRoutes());
+// Admin rate-limited participants roster -> routes/admin/rateLimits.routes.ts.
+app.use(adminRateLimitsRoutes());
 
-// GET /admin/api/rate-limits/users - Get all rate-limited users
-app.get('/admin/api/rate-limits/users', requireRole('therapist', 'researcher'), async (req, res) => {
-  try {
-    const config = await getSystemConfig();
-    const limits = (config.session_limits as SessionLimitsConfig | undefined) ?? { enabled: false } as SessionLimitsConfig;
 
-    if (!limits.enabled) {
-      return res.json({ rateLimitedUsers: [], config: limits });
-    }
-
-    // Get today's start in SLC time
-    const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
-    todayStart.setHours(0, 0, 0, 0);
-
-    const result = await pool.query(`
-      SELECT
-        u.userid,
-        u.username,
-        u.role,
-        COUNT(ts.session_id) AS sessions_today,
-        MAX(ts.created_at) AS last_session_at
-      FROM users u
-      LEFT JOIN therapy_sessions ts ON u.userid = ts.user_id
-        AND ts.created_at >= $1
-      WHERE u.role = 'participant'
-      GROUP BY u.userid, u.username, u.role
-      HAVING COUNT(ts.session_id) >= $2
-      ORDER BY last_session_at DESC
-    `, [todayStart, limits.max_sessions_per_day]);
-
-    const rateLimitedUsers = result.rows.map(row => ({
-      userid: row.userid,
-      username: row.username,
-      role: row.role,
-      sessions_used_today: parseInt(row.sessions_today),
-      session_limit: limits.max_sessions_per_day,
-      limit_resets_at: getNextMidnightSLC().toISOString(),
-      hours_until_reset: getHoursUntilReset(),
-      last_session_at: row.last_session_at
-    }));
-
-    res.json({ rateLimitedUsers, config: limits });
-  } catch (err) {
-    console.error('Error fetching rate-limited users:', err);
-    res.status(500).json({ error: 'Failed to fetch rate-limited users' });
-  }
-});
 
 // Crisis Management API Routes -> routes/admin/crisis.routes.ts
 app.use(crisisRoutes());

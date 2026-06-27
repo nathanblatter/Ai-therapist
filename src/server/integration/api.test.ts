@@ -172,6 +172,18 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('rate-limit routes', () => {
+  it('GET /api/rate-limits/status requires auth (401)', async () => {
+    const res = await request(app).get('/api/rate-limits/status');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /admin/api/rate-limits/users is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/rate-limits/users');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('admin analytics route', () => {
   it('GET /admin/api/analytics is gated (401)', async () => {
     const res = await request(app).get('/admin/api/analytics');
