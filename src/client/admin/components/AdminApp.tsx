@@ -1,20 +1,32 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2, X } from "react-feather";
 import AdminHeader from "./AdminHeader";
-import SessionList from "./SessionList";
-import SessionDetail from "./SessionDetail";
-import Analytics from "./Analytics";
-import ExportPanel from "./ExportPanel";
-import UserManagement from "./UserManagement";
-import LiveMonitoring from "./LiveMonitoring";
-import SystemConfig from "./SystemConfig";
-import SystemPrompts from "./SystemPrompts";
-import RateLimitedUsers from "./RateLimitedUsers";
-import UserSessions from "./UserSessions";
-import CrisisManagement from "./CrisisManagement";
-import MFASetup from "./MFASetup";
-import DataRetention from "./DataRetention";
 import ToastContainer from "../../shared/components/Toast";
+
+// Heavy, independently-navigable views are code-split so the initial admin
+// bundle stays small. They're rendered client-only (see isClient gate below),
+// which keeps SSR (renderToString, no Suspense streaming) safe.
+const SessionList = lazy(() => import("./SessionList"));
+const SessionDetail = lazy(() => import("./SessionDetail"));
+const Analytics = lazy(() => import("./Analytics"));
+const ExportPanel = lazy(() => import("./ExportPanel"));
+const UserManagement = lazy(() => import("./UserManagement"));
+const LiveMonitoring = lazy(() => import("./LiveMonitoring"));
+const SystemConfig = lazy(() => import("./SystemConfig"));
+const SystemPrompts = lazy(() => import("./SystemPrompts"));
+const RateLimitedUsers = lazy(() => import("./RateLimitedUsers"));
+const UserSessions = lazy(() => import("./UserSessions"));
+const CrisisManagement = lazy(() => import("./CrisisManagement"));
+const MFASetup = lazy(() => import("./MFASetup"));
+const DataRetention = lazy(() => import("./DataRetention"));
+
+function ViewLoading() {
+  return (
+    <div className="flex items-center justify-center h-full p-8 text-gray-500" role="status" aria-live="polite">
+      Loading…
+    </div>
+  );
+}
 
 export default function AdminApp() {
   const [currentView, setCurrentView] = useState('sessions');
@@ -138,27 +150,35 @@ export default function AdminApp() {
         </aside>
 
         <div className="flex-1 overflow-auto">
-          {currentView === 'dashboard' && <Analytics />}
-          {currentView === 'sessions' && <SessionList onViewSession={handleViewSession} />}
-          {currentView === 'live' && <LiveMonitoring onViewSession={handleViewSession} />}
-          {currentView === 'crisis' && <CrisisManagement />}
-          {currentView === 'rate-limits' && <RateLimitedUsers />}
-          {currentView === 'mfa' && <MFASetup />}
-          {currentView === 'users' && <UserManagement />}
-          {currentView === 'user-sessions' && <UserSessions />}
-          {currentView === 'prompts' && <SystemPrompts />}
-          {currentView === 'retention' && <DataRetention />}
-          {currentView === 'config' && <SystemConfig />}
-          {currentView === 'export' && <ExportPanel />}
+          {isClient ? (
+            <Suspense fallback={<ViewLoading />}>
+              {currentView === 'dashboard' && <Analytics />}
+              {currentView === 'sessions' && <SessionList onViewSession={handleViewSession} />}
+              {currentView === 'live' && <LiveMonitoring onViewSession={handleViewSession} />}
+              {currentView === 'crisis' && <CrisisManagement />}
+              {currentView === 'rate-limits' && <RateLimitedUsers />}
+              {currentView === 'mfa' && <MFASetup />}
+              {currentView === 'users' && <UserManagement />}
+              {currentView === 'user-sessions' && <UserSessions />}
+              {currentView === 'prompts' && <SystemPrompts />}
+              {currentView === 'retention' && <DataRetention />}
+              {currentView === 'config' && <SystemConfig />}
+              {currentView === 'export' && <ExportPanel />}
+            </Suspense>
+          ) : (
+            <ViewLoading />
+          )}
         </div>
       </main>
 
       {selectedSessionId && (
-        <SessionDetail
-          sessionId={selectedSessionId}
-          onClose={handleCloseSession}
-          isEditMode={isEditMode}
-        />
+        <Suspense fallback={null}>
+          <SessionDetail
+            sessionId={selectedSessionId}
+            onClose={handleCloseSession}
+            isEditMode={isEditMode}
+          />
+        </Suspense>
       )}
 
       {/* Toast Notifications */}
