@@ -124,20 +124,12 @@ export default function chatRoutes(): Router {
       const { sendMessage } = await import('../../services/chatTherapy.service.js');
       const aiResponse = await sendMessage(sessionId, message);
 
-      // Persist both turns; content_redacted is filled in asynchronously.
-      const insertedMessages = await insertMessagesBatch([
+      // Persist both turns; content_redacted is filled in once per session at
+      // session end (see sessionRedaction.service), not per message.
+      await insertMessagesBatch([
         { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
         { session_id: sessionId, role: 'assistant', message_type: 'text', content: aiResponse, content_redacted: null },
       ]);
-
-      const { queueRedactionBatch } = await import('../../services/redactionQueue.service.js');
-      const redactionJobs = insertedMessages.map(msg => ({
-        messageId: msg.message_id,
-        content: msg.content,
-        sessionId: msg.session_id,
-      }));
-      queueRedactionBatch(redactionJobs);
-      console.log(`📋 Queued ${redactionJobs.length} chat messages for async redaction`);
 
       // Live-monitoring events.
       global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
@@ -185,6 +177,11 @@ export default function chatRoutes(): Router {
       endChatSession(sessionId);
 
       const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
+
+      // Redact the whole session in one batched job (fire-and-forget).
+      import('../../services/sessionRedaction.service.js')
+        .then(m => m.redactSession(sessionId))
+        .catch(e => console.error('[Redaction] session redaction failed:', e));
 
       global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedBy: 'user', endedAt: new Date() });
       global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt: new Date() });

@@ -87,15 +87,10 @@ export default function logsRoutes(): Router {
 
       const insertedMessages = await insertMessagesBatch(messages);
 
-      // ========== QUEUE ASYNC REDACTION ==========
-      const { queueRedactionBatch } = await import('../../services/redactionQueue.service.js');
-      const redactionJobs = insertedMessages.map(msg => ({
-        messageId: msg.message_id,
-        content: msg.content,
-        sessionId: msg.session_id,
-      }));
-      queueRedactionBatch(redactionJobs);
-      console.log(`📋 Queued ${redactionJobs.length} messages for async redaction`);
+      // Redaction is no longer per-message — it runs once per session at session
+      // end (see sessionRedaction.service). Messages persist with
+      // content_redacted = NULL until then; live monitoring reads the unredacted
+      // sideband transcript stream instead.
 
       // ========== MULTI-LAYERED CRISIS DETECTION ==========
       const { analyzeMessageRisk, flagSessionCrisis, logInterventionAction } = await import('../../services/crisisDetection.service.js');

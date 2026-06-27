@@ -66,6 +66,11 @@ export default function adminSessionsRoutes(): Router {
         console.error('[Sideband] cleanup on admin session end failed:', e);
       }
 
+      // Redact the whole session in one batched job (fire-and-forget).
+      import('../../services/sessionRedaction.service.js')
+        .then(m => m.redactSession(sessionId))
+        .catch(e => console.error('[Redaction] session redaction failed:', e));
+
       // Notify admin dashboards and the participant's own session room.
       global.io.to('admin-broadcast').emit('session:ended', {
         sessionId,

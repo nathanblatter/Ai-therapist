@@ -43,11 +43,6 @@ interface NewMessagesData {
   messages: Message[];
 }
 
-interface MessageRedactedData {
-  messageId: string;
-  content_redacted: string;
-}
-
 interface SessionStatusData {
   status: string;
 }
@@ -184,14 +179,15 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       }
     };
 
-    const handleMessageRedacted = (data: MessageRedactedData) => {
-      // Update message with redacted content when redaction completes
-      setMessages(prev => prev.map(msg =>
-        msg.message_id === data.messageId
-          ? { ...msg, message: data.content_redacted }
-          : msg
-      ));
-      console.log(`Message ${data.messageId} redaction completed`);
+    // Redaction now runs once per session at session end. When it completes,
+    // refetch so researchers' redacted view picks up the populated content.
+    const handleSessionRedactionComplete = (data: { sessionId: string; count: number }) => {
+      if (data.sessionId !== sessionId) return;
+      console.log(`Session redaction completed (${data.count} messages); refreshing`);
+      fetch(`/admin/api/sessions/${sessionId}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.messages) setMessages(d.messages); })
+        .catch(err => console.error('Failed to refresh after redaction:', err));
     };
 
     const handleSessionStatus = (data: SessionStatusData) => {
@@ -230,7 +226,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     };
 
     socket.on('messages:new', handleNewMessages);
-    socket.on('message:redacted', handleMessageRedacted);
+    socket.on('session:redaction-complete', handleSessionRedactionComplete);
     socket.on('session:status', handleSessionStatus);
     socket.on('sideband:connected', handleSidebandConnected);
     socket.on('sideband:disconnected', handleSidebandDisconnected);
@@ -240,7 +236,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     return () => {
       socket.emit('session:leave', { sessionId });
       socket.off('messages:new', handleNewMessages);
-      socket.off('message:redacted', handleMessageRedacted);
+      socket.off('session:redaction-complete', handleSessionRedactionComplete);
       socket.off('session:status', handleSessionStatus);
       socket.off('sideband:connected', handleSidebandConnected);
       socket.off('sideband:disconnected', handleSidebandDisconnected);

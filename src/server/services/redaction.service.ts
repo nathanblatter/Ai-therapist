@@ -96,3 +96,50 @@ export default async function redactPHI(input: string): Promise<string> {
 
     return secondPass;
 }
+
+// ---- Batched (per-session) redaction ----
+// Redact every message in a session in a single model call instead of one call
+// per message. The model receives a JSON array of strings and must return a
+// JSON array of the same length/order with each element redacted.
+
+const batchInstructions = prompt + `
+
+BATCH MODE: The input is a JSON array of message strings. Apply the redaction rules above INDEPENDENTLY to each element. Return ONLY a JSON array of strings with the EXACT same length and order as the input, where each element is the redacted version of the corresponding input element. Do not merge, split, reorder, add, or drop elements. Output valid JSON only — no markdown fences, no commentary.`;
+
+/** Strip ```json ... ``` fences a model may wrap JSON output in. */
+function stripCodeFences(text: string): string {
+    const t = text.trim();
+    const fenced = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+    return fenced ? fenced[1].trim() : t;
+}
+
+async function redactBatchSinglePass(inputs: string[]): Promise<string[]> {
+    const client = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+    const response = await (client as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<{ output_text: string }> } }).responses.create({
+        model: "gpt-5",
+        reasoning: { effort: "low" },
+        instructions: batchInstructions,
+        input: JSON.stringify(inputs),
+    });
+
+    const parsed = JSON.parse(stripCodeFences(response.output_text)) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== inputs.length) {
+        throw new Error(`Batch redaction returned ${Array.isArray(parsed) ? `${parsed.length} items` : 'a non-array'}, expected ${inputs.length}`);
+    }
+    return parsed.map(x => String(x));
+}
+
+/**
+ * Double-pass redact a batch of messages in two model calls total (regardless of
+ * message count). Returns a map of message id → redacted text.
+ */
+export async function redactPHIBatch(items: Array<{ id: number; content: string | null }>): Promise<Map<number, string>> {
+    const inputs = items.map(i => i.content ?? '');
+    const firstPass = await redactBatchSinglePass(inputs);
+    const secondPass = await redactBatchSinglePass(firstPass);
+
+    const result = new Map<number, string>();
+    items.forEach((item, idx) => result.set(item.id, secondPass[idx]));
+    return result;
+}

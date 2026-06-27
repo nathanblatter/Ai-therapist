@@ -147,6 +147,11 @@ export default function tokenRoutes(): Router {
                   console.error('[Sideband] cleanup on auto-terminate failed:', e);
                 }
 
+                // Redact the whole session in one batched job (fire-and-forget).
+                import('../../services/sessionRedaction.service.js')
+                  .then(m => m.redactSession(sessionId))
+                  .catch(e => console.error('[Redaction] session redaction failed:', e));
+
                 global.io.to(`session:${sessionId}`).emit('session:status', {
                   status: 'ended',
                   endedBy: 'system',
