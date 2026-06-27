@@ -15,6 +15,7 @@ import { requireAuth, requireRole, verifyCredentials, createUser, getAllUsers, g
 import { createSession, getSession, insertMessagesBatch, upsertSessionConfig, updateSessionStatus, getAiModel, type InsertMessageInput } from "./models/dbQueries.js";
 import configRoutes from "./routes/public/config.routes.js";
 import voicesRoutes from "./routes/public/voices.routes.js";
+import authRoutes from "./routes/public/auth.routes.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { getRetentionSettings, updateRetentionSettings, executeContentWipe, getWipeStats, startScheduler as startContentWipeScheduler, getSchedulerStatus } from "./services/contentWipe.service.js";
@@ -610,159 +611,8 @@ const sessionConfig = JSON.stringify({
 
 
 // ===================== Authentication Routes =====================
-
-// Login endpoint
-app.post("/api/auth/login", async (req, res) => {
-  const { username, password, mfaToken, backupCode } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required' });
-  }
-
-  try {
-    const user = await verifyCredentials(username, password);
-
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid username or password' });
-    }
-
-    // Check if MFA is enabled for this user
-    console.log('User MFA enabled?', user.mfa_enabled);
-    console.log('MFA token provided?', !!mfaToken);
-    console.log('Backup code provided?', !!backupCode);
-
-    if (user.mfa_enabled) {
-      // MFA is enabled - verify MFA token or backup code
-      if (!mfaToken && !backupCode) {
-        // First login step - credentials valid, but MFA required
-        console.log('Returning mfaRequired response');
-        return res.json({
-          success: false,
-          mfaRequired: true,
-          userId: user.userid // Pass userId for MFA verification
-        });
-      }
-
-      // Verify MFA token or backup code
-      const { verifyTOTP, verifyBackupCode, updateBackupCodes, updateMFAVerificationTime } = await import('./services/mfa.service.js');
-
-      let mfaValid = false;
-
-      if (mfaToken) {
-        // Verify TOTP token
-        mfaValid = verifyTOTP(mfaToken, user.mfa_secret ?? '');
-      } else if (backupCode) {
-        // Verify backup code
-        const verification = await verifyBackupCode(backupCode, user.mfa_backup_codes ?? []);
-        mfaValid = verification.valid;
-
-        if (mfaValid) {
-          // Remove used backup code
-          await updateBackupCodes(user.userid, verification.remainingCodes);
-          console.log(`Backup code used for user ${user.username}. Remaining codes: ${verification.remainingCodes.length}`);
-        }
-      }
-
-      if (!mfaValid) {
-        return res.status(401).json({ error: 'Invalid MFA token or backup code' });
-      }
-
-      // Update last MFA verification timestamp
-      await updateMFAVerificationTime(user.userid);
-    }
-
-    // Set session (after successful MFA or if MFA not enabled)
-    req.session.userId = user.userid;
-    req.session.username = user.username;
-    req.session.userRole = user.role;
-    req.session.mfaVerified = true; // Mark that MFA was verified (or not required)
-
-    // Explicitly save session to ensure it persists
-    req.session.save((err) => {
-      if (err) {
-        console.error('Session save error:', err);
-      } else {
-        console.log('User logged in and session saved:', {
-          userId: user.userid,
-          username: user.username,
-          role: user.role,
-          mfaVerified: true
-        });
-      }
-    });
-
-    res.json({
-      success: true,
-      user: {
-        userid: user.userid,
-        username: user.username,
-        role: user.role
-      }
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
-  }
-});
-
-// Register endpoint (admin only - can be modified based on requirements)
-app.post("/api/auth/register", requireRole('researcher'), async (req, res) => {
-  const { username, password, role } = req.body;
-
-  if (!username || !password || !role) {
-    return res.status(400).json({ error: 'Username, password, and role are required' });
-  }
-
-  if (!['therapist', 'researcher', 'participant'].includes(role)) {
-    return res.status(400).json({ error: 'Invalid role' });
-  }
-
-  try {
-    const user = await createUser(username, password, role);
-
-    res.json({
-      success: true,
-      user: {
-        userid: user.userid,
-        username: user.username,
-        role: user.role
-      }
-    });
-  } catch (error: unknown) {
-    if (error instanceof Error && error.message === 'Username already exists') {
-      return res.status(409).json({ error: 'Username already exists' });
-    }
-    console.error('Registration error:', error);
-    res.status(500).json({ error: 'Registration failed' });
-  }
-});
-
-// Logout endpoint
-app.post("/api/auth/logout", (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      console.error('Logout error:', err);
-      return res.status(500).json({ error: 'Logout failed' });
-    }
-    res.json({ success: true });
-  });
-});
-
-// Check auth status
-app.get("/api/auth/status", (req, res) => {
-  if (req.session?.userId) {
-    res.json({
-      authenticated: true,
-      user: {
-        userid: req.session.userId,
-        username: req.session.username,
-        role: req.session.userRole
-      }
-    });
-  } else {
-    res.json({ authenticated: false });
-  }
-});
+// Login, register, logout, status live in routes/public/auth.routes.ts.
+app.use(authRoutes());
 
 // ===================== MFA (Multi-Factor Authentication) Routes =====================
 

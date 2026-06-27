@@ -102,6 +102,32 @@ describe('auth / role gating', () => {
   });
 });
 
+describe('auth routes', () => {
+  it('GET /api/auth/status reports unauthenticated without a session', async () => {
+    const res = await request(app).get('/api/auth/status');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ authenticated: false });
+  });
+
+  it('POST /api/auth/login requires username and password', async () => {
+    const res = await request(app).post('/api/auth/login').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/auth/register is researcher-gated (401 without a session)', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ username: 'x', password: 'y', role: 'participant' });
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/auth/logout succeeds', async () => {
+    const res = await request(app).post('/api/auth/logout');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+  });
+});
+
 describe('app wiring', () => {
   it('unknown API routes 404 (no rogue catch-all in API scope)', async () => {
     const res = await request(app).get('/api/this-route-does-not-exist');
