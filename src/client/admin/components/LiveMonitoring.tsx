@@ -174,23 +174,39 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   }, [socket]);
 
   // Feed incoming audio chunks to the player (ref guards against stale closure).
+  const audioChunkCountRef = useRef(0);
   const handleAudioChunk = (data: { sessionId: string; pcm: string; sampleRate: number }) => {
     if (data.sessionId !== listeningSessionIdRef.current) return;
+    if (audioChunkCountRef.current++ % 50 === 0) {
+      console.log(`[Audio] received chunk #${audioChunkCountRef.current} (${data.pcm.length}b @ ${data.sampleRate}Hz)`);
+    }
     audioPlayerRef.current?.push(data.pcm, data.sampleRate);
   };
 
   const startListening = (sessionId: string) => {
-    if (!socket) return;
+    if (!socket) {
+      toast.error('No socket connection');
+      return;
+    }
     // Switch sources if already listening to a different session.
     if (listeningSessionIdRef.current && listeningSessionIdRef.current !== sessionId) {
       stopListening();
     }
-    const player = new AudioStreamPlayer();
-    player.start(); // must run in the click handler (user gesture) to allow audio
-    audioPlayerRef.current = player;
+    // Emit first so the request always reaches the server even if audio setup
+    // throws; the participant won't tee until this arrives.
+    console.log('[Audio] requesting listen for', sessionId);
+    socket.emit('admin:audio-listen-start', { sessionId });
     listeningSessionIdRef.current = sessionId;
     setListeningSessionId(sessionId);
-    socket.emit('admin:audio-listen-start', { sessionId });
+    try {
+      const player = new AudioStreamPlayer();
+      player.start(); // must run in the click handler (user gesture)
+      audioPlayerRef.current = player;
+      toast.info('Listening for assistant audio…');
+    } catch (err) {
+      console.error('[Audio] failed to start player:', err);
+      toast.error('Audio playback unavailable in this browser');
+    }
   };
 
   const stopListening = () => {
