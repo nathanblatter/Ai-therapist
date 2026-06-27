@@ -5,7 +5,6 @@ import { asyncHandler } from '../../utils/asyncHandler.js';
 import { createLogger } from '../../utils/logger.js';
 import { updateSessionStatus, getSession, deleteSession, updateMessage, deleteMessage } from '../../models/dbQueries.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
-import { handleSessionEndRoomCleanup } from './rooms.routes.js';
 
 const log = createLogger('admin:sessions');
 
@@ -69,9 +68,6 @@ export default function adminSessionsRoutes() {
 
     // Update session status
     const updatedSession = await updateSessionStatus(sessionId, 'ended', adminUsername);
-
-    // Clean up room assignments
-    await handleSessionEndRoomCleanup(sessionId);
 
     // Emit socket events
     io.to('admin-broadcast').emit('session:ended', {

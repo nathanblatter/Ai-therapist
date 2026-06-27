@@ -177,9 +177,6 @@ export default function sessionsRoutes() {
               const { updateSessionStatus } = await import("../models/dbQueries.js");
               await updateSessionStatus(sessionId, 'ended', 'system');
 
-              const { handleSessionEndRoomCleanup } = await import('./admin/rooms.routes.js');
-              await handleSessionEndRoomCleanup(sessionId);
-
               io.to(`session:${sessionId}`).emit('session:status', {
                 status: 'ended',
                 endedBy: 'system',
@@ -397,9 +394,6 @@ export default function sessionsRoutes() {
 
     const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 
-    const { handleSessionEndRoomCleanup } = await import('./admin/rooms.routes.js');
-    await handleSessionEndRoomCleanup(sessionId);
-
     io.to('admin-broadcast').emit('session:ended', {
       sessionId, endedBy: 'user', endedAt: new Date()
     });
@@ -472,9 +466,6 @@ export default function sessionsRoutes() {
     }
 
     const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
-
-    const { handleSessionEndRoomCleanup } = await import('./admin/rooms.routes.js');
-    await handleSessionEndRoomCleanup(sessionId);
 
     io.to('admin-broadcast').emit('session:ended', {
       sessionId, endedAt: new Date(), endedBy: 'user'

@@ -3,7 +3,6 @@ import type { Socket } from 'socket.io-client';
 import { Activity, Users, MessageSquare, AlertTriangle, X, Radio } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../../shared/components/Toast';
-import RoomAssignment from './RoomAssignment';
 
 // ---- Local types ----
 
@@ -943,8 +942,6 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
         </div>
       )}
 
-      {/* Room Assignment Diagram */}
-      <RoomAssignment />
     </div>
   );
 }
