@@ -622,24 +622,40 @@ export default function App() {
     };
     await pc.setRemoteDescription(answer);
 
-    // Hand the call_id to the server so it can open its sideband WebSocket.
+    // Hand the call_id to the server so it can open its sideband WebSocket — but
+    // only once the WebRTC call is actually CONNECTED. Registering right after
+    // setRemoteDescription races OpenAI: the session for the call_id doesn't
+    // exist until negotiation finishes, which yields a 404 call_id_not_found.
     // Non-fatal: the voice session continues even if this fails.
     if (callId && newSessionId) {
-      try {
-        const registerResponse = await fetch(`/api/sessions/${newSessionId}/register-call`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ call_id: callId })
-        });
+      let registered = false;
+      const registerSideband = async () => {
+        if (registered) return;
+        registered = true;
+        try {
+          const registerResponse = await fetch(`/api/sessions/${newSessionId}/register-call`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ call_id: callId })
+          });
 
-        if (registerResponse.ok) {
-          console.log(`[Sideband] Registered call_id with server for session ${newSessionId}`);
-        } else {
-          const errorText = await registerResponse.text();
-          console.warn('[Sideband] Failed to register call_id with server:', errorText);
+          if (registerResponse.ok) {
+            console.log(`[Sideband] Registered call_id with server for session ${newSessionId}`);
+          } else {
+            const errorText = await registerResponse.text();
+            console.warn('[Sideband] Failed to register call_id with server:', errorText);
+          }
+        } catch (error) {
+          console.error('[Sideband] Error registering call_id:', error);
         }
-      } catch (error) {
-        console.error('[Sideband] Error registering call_id:', error);
+      };
+
+      if (pc.connectionState === 'connected') {
+        registerSideband();
+      } else {
+        pc.addEventListener('connectionstatechange', () => {
+          if (pc.connectionState === 'connected') registerSideband();
+        });
       }
     }
 

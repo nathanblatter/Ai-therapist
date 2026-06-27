@@ -28,7 +28,7 @@ export class SidebandManager {
    * @param {string} apiKey - OpenAI API key
    * @returns {Promise<WebSocket>} - The WebSocket connection
    */
-  async connect(sessionId: string, callId: string, apiKey: string): Promise<WebSocket> {
+  async connect(sessionId: string, callId: string, apiKey: string, attempt = 0): Promise<WebSocket> {
     // Check if already connected
     if (this.connections.has(sessionId)) {
       console.warn(`[Sideband] Already connected for session ${sessionId.substring(0, 12)}...`);
@@ -36,8 +36,7 @@ export class SidebandManager {
     }
 
     const wsUrl = `wss://api.openai.com/v1/realtime?call_id=${callId}`;
-    console.log(`[Sideband] Connecting to ${wsUrl}`);
-    console.log(`[Sideband] Using call_id: ${callId}`);
+    console.log(`[Sideband] Attaching to ${wsUrl} (attempt ${attempt + 1})`);
 
     try {
       const ws = new WebSocket(wsUrl, {
@@ -63,6 +62,20 @@ export class SidebandManager {
           const detail = `Sideband upgrade rejected: HTTP ${res.statusCode} for call_id=${callId} — ${body || '(empty body)'}`;
           console.error(`[Sideband] ${detail}`);
           this.connections.delete(sessionId);
+
+          // A 404 call_id_not_found right after the call starts usually means the
+          // Realtime session isn't registered yet (the WebRTC connection is still
+          // finishing negotiation). Retry a few times before giving up.
+          const callNotReady = res.statusCode === 404 && body.includes('call_id_not_found');
+          if (callNotReady && attempt < this.maxReconnectAttempts) {
+            const delay = this.reconnectDelayMs * (attempt + 1);
+            console.log(`[Sideband] call_id not registered yet; retrying attach in ${delay}ms (attempt ${attempt + 2}/${this.maxReconnectAttempts + 1})`);
+            setTimeout(() => {
+              this.connect(sessionId, callId, apiKey, attempt + 1).catch(() => {});
+            }, delay);
+            return;
+          }
+
           this.logConnectionError(sessionId, new Error(detail)).catch(() => {});
           if (global.io) {
             global.io.to('admin-broadcast').emit('sideband:error', {
@@ -77,7 +90,7 @@ export class SidebandManager {
       this.connections.set(sessionId, ws);
       this.reconnectAttempts.set(sessionId, 0);
 
-      console.log(`[Sideband] Connected for session ${sessionId.substring(0, 12)}...`);
+      console.log(`[Sideband] Socket opened for session ${sessionId.substring(0, 12)}... (awaiting upgrade)`);
       return ws;
 
     } catch (error) {
