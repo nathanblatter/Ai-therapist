@@ -1,28 +1,7 @@
 // Public (bot-facing) configuration endpoints. No auth required.
 import { Router } from 'express';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
-import { getAiModel } from '../../db/index.js';
-
-interface VoiceOption {
-  value: string;
-  label: string;
-  description: string;
-  enabled: boolean;
-}
-interface VoicesConfig {
-  voices?: VoiceOption[];
-  default_voice?: string;
-}
-interface LanguageOption {
-  value: string;
-  label: string;
-  description: string;
-  enabled: boolean;
-}
-interface LanguagesConfig {
-  languages?: LanguageOption[];
-  default_language?: string;
-}
+import { getAiModel, type VoicesConfig, type LanguagesConfig } from '../../db/index.js';
 
 export default function configRoutes(): Router {
   const router = Router();

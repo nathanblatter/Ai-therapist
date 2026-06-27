@@ -5,4 +5,5 @@
 // during the migration and will be split into domain modules slice by slice
 // until it can be removed.
 export * from './config.queries.js';
+export * from './users.queries.js';
 export * from '../models/dbQueries.js';

@@ -140,6 +140,23 @@ describe('mfa routes', () => {
   });
 });
 
+describe('users routes', () => {
+  it('GET /api/users is researcher-gated (401 without a session)', async () => {
+    const res = await request(app).get('/api/users');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /api/users/preferences requires auth (401)', async () => {
+    const res = await request(app).get('/api/users/preferences');
+    expect(res.status).toBe(401);
+  });
+
+  it('PUT /api/users/preferences requires auth (401)', async () => {
+    const res = await request(app).put('/api/users/preferences').send({ voice: 'cedar', language: 'en' });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('app wiring', () => {
   it('unknown API routes 404 (no rogue catch-all in API scope)', async () => {
     const res = await request(app).get('/api/this-route-does-not-exist');

@@ -7,6 +7,28 @@ interface SystemConfigRow {
   config_value: unknown;
 }
 
+// Shape of the voices/languages config blobs, shared by the routes that read them.
+export interface VoiceOption {
+  value: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+export interface VoicesConfig {
+  voices?: VoiceOption[];
+  default_voice?: string;
+}
+export interface LanguageOption {
+  value: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+export interface LanguagesConfig {
+  languages?: LanguageOption[];
+  default_language?: string;
+}
+
 /** Fetch every row from the system_config key/value table. */
 export async function fetchSystemConfigRows(): Promise<SystemConfigRow[]> {
   const result = await pool.query<SystemConfigRow>(
