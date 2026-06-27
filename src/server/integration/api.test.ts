@@ -172,6 +172,38 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('admin sessions + messages routes', () => {
+  it('GET /admin/api/sessions/active is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/sessions/active');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /admin/api/sessions is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/sessions');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /admin/api/sessions/:id is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/sessions/abc');
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /admin/api/sessions/:id/end is gated (401)', async () => {
+    const res = await request(app).post('/admin/api/sessions/abc/end');
+    expect(res.status).toBe(401);
+  });
+
+  it('PUT /admin/api/messages/:id is gated (401)', async () => {
+    const res = await request(app).put('/admin/api/messages/1').send({ content: 'x' });
+    expect(res.status).toBe(401);
+  });
+
+  it('DELETE /admin/api/messages/:id is gated (401)', async () => {
+    const res = await request(app).delete('/admin/api/messages/1');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('rate-limit routes', () => {
   it('GET /api/rate-limits/status requires auth (401)', async () => {
     const res = await request(app).get('/api/rate-limits/status');
