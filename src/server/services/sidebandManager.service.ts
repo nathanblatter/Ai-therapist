@@ -6,17 +6,20 @@
 import WebSocket from 'ws';
 import { pool } from '../config/db.js';
 import { insertMessagesBatch } from '../db/index.js';
-import { getOpenAIKey } from '../config/secrets.js';
 
 export class SidebandManager {
   private connections: Map<string, WebSocket>;
   private reconnectAttempts: Map<string, number>;
+  // Per-session ephemeral key used to authenticate the sideband WS. Stored so
+  // reconnects reuse it (the standard API key returns 404 call_id_not_found).
+  private sessionKeys: Map<string, string>;
   private maxReconnectAttempts: number;
   private reconnectDelayMs: number;
 
   constructor() {
     this.connections = new Map(); // sessionId → WebSocket
     this.reconnectAttempts = new Map(); // sessionId → attempt count
+    this.sessionKeys = new Map(); // sessionId → ephemeral key
     this.maxReconnectAttempts = 3;
     this.reconnectDelayMs = 2000;
   }
@@ -89,6 +92,7 @@ export class SidebandManager {
 
       this.connections.set(sessionId, ws);
       this.reconnectAttempts.set(sessionId, 0);
+      this.sessionKeys.set(sessionId, apiKey);
 
       console.log(`[Sideband] Socket opened for session ${sessionId.substring(0, 12)}... (awaiting upgrade)`);
       return ws;
@@ -405,12 +409,14 @@ export class SidebandManager {
                 [sessionId]
               );
               const callId = callIdResult.rows[0]?.openai_call_id as string | undefined;
-              if (callId) {
-                // Get API key from AWS Secrets Manager
-                const apiKey = await getOpenAIKey();
-                if (apiKey) {
-                  await this.connect(sessionId, callId, apiKey);
-                }
+              // Reuse the ephemeral key that created the call (the standard key
+              // returns 404). Note: ephemeral keys are short-lived, so a late
+              // reconnect may legitimately fail once it has expired.
+              const apiKey = this.sessionKeys.get(sessionId);
+              if (callId && apiKey) {
+                await this.connect(sessionId, callId, apiKey);
+              } else if (!apiKey) {
+                console.warn(`[Sideband] No stored ephemeral key for ${sessionId}; cannot reconnect.`);
               }
             } catch (error: unknown) {
               console.error('[Sideband] Reconnection failed:', error);
@@ -435,8 +441,9 @@ export class SidebandManager {
       console.log(`[Sideband] Disconnecting session ${sessionId.substring(0, 12)}...`);
       ws.close(1000, 'Session ended');
       this.connections.delete(sessionId);
-      this.reconnectAttempts.delete(sessionId);
     }
+    this.reconnectAttempts.delete(sessionId);
+    this.sessionKeys.delete(sessionId);
   }
 
   /**
@@ -501,6 +508,7 @@ export class SidebandManager {
       ws.close(1000, 'Server shutdown');
       this.connections.delete(sessionId);
       this.reconnectAttempts.delete(sessionId);
+      this.sessionKeys.delete(sessionId);
     }
     console.log('[Sideband] All connections closed');
   }

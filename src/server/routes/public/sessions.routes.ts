@@ -22,7 +22,7 @@ export default function sessionsRoutes(): Router {
   // POST /api/sessions/:sessionId/register-call - attach an OpenAI call id
   router.post('/api/sessions/:sessionId/register-call', async (req, res) => {
     const { sessionId } = req.params;
-    const { call_id } = req.body;
+    const { call_id, ephemeral_key } = req.body;
 
     if (!call_id) {
       return res.status(400).json({ error: 'call_id is required' });
@@ -45,17 +45,18 @@ export default function sessionsRoutes(): Router {
       // attach (errors are logged to the session via sidebandManager).
       // Kill switch: set SIDEBAND_ENABLED=false to stop attaching without a redeploy.
       const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
-      const { getOpenAIKey } = await import('../../config/secrets.js');
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
-      const apiKey = sidebandEnabled ? await getOpenAIKey() : null;
+      // IMPORTANT: the sideband WS must use the EPHEMERAL key that created the
+      // WebRTC call, not the standard API key — the standard key returns 404
+      // call_id_not_found (confirmed OpenAI behaviour, contra their docs).
       if (!sidebandEnabled) {
         console.log('[Sideband] Disabled via SIDEBAND_ENABLED=false; call_id recorded only.');
-      } else if (apiKey) {
-        sidebandManager.connect(sessionId, call_id, apiKey).catch(err => {
+      } else if (typeof ephemeral_key === 'string' && ephemeral_key) {
+        sidebandManager.connect(sessionId, call_id, ephemeral_key).catch(err => {
           console.warn(`[Sideband] connect() failed for ${sessionId}:`, err instanceof Error ? err.message : err);
         });
       } else {
-        console.warn('[Sideband] No OpenAI API key available; skipping sideband attach.');
+        console.warn('[Sideband] No ephemeral key provided; skipping sideband attach.');
       }
 
       res.json({ success: true, message: 'Call registered', sessionId, call_id });
