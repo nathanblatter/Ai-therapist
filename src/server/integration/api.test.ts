@@ -172,6 +172,23 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('admin sideband routes', () => {
+  it('GET /admin/api/sideband/status is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/sideband/status');
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /admin/api/sideband/disconnect is gated (401)', async () => {
+    const res = await request(app).post('/admin/api/sideband/disconnect').send({ sessionId: 'x' });
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /admin/api/sessions/:id/update-instructions is gated (401)', async () => {
+    const res = await request(app).post('/admin/api/sessions/x/update-instructions').send({ instructions: 'hi' });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('admin sessions + messages routes', () => {
   it('GET /admin/api/sessions/active is gated (401)', async () => {
     const res = await request(app).get('/admin/api/sessions/active');
