@@ -26,3 +26,21 @@ export async function updateUserPreferences(
     [voice, language, userId]
   );
 }
+
+/** A user's stored language preference (null if user/row absent or unset). */
+export async function getUserPreferredLanguage(userId: number | string): Promise<string | null> {
+  const result = await pool.query<{ preferred_language: string | null }>(
+    'SELECT preferred_language FROM users WHERE userid = $1',
+    [userId]
+  );
+  if (result.rows.length === 0) return null;
+  return result.rows[0].preferred_language;
+}
+
+/** Persist just the language preference (used by the chat-start flow). */
+export async function setUserPreferredLanguage(userId: number | string, language: string): Promise<void> {
+  await pool.query(
+    'UPDATE users SET preferred_language = $1 WHERE userid = $2',
+    [language, userId]
+  );
+}

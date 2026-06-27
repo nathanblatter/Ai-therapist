@@ -172,6 +172,18 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('chat routes', () => {
+  it('POST /api/chat/message requires sessionId and message (400)', async () => {
+    const res = await request(app).post('/api/chat/message').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/chat/end requires sessionId (400)', async () => {
+    const res = await request(app).post('/api/chat/end').send({});
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('admin sideband routes', () => {
   it('GET /admin/api/sideband/status is gated (401)', async () => {
     const res = await request(app).get('/admin/api/sideband/status');
