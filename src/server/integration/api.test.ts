@@ -128,6 +128,18 @@ describe('auth routes', () => {
   });
 });
 
+describe('mfa routes', () => {
+  it('GET /api/mfa/status requires auth (401)', async () => {
+    const res = await request(app).get('/api/mfa/status');
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/mfa/disable requires auth (401)', async () => {
+    const res = await request(app).post('/api/mfa/disable').send({ password: 'x' });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('app wiring', () => {
   it('unknown API routes 404 (no rogue catch-all in API scope)', async () => {
     const res = await request(app).get('/api/this-route-does-not-exist');
