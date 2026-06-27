@@ -157,6 +157,21 @@ describe('users routes', () => {
   });
 });
 
+describe('health + bug-report', () => {
+  it('GET /health returns ok with uptime', async () => {
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(typeof res.body.uptime).toBe('number');
+  });
+
+  it('POST /api/bug-report requires a message (or reports not configured)', async () => {
+    // Without FLIGHTDECK_INGEST_KEY the route returns 503; with it, empty body -> 400.
+    const res = await request(app).post('/api/bug-report').send({});
+    expect([400, 503]).toContain(res.status);
+  });
+});
+
 describe('app wiring', () => {
   it('unknown API routes 404 (no rogue catch-all in API scope)', async () => {
     const res = await request(app).get('/api/this-route-does-not-exist');
