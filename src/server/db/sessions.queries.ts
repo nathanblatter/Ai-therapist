@@ -17,3 +17,11 @@ export async function getSessionAccessInfo(sessionId: string): Promise<SessionAc
   );
   return result.rows[0] ?? null;
 }
+
+/** Attach the OpenAI realtime call id to a session (used by register-call). */
+export async function setSessionCallId(sessionId: string, callId: string): Promise<void> {
+  await pool.query(
+    'UPDATE therapy_sessions SET openai_call_id = $1 WHERE session_id = $2',
+    [callId, sessionId]
+  );
+}

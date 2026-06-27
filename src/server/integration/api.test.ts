@@ -172,6 +172,18 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('session management routes', () => {
+  it('GET /api/sessions requires auth (401)', async () => {
+    const res = await request(app).get('/api/sessions');
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/sessions/:id/register-call requires call_id (400)', async () => {
+    const res = await request(app).post('/api/sessions/abc/register-call').send({});
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('chat routes', () => {
   it('POST /api/chat/message requires sessionId and message (400)', async () => {
     const res = await request(app).post('/api/chat/message').send({});

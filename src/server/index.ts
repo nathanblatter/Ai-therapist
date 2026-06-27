@@ -32,6 +32,7 @@ import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
 import adminSessionsRoutes from "./routes/admin/sessions.routes.js";
 import sidebandRoutes from "./routes/admin/sideband.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
+import sessionsRoutes from "./routes/public/sessions.routes.js";
 import { getSystemConfig, getSystemPrompt } from "./utils/sessionHelpers.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
@@ -759,67 +760,6 @@ app.all("/token", async (req, res) => {
 app.use(chatRoutes());
 
 
-// ===================== Sideband WebSocket Control Endpoints =====================
-
-// POST /api/sessions/:sessionId/register-call - Register call_id and establish sideband connection
-app.post("/api/sessions/:sessionId/register-call", async (req, res) => {
-  const { sessionId } = req.params;
-  const { call_id } = req.body;
-
-  if (!call_id) {
-    return res.status(400).json({ error: 'call_id is required' });
-  }
-
-  try {
-    // Verify session exists and is active
-    const sessionCheck = await pool.query(
-      'SELECT status FROM therapy_sessions WHERE session_id = $1',
-      [sessionId]
-    );
-
-    if (sessionCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-
-    if (sessionCheck.rows[0].status !== 'active') {
-      return res.status(400).json({ error: 'Session is not active' });
-    }
-
-    // Update session with call_id
-    await pool.query(
-      'UPDATE therapy_sessions SET openai_call_id = $1 WHERE session_id = $2',
-      [call_id, sessionId]
-    );
-
-    // TODO: Sideband connection - disabled (OpenAI returns 404 for WebRTC sessions)
-    // Re-enable when properly researched and implemented
-    /*
-    const { sidebandManager } = await import('./services/sidebandManager.service.js');
-    const apiKey = await getOpenAIKey();
-
-    // Try to connect, but don't wait for it or fail if it errors
-    sidebandManager.connect(sessionId, call_id, apiKey).catch(err => {
-      console.warn(`[Sideband] Failed to establish connection (feature may not be available): ${err.message}`);
-    });
-
-    console.log(`Sideband connection attempt initiated for session ${sessionId.substring(0, 12)}...`);
-    */
-
-    res.json({
-      success: true,
-      message: 'Call registered',
-      sessionId,
-      call_id
-    });
-
-  } catch (error: unknown) {
-    console.error('Failed to establish sideband connection:', error);
-    res.status(500).json({
-      error: 'Failed to establish sideband connection',
-      details: error instanceof Error ? error.message : String(error)
-    });
-  }
-});
 
 // Admin sideband control (status / live instruction updates) -> routes/admin/sideband.routes.ts.
 app.use(sidebandRoutes());
@@ -847,122 +787,10 @@ app.use(sidebandRoutes());
 // });
 
 // ===================== Session Management API Routes =====================
+// Public session create/list/view/end + register-call -> routes/public/sessions.routes.ts.
+app.use(sessionsRoutes());
 
-// POST /api/sessions/create - Create a new therapy session
-app.post("/api/sessions/create", async (req, res) => {
-  try {
-    const userId = req.session?.userId || null; // Use logged-in user if available
-    const { sessionName } = req.body;
 
-    const session = await createSession(userId, sessionName);
-    res.json(session);
-  } catch (err) {
-    console.error("Failed to create session:", err);
-    res.status(500).json({ error: "Failed to create session" });
-  }
-});
-
-// GET /api/sessions - List user's sessions (requires auth)
-app.get("/api/sessions", requireAuth, async (req, res) => {
-  try {
-    const { getUserSessions } = await import("./models/dbQueries.js");
-    const sessions = await getUserSessions(req.session.userId!);
-    res.json(sessions);
-  } catch (err) {
-    console.error("Failed to fetch sessions:", err);
-    res.status(500).json({ error: "Failed to fetch sessions" });
-  }
-});
-
-// GET /api/sessions/:sessionId - Get session details
-app.get("/api/sessions/:sessionId", async (req, res) => {
-  try {
-    const { getSession, getSessionMessages, getSessionConfig } = await import("./models/dbQueries.js");
-    const { sessionId } = req.params;
-    const session = await getSession(sessionId);
-
-    if (!session) {
-      return res.status(404).json({ error: "Session not found" });
-    }
-
-    // Check if user has access to this session
-    if (session.user_id && session.user_id !== req.session?.userId) {
-      return res.status(403).json({ error: "Access denied" });
-    }
-
-    // Users can see their own unredacted content
-    const messages = await getSessionMessages(sessionId, false); // Unredacted for session owners
-    const config = await getSessionConfig(sessionId);
-
-    res.json({
-      session,
-      messages,
-      config
-    });
-  } catch (err) {
-    console.error("Failed to fetch session details:", err);
-    res.status(500).json({ error: "Failed to fetch session details" });
-  }
-});
-
-// POST /api/sessions/:sessionId/end - End a session (triggers auto-naming)
-app.post("/api/sessions/:sessionId/end", async (req, res) => {
-  try {
-    const { updateSessionStatus } = await import("./models/dbQueries.js");
-    const { sessionId } = req.params;
-
-    const session = await getSession(sessionId);
-    if (!session) {
-      return res.status(404).json({ error: "Session not found" });
-    }
-
-    // Check if user has access to this session
-    if (session.user_id && session.user_id !== req.session?.userId) {
-      return res.status(403).json({ error: "Access denied" });
-    }
-
-    // IDEMPOTENCY CHECK: If already ended, return existing session
-    if (session.status === 'ended') {
-      console.log(`Session ${sessionId} already ended, returning existing data (idempotent)`);
-      return res.status(200).json({
-        ...session,
-        alreadyEnded: true,
-        message: "Session was already ended"
-      });
-    }
-
-    // Session is active - proceed with ending it (ended by user)
-    // TODO: Sideband disconnect - currently disabled
-    /*
-    const { sidebandManager } = await import('./services/sidebandManager.service.js');
-    await sidebandManager.disconnect(sessionId);
-    */
-
-    const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
-
-    // Emit session ended events to Socket.io
-    global.io.to('admin-broadcast').emit('session:ended', {
-      sessionId,
-      endedAt: new Date(),
-      endedBy: 'user'
-    });
-    global.io.to(`session:${sessionId}`).emit('session:status', {
-      status: 'ended',
-      endedBy: 'user'
-    });
-
-    // Trigger auto-naming in the background ONLY if we just ended the session
-    generateSessionNameAsync(sessionId);
-
-    res.json({
-      ...updatedSession,
-      message: "Session ended successfully"
-    });
-  } catch (err) {
-    console.error("Failed to end session:", err);
-    res.status(500).json({ error: "Failed to end session" });
-  }
-});
 
 // ===================== Logs batch route with redaction =====================
 app.post("/logs/batch", async (req, res) => {
