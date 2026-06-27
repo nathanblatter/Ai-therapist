@@ -242,6 +242,13 @@ export class SidebandManager {
         }
       }]);
 
+      // Surface the tool call to the admin live-monitoring UI.
+      if (global.io) {
+        global.io.to('admin-broadcast').emit('sideband:tool-call', {
+          sessionId, callId: call_id, toolName, args, status: 'executing', timestamp: new Date(),
+        });
+      }
+
       // Execute tool via registry
       const { toolRegistry } = await import('./toolRegistry.service.js');
       const result = await toolRegistry.executeTool(toolName, args);
@@ -279,6 +286,13 @@ export class SidebandManager {
           status: 'completed'
         }
       }]);
+
+      // Surface the result to the admin live-monitoring UI.
+      if (global.io) {
+        global.io.to('admin-broadcast').emit('sideband:tool-call', {
+          sessionId, callId: call_id, toolName, args, result, status: 'completed', timestamp: new Date(),
+        });
+      }
 
       console.log(`[Sideband] Tool ${toolName} executed for session ${sessionId.substring(0, 12)}...`);
 
@@ -323,6 +337,13 @@ export class SidebandManager {
           status: 'failed'
         }
       }]);
+
+      // Surface the failure to the admin live-monitoring UI.
+      if (global.io) {
+        global.io.to('admin-broadcast').emit('sideband:tool-call', {
+          sessionId, callId: call_id, toolName, error: errorMessage, status: 'failed', timestamp: new Date(),
+        });
+      }
     }
   }
 

@@ -109,6 +109,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     socket.on('sideband:disconnected', handleSidebandDisconnected);
     socket.on('sideband:status-update', handleSidebandStatusUpdate);
     socket.on('sideband:error', handleSidebandError);
+    socket.on('sideband:tool-call', handleSidebandToolCall);
     socket.on('session:openai-update', handleOpenAIUpdate);
     socket.on('admin:sideband-connections', handleSidebandConnectionsList);
 
@@ -123,6 +124,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       socket.off('sideband:disconnected', handleSidebandDisconnected);
       socket.off('sideband:status-update', handleSidebandStatusUpdate);
       socket.off('sideband:error', handleSidebandError);
+      socket.off('sideband:tool-call', handleSidebandToolCall);
       socket.off('session:openai-update', handleOpenAIUpdate);
       socket.off('admin:sideband-connections', handleSidebandConnectionsList);
     };
@@ -330,6 +332,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           timestamp: new Date(),
           data: data.data
         }
+      ].slice(-50)
+    }));
+  };
+
+  const handleSidebandToolCall = (data: { sessionId: string; toolName: string; status: string; args?: unknown; result?: unknown; error?: string; callId?: string }) => {
+    console.log('[LiveMonitoring] Sideband tool call:', data);
+    setSidebandEvents(prev => ({
+      ...prev,
+      [data.sessionId]: [
+        ...(prev[data.sessionId] || []),
+        { type: 'tool_call', timestamp: new Date(), data }
       ].slice(-50)
     }));
   };
@@ -856,7 +869,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
 
                   <div className="mb-2">
                     <h5 className="font-medium text-gray-700 text-sm mb-2">
-                      OpenAI Events ({selectedSidebandEvents.length})
+                      Events &amp; Tool Calls ({selectedSidebandEvents.length})
                     </h5>
                   </div>
 
@@ -865,26 +878,54 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       <p className="text-gray-500 text-sm italic">No events yet</p>
                     ) : (
                       <div className="space-y-2">
-                        {selectedSidebandEvents.map((event, idx) => (
-                          <div
-                            key={idx}
-                            className={`p-2 rounded text-xs ${
-                              event.type === 'error'
-                                ? 'bg-yellow-50 border-l-2 border-yellow-500'
-                                : 'bg-white border-l-2 border-blue-500'
-                            }`}
-                          >
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="font-semibold text-gray-900">{event.type}</span>
-                              <span className="text-gray-500">
-                                {new Date(event.timestamp).toLocaleTimeString()}
-                              </span>
+                        {selectedSidebandEvents.map((event, idx) => {
+                          if (event.type === 'tool_call') {
+                            const td = event.data as { toolName?: string; status?: string; args?: unknown; result?: unknown; error?: string };
+                            const status = td.status || 'executing';
+                            const style = status === 'completed'
+                              ? 'bg-green-50 border-green-500'
+                              : status === 'failed'
+                                ? 'bg-red-50 border-red-500'
+                                : 'bg-purple-50 border-purple-500';
+                            return (
+                              <div key={idx} className={`p-2 rounded text-xs border-l-2 ${style}`}>
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="font-semibold text-gray-900">🔧 {td.toolName} · {status}</span>
+                                  <span className="text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
+                                </div>
+                                {td.args !== undefined && (
+                                  <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">args: {JSON.stringify(td.args, null, 2)}</pre>
+                                )}
+                                {td.result !== undefined && (
+                                  <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">result: {JSON.stringify(td.result, null, 2)}</pre>
+                                )}
+                                {td.error && (
+                                  <pre className="text-xs text-red-700 overflow-x-auto whitespace-pre-wrap break-words">error: {td.error}</pre>
+                                )}
+                              </div>
+                            );
+                          }
+                          return (
+                            <div
+                              key={idx}
+                              className={`p-2 rounded text-xs ${
+                                event.type === 'error'
+                                  ? 'bg-yellow-50 border-l-2 border-yellow-500'
+                                  : 'bg-white border-l-2 border-blue-500'
+                              }`}
+                            >
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="font-semibold text-gray-900">{event.type}</span>
+                                <span className="text-gray-500">
+                                  {new Date(event.timestamp).toLocaleTimeString()}
+                                </span>
+                              </div>
+                              <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
+                                {JSON.stringify(event.data, null, 2)}
+                              </pre>
                             </div>
-                            <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
-                              {JSON.stringify(event.data, null, 2)}
-                            </pre>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
