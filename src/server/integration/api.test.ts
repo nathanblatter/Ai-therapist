@@ -172,6 +172,13 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('admin analytics route', () => {
+  it('GET /admin/api/analytics is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/analytics');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('admin config routes', () => {
   it('GET /admin/api/config/system-prompt-preview is researcher-gated (401)', async () => {
     const res = await request(app).get('/admin/api/config/system-prompt-preview');
