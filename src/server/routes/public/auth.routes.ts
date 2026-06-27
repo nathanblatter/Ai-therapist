@@ -1,6 +1,7 @@
 // Authentication routes: login (with MFA), register, logout, status.
 import { Router } from 'express';
-import { verifyCredentials, createUser, requireRole } from '../../middleware/auth.js';
+import { requireRole } from '../../middleware/auth.js';
+import { verifyCredentials, createUser } from '../../db/index.js';
 
 export default function authRoutes(): Router {
   const router = Router();

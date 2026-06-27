@@ -79,7 +79,7 @@ export default function mfaRoutes(): Router {
     }
 
     try {
-      const { verifyCredentials } = await import('../../middleware/auth.js');
+      const { verifyCredentials } = await import('../../db/index.js');
       const { disableMFA } = await import('../../services/mfa.service.js');
 
       const user = await verifyCredentials(req.session.username!, password);
@@ -103,7 +103,7 @@ export default function mfaRoutes(): Router {
     }
 
     try {
-      const { verifyCredentials } = await import('../../middleware/auth.js');
+      const { verifyCredentials } = await import('../../db/index.js');
       const { generateBackupCodes, updateBackupCodes, getMFAStatus } = await import('../../services/mfa.service.js');
 
       const user = await verifyCredentials(req.session.username!, password);

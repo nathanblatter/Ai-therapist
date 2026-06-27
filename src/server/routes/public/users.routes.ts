@@ -1,9 +1,14 @@
 // User management + per-user preferences (under /api/users).
 // Researcher-gated where noted; preferences/self routes only need auth.
 import { Router } from 'express';
-import { requireAuth, requireRole, getAllUsers, getUserById, updateUser, deleteUser, createUser } from '../../middleware/auth.js';
+import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import {
+  getAllUsers,
+  getUserById,
+  updateUser,
+  deleteUser,
+  createUser,
   getUserPreferences,
   updateUserPreferences,
   type VoicesConfig,

@@ -23,6 +23,22 @@ export async function getActiveSidebandSessions(): Promise<SidebandSessionRow[]>
   return result.rows;
 }
 
+/** Sideband connection rows for the given session ids (admin socket view). */
+export async function getSidebandConnectionsByIds(sessionIds: string[]): Promise<SidebandSessionRow[]> {
+  const result = await pool.query(`
+    SELECT
+      session_id,
+      openai_call_id,
+      sideband_connected,
+      sideband_connected_at,
+      status
+    FROM therapy_sessions
+    WHERE session_id = ANY($1)
+    ORDER BY sideband_connected_at DESC
+  `, [sessionIds]);
+  return result.rows;
+}
+
 /** Record an admin sideband action (instruction update / disconnect) as a system message. */
 export async function logSidebandAction(
   sessionId: string,
