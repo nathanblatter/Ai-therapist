@@ -11,7 +11,7 @@ import type { IncomingMessage } from "http";
 import connectPgSimple from "connect-pg-simple";
 import {pool } from "./config/db.js";
 import { requireAuth, requireRole } from "./middleware/auth.js";
-import { insertMessagesBatch, type InsertMessageInput } from "./models/dbQueries.js";
+import { insertMessagesBatch, type InsertMessageInput } from "./db/index.js";
 import configRoutes from "./routes/public/config.routes.js";
 import voicesRoutes from "./routes/public/voices.routes.js";
 import authRoutes from "./routes/public/auth.routes.js";

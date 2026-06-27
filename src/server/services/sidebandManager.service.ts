@@ -5,7 +5,7 @@
 
 import WebSocket from 'ws';
 import { pool } from '../config/db.js';
-import { insertMessagesBatch } from '../models/dbQueries.js';
+import { insertMessagesBatch } from '../db/index.js';
 import { getOpenAIKey } from '../config/secrets.js';
 
 export class SidebandManager {

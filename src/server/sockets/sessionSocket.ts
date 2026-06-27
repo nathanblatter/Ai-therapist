@@ -2,7 +2,7 @@ import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { Pool } from 'pg';
-import { insertMessagesBatch } from '../models/dbQueries.js';
+import { insertMessagesBatch } from '../db/index.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('socket');

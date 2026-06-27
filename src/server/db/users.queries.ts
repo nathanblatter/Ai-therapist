@@ -1,5 +1,20 @@
-// Data-access for user-owned preferences (voice + language).
+// Data-access for users: their stored row shape and voice/language preferences.
 import { pool } from '../config/db.js';
+
+export interface UserRow {
+  userid: number;
+  username: string;
+  role: string;
+  password?: string;
+  preferred_voice?: string | null;
+  preferred_language?: string | null;
+  mfa_enabled?: boolean;
+  mfa_secret?: string | null;
+  mfa_backup_codes?: string[] | null;
+  mfa_enabled_at?: Date | null;
+  created_at?: Date;
+  updated_at?: Date;
+}
 
 export interface UserPreferencesRow {
   preferred_voice: string | null;

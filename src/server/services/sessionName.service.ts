@@ -3,7 +3,7 @@
 
 import OpenAI from "openai";
 import { getOpenAIKey } from "../config/secrets.js";
-import { getSessionMessages, updateSessionName } from "../models/dbQueries.js";
+import { getSessionMessages, updateSessionName } from "../db/index.js";
 
 const apiKey = await getOpenAIKey();
 const openai = new OpenAI({ apiKey });
@@ -16,7 +16,7 @@ const openai = new OpenAI({ apiKey });
 export async function generateSessionName(sessionId: string): Promise<string | null> {
   try {
     // Get session to check for existing name
-    const { getSession } = await import("../models/dbQueries.js");
+    const { getSession } = await import("../db/index.js");
     const session = await getSession(sessionId);
 
     if (!session) {

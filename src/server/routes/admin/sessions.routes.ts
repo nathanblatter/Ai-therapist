@@ -1,7 +1,7 @@
 // Admin session browser + message editing API (therapist/researcher): list
 // active/all sessions, view a session's transcript, remotely end a session, and
 // edit/delete sessions and messages. Read queries live in
-// db/adminSessions.queries.ts; mutations reuse models/dbQueries.ts.
+// db/adminSessions.queries.ts; mutations reuse the db/ session helpers.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import {

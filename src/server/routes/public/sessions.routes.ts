@@ -1,7 +1,7 @@
 // Public session management API: create/list/view/end a participant's own
 // therapy sessions, plus register-call which attaches the OpenAI realtime call
 // id. Session owners see their own unredacted content. Mutations reuse
-// models/dbQueries.ts; small read checks come from db/sessions.queries.ts.
+// db/sessions.queries.ts + db/messages.queries.ts.
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import {

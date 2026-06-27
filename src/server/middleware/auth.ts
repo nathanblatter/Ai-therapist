@@ -2,7 +2,7 @@
 import bcrypt from 'bcrypt';
 import type { Request, Response, NextFunction } from 'express';
 import { pool } from '../config/db.js';
-import type { UserRow } from '../models/dbQueries.js';
+import type { UserRow } from '../db/index.js';
 
 const SALT_ROUNDS = 10;
 

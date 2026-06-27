@@ -1,6 +1,6 @@
 // Data-access for the admin session browser: active list, filtered/paginated
 // list, single-session detail, and redaction status. Session/message mutations
-// (end/delete/update) live in models/dbQueries.ts and are called directly.
+// (end/delete/update) live in db/sessions.queries.ts + db/messages.queries.ts.
 import { pool } from '../config/db.js';
 
 export type AdminSessionRow = Record<string, unknown>;

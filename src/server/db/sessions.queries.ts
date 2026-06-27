@@ -1,12 +1,261 @@
-// Data-access for the public session flow (chat + realtime). Session/message
-// mutations live in models/dbQueries.ts; this holds the small read-side checks
-// the public routes use for ownership/status validation.
+// Data-access for therapy sessions and their configuration: lifecycle CRUD,
+// ownership/status read checks, and the session_configurations upsert/read.
 import { pool } from '../config/db.js';
+
+export interface SessionRow {
+  session_id: string;
+  user_id: number | null;
+  session_name: string | null;
+  status: string;
+  session_type: string;
+  created_at: Date;
+  updated_at: Date;
+  ended_at: Date | null;
+  ended_by: string | null;
+  crisis_flagged?: boolean;
+  crisis_severity?: string | null;
+  crisis_risk_score?: number | null;
+  crisis_flagged_at?: Date | null;
+  crisis_flagged_by?: string | null;
+  openai_call_id?: string | null;
+  sideband_connected?: boolean;
+  sideband_connected_at?: Date | null;
+  sideband_disconnected_at?: Date | null;
+  sideband_error?: string | null;
+}
+
+export interface CreateSessionConfig {
+  sessionId: string;
+  userId?: number | null;
+  sessionName?: string | null;
+  status?: string;
+  sessionType?: string;
+}
+
+export interface SessionConfigRow {
+  session_id: string;
+  voice: string | null;
+  modalities: string[] | null;
+  instructions: string | null;
+  turn_detection: Record<string, unknown> | null;
+  tools: unknown[] | null;
+  temperature: number | null;
+  max_response_output_tokens: number | null;
+  language: string | null;
+}
+
+export interface UpsertSessionConfigInput {
+  voice?: string;
+  modalities?: string[];
+  instructions?: string | null;
+  turn_detection?: Record<string, unknown> | null;
+  tools?: unknown[] | null;
+  temperature?: number;
+  max_response_output_tokens?: number;
+  language?: string;
+}
 
 export interface SessionAccessInfo {
   status: string;
   user_id: number | string | null;
   session_type: string;
+}
+
+/**
+ * Create a therapy session. Accepts either a config object (preferred) or the
+ * legacy (userId, sessionName) parameter form.
+ */
+export async function createSession(userId: number | CreateSessionConfig | null = null, sessionName: string | null = null): Promise<SessionRow> {
+  if (typeof userId === 'object' && userId !== null) {
+    const config = userId as CreateSessionConfig;
+    const result = await pool.query<SessionRow>(
+      `INSERT INTO therapy_sessions (session_id, user_id, session_name, status, session_type, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [
+        config.sessionId,
+        config.userId || null,
+        config.sessionName || null,
+        config.status || 'active',
+        config.sessionType || 'realtime'
+      ]
+    );
+    return result.rows[0];
+  } else {
+    const result = await pool.query<SessionRow>(
+      `INSERT INTO therapy_sessions (user_id, session_name, status, created_at, updated_at)
+       VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [userId, sessionName]
+    );
+    return result.rows[0];
+  }
+}
+
+/** Get a session by id, or null. */
+export async function getSession(sessionId: string): Promise<SessionRow | null> {
+  const result = await pool.query<SessionRow>(
+    'SELECT * FROM therapy_sessions WHERE session_id = $1',
+    [sessionId]
+  );
+  return result.rows[0] || null;
+}
+
+/** The user's most recent active session, or null (idempotency checks). */
+export async function getActiveSessionForUser(userId: number | string): Promise<SessionRow | null> {
+  if (!userId) return null;
+
+  const result = await pool.query<SessionRow>(
+    `SELECT * FROM therapy_sessions
+     WHERE user_id = $1 AND status = 'active'
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
+
+/** All of a user's sessions, optionally filtered by status, newest first. */
+export async function getUserSessions(userId: number | string, status: string | null = null): Promise<SessionRow[]> {
+  const query = status
+    ? 'SELECT * FROM therapy_sessions WHERE user_id = $1 AND status = $2 ORDER BY created_at DESC'
+    : 'SELECT * FROM therapy_sessions WHERE user_id = $1 ORDER BY created_at DESC';
+
+  const params = status ? [userId, status] : [userId];
+  const result = await pool.query<SessionRow>(query, params);
+  return result.rows;
+}
+
+/** Paginated admin view of all sessions with username + message counts. */
+export async function getAllSessions(limit = 50, offset = 0): Promise<Array<SessionRow & { username?: string; message_count?: string }>> {
+  const result = await pool.query<SessionRow & { username?: string; message_count?: string }>(
+    `SELECT
+      ts.*,
+      u.username,
+      COUNT(m.message_id) as message_count
+     FROM therapy_sessions ts
+     LEFT JOIN users u ON ts.user_id = u.userid
+     LEFT JOIN messages m ON ts.session_id = m.session_id
+     GROUP BY ts.session_id, u.username
+     ORDER BY ts.created_at DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
+  return result.rows;
+}
+
+/** Update a session's status (idempotent); stamps ended_at/by when ending. */
+export async function updateSessionStatus(sessionId: string, status: string, endedBy: string | null = null): Promise<SessionRow> {
+  const currentSession = await getSession(sessionId);
+  if (!currentSession) {
+    throw new Error('Session not found');
+  }
+
+  // Already in the target status — return as-is (idempotent).
+  if (currentSession.status === status) {
+    return currentSession;
+  }
+
+  const result = await pool.query<SessionRow>(
+    `UPDATE therapy_sessions
+     SET status = $1,
+         updated_at = CURRENT_TIMESTAMP,
+         ended_at = ${status === 'ended' ? "CURRENT_TIMESTAMP" : 'ended_at'},
+         ended_by = ${status === 'ended' && endedBy ? '$3' : 'ended_by'}
+     WHERE session_id = $2
+     RETURNING *`,
+    status === 'ended' && endedBy ? [status, sessionId, endedBy] : [status, sessionId]
+  );
+  return result.rows[0];
+}
+
+/** Set a session's name (typically auto-generated after it ends). */
+export async function updateSessionName(sessionId: string, sessionName: string): Promise<SessionRow> {
+  const result = await pool.query<SessionRow>(
+    `UPDATE therapy_sessions
+     SET session_name = $1, updated_at = CURRENT_TIMESTAMP
+     WHERE session_id = $2
+     RETURNING *`,
+    [sessionName, sessionId]
+  );
+  return result.rows[0];
+}
+
+/** Delete a session and all its messages/config in one transaction. */
+export async function deleteSession(sessionId: string): Promise<SessionRow> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const sessionResult = await client.query<SessionRow>(
+      'SELECT * FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+
+    if (sessionResult.rows.length === 0) {
+      throw new Error('Session not found');
+    }
+
+    const session = sessionResult.rows[0];
+
+    await client.query('DELETE FROM messages WHERE session_id = $1', [sessionId]);
+    await client.query('DELETE FROM session_configurations WHERE session_id = $1', [sessionId]);
+    await client.query('DELETE FROM therapy_sessions WHERE session_id = $1', [sessionId]);
+
+    await client.query('COMMIT');
+    return session;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Create or update a session's realtime configuration. */
+export async function upsertSessionConfig(sessionId: string, config: UpsertSessionConfigInput): Promise<SessionConfigRow> {
+  const {
+    voice = 'alloy',
+    modalities = ['text', 'audio'],
+    instructions = null,
+    turn_detection = null,
+    tools = null,
+    temperature = 0.8,
+    max_response_output_tokens = 4096,
+    language = 'en'
+  } = config;
+
+  // JSONB fields: stringify when present, otherwise pass null.
+  const turnDetectionJson = turn_detection ? JSON.stringify(turn_detection) : null;
+  const toolsJson = tools ? JSON.stringify(tools) : null;
+
+  const result = await pool.query<SessionConfigRow>(
+    `INSERT INTO session_configurations
+     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)
+     ON CONFLICT (session_id)
+     DO UPDATE SET
+       voice = EXCLUDED.voice,
+       modalities = EXCLUDED.modalities,
+       instructions = EXCLUDED.instructions,
+       turn_detection = EXCLUDED.turn_detection,
+       tools = EXCLUDED.tools,
+       temperature = EXCLUDED.temperature,
+       max_response_output_tokens = EXCLUDED.max_response_output_tokens,
+       language = EXCLUDED.language
+     RETURNING *`,
+    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language]
+  );
+  return result.rows[0];
+}
+
+/** A session's realtime configuration, or null. */
+export async function getSessionConfig(sessionId: string): Promise<SessionConfigRow | null> {
+  const result = await pool.query<SessionConfigRow>(
+    'SELECT * FROM session_configurations WHERE session_id = $1',
+    [sessionId]
+  );
+  return result.rows[0] || null;
 }
 
 /** Status / owner / type for a session, or null if it doesn't exist. */
