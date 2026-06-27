@@ -72,9 +72,9 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
   };
 
   return (
-    <header className="bg-navy text-white p-4 md:p-6 font-sans" role="banner">
+    <header className="bg-navy text-white p-3 md:p-6 font-sans" role="banner">
       <div className="max-w-5xl mx-auto">
-        <h1 className="text-3xl md:text-5xl font-bold text-center">AI Therapist Assistant</h1>
+        <h1 className="text-2xl md:text-5xl font-bold text-center">AI Therapist Assistant</h1>
         {username && (
           <p className="text-center text-lg text-lightBlue mt-2" aria-label={`Logged in as ${username}`}>
             Welcome, {capitalizeFirst(username)}
@@ -103,15 +103,15 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
             )}
           </div>
         )}
-        <p className="mt-2 text-sm md:text-base leading-relaxed">
+        <p className="mt-2 text-xs sm:text-sm md:text-base leading-relaxed">
           If you experience emotional distress, crisis, or worsening mental health symptoms at any point during your session please reach out immediately to the 988 Suicide & Crisis Lifeline at
           <a href="tel:988" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline">988</a> or visit
           <a href="https://988lifeline.org" target="_blank" rel="noopener noreferrer" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline website">988lifeline.org</a> for support. You are not alone—help is available.
         </p>
-        <nav className="mt-4 flex flex-col sm:flex-row items-center gap-2 sm:gap-4 justify-center" role="navigation" aria-label="Main navigation">
+        <nav className="mt-3 md:mt-4 flex flex-row flex-wrap items-center gap-2 sm:gap-4 justify-center" role="navigation" aria-label="Main navigation">
           <a
             href="tel:988"
-            className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
+            className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
             aria-label="Call the 988 Suicide & Crisis Lifeline at 988"
           >
             Call 988
@@ -120,7 +120,7 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
             href="https://988lifeline.org"
             target="_blank"
             rel="noopener noreferrer"
-            className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
+            className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
             aria-label="Visit crisis resources page (opens in new tab)"
           >
             Crisis Resources
@@ -131,7 +131,7 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
               href="/admin/"
               target="_blank"
               rel="noopener noreferrer"
-              className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
+              className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
               aria-label="Open Admin Portal (opens in new tab)"
             >
               Admin Portal
@@ -139,12 +139,12 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
           )}
           <button
             onClick={() => navigate('/profile')}
-            className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center min-h-[44px] flex items-center justify-center"
+            className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
             aria-label="View my profile"
           >
             Profile
           </button>
-          <button onClick={handleLogout} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center" title="Logout">Logout</button>
+          <button onClick={handleLogout} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center" title="Logout">Logout</button>
         </nav>
         
       </div>

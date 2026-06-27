@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
+import { Menu } from 'react-feather';
 
-export default function AdminHeader() {
+interface AdminHeaderProps {
+  onMenuClick?: () => void;
+}
+
+export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
   const [username, setUsername] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
 
@@ -44,16 +49,27 @@ export default function AdminHeader() {
 
   return (
     <header className="bg-navy text-white p-4 md:p-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-bold">AI Therapist Research & Therapist Audit Portal</h1>
-          {username && (
-            <p className="text-lightBlue mt-2 text-lg">
-              Welcome, {capitalizeFirst(username)} {userRole && <span className="text-sm">({userRole})</span>}
-            </p>
+      <div className="flex justify-between items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          {onMenuClick && (
+            <button
+              onClick={onMenuClick}
+              className="md:hidden p-2 -ml-2 shrink-0 text-white hover:bg-white/10 rounded-lg"
+              aria-label="Open navigation menu"
+            >
+              <Menu size={24} />
+            </button>
           )}
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-2xl md:text-4xl font-bold leading-tight">AI Therapist Research & Therapist Audit Portal</h1>
+            {username && (
+              <p className="text-lightBlue mt-1 md:mt-2 text-sm md:text-lg truncate">
+                Welcome, {capitalizeFirst(username)} {userRole && <span className="text-xs md:text-sm">({userRole})</span>}
+              </p>
+            )}
+          </div>
         </div>
-        <button onClick={handleLogout} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-full text-sm font-semibold w-full sm:w-auto text-center" title="Logout">Logout</button>
+        <button onClick={handleLogout} className="bg-gray-700 hover:bg-gray-600 px-3 md:px-4 py-2 rounded-full text-sm font-semibold shrink-0 text-center" title="Logout">Logout</button>
       </div>
     </header>
   );

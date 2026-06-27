@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2 } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2, X } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SessionList from "./SessionList";
 import SessionDetail from "./SessionDetail";
@@ -22,6 +22,7 @@ export default function AdminApp() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Handle SSR - only render interactive parts on client
   useEffect(() => {
@@ -85,17 +86,43 @@ export default function AdminApp() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      <AdminHeader />
+      <AdminHeader onMenuClick={() => setIsSidebarOpen(true)} />
 
-      <main className="flex-1 overflow-hidden flex">
-        <aside className="w-64 bg-white border-r shadow-sm">
-          <nav className="p-4 space-y-2">
+      <main className="flex-1 overflow-hidden flex relative">
+        {/* Mobile overlay backdrop */}
+        {isSidebarOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-black/40 md:hidden"
+            onClick={() => setIsSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
+        <aside
+          className={`fixed inset-y-0 left-0 z-40 w-64 bg-white border-r shadow-sm transform transition-transform duration-200 ease-in-out md:static md:z-auto md:translate-x-0 ${
+            isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          <div className="flex items-center justify-between p-4 md:hidden">
+            <span className="font-semibold text-gray-700">Menu</span>
+            <button
+              onClick={() => setIsSidebarOpen(false)}
+              className="p-2 -mr-2 text-gray-500 hover:text-gray-800"
+              aria-label="Close menu"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <nav className="p-4 pt-0 md:pt-4 space-y-2 overflow-y-auto h-full">
             {navItems.map(item => {
               const Icon = item.icon;
               return (
                 <button
                   key={item.id}
-                  onClick={() => setCurrentView(item.id)}
+                  onClick={() => {
+                    setCurrentView(item.id);
+                    setIsSidebarOpen(false);
+                  }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
                     currentView === item.id
                       ? 'bg-royal text-white'
