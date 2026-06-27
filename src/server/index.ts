@@ -21,6 +21,7 @@ import usersRoutes from "./routes/public/users.routes.js";
 import healthRoutes from "./routes/public/health.routes.js";
 import bugReportRoutes from "./routes/public/bugReport.routes.js";
 import contentRetentionRoutes from "./routes/admin/contentRetention.routes.js";
+import userSessionsRoutes from "./routes/admin/userSessions.routes.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
@@ -2882,68 +2883,8 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
 // Content Retention / Data Wipe Endpoints -> routes/admin/contentRetention.routes.ts
 app.use(contentRetentionRoutes());
 
-// GET /admin/api/user-sessions - Get all active user sessions
-app.get("/admin/api/user-sessions", requireRole('researcher'), async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        sid,
-        sess,
-        expire
-      FROM user_sessions
-      ORDER BY expire DESC
-    `);
-
-    // Parse the sess JSON and extract relevant fields
-    const sessions = result.rows.map(row => {
-      let sessData: Record<string, unknown> = {};
-      try {
-        sessData = typeof row.sess === 'string' ? JSON.parse(row.sess) as Record<string, unknown> : row.sess as Record<string, unknown>;
-      } catch (err) {
-        console.error('Failed to parse session data:', err);
-      }
-
-      return {
-        sid: row.sid,
-        expire: row.expire,
-        userId: sessData['userId'],
-        username: sessData['username'],
-        userRole: sessData['userRole'],
-        cookie: sessData['cookie']
-      };
-    });
-
-    res.json(sessions);
-  } catch (err) {
-    console.error("Failed to fetch user sessions:", err);
-    res.status(500).json({ error: "Failed to fetch user sessions" });
-  }
-});
-
-// DELETE /admin/api/user-sessions/:sid - Delete a specific user session (logout user)
-app.delete("/admin/api/user-sessions/:sid", requireRole('researcher'), async (req, res) => {
-  const { sid } = req.params;
-
-  try {
-    const result = await pool.query(
-      'DELETE FROM user_sessions WHERE sid = $1 RETURNING sid',
-      [sid]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-
-    console.log(`[Admin] Session ${sid} deleted by ${req.session.username}`);
-    res.json({
-      message: 'Session deleted successfully',
-      sid: result.rows[0].sid
-    });
-  } catch (err) {
-    console.error("Failed to delete user session:", err);
-    res.status(500).json({ error: "Failed to delete user session" });
-  }
-});
+// User session admin (list/force-logout) -> routes/admin/userSessions.routes.ts.
+app.use(userSessionsRoutes());
 
 // GET /admin/api/rate-limits/users - Get all rate-limited users
 app.get('/admin/api/rate-limits/users', requireRole('therapist', 'researcher'), async (req, res) => {

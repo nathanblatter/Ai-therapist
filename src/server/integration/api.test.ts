@@ -184,6 +184,18 @@ describe('admin content-retention routes', () => {
   });
 });
 
+describe('admin user-sessions routes', () => {
+  it('GET /admin/api/user-sessions is researcher-gated (401)', async () => {
+    const res = await request(app).get('/admin/api/user-sessions');
+    expect(res.status).toBe(401);
+  });
+
+  it('DELETE /admin/api/user-sessions/:sid is researcher-gated (401)', async () => {
+    const res = await request(app).delete('/admin/api/user-sessions/abc');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('app wiring', () => {
   it('unknown API routes 404 (no rogue catch-all in API scope)', async () => {
     const res = await request(app).get('/api/this-route-does-not-exist');
