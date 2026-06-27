@@ -196,6 +196,23 @@ describe('admin user-sessions routes', () => {
   });
 });
 
+describe('admin crisis + redaction routes', () => {
+  it('POST /admin/api/sessions/:id/crisis/flag is gated (401)', async () => {
+    const res = await request(app).post('/admin/api/sessions/abc/crisis/flag').send({ severity: 'high' });
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /admin/api/crisis/all is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/crisis/all');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /redact/api/messages is researcher-gated (401)', async () => {
+    const res = await request(app).get('/redact/api/messages');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('app wiring', () => {
   it('unknown API routes 404 (no rogue catch-all in API scope)', async () => {
     const res = await request(app).get('/api/this-route-does-not-exist');

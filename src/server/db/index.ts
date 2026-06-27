@@ -8,4 +8,6 @@ export * from './config.queries.js';
 export * from './users.queries.js';
 export * from './contentRetention.queries.js';
 export * from './userSessions.queries.js';
+export * from './crisis.queries.js';
+export * from './redaction.queries.js';
 export * from '../models/dbQueries.js';
