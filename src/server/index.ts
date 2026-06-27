@@ -20,9 +20,10 @@ import mfaRoutes from "./routes/public/mfa.routes.js";
 import usersRoutes from "./routes/public/users.routes.js";
 import healthRoutes from "./routes/public/health.routes.js";
 import bugReportRoutes from "./routes/public/bugReport.routes.js";
+import contentRetentionRoutes from "./routes/admin/contentRetention.routes.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
-import { getRetentionSettings, updateRetentionSettings, executeContentWipe, getWipeStats, startScheduler as startContentWipeScheduler, getSchedulerStatus } from "./services/contentWipe.service.js";
+import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
 
 // ---------- local type helpers ----------
 
@@ -2878,120 +2879,8 @@ app.put("/admin/api/config/:key", requireRole('researcher'), async (req, res) =>
   }
 });
 
-// ============================================
-// Content Retention / Data Wipe Endpoints
-// ============================================
-
-// GET /admin/api/content-retention - Get retention settings and stats
-app.get("/admin/api/content-retention", requireRole('researcher'), async (req, res) => {
-  try {
-    const stats = await getWipeStats();
-    const schedulerStatus = getSchedulerStatus();
-
-    res.json({
-      ...stats,
-      scheduler: schedulerStatus
-    });
-  } catch (err) {
-    console.error("Failed to fetch content retention stats:", err);
-    res.status(500).json({ error: "Failed to fetch content retention stats" });
-  }
-});
-
-// PUT /admin/api/content-retention - Update retention settings
-app.put("/admin/api/content-retention", requireRole('researcher'), async (req, res) => {
-  const { settings } = req.body;
-
-  if (!settings) {
-    return res.status(400).json({ error: 'Settings are required' });
-  }
-
-  // Validate settings
-  if (typeof settings.enabled !== 'boolean') {
-    return res.status(400).json({ error: 'enabled must be a boolean' });
-  }
-
-  if (typeof settings.retention_hours !== 'number' || settings.retention_hours < 1 || settings.retention_hours > 8760) {
-    return res.status(400).json({ error: 'retention_hours must be between 1 and 8760 (1 year)' });
-  }
-
-  // Validate wipe_time format (HH:MM)
-  const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
-  if (!timeRegex.test(settings.wipe_time)) {
-    return res.status(400).json({ error: 'wipe_time must be in HH:MM format' });
-  }
-
-  if (typeof settings.require_redaction_complete !== 'boolean') {
-    return res.status(400).json({ error: 'require_redaction_complete must be a boolean' });
-  }
-
-  try {
-    const updatedSettings = await updateRetentionSettings(settings, req.session.username!);
-
-    console.log(`Content retention settings updated by ${req.session.username}`);
-
-    res.json({
-      success: true,
-      settings: updatedSettings
-    });
-  } catch (err) {
-    console.error("Failed to update content retention settings:", err);
-    res.status(500).json({ error: "Failed to update content retention settings" });
-  }
-});
-
-// POST /admin/api/content-retention/wipe - Trigger manual content wipe
-app.post("/admin/api/content-retention/wipe", requireRole('researcher'), async (req, res) => {
-  try {
-    console.log(`Manual content wipe triggered by ${req.session.username}`);
-
-    const result = await executeContentWipe('manual', req.session.username);
-
-    if (result.success) {
-      res.json({
-        success: true,
-        wipeId: result.wipeId,
-        messagesWiped: result.messagesWiped,
-        messagesSkipped: result.messagesSkipped
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: result.error
-      });
-    }
-  } catch (err) {
-    console.error("Failed to execute content wipe:", err);
-    res.status(500).json({ error: "Failed to execute content wipe" });
-  }
-});
-
-// GET /admin/api/content-retention/log - Get wipe history log
-app.get("/admin/api/content-retention/log", requireRole('researcher'), async (req, res) => {
-  const limit = parseInt(String(req.query.limit ?? '')) || 50;
-  const offset = parseInt(String(req.query.offset ?? '')) || 0;
-
-  try {
-    const result = await pool.query(
-      `SELECT * FROM content_wipe_log
-       ORDER BY started_at DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
-    );
-
-    const countResult = await pool.query('SELECT COUNT(*) as count FROM content_wipe_log');
-
-    res.json({
-      wipes: result.rows,
-      total: parseInt(countResult.rows[0].count),
-      limit,
-      offset
-    });
-  } catch (err) {
-    console.error("Failed to fetch content wipe log:", err);
-    res.status(500).json({ error: "Failed to fetch content wipe log" });
-  }
-});
+// Content Retention / Data Wipe Endpoints -> routes/admin/contentRetention.routes.ts
+app.use(contentRetentionRoutes());
 
 // GET /admin/api/user-sessions - Get all active user sessions
 app.get("/admin/api/user-sessions", requireRole('researcher'), async (req, res) => {

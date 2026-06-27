@@ -6,4 +6,5 @@
 // until it can be removed.
 export * from './config.queries.js';
 export * from './users.queries.js';
+export * from './contentRetention.queries.js';
 export * from '../models/dbQueries.js';

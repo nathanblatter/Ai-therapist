@@ -172,6 +172,18 @@ describe('health + bug-report', () => {
   });
 });
 
+describe('admin content-retention routes', () => {
+  it('GET /admin/api/content-retention is researcher-gated (401)', async () => {
+    const res = await request(app).get('/admin/api/content-retention');
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /admin/api/content-retention/wipe is researcher-gated (401)', async () => {
+    const res = await request(app).post('/admin/api/content-retention/wipe');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('app wiring', () => {
   it('unknown API routes 404 (no rogue catch-all in API scope)', async () => {
     const res = await request(app).get('/api/this-route-does-not-exist');
