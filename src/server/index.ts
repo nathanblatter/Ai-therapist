@@ -13,6 +13,8 @@ import {getOpenAIKey} from "./config/secrets.js"; // Import the function to get 
 import {pool } from "./config/db.js";
 import { requireAuth, requireRole, verifyCredentials, createUser, getAllUsers, getUserById, updateUser, deleteUser } from "./middleware/auth.js";
 import { createSession, getSession, insertMessagesBatch, upsertSessionConfig, updateSessionStatus, getAiModel, type InsertMessageInput } from "./models/dbQueries.js";
+import configRoutes from "./routes/public/config.routes.js";
+import voicesRoutes from "./routes/public/voices.routes.js";
 import { generateSessionNameAsync } from "./services/sessionName.service.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { getRetentionSettings, updateRetentionSettings, executeContentWipe, getWipeStats, startScheduler as startContentWipeScheduler, getSchedulerStatus } from "./services/contentWipe.service.js";
@@ -3289,159 +3291,9 @@ app.get("/admin/api/export", requireRole('therapist', 'researcher'), async (req,
 });
 
 // ===================== System Configuration API Routes =====================
-
-// GET /api/config/crisis - Get crisis contact info (public endpoint for clients)
-app.get("/api/config/crisis", async (req, res) => {
-  try {
-    const config = await getSystemConfig();
-    const crisisContact = config.crisis_contact || {
-      hotline: '988 Suicide & Crisis Lifeline',
-      phone: '988',
-      text: 'Text HOME to 741741',
-      enabled: true
-    };
-
-    res.json(crisisContact);
-  } catch (err) {
-    console.error("Failed to fetch crisis contact:", err);
-    res.status(500).json({ error: "Failed to fetch crisis contact" });
-  }
-});
-
-// GET /api/config/features - Get features configuration
-app.get("/api/config/features", async (req, res) => {
-  try {
-    const config = await getSystemConfig();
-    const features = config.features || {
-      voice_enabled: true,
-      chat_enabled: true,
-      file_upload_enabled: false,
-      session_recording_enabled: false,
-      output_modalities: ["audio"]
-    };
-
-    res.json(features);
-  } catch (err) {
-    console.error("Failed to fetch features config:", err);
-    res.status(500).json({ error: "Failed to fetch features config" });
-  }
-});
-
-// GET /api/config/ai-model - Get AI model for client (no auth required)
-app.get("/api/config/ai-model", async (req, res) => {
-  try {
-    const model = await getAiModel();
-    res.json({ model });
-  } catch (err) {
-    console.error('Failed to fetch AI model:', err);
-    res.status(500).json({ error: 'Failed to fetch AI model configuration' });
-  }
-});
-
-// GET /api/config/client-logging - Get client logging configuration (public endpoint)
-app.get("/api/config/client-logging", async (req, res) => {
-  try {
-    const config = await getSystemConfig();
-    const clientLogging = config.client_logging || { enabled: false };
-    res.json(clientLogging);
-  } catch (err) {
-    console.error("Failed to fetch client logging config:", err);
-    res.status(500).json({ error: "Failed to fetch client logging config" });
-  }
-});
-
-// GET /api/config/voices - Get enabled voices with metadata (public endpoint for users)
-app.get("/api/config/voices", async (req, res) => {
-  try {
-    const config = await getSystemConfig();
-    const voicesConfig = (config.voices as VoicesConfig | undefined) ?? {
-      voices: [
-        { value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }
-      ] as VoiceOption[],
-      default_voice: 'cedar'
-    } as VoicesConfig;
-
-    // Filter to only enabled voices for users
-    const enabledVoices = voicesConfig.voices
-      ? voicesConfig.voices
-          .filter((v: VoiceOption) => v.enabled)
-          .map((v: VoiceOption) => ({ value: v.value, label: v.label, description: v.description }))
-      : [];
-
-    res.json({
-      voices: enabledVoices,
-      default_voice: voicesConfig.default_voice
-    });
-  } catch (err) {
-    console.error("Failed to fetch voices config:", err);
-    res.status(500).json({ error: "Failed to fetch voices config" });
-  }
-});
-
-// GET /api/config/languages - Get enabled languages with metadata (public endpoint for users)
-app.get("/api/config/languages", async (req, res) => {
-  try {
-    const config = await getSystemConfig();
-    const languagesConfig = (config.languages as LanguagesConfig | undefined) ?? {
-      languages: [
-        { value: 'en', label: 'English', description: 'English', enabled: true }
-      ] as LanguageOption[],
-      default_language: 'en'
-    } as LanguagesConfig;
-
-    // Filter to only enabled languages for users
-    const enabledLanguages = languagesConfig.languages
-      ? languagesConfig.languages
-          .filter((l: LanguageOption) => l.enabled)
-          .map((l: LanguageOption) => ({ value: l.value, label: l.label, description: l.description }))
-      : [];
-
-    res.json({
-      languages: enabledLanguages,
-      default_language: languagesConfig.default_language
-    });
-  } catch (err) {
-    console.error("Failed to fetch languages config:", err);
-    res.status(500).json({ error: "Failed to fetch languages config" });
-  }
-});
-
-// GET /api/voices/preview/:voiceName - Serve voice preview audio files
-app.get("/api/voices/preview/:voiceName", async (req, res) => {
-  try {
-    const { voiceName } = req.params;
-
-    // Sanitize voice name to prevent directory traversal
-    const sanitizedVoiceName = path.basename(voiceName);
-
-    // Construct the path to the voice file (MP3 for browser compatibility)
-    const voiceFilePath = path.join(__dirname, '../../assets/audio/voices', `${sanitizedVoiceName}.mp3`);
-
-    // Check if file exists
-    if (!fs.existsSync(voiceFilePath)) {
-      return res.status(404).json({ error: 'Voice preview not found' });
-    }
-
-    // Set appropriate headers for audio streaming
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-
-    // Stream the file
-    const stream = fs.createReadStream(voiceFilePath);
-    stream.pipe(res);
-
-    stream.on('error', (err) => {
-      console.error('Error streaming voice preview:', err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to stream voice preview' });
-      }
-    });
-  } catch (err) {
-    console.error("Failed to serve voice preview:", err);
-    res.status(500).json({ error: "Failed to serve voice preview" });
-  }
-});
+// Public config + voice-preview endpoints are defined in routes/public/.
+app.use(configRoutes());
+app.use(voicesRoutes());
 
 // GET /admin/api/config - Get all system configuration
 app.get("/admin/api/config", requireRole('therapist', 'researcher'), async (req, res) => {

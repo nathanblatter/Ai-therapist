@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import { fetchSystemConfigRows } from '../db/index.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('sessionHelpers');
@@ -77,11 +78,9 @@ export async function getSystemConfig(): Promise<SystemConfig> {
   }
 
   try {
-    const result = await pool.query<{ config_key: string; config_value: unknown }>(
-      'SELECT config_key, config_value FROM system_config'
-    );
+    const rows = await fetchSystemConfigRows();
     const config: SystemConfig = {};
-    result.rows.forEach(row => {
+    rows.forEach(row => {
       config[row.config_key] = row.config_value;
     });
 
