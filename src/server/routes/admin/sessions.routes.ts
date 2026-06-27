@@ -162,7 +162,12 @@ export default function adminSessionsRoutes(): Router {
         return res.status(404).json({ error: 'Session not found' });
       }
 
-      const contentColumn: MessageContentColumn = req.session.userRole === 'therapist' ? 'content' : 'content_redacted';
+      // Therapists always see raw content. Researchers see raw content while the
+      // session is still active (live monitoring is exempt from redaction by
+      // approval) and the redacted column only once the session has ended, when
+      // the per-session batch redaction has populated it.
+      const liveExempt = req.session.userRole === 'therapist' || session.status === 'active';
+      const contentColumn: MessageContentColumn = liveExempt ? 'content' : 'content_redacted';
       const messages = await getAdminSessionMessages(sessionId, contentColumn);
 
       res.json({ session, messages });

@@ -162,10 +162,13 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       if (data.sessionId === sessionId) {
         console.log(`Received ${data.messages.length} new messages`);
 
-        // Process messages with role-based content selection
+        // Therapists always see raw content; researchers see raw content while
+        // the session is active (live monitoring is exempt from redaction) and
+        // the redacted column only once it has ended.
+        const showUnredacted = userRole === 'therapist' || session?.status === 'active';
         const processedMessages: Message[] = data.messages.map((msg: Message) => ({
           ...msg,
-          message: (userRole === 'therapist' ? msg.content : msg.content_redacted) ?? msg.message
+          message: (showUnredacted ? msg.content : msg.content_redacted) ?? msg.message
         }));
 
         setMessages(prev => [...prev, ...processedMessages]);
@@ -243,7 +246,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       socket.off('sideband:error', handleSidebandError);
       socket.off('session:instructions-updated', handleInstructionsUpdated);
     };
-  }, [socket, sessionId, isAtBottom, userRole]);
+  }, [socket, sessionId, isAtBottom, userRole, session?.status]);
 
   // Handle Escape key and auto-focus for Update Instructions modal
   useEffect(() => {
