@@ -347,15 +347,20 @@ export default function App() {
 
     // Connect to Socket.io for remote session management
     const socket = io({
+      withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnection: true
     });
 
     socket.on('connect', () => {
-      console.log('Socket.io connected for session monitoring');
+      console.log('[socket] connected for session monitoring; id=', socket.id, 'transport=', socket.io.engine.transport.name);
       // Join the session-specific room to receive events for this session
       socket.emit('session:join', { sessionId: newSessionId });
     });
+    socket.on('connect_error', (e) => {
+      console.error('[socket] connect_error:', e.message, e);
+    });
+    socket.io.on('error', (e) => console.error('[socket] manager error:', e));
 
     // Audio capture is started in pc.ontrack below (once both the mic and the
     // assistant track exist) and runs for the whole session so the server can
