@@ -66,7 +66,17 @@ export function startMixedTee(
 ): AudioTeeHandle {
   const AudioCtx = window.AudioContext || (window as WebkitWindow).webkitAudioContext!;
   const ctx = new AudioCtx();
+  // The context is created during async WebRTC negotiation (not directly in the
+  // click handler), so it starts suspended and would never fire onaudioprocess.
+  // A prior user gesture exists (starting the session), so resume() succeeds.
+  const ensureRunning = () => { if (ctx.state === 'suspended') void ctx.resume(); };
+  ensureRunning();
+  // Belt-and-suspenders: also resume on the next user interaction.
+  const onGesture = () => ensureRunning();
+  window.addEventListener('pointerdown', onGesture, { once: true });
+
   const processor = ctx.createScriptProcessor(4096, 1, 1);
+  let started = false;
 
   // One gain per source feeds the same processor input; Web Audio sums them.
   const sources = streams
@@ -81,6 +91,7 @@ export function startMixedTee(
     });
 
   processor.onaudioprocess = (e) => {
+    if (!started) { started = true; console.log('[MixedTee] capturing audio @', ctx.sampleRate, 'Hz'); }
     const input = e.inputBuffer.getChannelData(0);
     const pcm16 = new Int16Array(input.length);
     for (let i = 0; i < input.length; i++) {
@@ -99,6 +110,7 @@ export function startMixedTee(
   return {
     stop: () => {
       try {
+        window.removeEventListener('pointerdown', onGesture);
         processor.onaudioprocess = null;
         processor.disconnect();
         mute.disconnect();
