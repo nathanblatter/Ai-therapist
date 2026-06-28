@@ -63,13 +63,19 @@ export function startAudioTee(
 export function startMixedTee(
   streams: MediaStream[],
   onChunk: (base64Pcm16: string, sampleRate: number) => void,
+  onStatus?: (s: { phase: string; ctxState?: string; chunks?: number; sources?: number }) => void,
 ): AudioTeeHandle {
   const AudioCtx = window.AudioContext || (window as WebkitWindow).webkitAudioContext!;
   const ctx = new AudioCtx();
+  let chunkCount = 0;
   // The context is created during async WebRTC negotiation (not directly in the
   // click handler), so it starts suspended and would never fire onaudioprocess.
   // A prior user gesture exists (starting the session), so resume() succeeds.
-  const ensureRunning = () => { if (ctx.state === 'suspended') void ctx.resume(); };
+  const ensureRunning = () => {
+    if (ctx.state === 'suspended') {
+      void ctx.resume().then(() => onStatus?.({ phase: 'resumed', ctxState: ctx.state }));
+    }
+  };
   ensureRunning();
   // Belt-and-suspenders: also resume on the next user interaction.
   const onGesture = () => ensureRunning();
@@ -91,7 +97,12 @@ export function startMixedTee(
     });
 
   processor.onaudioprocess = (e) => {
-    if (!started) { started = true; console.log('[MixedTee] capturing audio @', ctx.sampleRate, 'Hz'); }
+    chunkCount++;
+    if (!started) {
+      started = true;
+      console.log('[MixedTee] capturing audio @', ctx.sampleRate, 'Hz');
+      onStatus?.({ phase: 'first-chunk', ctxState: ctx.state });
+    }
     const input = e.inputBuffer.getChannelData(0);
     const pcm16 = new Int16Array(input.length);
     for (let i = 0; i < input.length; i++) {
@@ -106,6 +117,11 @@ export function startMixedTee(
   mute.gain.value = 0;
   processor.connect(mute);
   mute.connect(ctx.destination);
+
+  onStatus?.({ phase: 'init', ctxState: ctx.state, sources: sources.length });
+  // Report whether capture actually started shortly after — surfaces a stuck
+  // (suspended) context or a source that produces no audioprocess callbacks.
+  setTimeout(() => onStatus?.({ phase: 'check', ctxState: ctx.state, chunks: chunkCount }), 1500);
 
   return {
     stop: () => {

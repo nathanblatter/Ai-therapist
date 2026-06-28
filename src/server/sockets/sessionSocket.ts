@@ -187,6 +187,13 @@ export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
       authSocket.leave(`audio:${sessionId}`);
     });
 
+    // Diagnostic: the participant reports audio-capture lifecycle (ontrack
+    // firing, AudioContext state, whether chunks started) so we can see why a
+    // recording is/isn't being produced without access to the browser.
+    authSocket.on('client:audio-status', (data: Record<string, unknown>) => {
+      log.info(`[audio-status] ${JSON.stringify(data)}`);
+    });
+
     // Participant relays a chunk of mixed audio: record it, and relay to any
     // live listeners (the room emit is a no-op when nobody is listening).
     let audioChunkLogCount = 0;

@@ -374,11 +374,24 @@ app.use(redactionRoutes());
 async function startProdServer() {
   console.log("Starting in production mode...");
 
+  // Cache policy: hashed build assets are content-addressed, so cache them
+  // forever (immutable); HTML must never be cached or browsers keep loading a
+  // stale bundle after a deploy.
+  const staticCache = (res: express.Response, filePath: string) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    } else if (/[.-][A-Za-z0-9_-]{8,}\.(js|css|woff2?|png|svg|jpe?g|gif|ico)$/.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  };
+
   // Serve static files from the client build directory.
-  app.use(express.static(path.resolve(__dirname, '../../dist/client')));
+  app.use(express.static(path.resolve(__dirname, '../../dist/client'), { setHeaders: staticCache }));
 
   // Serve admin static assets (CSS, JS) - admin assets are prefixed with "admin-" so no conflicts
-  app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets')));
+  app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets'), { setHeaders: staticCache }));
 
   // Dynamically import all SSR modules
   // @ts-ignore – these modules are generated at build time and not available during type-check
@@ -389,7 +402,7 @@ async function startProdServer() {
   const { render: renderRedact } = await import('../../dist/redact-server/redact-entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
 
   // Serve redact static assets
-  app.use('/redact/assets', express.static(path.resolve(__dirname, '../../dist/redact-client/assets')));
+  app.use('/redact/assets', express.static(path.resolve(__dirname, '../../dist/redact-client/assets'), { setHeaders: staticCache }));
 
   // Admin panel route
   app.get('/admin', requireRole('therapist', 'researcher'), async (req, res) => {
@@ -397,7 +410,7 @@ async function startProdServer() {
       const template = fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8');
       const appHtml = await renderAdmin(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
       const stack = e instanceof Error ? e.stack : String(e);
       console.error(stack);
@@ -411,7 +424,7 @@ async function startProdServer() {
       const template = fs.readFileSync(path.resolve(__dirname, '../../dist/redact-client/redact.html'), 'utf-8');
       const appHtml = await renderRedact(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
       const stack = e instanceof Error ? e.stack : String(e);
       console.error(stack);
@@ -425,7 +438,7 @@ async function startProdServer() {
       const template = fs.readFileSync(path.resolve(__dirname, '../../dist/client/index.html'), 'utf-8');
       const appHtml = await render(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
       const stack = e instanceof Error ? e.stack : String(e);
       console.error(stack);

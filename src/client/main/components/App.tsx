@@ -517,13 +517,23 @@ export default function App() {
 
     pc.ontrack = (e) => {
       audioEl.srcObject = e.streams[0];
+      socket.emit('client:audio-status', {
+        sessionId: newSessionId,
+        phase: 'ontrack',
+        tracks: e.streams[0]?.getAudioTracks().length ?? 0,
+        hasMic: !!ms && ms.getAudioTracks().length > 0,
+      });
       // Capture the whole conversation: mix mic + assistant audio into one PCM
       // stream, teed for the entire session so the server can record it and
       // relay it live to any admin who is listening.
       if (!audioTeeRef.current) {
-        audioTeeRef.current = startMixedTee([ms, e.streams[0]], (pcm, sampleRate) => {
-          socket.emit('client:audio-chunk', { sessionId: newSessionId, pcm, sampleRate });
-        });
+        audioTeeRef.current = startMixedTee(
+          [ms, e.streams[0]],
+          (pcm, sampleRate) => {
+            socket.emit('client:audio-chunk', { sessionId: newSessionId, pcm, sampleRate });
+          },
+          (status) => socket.emit('client:audio-status', { sessionId: newSessionId, ...status }),
+        );
       }
     };
     // Set up data channel for sending and receiving events
