@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@aws-sdk/client-s3": "^3.1075.0",
     "@aws-sdk/client-secrets-manager": "^3.857.0",
     "bcrypt": "^6.0.0",
     "connect-pg-simple": "^10.0.0",

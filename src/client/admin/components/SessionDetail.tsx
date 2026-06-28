@@ -85,6 +85,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [flagSeverity, setFlagSeverity] = useState('medium');
   const [flagNotes, setFlagNotes] = useState('');
   const [flagging, setFlagging] = useState(false);
+  const [recording, setRecording] = useState<{ url: string; durationMs: number | null } | null>(null);
 
   const { socket } = useSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -118,6 +119,26 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
     fetchSession();
   }, [sessionId]);
+
+  // Load the session recording once it's available (ready only after the
+  // session ends and the audio is uploaded to object storage).
+  useEffect(() => {
+    let cancelled = false;
+    const fetchRecording = async () => {
+      try {
+        const res = await fetch(`/admin/api/sessions/${sessionId}/recording-info`);
+        if (!res.ok) return;
+        const info = await res.json();
+        if (!cancelled) {
+          setRecording(info.available ? { url: info.url, durationMs: info.durationMs } : null);
+        }
+      } catch {
+        /* no recording yet */
+      }
+    };
+    fetchRecording();
+    return () => { cancelled = true; };
+  }, [sessionId, session?.status]);
 
   useEffect(() => {
     const fetchUserRole = async () => {
@@ -669,6 +690,23 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
               >
                 Tool Calls Only
               </button>
+            </div>
+          )}
+
+          {recording && (
+            <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700">Session recording</span>
+                {recording.durationMs != null && (
+                  <span className="text-xs text-gray-500">
+                    {Math.floor(recording.durationMs / 60000)}:
+                    {String(Math.floor((recording.durationMs % 60000) / 1000)).padStart(2, '0')}
+                  </span>
+                )}
+              </div>
+              <audio controls preload="metadata" src={recording.url} className="w-full">
+                Your browser does not support audio playback.
+              </audio>
             </div>
           )}
 

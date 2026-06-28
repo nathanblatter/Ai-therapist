@@ -18,6 +18,14 @@ services:
       AWS_REGION: ${AWS_REGION}
       FLIGHTDECK_URL: ${FLIGHTDECK_URL:-http://flightdeck:8080}
       FLIGHTDECK_INGEST_KEY: ${FLIGHTDECK_INGEST_KEY}
+      # Object storage for session recordings. Endpoint is hardcoded (not
+      # interpolated) so the host .env's local-dev value (127.0.0.1:9000) can't
+      # leak in — the container reaches MinIO by service name on the shared
+      # docker-services network. Only the credentials come from .env.
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BUCKET: ai-therapist-recordings
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     networks:
       - default
       - flightdeck

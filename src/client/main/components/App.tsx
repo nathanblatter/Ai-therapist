@@ -7,7 +7,7 @@ import Header from './Header';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
 import BugReport from './BugReport';
-import { startAudioTee, type AudioTeeHandle } from '../lib/audioTee';
+import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 
 interface CrisisContact {
   hotline: string;
@@ -357,27 +357,9 @@ export default function App() {
       socket.emit('session:join', { sessionId: newSessionId });
     });
 
-    // Live audio monitoring: tee the assistant's audio to admins on demand. The
-    // server signals start when an admin begins listening and stop when none are.
-    socket.on('audio:tee-start', () => {
-      if (audioTeeRef.current) return; // already teeing
-      const stream = audioElement.current?.srcObject as MediaStream | null;
-      if (!stream) {
-        console.warn('[AudioTee] No assistant stream available to tee yet');
-        return;
-      }
-      console.log('[AudioTee] Admin listening — starting assistant audio tee');
-      audioTeeRef.current = startAudioTee(stream, (pcm, sampleRate) => {
-        socket.emit('client:audio-chunk', { sessionId: newSessionId, pcm, sampleRate });
-      });
-    });
-
-    socket.on('audio:tee-stop', () => {
-      if (!audioTeeRef.current) return;
-      console.log('[AudioTee] No listeners — stopping assistant audio tee');
-      audioTeeRef.current.stop();
-      audioTeeRef.current = null;
-    });
+    // Audio capture is started in pc.ontrack below (once both the mic and the
+    // assistant track exist) and runs for the whole session so the server can
+    // record it and relay it live to any admin who chooses to listen.
 
     // Listen for remote session termination by admin or system
     socket.on('session:status', (data) => {
@@ -528,11 +510,22 @@ export default function App() {
     const audioEl = document.createElement("audio");
     audioEl.autoplay = true;
     audioElement.current = audioEl;
-    pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; };
     // Add local audio track for microphone input in the browser
     const ms = await navigator.mediaDevices.getUserMedia({ audio: true,}); //video: true// });
     setLocalStream(ms);
     pc.addTrack(ms.getTracks()[0]);
+
+    pc.ontrack = (e) => {
+      audioEl.srcObject = e.streams[0];
+      // Capture the whole conversation: mix mic + assistant audio into one PCM
+      // stream, teed for the entire session so the server can record it and
+      // relay it live to any admin who is listening.
+      if (!audioTeeRef.current) {
+        audioTeeRef.current = startMixedTee([ms, e.streams[0]], (pcm, sampleRate) => {
+          socket.emit('client:audio-chunk', { sessionId: newSessionId, pcm, sampleRate });
+        });
+      }
+    };
     // Set up data channel for sending and receiving events
     const dc = pc.createDataChannel("oai-events");
     dataChannelRef.current = dc;

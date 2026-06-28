@@ -150,6 +150,11 @@ export default function sessionsRoutes(): Router {
         .then(m => m.redactSession(sessionId))
         .catch(e => console.error('[Redaction] session redaction failed:', e));
 
+      // Finalize the audio recording (wrap buffered PCM → WAV → object storage).
+      import('../../services/recorder.service.js')
+        .then(m => m.finalize(sessionId))
+        .catch(e => console.error('[Recorder] finalize failed:', e));
+
       global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' });
       global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'user' });
 

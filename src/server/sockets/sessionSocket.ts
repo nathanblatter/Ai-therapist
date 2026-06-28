@@ -3,6 +3,7 @@ import connectPgSimple from 'connect-pg-simple';
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { Pool } from 'pg';
 import { insertMessagesBatch } from '../db/index.js';
+import { appendChunk } from '../services/recorder.service.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('socket');
@@ -16,27 +17,6 @@ interface AuthenticatedSocket extends Socket {
 
 export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
   const PgSession = connectPgSimple(session);
-
-  // Live audio monitoring: which admin sockets are listening to each session.
-  // The participant's browser only tees its assistant audio while at least one
-  // admin is listening (on-demand), so we track listeners to start/stop teeing.
-  const audioListeners = new Map<string, Set<string>>(); // sessionId → admin socket ids
-
-  function addAudioListener(sessionId: string, socketId: string): boolean {
-    let set = audioListeners.get(sessionId);
-    if (!set) { set = new Set(); audioListeners.set(sessionId, set); }
-    const wasEmpty = set.size === 0;
-    set.add(socketId);
-    return wasEmpty; // true if this is the first listener
-  }
-
-  function removeAudioListener(sessionId: string, socketId: string): boolean {
-    const set = audioListeners.get(sessionId);
-    if (!set) return false;
-    set.delete(socketId);
-    if (set.size === 0) { audioListeners.delete(sessionId); return true; } // now empty
-    return false;
-  }
 
   // Socket.io authentication middleware
   io.use((socket, next) => {
@@ -188,56 +168,45 @@ export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
       }
     });
 
-    // ---- Live assistant-audio monitoring ----
+    // ---- Live audio monitoring + recording ----
+    //
+    // The participant's browser mixes mic + assistant audio and tees a single
+    // PCM16 stream for the whole session (always-on, so we can record it). The
+    // server records every session to object storage and additionally relays
+    // chunks live to any admin who has joined the session's audio room.
 
-    // Admin asks to listen to a session's assistant audio.
+    // Admin joins/leaves a session's live audio room.
     authSocket.on('admin:audio-listen-start', ({ sessionId }: { sessionId: string }) => {
-      log.info(`[audio] listen-start received: isAdmin=${isAdmin} role=${authSocket.userRole} sessionId=${sessionId}`);
       if (!isAdmin || !sessionId) return;
       authSocket.join(`audio:${sessionId}`);
-      const first = addAudioListener(sessionId, authSocket.id);
-      if (first) {
-        // First listener — tell the participant's browser to start teeing.
-        const room = io.sockets.adapter.rooms.get(`session:${sessionId}`);
-        log.info(`[audio] tee-start → session:${sessionId} (${room?.size ?? 0} sockets in room)`);
-        io.to(`session:${sessionId}`).emit('audio:tee-start', { sessionId });
-      }
-      log.info(`[audio] Admin ${authSocket.username} listening to audio for ${sessionId}`);
+      log.info(`[audio] ${authSocket.username} listening live to ${sessionId}`);
     });
 
-    // Admin stops listening.
     authSocket.on('admin:audio-listen-stop', ({ sessionId }: { sessionId: string }) => {
-      if (!isAdmin || !sessionId) return;
+      if (!sessionId) return;
       authSocket.leave(`audio:${sessionId}`);
-      const nowEmpty = removeAudioListener(sessionId, authSocket.id);
-      if (nowEmpty) {
-        io.to(`session:${sessionId}`).emit('audio:tee-stop', { sessionId });
-      }
     });
 
-    // Participant relays a chunk of teed assistant audio. Forward to listeners.
+    // Participant relays a chunk of mixed audio: record it, and relay to any
+    // live listeners (the room emit is a no-op when nobody is listening).
     let audioChunkLogCount = 0;
     authSocket.on('client:audio-chunk', ({ sessionId, pcm, sampleRate }: { sessionId: string; pcm: string; sampleRate: number }) => {
       if (!sessionId || !pcm) return;
-      const set = audioListeners.get(sessionId);
-      if (!set || set.size === 0) return; // nobody listening; drop
-      if (audioChunkLogCount++ % 100 === 0) {
-        log.info(`[audio] relaying chunk #${audioChunkLogCount} for ${sessionId} → ${set.size} listener(s), ${pcm.length}b @ ${sampleRate}Hz`);
+      try {
+        appendChunk(sessionId, pcm, sampleRate);
+      } catch (err) {
+        log.error({ err }, `[audio] failed to buffer chunk for ${sessionId}`);
       }
       authSocket.to(`audio:${sessionId}`).emit('audio:chunk', { sessionId, pcm, sampleRate });
+      if (audioChunkLogCount++ % 200 === 0) {
+        log.info(`[audio] chunk for ${sessionId} (${pcm.length}b @ ${sampleRate}Hz)`);
+      }
     });
 
     authSocket.on('disconnect', (reason: string) => {
       log.info(`User disconnected: ${reason}`);
       if (isAdmin) {
         authSocket.to('admin-broadcast').emit('admin:left', { username: authSocket.username });
-        // Drop this admin from any audio sessions; stop teeing if last listener.
-        for (const [sessionId, set] of audioListeners) {
-          if (set.has(authSocket.id)) {
-            const nowEmpty = removeAudioListener(sessionId, authSocket.id);
-            if (nowEmpty) io.to(`session:${sessionId}`).emit('audio:tee-stop', { sessionId });
-          }
-        }
       }
     });
   });

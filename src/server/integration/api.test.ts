@@ -191,6 +191,18 @@ describe('session management routes', () => {
   });
 });
 
+describe('admin recording routes', () => {
+  it('GET /admin/api/sessions/:id/recording-info is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/sessions/abc/recording-info');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /admin/api/sessions/:id/recording is gated (401)', async () => {
+    const res = await request(app).get('/admin/api/sessions/abc/recording');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('chat routes', () => {
   it('POST /api/chat/message requires sessionId and message (400)', async () => {
     const res = await request(app).post('/api/chat/message').send({});

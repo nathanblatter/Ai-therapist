@@ -152,6 +152,11 @@ export default function tokenRoutes(): Router {
                   .then(m => m.redactSession(sessionId))
                   .catch(e => console.error('[Redaction] session redaction failed:', e));
 
+                // Finalize the audio recording (buffered PCM → WAV → object storage).
+                import('../../services/recorder.service.js')
+                  .then(m => m.finalize(sessionId))
+                  .catch(e => console.error('[Recorder] finalize failed:', e));
+
                 global.io.to(`session:${sessionId}`).emit('session:status', {
                   status: 'ended',
                   endedBy: 'system',

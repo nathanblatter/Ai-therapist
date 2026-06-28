@@ -54,6 +54,66 @@ export function startAudioTee(
   };
 }
 
+/**
+ * Tee several MediaStreams mixed down into a single PCM16 stream. Used to
+ * capture the whole conversation (participant mic + assistant voice) as one
+ * combined recording. Each source is attenuated slightly to leave headroom
+ * before the summed signal is clamped. Returns a handle to stop and release.
+ */
+export function startMixedTee(
+  streams: MediaStream[],
+  onChunk: (base64Pcm16: string, sampleRate: number) => void,
+): AudioTeeHandle {
+  const AudioCtx = window.AudioContext || (window as WebkitWindow).webkitAudioContext!;
+  const ctx = new AudioCtx();
+  const processor = ctx.createScriptProcessor(4096, 1, 1);
+
+  // One gain per source feeds the same processor input; Web Audio sums them.
+  const sources = streams
+    .filter((s) => s && s.getAudioTracks().length > 0)
+    .map((stream) => {
+      const src = ctx.createMediaStreamSource(stream);
+      const gain = ctx.createGain();
+      gain.gain.value = 0.85; // headroom so two simultaneous voices don't clip hard
+      src.connect(gain);
+      gain.connect(processor);
+      return { src, gain };
+    });
+
+  processor.onaudioprocess = (e) => {
+    const input = e.inputBuffer.getChannelData(0);
+    const pcm16 = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    onChunk(int16ToBase64(pcm16), ctx.sampleRate);
+  };
+
+  // Route through a muted gain so the tap doesn't double-play locally.
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+  processor.connect(mute);
+  mute.connect(ctx.destination);
+
+  return {
+    stop: () => {
+      try {
+        processor.onaudioprocess = null;
+        processor.disconnect();
+        mute.disconnect();
+        for (const { src, gain } of sources) {
+          src.disconnect();
+          gain.disconnect();
+        }
+      } catch {
+        // already torn down
+      }
+      void ctx.close();
+    },
+  };
+}
+
 function int16ToBase64(pcm: Int16Array): string {
   const bytes = new Uint8Array(pcm.buffer);
   let binary = '';

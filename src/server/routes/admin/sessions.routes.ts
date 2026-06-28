@@ -19,6 +19,8 @@ import {
   type MessageContentColumn,
 } from '../../db/index.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
+import { getSessionRecording } from '../../db/recording.queries.js';
+import { getObjectStream, headObject } from '../../config/objectStorage.js';
 
 // Split a comma-separated query param into a non-empty string[] (or null).
 function parseList(value: unknown): string[] | null {
@@ -70,6 +72,11 @@ export default function adminSessionsRoutes(): Router {
       import('../../services/sessionRedaction.service.js')
         .then(m => m.redactSession(sessionId))
         .catch(e => console.error('[Redaction] session redaction failed:', e));
+
+      // Finalize the audio recording (wrap buffered PCM → WAV → object storage).
+      import('../../services/recorder.service.js')
+        .then(m => m.finalize(sessionId))
+        .catch(e => console.error('[Recorder] finalize failed:', e));
 
       // Notify admin dashboards and the participant's own session room.
       global.io.to('admin-broadcast').emit('session:ended', {
@@ -150,6 +157,71 @@ export default function adminSessionsRoutes(): Router {
     } catch (err) {
       console.error('Failed to check redaction status:', err);
       res.status(500).json({ error: 'Failed to check redaction status' });
+    }
+  });
+
+  // GET /admin/api/sessions/:sessionId/recording-info - playback availability
+  router.get('/admin/api/sessions/:sessionId/recording-info', requireRole('therapist', 'researcher'), async (req, res) => {
+    const { sessionId } = req.params;
+    try {
+      const rec = await getSessionRecording(sessionId);
+      if (!rec || rec.status !== 'ready') {
+        return res.json({ available: false, status: rec?.status ?? 'none' });
+      }
+      res.json({
+        available: true,
+        status: rec.status,
+        durationMs: rec.durationMs,
+        sizeBytes: rec.sizeBytes,
+        url: `/admin/api/sessions/${sessionId}/recording`,
+      });
+    } catch (err) {
+      console.error('Failed to fetch recording info:', err);
+      res.status(500).json({ error: 'Failed to fetch recording info' });
+    }
+  });
+
+  // GET /admin/api/sessions/:sessionId/recording - stream the WAV (Range-aware,
+  // proxied from object storage so the browser never talks to MinIO directly).
+  router.get('/admin/api/sessions/:sessionId/recording', requireRole('therapist', 'researcher'), async (req, res) => {
+    const { sessionId } = req.params;
+    try {
+      const rec = await getSessionRecording(sessionId);
+      if (!rec || rec.status !== 'ready') {
+        return res.status(404).json({ error: 'No recording available' });
+      }
+
+      const meta = await headObject(rec.objectKey);
+      if (!meta) return res.status(404).json({ error: 'Recording object missing' });
+
+      const total = meta.contentLength;
+      const rangeHeader = req.headers.range;
+
+      if (rangeHeader) {
+        const match = /bytes=(\d+)-(\d*)/.exec(rangeHeader);
+        const start = match ? parseInt(match[1], 10) : 0;
+        const end = match && match[2] ? parseInt(match[2], 10) : total - 1;
+        if (start >= total || end >= total) {
+          res.status(416).setHeader('Content-Range', `bytes */${total}`);
+          return res.end();
+        }
+        const { body } = await getObjectStream(rec.objectKey, { start, end });
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', end - start + 1);
+        res.setHeader('Content-Type', meta.contentType);
+        return body.pipe(res);
+      }
+
+      const { body } = await getObjectStream(rec.objectKey);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Length', total);
+      res.setHeader('Content-Type', meta.contentType);
+      body.pipe(res);
+    } catch (err) {
+      console.error('Failed to stream recording:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Failed to stream recording' });
     }
   });
 
