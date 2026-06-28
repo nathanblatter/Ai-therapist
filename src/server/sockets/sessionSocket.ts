@@ -3,7 +3,6 @@ import connectPgSimple from 'connect-pg-simple';
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { Pool } from 'pg';
 import { insertMessagesBatch } from '../db/index.js';
-import { appendChunk } from '../services/recorder.service.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('socket');
@@ -187,28 +186,10 @@ export function initializeSocketHandlers(io: SocketIOServer, pool: Pool): void {
       authSocket.leave(`audio:${sessionId}`);
     });
 
-    // Diagnostic: the participant reports audio-capture lifecycle (ontrack
-    // firing, AudioContext state, whether chunks started) so we can see why a
-    // recording is/isn't being produced without access to the browser.
-    authSocket.on('client:audio-status', (data: Record<string, unknown>) => {
-      log.info(`[audio-status] ${JSON.stringify(data)}`);
-    });
-
-    // Participant relays a chunk of mixed audio: record it, and relay to any
-    // live listeners (the room emit is a no-op when nobody is listening).
-    let audioChunkLogCount = 0;
-    authSocket.on('client:audio-chunk', ({ sessionId, pcm, sampleRate }: { sessionId: string; pcm: string; sampleRate: number }) => {
-      if (!sessionId || !pcm) return;
-      try {
-        appendChunk(sessionId, pcm, sampleRate);
-      } catch (err) {
-        log.error({ err }, `[audio] failed to buffer chunk for ${sessionId}`);
-      }
-      authSocket.to(`audio:${sessionId}`).emit('audio:chunk', { sessionId, pcm, sampleRate });
-      if (audioChunkLogCount++ % 200 === 0) {
-        log.info(`[audio] chunk for ${sessionId} (${pcm.length}b @ ${sampleRate}Hz)`);
-      }
-    });
+    // NOTE: participant audio is ingested over HTTP (POST /api/sessions/:id/audio
+    // in sessions.routes.ts), not via this socket — the participant's Socket.io
+    // connection is unreliable through the tunnel. That route appends to the
+    // recording and relays 'audio:chunk' to the audio:<sessionId> room above.
 
     authSocket.on('disconnect', (reason: string) => {
       log.info(`User disconnected: ${reason}`);

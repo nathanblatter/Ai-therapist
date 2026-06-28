@@ -356,14 +356,14 @@ export default function App() {
     });
 
     socket.on('connect', () => {
-      console.log('[socket] connected for session monitoring; id=', socket.id, 'transport=', socket.io.engine.transport.name);
+      console.log('Socket.io connected for session monitoring');
       // Join the session-specific room to receive events for this session
       socket.emit('session:join', { sessionId: newSessionId });
     });
-    socket.on('connect_error', (e) => {
-      console.error('[socket] connect_error:', e.message, e);
-    });
-    socket.io.on('error', (e) => console.error('[socket] manager error:', e));
+    // The participant socket is known to be unreliable through the tunnel (see
+    // ai-therapist follow-up); audio no longer depends on it. Log failures so
+    // the open investigation has data, but they no longer break recording.
+    socket.on('connect_error', (e) => console.error('[socket] connect_error:', e.message));
 
     // Audio capture is started in pc.ontrack below (once both the mic and the
     // assistant track exist) and runs for the whole session so the server can
