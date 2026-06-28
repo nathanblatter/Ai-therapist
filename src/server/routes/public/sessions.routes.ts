@@ -2,8 +2,9 @@
 // therapy sessions, plus register-call which attaches the OpenAI realtime call
 // id. Session owners see their own unredacted content. Mutations reuse
 // db/sessions.queries.ts + db/messages.queries.ts.
-import { Router } from 'express';
+import { Router, json } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
+import { appendChunk } from '../../services/recorder.service.js';
 import {
   createSession,
   getSession,
@@ -18,6 +19,30 @@ import { generateSessionNameAsync } from '../../services/sessionName.service.js'
 
 export default function sessionsRoutes(): Router {
   const router = Router();
+
+  // POST /api/sessions/:sessionId/audio - ingest mixed (mic+assistant) PCM16
+  // audio over HTTP. The participant browser's Socket.io connection is
+  // unreliable through the tunnel, but HTTP works, so audio is uploaded here:
+  // each batch is appended to the session recording and relayed live to any
+  // admin listening (over the admin socket, which is reliable). Uses its own
+  // larger body limit since batches are bigger than the default 100kb.
+  router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), (req, res) => {
+    const { sessionId } = req.params;
+    const { chunks, sampleRate } = req.body as { chunks?: string[]; sampleRate?: number };
+    if (!sessionId || !Array.isArray(chunks) || typeof sampleRate !== 'number') {
+      return res.status(400).json({ error: 'chunks[] and sampleRate required' });
+    }
+    for (const pcm of chunks) {
+      if (typeof pcm !== 'string' || !pcm) continue;
+      try {
+        appendChunk(sessionId, pcm, sampleRate);
+      } catch {
+        /* best-effort recording */
+      }
+      global.io?.to(`audio:${sessionId}`).emit('audio:chunk', { sessionId, pcm, sampleRate });
+    }
+    res.sendStatus(204);
+  });
 
   // POST /api/sessions/:sessionId/register-call - attach an OpenAI call id
   router.post('/api/sessions/:sessionId/register-call', async (req, res) => {

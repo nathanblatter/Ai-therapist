@@ -8,6 +8,7 @@ import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
 import BugReport from './BugReport';
 import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
+import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
 
 interface CrisisContact {
   hotline: string;
@@ -65,8 +66,10 @@ export default function App() {
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const audioElement = useRef<HTMLAudioElement | null>(null);
-  // Active assistant-audio tee (only runs while an admin is listening).
+  // Always-on capture: tee mixes mic+assistant audio; uploader POSTs it to the
+  // server (HTTP, since the participant socket is unreliable through the tunnel).
   const audioTeeRef = useRef<AudioTeeHandle | null>(null);
+  const audioUploaderRef = useRef<AudioUploader | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
@@ -522,23 +525,15 @@ export default function App() {
 
     pc.ontrack = (e) => {
       audioEl.srcObject = e.streams[0];
-      socket.emit('client:audio-status', {
-        sessionId: newSessionId,
-        phase: 'ontrack',
-        tracks: e.streams[0]?.getAudioTracks().length ?? 0,
-        hasMic: !!ms && ms.getAudioTracks().length > 0,
-      });
       // Capture the whole conversation: mix mic + assistant audio into one PCM
-      // stream, teed for the entire session so the server can record it and
-      // relay it live to any admin who is listening.
+      // stream and upload it over HTTP for the entire session, so the server can
+      // record it and relay it live to any admin who is listening.
       if (!audioTeeRef.current) {
-        audioTeeRef.current = startMixedTee(
-          [ms, e.streams[0]],
-          (pcm, sampleRate) => {
-            socket.emit('client:audio-chunk', { sessionId: newSessionId, pcm, sampleRate });
-          },
-          (status) => socket.emit('client:audio-status', { sessionId: newSessionId, ...status }),
-        );
+        const uploader = createAudioUploader(newSessionId);
+        audioUploaderRef.current = uploader;
+        audioTeeRef.current = startMixedTee([ms, e.streams[0]], (pcm, sampleRate) => {
+          uploader.push(pcm, sampleRate);
+        });
       }
     };
     // Set up data channel for sending and receiving events
@@ -759,6 +754,10 @@ export default function App() {
     if (audioTeeRef.current) {
       audioTeeRef.current.stop();
       audioTeeRef.current = null;
+    }
+    if (audioUploaderRef.current) {
+      audioUploaderRef.current.stop(); // flush the final batch
+      audioUploaderRef.current = null;
     }
 
     if (dataChannelRef.current) {
