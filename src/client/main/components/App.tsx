@@ -236,11 +236,12 @@ export default function App() {
   // Chat-only therapy session (GPT-4 text completions)
   async function startChatSession() {
     try {
-      // Backend will load language from database (user's saved preferences)
+      // Send the current language picker value (request body wins server-side)
+      // so it also applies for anonymous participants without saved prefs.
       const response = await fetch('/api/chat/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({ language: sessionSettings.language })
       });
 
       // Check for rate limiting errors
@@ -308,12 +309,17 @@ export default function App() {
 
   // Realtime therapy session (WebRTC with voice + chat)
   async function startRealtimeSession() {
-    // Get a session token for OpenAI Realtime API
-    // Backend will load voice/language from database (user's saved preferences)
+    // Get a session token for OpenAI Realtime API. The current picker values
+    // are sent explicitly (request body wins server-side) so the choice also
+    // applies for anonymous participants, who have no saved preferences row;
+    // logged-in users' preferences remain the fallback when nothing is sent.
     const tokenResponse = await fetch("/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({})
+      body: JSON.stringify({
+        voice: sessionSettings.voice,
+        language: sessionSettings.language,
+      })
     });
 
     // Check for rate limiting errors
