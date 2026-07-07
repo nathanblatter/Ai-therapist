@@ -1,13 +1,25 @@
 // Authentication routes: login (with MFA), register, logout, status.
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { requireRole } from '../../middleware/auth.js';
 import { verifyCredentials, createUser } from '../../db/index.js';
 
 export default function authRoutes(): Router {
   const router = Router();
 
+  // Brute-force protection: successful logins don't count, so a legitimate
+  // shared-lab IP isn't locked out by normal use.
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts. Please try again in a few minutes.' },
+  });
+
   // POST /api/auth/login
-  router.post('/api/auth/login', async (req, res) => {
+  router.post('/api/auth/login', loginLimiter, async (req, res) => {
     const { username, password, mfaToken, backupCode } = req.body;
 
     if (!username || !password) {

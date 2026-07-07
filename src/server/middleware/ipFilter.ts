@@ -6,24 +6,13 @@ import geoip from 'geoip-lite';
 import type { Request, Response, NextFunction } from 'express';
 
 /**
- * Get client IP address from request
- * Handles proxies and load balancers
+ * Get client IP address from request.
+ * Uses req.ip, which honours `trust proxy` (set to 1 for the Cloudflare
+ * tunnel). Never read x-forwarded-for directly: its first hop is
+ * client-supplied, so trusting it lets anyone spoof a US IP.
  */
 function getClientIp(req: Request): string | undefined {
-  // Check common headers for proxied requests
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    // x-forwarded-for can contain multiple IPs, take the first one
-    const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0];
-    return first.trim();
-  }
-
-  // Check other common proxy headers
-  const realIp = req.headers['x-real-ip'];
-  if (realIp) {
-    return Array.isArray(realIp) ? realIp[0] : realIp;
-  }
-  return (req.socket.remoteAddress) ?? undefined;
+  return req.ip ?? req.socket.remoteAddress ?? undefined;
 }
 
 /**
@@ -60,8 +49,9 @@ export function restrictParticipantsToUs(req: Request, res: Response, next: Next
     return next();
   }
 
-  // Skip IP check for authentication routes
-  if (req.path === '/api/login' || req.path === '/api/logout') {
+  // Skip IP check for authentication routes so therapists/researchers abroad
+  // can log in (their role then exempts them below).
+  if (req.path === '/api/auth/login' || req.path === '/api/auth/logout') {
     return next();
   }
 
