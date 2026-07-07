@@ -9,9 +9,11 @@ import { fileURLToPath } from "url";
 import session, { type Session, type SessionData } from "express-session";
 import type { IncomingMessage } from "http";
 import connectPgSimple from "connect-pg-simple";
+import helmet from "helmet";
 import {pool } from "./config/db.js";
-import { requireAuth, requireRole } from "./middleware/auth.js";
-import { insertMessagesBatch, getSidebandConnectionsByIds, type InsertMessageInput } from "./db/index.js";
+import { requireRole } from "./middleware/auth.js";
+import { errorHandler } from "./middleware/errorHandler.js";
+import { insertMessagesBatch, getSidebandConnectionsByIds, getSessionAccessInfo } from "./db/index.js";
 import configRoutes from "./routes/public/config.routes.js";
 import voicesRoutes from "./routes/public/voices.routes.js";
 import authRoutes from "./routes/public/auth.routes.js";
@@ -65,8 +67,11 @@ app.set('trust proxy', 1);
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
+    // Same-origin requests never need CORS headers, so production defaults to
+    // denying cross-origin entirely (`false`). `origin: true` would reflect
+    // ANY origin with credentials — never do that.
     origin: process.env.NODE_ENV === 'production'
-      ? (process.env.CORS_ORIGIN || true)  // Allow same-origin in production
+      ? (process.env.CORS_ORIGIN || false)
       : 'http://localhost:5173',
     credentials: true
   },
@@ -77,7 +82,7 @@ const io = new Server(httpServer, {
 // Make 'io' available globally for event emission
 global.io = io;
 
-const port = process.env.PORT ;
+const port = process.env.PORT || 3067;
 
 
 // Language instructions are now stored in the database system_config table
@@ -89,21 +94,29 @@ const port = process.env.PORT ;
 // SLC timezone helpers (getNextMidnightSLC/getHoursUntilReset/getStartOfTodaySLC)
 // live in utils/timezoneHelpers.ts and are used by the rate-limit route modules.
 
+// Security headers. CSP is left off: the SSR pages inline scripts and Vite dev
+// injects its own — enabling it needs nonce plumbing first.
+app.use(helmet({ contentSecurityPolicy: false }));
+
 app.use(express.json()); // Needed to parse JSON bodies
 
 // Health + bug-report (public, pre-session/IP middleware).
 app.use(healthRoutes());
 app.use(bugReportRoutes());
 
-// Session configuration with PostgreSQL store
+// Session configuration with PostgreSQL store. One middleware instance shared
+// by HTTP and the Socket.io handshake so cookie/secret settings can't drift.
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET must be set in production');
+}
 const PgSession = connectPgSimple(session);
-app.use(session({
+const sessionMiddleware = session({
   store: new PgSession({
     pool: pool,
     tableName: 'user_sessions',
     createTableIfMissing: false // We create table via migration
   }),
-  secret: process.env.SESSION_SECRET || 'ai-therapist-secret-key-change-in-production',
+  secret: process.env.SESSION_SECRET || 'dev-only-insecure-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -112,7 +125,8 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     sameSite: 'lax' // Prevent CSRF while allowing navigation
   }
-}));
+});
+app.use(sessionMiddleware);
 
 // IP-based geolocation filtering
 // Restricts participants to US-based access only
@@ -124,20 +138,7 @@ app.use(restrictParticipantsToUs);
 io.use((socket: AuthSocket, next) => {
   const req = socket.request as SessionRequest;
 
-  // Get session from socket handshake
-  const sessionMiddleware = session({
-    store: new PgSession({ pool, tableName: 'user_sessions', createTableIfMissing: false }),
-    secret: process.env.SESSION_SECRET || 'ai-therapist-secret-key-change-in-production',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.COOKIE_SECURE === 'true',
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000,
-      sameSite: 'lax'
-    }
-  });
-
+  // Reuse the same session middleware as HTTP to load the handshake session.
   sessionMiddleware(req as unknown as Request, {} as Response, (err) => {
     if (err) {
       console.error('[Socket.io] Session middleware error:', err);
@@ -179,8 +180,36 @@ io.on('connection', (socket: AuthSocket) => {
     console.log(`[Socket.io] Participant connected (${socket.id})`);
   }
 
-  // Handle session room subscriptions (available to all users)
-  socket.on('session:join', ({ sessionId }) => {
+  // Handle session room subscriptions. Session rooms receive live unredacted
+  // transcripts (`messages:new`), so joins must be authorized: admins may join
+  // anything; participants only sessions they own — via the ownedSessions list
+  // in their handshake cookie (set by /token, /api/chat/start, or
+  // /api/sessions/create before the socket connects) or, for logged-in users,
+  // the session row's user_id.
+  socket.on('session:join', async ({ sessionId }: { sessionId?: string }) => {
+    if (typeof sessionId !== 'string' || !sessionId) return;
+
+    if (isAdmin) {
+      socket.join(`session:${sessionId}`);
+      return;
+    }
+
+    const req = socket.request as SessionRequest;
+    let allowed = (req.session?.ownedSessions ?? []).includes(sessionId);
+    if (!allowed && socket.userId) {
+      try {
+        const info = await getSessionAccessInfo(sessionId);
+        allowed = !!info && info.user_id === socket.userId;
+      } catch (err) {
+        console.error('[Socket.io] session:join ownership lookup failed:', err);
+      }
+    }
+
+    if (!allowed) {
+      console.warn(`[Socket.io] Denied session:join for ${sessionId.substring(0, 12)}... from ${socket.id} (not owner)`);
+      return;
+    }
+
     console.log(`[Socket.io] User joining session ${sessionId}`);
     socket.join(`session:${sessionId}`);
   });
@@ -302,27 +331,6 @@ app.use(chatRoutes());
 app.use(sidebandRoutes());
 
 
-// // === OLD LOGGING ENDPOINT ===
-// app.post("/log", async (req, res) => {
-//   const { timestamp, sessionId, role, type, message, extras } = req.body;
-
-//   if (!timestamp || !sessionId || !role || !type || !message) {
-//     return res.status(400).send("Missing required log fields");
-//   }
-
-//   try {
-//     await pool.query(
-//       `INSERT INTO conversation_logs (session_id, role, message_type, message, extras, created_at)
-//        VALUES ($1, $2, $3, $4, $5, $6)`,
-//       [sessionId, role, type, message, extras || null, new Date(timestamp)]
-//     );
-//     res.sendStatus(200);
-//   } catch (err) {
-//     console.error("Failed to insert log into DB:", err);
-//     res.sendStatus(500);
-//   }
-// });
-
 // ===================== Session Management API Routes =====================
 // Public session create/list/view/end + register-call -> routes/public/sessions.routes.ts.
 app.use(sessionsRoutes());
@@ -396,9 +404,9 @@ async function startProdServer() {
   // Dynamically import all SSR modules
   // @ts-ignore – these modules are generated at build time and not available during type-check
   const { render } = await import('../../dist/server/entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
-  // @ts-ignore
+  // @ts-ignore – build-time module, see above
   const { render: renderAdmin } = await import('../../dist/admin-server/admin-entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
-  // @ts-ignore
+  // @ts-ignore – build-time module, see above
   const { render: renderRedact } = await import('../../dist/redact-server/redact-entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
 
   // Serve redact static assets
@@ -412,9 +420,8 @@ async function startProdServer() {
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
-      const stack = e instanceof Error ? e.stack : String(e);
-      console.error(stack);
-      res.status(500).end(stack);
+      console.error(e instanceof Error ? e.stack : String(e));
+      res.status(500).send('Internal server error');
     }
   });
 
@@ -426,9 +433,8 @@ async function startProdServer() {
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
-      const stack = e instanceof Error ? e.stack : String(e);
-      console.error(stack);
-      res.status(500).end(stack);
+      console.error(e instanceof Error ? e.stack : String(e));
+      res.status(500).send('Internal server error');
     }
   });
 
@@ -440,9 +446,8 @@ async function startProdServer() {
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
-      const stack = e instanceof Error ? e.stack : String(e);
-      console.error(stack);
-      res.status(500).end(stack);
+      console.error(e instanceof Error ? e.stack : String(e));
+      res.status(500).send('Internal server error');
     }
   });
 }
@@ -536,7 +541,9 @@ async function initializeServer() {
     await startDevServer();
   }
 
-  
+  // Final error handler: logs and returns a generic JSON error (stack only in
+  // non-production). Must be mounted after every route.
+  app.use(errorHandler);
 }
 
 // Only boot the HTTP server / SSR when run as the entrypoint (npm start, Docker).

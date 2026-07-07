@@ -16,6 +16,7 @@ import {
   setSessionCallId,
 } from '../../db/index.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
+import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 
 export default function sessionsRoutes(): Router {
   const router = Router();
@@ -26,11 +27,20 @@ export default function sessionsRoutes(): Router {
   // each batch is appended to the session recording and relayed live to any
   // admin listening (over the admin socket, which is reliable). Uses its own
   // larger body limit since batches are bigger than the default 100kb.
-  router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), (req, res) => {
+  router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), async (req, res) => {
     const { sessionId } = req.params;
     const { chunks, sampleRate } = req.body as { chunks?: string[]; sampleRate?: number };
     if (!sessionId || !Array.isArray(chunks) || typeof sampleRate !== 'number') {
       return res.status(400).json({ error: 'chunks[] and sampleRate required' });
+    }
+    // Only the session's owner may feed audio into its recording. Cookie
+    // ownership avoids a DB hit on this hot path; logged-in owners whose
+    // cookie was lost fall back to the user_id check.
+    if (!(req.session?.ownedSessions ?? []).includes(sessionId)) {
+      const access = await getSessionAccessInfo(sessionId);
+      if (!access || !canAccessSession(req, access, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
     }
     for (const pcm of chunks) {
       if (typeof pcm !== 'string' || !pcm) continue;
@@ -57,6 +67,9 @@ export default function sessionsRoutes(): Router {
       const session = await getSessionAccessInfo(sessionId);
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
       }
       if (session.status !== 'active') {
         return res.status(400).json({ error: 'Session is not active' });
@@ -100,6 +113,7 @@ export default function sessionsRoutes(): Router {
       const userId = req.session?.userId || null;
       const { sessionName } = req.body;
       const session = await createSession(userId, sessionName);
+      recordSessionOwnership(req, session.session_id);
       res.json(session);
     } catch (err) {
       console.error('Failed to create session:', err);
@@ -126,7 +140,7 @@ export default function sessionsRoutes(): Router {
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
       }
-      if (session.user_id && session.user_id !== req.session?.userId) {
+      if (!canAccessSession(req, session, sessionId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -149,7 +163,7 @@ export default function sessionsRoutes(): Router {
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
       }
-      if (session.user_id && session.user_id !== req.session?.userId) {
+      if (!canAccessSession(req, session, sessionId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 

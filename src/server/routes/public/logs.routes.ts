@@ -4,6 +4,7 @@
 // Socket.io activity to admins. The heavy lifting lives in the crisis-detection
 // and redaction-queue services; this route orchestrates them.
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import {
   getSession,
   insertMessagesBatch,
@@ -15,12 +16,17 @@ import {
   type InsertMessageInput,
 } from '../../db/index.js';
 import { getSystemPrompt } from '../../utils/sessionHelpers.js';
+import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 
 export default function logsRoutes(): Router {
   const router = Router();
 
+  // Generous per-IP throttle: the client flushes every ~15s, so a real
+  // participant stays far below this even with the unload beacon.
+  const logsLimiter = rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false });
+
   // POST /logs/batch - persist a batch of conversation records
-  router.post('/logs/batch', async (req, res) => {
+  router.post('/logs/batch', logsLimiter, async (req, res) => {
     const { records } = req.body;
     if (!Array.isArray(records) || records.length === 0) {
       return res.status(400).send('No records provided');
@@ -61,11 +67,21 @@ export default function logsRoutes(): Router {
         });
       }
 
-      // Ensure every referenced session exists, with a default configuration.
+      // Ensure every referenced session exists (with a default configuration)
+      // and that the requester is allowed to write to it: its owner (by cookie
+      // or user_id) or an admin. Reject the whole batch on any foreign session
+      // so unauthenticated callers can't inject messages into other people's
+      // transcripts or spam crisis detection.
       for (const sessionId of sessionIds) {
         const existingSession = await getSession(sessionId);
-        if (!existingSession) {
+        if (existingSession) {
+          if (!canAccessSession(req, existingSession, sessionId)) {
+            console.warn(`[Logs] Rejected batch write to session ${sessionId.substring(0, 12)}... (not owner)`);
+            return res.status(403).json({ error: 'Access denied' });
+          }
+        } else {
           await createActiveRealtimeSession(sessionId, userId);
+          recordSessionOwnership(req, sessionId);
           console.log(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
 
           try {
@@ -93,6 +109,27 @@ export default function logsRoutes(): Router {
       // content_redacted = NULL until then; live monitoring reads the unredacted
       // sideband transcript stream instead.
 
+      // Ack now — the crisis analysis below makes an LLM call per message and
+      // used to hold the participant's logging loop (and the unload beacon)
+      // hostage. It runs after the response, like redaction does.
+      res.sendStatus(200);
+
+      setImmediate(() => {
+        void processInsertedMessages(insertedMessages).catch(err =>
+          console.error('[Logs] post-persist crisis/emission processing failed:', err));
+      });
+    } catch (err) {
+      console.error('Failed to insert batch logs into DB:', err);
+      res.sendStatus(500);
+    }
+  });
+
+  // Crisis detection + admin socket fan-out for freshly persisted messages.
+  // Runs off the request path (fire-and-forget).
+  async function processInsertedMessages(
+    insertedMessages: Awaited<ReturnType<typeof insertMessagesBatch>>
+  ): Promise<void> {
+    {
       // ========== MULTI-LAYERED CRISIS DETECTION ==========
       const { analyzeMessageRisk, flagSessionCrisis, logInterventionAction } = await import('../../services/crisisDetection.service.js');
       const { executeGraduatedResponse } = await import('../../services/crisisIntervention.service.js');
@@ -184,13 +221,8 @@ export default function logsRoutes(): Router {
         });
       }));
       // ========== END SOCKET.IO EVENT EMISSION ==========
-
-      res.sendStatus(200);
-    } catch (err) {
-      console.error('Failed to insert batch logs into DB:', err);
-      res.sendStatus(500);
     }
-  });
+  }
 
   return router;
 }

@@ -15,6 +15,7 @@ import {
 } from '../../db/index.js';
 import { checkSessionLimits, getSystemPrompt } from '../../utils/sessionHelpers.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
+import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 
 export default function chatRoutes(): Router {
   const router = Router();
@@ -61,6 +62,7 @@ export default function chatRoutes(): Router {
       }
 
       const sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      recordSessionOwnership(req, sessionId);
       const systemPrompt = await getSystemPrompt(userLanguage, 'chat');
 
       const { initializeChatSession } = await import('../../services/chatTherapy.service.js');
@@ -115,9 +117,10 @@ export default function chatRoutes(): Router {
         return res.status(400).json({ error: 'Session is not a chat-only session' });
       }
 
-      // Ownership check.
-      const userId = req.session?.userId || req.sessionID;
-      if (session.user_id !== userId) {
+      // Ownership check (cookie ownedSessions for anonymous users, user_id
+      // for logged-in ones — the old `user_id !== req.sessionID` comparison
+      // could never match for anonymous sessions).
+      if (!canAccessSession(req, session, sessionId)) {
         return res.status(403).json({ error: 'Unauthorized: You do not own this session' });
       }
 
@@ -162,8 +165,7 @@ export default function chatRoutes(): Router {
       }
 
       // Ownership check.
-      const userId = req.session?.userId || req.sessionID;
-      if (session.user_id !== userId) {
+      if (!canAccessSession(req, session, sessionId)) {
         return res.status(403).json({ error: 'Unauthorized: You do not own this session' });
       }
 

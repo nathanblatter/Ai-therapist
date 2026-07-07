@@ -15,6 +15,7 @@ import {
   createActiveRealtimeSession,
 } from '../../db/index.js';
 import { checkSessionLimits, getSystemPrompt } from '../../utils/sessionHelpers.js';
+import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
 
 export default function tokenRoutes(): Router {
   const router = Router();
@@ -116,6 +117,13 @@ export default function tokenRoutes(): Router {
 
       const sessionId = data.session.id;
       const username = req.session?.username || null;
+
+      // Remember ownership in the requester's cookie session so later requests
+      // (/logs/batch, session:join, audio upload, end) can be authorized even
+      // for anonymous participants. Recorded before the DB insert on purpose:
+      // if the insert fails, /logs/batch lazily creates the session and still
+      // needs to know this browser owns it.
+      recordSessionOwnership(req, sessionId);
 
       try {
         await createActiveRealtimeSession(sessionId, userId);

@@ -11,6 +11,8 @@ declare module "express-session" {
     user?: SessionUser;
     mfaVerified?: boolean;
     tempMFASecret?: string;
+    /** Therapy sessions created by this (possibly anonymous) browser session. */
+    ownedSessions?: string[];
   }
 }
 
