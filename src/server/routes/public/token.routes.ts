@@ -16,7 +16,7 @@ import {
 } from '../../db/index.js';
 import { checkSessionLimits, getSystemPrompt, getActiveModality } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
-import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../utils/promptContext.js';
+import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock, buildToolGuidanceBlock } from '../../utils/promptContext.js';
 import { setSessionCheckin } from '../../db/index.js';
 
 export default function tokenRoutes(): Router {
@@ -85,12 +85,13 @@ export default function tokenRoutes(): Router {
       const tools = await toolRegistry.getEnabledToolDefinitions();
 
       // Assemble instructions: base prompt (with active modality + language
-      // additions) + returning-participant memory (opt-in, logged-in only) +
-      // today's pre-session check-in.
+      // additions) + when-to-call-tools guidance + returning-participant
+      // memory (opt-in, logged-in only) + today's pre-session check-in.
       const checkin = sanitizeCheckin(req.body?.checkin);
       const memoryBlock = await buildMemoryBlock(userId);
+      const toolGuidance = buildToolGuidanceBlock(tools.map(t => t.name));
       const instructions =
-        (await getSystemPrompt(userLanguage, 'realtime')) + memoryBlock + buildCheckinBlock(checkin);
+        (await getSystemPrompt(userLanguage, 'realtime')) + toolGuidance + memoryBlock + buildCheckinBlock(checkin);
       const activeModality = await getActiveModality();
 
       const dynamicSessionConfig = JSON.stringify({

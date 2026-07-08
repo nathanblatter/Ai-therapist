@@ -47,6 +47,46 @@ export function buildCheckinBlock(checkin: SessionCheckin | null): string {
 }
 
 /**
+ * Prompt block teaching the model when to actually CALL its client-side tools.
+ * The base prompt predates tool calling — its privacy section even reads as
+ * "never store anything", which made the model refuse remember_this — and
+ * without explicit cues the realtime model handles most requests verbally
+ * instead of invoking the matching tool (observed live: thought record asked
+ * for twice and never opened, mood rating never logged, "end the session now"
+ * ignored). Lines are emitted only for tools enabled for this session.
+ */
+export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
+  const has = (name: string) => enabledToolNames.includes(name);
+  const lines: string[] = [];
+  if (has('start_thought_record')) {
+    lines.push('- When they agree to work through a thought record, CALL start_thought_record to open the on-screen form. Never walk through one only in speech.');
+  }
+  if (has('log_mood')) {
+    lines.push('- Whenever they give a mood rating ("about a 4 out of 10"), CALL log_mood with it.');
+  }
+  if (has('remember_this')) {
+    lines.push('- When they ask you to remember something for future conversations, CALL remember_this. You CAN store facts this way — the privacy rules above are about not repeating or leaking data, and this tool enforces the participant\'s own consent. Never claim you cannot remember things without calling it.');
+  }
+  if (has('recall_previous_sessions')) {
+    lines.push('- When they reference past conversations, CALL recall_previous_sessions before saying you have no access.');
+  }
+  if (has('switch_language')) {
+    lines.push('- When the conversation language changes (they ask, or start speaking another language), CALL switch_language with the new language — then continue in it.');
+  }
+  if (has('end_session')) {
+    lines.push('- When they say they want to end and you have said goodbye, CALL end_session. Do not leave them to find the button.');
+  }
+  if (has('flag_notable_moment')) {
+    lines.push('- When you notice a breakthrough, or a technique clearly landing or failing, silently CALL flag_notable_moment.');
+  }
+  if (has('start_breathing_exercise') || has('start_grounding_exercise')) {
+    lines.push('- When they accept a breathing or grounding exercise, CALL the matching start_* tool so the guided visual appears — do not narrate it unaided.');
+  }
+  if (lines.length === 0) return '';
+  return `\n\n## Using your tools (important)\nYour function tools show real interactive cards and forms on the participant's screen and save information for their care team. When a request matches a tool, CALL the tool — describing it verbally instead is a failure. Specifically:\n${lines.join('\n')}`;
+}
+
+/**
  * Prompt block giving the model continuity with a returning participant.
  * Empty string for anonymous users, users who haven't opted in, or first-timers.
  */
