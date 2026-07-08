@@ -135,7 +135,11 @@ export default function logsRoutes(): Router {
       const { executeGraduatedResponse } = await import('../../services/crisisIntervention.service.js');
 
       for (const msg of insertedMessages) {
-        if (msg.role === 'user' || msg.role === 'assistant') {
+        // Only participant messages are scored: the assistant reciting crisis
+        // resources ("988 Suicide & Crisis Lifeline") used to flag its own
+        // session as a high-severity crisis. Assistant turns still reach the
+        // stage-2 LLM as conversation context.
+        if (msg.role === 'user') {
           const conversationHistory = await getRecentSessionMessages(msg.session_id, 10);
 
           const riskAnalysis = await analyzeMessageRisk(
@@ -157,9 +161,14 @@ export default function logsRoutes(): Router {
             const state = await getSessionCrisisState(msg.session_id);
             const currentScore = state?.crisis_risk_score || 0;
 
-            // Flag only on imminent/explicit crisis keywords (severity === 'high').
-            const shouldFlag = riskAnalysis.severity === 'high' &&
-              (!state?.crisis_flagged || riskAnalysis.riskScore > currentScore + 10);
+            // Graduated flagging: medium (50+) and high (75+) both flag the
+            // session for human review; only high (below) additionally fires
+            // the emergency admin alert. Re-flag only on meaningful escalation.
+            const severityRank: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3 };
+            const shouldFlag = (riskAnalysis.severity === 'high' || riskAnalysis.severity === 'medium') &&
+              (!state?.crisis_flagged ||
+                severityRank[riskAnalysis.severity] > (severityRank[state?.crisis_severity ?? 'none'] ?? 0) ||
+                riskAnalysis.riskScore > currentScore + 10);
 
             if (shouldFlag) {
               await flagSessionCrisis(

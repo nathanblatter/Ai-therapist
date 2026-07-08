@@ -18,9 +18,16 @@ export async function getSessionCrisisFlag(
   return result.rows[0] ?? null;
 }
 
+export interface RecentSessionMessage {
+  role: string;
+  content: string | null;
+  content_redacted: string | null;
+  [key: string]: unknown;
+}
+
 /** The most recent messages in a session, chronological order (oldest first). */
-export async function getRecentSessionMessages(sessionId: string, limit = 10): Promise<Record<string, unknown>[]> {
-  const result = await pool.query(
+export async function getRecentSessionMessages(sessionId: string, limit = 10): Promise<RecentSessionMessage[]> {
+  const result = await pool.query<RecentSessionMessage>(
     `SELECT * FROM messages
      WHERE session_id = $1
      ORDER BY created_at DESC

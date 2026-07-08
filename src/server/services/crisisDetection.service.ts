@@ -1,21 +1,51 @@
+import OpenAI from 'openai';
 import { pool } from '../config/db.js';
+import { getOpenAIKey } from '../config/secrets.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('crisisDetection');
 
 // ============================================
-// CRISIS KEYWORD DETECTION
+// STAGE 1: TIERED KEYWORD SCREEN
 // ============================================
+// The keyword screen's job is SCREENING, not judging: any tier match sends the
+// conversation to the stage-2 LLM assessment, which understands context
+// (negation, bystander talk, quoting the 988 hotline's name, media
+// references). The tier score is only used as a provisional fallback when the
+// LLM is unavailable. Assistant messages are never scored — the caller gates
+// on role (an assistant reciting "988 Suicide & Crisis Lifeline" once flagged
+// a session as a high-severity crisis).
 
-const CRISIS_KEYWORDS = {
+const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
+  // Explicit ideation / self-harm / means.
   high: {
     keywords: [
-      // Suicidal ideation
-      'suicide', 'kill myself', 'end my life', 'want to die',
-      // Self-harm
-      'self-harm', 'cut myself',
-      // Substance crisis
-      'overdose'
+      'suicide', 'suicidal', 'kill myself', 'end my life', 'take my own life',
+      'want to die', 'better off dead', 'wish i was dead', 'wish i were dead',
+      'end it all', 'no reason to live', 'not worth living',
+      'self-harm', 'self harm', 'cut myself', 'hurt myself', 'harm myself',
+      'overdose',
     ],
-    score: 75
-  }
+    score: 75,
+  },
+  // Passive ideation / escape wishes — the phrases the old list missed.
+  medium: {
+    keywords: [
+      "don't want to be here", 'do not want to be here', "don't want to exist",
+      'want to disappear', "can't go on", 'cannot go on', 'no point in living',
+      'no point going on', 'give up on life',
+      'everyone would be better off without me', 'better off without me',
+    ],
+    score: 40,
+  },
+  // Acute distress — enough to warrant a contextual look, nothing more.
+  low: {
+    keywords: [
+      'hopeless', 'worthless', "can't take it anymore", 'cannot take it anymore',
+      "can't take this anymore", 'no way out',
+    ],
+    score: 15,
+  },
 };
 
 interface DetectedKeyword {
@@ -31,14 +61,13 @@ interface KeywordAnalysis {
 }
 
 /**
- * Detect crisis keywords in message content
- * @param {string} content - Message content
- * @returns {object} { keywords: string[], keywordScore: number, detectedKeywords: array }
+ * Tiered keyword screen. Exported for tests. Curly quotes are normalized so
+ * Whisper transcripts ("don’t") match the straight-quote keyword list.
  */
-function detectCrisisKeywords(content: string): KeywordAnalysis {
+export function detectCrisisKeywords(content: string): KeywordAnalysis {
   if (!content) return { keywords: [], keywordScore: 0, detectedKeywords: [] };
 
-  const lowerContent = content.toLowerCase();
+  const lowerContent = content.toLowerCase().replace(/[‘’]/g, "'");
   const detectedKeywords: DetectedKeyword[] = [];
   let totalScore = 0;
 
@@ -56,6 +85,96 @@ function detectCrisisKeywords(content: string): KeywordAnalysis {
     keywords: detectedKeywords.map(k => k.keyword),
     keywordScore: totalScore,
     detectedKeywords
+  };
+}
+
+// ============================================
+// STAGE 2: LLM RISK ASSESSMENT
+// ============================================
+
+const RISK_MODEL = 'gpt-4o-mini';
+
+let openaiClient: OpenAI | null = null;
+async function getClient(): Promise<OpenAI> {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey: await getOpenAIKey() });
+  }
+  return openaiClient;
+}
+
+const RISK_ASSESSMENT_PROMPT = `You are a clinical risk-assessment assistant for an AI-assisted therapy research platform. A keyword screen flagged possible crisis language in a support conversation. Read the recent transcript and assess the PARTICIPANT's current suicide/self-harm risk.
+
+Return STRICT JSON only:
+{
+  "risk_score": <0-100>,
+  "severity": "none" | "low" | "medium" | "high",
+  "context": "genuine" | "negated" | "bystander" | "reference" | "unclear",
+  "factors": [<short strings: e.g. "passive ideation", "expressed plan", "hopelessness", "protective factors present">],
+  "reasoning": "<one sentence>"
+}
+
+Context judgment matters more than keywords:
+- "reference": mentioning a hotline's name, suicide prevention, a movie/book/news story → score 0-10, severity none.
+- "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
+- "bystander": talking about someone ELSE's crisis or loss → score 0-20, severity none/low (their own grief may still warrant low).
+- "genuine" passive ideation ("I don't want to be here anymore", "no point going on") → 40-60, medium.
+- "genuine" active ideation without plan → 60-75, high.
+- "genuine" ideation with plan, means, or timeframe → 80-100, high.
+Weigh protective factors (future plans, reasons for living, engaged help-seeking) downward. Base the score on the participant's CURRENT state in this conversation, not history alone.`;
+
+interface LlmRiskAssessment {
+  risk_score: number;
+  severity: 'none' | 'low' | 'medium' | 'high';
+  context: string;
+  factors: string[];
+  reasoning: string;
+}
+
+interface HistoryMessage {
+  role: string;
+  content?: string | null;
+  content_redacted?: string | null;
+}
+
+/** LLM contextual assessment of the recent conversation. Throws on failure. */
+async function assessRiskWithLLM(
+  latestContent: string,
+  conversationHistory: HistoryMessage[],
+): Promise<LlmRiskAssessment> {
+  const client = await getClient();
+
+  const transcript = conversationHistory
+    .filter(m => (m.role === 'user' || m.role === 'assistant') && (m.content ?? m.content_redacted))
+    .map(m => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.content ?? m.content_redacted}`)
+    .join('\n')
+    .slice(-6000);
+
+  const response = await client.chat.completions.create({
+    model: RISK_MODEL,
+    temperature: 0,
+    max_tokens: 300,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: RISK_ASSESSMENT_PROMPT },
+      {
+        role: 'user',
+        content: `Recent transcript:\n${transcript}\n\nLatest participant message (the one that tripped the screen):\n"${latestContent}"`,
+      },
+    ],
+  });
+
+  const parsed = JSON.parse(response.choices[0]?.message?.content ?? '{}') as Partial<LlmRiskAssessment>;
+  const score = Math.max(0, Math.min(100, Math.round(Number(parsed.risk_score) || 0)));
+  const severity = (['none', 'low', 'medium', 'high'] as const).includes(parsed.severity as 'none')
+    ? (parsed.severity as LlmRiskAssessment['severity'])
+    : score >= 75 ? 'high' : score >= 50 ? 'medium' : score >= 25 ? 'low' : 'none';
+
+  return {
+    risk_score: score,
+    severity,
+    context: typeof parsed.context === 'string' ? parsed.context : 'unclear',
+    factors: Array.isArray(parsed.factors) ? parsed.factors.filter((f): f is string => typeof f === 'string').slice(0, 8) : [],
+    reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning.slice(0, 400) : '',
   };
 }
 
@@ -140,23 +259,46 @@ interface RiskAnalysisResult {
 }
 
 /**
- * Analyze message risk using keyword detection only.
- * Trajectory is tracked passively for history but does not affect score.
- * @param {object} message - Message object
- * @param {array} conversationHistory - Unused, kept for call-site compatibility
- * @returns {object} Risk analysis result
+ * Two-stage risk analysis for a participant message.
+ *
+ * Stage 1: tiered keyword screen (cheap, every message). No match → score 0,
+ * no LLM call. Stage 2: on any keyword match, an LLM reads the recent
+ * conversation and judges CONTEXT — negation, bystander talk, quoting the
+ * hotline, media references all score ~0, while genuine passive/active
+ * ideation lands in graduated 25/50/75 bands that drive steering → medium
+ * flag → high flag + alert. If the LLM call fails, the keyword tier score
+ * stands (fail toward detection, never away from it).
  */
-export async function analyzeMessageRisk(message: MessageInput, conversationHistory: unknown[] = []): Promise<RiskAnalysisResult> {
+export async function analyzeMessageRisk(message: MessageInput, conversationHistory: HistoryMessage[] = []): Promise<RiskAnalysisResult> {
   try {
     const keywordAnalysis = detectCrisisKeywords(message.content);
 
     // Call passively for history logging — score not added to total
     await trackEmotionalTrajectory(message.session_id);
 
-    const riskScore = Math.min(keywordAnalysis.keywordScore, 100);
-    const severity = riskScore >= 75 ? 'high' : 'none';
+    let riskScore = Math.min(keywordAnalysis.keywordScore, 100);
+    let factors = keywordAnalysis.keywords;
+    let method = 'keyword_only';
+    let llm: LlmRiskAssessment | null = null;
 
-    const factors = keywordAnalysis.keywords;
+    if (keywordAnalysis.keywordScore > 0) {
+      try {
+        llm = await assessRiskWithLLM(message.content, conversationHistory);
+        riskScore = llm.risk_score;
+        factors = llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords;
+        method = 'llm_assessed';
+        log.info(
+          `[risk] session ${message.session_id.substring(0, 12)}…: keywords [${keywordAnalysis.keywords.join(', ')}] ` +
+            `→ LLM ${llm.risk_score}/100 (${llm.context}): ${llm.reasoning}`,
+        );
+      } catch (err) {
+        // LLM unavailable — keyword tier score stands as the provisional score.
+        method = 'keyword_fallback';
+        log.error({ err }, `[risk] LLM assessment failed for session ${message.session_id}; using keyword tier score ${riskScore}`);
+      }
+    }
+
+    const severity = riskScore >= 75 ? 'high' : riskScore >= 50 ? 'medium' : riskScore >= 25 ? 'low' : 'none';
 
     // Passive logging — insert unconditionally regardless of flagging.
     // severity column has CHECK (severity IN ('low','medium','high')), so use NULL when no keyword matched.
@@ -170,8 +312,15 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
         riskScore,
         severity === 'none' ? null : severity,
         JSON.stringify({
+          method,
           keyword_score: keywordAnalysis.keywordScore,
-          keywords: keywordAnalysis.keywords
+          keywords: keywordAnalysis.keywords,
+          ...(llm ? {
+            llm_score: llm.risk_score,
+            llm_context: llm.context,
+            llm_factors: llm.factors,
+            llm_reasoning: llm.reasoning,
+          } : {}),
         })
       ]
     );
@@ -181,7 +330,8 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
       severity,
       factors,
       breakdown: {
-        keywords: keywordAnalysis.keywordScore
+        keywords: keywordAnalysis.keywordScore,
+        ...(llm ? { llm: llm.risk_score } : {}),
       }
     };
   } catch (error) {
