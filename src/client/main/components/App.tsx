@@ -5,6 +5,7 @@ import SessionControls from "./SessionControls";
 import SessionSettings from "./SessionSettings";
 import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
 import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
+import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
 import Header from './Header';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
@@ -80,6 +81,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
   const [activeExercise, setActiveExercise] = useState<ActiveExercise | null>(null);
+  const [toolUI, setToolUI] = useState<ToolUI | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const [crisisContact, setCrisisContact] = useState<CrisisContact>({
     hotline: '988 Suicide & Crisis Lifeline',
@@ -706,6 +708,7 @@ export default function App() {
 
   async function stopSession() {
     setActiveExercise(null);
+    setToolUI(null);
     // Handle chat-only session
     if (sessionType === 'chat') {
       if (sessionId) {
@@ -996,6 +999,39 @@ export default function App() {
       setActiveExercise({ type: 'grounding' });
       return { shown: true };
     },
+    show_resource_card: async (args: unknown) => {
+      const a = (args ?? {}) as { resource_type?: string };
+      setToolUI({ kind: 'resource', resourceType: a.resource_type ?? 'all' });
+      return { shown: true };
+    },
+    start_thought_record: async () => {
+      setToolUI({ kind: 'thought_record' });
+      return { shown: true };
+    },
+    show_journaling_prompt: async (args: unknown) => {
+      const a = (args ?? {}) as { prompt?: string };
+      setToolUI({ kind: 'journal', prompt: a.prompt || 'What would you like to put into words right now?' });
+      return { shown: true };
+    },
+    display_session_recap: async (args: unknown) => {
+      const a = (args ?? {}) as { focus?: string; techniques?: string[]; takeaway?: string };
+      setToolUI({ kind: 'recap', focus: a.focus || 'Today’s conversation', techniques: a.techniques, takeaway: a.takeaway || '' });
+      return { shown: true };
+    },
+    create_safety_plan: async (args: unknown) => {
+      setToolUI({ kind: 'safety_plan', plan: (args ?? {}) as SafetyPlanData });
+      return { shown: true };
+    },
+    administer_scale: async (args: unknown) => {
+      const a = (args ?? {}) as { scale?: string };
+      if (a.scale) setToolUI({ kind: 'scale', scale: a.scale });
+      return { shown: Boolean(a.scale) };
+    },
+    end_session: async () => {
+      // Give the model's goodbye audio a moment to finish before teardown.
+      setTimeout(() => void stopSession(), 6000);
+      return { ending: true };
+    },
   };
 
   // NOTE: the realtime session config (model, voice, instructions, tools,
@@ -1041,6 +1077,17 @@ export default function App() {
 
       {/* Guided exercise overlay (launched by AI tool calls) */}
       <ExerciseOverlay exercise={activeExercise} onClose={() => setActiveExercise(null)} />
+
+      {/* Wave-2 tool surfaces: resource card, thought record, journal, recap, safety plan, screeners */}
+      <ToolOverlays
+        ui={toolUI}
+        onClose={() => setToolUI(null)}
+        onShareText={(text) => sendTextMessage(text)}
+        onInvisibleMessage={(text) => sendInvisiblePrompt(text)}
+        onLogRecord={(type, message, extras) =>
+          logConversation({ sessionId, role: 'user', type, message, extras })}
+        sessionId={sessionId}
+      />
 
       {/* Pre-session check-in (optional, skippable) */}
       <PreSessionCheckIn

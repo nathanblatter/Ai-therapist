@@ -54,6 +54,49 @@ export default function sessionsRoutes(): Router {
     res.sendStatus(204);
   });
 
+  // POST /api/sessions/:sessionId/scale-response - store a completed screener
+  // (PHQ-2/GAD-2) submitted from the administer_scale overlay. Owner-gated.
+  router.post('/api/sessions/:sessionId/scale-response', async (req, res) => {
+    const { sessionId } = req.params;
+    const { scale, answers } = req.body as { scale?: string; answers?: number[] };
+
+    const { SCALES } = await import('../../utils/scales.js');
+    const def = scale ? SCALES[scale] : undefined;
+    if (!def || !Array.isArray(answers) || answers.length !== def.items.length ||
+        !answers.every(a => Number.isInteger(a) && a >= 0 && a <= 3)) {
+      return res.status(400).json({ error: 'valid scale and answers[] required' });
+    }
+
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const score = answers.reduce((a, b) => a + b, 0);
+      const { insertScaleResponse } = await import('../../db/index.js');
+      await insertScaleResponse(sessionId, def.id, answers, score);
+
+      global.io?.to('admin-broadcast').emit('session:scale-completed', {
+        sessionId, scale: def.id, score, maxScore: def.max_score, completedAt: new Date(),
+      });
+
+      res.json({ success: true, scale: def.id, score, max_score: def.max_score });
+    } catch (err) {
+      console.error('Failed to store scale response:', err);
+      res.status(500).json({ error: 'Failed to store scale response' });
+    }
+  });
+
+  // GET /api/scales/:scaleId - screener definition for the client form
+  router.get('/api/scales/:scaleId', async (req, res) => {
+    const { SCALES } = await import('../../utils/scales.js');
+    const def = SCALES[req.params.scaleId];
+    if (!def) return res.status(404).json({ error: 'Unknown scale' });
+    res.json(def);
+  });
+
   // POST /api/sessions/:sessionId/register-call - attach an OpenAI call id
   router.post('/api/sessions/:sessionId/register-call', async (req, res) => {
     const { sessionId } = req.params;

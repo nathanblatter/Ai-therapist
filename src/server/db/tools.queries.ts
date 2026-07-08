@@ -56,3 +56,75 @@ export async function getSessionGoal(sessionId: string): Promise<string | null> 
   );
   return result.rows[0]?.session_goal ?? null;
 }
+
+// ---------- Wave 2: safety plans, user memories, scale responses ----------
+
+export interface SafetyPlan {
+  warning_signs?: string[];
+  coping_strategies?: string[];
+  support_contacts?: string[];
+  reasons_worth_living?: string[];
+  professional_resources?: string[];
+}
+
+export async function insertSafetyPlan(
+  sessionId: string,
+  userId: number | null,
+  plan: SafetyPlan
+): Promise<void> {
+  await pool.query(
+    'INSERT INTO safety_plans (session_id, user_id, plan) VALUES ($1, $2, $3)',
+    [sessionId, userId, JSON.stringify(plan)]
+  );
+}
+
+export async function getSessionSafetyPlan(sessionId: string): Promise<{ plan: SafetyPlan; created_at: Date } | null> {
+  const result = await pool.query<{ plan: SafetyPlan; created_at: Date }>(
+    'SELECT plan, created_at FROM safety_plans WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1',
+    [sessionId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Facts the participant explicitly asked the AI to remember (remember_this). */
+export async function insertUserMemory(userId: number, fact: string, sessionId: string | null): Promise<void> {
+  await pool.query(
+    'INSERT INTO user_memories (user_id, fact, session_id) VALUES ($1, $2, $3)',
+    [userId, fact, sessionId]
+  );
+}
+
+export async function getUserMemories(userId: number, limit = 10): Promise<string[]> {
+  const result = await pool.query<{ fact: string }>(
+    'SELECT fact FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+    [userId, limit]
+  );
+  return result.rows.map(r => r.fact);
+}
+
+export async function insertScaleResponse(
+  sessionId: string,
+  scale: string,
+  answers: number[],
+  score: number
+): Promise<void> {
+  await pool.query(
+    'INSERT INTO scale_responses (session_id, scale, answers, score) VALUES ($1, $2, $3, $4)',
+    [sessionId, scale, JSON.stringify(answers), score]
+  );
+}
+
+export interface ScaleResponseRow {
+  scale: string;
+  answers: number[];
+  score: number;
+  created_at: Date;
+}
+
+export async function getSessionScaleResponses(sessionId: string): Promise<ScaleResponseRow[]> {
+  const result = await pool.query<ScaleResponseRow>(
+    'SELECT scale, answers, score, created_at FROM scale_responses WHERE session_id = $1 ORDER BY created_at',
+    [sessionId]
+  );
+  return result.rows;
+}

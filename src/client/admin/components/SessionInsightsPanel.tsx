@@ -24,10 +24,12 @@ interface SoapNote {
 interface Insights {
   summary: SessionSummary | null;
   soap_note: SoapNote | null;
-  soap_status: 'draft' | 'reviewed';
-  soap_reviewed_by: string | null;
-  soap_reviewed_at: string | null;
-  model: string | null;
+  soap_status?: 'draft' | 'reviewed';
+  soap_reviewed_by?: string | null;
+  soap_reviewed_at?: string | null;
+  model?: string | null;
+  safety_plan?: { plan: Record<string, string[]>; created_at: string } | null;
+  scale_responses?: { scale: string; answers: number[]; score: number; created_at: string }[];
 }
 
 interface Checkin {
@@ -148,6 +150,40 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                   Generate now
                 </button>
               )}
+            </div>
+          )}
+
+          {insights?.safety_plan && (
+            <div>
+              <h4 className="font-semibold text-gray-700 mb-1">
+                Safety plan <span className="font-normal text-xs text-gray-400">created {new Date(insights.safety_plan.created_at).toLocaleString()}</span>
+              </h4>
+              <div className="bg-white rounded p-3 text-gray-700 space-y-2">
+                {Object.entries(insights.safety_plan.plan).map(([section, items]) =>
+                  Array.isArray(items) && items.length > 0 ? (
+                    <div key={section}>
+                      <span className="font-medium capitalize">{section.replace(/_/g, ' ')}:</span>{' '}
+                      {items.join('; ')}
+                    </div>
+                  ) : null
+                )}
+              </div>
+            </div>
+          )}
+
+          {insights?.scale_responses && insights.scale_responses.length > 0 && (
+            <div>
+              <h4 className="font-semibold text-gray-700 mb-1">Screener responses</h4>
+              <div className="bg-white rounded p-3 text-gray-700 space-y-1">
+                {insights.scale_responses.map((r, i) => (
+                  <div key={i}>
+                    <span className="font-mono uppercase">{r.scale}</span>: score <strong>{r.score}</strong>
+                    {' '}(items: {r.answers.join(', ')}) · {new Date(r.created_at).toLocaleString()}
+                    {r.score >= 3 && <span className="ml-2 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">≥ cutoff</span>}
+                  </div>
+                ))}
+                <p className="text-xs text-gray-400 pt-1">Screeners, not diagnoses.</p>
+              </div>
             </div>
           )}
 

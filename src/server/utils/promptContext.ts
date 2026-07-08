@@ -6,6 +6,7 @@ import {
   getRecentUserSummaries,
   countUserEndedSessions,
   getUserMemoryEnabled,
+  getUserMemories,
   type SessionCheckin,
 } from '../db/index.js';
 import { createLogger } from './logger.js';
@@ -55,11 +56,12 @@ export async function buildMemoryBlock(userId: number | null): Promise<string> {
     const enabled = await getUserMemoryEnabled(userId);
     if (!enabled) return '';
 
-    const [summaries, endedCount] = await Promise.all([
+    const [summaries, endedCount, facts] = await Promise.all([
       getRecentUserSummaries(userId, 3),
       countUserEndedSessions(userId),
+      getUserMemories(userId, 8),
     ]);
-    if (summaries.length === 0) return '';
+    if (summaries.length === 0 && facts.length === 0) return '';
 
     const entries = summaries.map(row => {
       const s = row.summary;
@@ -72,7 +74,14 @@ export async function buildMemoryBlock(userId: number | null): Promise<string> {
       return `- ${date}${s.headline ? ` ("${s.headline}")` : ''}: ${parts.join(' | ')}`;
     });
 
-    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)\nContext from recent conversations, most recent first:\n${entries.join('\n')}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
+    const factsBlock = facts.length > 0
+      ? `\nThings they explicitly asked you to remember:\n${facts.map(f => `- ${f}`).join('\n')}`
+      : '';
+    const entriesBlock = entries.length > 0
+      ? `\nContext from recent conversations, most recent first:\n${entries.join('\n')}`
+      : '';
+
+    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
   } catch (err) {
     // Memory must never block a session from starting.
     log.error({ err }, `Failed to build memory block for user ${userId}`);

@@ -3,7 +3,7 @@
 // researchers must not see.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { getSessionInsights, markSoapReviewed } from '../../db/index.js';
+import { getSessionInsights, markSoapReviewed, getSessionSafetyPlan, getSessionScaleResponses } from '../../db/index.js';
 
 export default function insightsRoutes(): Router {
   const router = Router();
@@ -11,11 +11,15 @@ export default function insightsRoutes(): Router {
   // GET /admin/api/sessions/:sessionId/insights
   router.get('/admin/api/sessions/:sessionId/insights', requireRole('therapist'), async (req, res) => {
     try {
-      const insights = await getSessionInsights(req.params.sessionId);
-      if (!insights) {
+      const [insights, safetyPlan, scaleResponses] = await Promise.all([
+        getSessionInsights(req.params.sessionId),
+        getSessionSafetyPlan(req.params.sessionId),
+        getSessionScaleResponses(req.params.sessionId),
+      ]);
+      if (!insights && !safetyPlan && scaleResponses.length === 0) {
         return res.status(404).json({ error: 'No insights for this session (yet)' });
       }
-      res.json(insights);
+      res.json({ ...(insights ?? {}), safety_plan: safetyPlan, scale_responses: scaleResponses });
     } catch (err) {
       console.error('Failed to fetch session insights:', err);
       res.status(500).json({ error: 'Failed to fetch session insights' });

@@ -495,6 +495,340 @@ export class ToolRegistry {
       }
     );
 
+    // ==================== WAVE 2 TOOLS ====================
+
+    // Tappable crisis-resource card on the participant's screen (rendered
+    // client-side from the data-channel event; this handler informs the model).
+    this.registerTool(
+      'show_resource_card',
+      {
+        type: 'function',
+        name: 'show_resource_card',
+        description: 'Display a tappable crisis-resource card on the participant\'s screen with call/text buttons (988, crisis text line, etc.). Stronger than reading numbers aloud — use whenever you share crisis resources, alongside saying them.',
+        parameters: {
+          type: 'object',
+          properties: {
+            resource_type: {
+              type: 'string',
+              enum: ['all', 'suicide', 'domestic_violence', 'substance_abuse', 'mental_health'],
+              description: 'Which resources to show. Default all.'
+            }
+          },
+          required: []
+        }
+      },
+      async (args: Record<string, unknown>) => ({
+        success: true,
+        shown: args['resource_type'] ?? 'all',
+        guidance: 'The resource card is now on the participant\'s screen with tappable call/text buttons. Mention it gently ("I\'ve put some numbers on your screen you can tap any time") without pressuring them to use it right now.'
+      })
+    );
+
+    // Guided CBT thought record (client renders the form; the completed record
+    // comes back through the normal logging path as a thought_record message).
+    this.registerTool(
+      'start_thought_record',
+      {
+        type: 'function',
+        name: 'start_thought_record',
+        description: 'Open a guided CBT thought-record form on the participant\'s screen (situation → automatic thought → feeling → evidence → balanced thought). Use when examining a specific unhelpful thought, after asking if they\'d like to work through it in writing.',
+        parameters: { type: 'object', properties: {}, required: [] }
+      },
+      async () => ({
+        success: true,
+        guidance: 'A thought-record form is now on the participant\'s screen. Stay quiet or offer brief encouragement while they fill it in; when they finish you will receive their entries — respond to the balanced thought they arrived at, not the form itself.'
+      })
+    );
+
+    // Private journaling overlay. Participant chooses whether to share.
+    this.registerTool(
+      'show_journaling_prompt',
+      {
+        type: 'function',
+        name: 'show_journaling_prompt',
+        description: 'Open a private writing box on the participant\'s screen with a prompt you provide. They choose to share what they wrote with you OR keep it entirely private (you will never see it). Good for feelings that are easier to write than say.',
+        parameters: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string', description: 'The journaling prompt, e.g. "What would you say to them if there were no consequences?"' }
+          },
+          required: ['prompt']
+        }
+      },
+      async (args: Record<string, unknown>) => ({
+        success: true,
+        prompt: args['prompt'],
+        guidance: 'The writing box is on their screen. Give them quiet time. If they share it, respond to what they wrote with care; if they keep it private, respect that completely and ask only how the writing felt.'
+      })
+    );
+
+    // End-of-session visual recap card (client renders from the args).
+    this.registerTool(
+      'display_session_recap',
+      {
+        type: 'function',
+        name: 'display_session_recap',
+        description: 'Show a visual recap card at the end of the session: what was worked on, techniques tried, and one takeaway. Call during your wind-down, right before saying goodbye.',
+        parameters: {
+          type: 'object',
+          properties: {
+            focus: { type: 'string', description: 'One line: what today was about.' },
+            techniques: { type: 'array', items: { type: 'string' }, description: 'Techniques tried or discussed.' },
+            takeaway: { type: 'string', description: 'One warm, specific takeaway for the participant.' }
+          },
+          required: ['focus', 'takeaway']
+        }
+      },
+      async () => ({
+        success: true,
+        guidance: 'The recap card is on the participant\'s screen — they can screenshot it. Close the conversation warmly.'
+      })
+    );
+
+    // Collaborative safety plan: stored server-side + shown as a card.
+    this.registerTool(
+      'create_safety_plan',
+      {
+        type: 'function',
+        name: 'create_safety_plan',
+        description: 'Save a safety plan you built WITH the participant (never invent entries — use their words). It is stored for the clinical team and shown to the participant as a card they can keep. Use after talking through warning signs and coping steps with someone experiencing recurring distress or risk.',
+        parameters: {
+          type: 'object',
+          properties: {
+            warning_signs: { type: 'array', items: { type: 'string' }, description: 'Their early warning signs.' },
+            coping_strategies: { type: 'array', items: { type: 'string' }, description: 'Steps that help them, in their words.' },
+            support_contacts: { type: 'array', items: { type: 'string' }, description: 'People they said they could reach out to (first names only).' },
+            reasons_worth_living: { type: 'array', items: { type: 'string' }, description: 'Their stated reasons/values (optional).' }
+          },
+          required: ['warning_signs', 'coping_strategies']
+        }
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+        const clean = (v: unknown): string[] =>
+          Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string').map(s => s.substring(0, 300)).slice(0, 10) : [];
+        const plan = {
+          warning_signs: clean(args['warning_signs']),
+          coping_strategies: clean(args['coping_strategies']),
+          support_contacts: clean(args['support_contacts']),
+          reasons_worth_living: clean(args['reasons_worth_living']),
+          professional_resources: ['988 Suicide & Crisis Lifeline (call or text 988)', 'Crisis Text Line (text HOME to 741741)', '911 for immediate danger'],
+        };
+        if (plan.warning_signs.length === 0 || plan.coping_strategies.length === 0) {
+          return { error: 'warning_signs and coping_strategies are both required' };
+        }
+        const { insertSafetyPlan, getSession } = await import('../db/index.js');
+        const session = await getSession(ctx.sessionId);
+        await insertSafetyPlan(ctx.sessionId, session?.user_id ?? null, plan);
+
+        if (global.io) {
+          global.io.to('admin-broadcast').emit('session:safety-plan-created', {
+            sessionId: ctx.sessionId, createdAt: new Date(),
+          });
+        }
+        return {
+          success: true,
+          guidance: 'The safety plan is saved and now showing on the participant\'s screen with crisis lines added. Encourage them to screenshot it and revisit the coping steps when warning signs appear.'
+        };
+      }
+    );
+
+    // On-demand deep memory recall (consent-gated like the injected block).
+    this.registerTool(
+      'recall_previous_sessions',
+      {
+        type: 'function',
+        name: 'recall_previous_sessions',
+        description: 'Retrieve summaries of this participant\'s previous conversations (only works if they are logged in and opted into session memory). Use when past context would genuinely help — e.g. they reference something from before.',
+        parameters: { type: 'object', properties: {}, required: [] }
+      },
+      async (_args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+        const { getSession, getUserMemoryEnabled, getRecentUserSummaries, getUserMemories } = await import('../db/index.js');
+        const session = await getSession(ctx.sessionId);
+        const userId = session?.user_id;
+        if (!userId) return { available: false, reason: 'Participant is anonymous — no session history exists.' };
+        if (!(await getUserMemoryEnabled(userId))) {
+          return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
+        }
+        const [summaries, facts] = await Promise.all([
+          getRecentUserSummaries(userId, 5),
+          getUserMemories(userId),
+        ]);
+        return {
+          available: true,
+          previous_sessions: summaries.map(s => ({
+            date: (s.ended_at ?? s.created_at).toISOString().slice(0, 10),
+            headline: s.summary.headline,
+            topics: s.summary.topics,
+            what_helped: s.summary.techniques_helped,
+            follow_up: s.summary.follow_up,
+          })),
+          remembered_facts: facts,
+          note: 'Use for continuity and warmth. Never claim to remember more than this.'
+        };
+      }
+    );
+
+    // Participant-approved memory.
+    this.registerTool(
+      'remember_this',
+      {
+        type: 'function',
+        name: 'remember_this',
+        description: 'Store one specific fact the participant EXPLICITLY asked you to remember for future conversations ("remember that..."). Only works for logged-in participants with session memory on. Never store anything they did not ask you to keep.',
+        parameters: {
+          type: 'object',
+          properties: {
+            fact: { type: 'string', description: 'The fact, phrased close to their words. One sentence.' }
+          },
+          required: ['fact']
+        }
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        const fact = typeof args['fact'] === 'string' ? args['fact'].trim().substring(0, 300) : '';
+        if (!fact || !ctx.sessionId) return { error: 'fact and session context are required' };
+        const { getSession, getUserMemoryEnabled, insertUserMemory } = await import('../db/index.js');
+        const session = await getSession(ctx.sessionId);
+        const userId = session?.user_id;
+        if (!userId) {
+          return { stored: false, reason: 'Participant is anonymous — memories need an account. Let them know gently if they asked.' };
+        }
+        if (!(await getUserMemoryEnabled(userId))) {
+          return { stored: false, reason: 'Session memory is turned off in their settings. Mention they can enable it there if they want this remembered.' };
+        }
+        await insertUserMemory(userId, fact, ctx.sessionId);
+        return { stored: true, fact };
+      }
+    );
+
+    // Graceful model-initiated session end (the client performs the teardown).
+    this.registerTool(
+      'end_session',
+      {
+        type: 'function',
+        name: 'end_session',
+        description: 'End the session cleanly. Call ONLY after you have fully said goodbye and the participant has agreed the conversation is complete — the session closes a few seconds after you call this.',
+        parameters: { type: 'object', properties: {}, required: [] }
+      },
+      async () => ({
+        success: true,
+        message: 'The session will close in a few seconds. Do not start any new topics.'
+      })
+    );
+
+    // Mid-session language switch (steers the model; config recorded).
+    this.registerTool(
+      'switch_language',
+      {
+        type: 'function',
+        name: 'switch_language',
+        description: 'Switch the conversation language when the participant asks or clearly prefers another language. Continue in the new language immediately after calling.',
+        parameters: {
+          type: 'object',
+          properties: {
+            language: { type: 'string', description: 'Target language code, e.g. "es", "fr", "ja".' }
+          },
+          required: ['language']
+        }
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        const language = typeof args['language'] === 'string' ? args['language'].toLowerCase().substring(0, 10) : '';
+        if (!language || !ctx.sessionId) return { error: 'language and session context are required' };
+        const { getSystemConfig } = await import('../utils/sessionHelpers.js');
+        const config = await getSystemConfig();
+        const languages = (config.languages as { languages?: { value: string; label: string; enabled: boolean }[] } | undefined)?.languages ?? [];
+        // The model tends to say bare codes ("es"); config uses regional ones
+        // ("es-ES", "es-419") — exact match first, then prefix match.
+        const enabled = languages.filter(l => l.enabled);
+        const target =
+          enabled.find(l => l.value.toLowerCase() === language) ??
+          enabled.find(l => l.value.toLowerCase().startsWith(`${language}-`)) ??
+          enabled.find(l => l.value.toLowerCase().split('-')[0] === language.split('-')[0]);
+        if (!target) {
+          return { error: `Language '${language}' is not available`, available: enabled.map(l => l.value) };
+        }
+        await pool.query(
+          'UPDATE session_configurations SET language = $2 WHERE session_id = $1',
+          [ctx.sessionId, target.value]
+        );
+        return {
+          success: true,
+          language: target.label,
+          guidance: `Continue the conversation entirely in ${target.label} from your next sentence. Keep the same warmth and approach.`
+        };
+      }
+    );
+
+    // Brief validated screeners (PHQ-2 / GAD-2). Client renders the form and
+    // posts answers to /api/sessions/:id/scale-response.
+    this.registerTool(
+      'administer_scale',
+      {
+        type: 'function',
+        name: 'administer_scale',
+        description: 'Present a brief 2-question validated check-in form on the participant\'s screen: phq2 (mood) or gad2 (anxiety). These are screeners, not diagnoses. Ask permission first ("mind if I ask two quick standard questions?"). At most one scale per session unless the participant asks.',
+        parameters: {
+          type: 'object',
+          properties: {
+            scale: { type: 'string', enum: ['phq2', 'gad2'], description: 'Which screener to present.' }
+          },
+          required: ['scale']
+        }
+      },
+      async (args: Record<string, unknown>) => {
+        const { SCALES } = await import('../utils/scales.js');
+        const scale = SCALES[args['scale'] as string];
+        if (!scale) return { error: 'Unknown scale', available: Object.keys(SCALES) };
+        return {
+          success: true,
+          scale: scale.id,
+          guidance: `The ${scale.name} form is on the participant's screen. Wait quietly while they answer; you will receive the result. Respond supportively to the answers — never announce a score as a diagnosis.`
+        };
+      }
+    );
+
+    // Research bookmark: the invocation log IS the storage; a transcript
+    // marker anchors it in context for later qualitative review.
+    this.registerTool(
+      'flag_notable_moment',
+      {
+        type: 'function',
+        name: 'flag_notable_moment',
+        description: 'Silently bookmark a conversationally significant moment for the research team: a breakthrough, a technique clearly landing or failing, strong resistance, or an unexpected turn. The participant never sees this. Use sparingly (a few per session at most).',
+        parameters: {
+          type: 'object',
+          properties: {
+            category: {
+              type: 'string',
+              enum: ['breakthrough', 'technique_worked', 'technique_failed', 'resistance', 'disclosure', 'other'],
+              description: 'What kind of moment this is.'
+            },
+            reason: { type: 'string', description: 'One sentence on why it is notable.' }
+          },
+          required: ['category', 'reason']
+        }
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+        const { insertMessagesBatch } = await import('../db/index.js');
+        await insertMessagesBatch([{
+          session_id: ctx.sessionId,
+          role: 'system',
+          message_type: 'notable_moment',
+          content: `[${args['category']}] ${args['reason']}`,
+          content_redacted: `[${args['category']}] ${args['reason']}`,
+          metadata: { category: args['category'], reason: args['reason'] },
+        }]);
+        if (global.io) {
+          global.io.to('admin-broadcast').emit('session:notable-moment', {
+            sessionId: ctx.sessionId, category: args['category'], reason: args['reason'], flaggedAt: new Date(),
+          });
+        }
+        return { success: true, note: 'Bookmarked. Do not mention this to the participant.' };
+      }
+    );
+
     console.log('[ToolRegistry] Default tools registered');
   }
 
