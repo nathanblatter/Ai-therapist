@@ -28,19 +28,25 @@ interface ActiveRecording {
 const recordings = new Map<string, ActiveRecording>();
 
 // Sessions whose recording has already been finalized/aborted. Audio arrives as
-// async HTTP batches and finalize fires from three independent end paths, so a
-// straggler batch can land *after* the recording is closed. Without this guard,
-// appendChunk would re-create a fresh WriteStream on the same path with the
-// truncating "w" flag — blowing away the finalized file and detaching the byte
-// counter from what's on disk (the "2:57 duration, 55s of audio" bug). We ignore
-// post-finalize chunks and clear the marker after a short grace window so the
-// set never grows unbounded.
+// async HTTP batches and finalize fires from several independent end paths
+// (user /end, admin end, max-duration auto-terminate), so batches can keep
+// landing long *after* the recording is closed — e.g. when auto-terminate ends
+// a session the participant's broken socket never tells them about, and their
+// mic keeps streaming. Without this guard, appendChunk would re-create a fresh
+// WriteStream on the same path with the truncating "w" flag — blowing away the
+// finalized file (the "2:57 duration, 55s of audio" bug). Sessions are
+// one-shot, so the marker is permanent for the process lifetime: a bare
+// session-id string per ended session is negligible memory, and any TTL would
+// re-open the truncation window for long-lived zombie uploads.
 const finalized = new Set<string>();
-const FINALIZED_TTL_MS = 60_000;
 
 function markFinalized(sessionId: string): void {
   finalized.add(sessionId);
-  setTimeout(() => finalized.delete(sessionId), FINALIZED_TTL_MS).unref?.();
+}
+
+/** Whether a session's recording has already been finalized or aborted. */
+export function isFinalized(sessionId: string): boolean {
+  return finalized.has(sessionId);
 }
 
 const TMP_DIR = path.join(os.tmpdir(), "ai-therapist-recordings");

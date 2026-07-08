@@ -4,7 +4,7 @@
 // db/sessions.queries.ts + db/messages.queries.ts.
 import { Router, json } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
-import { appendChunk } from '../../services/recorder.service.js';
+import { appendChunk, isFinalized } from '../../services/recorder.service.js';
 import {
   createSession,
   getSession,
@@ -42,6 +42,9 @@ export default function sessionsRoutes(): Router {
         return res.status(403).json({ error: 'Access denied' });
       }
     }
+    // Recording already closed (session ended / auto-terminated): tell the
+    // client to stop its uploader instead of silently discarding forever.
+    if (isFinalized(sessionId)) return res.sendStatus(410);
     for (const pcm of chunks) {
       if (typeof pcm !== 'string' || !pcm) continue;
       try {

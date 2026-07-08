@@ -13,9 +13,10 @@ export interface AudioUploader {
 export function createAudioUploader(sessionId: string, flushMs = 400): AudioUploader {
   let buf: string[] = [];
   let sampleRate = 48000;
+  let dead = false;
 
   const flush = (useBeacon = false) => {
-    if (buf.length === 0) return;
+    if (dead || buf.length === 0) return;
     const chunks = buf;
     buf = [];
     const body = JSON.stringify({ chunks, sampleRate });
@@ -29,13 +30,21 @@ export function createAudioUploader(sessionId: string, flushMs = 400): AudioUplo
       headers: { 'Content-Type': 'application/json' },
       body,
       keepalive: true,
+    }).then((res) => {
+      // 410 = the server already finalized this recording (session ended or
+      // auto-terminated); stop uploading instead of streaming into the void.
+      if (res.status === 410) {
+        dead = true;
+        clearInterval(timer);
+        buf = [];
+      }
     }).catch(() => { /* best-effort; dropped audio just shortens the recording */ });
   };
 
   const timer = setInterval(() => flush(false), flushMs);
 
   return {
-    push: (pcm, sr) => { sampleRate = sr; buf.push(pcm); },
+    push: (pcm, sr) => { if (!dead) { sampleRate = sr; buf.push(pcm); } },
     stop: () => { clearInterval(timer); flush(true); },
   };
 }

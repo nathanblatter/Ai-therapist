@@ -155,58 +155,95 @@ export default function tokenRoutes(): Router {
         });
 
         // Schedule auto-termination when a max duration applies (not researchers).
+        // Two phases, because the participant's Socket.io channel is unreliable
+        // through the tunnel: ending the session server-side is invisible to
+        // them, their WebRTC conversation keeps going, and the recording ends
+        // up covering only the first N minutes of a much longer conversation.
+        // Phase 1 (at the limit) asks the MODEL — over the sideband — to say
+        // goodbye and call end_session, which reaches the client on the WebRTC
+        // data channel (reliable) and closes the session through the normal
+        // user path with the recording intact. Phase 2 (grace elapsed, still
+        // active) is the old hard server-side end as a backstop.
         if (limitCheck.limits && limitCheck.limits.max_duration_minutes && !limitCheck.bypass) {
           const maxDurationMinutes = limitCheck.limits.max_duration_minutes;
           const durationMs = maxDurationMinutes * 60 * 1000;
+          const graceMs = 75 * 1000;
+
+          const hardEnd = async () => {
+            console.log(`⏰ Auto-terminating session ${sessionId} after ${maxDurationMinutes} minutes (+grace)`);
+            await updateSessionStatus(sessionId, 'ended', 'system');
+
+            try {
+              const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+              await sidebandManager.disconnect(sessionId);
+            } catch (e) {
+              console.error('[Sideband] cleanup on auto-terminate failed:', e);
+            }
+
+            // Redact the whole session in one batched job (fire-and-forget).
+            import('../../services/sessionRedaction.service.js')
+              .then(m => m.redactSession(sessionId))
+              .catch(e => console.error('[Redaction] session redaction failed:', e));
+
+            // Finalize the audio recording (buffered PCM → WAV → object storage).
+            import('../../services/recorder.service.js')
+              .then(m => m.finalize(sessionId))
+              .catch(e => console.error('[Recorder] finalize failed:', e));
+
+            // Memory summary + draft SOAP note (fire-and-forget).
+            import('../../services/sessionInsights.service.js')
+              .then(m => m.generateSessionInsightsAsync(sessionId))
+              .catch(e => console.error('[Insights] generation failed:', e));
+
+            global.io.to(`session:${sessionId}`).emit('session:status', {
+              status: 'ended',
+              endedBy: 'system',
+              reason: 'duration_limit',
+              message: `Your session has ended after ${maxDurationMinutes} minutes (maximum session duration).`,
+              remoteTermination: true,
+            });
+            global.io.to('admin-broadcast').emit('session:ended', {
+              sessionId,
+              endedAt: new Date(),
+              endedBy: 'system',
+              reason: 'duration_limit',
+            });
+          };
+
           setTimeout(async () => {
             try {
               const current = await getSessionAccessInfo(sessionId);
-              if (current && current.status === 'active') {
-                console.log(`⏰ Auto-terminating session ${sessionId} after ${maxDurationMinutes} minutes`);
-                await updateSessionStatus(sessionId, 'ended', 'system');
+              if (!current || current.status !== 'active') return;
 
-                try {
-                  const { sidebandManager } = await import('../../services/sidebandManager.service.js');
-                  await sidebandManager.disconnect(sessionId);
-                } catch (e) {
-                  console.error('[Sideband] cleanup on auto-terminate failed:', e);
-                }
-
-                // Redact the whole session in one batched job (fire-and-forget).
-                import('../../services/sessionRedaction.service.js')
-                  .then(m => m.redactSession(sessionId))
-                  .catch(e => console.error('[Redaction] session redaction failed:', e));
-
-                // Finalize the audio recording (buffered PCM → WAV → object storage).
-                import('../../services/recorder.service.js')
-                  .then(m => m.finalize(sessionId))
-                  .catch(e => console.error('[Recorder] finalize failed:', e));
-
-                // Memory summary + draft SOAP note (fire-and-forget).
-                import('../../services/sessionInsights.service.js')
-                  .then(m => m.generateSessionInsightsAsync(sessionId))
-                  .catch(e => console.error('[Insights] generation failed:', e));
-
-                global.io.to(`session:${sessionId}`).emit('session:status', {
-                  status: 'ended',
-                  endedBy: 'system',
-                  reason: 'duration_limit',
-                  message: `Your session has ended after ${maxDurationMinutes} minutes (maximum session duration).`,
-                  remoteTermination: true,
-                });
-                global.io.to('admin-broadcast').emit('session:ended', {
+              // Phase 1: tell the model to close out and end the session itself.
+              try {
+                const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+                await sidebandManager.injectMessage(
                   sessionId,
-                  endedAt: new Date(),
-                  endedBy: 'system',
-                  reason: 'duration_limit',
-                });
+                  'system',
+                  'TIME LIMIT REACHED: this session has hit its maximum duration. In your next reply, give a brief, warm closing (2-3 sentences, no new topics), then immediately call the end_session tool.',
+                  true,
+                );
+                console.log(`⏰ Session ${sessionId} hit ${maxDurationMinutes}min limit — asked model to wrap up (${graceMs / 1000}s grace)`);
+              } catch (e) {
+                console.error('[Sideband] wrap-up injection failed, will hard-end after grace:', e);
               }
+
+              // Phase 2: backstop if the model/client didn't end it in time.
+              setTimeout(async () => {
+                try {
+                  const after = await getSessionAccessInfo(sessionId);
+                  if (after && after.status === 'active') await hardEnd();
+                } catch (err) {
+                  console.error(`Failed to hard-end session ${sessionId}:`, err);
+                }
+              }, graceMs);
             } catch (err) {
               console.error(`Failed to auto-terminate session ${sessionId}:`, err);
             }
           }, durationMs);
 
-          console.log(`Session ${sessionId} will auto-terminate in ${maxDurationMinutes} minutes`);
+          console.log(`Session ${sessionId} will auto-terminate in ${maxDurationMinutes} minutes (+${graceMs / 1000}s grace)`);
         }
 
         // Persist the session configuration alongside the session.
