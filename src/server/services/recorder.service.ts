@@ -22,9 +22,26 @@ interface ActiveRecording {
   stream: fs.WriteStream;
   sampleRate: number;
   byteLength: number;
+  errored: boolean;
 }
 
 const recordings = new Map<string, ActiveRecording>();
+
+// Sessions whose recording has already been finalized/aborted. Audio arrives as
+// async HTTP batches and finalize fires from three independent end paths, so a
+// straggler batch can land *after* the recording is closed. Without this guard,
+// appendChunk would re-create a fresh WriteStream on the same path with the
+// truncating "w" flag — blowing away the finalized file and detaching the byte
+// counter from what's on disk (the "2:57 duration, 55s of audio" bug). We ignore
+// post-finalize chunks and clear the marker after a short grace window so the
+// set never grows unbounded.
+const finalized = new Set<string>();
+const FINALIZED_TTL_MS = 60_000;
+
+function markFinalized(sessionId: string): void {
+  finalized.add(sessionId);
+  setTimeout(() => finalized.delete(sessionId), FINALIZED_TTL_MS).unref?.();
+}
 
 const TMP_DIR = path.join(os.tmpdir(), "ai-therapist-recordings");
 
@@ -39,18 +56,27 @@ export function appendChunk(
   base64Pcm16: string,
   sampleRate: number,
 ): void {
+  // Drop stragglers that arrive after the recording was closed — re-creating
+  // the stream here would truncate the finalized file.
+  if (finalized.has(sessionId)) return;
+
   let rec = recordings.get(sessionId);
   if (!rec) {
     const filePath = path.join(tmpDir(), `${sessionId}.pcm`);
-    rec = {
-      filePath,
-      stream: fs.createWriteStream(filePath),
-      sampleRate,
-      byteLength: 0,
-    };
+    const stream = fs.createWriteStream(filePath);
+    rec = { filePath, stream, sampleRate, byteLength: 0, errored: false };
+    // A WriteStream with no 'error' listener throws (and can crash the process)
+    // on a write failure. Capture it instead so we stop counting bytes that
+    // never reached disk — otherwise the duration derived from the counter
+    // would over-report the real audio.
+    stream.on("error", (err) => {
+      rec!.errored = true;
+      log.error({ err }, `[rec] write stream error for ${sessionId}`);
+    });
     recordings.set(sessionId, rec);
     log.info(`[rec] started recording for ${sessionId} @ ${sampleRate}Hz`);
   }
+  if (rec.errored) return; // stream is dead; don't count bytes we can't persist
   const buf = Buffer.from(base64Pcm16, "base64");
   rec.stream.write(buf);
   rec.byteLength += buf.length;
@@ -69,6 +95,8 @@ export async function finalize(sessionId: string): Promise<void> {
   const rec = recordings.get(sessionId);
   if (!rec) return;
   recordings.delete(sessionId);
+  // Block any straggler audio batches from re-opening this recording.
+  markFinalized(sessionId);
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -88,7 +116,16 @@ export async function finalize(sessionId: string): Promise<void> {
     await ensureBucket();
     await putObject(key, wav, "audio/wav");
 
-    const durationMs = Math.round((rec.byteLength / 2 / rec.sampleRate) * 1000);
+    // Derive duration from the bytes actually on disk, not the in-memory
+    // counter — if any write was dropped the two diverge, and the stored
+    // duration must reflect the real audio, not what we tried to write.
+    if (pcm.length !== rec.byteLength) {
+      log.warn(
+        `[rec] ${sessionId} byte mismatch: counted ${rec.byteLength} but ` +
+          `${pcm.length} on disk — reporting duration from disk`,
+      );
+    }
+    const durationMs = Math.round((pcm.length / 2 / rec.sampleRate) * 1000);
     await setSessionRecording(sessionId, {
       objectKey: key,
       status: "ready",
@@ -118,6 +155,7 @@ export function abort(sessionId: string): void {
   const rec = recordings.get(sessionId);
   if (!rec) return;
   recordings.delete(sessionId);
+  markFinalized(sessionId);
   rec.stream.destroy();
   void cleanupTemp(rec.filePath);
 }

@@ -102,6 +102,27 @@ describe('recorder.service', () => {
     expect(hasRecording(sessionId)).toBe(false);
   });
 
+  it('ignores straggler chunks that arrive after finalize', async () => {
+    const sessionId = `sess-straggler-${Date.now()}`;
+    const sampleRate = 48000;
+    // 4096 samples → 8192 PCM bytes → the only audio that should be recorded.
+    appendChunk(sessionId, pcmChunk(4096), sampleRate);
+    await finalize(sessionId);
+
+    // A late HTTP batch lands after the recording closed. It must NOT re-open
+    // the stream (which would truncate the file and desync the duration).
+    appendChunk(sessionId, pcmChunk(4096), sampleRate);
+    expect(hasRecording(sessionId)).toBe(false);
+
+    // Exactly one upload happened, and its duration reflects only the first
+    // chunk (8192 bytes / 2 / 48000 = ~85ms), not the straggler.
+    expect(putObjectMock).toHaveBeenCalledOnce();
+    expect(setRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+      status: 'ready',
+      durationMs: 85,
+    }));
+  });
+
   it('abort discards the buffer without uploading', async () => {
     const sessionId = `sess-abort-${Date.now()}`;
     appendChunk(sessionId, pcmChunk(1024), 48000);
