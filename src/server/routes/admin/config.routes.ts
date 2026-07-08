@@ -23,6 +23,33 @@ export default function adminConfigRoutes(): Router {
     res.json({ presets: DEFAULT_MODALITY_PRESETS });
   });
 
+  // GET /admin/api/tools - registered AI tools with enabled state + usage
+  // counts, for the SystemConfig tools panel (ai-therapist-32).
+  router.get('/admin/api/tools', requireRole('therapist', 'researcher'), async (_req, res) => {
+    try {
+      const { toolRegistry } = await import('../../services/toolRegistry.service.js');
+      const { getToolInvocationStats } = await import('../../db/index.js');
+      const [enabled, stats] = await Promise.all([
+        toolRegistry.getEnabledToolDefinitions(),
+        getToolInvocationStats(),
+      ]);
+      const enabledNames = new Set(enabled.map(d => d.name));
+      const statsByName = new Map(stats.map(s => [s.tool_name, s]));
+      const tools = toolRegistry.getAllToolDefinitions().map(def => ({
+        name: def.name,
+        description: def.description,
+        enabled: enabledNames.has(def.name),
+        invocations: statsByName.get(def.name)?.invocations ?? 0,
+        sessions: statsByName.get(def.name)?.sessions ?? 0,
+        last_used: statsByName.get(def.name)?.last_used ?? null,
+      }));
+      res.json({ tools });
+    } catch (err) {
+      console.error('Failed to list tools:', err);
+      res.status(500).json({ error: 'Failed to list tools' });
+    }
+  });
+
   // GET /admin/api/config - all configuration, keyed by config_key
   router.get('/admin/api/config', requireRole('therapist', 'researcher'), async (_req, res) => {
     try {

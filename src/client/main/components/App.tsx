@@ -4,6 +4,7 @@ import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import SessionSettings from "./SessionSettings";
 import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
+import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
 import Header from './Header';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
@@ -78,6 +79,7 @@ export default function App() {
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
+  const [activeExercise, setActiveExercise] = useState<ActiveExercise | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const [crisisContact, setCrisisContact] = useState<CrisisContact>({
     hotline: '988 Suicide & Crisis Lifeline',
@@ -703,6 +705,7 @@ export default function App() {
   }
 
   async function stopSession() {
+    setActiveExercise(null);
     // Handle chat-only session
     if (sessionType === 'chat') {
       if (sessionId) {
@@ -979,8 +982,20 @@ export default function App() {
     }
   }
 
+  // Client-side reactions to AI tool calls, dispatched from the WebRTC data
+  // channel (the server sideband executes the canonical tool; these drive UI).
   const fns = {
     stopSession: () => stopSession(),
+    start_breathing_exercise: async (args: unknown) => {
+      const a = (args ?? {}) as { duration_seconds?: number };
+      const duration = Math.min(Math.max(Number(a.duration_seconds) || 60, 20), 300);
+      setActiveExercise({ type: 'breathing', durationSeconds: duration });
+      return { shown: true };
+    },
+    start_grounding_exercise: async () => {
+      setActiveExercise({ type: 'grounding' });
+      return { shown: true };
+    },
   };
 
   // NOTE: the realtime session config (model, voice, instructions, tools,
@@ -1023,6 +1038,9 @@ export default function App() {
           />
         </div>
       </main>
+
+      {/* Guided exercise overlay (launched by AI tool calls) */}
+      <ExerciseOverlay exercise={activeExercise} onClose={() => setActiveExercise(null)} />
 
       {/* Pre-session check-in (optional, skippable) */}
       <PreSessionCheckIn

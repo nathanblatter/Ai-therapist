@@ -82,7 +82,7 @@ export default function tokenRoutes(): Router {
       const aiModel = await getAiModel();
 
       const { toolRegistry } = await import('../../services/toolRegistry.service.js');
-      const tools = toolRegistry.getAllToolDefinitions();
+      const tools = await toolRegistry.getEnabledToolDefinitions();
 
       // Assemble instructions: base prompt (with active modality + language
       // additions) + returning-participant memory (opt-in, logged-in only) +

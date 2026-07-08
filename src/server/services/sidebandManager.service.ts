@@ -438,9 +438,15 @@ export class SidebandManager {
         });
       }
 
-      // Execute tool via registry
+      // Execute tool via registry (session context injected server-side)
       const { toolRegistry } = await import('./toolRegistry.service.js');
-      const result = await toolRegistry.executeTool(toolName, args);
+      const result = await toolRegistry.executeTool(toolName, args, { sessionId });
+
+      // Invocation analytics (ai-therapist-32): stamped with the session's
+      // current risk score so tool usage can be correlated with risk.
+      import('../db/index.js')
+        .then(db => db.insertToolInvocation(sessionId, toolName, args, true))
+        .catch(err => console.error('[Sideband] Failed to log tool invocation:', err));
 
       // Send response back to OpenAI
       const ws = this.connections.get(sessionId);
@@ -533,6 +539,10 @@ export class SidebandManager {
           sessionId, callId: call_id, toolName, error: errorMessage, status: 'failed', timestamp: new Date(),
         });
       }
+
+      import('../db/index.js')
+        .then(db => db.insertToolInvocation(sessionId, toolName, null, false))
+        .catch(err => console.error('[Sideband] Failed to log tool invocation:', err));
     }
   }
 

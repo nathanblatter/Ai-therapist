@@ -21,6 +21,17 @@ interface Features {
   file_upload_enabled: boolean;
   session_recording_enabled: boolean;
   output_modalities: string[];
+  /** AI tools removed from new sessions (ai-therapist-32). */
+  disabled_tools?: string[];
+}
+
+interface AiToolInfo {
+  name: string;
+  description: string;
+  enabled: boolean;
+  invocations: number;
+  sessions: number;
+  last_used: string | null;
 }
 
 interface AiModel {
@@ -124,6 +135,7 @@ export default function SystemConfig() {
   });
 
   // New voice/language form states
+  const [aiTools, setAiTools] = useState<AiToolInfo[]>([]);
   const [newVoice, setNewVoice] = useState<Omit<VoiceEntry, 'enabled'>>({ value: '', label: '', description: '' });
   const [newLanguage, setNewLanguage] = useState<Omit<LanguageEntry, 'enabled'>>({
     value: '',
@@ -146,6 +158,12 @@ export default function SystemConfig() {
 
       const data: SystemConfigData = await response.json();
       setConfig(data);
+
+      // Registered AI tools + usage counts (non-fatal if unavailable).
+      fetch('/admin/api/tools')
+        .then(res => (res.ok ? res.json() : null))
+        .then((t: { tools: AiToolInfo[] } | null) => { if (t) setAiTools(t.tools); })
+        .catch(() => { /* tools panel just stays empty */ });
 
       // Populate form fields
       if (data.crisis_contact) {
@@ -277,6 +295,12 @@ export default function SystemConfig() {
   const updateFeatures = (field: keyof Features, value: boolean | string[]) => {
     setFeatures(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
+  };
+
+  const toggleTool = (name: string, enabled: boolean) => {
+    const disabled = new Set(features.disabled_tools ?? []);
+    if (enabled) disabled.delete(name); else disabled.add(name);
+    updateFeatures('disabled_tools', Array.from(disabled));
   };
 
   const updateAiModel = (field: keyof AiModel, value: string) => {
@@ -943,6 +967,41 @@ export default function SystemConfig() {
       </div>
 
       {/* Additional Features (only shown for Realtime Voice mode) */}
+      {/* AI Tools (ai-therapist-32): per-tool enable/disable + usage counts */}
+      {aiTools.length > 0 && (
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">AI Tools</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Functions the AI can call during sessions. Disabling a tool removes it from new
+            sessions (and blocks it in running ones) — usable as a study condition.
+          </p>
+          <div className="space-y-2">
+            {aiTools.map(tool => {
+              const enabled = !(features.disabled_tools ?? []).includes(tool.name);
+              return (
+                <div key={tool.name} className="flex items-start justify-between gap-4 p-3 bg-gray-50 rounded-lg">
+                  <div className="min-w-0">
+                    <p className="font-medium text-gray-900 font-mono text-sm">{tool.name}</p>
+                    <p className="text-xs text-gray-600 mt-0.5">{tool.description}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {tool.invocations} call{tool.invocations === 1 ? '' : 's'} across {tool.sessions} session{tool.sessions === 1 ? '' : 's'}
+                      {tool.last_used ? ` · last used ${new Date(tool.last_used).toLocaleDateString()}` : ''}
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(e) => toggleTool(tool.name, e.target.checked)}
+                    aria-label={`Enable ${tool.name}`}
+                    className="w-4 h-4 mt-1 flex-shrink-0 text-royal border-gray-300 rounded focus:ring-royal"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {features.voice_enabled && (
         <div className="mb-6 bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Realtime Voice Session Options</h3>
