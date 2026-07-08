@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { X, AlertTriangle } from "react-feather";
 import ConversationBubble from "./ConversationBubble";
+import SessionInsightsPanel from "./SessionInsightsPanel";
 import { useSocket } from '../hooks/useSocket';
 import { toast } from "../../shared/components/Toast";
 
@@ -30,6 +31,7 @@ interface Session {
   crisis_risk_score?: number | null;
   crisis_flagged_at?: string | null;
   crisis_flagged_by?: string | null;
+  checkin?: { mood?: number; topic?: string; goal?: string } | null;
 }
 
 interface SessionDetailProps {
@@ -671,6 +673,16 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         </header>
 
         <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4">
+          {/* AI insights: check-in, memory summary, SOAP review (therapist only) */}
+          {!loading && (
+            <SessionInsightsPanel
+              sessionId={sessionId}
+              userRole={userRole}
+              sessionStatus={session?.status}
+              checkin={session?.checkin}
+            />
+          )}
+
           {/* Filter Toggle */}
           {!loading && messages.length > 0 && (
             <div className="mb-4 flex gap-2" role="group" aria-label="Message filter">

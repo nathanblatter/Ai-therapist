@@ -32,6 +32,7 @@ import adminRateLimitsRoutes from "./routes/admin/rateLimits.routes.js";
 import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
 import adminSessionsRoutes from "./routes/admin/sessions.routes.js";
 import sidebandRoutes from "./routes/admin/sideband.routes.js";
+import insightsRoutes from "./routes/admin/insights.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
 import tokenRoutes from "./routes/public/token.routes.js";
@@ -378,6 +379,9 @@ app.use(crisisRoutes());
 
 // Redaction-verification API -> routes/admin/redaction.routes.ts
 app.use(redactionRoutes());
+
+// Session insights (memory summary + SOAP review) -> routes/admin/insights.routes.ts
+app.use(insightsRoutes());
 
 async function startProdServer() {
   console.log("Starting in production mode...");

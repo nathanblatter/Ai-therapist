@@ -32,6 +32,8 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
   const [availableLanguages, setAvailableLanguages] = useState<LanguageOption[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  // null = anonymous user (no account to remember sessions against) → hidden.
+  const [memoryEnabled, setMemoryEnabled] = useState<boolean | null>(null);
 
   // Load available voices and languages when modal opens
   useEffect(() => {
@@ -64,7 +66,29 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
     };
 
     fetchOptions();
+
+    // Session-memory consent — only exists for logged-in users (401 → hide).
+    fetch('/api/users/preferences', { credentials: 'include' })
+      .then(res => (res.ok ? res.json() : null))
+      .then(prefs => setMemoryEnabled(prefs ? Boolean(prefs.memory_enabled) : null))
+      .catch(() => setMemoryEnabled(null));
   }, [isOpen]);
+
+  const handleMemoryToggle = async (enabled: boolean) => {
+    setMemoryEnabled(enabled); // optimistic
+    try {
+      const res = await fetch('/api/users/preferences/memory', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) setMemoryEnabled(!enabled);
+    } catch (err) {
+      console.error('Failed to save memory preference:', err);
+      setMemoryEnabled(!enabled);
+    }
+  };
 
   // Handle Escape key to close modal
   useEffect(() => {
@@ -213,6 +237,37 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
                 />
               </div>
             </div>
+
+            {/* Session memory consent (logged-in users only) */}
+            {memoryEnabled !== null && (
+              <div className="mt-6 pt-6 border-t border-gray-100">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700">Session memory</h3>
+                    <p className="text-xs text-gray-500 mt-1 max-w-md">
+                      When on, the AI keeps a short thematic summary of each conversation
+                      (never a transcript) and uses it for continuity next time — e.g.
+                      &ldquo;last time we talked about…&rdquo;. You can turn this off anytime.
+                    </p>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={memoryEnabled}
+                    aria-label="Toggle session memory"
+                    onClick={() => handleMemoryToggle(!memoryEnabled)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                      memoryEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        memoryEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Info Message */}
             {disabled && (

@@ -3,6 +3,7 @@ import { io, Socket } from "socket.io-client";
 import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import SessionSettings from "./SessionSettings";
+import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
 import Header from './Header';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
@@ -76,6 +77,7 @@ export default function App() {
     language: 'en'
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCheckInOpen, setIsCheckInOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const [crisisContact, setCrisisContact] = useState<CrisisContact>({
     hotline: '988 Suicide & Crisis Lifeline',
@@ -225,23 +227,23 @@ export default function App() {
   }
 
   // Wrapper function that routes to realtime or chat-only based on features
-  async function startSession() {
+  async function startSession(checkin: CheckinData | null = null) {
     if (features.voice_enabled === false) {
-      await startChatSession();
+      await startChatSession(checkin);
     } else {
-      await startRealtimeSession();
+      await startRealtimeSession(checkin);
     }
   }
 
   // Chat-only therapy session (GPT-4 text completions)
-  async function startChatSession() {
+  async function startChatSession(checkin: CheckinData | null = null) {
     try {
       // Send the current language picker value (request body wins server-side)
       // so it also applies for anonymous participants without saved prefs.
       const response = await fetch('/api/chat/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: sessionSettings.language })
+        body: JSON.stringify({ language: sessionSettings.language, checkin })
       });
 
       // Check for rate limiting errors
@@ -308,7 +310,7 @@ export default function App() {
   }
 
   // Realtime therapy session (WebRTC with voice + chat)
-  async function startRealtimeSession() {
+  async function startRealtimeSession(checkin: CheckinData | null = null) {
     // Get a session token for OpenAI Realtime API. The current picker values
     // are sent explicitly (request body wins server-side) so the choice also
     // applies for anonymous participants, who have no saved preferences row;
@@ -319,6 +321,7 @@ export default function App() {
       body: JSON.stringify({
         voice: sessionSettings.voice,
         language: sessionSettings.language,
+        checkin,
       })
     });
 
@@ -1009,7 +1012,7 @@ export default function App() {
         </div>
         <div className="w-full max-w-4xl p-2 sm:p-4">
           <SessionControls
-            startSession={startSession}
+            startSession={() => setIsCheckInOpen(true)}
             stopSession={stopSession}
             sendTextMessage={sendTextMessage}
             isSessionActive={isSessionActive}
@@ -1020,6 +1023,16 @@ export default function App() {
           />
         </div>
       </main>
+
+      {/* Pre-session check-in (optional, skippable) */}
+      <PreSessionCheckIn
+        isOpen={isCheckInOpen}
+        onCancel={() => setIsCheckInOpen(false)}
+        onStart={(checkin) => {
+          setIsCheckInOpen(false);
+          void startSession(checkin);
+        }}
+      />
 
       {/* Settings Modal */}
       <SessionSettings

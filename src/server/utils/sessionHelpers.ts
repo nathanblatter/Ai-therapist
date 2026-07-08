@@ -48,9 +48,50 @@ interface SystemPromptEntry {
   last_modified?: string;
 }
 
+export interface ModalityPreset {
+  label: string;
+  addition: string;
+}
+
 interface SystemPromptsConfig {
   realtime?: SystemPromptEntry;
   chat?: SystemPromptEntry;
+  /** Therapeutic-approach appendices, keyed by modality id (cbt/act/mi/...). */
+  modality_presets?: Record<string, ModalityPreset>;
+  /** Which preset is applied to new sessions; null/absent/'none' = base prompt only. */
+  active_modality?: string | null;
+}
+
+// Editable via the SystemPrompts admin tab (stored in system_config); these are
+// the fallbacks when the config has no modality_presets yet.
+export const DEFAULT_MODALITY_PRESETS: Record<string, ModalityPreset> = {
+  supportive: {
+    label: 'Supportive listening',
+    addition: `\n\n## Therapeutic approach: supportive listening\nPrioritize reflective listening and validation. Mirror the participant's language, summarize what you hear, and normalize their feelings. Offer coping ideas only when asked or when the participant seems stuck — the relationship is the intervention.`,
+  },
+  cbt: {
+    label: 'CBT-informed',
+    addition: `\n\n## Therapeutic approach: CBT-informed\nUse cognitive-behavioral techniques where natural: help the participant notice the link between situations, thoughts, feelings, and behaviours; gently examine unhelpful thought patterns with curious questions (never lecture); suggest small, concrete behavioural experiments or coping actions. One technique at a time.`,
+  },
+  act: {
+    label: 'ACT-informed',
+    addition: `\n\n## Therapeutic approach: ACT-informed\nDraw on acceptance and commitment ideas: help the participant make room for difficult feelings rather than fight them, notice thoughts as thoughts (defusion), connect with what they value, and take one small values-aligned step. Use plain language, not ACT jargon.`,
+  },
+  mi: {
+    label: 'Motivational interviewing',
+    addition: `\n\n## Therapeutic approach: motivational interviewing\nUse the MI spirit: open questions, affirmations, reflections, summaries. Roll with resistance instead of arguing; draw out the participant's own reasons for change (change talk); support autonomy — they are the expert on their life.`,
+  },
+};
+
+/** Resolve the active modality preset from config (null = base prompt only). */
+export async function getActiveModality(): Promise<{ key: string; preset: ModalityPreset } | null> {
+  const config = await getSystemConfig();
+  const prompts = config.system_prompts as SystemPromptsConfig | undefined;
+  const key = prompts?.active_modality;
+  if (!key || key === 'none') return null;
+  const presets = { ...DEFAULT_MODALITY_PRESETS, ...(prompts?.modality_presets ?? {}) };
+  const preset = presets[key];
+  return preset ? { key, preset } : null;
 }
 
 interface SystemConfig {
@@ -290,7 +331,7 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime')
   let basePrompt = DEFAULT_SYSTEM_PROMPT;
   const systemPrompts = config.system_prompts as SystemPromptsConfig | undefined;
   if (systemPrompts) {
-    const entry = systemPrompts[sessionType as keyof SystemPromptsConfig];
+    const entry = sessionType === 'chat' ? systemPrompts.chat : systemPrompts.realtime;
     if (entry?.prompt) {
       basePrompt = entry.prompt;
     }
@@ -306,7 +347,11 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime')
     : null;
   const languageAddition = languageObj?.systemPromptAddition || '';
 
-  return basePrompt + languageAddition;
+  // Active therapeutic-modality appendix (research condition; see getActiveModality).
+  const modality = await getActiveModality();
+  const modalityAddition = modality?.preset.addition ?? '';
+
+  return basePrompt + modalityAddition + languageAddition;
 }
 
 export const sessionConfigDefault = {

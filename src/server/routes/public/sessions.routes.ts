@@ -194,6 +194,11 @@ export default function sessionsRoutes(): Router {
         .then(m => m.finalize(sessionId))
         .catch(e => console.error('[Recorder] finalize failed:', e));
 
+      // Memory summary + draft SOAP note (fire-and-forget).
+      import('../../services/sessionInsights.service.js')
+        .then(m => m.generateSessionInsightsAsync(sessionId))
+        .catch(e => console.error('[Insights] generation failed:', e));
+
       global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' });
       global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'user' });
 

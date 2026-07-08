@@ -144,6 +144,11 @@ export default function logsRoutes(): Router {
           );
 
           if (riskAnalysis.riskScore > 0) {
+            // Risk-adaptive steering: nudge the live model toward de-escalation
+            // (own thresholds + cooldown inside; independent of crisis flagging).
+            const { maybeSteerSession } = await import('../../services/crisisIntervention.service.js');
+            await maybeSteerSession(msg.session_id, riskAnalysis.riskScore, riskAnalysis.severity);
+
             console.log(` Risk detected in session ${msg.session_id}:
             Score=${riskAnalysis.riskScore},
             Severity=${riskAnalysis.severity},

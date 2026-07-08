@@ -16,3 +16,4 @@ export * from './contentRetention.queries.js';
 export * from './userSessions.queries.js';
 export * from './crisis.queries.js';
 export * from './redaction.queries.js';
+export * from './insights.queries.js';

@@ -14,6 +14,7 @@ import {
   setUserPreferredLanguage,
 } from '../../db/index.js';
 import { checkSessionLimits, getSystemPrompt } from '../../utils/sessionHelpers.js';
+import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 
@@ -63,7 +64,12 @@ export default function chatRoutes(): Router {
 
       const sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       recordSessionOwnership(req, sessionId);
-      const systemPrompt = await getSystemPrompt(userLanguage, 'chat');
+
+      // Base prompt + returning-participant memory (opt-in) + today's check-in.
+      const checkin = sanitizeCheckin(req.body?.checkin);
+      const memoryBlock = await buildMemoryBlock(numericUserId);
+      const systemPrompt =
+        (await getSystemPrompt(userLanguage, 'chat')) + memoryBlock + buildCheckinBlock(checkin);
 
       const { initializeChatSession } = await import('../../services/chatTherapy.service.js');
       initializeChatSession(sessionId, systemPrompt);
@@ -76,6 +82,12 @@ export default function chatRoutes(): Router {
         status: 'active',
         sessionType: 'chat',
       });
+
+      if (checkin) {
+        const { setSessionCheckin } = await import('../../db/index.js');
+        setSessionCheckin(sessionId, checkin).catch(err =>
+          console.error('[ChatStart] Failed to store check-in:', err));
+      }
 
       global.io.to('admin-broadcast').emit('session:started', {
         sessionId,
@@ -184,6 +196,11 @@ export default function chatRoutes(): Router {
       import('../../services/sessionRedaction.service.js')
         .then(m => m.redactSession(sessionId))
         .catch(e => console.error('[Redaction] session redaction failed:', e));
+
+      // Memory summary + draft SOAP note (fire-and-forget).
+      import('../../services/sessionInsights.service.js')
+        .then(m => m.generateSessionInsightsAsync(sessionId))
+        .catch(e => console.error('[Insights] generation failed:', e));
 
       global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedBy: 'user', endedAt: new Date() });
       global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt: new Date() });

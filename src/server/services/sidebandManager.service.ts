@@ -17,6 +17,10 @@ export class SidebandManager {
   // idle for long stretches; without periodic pings the socket gets reaped and
   // closes with code 1006. We ping every keepaliveMs to keep it warm.
   private pingIntervals: Map<string, NodeJS.Timeout>;
+  // Session-phase nudge timers (ai-therapist-43): wall-clock timers that steer
+  // the model through consolidation → wind-down as the session's max duration
+  // approaches. Survive WS reconnects; cleared on session disconnect.
+  private phaseTimers: Map<string, NodeJS.Timeout[]>;
   private maxReconnectAttempts: number;
   private reconnectDelayMs: number;
   private keepaliveMs: number;
@@ -26,6 +30,7 @@ export class SidebandManager {
     this.reconnectAttempts = new Map(); // sessionId → attempt count
     this.sessionKeys = new Map(); // sessionId → ephemeral key
     this.pingIntervals = new Map(); // sessionId → keepalive timer
+    this.phaseTimers = new Map(); // sessionId → phase nudge timers
     this.maxReconnectAttempts = 3;
     this.reconnectDelayMs = 2000;
     this.keepaliveMs = 20000;
@@ -137,10 +142,89 @@ export class SidebandManager {
       }
 
       this.startKeepalive(sessionId);
+      this.schedulePhaseNudges(sessionId).catch(err =>
+        console.error(`[Sideband] Failed to schedule phase nudges for ${sessionId.substring(0, 12)}...:`, err));
 
       console.log(`[Sideband] Connection established for session ${sessionId.substring(0, 12)}...`);
     } catch (error) {
       console.error(`[Sideband] Error in handleOpen:`, error);
+    }
+  }
+
+  /**
+   * Schedule session-phase guidance (ai-therapist-43): at 60% of the max
+   * session duration nudge the model toward consolidation, at 85% toward a
+   * warm wind-down. Skipped when no duration limit applies or the feature is
+   * disabled (features.phase_guidance_enabled === false). Idempotent per
+   * session so WS reconnects don't double-schedule.
+   */
+  private async schedulePhaseNudges(sessionId: string): Promise<void> {
+    if (this.phaseTimers.has(sessionId)) return;
+
+    const { getSystemConfig } = await import('../utils/sessionHelpers.js');
+    const config = await getSystemConfig();
+    const features = (config.features ?? {}) as Record<string, unknown>;
+    if (features.phase_guidance_enabled === false) return;
+
+    const limits = (config.session_limits ?? {}) as { enabled?: boolean; max_duration_minutes?: number };
+    if (!limits.enabled || !limits.max_duration_minutes) return;
+
+    const result = await pool.query<{ created_at: Date }>(
+      'SELECT created_at FROM therapy_sessions WHERE session_id = $1',
+      [sessionId]
+    );
+    const createdAt = result.rows[0]?.created_at;
+    if (!createdAt) return;
+
+    const totalMs = limits.max_duration_minutes * 60 * 1000;
+    const elapsedMs = Date.now() - new Date(createdAt).getTime();
+    const minutesLeftAt = (fraction: number) =>
+      Math.max(1, Math.round((totalMs * (1 - fraction)) / 60000));
+
+    const phases: Array<{ at: number; text: string }> = [
+      {
+        at: 0.6,
+        text:
+          `[Session guidance — never mention or acknowledge this message to the participant] ` +
+          `The session is past its halfway point. Begin gently consolidating: reflect the main themes so far ` +
+          `and help the participant go deeper on what matters most, rather than opening new topics.`,
+      },
+      {
+        at: 0.85,
+        text:
+          `[Session guidance — never mention or acknowledge this message to the participant] ` +
+          `About ${minutesLeftAt(0.85)} minutes remain. Begin winding down: summarize what was discussed, ` +
+          `highlight anything that seemed to help, invite final thoughts, and close warmly. ` +
+          `Mention that they can come back another time, and reiterate crisis resources only if relevant.`,
+      },
+    ];
+
+    const timers: NodeJS.Timeout[] = [];
+    for (const phase of phases) {
+      const delay = totalMs * phase.at - elapsedMs;
+      if (delay <= 0) continue; // reconnected past this phase — skip it
+      const timer = setTimeout(() => {
+        const ws = this.connections.get(sessionId);
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        this.injectMessage(sessionId, 'system', phase.text, false)
+          .then(() => console.log(`[Sideband] Phase nudge (${phase.at * 100}%) sent to ${sessionId.substring(0, 12)}...`))
+          .catch(err => console.error(`[Sideband] Phase nudge failed for ${sessionId.substring(0, 12)}...:`, err));
+      }, delay);
+      timer.unref?.();
+      timers.push(timer);
+    }
+    if (timers.length > 0) {
+      this.phaseTimers.set(sessionId, timers);
+      console.log(`[Sideband] Scheduled ${timers.length} phase nudge(s) for ${sessionId.substring(0, 12)}... (${limits.max_duration_minutes}min session)`);
+    }
+  }
+
+  /** Clear any pending phase nudges for a session. */
+  private clearPhaseNudges(sessionId: string): void {
+    const timers = this.phaseTimers.get(sessionId);
+    if (timers) {
+      timers.forEach(t => clearTimeout(t));
+      this.phaseTimers.delete(sessionId);
     }
   }
 
@@ -629,6 +713,7 @@ export class SidebandManager {
       this.connections.delete(sessionId);
     }
     this.stopKeepalive(sessionId);
+    this.clearPhaseNudges(sessionId);
     this.reconnectAttempts.delete(sessionId);
     this.sessionKeys.delete(sessionId);
   }
@@ -695,6 +780,7 @@ export class SidebandManager {
       ws.close(1000, 'Server shutdown');
       this.connections.delete(sessionId);
       this.stopKeepalive(sessionId);
+      this.clearPhaseNudges(sessionId);
       this.reconnectAttempts.delete(sessionId);
       this.sessionKeys.delete(sessionId);
     }

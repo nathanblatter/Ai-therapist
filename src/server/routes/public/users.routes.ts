@@ -70,10 +70,29 @@ export default function usersRoutes(): Router {
         language = languageEnabled ? userLanguage! : languagesConfig.default_language;
       }
 
-      res.json({ voice, language });
+      const { getUserMemoryEnabled } = await import('../../db/index.js');
+      const memory_enabled = await getUserMemoryEnabled(userId!);
+
+      res.json({ voice, language, memory_enabled });
     } catch (error) {
       console.error('Error fetching user preferences:', error);
       res.status(500).json({ error: 'Failed to fetch preferences' });
+    }
+  });
+
+  // PUT /api/users/preferences/memory - cross-session memory consent (opt-in)
+  router.put('/api/users/preferences/memory', requireAuth, async (req, res) => {
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled (boolean) is required' });
+    }
+    try {
+      const { setUserMemoryEnabled } = await import('../../db/index.js');
+      await setUserMemoryEnabled(req.session.userId!, enabled);
+      res.json({ success: true, memory_enabled: enabled });
+    } catch (error) {
+      console.error('Error saving memory preference:', error);
+      res.status(500).json({ error: 'Failed to save memory preference' });
     }
   });
 

@@ -11,6 +11,11 @@ interface PromptsMap {
   [sessionType: string]: PromptEntry;
 }
 
+interface ModalityPreset {
+  label: string;
+  addition: string;
+}
+
 interface Language {
   value: string;
   label: string;
@@ -36,6 +41,12 @@ export default function SystemPrompts() {
   // Original prompts for reset functionality
   const [originalPrompts, setOriginalPrompts] = useState<PromptsMap | null>(null);
 
+  // Therapeutic modality presets (ai-therapist-41): appendix blocks applied to
+  // the base prompt; active_modality selects the study condition.
+  const [modalityPresets, setModalityPresets] = useState<Record<string, ModalityPreset>>({});
+  const [activeModality, setActiveModality] = useState<string>('none');
+  const [editingModality, setEditingModality] = useState<string | null>(null);
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -49,13 +60,34 @@ export default function SystemPrompts() {
       if (!response.ok) throw new Error('Failed to fetch configuration');
 
       const data = await response.json() as {
-        system_prompts?: { value: PromptsMap };
+        system_prompts?: {
+          value: PromptsMap & {
+            modality_presets?: Record<string, ModalityPreset>;
+            active_modality?: string | null;
+          };
+        };
         languages?: { value: { languages: Language[] } };
       };
 
+      // Modality presets: saved config wins, otherwise the built-in defaults.
+      const savedPresets = data.system_prompts?.value?.modality_presets;
+      if (savedPresets && Object.keys(savedPresets).length > 0) {
+        setModalityPresets(savedPresets);
+      } else {
+        try {
+          const defaultsRes = await fetch('/admin/api/config/modality-defaults');
+          if (defaultsRes.ok) {
+            const defaults = await defaultsRes.json() as { presets: Record<string, ModalityPreset> };
+            setModalityPresets(defaults.presets);
+          }
+        } catch { /* modality editing just starts empty */ }
+      }
+      setActiveModality(data.system_prompts?.value?.active_modality || 'none');
+
       if (data.system_prompts) {
-        setPrompts(data.system_prompts.value);
-        setOriginalPrompts(JSON.parse(JSON.stringify(data.system_prompts.value)) as PromptsMap);
+        const { modality_presets: _mp, active_modality: _am, ...promptEntries } = data.system_prompts.value;
+        setPrompts(promptEntries as PromptsMap);
+        setOriginalPrompts(JSON.parse(JSON.stringify(promptEntries)) as PromptsMap);
       } else {
         // Initialize with empty prompts if not in database yet
         const defaultPrompts: PromptsMap = {
@@ -118,7 +150,13 @@ export default function SystemPrompts() {
       const response = await fetch('/admin/api/config/system_prompts', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: prompts })
+        body: JSON.stringify({
+          value: {
+            ...prompts,
+            modality_presets: modalityPresets,
+            active_modality: activeModality === 'none' ? null : activeModality,
+          },
+        })
       });
 
       if (!response.ok) {
@@ -166,7 +204,7 @@ export default function SystemPrompts() {
   };
 
   useEffect(() => {
-    if (showPreview) {
+    if (showPreview && activeTab !== 'modality') {
       fetchPreview();
     }
   }, [showPreview, activeTab, previewLanguage]);
@@ -288,9 +326,97 @@ export default function SystemPrompts() {
           >
             Chat-Only Sessions
           </button>
+          <button
+            onClick={() => setActiveTab('modality')}
+            className={`pb-3 px-1 border-b-2 font-medium text-sm transition ${
+              activeTab === 'modality'
+                ? 'border-royal text-royal'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Therapeutic Modality
+            {activeModality !== 'none' && (
+              <span className="ml-2 text-xs bg-royal text-white px-2 py-0.5 rounded-full">
+                {modalityPresets[activeModality]?.label || activeModality}
+              </span>
+            )}
+          </button>
         </nav>
       </div>
 
+      {activeTab === 'modality' ? (
+        /* Modality panel: pick the active therapeutic approach + edit presets */
+        <div className="bg-white rounded-lg shadow p-6 space-y-6">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800 mb-1">Active modality</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              The selected approach is appended to the base prompt for every new session
+              and recorded on the session&apos;s configuration — treat it as the study condition.
+            </p>
+            <div className="space-y-2">
+              <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                <input
+                  type="radio"
+                  name="active-modality"
+                  checked={activeModality === 'none'}
+                  onChange={() => { setActiveModality('none'); setHasChanges(true); setSaveSuccess(null); }}
+                />
+                <span className="text-sm font-medium text-gray-700">None (base prompt only)</span>
+              </label>
+              {Object.entries(modalityPresets).map(([key, preset]) => (
+                <div key={key} className="border rounded-lg">
+                  <label className="flex items-center gap-3 p-3 cursor-pointer hover:bg-gray-50">
+                    <input
+                      type="radio"
+                      name="active-modality"
+                      checked={activeModality === key}
+                      onChange={() => { setActiveModality(key); setHasChanges(true); setSaveSuccess(null); }}
+                    />
+                    <span className="text-sm font-medium text-gray-700 flex-1">{preset.label}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); setEditingModality(editingModality === key ? null : key); }}
+                      className="text-xs text-royal hover:underline px-2 py-1"
+                    >
+                      {editingModality === key ? 'Close' : 'Edit'}
+                    </button>
+                  </label>
+                  {editingModality === key && (
+                    <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Label</label>
+                        <input
+                          type="text"
+                          value={preset.label}
+                          onChange={(e) => {
+                            setModalityPresets(prev => ({ ...prev, [key]: { ...prev[key], label: e.target.value } }));
+                            setHasChanges(true); setSaveSuccess(null);
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-royal"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
+                          Prompt appendix ({preset.addition.length} characters)
+                        </label>
+                        <textarea
+                          value={preset.addition}
+                          onChange={(e) => {
+                            setModalityPresets(prev => ({ ...prev, [key]: { ...prev[key], addition: e.target.value } }));
+                            setHasChanges(true); setSaveSuccess(null);
+                          }}
+                          rows={6}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-royal resize-y"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="flex gap-6">
         {/* Editor Panel */}
         <div className={`${showPreview ? 'w-1/2' : 'w-full'} transition-all`}>
@@ -393,6 +519,7 @@ export default function SystemPrompts() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

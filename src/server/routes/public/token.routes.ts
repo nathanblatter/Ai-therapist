@@ -14,8 +14,10 @@ import {
   getSessionAccessInfo,
   createActiveRealtimeSession,
 } from '../../db/index.js';
-import { checkSessionLimits, getSystemPrompt } from '../../utils/sessionHelpers.js';
+import { checkSessionLimits, getSystemPrompt, getActiveModality } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
+import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../utils/promptContext.js';
+import { setSessionCheckin } from '../../db/index.js';
 
 export default function tokenRoutes(): Router {
   const router = Router();
@@ -82,13 +84,22 @@ export default function tokenRoutes(): Router {
       const { toolRegistry } = await import('../../services/toolRegistry.service.js');
       const tools = toolRegistry.getAllToolDefinitions();
 
+      // Assemble instructions: base prompt (with active modality + language
+      // additions) + returning-participant memory (opt-in, logged-in only) +
+      // today's pre-session check-in.
+      const checkin = sanitizeCheckin(req.body?.checkin);
+      const memoryBlock = await buildMemoryBlock(userId);
+      const instructions =
+        (await getSystemPrompt(userLanguage, 'realtime')) + memoryBlock + buildCheckinBlock(checkin);
+      const activeModality = await getActiveModality();
+
       const dynamicSessionConfig = JSON.stringify({
         session: {
           type: 'realtime',
           tools,
           tool_choice: 'auto',
           model: aiModel,
-          instructions: await getSystemPrompt(userLanguage, 'realtime'),
+          instructions,
           audio: {
             input: { transcription: { model: 'whisper-1' } },
             output: { voice: userVoice },
@@ -129,6 +140,11 @@ export default function tokenRoutes(): Router {
         await createActiveRealtimeSession(sessionId, userId);
         console.log(`Therapy session created with user_id: ${userId}`);
 
+        if (checkin) {
+          setSessionCheckin(sessionId, checkin).catch(err =>
+            console.error('[Token] Failed to store check-in:', err));
+        }
+
         global.io.to('admin-broadcast').emit('session:created', {
           sessionId,
           userId,
@@ -165,6 +181,11 @@ export default function tokenRoutes(): Router {
                   .then(m => m.finalize(sessionId))
                   .catch(e => console.error('[Recorder] finalize failed:', e));
 
+                // Memory summary + draft SOAP note (fire-and-forget).
+                import('../../services/sessionInsights.service.js')
+                  .then(m => m.generateSessionInsightsAsync(sessionId))
+                  .catch(e => console.error('[Insights] generation failed:', e));
+
                 global.io.to(`session:${sessionId}`).emit('session:status', {
                   status: 'ended',
                   endedBy: 'system',
@@ -198,6 +219,7 @@ export default function tokenRoutes(): Router {
           temperature,
           max_response_output_tokens: sessionConfigObj.session?.max_response_output_tokens || 4096,
           language: userLanguage,
+          modality: activeModality?.key ?? null,
         });
         console.log(`Session configuration created for session: ${sessionId.substring(0, 12)}... (voice: ${userVoice}, language: ${userLanguage})`);
       } catch (dbError) {

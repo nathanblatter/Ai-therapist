@@ -11,10 +11,17 @@ import {
   type VoiceOption,
   type LanguageOption,
 } from '../../db/index.js';
-import { getSystemPrompt, invalidateConfigCache } from '../../utils/sessionHelpers.js';
+import { getSystemPrompt, invalidateConfigCache, DEFAULT_MODALITY_PRESETS } from '../../utils/sessionHelpers.js';
 
 export default function adminConfigRoutes(): Router {
   const router = Router();
+
+  // GET /admin/api/config/modality-defaults - built-in therapeutic-approach
+  // presets, used by the SystemPrompts UI to bootstrap editing before any
+  // custom presets have been saved to system_config.
+  router.get('/admin/api/config/modality-defaults', requireRole('therapist', 'researcher'), (_req, res) => {
+    res.json({ presets: DEFAULT_MODALITY_PRESETS });
+  });
 
   // GET /admin/api/config - all configuration, keyed by config_key
   router.get('/admin/api/config', requireRole('therapist', 'researcher'), async (_req, res) => {
