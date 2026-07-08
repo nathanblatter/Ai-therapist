@@ -26,6 +26,11 @@ services:
       MINIO_BUCKET: ai-therapist-recordings
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # Crisis paging via the local iMessage HTTP API (same service
+      # personal-site uses; reachable at the host's Tailscale IP).
+      IMESSAGE_API_URL: ${IMESSAGE_API_URL:-http://100.79.61.79:8899}
+      IMESSAGE_API_KEY: ${IMESSAGE_API_KEY}
+      CRISIS_ALERT_PHONE: ${CRISIS_ALERT_PHONE}
     networks:
       - default
       - flightdeck

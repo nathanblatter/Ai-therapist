@@ -711,11 +711,16 @@ export default function CrisisManagement() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Risk Score</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Severity</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Calculated At</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Score Factors</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Assessment</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {data.riskScoreHistory.map(history => (
+                    {data.riskScoreHistory.map(history => {
+                      const f = (history.score_factors ?? {}) as Record<string, unknown>;
+                      const method = typeof f.method === 'string' ? f.method : null;
+                      const context = typeof f.llm_context === 'string' ? f.llm_context : null;
+                      const reasoning = typeof f.llm_reasoning === 'string' ? f.llm_reasoning : null;
+                      return (
                       <tr key={history.history_id} className="hover:bg-gray-50">
                         <td className="px-6 py-4">
                           <code className="text-xs bg-gray-100 px-2 py-1 rounded">
@@ -735,10 +740,21 @@ export default function CrisisManagement() {
                         <td className="px-6 py-4 text-sm text-gray-600">
                           {formatDate(history.calculated_at)}
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-6 py-4 max-w-md">
+                          <div className="flex flex-wrap items-center gap-1 mb-1">
+                            {method && (
+                              <span className="px-1.5 py-0.5 rounded text-xs font-mono bg-gray-100 text-gray-600">{method}</span>
+                            )}
+                            {context && (
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${context === 'genuine' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                                {context}
+                              </span>
+                            )}
+                          </div>
+                          {reasoning && <p className="text-xs text-gray-600">{reasoning}</p>}
                           <details className="text-xs">
                             <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
-                              View factors
+                              Raw factors
                             </summary>
                             <pre className="mt-2 p-2 bg-gray-100 rounded overflow-x-auto">
                               {JSON.stringify(history.score_factors, null, 2)}
@@ -746,7 +762,8 @@ export default function CrisisManagement() {
                           </details>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
 

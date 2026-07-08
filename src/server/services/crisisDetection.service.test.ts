@@ -118,6 +118,67 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
     expect(r.severity).toBe('medium');
   });
 
+  it('runs a periodic LLM sweep after 8 quiet user messages (no keyword trip)', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 30, severity: 'low', context: 'genuine',
+      factors: ['withdrawal'], reasoning: 'Increasing withdrawal without explicit language.',
+    }));
+    const sweepMsg = (i: number) => ({ content: `ordinary message ${i}`, session_id: 'sess-sweep', message_id: i });
+    for (let i = 1; i <= 7; i++) {
+      const r = await analyzeMessageRisk(sweepMsg(i), []);
+      expect(r.riskScore).toBe(0);
+    }
+    expect(createMock).not.toHaveBeenCalled();
+    // 8th quiet message triggers the sweep.
+    const r = await analyzeMessageRisk(sweepMsg(8), []);
+    expect(createMock).toHaveBeenCalledOnce();
+    expect(r.riskScore).toBe(30);
+    // Counter reset: the 9th message doesn't sweep again.
+    await analyzeMessageRisk(sweepMsg(9), []);
+    expect(createMock).toHaveBeenCalledOnce();
+  });
+
+  it('adds a trajectory bonus to a risky message after a deteriorating run-up', async () => {
+    // Trajectory SELECT returns 3+ strictly increasing prior scores.
+    queryMock.mockImplementation((sql: string) => {
+      if (String(sql).includes('FROM risk_score_history') && String(sql).includes('SELECT')) {
+        return Promise.resolve({
+          rows: [
+            { risk_score: 40, calculated_at: new Date() },
+            { risk_score: 30, calculated_at: new Date() },
+            { risk_score: 20, calculated_at: new Date() },
+          ], // DESC order; service reverses to chronological 20→30→40
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 55, severity: 'medium', context: 'genuine',
+      factors: ['passive ideation'], reasoning: 'Escalating passive ideation.',
+    }));
+    const r = await analyzeMessageRisk({ content: "I can't go on like this", session_id: 'sess-traj', message_id: 1 }, []);
+    expect(r.riskScore).toBe(70); // 55 + 15 deteriorating-trend bonus
+    expect(r.factors).toContain('trajectory: deteriorating');
+    expect(r.breakdown.trajectory).toBe(15);
+  });
+
+  it('never applies trajectory bonus to a zero-risk message', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      if (String(sql).includes('FROM risk_score_history') && String(sql).includes('SELECT')) {
+        return Promise.resolve({
+          rows: [
+            { risk_score: 40, calculated_at: new Date() },
+            { risk_score: 30, calculated_at: new Date() },
+            { risk_score: 20, calculated_at: new Date() },
+          ],
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await analyzeMessageRisk({ content: 'the weather is nice today', session_id: 'sess-traj-zero', message_id: 2 }, []);
+    expect(r.riskScore).toBe(0);
+  });
+
   it('logs the assessment to risk_score_history with both stage breakdowns', async () => {
     createMock.mockResolvedValue(llmResponse({
       risk_score: 5, severity: 'none', context: 'bystander',

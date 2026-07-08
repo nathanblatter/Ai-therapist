@@ -93,8 +93,25 @@ export async function executeGraduatedResponse(sessionId: string, severity: stri
 // HIGH RISK RESPONSE
 // ============================================
 
+// Structured, laddered safety-assessment guidance injected to the model on a
+// high flag. One gentle question at a time (C-SSRS-shaped: ideation → plan →
+// means → timeframe), leaning on the client-side tools that already exist.
+const SAFETY_PROTOCOL_GUIDANCE =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  `A high-severity safety concern has been detected and a human monitor has been paged. ` +
+  `Shift fully into safety assessment, gently and without alarm. One question at a time, in this order, adapting to their answers: ` +
+  `(1) ask directly whether they are having thoughts of ending their life right now; ` +
+  `(2) if yes, ask whether they have thought about how; ` +
+  `(3) whether they have access to that method; ` +
+  `(4) whether they have a timeframe in mind. ` +
+  `Between questions, validate and stay warm — do not interrogate. ` +
+  `Call the show_resource_card tool so crisis lines are on their screen, and if they engage, offer to build a safety plan together using the create_safety_plan tool. ` +
+  `Do not end the session yourself. Stay with them.`;
+
 /**
- * Execute high risk intervention — admin alert only, no automated user message.
+ * Execute high risk intervention: page the on-call phone, alert admin
+ * dashboards, and inject the structured safety-assessment protocol into the
+ * live model over the sideband.
  */
 async function executeHighRiskResponse(sessionId: string, riskScore: number): Promise<void> {
   try {
@@ -102,6 +119,29 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
       riskScore,
       emergencyProtocol: 'activated'
     });
+
+    // Page a human — the dashboard socket alert only works if someone is
+    // looking at the dashboard.
+    import('./crisisAlert.service.js')
+      .then(async m => {
+        await m.sendCrisisAlert(
+          `🚨 AI-Therapist HIGH crisis flag\nSession ${sessionId.substring(0, 16)}… — risk ${riskScore}/100\nhttps://ai-therapist.nathanblatter.com/admin`,
+        );
+        await logInterventionAction(sessionId, 'crisis_sms_alert', { riskScore });
+      })
+      .catch(err => console.error('Error sending crisis SMS:', err));
+
+    // Steer the live model into a structured safety assessment.
+    try {
+      const { sidebandManager } = await import('./sidebandManager.service.js');
+      if (sidebandManager.getActiveConnections().includes(sessionId)) {
+        await sidebandManager.injectMessage(sessionId, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
+        await logInterventionAction(sessionId, 'safety_protocol', { riskScore });
+        console.log(`Safety protocol injected for session ${sessionId}`);
+      }
+    } catch (err) {
+      console.error('Error injecting safety protocol:', err);
+    }
 
     if (global.io) {
       global.io.to(`session:${sessionId}`).emit('session:crisis-emergency', {

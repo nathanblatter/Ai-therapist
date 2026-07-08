@@ -136,6 +136,31 @@ interface HistoryMessage {
   content_redacted?: string | null;
 }
 
+// Periodic sweep: the keyword screen only wakes the LLM when specific phrases
+// appear, so someone spiraling in unusual language would sail past it. Every
+// SWEEP_EVERY participant messages without an LLM assessment, run one anyway
+// over the recent conversation. The counter resets whenever the LLM runs for
+// any reason. Cost: at most one extra call per 8 user turns per session.
+const SWEEP_EVERY = 8;
+const sweepCounters = new Map<string, number>();
+
+function sweepDue(sessionId: string): boolean {
+  const count = (sweepCounters.get(sessionId) ?? 0) + 1;
+  sweepCounters.set(sessionId, count);
+  // Opportunistic cleanup so ended sessions don't accumulate.
+  if (sweepCounters.size > 500) {
+    for (const [id, c] of sweepCounters) {
+      if (c === 0) sweepCounters.delete(id);
+      if (sweepCounters.size <= 250) break;
+    }
+  }
+  return count >= SWEEP_EVERY;
+}
+
+function resetSweep(sessionId: string): void {
+  sweepCounters.set(sessionId, 0);
+}
+
 /** LLM contextual assessment of the recent conversation. Throws on failure. */
 async function assessRiskWithLLM(
   latestContent: string,
@@ -273,22 +298,26 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
   try {
     const keywordAnalysis = detectCrisisKeywords(message.content);
 
-    // Call passively for history logging — score not added to total
-    await trackEmotionalTrajectory(message.session_id);
+    // Trajectory across the session's recent scores (computed BEFORE this
+    // message's insert, so it reflects the run-up, not the current message).
+    const trajectory = await trackEmotionalTrajectory(message.session_id);
 
     let riskScore = Math.min(keywordAnalysis.keywordScore, 100);
     let factors = keywordAnalysis.keywords;
     let method = 'keyword_only';
     let llm: LlmRiskAssessment | null = null;
 
-    if (keywordAnalysis.keywordScore > 0) {
+    const isSweep = keywordAnalysis.keywordScore === 0 && sweepDue(message.session_id);
+
+    if (keywordAnalysis.keywordScore > 0 || isSweep) {
       try {
         llm = await assessRiskWithLLM(message.content, conversationHistory);
+        resetSweep(message.session_id);
         riskScore = llm.risk_score;
         factors = llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords;
-        method = 'llm_assessed';
+        method = isSweep ? 'llm_sweep' : 'llm_assessed';
         log.info(
-          `[risk] session ${message.session_id.substring(0, 12)}…: keywords [${keywordAnalysis.keywords.join(', ')}] ` +
+          `[risk] session ${message.session_id.substring(0, 12)}…: ${isSweep ? 'periodic sweep' : `keywords [${keywordAnalysis.keywords.join(', ')}]`} ` +
             `→ LLM ${llm.risk_score}/100 (${llm.context}): ${llm.reasoning}`,
         );
       } catch (err) {
@@ -296,6 +325,14 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
         method = 'keyword_fallback';
         log.error({ err }, `[risk] LLM assessment failed for session ${message.session_id}; using keyword tier score ${riskScore}`);
       }
+    }
+
+    // Trajectory bonus: a deteriorating run-up makes the same message more
+    // concerning. Only applied when the current message itself carries risk,
+    // so a neutral message never inherits score from history alone.
+    if (riskScore > 0 && trajectory.trajectoryScore > 0) {
+      riskScore = Math.min(100, riskScore + trajectory.trajectoryScore);
+      factors = [...factors, `trajectory: ${trajectory.trend}`];
     }
 
     const severity = riskScore >= 75 ? 'high' : riskScore >= 50 ? 'medium' : riskScore >= 25 ? 'low' : 'none';
@@ -315,6 +352,10 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
           method,
           keyword_score: keywordAnalysis.keywordScore,
           keywords: keywordAnalysis.keywords,
+          ...(trajectory.trajectoryScore > 0 ? {
+            trajectory_score: trajectory.trajectoryScore,
+            trajectory_trend: trajectory.trend,
+          } : {}),
           ...(llm ? {
             llm_score: llm.risk_score,
             llm_context: llm.context,
@@ -331,6 +372,7 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
       factors,
       breakdown: {
         keywords: keywordAnalysis.keywordScore,
+        ...(trajectory.trajectoryScore > 0 ? { trajectory: trajectory.trajectoryScore } : {}),
         ...(llm ? { llm: llm.risk_score } : {}),
       }
     };

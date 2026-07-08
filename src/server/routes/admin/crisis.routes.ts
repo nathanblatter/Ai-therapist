@@ -142,6 +142,20 @@ export default function crisisRoutes(): Router {
     }
   });
 
+  // GET /admin/api/sessions/:sessionId/risk-history - the per-message risk
+  // timeline for one session (scores, severity, and the stage-2 LLM's context
+  // judgment + reasoning from score_factors). Drives SessionDetail's timeline.
+  router.get('/admin/api/sessions/:sessionId/risk-history', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const { getSessionRiskHistory } = await import('../../services/crisisDetection.service.js');
+      const history = await getSessionRiskHistory(req.params.sessionId);
+      res.json({ history });
+    } catch (err) {
+      console.error('Failed to fetch session risk history:', err);
+      res.status(500).json({ error: 'Failed to fetch session risk history' });
+    }
+  });
+
   // GET /admin/api/crisis/active - active crisis sessions
   router.get('/admin/api/crisis/active', requireRole('therapist', 'researcher'), async (_req, res) => {
     try {
