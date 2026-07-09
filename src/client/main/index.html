@@ -7,6 +7,9 @@
     <meta name="author" content="Nathan Blatter" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- head -->
+    <!-- Theme bootstrap: re-apply stored theme/accessibility prefs before first
+         paint so there is no flash. Mirrors src/client/shared/theme.ts. -->
+    <script>(function(){try{var d=document.documentElement,t=localStorage.getItem('app-theme');if(t&&t!=='default')d.setAttribute('data-theme',t);var a=JSON.parse(localStorage.getItem('app-a11y')||'{}');if(a.fontSize&&a.fontSize!=='md')d.setAttribute('data-fontsize',a.fontSize);if(a.motion&&a.motion!=='system')d.setAttribute('data-motion',a.motion);if(a.contrast==='high')d.setAttribute('data-contrast','high');if(a.font==='dyslexic')d.setAttribute('data-font','dyslexic');}catch(e){}})();</script>
   </head>
   <body>
     <div id="root"><!--ssr-outlet--></div>

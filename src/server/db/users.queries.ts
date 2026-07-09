@@ -23,15 +23,24 @@ export interface UserRow {
 export interface UserPreferencesRow {
   preferred_voice: string | null;
   preferred_language: string | null;
+  preferred_theme: string | null;
 }
 
-/** Read a user's stored voice/language preferences, or null if the user has none. */
+/** Read a user's stored voice/language/theme preferences, or null if the user has none. */
 export async function getUserPreferences(userId: number | string): Promise<UserPreferencesRow | null> {
   const result = await pool.query<UserPreferencesRow>(
-    'SELECT preferred_voice, preferred_language FROM users WHERE userid = $1',
+    'SELECT preferred_voice, preferred_language, preferred_theme FROM users WHERE userid = $1',
     [userId]
   );
   return result.rows[0] ?? null;
+}
+
+/** Persist just the UI theme preference. */
+export async function setUserPreferredTheme(userId: number | string, theme: string): Promise<void> {
+  await pool.query(
+    'UPDATE users SET preferred_theme = $1 WHERE userid = $2',
+    [theme, userId]
+  );
 }
 
 /** Persist a user's voice/language preferences. */

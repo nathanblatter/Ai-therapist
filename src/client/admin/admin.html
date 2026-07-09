@@ -13,6 +13,9 @@
         transition: opacity 0.1s ease-in;
       }
     </style>
+    <!-- Theme bootstrap: re-apply the stored admin theme before first paint.
+         Mirrors src/client/shared/theme.ts (admin persists separately). -->
+    <script>(function(){try{var t=localStorage.getItem('admin-theme');if(t&&t!=='default')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
   </head>
   <body>
     <div id="root"><!--ssr-outlet--></div>

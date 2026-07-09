@@ -7,11 +7,13 @@ import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
 import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
 import Header from './Header';
+import VoiceOrb from './VoiceOrb';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
 import BugReport from './BugReport';
 import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
+import { getStoredTheme, setTheme } from '../../shared/theme';
 
 interface CrisisContact {
   hotline: string;
@@ -63,6 +65,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [assistantStream, setAssistantStream] = useState("");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const assistantBuffer = useRef("");
   const userBuffer = useRef("");
   const currentVoiceMessageId = useRef<string | null>(null);
@@ -133,6 +136,11 @@ export default function App() {
           voice: prefs.voice || 'cedar',
           language: prefs.language || 'en'
         });
+        // Server-stored theme wins over this device's localStorage so a
+        // logged-in user's choice follows them across devices.
+        if (prefs.theme && prefs.theme !== getStoredTheme()) {
+          setTheme(prefs.theme);
+        }
         console.log('Loaded user preferences:', prefs);
       })
       .catch(err => {
@@ -538,6 +546,7 @@ export default function App() {
 
     pc.ontrack = (e) => {
       audioEl.srcObject = e.streams[0];
+      setRemoteStream(e.streams[0]);
       // Capture the whole conversation: mix mic + assistant audio into one PCM
       // stream and upload it over HTTP for the entire session, so the server can
       // record it and relay it live to any admin who is listening.
@@ -791,6 +800,7 @@ export default function App() {
     setIsSessionActive(false);
     dataChannelRef.current = null;
     setLocalStream(null);
+    setRemoteStream(null);
     setSessionId(null);
     setSessionType(null);
     setSessionEndTime(null);
@@ -1048,6 +1058,10 @@ export default function App() {
     <div className="flex flex-col h-dvh bg-gray-50">
       <Header sessionId={sessionId} timeRemaining={timeRemaining} />
       <main className="flex-1 flex flex-col items-center overflow-hidden">
+        {/* Themed voice indicator (voice sessions only) */}
+        {isSessionActive && sessionType === 'realtime' && (
+          <VoiceOrb localStream={localStream} remoteStream={remoteStream} />
+        )}
         <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
           {isSessionActive ? (
             <ChatLog messages={messages} assistantStream={assistantStream} />

@@ -1,3 +1,7 @@
+/* Theme tokens must be imported before anything else so every Tailwind
+   color utility (remapped to CSS variables in tailwind.config.js) resolves. */
+@import "./theme-tokens.css";
+
 /*
 @tailwind base; adds base styles to all elements:
 https://tailwindcss.com/docs/preflight
@@ -7,7 +11,7 @@ https://tailwindcss.com/docs/preflight
 @tailwind utilities;
 
 :root {
-  --color-base: #efefef;
+  --color-base: rgb(var(--c-gray-50));
   --color-highlight: #ff80ff;
 }
 
@@ -21,6 +25,61 @@ body {
   font-family: "Consolas", "Andale Mono", monospace;
   font-size: 0.9rem;
   background-color: var(--color-base);
+}
+
+/* ---- Accessibility: font size (data-fontsize on <html>) ---- */
+:root[data-fontsize="sm"] { font-size: 87.5%; }
+:root[data-fontsize="lg"] { font-size: 112.5%; }
+:root[data-fontsize="xl"] { font-size: 125%; }
+
+/* ---- Accessibility: dyslexia-friendly type (data-font on <html>) ---- */
+:root[data-font="dyslexic"] body,
+:root[data-font="dyslexic"] body * {
+  font-family: Verdana, "Trebuchet MS", "Comic Sans MS", sans-serif !important;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+}
+
+/* ---- Accessibility: high contrast (data-contrast on <html>) ----
+   Darkens the muted text/border grays that carry most UI copy. */
+:root[data-contrast="high"] {
+  --c-gray-400: 75 85 99;
+  --c-gray-500: 31 41 55;
+  --c-gray-600: 17 24 39;
+  --c-gray-700: 17 24 39;
+  --c-gray-200: 156 163 175;
+  --c-gray-300: 107 114 128;
+  --t-ink-muted: var(--c-gray-500);
+}
+:root[data-theme="dark"][data-contrast="high"] {
+  --c-gray-400: 209 213 219;
+  --c-gray-500: 229 231 235;
+  --c-gray-600: 243 244 246;
+  --c-gray-700: 249 250 251;
+  --c-gray-200: 107 114 128;
+  --c-gray-300: 156 163 175;
+}
+
+/* ---- Accessibility: reduced motion ----
+   Applied when the user opts in (data-motion="reduce") or, by default,
+   when the OS asks for it (the in-app setting can override either way). */
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="allow"]) *,
+  :root:not([data-motion="allow"]) *::before,
+  :root:not([data-motion="allow"]) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @keyframes slideIn {
@@ -37,3 +96,19 @@ body {
 .animate-slideIn {
   animation: slideIn 0.3s ease-out;
 }
+
+/* ---- Voice orb (themed via --t-orb-a / --t-orb-b) ---- */
+@keyframes orbBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+.voice-orb {
+  background: radial-gradient(
+    circle at 32% 30%,
+    rgb(var(--t-orb-b) / 0.9),
+    rgb(var(--t-orb-a)) 70%
+  );
+  box-shadow: 0 0 24px rgb(var(--t-orb-a) / 0.35);
+  transition: box-shadow 150ms ease-out;
+}
+.voice-orb--idle { animation: orbBreathe 5s ease-in-out infinite; }

@@ -1,7 +1,8 @@
 // Header.jsx
 import React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Menu, X } from 'react-feather';
 import CopyButton from '../../shared/components/CopyButton';
 
 interface HeaderProps {
@@ -12,7 +13,30 @@ interface HeaderProps {
 const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
   const [username, setUsername] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
+
+  // Close the mobile menu when tapping outside it or pressing Escape
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [isMenuOpen]);
   function capitalizeFirst(str: string | null): string | null {
   if (!str || typeof str !== "string") return str;
   return str.charAt(0).toUpperCase() + str.slice(1);
@@ -108,7 +132,8 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
           <a href="tel:988" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline">988</a> or visit
           <a href="https://988lifeline.org" target="_blank" rel="noopener noreferrer" className="text-blue-300 underline ml-1" title="988 Suicide & Crisis Lifeline website">988lifeline.org</a> for support. You are not alone—help is available.
         </p>
-        <nav className="mt-3 md:mt-4 [@media(max-height:500px)]:mt-1.5 flex flex-row flex-wrap items-center gap-2 sm:gap-4 justify-center" role="navigation" aria-label="Main navigation">
+        <nav className="mt-3 md:mt-4 [@media(max-height:500px)]:mt-1.5 flex flex-row items-center gap-2 sm:gap-4 justify-center" role="navigation" aria-label="Main navigation">
+          {/* Call 988 stays visible at every size — never behind a menu */}
           <a
             href="tel:988"
             className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
@@ -116,37 +141,95 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
           >
             Call 988
           </a>
-          <a
-            href="https://988lifeline.org"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
-            aria-label="Visit crisis resources page (opens in new tab)"
-          >
-            Crisis Resources
-          </a>
 
-          {(userRole === 'researcher' || userRole === 'therapist') && (
+          {/* Full button row on sm+ screens */}
+          <div className="hidden sm:flex flex-row flex-wrap items-center gap-2 sm:gap-4 justify-center">
             <a
-              href="/admin/"
+              href="https://988lifeline.org"
               target="_blank"
               rel="noopener noreferrer"
               className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
-              aria-label="Open Admin Portal (opens in new tab)"
+              aria-label="Visit crisis resources page (opens in new tab)"
             >
-              Admin Portal
+              Crisis Resources
             </a>
-          )}
-          <button
-            onClick={() => navigate('/profile')}
-            className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
-            aria-label="View my profile"
-          >
-            Profile
-          </button>
-          <button onClick={handleLogout} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center" title="Logout">Logout</button>
+
+            {(userRole === 'researcher' || userRole === 'therapist') && (
+              <a
+                href="/admin/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-royal hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
+                aria-label="Open Admin Portal (opens in new tab)"
+              >
+                Admin Portal
+              </a>
+            )}
+            <button
+              onClick={() => navigate('/profile')}
+              className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
+              aria-label="View my profile"
+            >
+              Profile
+            </button>
+            <button onClick={handleLogout} className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center" title="Logout">Logout</button>
+          </div>
+
+          {/* Compact menu on mobile */}
+          <div className="relative sm:hidden" ref={menuRef}>
+            <button
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold min-h-[44px] min-w-[44px] flex items-center justify-center gap-2"
+              aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={isMenuOpen}
+              aria-haspopup="true"
+            >
+              {isMenuOpen ? <X size={18} /> : <Menu size={18} />}
+              <span>Menu</span>
+            </button>
+            {isMenuOpen && (
+              <div className="absolute right-0 mt-2 w-52 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50 text-left" role="menu">
+                <a
+                  href="https://988lifeline.org"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                  role="menuitem"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Crisis Resources
+                </a>
+                {(userRole === 'researcher' || userRole === 'therapist') && (
+                  <a
+                    href="/admin/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                    role="menuitem"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Admin Portal
+                  </a>
+                )}
+                <button
+                  onClick={() => { setIsMenuOpen(false); navigate('/profile'); }}
+                  className="block w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                  role="menuitem"
+                >
+                  Profile
+                </button>
+                <button
+                  onClick={() => { setIsMenuOpen(false); handleLogout(); }}
+                  className="block w-full text-left px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50"
+                  role="menuitem"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
-        
+
       </div>
     </header>
   );

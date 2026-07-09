@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Menu } from 'react-feather';
+import { Menu, Moon, Sun } from 'react-feather';
+import { getStoredTheme, setTheme, ADMIN_THEME_STORAGE_KEY } from '../../shared/theme';
 
 interface AdminHeaderProps {
   onMenuClick?: () => void;
@@ -8,6 +9,18 @@ interface AdminHeaderProps {
 export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
   const [username, setUsername] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [isDark, setIsDark] = useState(false);
+
+  // Theme was already applied pre-paint by admin.html's bootstrap; sync the toggle.
+  useEffect(() => {
+    setIsDark(getStoredTheme(ADMIN_THEME_STORAGE_KEY) === 'dark');
+  }, []);
+
+  const toggleDarkMode = () => {
+    const next = !isDark;
+    setIsDark(next);
+    setTheme(next ? 'dark' : 'default', ADMIN_THEME_STORAGE_KEY);
+  };
 
   useEffect(() => {
     const fetchAuthStatus = async () => {
@@ -69,7 +82,17 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
             )}
           </div>
         </div>
-        <button onClick={handleLogout} className="bg-gray-700 hover:bg-gray-600 px-3 md:px-4 py-2 rounded-full text-sm font-semibold shrink-0 text-center" title="Logout">Logout</button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={toggleDarkMode}
+            className="p-2 text-white hover:bg-white/10 rounded-full"
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {isDark ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
+          <button onClick={handleLogout} className="bg-gray-700 hover:bg-gray-600 px-3 md:px-4 py-2 rounded-full text-sm font-semibold text-center" title="Logout">Logout</button>
+        </div>
       </div>
     </header>
   );

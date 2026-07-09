@@ -11,6 +11,7 @@ import {
   createUser,
   getUserPreferences,
   updateUserPreferences,
+  setUserPreferredTheme,
   type VoicesConfig,
   type LanguagesConfig,
 } from '../../db/index.js';
@@ -29,6 +30,9 @@ const DEFAULT_LANGUAGES: LanguagesConfig = {
   languages: [{ value: 'en', label: 'English', description: 'English', enabled: true }],
   default_language: 'en',
 };
+
+// Must match THEMES in src/client/shared/theme.ts.
+const VALID_THEMES = ['default', 'sage', 'ocean', 'dusk', 'dark'];
 
 export default function usersRoutes(): Router {
   const router = Router();
@@ -73,7 +77,13 @@ export default function usersRoutes(): Router {
       const { getUserMemoryEnabled } = await import('../../db/index.js');
       const memory_enabled = await getUserMemoryEnabled(userId!);
 
-      res.json({ voice, language, memory_enabled });
+      // null = never chosen (distinct from an explicit 'default' choice, which
+      // should sync across devices).
+      const theme = prefs?.preferred_theme && VALID_THEMES.includes(prefs.preferred_theme)
+        ? prefs.preferred_theme
+        : null;
+
+      res.json({ voice, language, theme, memory_enabled });
     } catch (error) {
       console.error('Error fetching user preferences:', error);
       res.status(500).json({ error: 'Failed to fetch preferences' });
@@ -93,6 +103,21 @@ export default function usersRoutes(): Router {
     } catch (error) {
       console.error('Error saving memory preference:', error);
       res.status(500).json({ error: 'Failed to save memory preference' });
+    }
+  });
+
+  // PUT /api/users/preferences/theme - UI theme preset
+  router.put('/api/users/preferences/theme', requireAuth, async (req, res) => {
+    const { theme } = req.body;
+    if (typeof theme !== 'string' || !VALID_THEMES.includes(theme)) {
+      return res.status(400).json({ error: `theme must be one of: ${VALID_THEMES.join(', ')}` });
+    }
+    try {
+      await setUserPreferredTheme(req.session.userId!, theme);
+      res.json({ success: true, theme });
+    } catch (error) {
+      console.error('Error saving theme preference:', error);
+      res.status(500).json({ error: 'Failed to save theme preference' });
     }
   });
 
