@@ -12,6 +12,8 @@ services:
       DATABASE_SSL: "false"
       SESSION_SECRET: ${SESSION_SECRET}
       CORS_ORIGIN: https://ai-therapist.nathanblatter.com
+      # Magic-link demo access. Unset => /demo/:token 404s (feature disabled).
+      DEMO_MAGIC_TOKEN: ${DEMO_MAGIC_TOKEN}
       # OpenAI key is pulled from AWS Secrets Manager at runtime.
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
