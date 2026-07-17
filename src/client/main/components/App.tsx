@@ -11,6 +11,7 @@ import VoiceOrb from './VoiceOrb';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
 import BugReport from './BugReport';
+import DemoSwitcher from '../../shared/components/DemoSwitcher';
 import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
 import { getStoredTheme, setTheme } from '../../shared/theme';
@@ -1056,6 +1057,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-dvh bg-gray-50">
+      <DemoSwitcher context="bot" />
       <Header sessionId={sessionId} timeRemaining={timeRemaining} />
       <main className="flex-1 flex flex-col items-center overflow-hidden">
         {/* Themed voice indicator (voice sessions only) */}

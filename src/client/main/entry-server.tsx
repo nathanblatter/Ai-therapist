@@ -5,6 +5,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import App from "./components/App";
 import Login from "./components/Login";
 import Profile from "./components/Profile";
+import DemoLanding from "./components/DemoLanding";
 import ProtectedRoute from "../shared/components/ProtectedRoute";
 
 export function render(url: string) {
@@ -13,6 +14,14 @@ export function render(url: string) {
       <StaticRouter location={url}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route
+            path="/demo"
+            element={
+              <ProtectedRoute>
+                <DemoLanding />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/"
             element={

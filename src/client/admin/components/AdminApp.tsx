@@ -2,6 +2,7 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2, X } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import ToastContainer from "../../shared/components/Toast";
+import DemoSwitcher from "../../shared/components/DemoSwitcher";
 
 // Heavy, independently-navigable views are code-split so the initial admin
 // bundle stays small. They're rendered client-only (see isClient gate below),
@@ -96,22 +97,10 @@ export default function AdminApp() {
     return true;
   });
 
-  const isDemo = userRole === 'demo';
-
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       <AdminHeader onMenuClick={() => setIsSidebarOpen(true)} />
-
-      {isDemo && (
-        <div
-          className="bg-amber-100 border-b border-amber-300 text-amber-900 text-sm px-4 py-2 text-center"
-          role="status"
-        >
-          <span className="font-semibold">Demo mode</span> — you're viewing a
-          sandboxed dashboard with fully synthetic data. No real participant
-          information is shown, and changes here are not saved.
-        </div>
-      )}
+      <DemoSwitcher context="admin" role={userRole} />
 
       <main className="flex-1 overflow-hidden flex relative">
         {/* Mobile overlay backdrop */}

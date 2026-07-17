@@ -45,7 +45,7 @@ export default function magicLinkRoutes(): Router {
       // Reuse an existing demo session on refresh instead of minting a new user
       // every visit.
       if (req.session?.userId && req.session.userRole === 'demo') {
-        return res.redirect('/admin');
+        return res.redirect('/demo');
       }
 
       const demoUser = await createDemoUser();
@@ -61,7 +61,7 @@ export default function magicLinkRoutes(): Router {
           return res.status(500).send('Could not start demo session.');
         }
         console.log(`[MagicLink] Provisioned demo account ${demoUser.username} (id ${demoUser.userid})`);
-        res.redirect('/admin');
+        res.redirect('/demo');
       });
     } catch (error) {
       console.error('[MagicLink] Failed to provision demo account:', error);
