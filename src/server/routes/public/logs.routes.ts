@@ -13,6 +13,7 @@ import {
   getRecentSessionMessages,
   getSessionCrisisState,
   getSessionMessageCount,
+  getSessionIsDemo,
   type InsertMessageInput,
 } from '../../db/index.js';
 import { getSystemPrompt } from '../../utils/sessionHelpers.js';
@@ -134,12 +135,28 @@ export default function logsRoutes(): Router {
       const { analyzeMessageRisk, flagSessionCrisis, logInterventionAction } = await import('../../services/crisisDetection.service.js');
       const { executeGraduatedResponse } = await import('../../services/crisisIntervention.service.js');
 
+      // Demo (magic-link) sessions never enter the real crisis pipeline: no
+      // scoring, no flags, no admin alerts, and crucially no SMS page to the
+      // on-call — a resume viewer must not be able to trigger a real crisis
+      // response. The live model still replies safely with crisis resources on
+      // its own. Memoized per session so a batch does one lookup each.
+      const demoSessionCache = new Map<string, boolean>();
+      const isDemoSession = async (sessionId: string): Promise<boolean> => {
+        const cached = demoSessionCache.get(sessionId);
+        if (cached !== undefined) return cached;
+        const demo = await getSessionIsDemo(sessionId);
+        demoSessionCache.set(sessionId, demo);
+        return demo;
+      };
+
       for (const msg of insertedMessages) {
         // Only participant messages are scored: the assistant reciting crisis
         // resources ("988 Suicide & Crisis Lifeline") used to flag its own
         // session as a high-severity crisis. Assistant turns still reach the
         // stage-2 LLM as conversation context.
         if (msg.role === 'user') {
+          if (await isDemoSession(msg.session_id)) continue;
+
           const conversationHistory = await getRecentSessionMessages(msg.session_id, 10);
 
           const riskAnalysis = await analyzeMessageRisk(

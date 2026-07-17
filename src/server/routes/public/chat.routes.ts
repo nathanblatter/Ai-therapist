@@ -81,6 +81,7 @@ export default function chatRoutes(): Router {
         sessionName: null, // generated from the conversation when the session ends
         status: 'active',
         sessionType: 'chat',
+        isDemo: userRole === 'demo',
       });
 
       if (checkin) {

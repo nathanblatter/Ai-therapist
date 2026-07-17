@@ -1,6 +1,7 @@
 // Data-access for users: their stored row shape, auth/CRUD (with password
 // hashing), and voice/language preferences.
 import bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 import { pool } from '../config/db.js';
 
 const SALT_ROUNDS = 10;
@@ -113,6 +114,26 @@ export async function verifyCredentials(username: string, password: string): Pro
     console.error('Error verifying credentials:', error);
     throw error;
   }
+}
+
+/**
+ * Provision a fresh, single-use demo account for a magic-link visitor. Each
+ * visitor gets their own row so daily-session limits are per-visitor, not
+ * shared. The password is a throwaway random value — demo accounts are only
+ * ever reached via the signed magic link, never by username/password login.
+ */
+export async function createDemoUser(): Promise<{ userid: number; username: string; role: string }> {
+  const suffix = randomBytes(4).toString('hex');
+  const username = `demo_${suffix}`;
+  const throwawayPassword = randomBytes(24).toString('hex');
+  const hashedPassword = await bcrypt.hash(throwawayPassword, SALT_ROUNDS);
+
+  const result = await pool.query<UserRow>(
+    `INSERT INTO users (username, password, role) VALUES ($1, $2, 'demo')
+     RETURNING userid, username, role`,
+    [username, hashedPassword]
+  );
+  return result.rows[0];
 }
 
 /** Create a user with a hashed password (for registration). */

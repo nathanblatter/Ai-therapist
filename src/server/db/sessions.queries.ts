@@ -30,6 +30,7 @@ export interface CreateSessionConfig {
   sessionName?: string | null;
   status?: string;
   sessionType?: string;
+  isDemo?: boolean;
 }
 
 export interface SessionConfigRow {
@@ -72,15 +73,16 @@ export async function createSession(userId: number | CreateSessionConfig | null 
   if (typeof userId === 'object' && userId !== null) {
     const config = userId as CreateSessionConfig;
     const result = await pool.query<SessionRow>(
-      `INSERT INTO therapy_sessions (session_id, user_id, session_name, status, session_type, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `INSERT INTO therapy_sessions (session_id, user_id, session_name, status, session_type, is_demo, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
       [
         config.sessionId,
         config.userId || null,
         config.sessionName || null,
         config.status || 'active',
-        config.sessionType || 'realtime'
+        config.sessionType || 'realtime',
+        config.isDemo ?? false
       ]
     );
     return result.rows[0];
@@ -281,11 +283,28 @@ export async function setSessionCallId(sessionId: string, callId: string): Promi
 }
 
 /** Create an active realtime session for the OpenAI-issued id (no-op if it exists). */
-export async function createActiveRealtimeSession(sessionId: string, userId: number | string | null): Promise<void> {
+export async function createActiveRealtimeSession(
+  sessionId: string,
+  userId: number | string | null,
+  isDemo = false
+): Promise<void> {
   await pool.query(
-    `INSERT INTO therapy_sessions (session_id, user_id, status, created_at, updated_at)
-     VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `INSERT INTO therapy_sessions (session_id, user_id, status, is_demo, created_at, updated_at)
+     VALUES ($1, $2, 'active', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
      ON CONFLICT (session_id) DO NOTHING`,
-    [sessionId, userId]
+    [sessionId, userId, isDemo]
   );
+}
+
+/**
+ * Whether a session belongs to a magic-link demo account. Used to keep demo
+ * activity out of the real crisis-alert/SMS pipeline. Missing sessions count as
+ * non-demo (fail safe toward normal processing).
+ */
+export async function getSessionIsDemo(sessionId: string): Promise<boolean> {
+  const result = await pool.query<{ is_demo: boolean }>(
+    'SELECT is_demo FROM therapy_sessions WHERE session_id = $1',
+    [sessionId]
+  );
+  return result.rows[0]?.is_demo ?? false;
 }

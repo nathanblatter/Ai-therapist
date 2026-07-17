@@ -17,6 +17,8 @@ import { insertMessagesBatch, getSidebandConnectionsByIds, getSessionAccessInfo 
 import configRoutes from "./routes/public/config.routes.js";
 import voicesRoutes from "./routes/public/voices.routes.js";
 import authRoutes from "./routes/public/auth.routes.js";
+import magicLinkRoutes from "./routes/public/magicLink.routes.js";
+import demoRoutes from "./routes/demo.routes.js";
 import mfaRoutes from "./routes/public/mfa.routes.js";
 import usersRoutes from "./routes/public/users.routes.js";
 import healthRoutes from "./routes/public/health.routes.js";
@@ -304,6 +306,15 @@ io.on('connection', (socket: AuthSocket) => {
 // Login, register, logout, status live in routes/public/auth.routes.ts.
 app.use(authRoutes());
 
+// Magic-link demo access (/demo/:token) — auto-provisions a capped demo account.
+app.use(magicLinkRoutes());
+
+// Demo dashboard interceptor. Mounted BEFORE the real admin/users routers so
+// that for 'demo' accounts every /admin/api/* (and /api/users) request is
+// served synthetic fixtures and never reaches the database. No-op for everyone
+// else (see routes/demo.routes.ts).
+app.use(demoRoutes());
+
 // ===================== MFA (Multi-Factor Authentication) Routes =====================
 
 // MFA setup/verify/disable + backup codes live in routes/public/mfa.routes.ts.
@@ -416,8 +427,8 @@ async function startProdServer() {
   // Serve redact static assets
   app.use('/redact/assets', express.static(path.resolve(__dirname, '../../dist/redact-client/assets'), { setHeaders: staticCache }));
 
-  // Admin panel route
-  app.get('/admin', requireRole('therapist', 'researcher'), async (req, res) => {
+  // Admin panel route (demo accounts see a synthetic-data version — see demo.routes.ts)
+  app.get('/admin', requireRole('therapist', 'researcher', 'demo'), async (req, res) => {
     try {
       const template = fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8');
       const appHtml = await renderAdmin(req.originalUrl);
@@ -465,8 +476,8 @@ async function startDevServer() {
   });
   app.use(vite.middlewares);
 
-  // Admin panel route in dev
-  app.get("/admin", requireRole('therapist', 'researcher'), async (req, res, next) => {
+  // Admin panel route in dev (demo accounts get synthetic data — see demo.routes.ts)
+  app.get("/admin", requireRole('therapist', 'researcher', 'demo'), async (req, res, next) => {
     try {
       // Read the admin HTML template
       let template = fs.readFileSync(path.resolve(__dirname, "../client/admin/admin.html"), "utf-8");

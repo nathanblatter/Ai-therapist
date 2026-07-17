@@ -96,9 +96,22 @@ export default function AdminApp() {
     return true;
   });
 
+  const isDemo = userRole === 'demo';
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       <AdminHeader onMenuClick={() => setIsSidebarOpen(true)} />
+
+      {isDemo && (
+        <div
+          className="bg-amber-100 border-b border-amber-300 text-amber-900 text-sm px-4 py-2 text-center"
+          role="status"
+        >
+          <span className="font-semibold">Demo mode</span> — you're viewing a
+          sandboxed dashboard with fully synthetic data. No real participant
+          information is shown, and changes here are not saved.
+        </div>
+      )}
 
       <main className="flex-1 overflow-hidden flex relative">
         {/* Mobile overlay backdrop */}

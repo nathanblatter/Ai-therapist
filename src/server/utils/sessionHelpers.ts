@@ -181,10 +181,52 @@ interface SessionLimitDeniedCooldown {
 
 export type SessionLimitResult = SessionLimitAllowed | SessionLimitDeniedDailyLimit | SessionLimitDeniedCooldown;
 
+// Hard caps for magic-link demo accounts (resume viewers). Enforced regardless
+// of the global session_limits config so a recruiter can always try the product
+// but can't run up unbounded OpenAI cost. Short sessions, few per day.
+export const DEMO_SESSION_LIMITS = {
+  max_sessions_per_day: 5,
+  max_duration_minutes: 5,
+  cooldown_minutes: 0,
+} as const;
+
 export async function checkSessionLimits(userId: unknown, userRole: string | null = null): Promise<SessionLimitResult> {
   if (!userId) {
     // Anonymous users don't have limits enforced
     return { allowed: true };
+  }
+
+  // Demo (magic-link) accounts: always capped, independent of global config.
+  if (userRole === 'demo') {
+    const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+    todayStart.setHours(0, 0, 0, 0);
+
+    const demoToday = await pool.query<{ session_count: string }>(
+      `SELECT COUNT(*) as session_count
+       FROM therapy_sessions
+       WHERE user_id = $1 AND created_at >= $2`,
+      [userId, todayStart]
+    );
+    const demoCount = parseInt(demoToday.rows[0].session_count);
+
+    if (demoCount >= DEMO_SESSION_LIMITS.max_sessions_per_day) {
+      return {
+        allowed: false,
+        reason: 'daily_limit',
+        message: `This demo is limited to ${DEMO_SESSION_LIMITS.max_sessions_per_day} sessions per day. Please try again tomorrow.`,
+        limit: DEMO_SESSION_LIMITS.max_sessions_per_day,
+        current: demoCount,
+      };
+    }
+
+    return {
+      allowed: true,
+      limits: {
+        max_duration_minutes: DEMO_SESSION_LIMITS.max_duration_minutes,
+        max_sessions_per_day: DEMO_SESSION_LIMITS.max_sessions_per_day,
+        sessions_today: demoCount,
+      },
+    };
   }
 
   // Researcher accounts are exempt from limits

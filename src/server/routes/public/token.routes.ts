@@ -138,7 +138,7 @@ export default function tokenRoutes(): Router {
       recordSessionOwnership(req, sessionId);
 
       try {
-        await createActiveRealtimeSession(sessionId, userId);
+        await createActiveRealtimeSession(sessionId, userId, userRole === 'demo');
         console.log(`Therapy session created with user_id: ${userId}`);
 
         if (checkin) {
