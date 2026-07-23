@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, flagSessionCrisisMock, logInterventionActionMock } = vi.hoisted(() => ({
+const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, flagSessionCrisisMock, logInterventionActionMock, searchKnowledgeChunksMock, embedTextMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
   setSessionGoalMock: vi.fn(),
   getSessionGoalMock: vi.fn(),
   flagSessionCrisisMock: vi.fn(),
   logInterventionActionMock: vi.fn(),
+  searchKnowledgeChunksMock: vi.fn(),
+  embedTextMock: vi.fn(),
 }));
 vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
@@ -17,10 +19,14 @@ vi.mock('../utils/sessionHelpers.js', () => ({
 vi.mock('../db/index.js', () => ({
   setSessionGoal: setSessionGoalMock,
   getSessionGoal: getSessionGoalMock,
+  searchKnowledgeChunks: searchKnowledgeChunksMock,
 }));
 vi.mock('./crisisDetection.service.js', () => ({
   flagSessionCrisis: flagSessionCrisisMock,
   logInterventionAction: logInterventionActionMock,
+}));
+vi.mock('./embeddings.service.js', () => ({
+  embedText: embedTextMock,
 }));
 
 import { toolRegistry } from './toolRegistry.service.js';
@@ -32,6 +38,8 @@ beforeEach(() => {
   getSessionGoalMock.mockReset();
   flagSessionCrisisMock.mockReset();
   logInterventionActionMock.mockReset();
+  searchKnowledgeChunksMock.mockReset();
+  embedTextMock.mockReset().mockResolvedValue([0.1, 0.2, 0.3]);
 });
 
 describe('registry mechanics', () => {
@@ -123,5 +131,45 @@ describe('escalate_to_human', () => {
     await toolRegistry.executeTool('escalate_to_human', { reason: 'r', urgency: 'critical!!' }, { sessionId: 's1' });
     expect(flagSessionCrisisMock).not.toHaveBeenCalled();
     expect(logInterventionActionMock).toHaveBeenCalledWith('s1', 'ai_escalation', expect.objectContaining({ urgency: 'medium' }));
+  });
+});
+
+describe('retrieve_psychoeducation (RAG)', () => {
+  it('requires a query', async () => {
+    const result = await toolRegistry.executeTool('retrieve_psychoeducation', { query: '  ' }) as { error?: string };
+    expect(result.error).toBeTruthy();
+    expect(embedTextMock).not.toHaveBeenCalled();
+  });
+
+  it('embeds the query and returns formatted, sourced passages', async () => {
+    searchKnowledgeChunksMock.mockResolvedValue([
+      { title: 'What depression is', content: 'Depression is...', source: 'NIMH', source_url: 'https://nimh', topic: 'depression', similarity: 0.9 },
+    ]);
+    const result = await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'what is depression', topic: 'depression' }) as { results: unknown[]; guidance: string };
+    expect(embedTextMock).toHaveBeenCalledWith('what is depression');
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], 'depression', 4);
+    expect(result.results).toEqual([
+      { title: 'What depression is', content: 'Depression is...', source: 'NIMH', source_url: 'https://nimh' },
+    ]);
+    expect(result.guidance).toMatch(/do not add clinical claims or citations beyond/i);
+  });
+
+  it('passes null topic when none is given', async () => {
+    searchKnowledgeChunksMock.mockResolvedValue([]);
+    await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'coping tips' });
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], null, 4);
+  });
+
+  it('on empty results, instructs the model not to fabricate citations', async () => {
+    searchKnowledgeChunksMock.mockResolvedValue([]);
+    const result = await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'obscure' }) as { results: unknown[]; guidance: string };
+    expect(result.results).toEqual([]);
+    expect(result.guidance).toMatch(/do not invent citations/i);
+  });
+
+  it('fails safe (no throw, no-fabrication message) when the knowledge base errors', async () => {
+    embedTextMock.mockRejectedValue(new Error('embeddings down'));
+    const result = await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'anything' }) as { error?: string };
+    expect(result.error).toMatch(/do not invent citations/i);
   });
 });

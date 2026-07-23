@@ -1,0 +1,82 @@
+[
+  {
+    "topic": "depression",
+    "title": "What depression is",
+    "content": "Depression (also called major depression, major depressive disorder, or clinical depression) is a common but serious mood disorder. It is different from ordinary sadness or grief because it can cause severe symptoms that affect how a person feels, thinks, and handles daily activities such as sleeping, eating, or working. To be diagnosed with depression, symptoms are usually present most of the day, nearly every day, for at least two weeks.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/depression",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "depression",
+    "title": "Signs and symptoms of depression",
+    "content": "Common symptoms of depression include a persistent sad, anxious, or empty mood; feelings of hopelessness or pessimism; loss of interest or pleasure in hobbies and activities; and reduced energy or fatigue. Many people also notice difficulty concentrating, remembering, or making decisions, and changes in sleep or appetite. Not everyone experiences the same symptoms; some people have only a few while others have many.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/depression",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "depression",
+    "title": "How psychotherapy helps depression",
+    "content": "Psychotherapy (also called talk therapy or counseling) can help people with depression by teaching new ways of thinking and behaving and helping them change habits that contribute to depression. Evidence-based approaches include cognitive behavioral therapy (CBT) and interpersonal therapy. Therapy can be delivered one-on-one, in a group, or virtually.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/depression",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "depression",
+    "title": "How antidepressant medication works",
+    "content": "Antidepressants are medications commonly used to treat depression. They work by changing how the brain produces or uses certain chemicals involved in mood or stress, and they usually take time — often 4 to 8 weeks — to work. Sleep, appetite, and concentration problems often improve before mood lifts. Medication decisions, including starting or stopping, should always be made with a health care provider.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/depression",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "anxiety",
+    "title": "What generalized anxiety disorder is",
+    "content": "People with generalized anxiety disorder (GAD) feel extremely worried or nervous more frequently or more intensely than the situation calls for, even about everyday things. The anxiety persists for months or longer and interferes with daily functioning, which distinguishes it from the occasional worry everyone experiences.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "anxiety",
+    "title": "Signs and symptoms of GAD",
+    "content": "Generalized anxiety disorder often involves worrying excessively about everyday things alongside physical symptoms. These can include restlessness, difficulty concentrating, sleep problems, muscle tension, trembling, irritability, and being easily fatigued. Symptoms tend to intensify during periods of stress.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "anxiety",
+    "title": "How CBT and ACT help anxiety",
+    "content": "Cognitive behavioral therapy (CBT) is a well-established, effective treatment for anxiety that helps people identify, challenge, and change unhelpful thinking and behavior patterns that fuel worry. Acceptance and commitment therapy (ACT) is another approach that encourages nonjudgmental acceptance of thoughts and feelings while committing to values-based action. Both are supported by research for anxiety disorders.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "coping",
+    "title": "Physical activity and mood",
+    "content": "Regular physical activity can boost mood and improve overall health. Even about 30 minutes of walking a day can help, and smaller amounts of movement still count. Building gentle, achievable activity into a routine is a practical self-care step for mental well-being.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "coping",
+    "title": "Sleep and mental health",
+    "content": "Prioritizing consistent sleep supports mental health. Keeping a regular sleep schedule and reducing screen exposure before bed can help, since blue light from devices can make it harder to fall asleep. Relaxing pre-sleep routines can make rest more restorative.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "coping",
+    "title": "Social connection and when to seek help",
+    "content": "Staying connected to people who offer emotional support and practical help is protective for mental health. It is a good idea to contact a health care provider when severe or distressing symptoms have lasted two weeks or more — for example, changes in sleep, trouble concentrating, or loss of interest in activities. If you or someone else is in crisis, call or text the 988 Suicide & Crisis Lifeline at 988.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+    "license": "Public Domain (U.S. NIMH)"
+  }
+]

@@ -829,6 +829,76 @@ export class ToolRegistry {
       }
     );
 
+    // Tool 22: Grounded psychoeducation retrieval (RAG over a vetted, evidence-
+    // based corpus in pgvector; see migration 031 + ingestKnowledge.js). The
+    // guardrails in the description + returned guidance are load-bearing: the
+    // model must ground claims/citations in the returned passages, never invent
+    // them. Safe to leave registered even before the corpus is ingested — any
+    // failure (missing table, embed error, empty corpus) returns a graceful,
+    // no-fabrication message rather than throwing.
+    this.registerTool(
+      'retrieve_psychoeducation',
+      {
+        type: 'function',
+        name: 'retrieve_psychoeducation',
+        description:
+          'Retrieve vetted, evidence-based psychoeducation passages from the clinical knowledge base to ground an explanation. Use when the participant asks what a condition is, why they might feel a certain way, or how a coping technique or therapy works. Summarize the returned passages in warm, plain language and mention the source. Do NOT state clinical facts, statistics, or citations that are not present in the returned passages.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'What to look up, in natural language (e.g. "why does CBT help with anxiety").',
+            },
+            topic: {
+              type: 'string',
+              description: 'Optional coarse filter, e.g. "depression", "anxiety", "coping".',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      async (args: Record<string, unknown>) => {
+        const query = typeof args['query'] === 'string' ? args['query'].trim() : '';
+        if (!query) return { error: 'query text is required' };
+        const topic = typeof args['topic'] === 'string' && args['topic'].trim()
+          ? args['topic'].trim()
+          : null;
+
+        try {
+          const { embedText } = await import('./embeddings.service.js');
+          const { searchKnowledgeChunks } = await import('../db/index.js');
+          const embedding = await embedText(query);
+          const rows = await searchKnowledgeChunks(embedding, topic, 4);
+
+          if (rows.length === 0) {
+            return {
+              results: [],
+              guidance:
+                'No matching passages in the knowledge base. Rely on general supportive knowledge, keep it brief, and do NOT invent citations, statistics, or specific clinical claims.',
+            };
+          }
+
+          return {
+            results: rows.map(r => ({
+              title: r.title,
+              content: r.content,
+              source: r.source,
+              source_url: r.source_url,
+            })),
+            guidance:
+              'Summarize these passages for the participant in warm, plain language and mention the source. Do NOT add clinical claims or citations beyond what is shown here.',
+          };
+        } catch (error) {
+          console.error('[ToolRegistry] retrieve_psychoeducation failed:', error);
+          return {
+            error:
+              'The knowledge base is unavailable right now. Continue supporting the participant without it, and do not invent citations.',
+          };
+        }
+      }
+    );
+
     console.log('[ToolRegistry] Default tools registered');
   }
 
