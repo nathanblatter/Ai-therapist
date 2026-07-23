@@ -1,0 +1,154 @@
+[
+  {
+    "topic": "panic",
+    "title": "What panic disorder is",
+    "content": "People with panic disorder have frequent, unexpected panic attacks — sudden episodes of intense fear that come on without a clear danger. Attacks usually peak within minutes and pass within an hour; they are deeply distressing but not physically dangerous. With treatment, most people learn to manage the attacks and improve their quality of life.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/panic-disorder-when-fear-overwhelms",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "panic",
+    "title": "Panic attack symptoms",
+    "content": "During a panic attack a person may feel intense fear or a sense of being out of control, alongside physical symptoms like a pounding or racing heart, sweating, trembling, shortness of breath, or chest discomfort. Because the body's fear response fires strongly, the sensations can feel like a medical emergency even though they are not.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/panic-disorder-when-fear-overwhelms",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "panic",
+    "title": "How panic disorder is treated",
+    "content": "Cognitive behavioral therapy (CBT) is a first-line treatment, teaching different ways of thinking about and reacting to the sensations of panic; exposure therapy helps a person gradually face situations they have been avoiding. SSRIs and SNRIs are commonly prescribed and take several weeks to work.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/panic-disorder-when-fear-overwhelms",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "social_anxiety",
+    "title": "What social anxiety disorder is",
+    "content": "Social anxiety disorder is intense anxiety or fear in situations where a person might be scrutinized, evaluated, or judged by others — such as speaking, meeting new people, or eating in public. The fear is out of proportion to the situation, often begins in childhood or adolescence, and can interfere with school, work, and relationships.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/social-anxiety-disorder-more-than-just-shyness",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "social_anxiety",
+    "title": "Signs of social anxiety",
+    "content": "Someone with social anxiety may blush, sweat, tremble, or feel their heart race in social situations, find it hard to make eye contact, and worry intensely that others will judge them negatively. Many cope by avoiding the situations they fear, which tends to strengthen the anxiety over time.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/social-anxiety-disorder-more-than-just-shyness",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "social_anxiety",
+    "title": "How social anxiety is treated",
+    "content": "Cognitive behavioral therapy (CBT) is considered the gold standard: it teaches new ways of thinking and reacting and includes practicing feared social situations so they feel less threatening. Antidepressants (SSRIs/SNRIs) and, for specific performance situations, beta-blockers are also used.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/social-anxiety-disorder-more-than-just-shyness",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "ptsd",
+    "title": "What PTSD is",
+    "content": "It is natural to feel afraid during and after a traumatic event — fear is part of the body's fight-or-flight response. Most people recover over time, but when symptoms last more than a month and interfere with daily life, it may be post-traumatic stress disorder (PTSD). About 6 in 100 people experience PTSD at some point in their lives.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/post-traumatic-stress-disorder-ptsd",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "ptsd",
+    "title": "PTSD: re-experiencing and avoidance",
+    "content": "Re-experiencing symptoms include flashbacks, recurring memories or dreams, and distressing thoughts, often triggered by reminders of the event and accompanied by physical reactions like a racing heart. Avoidance symptoms involve staying away from places, people, or thoughts connected to the trauma, sometimes reshaping daily routines to do so.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/post-traumatic-stress-disorder-ptsd",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "ptsd",
+    "title": "PTSD: arousal and mood symptoms",
+    "content": "Arousal and reactivity symptoms include being easily startled, feeling tense or on edge, trouble sleeping or concentrating, and irritability. Changes in thinking and mood include trouble remembering parts of the event, persistent negative beliefs about oneself or the world, ongoing fear, guilt or shame, and losing interest in activities.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/post-traumatic-stress-disorder-ptsd",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "ptsd",
+    "title": "How PTSD is treated",
+    "content": "Trauma-focused psychotherapies are the core treatment: exposure therapy helps a person face and gain control over fear in a safe, gradual way, and cognitive restructuring helps make sense of the memory and ease distorted guilt or shame. SSRIs are FDA-approved for PTSD and are often combined with therapy.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/post-traumatic-stress-disorder-ptsd",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "ocd",
+    "title": "What OCD is",
+    "content": "Obsessive-compulsive disorder (OCD) is a long-lasting condition involving uncontrollable, recurring thoughts (obsessions), repetitive behaviors (compulsions), or both. The symptoms are time-consuming and interfere with daily life, but treatment can help people manage them and function well.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/obsessive-compulsive-disorder-when-unwanted-thoughts-take-over",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "ocd",
+    "title": "Obsessions vs. compulsions",
+    "content": "Obsessions are intrusive, unwanted thoughts, urges, or images a person cannot easily control — for example fears of contamination, of losing control, or forbidden thoughts. Compulsions are repetitive behaviors done to relieve the distress of an obsession, such as excessive cleaning, checking, counting, or arranging things a precise way.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/obsessive-compulsive-disorder-when-unwanted-thoughts-take-over",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "ocd",
+    "title": "Exposure and response prevention (ERP)",
+    "content": "Exposure and response prevention (ERP) is a specific, well-supported form of CBT for OCD: a person gradually encounters situations that trigger obsessions while resisting the usual compulsive response. Research shows ERP effectively reduces compulsions, even for people who have not responded well to medication.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/obsessive-compulsive-disorder-when-unwanted-thoughts-take-over",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "bipolar",
+    "title": "What bipolar disorder is",
+    "content": "Bipolar disorder is a mental illness marked by extreme shifts in mood, energy, and activity — manic (or hypomanic) periods of feeling very up or irritable, and depressive periods of feeling very down. It can be chronic or episodic and usually requires ongoing treatment, but it responds well to proper care.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/bipolar-disorder",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "bipolar",
+    "title": "Manic and depressive episodes",
+    "content": "In a manic episode a person may feel elated or extremely irritable, have racing thoughts, need less sleep, and talk fast about many things. In a depressive episode they may feel very down, anxious, or hopeless, have trouble concentrating, and sleep too much or too little.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/bipolar-disorder",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "bipolar",
+    "title": "How bipolar disorder is treated",
+    "content": "Treatment usually combines medication and psychotherapy. Mood stabilizers such as lithium or valproate help prevent or reduce the severity of episodes, sometimes with other medications. Therapies like cognitive behavioral therapy, family-focused therapy, and interpersonal and social rhythm therapy work best alongside medication.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/bipolar-disorder",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "stress",
+    "title": "Stress vs. anxiety",
+    "content": "Stress is the body's response to an external demand or pressure and usually eases once the situation passes. Anxiety is the body's reaction to stress and can persist even when there is no current threat. Both are normal, but when they linger or interfere with everyday life it may be time to seek support.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/so-stressed-out-fact-sheet",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "stress",
+    "title": "Healthy ways to cope with stress",
+    "content": "Helpful stress-management steps include keeping a journal, practicing relaxation such as deep breathing or visualization, staying physically active, keeping a regular sleep schedule, limiting caffeine, and reaching out to friends or family who support you in positive ways.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/so-stressed-out-fact-sheet",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "stress",
+    "title": "When to seek help for stress or anxiety",
+    "content": "Consider reaching out to a health professional when stress or anxiety won't go away or starts to interfere with everyday life. Psychotherapy (talk therapy) and medication are the two main treatments for anxiety. If you are in crisis, call or text the 988 Suicide & Crisis Lifeline.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/so-stressed-out-fact-sheet",
+    "license": "Public Domain (U.S. NIMH)"
+  }
+]

@@ -15,11 +15,17 @@ import { upsertKnowledgeChunk } from '../../server/db/knowledge.queries.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Each seed file's default kind; individual chunks may override via a `kind` field.
+// Each seed file's default kind + approval state. The original baseline files
+// are active; the *_expansion files ingest as pending (active:false) so nothing
+// new goes live until it's approved. Individual chunks may override `kind` /
+// `active`. Re-ingest never overwrites an already-approved chunk.
 const SEED_FILES = [
-  { file: 'psychoeducation.seed.json', kind: 'psychoeducation' },
-  { file: 'worksheets.seed.json', kind: 'worksheet' },
-  { file: 'techniques.seed.json', kind: 'technique' },
+  { file: 'psychoeducation.seed.json', kind: 'psychoeducation', defaultActive: true },
+  { file: 'worksheets.seed.json', kind: 'worksheet', defaultActive: true },
+  { file: 'techniques.seed.json', kind: 'technique', defaultActive: true },
+  { file: 'psychoeducation_expansion.seed.json', kind: 'psychoeducation', defaultActive: false },
+  { file: 'worksheets_expansion.seed.json', kind: 'worksheet', defaultActive: false },
+  { file: 'techniques_expansion.seed.json', kind: 'technique', defaultActive: false },
 ];
 
 async function ingest() {
@@ -56,9 +62,13 @@ async function ingest() {
           metadata: c.metadata ?? null,
           content_hash: contentHash,
           embedding,
+          // Per-chunk override, else the file's default. Approval flips it later;
+          // re-ingest never overwrites an approval (see upsertKnowledgeChunk).
+          active: c.active ?? seed.defaultActive,
         });
         ok++;
-        console.log(`  ✓ [${c.kind ?? seed.kind}] ${c.title ?? contentHash.slice(0, 8)}`);
+        const isActive = c.active ?? seed.defaultActive;
+        console.log(`  ${isActive ? '✓' : '⏳'} [${c.kind ?? seed.kind}] ${c.title ?? contentHash.slice(0, 8)}`);
       } catch (err) {
         console.error(`  ✗ ${c.title ?? '(untitled)'}: ${err.message}`);
       }
@@ -66,10 +76,13 @@ async function ingest() {
   }
 
   const { rows } = await pool.query(
-    `SELECT kind, COUNT(*) AS n FROM knowledge_chunks WHERE embedding IS NOT NULL GROUP BY kind ORDER BY kind`
+    `SELECT kind,
+            COUNT(*) FILTER (WHERE active IS TRUE) AS active,
+            COUNT(*) FILTER (WHERE active IS NOT TRUE) AS pending
+     FROM knowledge_chunks WHERE embedding IS NOT NULL GROUP BY kind ORDER BY kind`
   );
   console.log(`Done: ${ok}/${total} embedded this run. Knowledge base by kind:`);
-  rows.forEach(r => console.log(`  ${r.kind}: ${r.n}`));
+  rows.forEach(r => console.log(`  ${r.kind}: ${r.active} active, ${r.pending} pending approval`));
 }
 
 ingest()

@@ -1,0 +1,68 @@
+[
+  {
+    "topic": "cognitive", "title": "Spotting thinking traps",
+    "content": "Identify the cognitive distortion behind a distressing thought (all-or-nothing thinking, catastrophizing, mind-reading, over-generalizing, discounting the positive), then examine the evidence and reframe it more flexibly.",
+    "source": "Cognitive behavioral therapy — cognitive distortions (standard clinical exercise)", "source_url": "https://www.nimh.nih.gov/health/publications/depression", "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "start_thought_record" }
+  },
+  {
+    "topic": "behavioral", "title": "Behavioral experiment planner",
+    "content": "Write down an anxious prediction and how strongly you believe it, design a small real-world test, then record what actually happened versus what you feared.",
+    "source": "Cognitive behavioral therapy (standard clinical exercise)", "source_url": null, "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "What are you afraid will happen? How strongly do you believe it (0-100%)? What small experiment could test it, and what will you watch for?" }
+  },
+  {
+    "topic": "depression", "title": "Activity schedule",
+    "content": "Plan small pleasant or meaningful activities across the day and rate your mood before and after, rebuilding momentum through action rather than waiting for motivation.",
+    "source": "Behavioral activation (standard clinical exercise)", "source_url": "https://www.nimh.nih.gov/health/publications/depression", "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "List two or three small activities you could do today — one pleasant, one meaningful. When will you do each, and how do you predict you'll feel afterward?" }
+  },
+  {
+    "topic": "decision", "title": "Pros and cons",
+    "content": "Weigh a decision or urge by listing the benefits and costs of acting versus not acting, making the trade-offs visible instead of tangled.",
+    "source": "Dialectical behavior therapy — pros and cons (standard clinical exercise)", "source_url": null, "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "For the choice on your mind: what are the pros and cons of doing it, and the pros and cons of not doing it?" }
+  },
+  {
+    "topic": "self_compassion", "title": "Self-compassion letter",
+    "content": "Write to yourself about a struggle from the perspective of a warm, understanding friend who knows your history and wants the best for you.",
+    "source": "Self-compassion practice (standard clinical exercise)", "source_url": null, "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "Write a short letter to yourself about what you're going through, in the voice of a kind friend who fully understands and accepts you." }
+  },
+  {
+    "topic": "gratitude", "title": "Three good things",
+    "content": "Recall three things that went well recently and reflect on why each happened, gently retraining attention toward the positive.",
+    "source": "Positive psychology — three good things (standard clinical exercise)", "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health", "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "What are three things — big or small — that went well recently? For each, why do you think it happened?" }
+  },
+  {
+    "topic": "anxiety", "title": "Fear ladder (exposure hierarchy)",
+    "content": "List situations you avoid because of fear and rank them from least to most anxiety-provoking, creating a step-by-step ladder to face gradually.",
+    "source": "Cognitive behavioral therapy — exposure hierarchy (standard clinical exercise)", "source_url": "https://www.nimh.nih.gov/health/publications/panic-disorder-when-fear-overwhelms", "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "List a few situations you avoid because they make you anxious, then rank them from easiest to hardest. Which one feels like a doable first step?" }
+  },
+  {
+    "topic": "anxiety", "title": "Worry decision tree",
+    "content": "Sort a worry: is it about something you can act on now? If yes, plan one step; if no, practice letting it go or scheduling it for later.",
+    "source": "Cognitive behavioral therapy — worry management (standard clinical exercise)", "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad", "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "Write the worry on your mind. Is it something you can do something about right now? If yes, what's one step? If no, what would help you set it down?" }
+  },
+  {
+    "topic": "coping", "title": "Coping card",
+    "content": "Create a short, personal reminder of what helps — coping steps, supportive people, and reasons to keep going — to reach for in a hard moment.",
+    "source": "Standard clinical coping exercise", "source_url": null, "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "What helps you get through a hard moment? List a few coping steps, one or two people you could reach out to, and one reason worth holding onto." }
+  },
+  {
+    "topic": "sleep", "title": "Sleep diary",
+    "content": "Track bedtime, wake time, and how rested you feel, along with caffeine, screens, and stress, to spot patterns affecting your sleep.",
+    "source": "Standard clinical sleep-hygiene exercise", "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health", "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "For last night: when did you go to bed and wake up, how rested do you feel (0-10), and what might have helped or hurt your sleep (caffeine, screens, stress)?" }
+  },
+  {
+    "topic": "meaning", "title": "Letter to your future self",
+    "content": "Write to yourself a few months or a year from now — what you hope for, what you're working through, and what you want to remember.",
+    "source": "Expressive writing (standard clinical exercise)", "source_url": null, "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "Write a short letter to yourself six months from now. What are you going through, what do you hope for, and what do you want future-you to remember about this time?" }
+  }
+]

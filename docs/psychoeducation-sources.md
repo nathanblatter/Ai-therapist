@@ -47,10 +47,29 @@ tools and follow the same table + vetting rules:
   Rollnick as the standard approach (description only). Vet clinical accuracy +
   attribution before relying on them.
 
+## Approval workflow (per-chunk gating)
+Every chunk has an `active` flag. Retrieval only returns `active = true` chunks,
+so content can sit embedded-but-gated until it clears review — approve as much as
+gets signed off, leave the rest pending.
+
+- The **baseline** seed files (`psychoeducation/worksheets/techniques.seed.json`)
+  ingest as **active**.
+- The **`*_expansion.seed.json`** files ingest as **pending** (`active:false`).
+- Re-running ingest never un-approves a chunk you've already approved.
+
+Check status / approve:
+```
+npx tsx src/database/scripts/approveKnowledge.js                 # list active vs pending
+npx tsx src/database/scripts/approveKnowledge.js --topic ptsd    # approve one topic
+npx tsx src/database/scripts/approveKnowledge.js --kind worksheet
+npx tsx src/database/scripts/approveKnowledge.js --all           # approve everything pending
+```
+
 ## How to add content
-1. Add vetted objects to `psychoeducation.seed.json`
-   (`{ topic, title, content, source, source_url, license }`).
-2. Run migration 031 if not already applied.
+1. Add objects to a seed file (`{ topic, title, content, source, source_url,
+   license, kind?, modality?, metadata?, active? }`). New/unreviewed content goes
+   in a `*_expansion.seed.json` file so it defaults to pending.
+2. Run migrations 031 + 032 if not already applied.
 3. `npx tsx src/database/scripts/ingestKnowledge.js` (idempotent by content hash).
-4. Keep `retrieve_psychoeducation` in the admin **disabled_tools** kill switch
-   until the corpus is vetted + ingested; enable it from System Config after.
+4. Vet, then approve with `approveKnowledge.js`. Leave the four RAG tools enabled;
+   the `active` flag — not the kill switch — is what gates individual content.

@@ -1,0 +1,102 @@
+[
+  {
+    "topic": "exposure", "modality": "cbt", "title": "Graded exposure",
+    "content": "Face a feared situation in small, planned steps rather than all at once. Build a ladder from least to most anxiety-provoking, stay with each step until the anxiety eases, and move up only when a step feels manageable. Avoidance shrinks a life; gradual approach expands it.",
+    "source": "National Institute of Mental Health (NIMH)", "source_url": "https://www.nimh.nih.gov/health/publications/social-anxiety-disorder-more-than-just-shyness", "license": "Public Domain (U.S. NIMH) — described in NIMH CBT/exposure material"
+  },
+  {
+    "topic": "behavioral", "modality": "cbt", "title": "Behavioral experiment",
+    "content": "Test an anxious prediction like a scientist. Write down what you fear will happen, rate how strongly you believe it, try the situation, then compare what actually happened to the prediction. Repeated experiments update beliefs more powerfully than reassurance.",
+    "source": "Cognitive behavioral therapy (standard clinical technique)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "behavioral", "modality": "cbt", "title": "Activity scheduling",
+    "content": "Plan small, specific pleasant or meaningful activities into the day and week, then notice mood before and after each. It counters the withdrawal that deepens low mood by rebuilding a sense of accomplishment and enjoyment step by step.",
+    "source": "National Institute of Mental Health (NIMH)", "source_url": "https://www.nimh.nih.gov/health/publications/depression", "license": "Public Domain (U.S. NIMH) — behavioral activation described in NIMH material"
+  },
+  {
+    "topic": "problem_solving", "modality": "cbt", "title": "Structured problem-solving",
+    "content": "Turn a vague worry into a plan: name the problem specifically, brainstorm options without judging them, weigh pros and cons, pick one to try, and review how it went. It separates solvable problems from worries that need coping rather than solving.",
+    "source": "Cognitive behavioral therapy (standard clinical technique)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "acceptance", "modality": "act", "title": "Willingness and acceptance",
+    "content": "Instead of struggling to get rid of a difficult feeling, practice making room for it — letting it be present without fighting it or letting it run the show. Paradoxically, dropping the struggle often reduces the feeling's intensity and frees energy for what matters.",
+    "source": "Acceptance and commitment therapy (standard clinical technique)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "mindfulness", "modality": "act", "title": "STOP skill",
+    "content": "When overwhelmed: Stop, Take a breath, Observe what's happening in your body, thoughts, and surroundings, then Proceed with intention. A brief pause that turns automatic reactions into a chosen response.",
+    "source": "Standard clinical mindfulness technique", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "engagement", "modality": "mi", "title": "Affirmations",
+    "content": "Notice and name a person's genuine strengths, efforts, and values. Sincere affirmations build the confidence and self-belief that support change, and strengthen the working relationship without flattery.",
+    "source": "Motivational interviewing (Miller & Rollnick) — standard clinical approach", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "motivation", "modality": "mi", "title": "Decisional balance",
+    "content": "Explore both sides of a change without pushing: the good things and the less-good things about staying the same, and about changing. Hearing themselves weigh it out helps a person move toward their own reasons for change.",
+    "source": "Motivational interviewing (Miller & Rollnick) — standard clinical approach", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "distress_tolerance", "modality": "dbt", "title": "TIPP for intense distress",
+    "content": "To bring down overwhelming emotion fast, change body chemistry: Temperature (cool water on the face), Intense exercise for a short burst, Paced breathing (slow the exhale), and Paired muscle relaxation. Useful in crisis moments before problem-solving is possible.",
+    "source": "Dialectical behavior therapy (standard clinical skill)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "distress_tolerance", "modality": "dbt", "title": "Self-soothe with the five senses",
+    "content": "Comfort yourself through each sense: something soothing to see, hear, smell, taste, and touch — a warm drink, soft blanket, calming music, a pleasant scent. A gentle way to get through a hard moment without making it worse.",
+    "source": "Dialectical behavior therapy (standard clinical skill)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "distress_tolerance", "modality": "dbt", "title": "Radical acceptance",
+    "content": "Stop fighting reality you cannot change in this moment. Accepting the facts of a painful situation — not approving of it — reduces the added suffering that comes from struggling against what already is, and frees you to respond wisely.",
+    "source": "Dialectical behavior therapy (standard clinical skill)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "emotion_regulation", "modality": "dbt", "title": "Opposite action",
+    "content": "When an emotion doesn't fit the facts or isn't helpful, act opposite to its urge: approach gently when fear says avoid, do something kind when anger says lash out, get active when sadness says withdraw. Acting opposite, all the way, changes the emotion over time.",
+    "source": "Dialectical behavior therapy (standard clinical skill)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "emotion_regulation", "modality": "dbt", "title": "PLEASE skill",
+    "content": "Reduce emotional vulnerability by caring for the body: treat PhysicaL illness, balanced Eating, avoid mood-Altering substances, balanced Sleep, and Exercise. A steadier body makes emotions easier to manage.",
+    "source": "Dialectical behavior therapy (standard clinical skill)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "mindfulness", "modality": "dbt", "title": "Wise mind",
+    "content": "Find the balance between the emotional mind (driven by feeling) and the reasonable mind (driven by logic). Wise mind is the calm, centered place where both are honored — often reached with a slow breath and a check-in on what you truly know.",
+    "source": "Dialectical behavior therapy (standard clinical skill)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "mindfulness", "modality": null, "title": "Box breathing",
+    "content": "Breathe in a square: inhale for 4 counts, hold for 4, exhale for 4, hold for 4, and repeat several rounds. Slowing and lengthening the breath signals the nervous system that it is safe to settle.",
+    "source": "Standard clinical relaxation technique", "source_url": "https://www.nimh.nih.gov/health/publications/so-stressed-out-fact-sheet", "license": "Concept — public domain description"
+  },
+  {
+    "topic": "mindfulness", "modality": null, "title": "Body scan",
+    "content": "Move attention slowly through the body from head to toe, noticing sensations without trying to change them, softening areas of tension as you go. It anchors attention in the present and eases physical stress.",
+    "source": "Standard clinical mindfulness technique", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "self_compassion", "modality": null, "title": "Self-compassion break",
+    "content": "In a hard moment, offer yourself three things: acknowledge this is a moment of suffering, remember that suffering is part of being human, and place a hand on your heart with a kind phrase like 'may I be gentle with myself.' Treat yourself as you would a good friend.",
+    "source": "Self-compassion practice (standard clinical technique)", "source_url": null, "license": "Concept — public domain description"
+  },
+  {
+    "topic": "coping", "modality": null, "title": "Gratitude practice",
+    "content": "Each day, note a few specific things that went well or that you appreciate, and why. Regularly directing attention to what is good gently rebalances a mind that stress and low mood pull toward the negative.",
+    "source": "Standard clinical positive-psychology technique", "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health", "license": "Concept — public domain description"
+  },
+  {
+    "topic": "sleep", "modality": null, "title": "Sleep hygiene",
+    "content": "Support sleep with a consistent schedule, a wind-down routine, a cool dark quiet room, and less screen and caffeine before bed — blue light from devices can make it harder to fall asleep. If you can't sleep, get up briefly and return when drowsy rather than lying frustrated.",
+    "source": "National Institute of Mental Health (NIMH)", "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health", "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "urges", "modality": null, "title": "Urge surfing",
+    "content": "Treat a strong urge like a wave: it rises, peaks, and falls if you don't feed it. Notice the urge with curiosity, breathe, and ride it out without acting, watching it pass. Each time weakens the urge's hold.",
+    "source": "Mindfulness-based relapse prevention (standard clinical technique)", "source_url": null, "license": "Concept — public domain description"
+  }
+]

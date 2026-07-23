@@ -66,15 +66,21 @@ export interface KnowledgeChunkInput {
   metadata: Record<string, unknown> | null;
   content_hash: string;
   embedding: number[];
+  /** Whether this chunk is retrievable. New content is ingested as false
+   *  (pending approval); an approval flips it true. Only applied on INSERT —
+   *  re-ingesting an existing chunk never overwrites its approval state. */
+  active: boolean;
 }
 
-/** Insert or update a chunk (idempotent by content_hash). Used by the ingest script. */
+/** Insert or update a chunk (idempotent by content_hash). Used by the ingest script.
+ *  NOTE: `active` is set only on first insert; ON CONFLICT deliberately does NOT
+ *  touch it, so re-running ingest never un-approves content you've approved. */
 export async function upsertKnowledgeChunk(chunk: KnowledgeChunkInput): Promise<void> {
   const vec = toVectorLiteral(chunk.embedding);
   await pool.query(
     `INSERT INTO knowledge_chunks
-       (topic, title, content, source, source_url, license, kind, modality, metadata, content_hash, embedding)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::vector)
+       (topic, title, content, source, source_url, license, kind, modality, metadata, content_hash, embedding, active)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::vector, $12)
      ON CONFLICT (content_hash) DO UPDATE SET
        topic = EXCLUDED.topic,
        title = EXCLUDED.title,
@@ -90,7 +96,37 @@ export async function upsertKnowledgeChunk(chunk: KnowledgeChunkInput): Promise<
     [
       chunk.topic, chunk.title, chunk.content, chunk.source, chunk.source_url, chunk.license,
       chunk.kind, chunk.modality, chunk.metadata ? JSON.stringify(chunk.metadata) : null,
-      chunk.content_hash, vec,
+      chunk.content_hash, vec, chunk.active,
     ],
   );
+}
+
+export interface KnowledgeStatusCounts {
+  kind: string;
+  active: number;
+  pending: number;
+}
+
+/** Approve chunks (active=true) by kind/topic, or all pending. Returns rows changed. */
+export async function approveKnowledgeChunks(filter: { kind?: string | null; topic?: string | null }): Promise<number> {
+  const result = await pool.query(
+    `UPDATE knowledge_chunks
+     SET active = TRUE, updated_at = CURRENT_TIMESTAMP
+     WHERE active IS NOT TRUE
+       AND ($1::text IS NULL OR kind = $1)
+       AND ($2::text IS NULL OR topic = $2)`,
+    [filter.kind ?? null, filter.topic ?? null],
+  );
+  return result.rowCount ?? 0;
+}
+
+/** Counts of active vs pending chunks per kind (for the approval workflow). */
+export async function getKnowledgeStatusCounts(): Promise<KnowledgeStatusCounts[]> {
+  const result = await pool.query<KnowledgeStatusCounts>(
+    `SELECT kind,
+            COUNT(*) FILTER (WHERE active IS TRUE)::int AS active,
+            COUNT(*) FILTER (WHERE active IS NOT TRUE)::int AS pending
+     FROM knowledge_chunks GROUP BY kind ORDER BY kind`,
+  );
+  return result.rows;
 }
