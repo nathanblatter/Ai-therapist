@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2, X } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2, BookOpen, X } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
@@ -20,6 +20,7 @@ const UserSessions = lazy(() => import("./UserSessions"));
 const CrisisManagement = lazy(() => import("./CrisisManagement"));
 const MFASetup = lazy(() => import("./MFASetup"));
 const DataRetention = lazy(() => import("./DataRetention"));
+const KnowledgeBase = lazy(() => import("./KnowledgeBase"));
 
 function ViewLoading() {
   return (
@@ -84,6 +85,7 @@ export default function AdminApp() {
     { id: 'users', label: 'Users', icon: Users, researcherOnly: true },
     { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
     { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
+    { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
     { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
     { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
     { id: 'export', label: 'Export', icon: Download },
@@ -163,6 +165,7 @@ export default function AdminApp() {
               {currentView === 'users' && <UserManagement />}
               {currentView === 'user-sessions' && <UserSessions />}
               {currentView === 'prompts' && <SystemPrompts />}
+              {currentView === 'knowledge' && <KnowledgeBase />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'config' && <SystemConfig />}
               {currentView === 'export' && <ExportPanel />}

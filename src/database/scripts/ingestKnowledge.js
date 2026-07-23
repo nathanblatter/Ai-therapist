@@ -24,6 +24,7 @@ const SEED_FILES = [
   { file: 'worksheets.seed.json', kind: 'worksheet', defaultActive: true },
   { file: 'techniques.seed.json', kind: 'technique', defaultActive: true },
   { file: 'psychoeducation_expansion.seed.json', kind: 'psychoeducation', defaultActive: false },
+  { file: 'psychoeducation_expansion2.seed.json', kind: 'psychoeducation', defaultActive: false },
   { file: 'worksheets_expansion.seed.json', kind: 'worksheet', defaultActive: false },
   { file: 'techniques_expansion.seed.json', kind: 'technique', defaultActive: false },
 ];

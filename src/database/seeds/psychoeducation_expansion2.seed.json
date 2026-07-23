@@ -1,0 +1,90 @@
+[
+  {
+    "topic": "adhd",
+    "title": "What ADHD is",
+    "content": "ADHD (attention-deficit/hyperactivity disorder) is a developmental condition marked by an ongoing pattern of inattention, hyperactivity, and/or impulsivity that interferes with functioning. It typically begins in childhood and can continue into adolescence and adulthood, and often occurs alongside other conditions.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/attention-deficit-hyperactivity-disorder-adhd",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "adhd",
+    "title": "Inattention vs. hyperactivity/impulsivity",
+    "content": "Inattention looks like difficulty paying attention, staying on task, or staying organized across settings like home, school, or work. Hyperactivity and impulsivity look like frequent movement or restlessness, talking excessively, interrupting or intruding on others, and trouble waiting one's turn.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/attention-deficit-hyperactivity-disorder-adhd",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "adhd",
+    "title": "How ADHD is treated",
+    "content": "Standard treatment combines medication with psychosocial approaches such as cognitive behavioral therapy, skills and organizational support, and, for children, parent training and school interventions. Mindfulness-based strategies and cognitive training are also being studied.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/attention-deficit-hyperactivity-disorder-adhd",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "bpd",
+    "title": "What borderline personality disorder is",
+    "content": "Borderline personality disorder is a serious condition affecting how a person feels about themselves and others, making everyday functioning hard. It involves difficulty regulating emotions, an unstable sense of self, and instability in relationships.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/borderline-personality-disorder",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "bpd",
+    "title": "Signs of borderline personality disorder",
+    "content": "Common experiences include intense mood swings, uncertainty about how one sees oneself, chronic feelings of emptiness, intense anger, and viewing things in extremes (all good or all bad). Self-harming behaviors and recurring thoughts of suicide can also occur and deserve prompt professional support.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/borderline-personality-disorder",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "bpd",
+    "title": "How borderline personality disorder is treated",
+    "content": "Dialectical behavior therapy (DBT) was developed specifically for borderline personality disorder; it uses mindfulness and teaches skills to manage intense emotions, reduce self-destructive behaviors, and improve relationships. Cognitive behavioral therapy can also help by changing inaccurate core beliefs and reducing mood swings, anxiety, and self-harming behaviors.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/borderline-personality-disorder",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "substance_use",
+    "title": "Co-occurring substance use and mental disorders",
+    "content": "Substance use disorders affect the brain and behavior and can disrupt work, school, and relationships. Many people with a substance use disorder also live with another condition such as depression, anxiety, or bipolar disorder at the same time — known as co-occurring disorders.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/substance-use-and-mental-health",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "substance_use",
+    "title": "Why they often co-occur",
+    "content": "Shared factors like stress, trauma, and genetics can contribute to both substance use and other mental disorders. A mental health condition can drive substance use as a way to cope, and substance use can change brain chemistry in ways that raise the risk of other conditions.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/substance-use-and-mental-health",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "substance_use",
+    "title": "Treating co-occurring disorders",
+    "content": "Integrated care that treats mental health and substance use together — in one coordinated place — tends to work best. Options include behavioral therapies such as cognitive behavioral therapy, family-based approaches, and medications that can address more than one condition.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/substance-use-and-mental-health",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "eating_disorders",
+    "title": "What eating disorders are",
+    "content": "Eating disorders are serious illnesses marked by severe disturbances in eating behaviors, often with intense focus on weight, body shape, or controlling food. They carry a higher risk of medical complications and of co-occurring conditions like depression, anxiety, and substance use.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/eating-disorders",
+    "license": "Public Domain (U.S. NIMH)"
+  },
+  {
+    "topic": "eating_disorders",
+    "title": "Eating disorders can be treated",
+    "content": "Eating disorders can be treated successfully, and early detection and treatment support a fuller recovery. Care typically involves psychological therapy, nutritional support, and medical monitoring, sometimes with medication for co-occurring conditions.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/eating-disorders",
+    "license": "Public Domain (U.S. NIMH)"
+  }
+]

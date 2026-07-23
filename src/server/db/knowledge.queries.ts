@@ -130,3 +130,47 @@ export async function getKnowledgeStatusCounts(): Promise<KnowledgeStatusCounts[
   );
   return result.rows;
 }
+
+// ---- Admin curation (the Knowledge Base UI) ----
+
+export interface KnowledgeChunkAdmin {
+  chunk_id: number;
+  kind: string;
+  topic: string | null;
+  title: string | null;
+  content: string;
+  source: string;
+  source_url: string | null;
+  license: string | null;
+  modality: string | null;
+  active: boolean;
+  created_at: Date;
+}
+
+/** List chunks for the admin curation view (no embedding), newest-pending first. */
+export async function listKnowledgeChunks(filter: { kind?: string | null; active?: boolean | null }): Promise<KnowledgeChunkAdmin[]> {
+  const result = await pool.query<KnowledgeChunkAdmin>(
+    `SELECT chunk_id, kind, topic, title, content, source, source_url, license, modality, active, created_at
+     FROM knowledge_chunks
+     WHERE ($1::text IS NULL OR kind = $1)
+       AND ($2::boolean IS NULL OR active = $2)
+     ORDER BY active ASC, kind, topic NULLS FIRST, title`,
+    [filter.kind ?? null, filter.active ?? null],
+  );
+  return result.rows;
+}
+
+/** Approve/unapprove a single chunk. Returns false if the id doesn't exist. */
+export async function setKnowledgeChunkActive(chunkId: number, active: boolean): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE knowledge_chunks SET active = $2, updated_at = CURRENT_TIMESTAMP WHERE chunk_id = $1`,
+    [chunkId, active],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+/** Permanently delete a chunk. Returns false if the id doesn't exist. */
+export async function deleteKnowledgeChunk(chunkId: number): Promise<boolean> {
+  const r = await pool.query(`DELETE FROM knowledge_chunks WHERE chunk_id = $1`, [chunkId]);
+  return (r.rowCount ?? 0) > 0;
+}
