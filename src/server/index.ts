@@ -41,6 +41,7 @@ import tokenRoutes from "./routes/public/token.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
+import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
 
 // ---------- local type helpers ----------
 
@@ -97,9 +98,46 @@ const port = process.env.PORT || 3067;
 // SLC timezone helpers (getNextMidnightSLC/getHoursUntilReset/getStartOfTodaySLC)
 // live in utils/timezoneHelpers.ts and are used by the rate-limit route modules.
 
-// Security headers. CSP is left off: the SSR pages inline scripts and Vite dev
-// injects its own — enabling it needs nonce plumbing first.
+// Security headers. CSP runs in REPORT-ONLY mode (production only — Vite dev
+// injects its own inline scripts): nothing is blocked yet, but violations of
+// the policy below are POSTed to /csp-report and logged. Once the logs run
+// clean (nonce plumbing for any SSR inline scripts), flip reportOnly to false.
+// script-src deliberately omits 'unsafe-inline' so reports reveal exactly
+// which inline scripts still need nonces.
 app.use(helmet({ contentSecurityPolicy: false }));
+if (process.env.NODE_ENV === 'production') {
+  app.use(
+    helmet.contentSecurityPolicy({
+      useDefaults: false,
+      reportOnly: true,
+      directives: {
+        'default-src': ["'self'"],
+        'script-src': ["'self'"],
+        'style-src': ["'self'", "'unsafe-inline'"], // Tailwind/Recharts inline styles
+        'img-src': ["'self'", 'data:', 'blob:'],
+        'media-src': ["'self'", 'blob:'],
+        'font-src': ["'self'", 'data:'],
+        // Same-origin API/socket.io + the OpenAI Realtime SDP/token exchange.
+        'connect-src': ["'self'", 'https://api.openai.com', 'wss:'],
+        'worker-src': ["'self'", 'blob:'], // audio worklets
+        'object-src': ["'none'"],
+        'base-uri': ["'self'"],
+        'frame-ancestors': ["'self'"],
+        'report-uri': ['/csp-report'],
+      },
+    })
+  );
+}
+
+// CSP violation reports (browsers send content-type application/csp-report).
+app.post(
+  '/csp-report',
+  express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '50kb' }),
+  (req, res) => {
+    console.warn('[CSP] violation report:', JSON.stringify(req.body));
+    res.sendStatus(204);
+  }
+);
 
 app.use(express.json()); // Needed to parse JSON bodies
 
@@ -589,6 +627,9 @@ if (isEntrypoint) {
     } catch (err) {
       console.error('Failed to start content wipe scheduler:', err);
     }
+
+    // Daily sweep of expired magic-link demo accounts and their data
+    startDemoCleanupScheduler();
   });
 }
 

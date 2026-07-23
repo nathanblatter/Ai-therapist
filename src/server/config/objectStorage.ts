@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { Readable } from "node:stream";
 import { createLogger } from "../utils/logger.js";
@@ -67,6 +68,11 @@ export async function putObject(
       ContentType: contentType,
     }),
   );
+}
+
+/** Delete an object (used when sweeping expired demo-account recordings). */
+export async function deleteObject(key: string): Promise<void> {
+  await getClient().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
 export interface ObjectMeta {

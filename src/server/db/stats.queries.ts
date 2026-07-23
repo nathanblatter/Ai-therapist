@@ -99,7 +99,7 @@ export async function getConfigStats(): Promise<{ languages: LanguageStatRow[]; 
   return { languages: languageStats, voices: voiceStats };
 }
 
-/** The configured AI model, defaulting to 'gpt-realtime-mini'. */
+/** The configured AI model, defaulting to 'gpt-realtime-2.1-mini'. */
 export async function getAiModel(): Promise<string> {
   try {
     const result = await pool.query<SystemConfigRow>(
@@ -108,12 +108,36 @@ export async function getAiModel(): Promise<string> {
 
     if (result.rows.length > 0) {
       const config = result.rows[0].config_value;
-      return config.model || 'gpt-realtime-mini';
+      return config.model || 'gpt-realtime-2.1-mini';
     }
 
-    return 'gpt-realtime-mini';
+    return 'gpt-realtime-2.1-mini';
   } catch (error) {
     console.error('Failed to fetch AI model config:', error);
-    return 'gpt-realtime-mini';
+    return 'gpt-realtime-2.1-mini';
+  }
+}
+
+/**
+ * The configured input-audio transcription model, defaulting to
+ * 'gpt-4o-mini-transcribe'. This transcription feeds the crisis keyword screen
+ * and the redaction pipeline, so it is admin-configurable (system_config
+ * 'transcription_model') rather than hard-coded.
+ */
+export async function getTranscriptionModel(): Promise<string> {
+  try {
+    const result = await pool.query<SystemConfigRow>(
+      `SELECT config_value FROM system_config WHERE config_key = 'transcription_model'`
+    );
+
+    if (result.rows.length > 0) {
+      const config = result.rows[0].config_value;
+      return config.model || 'gpt-4o-mini-transcribe';
+    }
+
+    return 'gpt-4o-mini-transcribe';
+  } catch (error) {
+    console.error('Failed to fetch transcription model config:', error);
+    return 'gpt-4o-mini-transcribe';
   }
 }

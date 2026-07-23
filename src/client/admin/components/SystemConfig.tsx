@@ -79,10 +79,24 @@ interface SystemConfigData {
   session_limits?: ConfigEntry<SessionLimits>;
   features?: ConfigEntry<Features>;
   ai_model?: ConfigEntry<AiModel>;
+  transcription_model?: ConfigEntry<AiModel>;
   client_logging?: ConfigEntry<ClientLogging>;
   voices?: ConfigEntry<VoicesConfig>;
   languages?: ConfigEntry<LanguagesConfig>;
 }
+
+// Latest OpenAI Realtime + transcription models, offered as a good/cheap pair
+// each. Kept in sync with the migration 030 defaults and the server fallbacks
+// in db/stats.queries.ts.
+const REALTIME_MODEL_OPTIONS = [
+  { model: 'gpt-realtime-2.1-mini', tier: 'Cheaper', description: 'Latest cost-effective realtime model' },
+  { model: 'gpt-realtime-2.1', tier: 'Best quality', description: 'Latest highest-quality realtime model' },
+];
+
+const TRANSCRIPTION_MODEL_OPTIONS = [
+  { model: 'gpt-4o-mini-transcribe', tier: 'Cheaper', description: 'Latest cost-effective transcription model' },
+  { model: 'gpt-4o-transcribe', tier: 'Best accuracy', description: 'Latest highest-accuracy transcription model' },
+];
 
 export default function SystemConfig() {
   const [config, setConfig] = useState<SystemConfigData | null>(null);
@@ -116,8 +130,13 @@ export default function SystemConfig() {
   });
 
   const [aiModel, setAiModel] = useState<AiModel>({
-    model: 'gpt-realtime-mini',
-    description: 'Fast, cost-effective realtime model'
+    model: 'gpt-realtime-2.1-mini',
+    description: 'Latest cost-effective realtime model'
+  });
+
+  const [transcriptionModel, setTranscriptionModel] = useState<AiModel>({
+    model: 'gpt-4o-mini-transcribe',
+    description: 'Latest cost-effective transcription model'
   });
 
   const [clientLogging, setClientLogging] = useState<ClientLogging>({
@@ -178,6 +197,9 @@ export default function SystemConfig() {
       if (data.ai_model) {
         setAiModel(data.ai_model.value);
       }
+      if (data.transcription_model) {
+        setTranscriptionModel(data.transcription_model.value);
+      }
       if (data.client_logging) {
         setClientLogging(data.client_logging.value);
       }
@@ -233,6 +255,14 @@ export default function SystemConfig() {
         body: JSON.stringify({ value: aiModel })
       });
       if (!modelResponse.ok) throw new Error('Failed to save AI model');
+
+      // Save transcription model
+      const transcriptionResponse = await fetch('/admin/api/config/transcription_model', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: transcriptionModel })
+      });
+      if (!transcriptionResponse.ok) throw new Error('Failed to save transcription model');
 
       // Save client logging
       const loggingResponse = await fetch('/admin/api/config/client_logging', {
@@ -303,8 +333,13 @@ export default function SystemConfig() {
     updateFeatures('disabled_tools', Array.from(disabled));
   };
 
-  const updateAiModel = (field: keyof AiModel, value: string) => {
-    setAiModel(prev => ({ ...prev, [field]: value }));
+  const updateAiModel = (model: string, description: string) => {
+    setAiModel({ model, description });
+    setHasChanges(true);
+  };
+
+  const updateTranscriptionModel = (model: string, description: string) => {
+    setTranscriptionModel({ model, description });
     setHasChanges(true);
   };
 
@@ -585,49 +620,64 @@ export default function SystemConfig() {
         </div>
 
         <div className="space-y-3">
-          <div
-            onClick={() => updateAiModel('model', 'gpt-realtime-mini')}
-            className={`flex items-center justify-between p-4 rounded-lg border-2 cursor-pointer transition ${
-              aiModel.model === 'gpt-realtime-mini'
-                ? 'border-royal bg-blue-50'
-                : 'border-gray-200 hover:border-gray-300 bg-white'
-            }`}
-          >
-            <div>
-              <p className="font-medium text-gray-900">gpt-realtime-mini</p>
-              <p className="text-xs text-red-600">USE IN DEV</p>
-
+          {REALTIME_MODEL_OPTIONS.map(opt => (
+            <div
+              key={opt.model}
+              onClick={() => updateAiModel(opt.model, opt.description)}
+              className={`flex items-center justify-between p-4 rounded-lg border-2 cursor-pointer transition ${
+                aiModel.model === opt.model
+                  ? 'border-royal bg-blue-50'
+                  : 'border-gray-200 hover:border-gray-300 bg-white'
+              }`}
+            >
+              <div>
+                <p className="font-medium text-gray-900">{opt.model}</p>
+                <p className="text-xs text-gray-500">{opt.tier} — {opt.description}</p>
+              </div>
+              <input
+                type="radio"
+                name="ai_model"
+                checked={aiModel.model === opt.model}
+                onChange={() => updateAiModel(opt.model, opt.description)}
+                className="w-4 h-4 text-royal border-gray-300 focus:ring-royal"
+              />
             </div>
-            <input
-              type="radio"
-              name="ai_model"
-              checked={aiModel.model === 'gpt-realtime-mini'}
-              onChange={() => updateAiModel('model', 'gpt-realtime-mini')}
-              className="w-4 h-4 text-royal border-gray-300 focus:ring-royal"
-            />
-          </div>
+          ))}
+        </div>
+      </div>
 
-          <div
-            onClick={() => updateAiModel('model', 'gpt-realtime')}
-            className={`flex items-center justify-between p-4 rounded-lg border-2 cursor-pointer transition ${
-              aiModel.model === 'gpt-realtime'
-                ? 'border-royal bg-blue-50'
-                : 'border-gray-200 hover:border-gray-300 bg-white'
-            }`}
-          >
-            <div>
-              <p className="font-medium text-gray-900">gpt-realtime</p>
-              <p className="text-xs text-red-600">USE IN PROD</p>
+      {/* Transcription Model Configuration */}
+      <div className="mb-6 bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Transcription Model</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          Model that transcribes participant audio. This transcription feeds crisis
+          detection and the redaction pipeline, so accuracy matters. Applies to new sessions.
+        </p>
 
+        <div className="space-y-3">
+          {TRANSCRIPTION_MODEL_OPTIONS.map(opt => (
+            <div
+              key={opt.model}
+              onClick={() => updateTranscriptionModel(opt.model, opt.description)}
+              className={`flex items-center justify-between p-4 rounded-lg border-2 cursor-pointer transition ${
+                transcriptionModel.model === opt.model
+                  ? 'border-royal bg-blue-50'
+                  : 'border-gray-200 hover:border-gray-300 bg-white'
+              }`}
+            >
+              <div>
+                <p className="font-medium text-gray-900">{opt.model}</p>
+                <p className="text-xs text-gray-500">{opt.tier} — {opt.description}</p>
+              </div>
+              <input
+                type="radio"
+                name="transcription_model"
+                checked={transcriptionModel.model === opt.model}
+                onChange={() => updateTranscriptionModel(opt.model, opt.description)}
+                className="w-4 h-4 text-royal border-gray-300 focus:ring-royal"
+              />
             </div>
-            <input
-              type="radio"
-              name="ai_model"
-              checked={aiModel.model === 'gpt-realtime'}
-              onChange={() => updateAiModel('model', 'gpt-realtime')}
-              className="w-4 h-4 text-royal border-gray-300 focus:ring-royal"
-            />
-          </div>
+          ))}
         </div>
       </div>
 

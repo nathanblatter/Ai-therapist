@@ -30,6 +30,7 @@ export async function getActiveSessions(): Promise<AdminSessionRow[]> {
     LEFT JOIN users u ON ts.user_id = u.userid
     LEFT JOIN messages m ON ts.session_id = m.session_id
     WHERE ts.status = 'active'
+      AND ts.is_demo IS NOT TRUE
     GROUP BY ts.session_id, u.username
     ORDER BY ts.crisis_flagged DESC, ts.created_at DESC
   `);
@@ -89,7 +90,8 @@ export async function listSessions(f: SessionListFilters): Promise<AdminSessionR
       LEFT JOIN session_configurations sc ON ts.session_id = sc.session_id
       LEFT JOIN messages m ON ts.session_id = m.session_id
       WHERE
-        ($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')
+        ts.is_demo IS NOT TRUE
+        AND ($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')
         AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
         AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
         AND ($8::TEXT[] IS NULL OR sc.voice = ANY($8))
@@ -136,7 +138,8 @@ export async function countSessions(f: SessionListFilters): Promise<number> {
     LEFT JOIN users u ON ts.user_id = u.userid
     LEFT JOIN session_configurations sc ON ts.session_id = sc.session_id
     WHERE
-      ($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')
+      ts.is_demo IS NOT TRUE
+      AND ($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')
       AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
       AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
       AND ($4::TEXT[] IS NULL OR sc.voice = ANY($4))

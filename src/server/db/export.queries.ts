@@ -37,7 +37,8 @@ export async function getMetadataExport(f: ExportFilters): Promise<ExportRow[]> 
     LEFT JOIN users u ON ts.user_id = u.userid
     LEFT JOIN messages m ON ts.session_id = m.session_id
     WHERE
-      ($1::VARCHAR IS NULL OR ts.session_id = $1)
+      ts.is_demo IS NOT TRUE
+      AND ($1::VARCHAR IS NULL OR ts.session_id = $1)
       AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
       AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
       AND ($4::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)
@@ -64,7 +65,8 @@ export async function getAnonymizedExport(f: ExportFilters, contentColumn: Expor
     INNER JOIN therapy_sessions ts ON m.session_id = ts.session_id
     LEFT JOIN users u ON ts.user_id = u.userid
     WHERE
-      ($1::VARCHAR IS NULL OR m.session_id = $1)
+      ts.is_demo IS NOT TRUE
+      AND ($1::VARCHAR IS NULL OR m.session_id = $1)
       AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
       AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
       AND ($4::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)
@@ -93,7 +95,8 @@ export async function getAggregatedExport(
       COUNT(DISTINCT CASE WHEN ts.session_type = 'chat' THEN ts.session_id END) as chat_sessions
     FROM therapy_sessions ts
     WHERE
-      ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
+      ts.is_demo IS NOT TRUE
+      AND ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
       AND ($2::TIMESTAMP IS NULL OR ts.created_at <= $2)
       AND ($3::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)
     GROUP BY TO_CHAR(ts.created_at, '${dateFormat}')
@@ -136,7 +139,8 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
     INNER JOIN therapy_sessions ts ON m.session_id = ts.session_id
     LEFT JOIN users u ON ts.user_id = u.userid
     WHERE
-      ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
+      ts.is_demo IS NOT TRUE
+      AND ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
       AND ($2::TIMESTAMP IS NULL OR ts.created_at <= $2)
       AND ($3::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)
     ORDER BY m.created_at ASC

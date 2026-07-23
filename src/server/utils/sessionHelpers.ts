@@ -401,11 +401,11 @@ export const sessionConfigDefault = {
     type: "realtime",
     tools: [] as unknown[],
     tool_choice: "auto",
-    model: "gpt-realtime-mini",
+    model: "gpt-realtime-2.1-mini",
     audio: {
       input: {
         transcription: {
-          model: "whisper-1",
+          model: "gpt-4o-mini-transcribe",
         }
       },
       output: {

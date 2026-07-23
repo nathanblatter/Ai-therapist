@@ -69,6 +69,7 @@ export async function getAllCrisisData(): Promise<AllCrisisData> {
       SELECT cr.*, ts.session_name
       FROM clinical_reviews cr
       LEFT JOIN therapy_sessions ts ON cr.session_id = ts.session_id
+      WHERE ts.is_demo IS NOT TRUE
       ORDER BY cr.requested_at DESC
       LIMIT 500
     `),
@@ -76,6 +77,7 @@ export async function getAllCrisisData(): Promise<AllCrisisData> {
       SELECT ce.*, ts.session_name
       FROM crisis_events ce
       LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
+      WHERE ts.is_demo IS NOT TRUE
       ORDER BY ce.created_at DESC
       LIMIT 500
     `),
@@ -83,6 +85,7 @@ export async function getAllCrisisData(): Promise<AllCrisisData> {
       SELECT hh.*, ts.session_name
       FROM human_handoffs hh
       LEFT JOIN therapy_sessions ts ON hh.session_id = ts.session_id
+      WHERE ts.is_demo IS NOT TRUE
       ORDER BY hh.initiated_at DESC
       LIMIT 500
     `),
@@ -90,6 +93,7 @@ export async function getAllCrisisData(): Promise<AllCrisisData> {
       SELECT ia.*, ts.session_name
       FROM intervention_actions ia
       LEFT JOIN therapy_sessions ts ON ia.session_id = ts.session_id
+      WHERE ts.is_demo IS NOT TRUE
       ORDER BY ia.performed_at DESC
       LIMIT 500
     `),
@@ -97,6 +101,7 @@ export async function getAllCrisisData(): Promise<AllCrisisData> {
       SELECT rsh.*, ts.session_name
       FROM risk_score_history rsh
       LEFT JOIN therapy_sessions ts ON rsh.session_id = ts.session_id
+      WHERE ts.is_demo IS NOT TRUE
       ORDER BY rsh.calculated_at DESC
       LIMIT 1000
     `),
@@ -118,6 +123,7 @@ export async function getAllCrisisEvents(): Promise<Record<string, unknown>[]> {
     FROM crisis_events ce
     LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
     LEFT JOIN users u ON ts.user_id = u.userid
+    WHERE ts.is_demo IS NOT TRUE
     ORDER BY ce.created_at DESC
     LIMIT 100
   `);

@@ -9,6 +9,7 @@ import {
   updateSessionStatus,
   upsertSessionConfig,
   getAiModel,
+  getTranscriptionModel,
   getUserPreferences,
   updateUserPreferences,
   getSessionAccessInfo,
@@ -80,6 +81,7 @@ export default function tokenRoutes(): Router {
 
       const temperature = 0.8;
       const aiModel = await getAiModel();
+      const transcriptionModel = await getTranscriptionModel();
 
       const { toolRegistry } = await import('../../services/toolRegistry.service.js');
       const tools = await toolRegistry.getEnabledToolDefinitions();
@@ -102,7 +104,7 @@ export default function tokenRoutes(): Router {
           model: aiModel,
           instructions,
           audio: {
-            input: { transcription: { model: 'whisper-1' } },
+            input: { transcription: { model: transcriptionModel } },
             output: { voice: userVoice },
           },
         },

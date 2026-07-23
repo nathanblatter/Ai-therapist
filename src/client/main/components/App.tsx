@@ -642,7 +642,7 @@ export default function App() {
     // Fetch AI model from system config
     const modelResponse = await fetch("/api/config/ai-model");
     const modelData = await modelResponse.json();
-    const model = modelData.model || "gpt-realtime-mini"; // Fallback to default
+    const model = modelData.model || "gpt-realtime-2.1-mini"; // Fallback to default
 
     const baseUrl = "https://api.openai.com/v1/realtime/calls";
     const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {

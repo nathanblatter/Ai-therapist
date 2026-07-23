@@ -43,7 +43,8 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
         FROM therapy_sessions ts
         LEFT JOIN session_configurations sc ON ts.session_id = sc.session_id
         WHERE
-          ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
+          ts.is_demo IS NOT TRUE
+          AND ($1::TIMESTAMP IS NULL OR ts.created_at >= $1)
           AND ($2::TIMESTAMP IS NULL OR ts.created_at <= $2)
           AND ($3::TEXT[] IS NULL OR sc.voice = ANY($3))
           AND ($4::TEXT[] IS NULL OR sc.language = ANY($4))
@@ -240,7 +241,7 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
               session_id,
               created_at,
               ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at) AS msg_order
-            FROM messages
+            FROM date_filtered_messages
             WHERE role = 'user'
           ) user_msg
           INNER JOIN (
@@ -248,7 +249,7 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
               session_id,
               created_at,
               ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at) AS msg_order
-            FROM messages
+            FROM date_filtered_messages
             WHERE role = 'assistant'
           ) assistant_msg
           ON user_msg.session_id = assistant_msg.session_id
