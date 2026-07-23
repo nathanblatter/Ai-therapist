@@ -104,7 +104,13 @@ export default function tokenRoutes(): Router {
           model: aiModel,
           instructions,
           audio: {
-            input: { transcription: { model: transcriptionModel } },
+            input: {
+              transcription: { model: transcriptionModel },
+              // Semantic VAD (low eagerness): decide the participant is done by
+              // their words, not just silence — far less likely to treat
+              // background noise as a turn, and won't cut them off mid-thought.
+              turn_detection: { type: 'semantic_vad', eagerness: 'low' },
+            },
             output: { voice: userVoice },
           },
         },
@@ -254,7 +260,7 @@ export default function tokenRoutes(): Router {
           voice: userVoice,
           modalities: ['text', 'audio'],
           instructions: sessionConfigObj.session?.instructions || null,
-          turn_detection: sessionConfigObj.session?.turn_detection || null,
+          turn_detection: sessionConfigObj.session?.audio?.input?.turn_detection || null,
           tools: sessionConfigObj.session?.tools || null,
           temperature,
           max_response_output_tokens: sessionConfigObj.session?.max_response_output_tokens || 4096,

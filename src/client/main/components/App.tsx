@@ -541,7 +541,11 @@ export default function App() {
     audioEl.autoplay = true;
     audioElement.current = audioEl;
     // Add local audio track for microphone input in the browser
-    const ms = await navigator.mediaDevices.getUserMedia({ audio: true,}); //video: true// });
+    // Enable the browser's built-in mic DSP so steady background noise (fans,
+    // hum, room tone) is suppressed before audio ever reaches the Realtime API.
+    const ms = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
     setLocalStream(ms);
     pc.addTrack(ms.getTracks()[0]);
 

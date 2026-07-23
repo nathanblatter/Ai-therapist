@@ -406,7 +406,8 @@ export const sessionConfigDefault = {
       input: {
         transcription: {
           model: "gpt-4o-mini-transcribe",
-        }
+        },
+        turn_detection: { type: "semantic_vad", eagerness: "low" },
       },
       output: {
         voice: "cedar",
