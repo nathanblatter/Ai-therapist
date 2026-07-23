@@ -1014,6 +1014,20 @@ export default function App() {
       setActiveExercise({ type: 'grounding' });
       return { shown: true };
     },
+    start_body_scan: async (args: unknown) => {
+      const a = (args ?? {}) as { duration_seconds?: number };
+      const duration = Math.min(Math.max(Number(a.duration_seconds) || 120, 30), 300);
+      setActiveExercise({ type: 'body_scan', durationSeconds: duration });
+      return { shown: true };
+    },
+    start_values_sort: async () => {
+      setToolUI({ kind: 'values_sort' });
+      return { shown: true };
+    },
+    start_fear_ladder: async () => {
+      setToolUI({ kind: 'fear_ladder' });
+      return { shown: true };
+    },
     show_resource_card: async (args: unknown) => {
       const a = (args ?? {}) as { resource_type?: string };
       setToolUI({ kind: 'resource', resourceType: a.resource_type ?? 'all' });

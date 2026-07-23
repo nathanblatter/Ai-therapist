@@ -1072,6 +1072,57 @@ export class ToolRegistry {
       }
     );
 
+    // Tools 26-28: interactive on-screen experiences (client renders the widget
+    // from the same data-channel event; the server just guides the model). Two
+    // return the participant's input to the model as an invisible message.
+    this.registerTool(
+      'start_body_scan',
+      {
+        type: 'function',
+        name: 'start_body_scan',
+        description: 'Start a guided body-scan relaxation on the participant\'s screen — attention moves gently from feet to head, softening each area. Use when they feel tense, wired, or want to relax. Ask first, then narrate slowly alongside the visual.',
+        parameters: {
+          type: 'object',
+          properties: {
+            duration_seconds: { type: 'number', description: 'Total length, 30-300 seconds (default 120).' },
+          },
+          required: [],
+        },
+      },
+      async () => ({
+        success: true,
+        guidance: 'A guided body-scan is now on the participant\'s screen, advancing through body regions on its own. Narrate slowly and calmly in time with it; leave silences. When it ends, ask how their body feels now.',
+      })
+    );
+
+    this.registerTool(
+      'start_values_sort',
+      {
+        type: 'function',
+        name: 'start_values_sort',
+        description: 'Open an ACT values card-sort on the participant\'s screen: they tap the values that matter most to them. Use when exploring what gives their life meaning or direction, or when they feel stuck or disconnected. You will receive their choices when they finish.',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+      async () => ({
+        success: true,
+        guidance: 'A values card-sort is on the participant\'s screen. Give them quiet time to choose. When they finish you\'ll receive the values they picked — reflect those back warmly and help them find one small values-aligned step.',
+      })
+    );
+
+    this.registerTool(
+      'start_fear_ladder',
+      {
+        type: 'function',
+        name: 'start_fear_ladder',
+        description: 'Open a fear-ladder builder on the participant\'s screen: they list situations they avoid and rate the distress of each. Use when working on avoidance or planning graded exposure. You will receive the ranked ladder (easiest to hardest) when they finish.',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+      async () => ({
+        success: true,
+        guidance: 'A fear-ladder builder is on the participant\'s screen. Let them fill it in. When they finish you\'ll receive their situations ranked easiest to hardest — affirm the effort and, only if they\'re willing, offer the lowest rung as a first step.',
+      })
+    );
+
     console.log('[ToolRegistry] Default tools registered');
   }
 

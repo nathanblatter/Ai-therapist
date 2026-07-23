@@ -13,7 +13,9 @@ export type ToolUI =
   | { kind: 'journal'; prompt: string }
   | { kind: 'recap'; focus: string; techniques?: string[]; takeaway: string }
   | { kind: 'safety_plan'; plan: SafetyPlanData }
-  | { kind: 'scale'; scale: string };
+  | { kind: 'scale'; scale: string }
+  | { kind: 'values_sort' }
+  | { kind: 'fear_ladder' };
 
 export interface SafetyPlanData {
   warning_signs?: string[];
@@ -350,6 +352,107 @@ function ScaleForm({ scale, sessionId, onClose, onResult }: {
   );
 }
 
+// ---------- values card sort (ACT) ----------
+
+const VALUE_OPTIONS = [
+  'Connection', 'Family', 'Health', 'Growth', 'Kindness', 'Honesty',
+  'Creativity', 'Adventure', 'Independence', 'Learning', 'Contribution',
+  'Security', 'Fun', 'Spirituality', 'Courage', 'Nature',
+];
+
+function ValuesSort({ onClose, onComplete }: { onClose: () => void; onComplete: (values: string[]) => void }) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const MAX = 5;
+  const toggle = (v: string) =>
+    setSelected(cur => (cur.includes(v) ? cur.filter(x => x !== v) : cur.length < MAX ? [...cur, v] : cur));
+
+  return (
+    <Shell title="What matters most to you?" onClose={onClose} wide>
+      <div className="px-6 py-5 space-y-4">
+        <p className="text-sm text-gray-600">Tap up to {MAX} values that feel most important to you right now. There are no wrong answers.</p>
+        <div className="flex flex-wrap gap-2">
+          {VALUE_OPTIONS.map(v => {
+            const on = selected.includes(v);
+            return (
+              <button
+                key={v}
+                onClick={() => toggle(v)}
+                className={`px-3 py-2 rounded-full text-sm border transition min-h-[44px] ${on ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'}`}
+              >
+                {v}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-xs text-gray-400">{selected.length}/{MAX} selected</span>
+          <button
+            onClick={() => onComplete(selected)}
+            disabled={selected.length === 0}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+// ---------- fear ladder (graded exposure) ----------
+
+interface LadderItem { situation: string; rating: number; }
+
+function FearLadder({ onClose, onComplete }: { onClose: () => void; onComplete: (items: LadderItem[]) => void }) {
+  const [items, setItems] = useState<LadderItem[]>([{ situation: '', rating: 50 }]);
+  const update = (i: number, patch: Partial<LadderItem>) =>
+    setItems(cur => cur.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const add = () => setItems(cur => (cur.length < 8 ? [...cur, { situation: '', rating: 50 }] : cur));
+  const remove = (i: number) => setItems(cur => (cur.length > 1 ? cur.filter((_, idx) => idx !== i) : cur));
+  const filled = items.filter(it => it.situation.trim());
+
+  return (
+    <Shell title="Build your fear ladder" onClose={onClose} wide>
+      <div className="px-6 py-5 space-y-4">
+        <p className="text-sm text-gray-600">List situations you tend to avoid, and rate how much distress each brings (0 = none, 100 = the most). We&rsquo;ll order them so you can start small.</p>
+        <div className="space-y-3">
+          {items.map((it, i) => (
+            <div key={i} className="space-y-1">
+              <div className="flex gap-2 items-center">
+                <input
+                  value={it.situation}
+                  onChange={(e) => update(i, { situation: e.target.value })}
+                  placeholder="e.g. making a phone call"
+                  maxLength={120}
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {items.length > 1 && (
+                  <button onClick={() => remove(i)} className="text-gray-400 hover:text-red-500 text-xs px-2">Remove</button>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <input type="range" min={0} max={100} value={it.rating} onChange={(e) => update(i, { rating: Number(e.target.value) })} className="flex-1 accent-blue-600" />
+                <span className="text-sm text-gray-600 w-10 text-right">{it.rating}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={add} disabled={items.length >= 8} className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-40">+ Add another</button>
+        <div className="flex justify-between items-center">
+          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">Cancel</button>
+          <button
+            onClick={() => onComplete(filled)}
+            disabled={filled.length === 0}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
 // ---------- dispatcher ----------
 
 export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMessage, onLogRecord, sessionId }: ToolOverlaysProps) {
@@ -391,6 +494,33 @@ export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMess
       return <SafetyPlanCard plan={ui.plan} onClose={onClose} />;
     case 'scale':
       return <ScaleForm scale={ui.scale} sessionId={sessionId} onClose={onClose} onResult={onInvisibleMessage} />;
+    case 'values_sort':
+      return (
+        <ValuesSort
+          onClose={onClose}
+          onComplete={(vals) => {
+            onLogRecord('values_sort', 'Values selected', { values: vals });
+            onInvisibleMessage(
+              `[Participant chose the values that matter most to them: ${vals.join(', ')}. Warmly reflect these back, and help them identify ONE small, concrete action aligned with one of these values. Do not lecture.]`
+            );
+            onClose();
+          }}
+        />
+      );
+    case 'fear_ladder':
+      return (
+        <FearLadder
+          onClose={onClose}
+          onComplete={(ladder) => {
+            const sorted = [...ladder].sort((a, b) => a.rating - b.rating);
+            onLogRecord('fear_ladder', 'Fear ladder built', { items: sorted });
+            onInvisibleMessage(
+              `[Participant built a fear ladder (easiest to hardest): ${sorted.map((it, i) => `${i + 1}. ${it.situation} (${it.rating})`).join('; ')}. Praise the courage to name these, and gently offer the lowest rung as a possible first step — only if they're willing.]`
+            );
+            onClose();
+          }}
+        />
+      );
     default:
       return null;
   }

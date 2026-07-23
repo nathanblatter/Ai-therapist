@@ -79,8 +79,17 @@ export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
   if (has('flag_notable_moment')) {
     lines.push('- When you notice a breakthrough, or a technique clearly landing or failing, silently CALL flag_notable_moment.');
   }
-  if (has('start_breathing_exercise') || has('start_grounding_exercise')) {
-    lines.push('- When they accept a breathing or grounding exercise, CALL the matching start_* tool so the guided visual appears — do not narrate it unaided.');
+  if (has('start_breathing_exercise') || has('start_grounding_exercise') || has('start_body_scan')) {
+    lines.push('- When they accept a breathing, grounding, or body-scan exercise, CALL the matching start_* tool so the guided visual appears — do not narrate it unaided.');
+  }
+  if (has('start_values_sort')) {
+    lines.push('- When exploring what matters to them or they feel stuck/disconnected, offer the values card-sort and CALL start_values_sort — you\'ll get their picks back to build on.');
+  }
+  if (has('start_fear_ladder')) {
+    lines.push('- When working on avoidance or planning exposure, offer to build a fear ladder and CALL start_fear_ladder — you\'ll get the ranked situations back.');
+  }
+  if (has('find_worksheet')) {
+    lines.push('- When a written exercise would help, CALL find_worksheet to pick the fitting one, then call the render tool it returns (start_thought_record / show_journaling_prompt).');
   }
   if (lines.length === 0) return '';
   return `\n\n## Using your tools (important)\nYour function tools show real interactive cards and forms on the participant's screen and save information for their care team. When a request matches a tool, CALL the tool — describing it verbally instead is a failure. Specifically:\n${lines.join('\n')}`;

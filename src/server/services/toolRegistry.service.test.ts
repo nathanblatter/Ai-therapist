@@ -285,3 +285,21 @@ describe('suggest_modality_technique', () => {
     expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(1, [0.1, 0.2, 0.3], { kind: 'technique', modality: null }, 1);
   });
 });
+
+describe('interactive experience tools', () => {
+  it('registers the new on-screen experiences', () => {
+    for (const name of ['start_body_scan', 'start_values_sort', 'start_fear_ladder']) {
+      expect(toolRegistry.hasTool(name)).toBe(true);
+    }
+  });
+
+  it('server handlers return guidance for the model to narrate alongside', async () => {
+    const scan = await toolRegistry.executeTool('start_body_scan', { duration_seconds: 90 }) as { success: boolean; guidance: string };
+    expect(scan.success).toBe(true);
+    expect(scan.guidance).toMatch(/body-scan/i);
+    const values = await toolRegistry.executeTool('start_values_sort', {}) as { success: boolean };
+    expect(values.success).toBe(true);
+    const ladder = await toolRegistry.executeTool('start_fear_ladder', {}) as { success: boolean };
+    expect(ladder.success).toBe(true);
+  });
+});

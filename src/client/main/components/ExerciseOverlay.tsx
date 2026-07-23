@@ -6,7 +6,7 @@
 import { useState, useEffect } from 'react';
 import { X } from 'react-feather';
 
-export type ExerciseType = 'breathing' | 'grounding';
+export type ExerciseType = 'breathing' | 'grounding' | 'body_scan';
 
 export interface ActiveExercise {
   type: ExerciseType;
@@ -98,8 +98,64 @@ function GroundingExercise({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Progressive relaxation: attention travels foot-to-head, softening each area.
+const BODY_SCAN_STEPS = [
+  { region: 'your feet and toes', cue: 'Notice contact with the floor — warmth, weight. Let them soften.' },
+  { region: 'your legs', cue: 'Let the muscles grow heavy and loose.' },
+  { region: 'your hips and lower back', cue: 'Release any holding here.' },
+  { region: 'your belly', cue: 'Let it rise and fall with each breath.' },
+  { region: 'your chest', cue: 'Notice your heartbeat, and let your breath slow.' },
+  { region: 'your hands and arms', cue: 'Unclench your hands; let your arms rest.' },
+  { region: 'your shoulders and neck', cue: 'Let your shoulders drop away from your ears.' },
+  { region: 'your face and jaw', cue: 'Soften your jaw, forehead, and the space between your brows.' },
+] as const;
+
+function BodyScan({ durationSeconds = 120, onClose }: { durationSeconds?: number; onClose: () => void }) {
+  const [secondsLeft, setSecondsLeft] = useState(durationSeconds);
+  const [stepIndex, setStepIndex] = useState(0);
+  const stepMs = Math.max(4000, Math.round((durationSeconds * 1000) / BODY_SCAN_STEPS.length));
+
+  useEffect(() => {
+    const tick = setInterval(() => setSecondsLeft(s => s - 1), 1000);
+    const advance = setInterval(() => setStepIndex(i => i + 1), stepMs);
+    return () => { clearInterval(tick); clearInterval(advance); };
+  }, [stepMs]);
+
+  useEffect(() => {
+    if (stepIndex >= BODY_SCAN_STEPS.length || secondsLeft <= 0) onClose();
+  }, [stepIndex, secondsLeft, onClose]);
+
+  const step = BODY_SCAN_STEPS[Math.min(stepIndex, BODY_SCAN_STEPS.length - 1)];
+
+  return (
+    <div className="flex flex-col items-center gap-8 max-w-md text-center px-6">
+      <div className="flex gap-1.5" aria-hidden="true">
+        {BODY_SCAN_STEPS.map((s, i) => (
+          <div key={s.region} className={`h-1.5 w-6 rounded-full ${i <= stepIndex ? 'bg-blue-300' : 'bg-white bg-opacity-20'}`} />
+        ))}
+      </div>
+      <div className="relative flex items-center justify-center" style={{ width: 200, height: 200 }}>
+        <div className="absolute rounded-full bg-blue-400 bg-opacity-20 animate-ping" style={{ width: 200, height: 200, animationDuration: '3s' }} />
+        <div className="absolute rounded-full bg-blue-500 bg-opacity-30" style={{ width: 130, height: 130 }} />
+      </div>
+      <div>
+        <p className="text-blue-200 text-sm uppercase tracking-wide mb-2">Body scan</p>
+        <p className="text-white text-2xl font-light mb-3" aria-live="polite">
+          Bring gentle attention to <span className="font-semibold">{step.region}</span>
+        </p>
+        <p className="text-blue-100">{step.cue}</p>
+      </div>
+      <p className="text-blue-100 text-sm">{Math.max(secondsLeft, 0)}s remaining</p>
+    </div>
+  );
+}
+
 export default function ExerciseOverlay({ exercise, onClose }: ExerciseOverlayProps) {
   if (!exercise) return null;
+
+  const label = exercise.type === 'breathing' ? 'Breathing exercise'
+    : exercise.type === 'body_scan' ? 'Body scan exercise'
+    : 'Grounding exercise';
 
   return (
     <div
@@ -107,7 +163,7 @@ export default function ExerciseOverlay({ exercise, onClose }: ExerciseOverlayPr
       style={{ background: 'linear-gradient(160deg, #1e3a5f 0%, #0f2340 100%)' }}
       role="dialog"
       aria-modal="true"
-      aria-label={exercise.type === 'breathing' ? 'Breathing exercise' : 'Grounding exercise'}
+      aria-label={label}
     >
       <button
         onClick={onClose}
@@ -116,9 +172,9 @@ export default function ExerciseOverlay({ exercise, onClose }: ExerciseOverlayPr
       >
         <X size={22} />
       </button>
-      {exercise.type === 'breathing'
-        ? <BreathingExercise durationSeconds={exercise.durationSeconds} onClose={onClose} />
-        : <GroundingExercise onClose={onClose} />}
+      {exercise.type === 'breathing' && <BreathingExercise durationSeconds={exercise.durationSeconds} onClose={onClose} />}
+      {exercise.type === 'grounding' && <GroundingExercise onClose={onClose} />}
+      {exercise.type === 'body_scan' && <BodyScan durationSeconds={exercise.durationSeconds} onClose={onClose} />}
     </div>
   );
 }
