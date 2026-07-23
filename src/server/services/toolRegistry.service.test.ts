@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, flagSessionCrisisMock, logInterventionActionMock, searchKnowledgeChunksMock, embedTextMock } = vi.hoisted(() => ({
+const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, flagSessionCrisisMock, logInterventionActionMock, searchKnowledgeChunksMock, embedTextMock, getSessionMock, getUserMemoryEnabledMock, searchUserMemoriesMock, getActiveModalityMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
   setSessionGoalMock: vi.fn(),
@@ -9,17 +9,25 @@ const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, 
   logInterventionActionMock: vi.fn(),
   searchKnowledgeChunksMock: vi.fn(),
   embedTextMock: vi.fn(),
+  getSessionMock: vi.fn(),
+  getUserMemoryEnabledMock: vi.fn(),
+  searchUserMemoriesMock: vi.fn(),
+  getActiveModalityMock: vi.fn(),
 }));
 vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 vi.mock('../utils/sessionHelpers.js', () => ({
   getSystemConfig: getSystemConfigMock,
+  getActiveModality: getActiveModalityMock,
 }));
 vi.mock('../db/index.js', () => ({
   setSessionGoal: setSessionGoalMock,
   getSessionGoal: getSessionGoalMock,
   searchKnowledgeChunks: searchKnowledgeChunksMock,
+  getSession: getSessionMock,
+  getUserMemoryEnabled: getUserMemoryEnabledMock,
+  searchUserMemories: searchUserMemoriesMock,
 }));
 vi.mock('./crisisDetection.service.js', () => ({
   flagSessionCrisis: flagSessionCrisisMock,
@@ -40,6 +48,10 @@ beforeEach(() => {
   logInterventionActionMock.mockReset();
   searchKnowledgeChunksMock.mockReset();
   embedTextMock.mockReset().mockResolvedValue([0.1, 0.2, 0.3]);
+  getSessionMock.mockReset().mockResolvedValue({ user_id: 42 });
+  getUserMemoryEnabledMock.mockReset().mockResolvedValue(true);
+  searchUserMemoriesMock.mockReset().mockResolvedValue([]);
+  getActiveModalityMock.mockReset().mockResolvedValue(null);
 });
 
 describe('registry mechanics', () => {
@@ -147,7 +159,7 @@ describe('retrieve_psychoeducation (RAG)', () => {
     ]);
     const result = await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'what is depression', topic: 'depression' }) as { results: unknown[]; guidance: string };
     expect(embedTextMock).toHaveBeenCalledWith('what is depression');
-    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], 'depression', 4);
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'psychoeducation', topic: 'depression' }, 4);
     expect(result.results).toEqual([
       { title: 'What depression is', content: 'Depression is...', source: 'NIMH', source_url: 'https://nimh' },
     ]);
@@ -157,7 +169,7 @@ describe('retrieve_psychoeducation (RAG)', () => {
   it('passes null topic when none is given', async () => {
     searchKnowledgeChunksMock.mockResolvedValue([]);
     await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'coping tips' });
-    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], null, 4);
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'psychoeducation', topic: null }, 4);
   });
 
   it('on empty results, instructs the model not to fabricate citations', async () => {
@@ -171,5 +183,105 @@ describe('retrieve_psychoeducation (RAG)', () => {
     embedTextMock.mockRejectedValue(new Error('embeddings down'));
     const result = await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'anything' }) as { error?: string };
     expect(result.error).toMatch(/do not invent citations/i);
+  });
+});
+
+describe('recall_relevant_history (per-user RAG)', () => {
+  it('requires a query', async () => {
+    const r = await toolRegistry.executeTool('recall_relevant_history', { query: '' }, { sessionId: 's1' }) as { error?: string };
+    expect(r.error).toBeTruthy();
+  });
+
+  it('is unavailable for anonymous participants', async () => {
+    getSessionMock.mockResolvedValue({ user_id: null });
+    const r = await toolRegistry.executeTool('recall_relevant_history', { query: 'my dog' }, { sessionId: 's1' }) as { available: boolean };
+    expect(r.available).toBe(false);
+    expect(searchUserMemoriesMock).not.toHaveBeenCalled();
+  });
+
+  it('is unavailable when session memory is off', async () => {
+    getUserMemoryEnabledMock.mockResolvedValue(false);
+    const r = await toolRegistry.executeTool('recall_relevant_history', { query: 'my dog' }, { sessionId: 's1' }) as { available: boolean };
+    expect(r.available).toBe(false);
+    expect(searchUserMemoriesMock).not.toHaveBeenCalled();
+  });
+
+  it('returns semantically matched memories scoped to the user', async () => {
+    searchUserMemoriesMock.mockResolvedValue([
+      { fact: 'Their dog is named Max', created_at: new Date('2026-07-01T00:00:00Z'), similarity: 0.8 },
+    ]);
+    const r = await toolRegistry.executeTool('recall_relevant_history', { query: 'pet' }, { sessionId: 's1' }) as { available: boolean; memories: { fact: string; when: string }[] };
+    expect(searchUserMemoriesMock).toHaveBeenCalledWith(42, [0.1, 0.2, 0.3], 5);
+    expect(r.memories).toEqual([{ fact: 'Their dog is named Max', when: '2026-07-01' }]);
+  });
+
+  it('on no matches, instructs the model not to fabricate past details', async () => {
+    searchUserMemoriesMock.mockResolvedValue([]);
+    const r = await toolRegistry.executeTool('recall_relevant_history', { query: 'nothing' }, { sessionId: 's1' }) as { memories: unknown[]; note: string };
+    expect(r.memories).toEqual([]);
+    expect(r.note).toMatch(/do not fabricate/i);
+  });
+});
+
+describe('find_worksheet', () => {
+  it('returns the matched worksheet and the render tool to call', async () => {
+    searchKnowledgeChunksMock.mockResolvedValue([
+      { title: 'Unsent letter', content: 'Write a letter...', source: 'Expressive writing', source_url: null, topic: 'grief', kind: 'worksheet', modality: null, metadata: { render_tool: 'show_journaling_prompt', prompt: 'Write a letter you will never send.' }, similarity: 0.7 },
+    ]);
+    const r = await toolRegistry.executeTool('find_worksheet', { concern: 'grief about a breakup' }) as { found: boolean; render_tool: string; suggested_prompt: string };
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'worksheet' }, 1);
+    expect(r.found).toBe(true);
+    expect(r.render_tool).toBe('show_journaling_prompt');
+    expect(r.suggested_prompt).toBe('Write a letter you will never send.');
+  });
+
+  it('falls back to a thought record when metadata names it', async () => {
+    searchKnowledgeChunksMock.mockResolvedValue([
+      { title: 'Challenging a thought', content: '...', source: 'CBT', source_url: null, topic: 'anxiety', kind: 'worksheet', modality: null, metadata: { render_tool: 'start_thought_record' }, similarity: 0.7 },
+    ]);
+    const r = await toolRegistry.executeTool('find_worksheet', { concern: 'a harsh self-critical thought' }) as { render_tool: string; suggested_prompt: string | null };
+    expect(r.render_tool).toBe('start_thought_record');
+    expect(r.suggested_prompt).toBeNull();
+  });
+
+  it('guides gracefully when no worksheet matches', async () => {
+    searchKnowledgeChunksMock.mockResolvedValue([]);
+    const r = await toolRegistry.executeTool('find_worksheet', { concern: 'obscure' }) as { found: boolean; guidance: string };
+    expect(r.found).toBe(false);
+    expect(r.guidance).toMatch(/do not invent a named worksheet/i);
+  });
+});
+
+describe('suggest_modality_technique', () => {
+  it('filters techniques by the active modality', async () => {
+    getActiveModalityMock.mockResolvedValue({ key: 'cbt', preset: { label: 'CBT-informed', addition: '' } });
+    searchKnowledgeChunksMock.mockResolvedValue([
+      { title: 'Behavioral activation', content: 'Schedule small actions...', source: 'NIMH', source_url: 'https://nimh', topic: 'behavioral', kind: 'technique', modality: 'cbt', metadata: null, similarity: 0.8 },
+    ]);
+    const r = await toolRegistry.executeTool('suggest_modality_technique', { concern: 'no motivation' }) as { found: boolean; technique: string; approach: string };
+    expect(embedTextMock).toHaveBeenCalledWith('CBT-informed: no motivation');
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'technique', modality: 'cbt' }, 1);
+    expect(r.found).toBe(true);
+    expect(r.approach).toBe('cbt');
+  });
+
+  it('falls back to any technique when none match the active modality', async () => {
+    getActiveModalityMock.mockResolvedValue({ key: 'mi', preset: { label: 'Motivational interviewing', addition: '' } });
+    searchKnowledgeChunksMock
+      .mockResolvedValueOnce([]) // no mi-tagged technique
+      .mockResolvedValueOnce([{ title: '5-4-3-2-1 grounding', content: '...', source: 'x', source_url: null, topic: 'grounding', kind: 'technique', modality: null, metadata: null, similarity: 0.5 }]);
+    const r = await toolRegistry.executeTool('suggest_modality_technique', { concern: 'panic' }) as { found: boolean; technique: string };
+    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(1, [0.1, 0.2, 0.3], { kind: 'technique', modality: 'mi' }, 1);
+    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(2, [0.1, 0.2, 0.3], { kind: 'technique' }, 1);
+    expect(r.found).toBe(true);
+    expect(r.technique).toBe('5-4-3-2-1 grounding');
+  });
+
+  it('with no active modality, searches all techniques (modality null)', async () => {
+    getActiveModalityMock.mockResolvedValue(null);
+    searchKnowledgeChunksMock.mockResolvedValue([]);
+    await toolRegistry.executeTool('suggest_modality_technique', { concern: 'stress' });
+    expect(embedTextMock).toHaveBeenCalledWith('stress');
+    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(1, [0.1, 0.2, 0.3], { kind: 'technique', modality: null }, 1);
   });
 });

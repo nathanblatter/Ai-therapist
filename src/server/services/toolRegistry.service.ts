@@ -697,7 +697,17 @@ export class ToolRegistry {
         if (!(await getUserMemoryEnabled(userId))) {
           return { stored: false, reason: 'Session memory is turned off in their settings. Mention they can enable it there if they want this remembered.' };
         }
-        await insertUserMemory(userId, fact, ctx.sessionId);
+        // Embed the fact so recall_relevant_history can find it semantically.
+        // Best-effort: if embedding fails, still store the fact (it remains
+        // listable via recall_previous_sessions, just not semantically searchable).
+        let embedding: number[] | undefined;
+        try {
+          const { embedText } = await import('./embeddings.service.js');
+          embedding = await embedText(fact);
+        } catch (err) {
+          console.error('[ToolRegistry] remember_this embedding failed (storing without it):', err);
+        }
+        await insertUserMemory(userId, fact, ctx.sessionId, embedding);
         return { stored: true, fact };
       }
     );
@@ -869,7 +879,7 @@ export class ToolRegistry {
           const { embedText } = await import('./embeddings.service.js');
           const { searchKnowledgeChunks } = await import('../db/index.js');
           const embedding = await embedText(query);
-          const rows = await searchKnowledgeChunks(embedding, topic, 4);
+          const rows = await searchKnowledgeChunks(embedding, { kind: 'psychoeducation', topic }, 4);
 
           if (rows.length === 0) {
             return {
@@ -895,6 +905,169 @@ export class ToolRegistry {
             error:
               'The knowledge base is unavailable right now. Continue supporting the participant without it, and do not invent citations.',
           };
+        }
+      }
+    );
+
+    // Tool 23: Semantic recall over the participant's OWN remembered facts
+    // (ai-therapist-66). Consent-gated like recall_previous_sessions, but
+    // retrieves by meaning instead of dumping everything. Only embedded memories
+    // (stored via remember_this after migration 032) are searchable.
+    this.registerTool(
+      'recall_relevant_history',
+      {
+        type: 'function',
+        name: 'recall_relevant_history',
+        description:
+          "Semantically search THIS participant's own remembered facts from past conversations for ones relevant to a topic (only for logged-in participants with session memory on). Use when they reference something from before or when specific past context would help — more targeted than recall_previous_sessions.",
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'What to look for, e.g. "their sister" or "sleep problems".' },
+          },
+          required: ['query'],
+        },
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        const query = typeof args['query'] === 'string' ? args['query'].trim() : '';
+        if (!query) return { error: 'query text is required' };
+        if (!ctx.sessionId) return { error: 'No session context available' };
+
+        const { getSession, getUserMemoryEnabled, searchUserMemories } = await import('../db/index.js');
+        const session = await getSession(ctx.sessionId);
+        const userId = session?.user_id;
+        if (!userId) return { available: false, reason: 'Participant is anonymous — no saved history.' };
+        if (!(await getUserMemoryEnabled(userId))) {
+          return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
+        }
+
+        try {
+          const { embedText } = await import('./embeddings.service.js');
+          const embedding = await embedText(query);
+          const rows = await searchUserMemories(userId, embedding, 5);
+          if (rows.length === 0) {
+            return {
+              available: true,
+              memories: [],
+              note: 'Nothing relevant found in what they asked you to remember. Do NOT fabricate past details.',
+            };
+          }
+          return {
+            available: true,
+            memories: rows.map(r => ({ fact: r.fact, when: r.created_at.toISOString().slice(0, 10) })),
+            note: 'Use for continuity and warmth. Never claim to remember more than these facts.',
+          };
+        } catch (error) {
+          console.error('[ToolRegistry] recall_relevant_history failed:', error);
+          return { error: 'Could not search history right now. Continue without it; do not invent past details.' };
+        }
+      }
+    );
+
+    // Tool 24: Find the best-fitting worksheet for a concern, then hand off to a
+    // render tool (ai-therapist-68). RAG over kind='worksheet'; the matched row's
+    // metadata says which existing render tool to call.
+    this.registerTool(
+      'find_worksheet',
+      {
+        type: 'function',
+        name: 'find_worksheet',
+        description:
+          "Find the most fitting therapeutic worksheet/exercise for what the participant is working on, then follow its instructions to open it on their screen. Use when a written exercise would help. After calling this, call the render tool it returns (start_thought_record or show_journaling_prompt).",
+        parameters: {
+          type: 'object',
+          properties: {
+            concern: { type: 'string', description: 'What they want to work on, e.g. "a harsh self-critical thought" or "grief about a breakup".' },
+          },
+          required: ['concern'],
+        },
+      },
+      async (args: Record<string, unknown>) => {
+        const concern = typeof args['concern'] === 'string' ? args['concern'].trim() : '';
+        if (!concern) return { error: 'concern text is required' };
+        try {
+          const { embedText } = await import('./embeddings.service.js');
+          const { searchKnowledgeChunks } = await import('../db/index.js');
+          const embedding = await embedText(concern);
+          const rows = await searchKnowledgeChunks(embedding, { kind: 'worksheet' }, 1);
+          if (rows.length === 0) {
+            return {
+              found: false,
+              guidance: 'No matching worksheet found. You can still open a blank thought record (start_thought_record) or offer a journaling prompt (show_journaling_prompt) if it would help. Do not invent a named worksheet.',
+            };
+          }
+          const w = rows[0];
+          const meta = (w.metadata ?? {}) as { render_tool?: string; prompt?: string };
+          const renderTool = meta.render_tool === 'start_thought_record' ? 'start_thought_record' : 'show_journaling_prompt';
+          return {
+            found: true,
+            title: w.title,
+            rationale: w.content,
+            source: w.source,
+            render_tool: renderTool,
+            suggested_prompt: meta.prompt ?? null,
+            guidance: `This worksheet fits. Briefly introduce it in your own warm words, then call ${renderTool}${meta.prompt ? ` with prompt: "${meta.prompt}"` : ''}. Do not invent worksheet content beyond this.`,
+          };
+        } catch (error) {
+          console.error('[ToolRegistry] find_worksheet failed:', error);
+          return { error: 'The worksheet library is unavailable right now. Offer a blank thought record or journaling prompt instead if useful.' };
+        }
+      }
+    );
+
+    // Tool 25: Suggest a technique matching the session's active modality
+    // (ai-therapist-70), grounded in the technique corpus. Prefers techniques
+    // tagged for the active approach; falls back to any if none match.
+    this.registerTool(
+      'suggest_modality_technique',
+      {
+        type: 'function',
+        name: 'suggest_modality_technique',
+        description:
+          "Suggest a specific therapeutic technique that fits the session's active approach (CBT/ACT/MI/supportive) and the participant's current concern, grounded in the clinical knowledge base. Use when you want a concrete, approach-consistent technique to offer.",
+        parameters: {
+          type: 'object',
+          properties: {
+            concern: { type: 'string', description: 'The current focus, e.g. "avoiding social situations".' },
+          },
+          required: ['concern'],
+        },
+      },
+      async (args: Record<string, unknown>) => {
+        const concern = typeof args['concern'] === 'string' ? args['concern'].trim() : '';
+        if (!concern) return { error: 'concern text is required' };
+        try {
+          const { getActiveModality } = await import('../utils/sessionHelpers.js');
+          const { embedText } = await import('./embeddings.service.js');
+          const { searchKnowledgeChunks } = await import('../db/index.js');
+          const modality = await getActiveModality();
+          const modalityKey = modality?.key ?? null;
+          const label = modality?.preset.label ? `${modality.preset.label}: ` : '';
+          const embedding = await embedText(`${label}${concern}`);
+
+          // Prefer the active modality's techniques; fall back to any technique.
+          let rows = await searchKnowledgeChunks(embedding, { kind: 'technique', modality: modalityKey }, 1);
+          if (rows.length === 0) {
+            rows = await searchKnowledgeChunks(embedding, { kind: 'technique' }, 1);
+          }
+          if (rows.length === 0) {
+            return {
+              found: false,
+              guidance: 'No matching technique in the library. Offer support in your own words consistent with the approach; do not invent named techniques or cite sources.',
+            };
+          }
+          const t = rows[0];
+          return {
+            found: true,
+            technique: t.title,
+            how_to: t.content,
+            approach: t.modality ?? 'general',
+            source: t.source,
+            guidance: 'Offer this technique in warm, plain language, matched to the active approach and to what the participant said. Do not add steps or citations beyond what is shown here.',
+          };
+        } catch (error) {
+          console.error('[ToolRegistry] suggest_modality_technique failed:', error);
+          return { error: 'The technique library is unavailable right now. Continue supportively in your own words without naming a specific technique or source.' };
         }
       }
     );

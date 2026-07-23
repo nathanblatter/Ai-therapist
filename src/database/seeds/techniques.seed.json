@@ -1,0 +1,65 @@
+[
+  {
+    "topic": "cognitive",
+    "modality": "cbt",
+    "title": "Cognitive restructuring",
+    "content": "Notice an unhelpful automatic thought, gently examine the evidence for and against it, and construct a more balanced, realistic alternative. Works best one thought at a time, with curious questions rather than lecturing.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Public Domain (U.S. NIMH) — technique described in NIMH CBT material"
+  },
+  {
+    "topic": "behavioral",
+    "modality": "cbt",
+    "title": "Behavioral activation",
+    "content": "When low mood shrinks activity, schedule small, meaningful or pleasant actions to rebuild momentum. Action often comes before motivation, so start tiny and specific.",
+    "source": "National Institute of Mental Health (NIMH)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/depression",
+    "license": "Public Domain (U.S. NIMH) — technique described in NIMH depression material"
+  },
+  {
+    "topic": "acceptance",
+    "modality": "act",
+    "title": "Cognitive defusion",
+    "content": "Create distance from a sticky thought by noticing it as a thought — for example, 'I'm having the thought that I'll fail' — rather than treating it as literal truth. This loosens the thought's grip without arguing with it.",
+    "source": "Acceptance and commitment therapy (standard clinical technique)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Concept — public domain description"
+  },
+  {
+    "topic": "values",
+    "modality": "act",
+    "title": "Values-based action",
+    "content": "Identify what you deeply care about and take one small step aligned with it, making room for difficult feelings rather than waiting for them to pass first.",
+    "source": "Acceptance and commitment therapy (standard clinical technique)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Concept — public domain description"
+  },
+  {
+    "topic": "engagement",
+    "modality": "mi",
+    "title": "Reflective listening",
+    "content": "Reflect back the participant's own words and meaning to build understanding and let them hear their own reasons for change, rather than supplying reasons for them.",
+    "source": "Motivational interviewing (Miller & Rollnick) — standard clinical approach",
+    "source_url": null,
+    "license": "Concept — public domain description"
+  },
+  {
+    "topic": "motivation",
+    "modality": "mi",
+    "title": "Evoking change talk",
+    "content": "Ask open questions that draw out the person's own motivations and reasons for change, and affirm them when they appear — the person voicing change is more persuasive than the clinician arguing for it.",
+    "source": "Motivational interviewing (Miller & Rollnick) — standard clinical approach",
+    "source_url": null,
+    "license": "Concept — public domain description"
+  },
+  {
+    "topic": "grounding",
+    "modality": null,
+    "title": "5-4-3-2-1 grounding",
+    "content": "Anchor attention in the present by naming 5 things you can see, 4 you can touch, 3 you can hear, 2 you can smell, and 1 you can taste. Useful when feeling panicky, dissociated, or caught in racing thoughts.",
+    "source": "Grounding technique (standard clinical exercise)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+    "license": "Concept — public domain description"
+  }
+]

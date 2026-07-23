@@ -1,0 +1,38 @@
+[
+  {
+    "topic": "anxiety",
+    "title": "Challenging an anxious or self-critical thought",
+    "content": "A CBT thought record helps slow down a distressing thought and examine it: name the situation, the automatic thought, the feeling it created, the evidence for and against it, and a more balanced thought.",
+    "source": "Cognitive behavioral therapy — thought record (standard clinical exercise)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Concept — public domain; exercise scaffold, no copyrighted worksheet copied",
+    "metadata": { "render_tool": "start_thought_record" }
+  },
+  {
+    "topic": "grief",
+    "title": "Unsent letter",
+    "content": "Writing an unsent letter lets a person say what is hard to say aloud — to someone they miss, someone who hurt them, or their past self — with no consequences.",
+    "source": "Expressive writing (standard clinical exercise)",
+    "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
+    "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "Write a letter you will never send to the person on your mind. Say everything you haven't been able to say." }
+  },
+  {
+    "topic": "values",
+    "title": "Values reflection (ACT)",
+    "content": "An ACT values exercise: reflect on the kind of person you want to be in a hard area of life, and one small action that moves you toward it — even while difficult feelings are present.",
+    "source": "Acceptance and commitment therapy — values clarification (standard clinical exercise)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "What matters most to you in the area of life that feels hardest right now, and what is one small step that would honor it?" }
+  },
+  {
+    "topic": "anxiety",
+    "title": "Worry postponement",
+    "content": "Worry time is a CBT technique: instead of fighting worries all day, note them down and set aside a short, scheduled time later to attend to them, freeing attention in the meantime.",
+    "source": "Cognitive behavioral therapy — stimulus control for worry (standard clinical exercise)",
+    "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
+    "license": "Concept — public domain; exercise scaffold",
+    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "List the worries on your mind right now. We'll set them aside together for a scheduled worry time." }
+  }
+]

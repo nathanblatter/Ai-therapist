@@ -1,7 +1,8 @@
-// Ingest the psychoeducation seed corpus into knowledge_chunks: embed each
-// passage with text-embedding-3-small and upsert (idempotent by content_hash).
-// Run AFTER migration 031, from the app container (DATABASE_URL + OPENAI key set):
-//   npx tsx src/database/scripts/ingestKnowledge.js
+// Ingest the RAG seed corpora into knowledge_chunks: embed each passage with
+// text-embedding-3-small and upsert (idempotent by content_hash). Loads three
+// kinds — psychoeducation prose, worksheets, and modality techniques.
+// Run AFTER migrations 031 + 032, from the app container (DATABASE_URL + OPENAI
+// key set):  npx tsx src/database/scripts/ingestKnowledge.js
 // Re-running is safe: unchanged passages are updated in place, edited ones re-embedded.
 import crypto from 'crypto';
 import fs from 'fs';
@@ -14,39 +15,61 @@ import { upsertKnowledgeChunk } from '../../server/db/knowledge.queries.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function ingest() {
-  const seedPath = path.join(__dirname, '../seeds/psychoeducation.seed.json');
-  const chunks = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
-  console.log(`Ingesting ${chunks.length} psychoeducation chunks from ${path.basename(seedPath)}...`);
+// Each seed file's default kind; individual chunks may override via a `kind` field.
+const SEED_FILES = [
+  { file: 'psychoeducation.seed.json', kind: 'psychoeducation' },
+  { file: 'worksheets.seed.json', kind: 'worksheet' },
+  { file: 'techniques.seed.json', kind: 'technique' },
+];
 
+async function ingest() {
+  let total = 0;
   let ok = 0;
-  for (const c of chunks) {
-    if (!c.content || !c.source) {
-      console.error(`  ✗ skipping malformed chunk (missing content/source): ${JSON.stringify(c).slice(0, 80)}`);
+
+  for (const seed of SEED_FILES) {
+    const seedPath = path.join(__dirname, '../seeds', seed.file);
+    if (!fs.existsSync(seedPath)) {
+      console.log(`  (skipping ${seed.file} — not found)`);
       continue;
     }
-    try {
-      const contentHash = crypto.createHash('md5').update(c.content).digest('hex');
-      const embedding = await embedText(c.content);
-      await upsertKnowledgeChunk({
-        topic: c.topic ?? null,
-        title: c.title ?? null,
-        content: c.content,
-        source: c.source,
-        source_url: c.source_url ?? null,
-        license: c.license ?? null,
-        content_hash: contentHash,
-        embedding,
-      });
-      ok++;
-      console.log(`  ✓ ${c.title ?? contentHash.slice(0, 8)}`);
-    } catch (err) {
-      console.error(`  ✗ ${c.title ?? '(untitled)'}: ${err.message}`);
+    const chunks = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+    console.log(`Ingesting ${chunks.length} '${seed.kind}' chunks from ${seed.file}...`);
+
+    for (const c of chunks) {
+      total++;
+      if (!c.content || !c.source) {
+        console.error(`  ✗ skipping malformed chunk (missing content/source)`);
+        continue;
+      }
+      try {
+        const contentHash = crypto.createHash('md5').update(c.content).digest('hex');
+        const embedding = await embedText(c.content);
+        await upsertKnowledgeChunk({
+          topic: c.topic ?? null,
+          title: c.title ?? null,
+          content: c.content,
+          source: c.source,
+          source_url: c.source_url ?? null,
+          license: c.license ?? null,
+          kind: c.kind ?? seed.kind,
+          modality: c.modality ?? null,
+          metadata: c.metadata ?? null,
+          content_hash: contentHash,
+          embedding,
+        });
+        ok++;
+        console.log(`  ✓ [${c.kind ?? seed.kind}] ${c.title ?? contentHash.slice(0, 8)}`);
+      } catch (err) {
+        console.error(`  ✗ ${c.title ?? '(untitled)'}: ${err.message}`);
+      }
     }
   }
 
-  const { rows } = await pool.query('SELECT COUNT(*) AS n FROM knowledge_chunks WHERE embedding IS NOT NULL');
-  console.log(`Done: ${ok}/${chunks.length} embedded this run; ${rows[0].n} total chunks embedded in the knowledge base.`);
+  const { rows } = await pool.query(
+    `SELECT kind, COUNT(*) AS n FROM knowledge_chunks WHERE embedding IS NOT NULL GROUP BY kind ORDER BY kind`
+  );
+  console.log(`Done: ${ok}/${total} embedded this run. Knowledge base by kind:`);
+  rows.forEach(r => console.log(`  ${r.kind}: ${r.n}`));
 }
 
 ingest()

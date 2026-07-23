@@ -34,6 +34,19 @@ linking + short excerpts over wholesale copying for anything not public-domain/C
 - **Open-access peer-reviewed articles** (PMC / open-access journals) — cite the
   DOI; only excerpt what the license allows.
 
+## Worksheets & techniques corpora (also vet)
+Two more seed files feed the `find_worksheet` and `suggest_modality_technique`
+tools and follow the same table + vetting rules:
+- `worksheets.seed.json` (`kind='worksheet'`) — exercise scaffolds that map to an
+  on-screen render tool via `metadata.render_tool` (`start_thought_record` or
+  `show_journaling_prompt`). These are standard clinical exercise *descriptions*,
+  not copied copyrighted worksheets.
+- `techniques.seed.json` (`kind='technique'`, `modality` = cbt/act/mi/null) —
+  brief descriptions of standard techniques, tagged to a therapeutic approach.
+  CBT/ACT sourced from NIMH public-domain material; MI attributed to Miller &
+  Rollnick as the standard approach (description only). Vet clinical accuracy +
+  attribution before relying on them.
+
 ## How to add content
 1. Add vetted objects to `psychoeducation.seed.json`
    (`{ topic, title, content, source, source_url, license }`).

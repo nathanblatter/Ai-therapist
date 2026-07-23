@@ -86,11 +86,19 @@ export async function getSessionSafetyPlan(sessionId: string): Promise<{ plan: S
   return result.rows[0] ?? null;
 }
 
-/** Facts the participant explicitly asked the AI to remember (remember_this). */
-export async function insertUserMemory(userId: number, fact: string, sessionId: string | null): Promise<void> {
+/** Facts the participant explicitly asked the AI to remember (remember_this).
+ *  The optional embedding powers semantic recall (recall_relevant_history);
+ *  passing undefined stores the fact without an embedding (still listable). */
+export async function insertUserMemory(
+  userId: number,
+  fact: string,
+  sessionId: string | null,
+  embedding?: number[],
+): Promise<void> {
+  const vec = embedding ? `[${embedding.join(',')}]` : null;
   await pool.query(
-    'INSERT INTO user_memories (user_id, fact, session_id) VALUES ($1, $2, $3)',
-    [userId, fact, sessionId]
+    'INSERT INTO user_memories (user_id, fact, session_id, embedding) VALUES ($1, $2, $3, $4::vector)',
+    [userId, fact, sessionId, vec]
   );
 }
 
@@ -100,6 +108,30 @@ export async function getUserMemories(userId: number, limit = 10): Promise<strin
     [userId, limit]
   );
   return result.rows.map(r => r.fact);
+}
+
+export interface RelevantMemory {
+  fact: string;
+  created_at: Date;
+  similarity: number;
+}
+
+/** Cosine-nearest embedded memories belonging to one user (recall_relevant_history). */
+export async function searchUserMemories(
+  userId: number,
+  embedding: number[],
+  limit: number,
+): Promise<RelevantMemory[]> {
+  const vec = `[${embedding.join(',')}]`;
+  const result = await pool.query<RelevantMemory>(
+    `SELECT fact, created_at, 1 - (embedding <=> $2::vector) AS similarity
+     FROM user_memories
+     WHERE user_id = $1 AND embedding IS NOT NULL
+     ORDER BY embedding <=> $2::vector
+     LIMIT $3`,
+    [userId, vec, limit]
+  );
+  return result.rows;
 }
 
 export async function insertScaleResponse(
