@@ -107,10 +107,22 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   const [injectRole, setInjectRole] = useState<'system' | 'user'>('system');
   const [injectRespond, setInjectRespond] = useState(false);
 
-  // Initial fetch
+  // Initial fetch. After that the list is driven LIVE by socket/sideband
+  // events (session:created / session:ended / session:activity); the endpoint
+  // is only re-hit as a reconciliation seed after a socket reconnect.
   useEffect(() => {
     fetchActiveSessions();
   }, []);
+
+  // Reconcile after every (re)connect: while the socket was down we missed
+  // created/ended/activity events, so re-seed from the DB and re-request the
+  // sideband connection list. (Runs on the initial connect too — the merge in
+  // fetchActiveSessions makes that harmless.)
+  useEffect(() => {
+    if (!connected || !socket) return;
+    fetchActiveSessions();
+    socket.emit('admin:get-sideband-connections');
+  }, [connected, socket]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drive live duration / "time ago" without waiting on socket events.
   useEffect(() => {
@@ -227,6 +239,52 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [transcripts, selectedSidebandSession]);
 
+  // Late-join history (ai-therapist-16): live sideband deltas only cover
+  // speech since THIS page loaded. When a session's transcript panel is first
+  // opened, seed it once from the DB messages, then let live deltas continue
+  // on top. DB turns older than the earliest live turn are prepended; anything
+  // newer is already represented live (the DB flush lags ~15s), so it is
+  // skipped to avoid duplicating turns.
+  const seededTranscriptsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const sid = selectedSidebandSession?.sessionId;
+    if (!sid || seededTranscriptsRef.current.has(sid)) return;
+    seededTranscriptsRef.current.add(sid);
+
+    (async () => {
+      try {
+        const res = await fetch(`/admin/api/sessions/${sid}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const dbTurns: TranscriptTurn[] = (data.messages || [])
+          .filter((m: { role: string; message: string | null }) =>
+            (m.role === 'user' || m.role === 'assistant') && (m.message ?? '').trim())
+          .map((m: { message_id: number; role: 'user' | 'assistant'; message: string; created_at: string }) => ({
+            itemId: `db-${m.message_id}`,
+            role: m.role,
+            text: m.message.trim(),
+            final: true,
+            timestamp: m.created_at,
+          }));
+        if (dbTurns.length === 0) return;
+
+        setTranscripts(prev => {
+          const live = prev[sid] ?? [];
+          const earliestLive = live.length > 0
+            ? Math.min(...live.map(t => new Date(t.timestamp).getTime()))
+            : Infinity;
+          const history = dbTurns.filter(t => new Date(t.timestamp).getTime() < earliestLive);
+          if (history.length === 0) return prev;
+          return { ...prev, [sid]: [...history, ...live].slice(-200) };
+        });
+      } catch (err) {
+        // Allow a retry next time the session is selected.
+        seededTranscriptsRef.current.delete(sid);
+        console.error(`[LiveMonitoring] Failed to seed transcript history for ${sid}:`, err);
+      }
+    })();
+  }, [selectedSidebandSession]);
+
   // Accumulate live transcript deltas (keyed by item_id) into ordered turns.
   const handleSidebandTranscript = (data: {
     sessionId: string; role: 'assistant' | 'user'; itemId: string;
@@ -269,7 +327,30 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
         message_count: parseInt(String(session.message_count)) || 0,
         duration_seconds: parseFloat(String(session.duration_seconds)) || 0
       }));
-      setActiveSessions(sessions);
+      // MERGE with live state rather than replacing it: the DB lags the
+      // sideband (messages flush every ~15s), so live counts/activity that are
+      // AHEAD of the fetch win; sessions the fetch doesn't know about yet
+      // (created while it was in flight) are kept.
+      setActiveSessions(prev => {
+        const bySessionId = new Map(prev.map(s => [s.session_id, s]));
+        const merged = sessions.map(fetched => {
+          const live = bySessionId.get(fetched.session_id);
+          if (!live) return fetched;
+          bySessionId.delete(fetched.session_id);
+          return {
+            ...fetched,
+            message_count: Math.max(fetched.message_count, live.message_count || 0),
+            last_activity:
+              live.last_activity && (!fetched.last_activity ||
+                new Date(live.last_activity) > new Date(fetched.last_activity))
+                ? live.last_activity
+                : fetched.last_activity,
+          };
+        });
+        // Live-known sessions missing from the fetch, newest first (matches
+        // handleSessionCreated's prepend behaviour).
+        return [...Array.from(bySessionId.values()), ...merged];
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -278,17 +359,20 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   };
 
   const handleSessionCreated = (data: { sessionId: string; userId: string; username: string; status: string; created_at: string }) => {
-    setActiveSessions(prev => [{
-      session_id: data.sessionId,
-      user_id: data.userId,
-      username: data.username,
-      session_name: null,
-      status: data.status,
-      created_at: data.created_at,
-      message_count: 0,
-      last_activity: data.created_at,
-      duration_seconds: 0
-    }, ...prev]);
+    setActiveSessions(prev => {
+      if (prev.some(s => s.session_id === data.sessionId)) return prev;
+      return [{
+        session_id: data.sessionId,
+        user_id: data.userId,
+        username: data.username,
+        session_name: null,
+        status: data.status,
+        created_at: data.created_at,
+        message_count: 0,
+        last_activity: data.created_at,
+        duration_seconds: 0
+      }, ...prev];
+    });
   };
 
   const handleSessionEnded = (data: { sessionId: string }) => {
