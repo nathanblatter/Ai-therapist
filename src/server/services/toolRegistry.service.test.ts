@@ -456,6 +456,9 @@ describe('retrieve_safety_plan (ai-therapist-72)', () => {
     const r = await toolRegistry.executeTool('retrieve_safety_plan', {}, { sessionId: 's1' }) as { available: boolean; reason: string };
     expect(r.available).toBe(false);
     expect(r.reason).toMatch(/create_safety_plan/);
+  });
+});
+
 describe('create_custom_worksheet (ai-therapist-73)', () => {
   const structuredTemplate = {
     chunk_id: 5,
