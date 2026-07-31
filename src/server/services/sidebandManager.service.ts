@@ -104,13 +104,15 @@ export class SidebandManager {
             return;
           }
 
-          // The standard API key was rejected outright (auth failure, not the
-          // registration race). Log loudly — this contradicts OpenAI's
-          // server-side-controls docs — and fall back once to the session's
-          // ephemeral key so monitoring still works for this session.
-          if ((res.statusCode === 401 || res.statusCode === 403) && fallbackKey && fallbackKey !== apiKey) {
-            console.error(`[Sideband] Standard API key rejected (HTTP ${res.statusCode}) for call_id=${callId}; falling back to the per-session ephemeral key. Body: ${body || '(empty)'}`);
-            this.connect(sessionId, callId, fallbackKey, attempt).catch(() => {});
+          // Current key rejected: either an outright auth failure (401/403 —
+          // e.g. an expired ephemeral key on a late reconnect) or 404 retries
+          // exhausted (live-verified 2026-07-31: a key with the wrong project
+          // scope gets call_id_not_found for the whole call, not just during
+          // the registration race). Try the other key once.
+          const retriesExhausted = callNotReady && attempt >= this.maxReconnectAttempts;
+          if ((res.statusCode === 401 || res.statusCode === 403 || retriesExhausted) && fallbackKey && fallbackKey !== apiKey) {
+            console.error(`[Sideband] Key rejected (HTTP ${res.statusCode}) for call_id=${callId}; retrying with the alternate key. Body: ${body || '(empty)'}`);
+            this.connect(sessionId, callId, fallbackKey, 0).catch(() => {});
             return;
           }
 

@@ -221,23 +221,24 @@ export default function sessionsRoutes(): Router {
       // Kill switch: set SIDEBAND_ENABLED=false to stop attaching without a redeploy.
       const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
-      // Auth (ai-therapist-62): per OpenAI's server-side-controls docs the
-      // sideband WS authenticates with the STANDARD API key, which never
-      // expires — so late reconnects keep working (the per-session ephemeral
-      // key used previously expires minutes into the session). The earlier
-      // "standard key returns 404 call_id_not_found" observation is now
-      // believed to have been the attach-before-call-registered race, which
-      // connect() retries around. If the standard key is genuinely rejected
-      // live, connect()'s unexpected-response handler logs the HTTP status +
-      // body, and the client-supplied ephemeral key is used as a fallback.
+      // Auth (ai-therapist-62, revised after live verification 2026-07-31):
+      // the STANDARD API key is rejected with 404 call_id_not_found for the
+      // entire life of a real WebRTC call (verified in prod logs — all retry
+      // attempts fail, so it is NOT the attach-before-registered race; likely
+      // a key/project scope mismatch). The per-session EPHEMERAL key is what
+      // attaches successfully, so it stays the primary. The standard key is
+      // kept as the fallback for late reconnects where the ephemeral key may
+      // have expired (the original item-62 concern).
       if (!sidebandEnabled) {
         console.log('[Sideband] Disabled via SIDEBAND_ENABLED=false; call_id recorded only.');
       } else {
         const { getOpenAIKey } = await import('../../config/secrets.js');
-        const apiKey = await getOpenAIKey();
-        const fallbackKey = typeof ephemeral_key === 'string' && ephemeral_key ? ephemeral_key : undefined;
+        const standardKey = await getOpenAIKey();
+        const ephemeralKey = typeof ephemeral_key === 'string' && ephemeral_key ? ephemeral_key : undefined;
+        const apiKey = ephemeralKey ?? standardKey;
+        const fallbackKey = ephemeralKey ? standardKey : undefined;
         if (!apiKey) {
-          console.error('[Sideband] No standard OpenAI key available; skipping sideband attach.');
+          console.error('[Sideband] No usable OpenAI key (ephemeral or standard); skipping sideband attach.');
         } else {
           sidebandManager.connect(sessionId, call_id, apiKey, 0, fallbackKey).catch(err => {
             console.warn(`[Sideband] connect() failed for ${sessionId}:`, err instanceof Error ? err.message : err);

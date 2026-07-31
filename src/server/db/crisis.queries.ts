@@ -62,31 +62,18 @@ export interface AllCrisisData {
   riskScoreHistory: Record<string, unknown>[];
 }
 
-/** Comprehensive crisis dashboard data (5 tables joined to session names). */
+/** Comprehensive crisis dashboard data (3 live tables joined to session names).
+ * clinical_reviews and human_handoffs were dropped in migrations 035 (sunset,
+ * ai-therapist-23); their keys remain as empty arrays for API-shape
+ * compatibility with the admin client. */
 export async function getAllCrisisData(): Promise<AllCrisisData> {
-  const [clinicalReviews, crisisEvents, humanHandoffs, interventionActions, riskScoreHistory] = await Promise.all([
-    pool.query(`
-      SELECT cr.*, ts.session_name
-      FROM clinical_reviews cr
-      LEFT JOIN therapy_sessions ts ON cr.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE
-      ORDER BY cr.requested_at DESC
-      LIMIT 500
-    `),
+  const [crisisEvents, interventionActions, riskScoreHistory] = await Promise.all([
     pool.query(`
       SELECT ce.*, ts.session_name
       FROM crisis_events ce
       LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
       WHERE ts.is_demo IS NOT TRUE
       ORDER BY ce.created_at DESC
-      LIMIT 500
-    `),
-    pool.query(`
-      SELECT hh.*, ts.session_name
-      FROM human_handoffs hh
-      LEFT JOIN therapy_sessions ts ON hh.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE
-      ORDER BY hh.initiated_at DESC
       LIMIT 500
     `),
     pool.query(`
@@ -108,9 +95,9 @@ export async function getAllCrisisData(): Promise<AllCrisisData> {
   ]);
 
   return {
-    clinicalReviews: clinicalReviews.rows,
+    clinicalReviews: [],
     crisisEvents: crisisEvents.rows,
-    humanHandoffs: humanHandoffs.rows,
+    humanHandoffs: [],
     interventionActions: interventionActions.rows,
     riskScoreHistory: riskScoreHistory.rows,
   };
