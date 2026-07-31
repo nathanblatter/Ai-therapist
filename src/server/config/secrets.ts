@@ -1,30 +1,14 @@
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from "@aws-sdk/client-secrets-manager";
 import "dotenv/config";
 
-// The OpenAI key (used for the Realtime API) is stored in AWS Secrets Manager.
-// AWS credentials are supplied to the container via AWS_ACCESS_KEY_ID /
-// AWS_SECRET_ACCESS_KEY / AWS_REGION.
+/**
+ * Get OpenAI API key from environment.
+ * The OpenAI key must be provided via the OPENAI_API_KEY environment variable.
+ * @throws {Error} If OPENAI_API_KEY is not set
+ */
 export async function getOpenAIKey() {
-  // Prefer a plain env var when present — used by tests/CI (so the app can boot
-  // without AWS) and as an AWS-free deployment option.
-  if (process.env.OPENAI_API_KEY) {
-    return process.env.OPENAI_API_KEY;
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) {
+    throw new Error('OPENAI_API_KEY environment variable is not set');
   }
-
-  const secret_name = "OpenAI-APIKEY";
-  const client = new SecretsManagerClient({
-    region: process.env.AWS_REGION || "us-west-1",
-  });
-
-  const response = await client.send(
-    new GetSecretValueCommand({
-      SecretId: secret_name,
-      VersionStage: "AWSCURRENT",
-    })
-  );
-
-  return response.SecretString;
+  return key;
 }
