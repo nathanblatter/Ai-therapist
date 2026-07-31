@@ -270,6 +270,11 @@ export default function tokenRoutes(): Router {
               .then(m => m.generateSessionInsightsAsync(sessionId))
               .catch(e => console.error('[Insights] generation failed:', e));
 
+            // Quality eval (LLM judge) — no-op unless system_config.evals.auto_run_enabled.
+            import('../../services/sessionEval.service.js')
+              .then(m => m.maybeAutoEvalSession(sessionId))
+              .catch(e => console.error('[Evals] auto-eval failed:', e));
+
             global.io.to(`session:${sessionId}`).emit('session:status', {
               status: 'ended',
               endedBy: 'system',

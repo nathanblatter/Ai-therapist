@@ -36,6 +36,7 @@ import adminSessionsRoutes from "./routes/admin/sessions.routes.js";
 import sidebandRoutes from "./routes/admin/sideband.routes.js";
 import insightsRoutes from "./routes/admin/insights.routes.js";
 import knowledgeRoutes from "./routes/admin/knowledge.routes.js";
+import evalsRoutes from "./routes/admin/evals.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
 import tokenRoutes from "./routes/public/token.routes.js";
@@ -435,6 +436,9 @@ app.use(insightsRoutes());
 
 // RAG knowledge-base curation (Knowledge Base tab) -> routes/admin/knowledge.routes.ts.
 app.use(knowledgeRoutes());
+
+// Session eval harness (LLM-judge quality scores) -> routes/admin/evals.routes.ts
+app.use(evalsRoutes());
 
 async function startProdServer() {
   console.log("Starting in production mode...");

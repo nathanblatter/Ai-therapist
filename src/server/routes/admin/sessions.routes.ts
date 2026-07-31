@@ -78,6 +78,11 @@ export default function adminSessionsRoutes(): Router {
         .then(m => m.finalize(sessionId))
         .catch(e => console.error('[Recorder] finalize failed:', e));
 
+      // Quality eval (LLM judge) — no-op unless system_config.evals.auto_run_enabled.
+      import('../../services/sessionEval.service.js')
+        .then(m => m.maybeAutoEvalSession(sessionId))
+        .catch(e => console.error('[Evals] auto-eval failed:', e));
+
       // Notify admin dashboards and the participant's own session room.
       global.io.to('admin-broadcast').emit('session:ended', {
         sessionId,

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, AlertTriangle } from "react-feather";
 import ConversationBubble from "./ConversationBubble";
 import SessionInsightsPanel from "./SessionInsightsPanel";
+import SessionEvalPanel from "./SessionEvalPanel";
 import RiskTimeline from "./RiskTimeline";
 import { useSocket } from '../hooks/useSocket';
 import { toast } from "../../shared/components/Toast";
@@ -686,6 +687,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
           {/* Per-message risk scores with the LLM's context judgment + reasoning */}
           {!loading && <RiskTimeline sessionId={sessionId} />}
+
+          {/* LLM-judge quality scores (ended sessions only) */}
+          {!loading && <SessionEvalPanel sessionId={sessionId} sessionStatus={session?.status} />}
 
           {/* Filter Toggle */}
           {!loading && messages.length > 0 && (
