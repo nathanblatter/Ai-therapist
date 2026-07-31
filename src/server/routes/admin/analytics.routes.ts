@@ -53,5 +53,69 @@ export default function analyticsRoutes(): Router {
     }
   });
 
+  // GET /admin/api/analytics/tools - tool-usage analytics (ai-therapist-75):
+  // per-tool frequency + failure rate, tools-per-session distribution, and
+  // dead tools (registered in the toolRegistry but never invoked).
+  router.get('/admin/api/analytics/tools', requireRole('therapist', 'researcher'), async (_req, res) => {
+    try {
+      const { toolRegistry } = await import('../../services/toolRegistry.service.js');
+      const {
+        getToolInvocationStats,
+        getToolsPerSessionDistribution,
+        getToolUsageSessionCounts,
+      } = await import('../../db/index.js');
+
+      const [stats, distribution, sessionCounts] = await Promise.all([
+        getToolInvocationStats(),
+        getToolsPerSessionDistribution(),
+        getToolUsageSessionCounts(),
+      ]);
+
+      const invokedNames = new Set(stats.map(s => s.tool_name));
+      const deadTools = toolRegistry.getAllToolDefinitions()
+        .map(def => def.name)
+        .filter(name => !invokedNames.has(name));
+
+      const zeroToolSessions = Math.max(
+        0,
+        sessionCounts.total_sessions - sessionCounts.sessions_with_tool_use
+      );
+
+      res.json({
+        tool_stats: stats,
+        distinct_tools_per_session: [
+          { distinct_tool_count: 0, session_count: zeroToolSessions },
+          ...distribution,
+        ],
+        dead_tools: deadTools,
+        registered_tool_count: toolRegistry.getAllToolDefinitions().length,
+        sessions_with_tool_use: sessionCounts.sessions_with_tool_use,
+        total_sessions: sessionCounts.total_sessions,
+      });
+    } catch (err) {
+      console.error('Failed to fetch tool analytics:', err);
+      res.status(500).json({ error: 'Failed to fetch tool analytics' });
+    }
+  });
+
+  // GET /admin/api/analytics/cost - per-session cost/token tracking rollup
+  // (ai-therapist-25c): all-time totals + a daily-spend series for the admin
+  // analytics view.
+  router.get('/admin/api/analytics/cost', requireRole('therapist', 'researcher'), async (req, res) => {
+    const days = req.query.days ? parseInt(String(req.query.days), 10) : 30;
+    try {
+      const { getCostTotals, getDailySpend, getFeedbackAggregate } = await import('../../db/index.js');
+      const [totals, dailySpend, feedback] = await Promise.all([
+        getCostTotals(),
+        getDailySpend(Number.isFinite(days) && days > 0 ? days : 30),
+        getFeedbackAggregate(),
+      ]);
+      res.json({ totals, daily_spend: dailySpend, feedback });
+    } catch (err) {
+      console.error('Failed to fetch cost analytics:', err);
+      res.status(500).json({ error: 'Failed to fetch cost analytics' });
+    }
+  });
+
   return router;
 }

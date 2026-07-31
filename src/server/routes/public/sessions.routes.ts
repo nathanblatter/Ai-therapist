@@ -92,6 +92,43 @@ export default function sessionsRoutes(): Router {
     }
   });
 
+  // POST /api/sessions/:sessionId/feedback - post-session participant survey
+  // (ai-therapist-25b): 2-3 Likert ratings (1-5) + optional free text, shown
+  // once on the post-session screen. Upsert so a resubmit just overwrites.
+  router.post('/api/sessions/:sessionId/feedback', async (req, res) => {
+    const { sessionId } = req.params;
+    const { helpfulness_rating, ease_rating, would_return_rating, comments } = req.body as {
+      helpfulness_rating?: number | null;
+      ease_rating?: number | null;
+      would_return_rating?: number | null;
+      comments?: string | null;
+    };
+
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const { upsertSessionFeedback } = await import('../../db/index.js');
+      const feedback = await upsertSessionFeedback(sessionId, {
+        helpfulness_rating: helpfulness_rating ?? null,
+        ease_rating: ease_rating ?? null,
+        would_return_rating: would_return_rating ?? null,
+        comments: comments ?? null,
+      });
+      res.json({ success: true, feedback });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to store feedback';
+      // Validation errors from upsertSessionFeedback (bad rating) are the
+      // participant's fault, not a server error.
+      const isValidationError = /must be an integer 1-5/.test(message);
+      console.error('Failed to store session feedback:', err);
+      res.status(isValidationError ? 400 : 500).json({ error: message });
+    }
+  });
+
   // GET /api/scales/:scaleId - screener definition for the client form
   router.get('/api/scales/:scaleId', async (req, res) => {
     const { SCALES } = await import('../../utils/scales.js');

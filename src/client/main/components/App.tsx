@@ -6,6 +6,7 @@ import SessionSettings from "./SessionSettings";
 import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
 import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
+import PostSessionScreen, { type PostSessionData, type SessionRecapData, type SharedWriteup } from "./PostSessionScreen";
 import Header from './Header';
 import VoiceOrb from './VoiceOrb';
 import { initializeLogger } from '../utils/logger';
@@ -86,6 +87,14 @@ export default function App() {
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
   const [activeExercise, setActiveExercise] = useState<ActiveExercise | null>(null);
   const [toolUI, setToolUI] = useState<ToolUI | null>(null);
+  // Artifacts the participant chose to keep/share during the session, for
+  // "Download my work" (ai-therapist-76) — never the raw transcript.
+  const [sessionRecap, setSessionRecap] = useState<SessionRecapData | null>(null);
+  const [sessionSafetyPlan, setSessionSafetyPlan] = useState<SafetyPlanData | null>(null);
+  const [sessionWriteups, setSessionWriteups] = useState<SharedWriteup[]>([]);
+  // Snapshot shown on the post-session screen (ai-therapist-25b / 76) after
+  // stopSession() clears the live session state.
+  const [postSessionData, setPostSessionData] = useState<PostSessionData | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const [crisisContact, setCrisisContact] = useState<CrisisContact>({
     hotline: '988 Suicide & Crisis Lifeline',
@@ -241,6 +250,7 @@ export default function App() {
 
   // Wrapper function that routes to realtime or chat-only based on features
   async function startSession(checkin: CheckinData | null = null) {
+    setPostSessionData(null); // clear the previous session's post-session screen
     if (features.voice_enabled === false) {
       await startChatSession(checkin);
     } else {
@@ -723,6 +733,23 @@ export default function App() {
   async function stopSession() {
     setActiveExercise(null);
     setToolUI(null);
+
+    // Snapshot what the participant chose to keep/share before clearing
+    // per-session state, so the post-session screen (recap + safety plan +
+    // "download my work") has something to show (ai-therapist-25b/76).
+    if (sessionId) {
+      setPostSessionData({
+        sessionId,
+        endedAt: new Date(),
+        recap: sessionRecap,
+        safetyPlan: sessionSafetyPlan,
+        writeups: sessionWriteups,
+      });
+    }
+    setSessionRecap(null);
+    setSessionSafetyPlan(null);
+    setSessionWriteups([]);
+
     // Handle chat-only session
     if (sessionType === 'chat') {
       if (sessionId) {
@@ -1044,11 +1071,15 @@ export default function App() {
     },
     display_session_recap: async (args: unknown) => {
       const a = (args ?? {}) as { focus?: string; techniques?: string[]; takeaway?: string };
-      setToolUI({ kind: 'recap', focus: a.focus || 'Today’s conversation', techniques: a.techniques, takeaway: a.takeaway || '' });
+      const recap = { focus: a.focus || 'Today’s conversation', techniques: a.techniques, takeaway: a.takeaway || '' };
+      setToolUI({ kind: 'recap', ...recap });
+      setSessionRecap(recap); // kept for "Download my work" (ai-therapist-76)
       return { shown: true };
     },
     create_safety_plan: async (args: unknown) => {
-      setToolUI({ kind: 'safety_plan', plan: (args ?? {}) as SafetyPlanData });
+      const plan = (args ?? {}) as SafetyPlanData;
+      setToolUI({ kind: 'safety_plan', plan });
+      setSessionSafetyPlan(plan); // kept for "Download my work" (ai-therapist-76)
       return { shown: true };
     },
     administer_scale: async (args: unknown) => {
@@ -1085,6 +1116,11 @@ export default function App() {
         <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
           {isSessionActive ? (
             <ChatLog messages={messages} assistantStream={assistantStream} />
+          ) : postSessionData ? (
+            <PostSessionScreen
+              data={postSessionData}
+              onDismiss={() => setPostSessionData(null)}
+            />
           ) : (
             <div className="flex items-center justify-center h-full text-center px-4">
               <div className="w-full max-w-2xl">
@@ -1116,10 +1152,42 @@ export default function App() {
       <ToolOverlays
         ui={toolUI}
         onClose={() => setToolUI(null)}
-        onShareText={(text) => sendTextMessage(text)}
+        onShareText={(text) => {
+          sendTextMessage(text);
+          // Only journal uses onShareText; keep it for "Download my work" (ai-therapist-76).
+          if (toolUI?.kind === 'journal') {
+            setSessionWriteups(prev => [...prev, { type: 'journal', label: 'Something I wrote', summary: text }]);
+          }
+        }}
         onInvisibleMessage={(text) => sendInvisiblePrompt(text)}
-        onLogRecord={(type, message, extras) =>
-          logConversation({ sessionId, role: 'user', type, message, extras })}
+        onLogRecord={(type, message, extras) => {
+          logConversation({ sessionId, role: 'user', type, message, extras });
+          // Kept for "Download my work" (ai-therapist-76) — participant-entered
+          // content only, formatted from the same extras the model receives.
+          if (type === 'thought_record') {
+            const r = extras as { situation?: string; thought?: string; feeling?: string; balanced_thought?: string };
+            setSessionWriteups(prev => [...prev, {
+              type: 'thought_record',
+              label: 'Thought record',
+              summary: [
+                r.situation && `Situation: ${r.situation}`,
+                r.thought && `Automatic thought: ${r.thought}`,
+                r.feeling && `Feeling: ${r.feeling}`,
+                r.balanced_thought && `Balanced thought: ${r.balanced_thought}`,
+              ].filter(Boolean).join('\n'),
+            }]);
+          } else if (type === 'values_sort') {
+            const v = extras as { values?: string[] };
+            setSessionWriteups(prev => [...prev, { type: 'values_sort', label: 'Values that matter to me', summary: (v.values ?? []).join(', ') }]);
+          } else if (type === 'fear_ladder') {
+            const f = extras as { items?: { situation: string; rating: number }[] };
+            setSessionWriteups(prev => [...prev, {
+              type: 'fear_ladder',
+              label: 'My fear ladder (easiest to hardest)',
+              summary: (f.items ?? []).map((it, i) => `${i + 1}. ${it.situation} (${it.rating}/10)`).join('\n'),
+            }]);
+          }
+        }}
         sessionId={sessionId}
       />
 

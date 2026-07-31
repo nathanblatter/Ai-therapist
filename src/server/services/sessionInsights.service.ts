@@ -97,6 +97,14 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     ],
   });
 
+  // Cost tracking (ai-therapist-25c): best-effort, never blocks insights generation.
+  import('../db/index.js')
+    .then(({ recordLlmUsage }) => recordLlmUsage(
+      sessionId, 'insights', INSIGHTS_MODEL,
+      response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
+    ))
+    .catch(err => log.error({ err }, 'Failed to record LLM usage (non-fatal)'));
+
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error('Empty insights response from model');
 

@@ -120,6 +120,23 @@ export async function approveKnowledgeChunks(filter: { kind?: string | null; top
   return result.rowCount ?? 0;
 }
 
+/** Preview what approveKnowledgeChunks(filter) would affect, without writing
+ *  (ai-therapist-77: --dry-run for approveKnowledge.js). */
+export async function previewPendingKnowledgeChunks(
+  filter: { kind?: string | null; topic?: string | null }
+): Promise<{ kind: string; topic: string | null; title: string | null }[]> {
+  const result = await pool.query<{ kind: string; topic: string | null; title: string | null }>(
+    `SELECT kind, topic, title
+     FROM knowledge_chunks
+     WHERE active IS NOT TRUE
+       AND ($1::text IS NULL OR kind = $1)
+       AND ($2::text IS NULL OR topic = $2)
+     ORDER BY kind, topic, title`,
+    [filter.kind ?? null, filter.topic ?? null],
+  );
+  return result.rows;
+}
+
 /** Counts of active vs pending chunks per kind (for the approval workflow). */
 export async function getKnowledgeStatusCounts(): Promise<KnowledgeStatusCounts[]> {
   const result = await pool.query<KnowledgeStatusCounts>(

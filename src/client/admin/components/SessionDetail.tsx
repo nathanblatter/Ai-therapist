@@ -35,6 +35,24 @@ interface Session {
   checkin?: { mood?: number; topic?: string; goal?: string } | null;
 }
 
+// Post-session feedback (ai-therapist-25b) shown in Session Detail.
+interface SessionFeedback {
+  helpfulness_rating: number | null;
+  ease_rating: number | null;
+  would_return_rating: number | null;
+  comments: string | null;
+  created_at: string;
+}
+
+// Per-session cost/token summary (ai-therapist-25c) shown in Session Detail.
+interface SessionCost {
+  realtime_minutes: number | null;
+  calls_by_purpose: { insights: number; redaction: number; crisis: number };
+  tokens_in: number;
+  tokens_out: number;
+  estimated_cost_usd: number;
+}
+
 interface SessionDetailProps {
   sessionId: string;
   onClose: () => void;
@@ -89,6 +107,8 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [flagNotes, setFlagNotes] = useState('');
   const [flagging, setFlagging] = useState(false);
   const [recording, setRecording] = useState<{ url: string; durationMs: number | null } | null>(null);
+  const [feedback, setFeedback] = useState<SessionFeedback | null>(null);
+  const [cost, setCost] = useState<SessionCost | null>(null);
 
   const { socket } = useSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -108,6 +128,8 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         const data = await response.json();
         setMessages(data.messages);
         setSession(data.session);
+        setFeedback(data.feedback ?? null);
+        setCost(data.cost ?? null);
 
         // Initialize sideband connection status from session data
         if (data.session?.sideband_connected) {
@@ -686,6 +708,47 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
           {/* Per-message risk scores with the LLM's context judgment + reasoning */}
           {!loading && <RiskTimeline sessionId={sessionId} />}
+
+          {/* Cost/token tracking (ai-therapist-25c) + participant feedback (ai-therapist-25b) */}
+          {!loading && (cost || feedback) && (
+            <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {cost && (
+                <div className="bg-gray-50 border rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Session Cost & Usage</h3>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    <dt className="text-gray-500">Realtime minutes</dt>
+                    <dd>{cost.realtime_minutes ?? 'N/A'}</dd>
+                    <dt className="text-gray-500">Insights calls</dt>
+                    <dd>{cost.calls_by_purpose.insights}</dd>
+                    <dt className="text-gray-500">Redaction calls</dt>
+                    <dd>{cost.calls_by_purpose.redaction}</dd>
+                    <dt className="text-gray-500">Crisis calls</dt>
+                    <dd>{cost.calls_by_purpose.crisis}</dd>
+                    <dt className="text-gray-500">Tokens (in / out)</dt>
+                    <dd>{cost.tokens_in} / {cost.tokens_out}</dd>
+                    <dt className="text-gray-500">Est. LLM cost</dt>
+                    <dd>${cost.estimated_cost_usd.toFixed(4)}</dd>
+                  </dl>
+                </div>
+              )}
+              {feedback && (
+                <div className="bg-gray-50 border rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Post-Session Feedback</h3>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    <dt className="text-gray-500">Helpfulness</dt>
+                    <dd>{feedback.helpfulness_rating ?? '—'} / 5</dd>
+                    <dt className="text-gray-500">Ease of use</dt>
+                    <dd>{feedback.ease_rating ?? '—'} / 5</dd>
+                    <dt className="text-gray-500">Would return</dt>
+                    <dd>{feedback.would_return_rating ?? '—'} / 5</dd>
+                  </dl>
+                  {feedback.comments && (
+                    <p className="text-sm text-gray-700 mt-2 italic">&ldquo;{feedback.comments}&rdquo;</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Filter Toggle */}
           {!loading && messages.length > 0 && (

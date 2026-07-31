@@ -22,23 +22,76 @@ export interface ToolInvocationStats {
   invocations: number;
   sessions: number;
   last_used: Date | null;
+  failures: number;
+  failure_rate: number;
 }
 
-/** Per-tool usage counts for the admin tools panel. */
+/** Per-tool usage counts for the admin tools panel (ai-therapist-75: now
+ *  includes failure/misfire counts alongside frequency). */
 export async function getToolInvocationStats(): Promise<ToolInvocationStats[]> {
-  const result = await pool.query<{ tool_name: string; invocations: string; sessions: string; last_used: Date | null }>(
+  const result = await pool.query<{
+    tool_name: string; invocations: string; sessions: string; last_used: Date | null; failures: string;
+  }>(
     `SELECT tool_name, COUNT(*) AS invocations,
-            COUNT(DISTINCT session_id) AS sessions, MAX(created_at) AS last_used
+            COUNT(DISTINCT session_id) AS sessions, MAX(created_at) AS last_used,
+            COUNT(*) FILTER (WHERE success IS FALSE) AS failures
      FROM tool_invocations
      GROUP BY tool_name
      ORDER BY COUNT(*) DESC`
   );
+  return result.rows.map(r => {
+    const invocations = parseInt(r.invocations, 10);
+    const failures = parseInt(r.failures, 10);
+    return {
+      tool_name: r.tool_name,
+      invocations,
+      sessions: parseInt(r.sessions, 10),
+      last_used: r.last_used,
+      failures,
+      failure_rate: invocations > 0 ? Math.round((failures / invocations) * 1000) / 10 : 0,
+    };
+  });
+}
+
+export interface ToolsPerSessionBucket {
+  distinct_tool_count: number;
+  session_count: number;
+}
+
+/** Histogram of how many distinct tools were used per session that used at
+ *  least one tool (ai-therapist-75). Sessions that never called a tool are
+ *  intentionally excluded — the caller can subtract from total session count
+ *  to get the zero-tool bucket. */
+export async function getToolsPerSessionDistribution(): Promise<ToolsPerSessionBucket[]> {
+  const result = await pool.query<{ distinct_tool_count: string; session_count: string }>(
+    `SELECT distinct_tool_count, COUNT(*) AS session_count
+     FROM (
+       SELECT session_id, COUNT(DISTINCT tool_name) AS distinct_tool_count
+       FROM tool_invocations
+       GROUP BY session_id
+     ) per_session
+     GROUP BY distinct_tool_count
+     ORDER BY distinct_tool_count`
+  );
   return result.rows.map(r => ({
-    tool_name: r.tool_name,
-    invocations: parseInt(r.invocations, 10),
-    sessions: parseInt(r.sessions, 10),
-    last_used: r.last_used,
+    distinct_tool_count: parseInt(r.distinct_tool_count, 10),
+    session_count: parseInt(r.session_count, 10),
   }));
+}
+
+/** Total sessions and how many of them invoked at least one tool — lets the
+ *  UI derive the "0 tools used" bucket alongside getToolsPerSessionDistribution. */
+export async function getToolUsageSessionCounts(): Promise<{ total_sessions: number; sessions_with_tool_use: number }> {
+  const result = await pool.query<{ total_sessions: string; sessions_with_tool_use: string }>(
+    `SELECT
+       (SELECT COUNT(*) FROM therapy_sessions WHERE is_demo IS NOT TRUE) AS total_sessions,
+       (SELECT COUNT(DISTINCT session_id) FROM tool_invocations) AS sessions_with_tool_use`
+  );
+  const row = result.rows[0];
+  return {
+    total_sessions: parseInt(row?.total_sessions ?? '0', 10),
+    sessions_with_tool_use: parseInt(row?.sessions_with_tool_use ?? '0', 10),
+  };
 }
 
 /** The model-set goal for a session (set_session_goal / recall_session_goal). */
