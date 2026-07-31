@@ -98,26 +98,40 @@ const port = process.env.PORT || 3067;
 // SLC timezone helpers (getNextMidnightSLC/getHoursUntilReset/getStartOfTodaySLC)
 // live in utils/timezoneHelpers.ts and are used by the rate-limit route modules.
 
-// Security headers. CSP runs in REPORT-ONLY mode (production only — Vite dev
-// injects its own inline scripts): nothing is blocked yet, but violations of
-// the policy below are POSTed to /csp-report and logged. Once the logs run
-// clean (nonce plumbing for any SSR inline scripts), flip reportOnly to false.
-// script-src deliberately omits 'unsafe-inline' so reports reveal exactly
-// which inline scripts still need nonces.
+// Security headers. CSP runs in REPORT-ONLY mode by default (production only).
+// Violations are POSTed to /csp-report and logged.
+//
+// CSP Enforcement flow:
+// 1. Deployed with CSP_ENFORCE=false (default) — policy runs in report-only mode,
+//    collecting violations at /csp-report.
+// 2. Once violation logs are clean, set CSP_ENFORCE=true to flip to enforcement
+//    (reject inline scripts/styles that violate the policy).
+//
+// Violations occur when:
+// - Inline scripts lack nonces (SSR scripts, demo notice bootstraps, etc.)
+// - Inline styles without nonces or 'unsafe-inline' (currently allowed for Tailwind/Recharts)
+// - External resources from unauthorized origins
+//
+// script-src deliberately omits 'unsafe-inline' so violations reveal exactly which
+// inline scripts and styles still need nonces.
+
+const CSP_ENFORCE = process.env.CSP_ENFORCE === 'true';
+
 app.use(helmet({ contentSecurityPolicy: false }));
 if (process.env.NODE_ENV === 'production') {
   app.use(
     helmet.contentSecurityPolicy({
       useDefaults: false,
-      reportOnly: true,
+      reportOnly: !CSP_ENFORCE,  // report-only by default; set CSP_ENFORCE=true to enforce
       directives: {
         'default-src': ["'self'"],
         'script-src': ["'self'"],
-        'style-src': ["'self'", "'unsafe-inline'"], // Tailwind/Recharts inline styles
+        'style-src': ["'self'", "'unsafe-inline'"], // Tailwind/Recharts inline styles (TODO: migrate to nonces)
         'img-src': ["'self'", 'data:', 'blob:'],
         'media-src': ["'self'", 'blob:'],
         'font-src': ["'self'", 'data:'],
-        // Same-origin API/socket.io + the OpenAI Realtime SDP/token exchange.
+        // Same-origin API/socket.io + OpenAI Realtime (https://api.openai.com for token/config,
+        // wss: for WebRTC media). Media streams and RTC endpoints use blob: URIs.
         'connect-src': ["'self'", 'https://api.openai.com', 'wss:'],
         'worker-src': ["'self'", 'blob:'], // audio worklets
         'object-src': ["'none'"],
@@ -127,6 +141,12 @@ if (process.env.NODE_ENV === 'production') {
       },
     })
   );
+
+  if (CSP_ENFORCE) {
+    console.log('[CSP] Enforcement mode enabled (CSP_ENFORCE=true)');
+  } else {
+    console.log('[CSP] Report-only mode (CSP_ENFORCE not set); violations logged to /csp-report');
+  }
 }
 
 // CSP violation reports (browsers send content-type application/csp-report).
