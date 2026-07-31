@@ -205,3 +205,43 @@ export async function getRedactionStatus(sessionId: string): Promise<number> {
   );
   return parseInt(result.rows[0].pending_count);
 }
+
+export type RedactionStatusLabel = 'complete' | 'partial' | 'pending' | 'no_content';
+
+export interface RedactionStatusBreakdown {
+  total: number;
+  redacted: number;
+  pending: number;
+  status: RedactionStatusLabel;
+}
+
+/**
+ * Full redaction breakdown for a session (ai-therapist-22): how many
+ * redactable messages it has, how many are already redacted, and a summary
+ * label for the admin sessions UI.
+ *   - no_content: nothing to redact (e.g. session with no user/assistant turns)
+ *   - complete:   every redactable message has content_redacted set
+ *   - pending:    none redacted yet (e.g. redaction hasn't run / just ended)
+ *   - partial:    some but not all — the gap this feature exists to surface
+ */
+export async function getRedactionStatusBreakdown(sessionId: string): Promise<RedactionStatusBreakdown> {
+  const result = await pool.query<{ total: string; redacted: string }>(
+    `SELECT
+       COUNT(*) FILTER (WHERE role IN ('user', 'assistant') AND content IS NOT NULL) AS total,
+       COUNT(*) FILTER (WHERE role IN ('user', 'assistant') AND content IS NOT NULL AND content_redacted IS NOT NULL) AS redacted
+     FROM messages
+     WHERE session_id = $1`,
+    [sessionId]
+  );
+  const total = parseInt(result.rows[0]?.total ?? '0');
+  const redacted = parseInt(result.rows[0]?.redacted ?? '0');
+  const pending = total - redacted;
+
+  let status: RedactionStatusLabel;
+  if (total === 0) status = 'no_content';
+  else if (pending === 0) status = 'complete';
+  else if (redacted === 0) status = 'pending';
+  else status = 'partial';
+
+  return { total, redacted, pending, status };
+}

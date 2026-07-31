@@ -22,3 +22,4 @@ export * from './knowledge.queries.js';
 export * from './evals.queries.js';
 export * from './caseProfile.queries.js';
 export * from './returningContext.queries.js';
+export * from './consent.queries.js';

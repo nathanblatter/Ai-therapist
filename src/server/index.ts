@@ -10,6 +10,7 @@ import session, { type Session, type SessionData } from "express-session";
 import type { IncomingMessage } from "http";
 import connectPgSimple from "connect-pg-simple";
 import helmet from "helmet";
+import { createAdapter as createPostgresAdapter } from "@socket.io/postgres-adapter";
 import {pool } from "./config/db.js";
 import { requireRole } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -41,9 +42,11 @@ import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
 import tokenRoutes from "./routes/public/token.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
+import consentRoutes from "./routes/public/consent.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
 import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
+import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
 
 // ---------- local type helpers ----------
 
@@ -82,6 +85,18 @@ const io = new Server(httpServer, {
     credentials: true
   },
   transports: ['websocket', 'polling']
+});
+
+// Fan socket.io packets (rooms/broadcasts: admin-broadcast, session:<id>, etc.)
+// out across processes via Postgres NOTIFY/LISTEN. Without this, a blue-green
+// deploy window with two app containers briefly running loses events between
+// sockets connected to different containers — a participant's `messages:new`
+// might land on the old container while the admin watching is on the new one.
+// Uses the same pg pool as everything else; failures here are logged but never
+// crash the process (in-memory adapter still works for same-container rooms).
+io.adapter(createPostgresAdapter(pool));
+pool.on('error', (err) => {
+  console.error('[Postgres adapter] pool error:', err);
 });
 
 // Make 'io' available globally for event emission
@@ -274,6 +289,11 @@ io.on('connection', (socket: AuthSocket) => {
 
     console.log(`[Socket.io] User joining session ${sessionId}`);
     socket.join(`session:${sessionId}`);
+    if (!isAdmin) {
+      // A live participant socket in the room is a sign of life: cancel any
+      // pending abandon-check from an earlier disconnect/reconnect blip.
+      noteSessionActivity(sessionId);
+    }
   });
 
   socket.on('session:leave', ({ sessionId }) => {
@@ -355,6 +375,18 @@ io.on('connection', (socket: AuthSocket) => {
     console.log(`[Socket.io] User disconnected: ${reason}`);
     if (isAdmin) {
       socket.to('admin-broadcast').emit('admin:left', { username: socket.username });
+    } else {
+      // Participant sockets over the tunnel are known to be flaky (reconnect
+      // storms, brief drops) — don't end the session on disconnect alone.
+      // Instead schedule a grace-window check: if there's no new activity
+      // (rejoin, audio chunk) for the session within the window, treat it as
+      // abandoned and finalize it. See sessionLifecycle.service.ts.
+      for (const room of socket.rooms) {
+        if (room.startsWith('session:')) {
+          const sessionId = room.slice('session:'.length);
+          scheduleAbandonCheck(sessionId);
+        }
+      }
     }
   });
 });
@@ -390,6 +422,9 @@ app.use(usersRoutes());
 
 // Realtime session token minting -> routes/public/token.routes.js.
 app.use(tokenRoutes());
+
+// Participant consent screen (accept/status) -> routes/public/consent.routes.ts.
+app.use(consentRoutes());
 
 
 // ===================== Chat-Only Therapy Endpoints =====================
@@ -657,6 +692,11 @@ if (isEntrypoint) {
 
     // Daily sweep of expired magic-link demo accounts and their data
     startDemoCleanupScheduler();
+
+    // Backstop sweep for sessions abandoned without a clean /end (dropped
+    // tunnel connection, closed tab, crashed browser): finalizes recording +
+    // triggers redaction so they don't sit "active" forever.
+    startAbandonedSessionSweeper();
   });
 }
 

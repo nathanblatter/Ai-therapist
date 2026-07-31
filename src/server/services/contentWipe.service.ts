@@ -4,6 +4,21 @@ import { pool } from '../config/db.js';
 let wipeInterval: ReturnType<typeof setTimeout> | null = null;
 let nextScheduledWipe: Date | null = null;
 
+// Redaction-gap sweep (ai-therapist-22): a session's /end handler fires
+// redactSession() as a fire-and-forget job, but a message can still be
+// mid-flight (a late /logs/batch flush from the client, landing after /end
+// already ran) and insert AFTER that batch job already queried "unredacted
+// messages for this session". That message is then stuck with content set and
+// content_redacted NULL forever — invisible until someone opens the session in
+// the admin transcript view. This sweep runs independently of the wipe and
+// just re-invokes the same idempotent redactSession() for any ended session
+// that still has redaction gaps, so nothing needs deployment-day glue: the
+// wipe query already protects unredacted content from being wiped
+// (content_redacted IS NOT NULL is required), so nothing is lost while a gap
+// waits for the next sweep tick.
+let redactionSweepInterval: ReturnType<typeof setInterval> | null = null;
+const REDACTION_SWEEP_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+
 interface RetentionSettings {
   enabled: boolean;
   retention_hours: number;
@@ -315,11 +330,60 @@ async function scheduleNextWipe(): Promise<void> {
 }
 
 /**
+ * Find ended sessions that still have a message with content set but
+ * content_redacted NULL — a redaction gap (ai-therapist-22). Exported
+ * separately from the sweep runner so the query logic can be unit tested
+ * without mocking the redaction service.
+ */
+export async function findEndedSessionsWithRedactionGaps(limit = 200): Promise<string[]> {
+  const result = await pool.query<{ session_id: string }>(
+    `SELECT DISTINCT ts.session_id
+       FROM therapy_sessions ts
+       JOIN messages m ON m.session_id = ts.session_id
+      WHERE ts.status = 'ended'
+        AND m.content IS NOT NULL
+        AND m.content_redacted IS NULL
+        AND m.role IN ('user', 'assistant')
+      LIMIT $1`,
+    [limit]
+  );
+  return result.rows.map(r => r.session_id);
+}
+
+/**
+ * Re-run the (idempotent) per-session batched redaction job for every ended
+ * session with a gap. Safe to call repeatedly / concurrently with itself —
+ * redactSession only touches rows that are still unredacted.
+ */
+export async function sweepRedactionGaps(): Promise<{ sweptSessions: number }> {
+  const sessionIds = await findEndedSessionsWithRedactionGaps();
+  if (sessionIds.length === 0) return { sweptSessions: 0 };
+
+  console.log(`🔁 Redaction sweep: re-running redactSession for ${sessionIds.length} ended session(s) with gaps`);
+  const { redactSession } = await import('./sessionRedaction.service.js');
+  for (const sessionId of sessionIds) {
+    await redactSession(sessionId).catch(err =>
+      console.error(`[Redaction sweep] failed for ${sessionId}:`, err)
+    );
+  }
+  return { sweptSessions: sessionIds.length };
+}
+
+/**
  * Start the content wipe scheduler
  */
 export async function startScheduler(): Promise<void> {
   console.log('🚀 Starting content wipe scheduler...');
   await scheduleNextWipe();
+
+  if (!redactionSweepInterval) {
+    redactionSweepInterval = setInterval(() => {
+      sweepRedactionGaps().catch(err => console.error('[Redaction sweep] tick failed:', err));
+    }, REDACTION_SWEEP_INTERVAL_MS);
+    redactionSweepInterval.unref?.();
+    // Run once immediately rather than waiting a full interval after boot/restart.
+    sweepRedactionGaps().catch(err => console.error('[Redaction sweep] initial run failed:', err));
+  }
 }
 
 /**
@@ -330,6 +394,10 @@ export function stopScheduler(): void {
     clearTimeout(wipeInterval);
     wipeInterval = null;
     nextScheduledWipe = null;
+  }
+  if (redactionSweepInterval) {
+    clearInterval(redactionSweepInterval);
+    redactionSweepInterval = null;
   }
 }
 

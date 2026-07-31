@@ -63,6 +63,11 @@ cp .env.example .env   # fill in DATABASE_URL, SESSION_SECRET, keys, MinIO setti
 npm run dev            # dev server with Vite middleware on PORT (default 3067)
 ```
 
+`MINIO_ENDPOINT` depends on where the app process runs relative to MinIO
+(host vs. Docker vs. Docker-with-MinIO-on-the-host) — see the comment above it
+in `.env.example` for the right value for your setup, including the
+`host.docker.internal` case when the app is containerized but MinIO isn't.
+
 ### Verify
 
 ```bash

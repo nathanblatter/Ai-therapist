@@ -14,6 +14,11 @@ const log = createLogger("storage");
 
 // MinIO is S3-compatible: same SDK, custom endpoint + path-style addressing.
 // Swapping MINIO_ENDPOINT/creds for real AWS S3 needs no code change.
+//
+// MINIO_ENDPOINT is relative to wherever THIS PROCESS runs, not the host — see
+// .env.example for the full breakdown (host vs. containerized-with-MinIO vs.
+// containerized-with-MinIO-on-host / host.docker.internal). The 127.0.0.1
+// default below only works when this process runs directly on the host.
 const endpoint = process.env.MINIO_ENDPOINT || "http://127.0.0.1:9000";
 const bucket = process.env.MINIO_BUCKET || "ai-therapist-recordings";
 const accessKeyId = process.env.MINIO_ROOT_USER || process.env.AWS_ACCESS_KEY_ID || "";

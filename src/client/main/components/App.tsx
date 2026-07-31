@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { io, Socket } from "socket.io-client";
+import type { Socket } from "socket.io-client";
 import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import SessionSettings from "./SessionSettings";
 import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
+import ConsentScreen from "./ConsentScreen";
 import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
 import Header from './Header';
@@ -14,6 +15,7 @@ import BugReport from './BugReport';
 import DemoSwitcher from '../../shared/components/DemoSwitcher';
 import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
+import { createParticipantSocket } from '../lib/participantSocket';
 import { getStoredTheme, setTheme } from '../../shared/theme';
 
 interface CrisisContact {
@@ -27,6 +29,7 @@ interface Features {
   output_modalities: string[];
   voice_enabled: boolean;
   chat_enabled: boolean;
+  session_recording_enabled?: boolean;
 }
 
 interface SessionSettings {
@@ -103,6 +106,11 @@ export default function App() {
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [sessionType, setSessionType] = useState<string | null>(null); // 'realtime' or 'chat'
 
+  // Consent (ai-therapist-24): must be accepted before a session can start.
+  const [isConsentOpen, setIsConsentOpen] = useState(false);
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [consentVersion, setConsentVersion] = useState('');
+
   useEffect(() => {
     setIsClient(true);
 
@@ -120,6 +128,17 @@ export default function App() {
       .then(res => res.json())
       .then(data => setFeatures(data))
       .catch(err => console.error('Failed to fetch features config:', err));
+
+    // Fetch consent status: has this browser session already accepted the
+    // current consent copy? (e.g. earlier in the same session, or a returning
+    // logged-in user within the same cookie's lifetime).
+    fetch('/api/consent/status', { credentials: 'include' })
+      .then(res => res.json())
+      .then(data => {
+        setConsentVersion(data.currentVersion);
+        setConsentAccepted(!!data.accepted);
+      })
+      .catch(err => console.error('Failed to fetch consent status:', err));
 
     // Fetch user preferences (voice and language)
     fetch('/api/users/preferences', {
@@ -283,15 +302,7 @@ export default function App() {
       setIsSessionActive(true);
 
       // Connect to Socket.io for remote session management
-      const socket = io({
-        transports: ['websocket', 'polling'],
-        reconnection: true
-      });
-
-      socket.on('connect', () => {
-        console.log('Socket.io connected for chat session monitoring');
-        socket.emit('session:join', { sessionId: newSessionId });
-      });
+      const socket = createParticipantSocket(newSessionId, 'chat');
 
       socket.on('session:status', (data) => {
         console.log('Received session:status event:', data);
@@ -299,10 +310,6 @@ export default function App() {
           toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
           stopSession();
         }
-      });
-
-      socket.on('disconnect', () => {
-        console.log('Socket.io disconnected');
       });
 
       socketRef.current = socket;
@@ -370,22 +377,13 @@ export default function App() {
       console.log(`Session will end in ${data.session_limits.max_duration_minutes} minutes`);
     }
 
-    // Connect to Socket.io for remote session management
-    const socket = io({
-      withCredentials: true,
-      transports: ['websocket', 'polling'],
-      reconnection: true
-    });
-
-    socket.on('connect', () => {
-      console.log('Socket.io connected for session monitoring');
-      // Join the session-specific room to receive events for this session
-      socket.emit('session:join', { sessionId: newSessionId });
-    });
-    // The participant socket is known to be unreliable through the tunnel (see
-    // ai-therapist follow-up); audio no longer depends on it. Log failures so
-    // the open investigation has data, but they no longer break recording.
-    socket.on('connect_error', (e) => console.error('[socket] connect_error:', e.message));
+    // Connect to Socket.io for remote session management. The participant
+    // socket is known to be unreliable through the tunnel (ai-therapist-18);
+    // audio doesn't depend on it (uploaded over plain HTTP) and abandonment
+    // is also handled server-side independent of a clean disconnect (see
+    // sessionLifecycle.service.ts) — this socket is only used for
+    // remote-termination notices and live crisis messages.
+    const socket = createParticipantSocket(newSessionId, 'realtime');
 
     // Audio capture is started in pc.ontrack below (once both the mic and the
     // assistant track exist) and runs for the whole session so the server can
@@ -554,8 +552,11 @@ export default function App() {
       setRemoteStream(e.streams[0]);
       // Capture the whole conversation: mix mic + assistant audio into one PCM
       // stream and upload it over HTTP for the entire session, so the server can
-      // record it and relay it live to any admin who is listening.
-      if (!audioTeeRef.current) {
+      // record it and relay it live to any admin who is listening. Gated on the
+      // features.session_recording_enabled flag (also shown in the consent
+      // screen the participant just accepted) — when it's off, capture never
+      // starts and nothing is uploaded.
+      if (!audioTeeRef.current && features.session_recording_enabled) {
         const uploader = createAudioUploader(newSessionId);
         audioUploaderRef.current = uploader;
         audioTeeRef.current = startMixedTee([ms, e.streams[0]], (pcm, sampleRate) => {
@@ -1078,6 +1079,18 @@ export default function App() {
   return (
     <div className="flex flex-col h-dvh bg-gray-50">
       <DemoSwitcher context="bot" />
+      {/* Persistent recording indicator - unobtrusive, always visible while a
+          recorded session is active (ai-therapist-24). */}
+      {isSessionActive && features.session_recording_enabled === true && (
+        <div
+          className="fixed top-2 right-2 z-50 flex items-center gap-1.5 bg-black/70 text-white text-xs font-medium px-2.5 py-1 rounded-full pointer-events-none"
+          role="status"
+          aria-label="This session is being recorded"
+        >
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" aria-hidden="true" />
+          Recording
+        </div>
+      )}
       <Header sessionId={sessionId} timeRemaining={timeRemaining} />
       <main className="flex-1 flex flex-col items-center overflow-hidden">
         {/* Themed voice indicator (voice sessions only) */}
@@ -1099,7 +1112,13 @@ export default function App() {
         </div>
         <div className="w-full max-w-4xl p-2 sm:p-4">
           <SessionControls
-            startSession={() => setIsCheckInOpen(true)}
+            startSession={() => {
+              if (consentAccepted) {
+                setIsCheckInOpen(true);
+              } else {
+                setIsConsentOpen(true);
+              }
+            }}
             stopSession={stopSession}
             sendTextMessage={sendTextMessage}
             isSessionActive={isSessionActive}
@@ -1123,6 +1142,19 @@ export default function App() {
         onLogRecord={(type, message, extras) =>
           logConversation({ sessionId, role: 'user', type, message, extras })}
         sessionId={sessionId}
+      />
+
+      {/* Consent screen (IRB requirement) - must accept before check-in/session start */}
+      <ConsentScreen
+        isOpen={isConsentOpen}
+        recordingEnabled={features.session_recording_enabled === true}
+        consentVersion={consentVersion}
+        onCancel={() => setIsConsentOpen(false)}
+        onAccept={() => {
+          setConsentAccepted(true);
+          setIsConsentOpen(false);
+          setIsCheckInOpen(true);
+        }}
       />
 
       {/* Pre-session check-in (optional, skippable) */}

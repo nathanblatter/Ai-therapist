@@ -5,6 +5,7 @@
 import { Router, json } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import { appendChunk, isFinalized } from '../../services/recorder.service.js';
+import { noteSessionActivity } from '../../services/sessionLifecycle.service.js';
 import {
   createSession,
   getSession,
@@ -17,6 +18,7 @@ import {
 } from '../../db/index.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
+import { getSystemConfig } from '../../utils/sessionHelpers.js';
 
 export default function sessionsRoutes(): Router {
   const router = Router();
@@ -45,6 +47,19 @@ export default function sessionsRoutes(): Router {
     // Recording already closed (session ended / auto-terminated): tell the
     // client to stop its uploader instead of silently discarding forever.
     if (isFinalized(sessionId)) return res.sendStatus(410);
+
+    // A batch landing at all means the participant is still here — cancels
+    // any pending abandon-check scheduled from an earlier socket disconnect.
+    noteSessionActivity(sessionId);
+
+    // Defense in depth: the client already gates capture on this flag, but
+    // don't persist audio server-side if an admin has since disabled
+    // recording (config is cached ~10min, so this can lag a live toggle by
+    // that long — acceptable given the client-side gate is the primary control).
+    const config = await getSystemConfig();
+    const recordingEnabled = (config.features?.session_recording_enabled as boolean | undefined) ?? false;
+    if (!recordingEnabled) return res.sendStatus(204);
+
     for (const pcm of chunks) {
       if (typeof pcm !== 'string' || !pcm) continue;
       try {

@@ -10,7 +10,7 @@ import {
   countSessions,
   getSessionWithUser,
   getAdminSessionMessages,
-  getRedactionStatus,
+  getRedactionStatusBreakdown,
   getSession,
   updateSessionStatus,
   deleteSession,
@@ -152,13 +152,20 @@ export default function adminSessionsRoutes(): Router {
     }
   });
 
-  // GET /admin/api/sessions/:sessionId/redaction-status - redaction progress.
+  // GET /admin/api/sessions/:sessionId/redaction-status - redaction progress:
+  // complete/partial/pending/no_content, plus raw counts (ai-therapist-22).
   // Registered before /:sessionId for clarity (paths don't actually overlap).
   router.get('/admin/api/sessions/:sessionId/redaction-status', requireRole('therapist', 'researcher'), async (req, res) => {
     const { sessionId } = req.params;
     try {
-      const pendingCount = await getRedactionStatus(sessionId);
-      res.json({ sessionId, pendingCount, allComplete: pendingCount === 0 });
+      const breakdown = await getRedactionStatusBreakdown(sessionId);
+      res.json({
+        sessionId,
+        ...breakdown,
+        // Kept for backward compatibility with any existing caller of this endpoint.
+        pendingCount: breakdown.pending,
+        allComplete: breakdown.pending === 0,
+      });
     } catch (err) {
       console.error('Failed to check redaction status:', err);
       res.status(500).json({ error: 'Failed to check redaction status' });
