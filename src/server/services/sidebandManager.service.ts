@@ -10,8 +10,11 @@ import { insertMessagesBatch } from '../db/index.js';
 export class SidebandManager {
   private connections: Map<string, WebSocket>;
   private reconnectAttempts: Map<string, number>;
-  // Per-session ephemeral key used to authenticate the sideband WS. Stored so
-  // reconnects reuse it (the standard API key returns 404 call_id_not_found).
+  // Per-session key used to authenticate the sideband WS. Since ai-therapist-62
+  // this is the STANDARD API key (per OpenAI's server-side-controls docs),
+  // which never expires — so mid-session reconnects keep working. Stored per
+  // session so reconnects reuse exactly what the initial attach used (which may
+  // be the ephemeral fallback if the standard key was rejected live).
   private sessionKeys: Map<string, string>;
   // Per-session keepalive timer. The sideband is a passive observer that can sit
   // idle for long stretches; without periodic pings the socket gets reaped and
@@ -40,10 +43,14 @@ export class SidebandManager {
    * Establish sideband WebSocket connection for a session
    * @param {string} sessionId - Therapy session ID
    * @param {string} callId - OpenAI call_id from Location header
-   * @param {string} apiKey - OpenAI API key
+   * @param {string} apiKey - OpenAI API key (standard key; see ai-therapist-62)
+   * @param {number} attempt - internal retry counter for the call-not-yet-registered race
+   * @param {string} [fallbackKey] - optional per-session ephemeral key, tried
+   *   once if the standard key is rejected outright (401/403) — diagnostics
+   *   safety net until standard-key sideband auth is verified live.
    * @returns {Promise<WebSocket>} - The WebSocket connection
    */
-  async connect(sessionId: string, callId: string, apiKey: string, attempt = 0): Promise<WebSocket> {
+  async connect(sessionId: string, callId: string, apiKey: string, attempt = 0, fallbackKey?: string): Promise<WebSocket> {
     // Check if already connected
     if (this.connections.has(sessionId)) {
       console.warn(`[Sideband] Already connected for session ${sessionId.substring(0, 12)}...`);
@@ -86,8 +93,18 @@ export class SidebandManager {
             const delay = this.reconnectDelayMs * (attempt + 1);
             console.log(`[Sideband] call_id not registered yet; retrying attach in ${delay}ms (attempt ${attempt + 2}/${this.maxReconnectAttempts + 1})`);
             setTimeout(() => {
-              this.connect(sessionId, callId, apiKey, attempt + 1).catch(() => {});
+              this.connect(sessionId, callId, apiKey, attempt + 1, fallbackKey).catch(() => {});
             }, delay);
+            return;
+          }
+
+          // The standard API key was rejected outright (auth failure, not the
+          // registration race). Log loudly — this contradicts OpenAI's
+          // server-side-controls docs — and fall back once to the session's
+          // ephemeral key so monitoring still works for this session.
+          if ((res.statusCode === 401 || res.statusCode === 403) && fallbackKey && fallbackKey !== apiKey) {
+            console.error(`[Sideband] Standard API key rejected (HTTP ${res.statusCode}) for call_id=${callId}; falling back to the per-session ephemeral key. Body: ${body || '(empty)'}`);
+            this.connect(sessionId, callId, fallbackKey, attempt).catch(() => {});
             return;
           }
 
@@ -689,14 +706,14 @@ export class SidebandManager {
                 [sessionId]
               );
               const callId = callIdResult.rows[0]?.openai_call_id as string | undefined;
-              // Reuse the ephemeral key that created the call (the standard key
-              // returns 404). Note: ephemeral keys are short-lived, so a late
-              // reconnect may legitimately fail once it has expired.
+              // Reuse whatever key the initial attach succeeded with. Since
+              // ai-therapist-62 that is normally the standard API key, which
+              // never expires — so reconnects work at any point in the session.
               const apiKey = this.sessionKeys.get(sessionId);
               if (callId && apiKey) {
                 await this.connect(sessionId, callId, apiKey);
               } else if (!apiKey) {
-                console.warn(`[Sideband] No stored ephemeral key for ${sessionId}; cannot reconnect.`);
+                console.warn(`[Sideband] No stored API key for ${sessionId}; cannot reconnect.`);
               }
             } catch (error: unknown) {
               console.error('[Sideband] Reconnection failed:', error);

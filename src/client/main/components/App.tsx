@@ -691,9 +691,11 @@ export default function App() {
           const registerResponse = await fetch(`/api/sessions/${newSessionId}/register-call`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            // The sideband WS must auth with the EPHEMERAL key that created this
-            // WebRTC call — the standard API key returns 404 call_id_not_found.
-            // (This ephemeral secret originated from our own /token endpoint.)
+            // The server attaches its sideband WS with the standard API key
+            // (per OpenAI's server-side-controls docs — ai-therapist-62). The
+            // ephemeral key is still sent as a one-shot fallback in case the
+            // standard key is rejected live. (This ephemeral secret originated
+            // from our own /token endpoint.)
             body: JSON.stringify({ call_id: callId, ephemeral_key: EPHEMERAL_KEY })
           });
 

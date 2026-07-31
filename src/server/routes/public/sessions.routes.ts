@@ -130,17 +130,28 @@ export default function sessionsRoutes(): Router {
       // Kill switch: set SIDEBAND_ENABLED=false to stop attaching without a redeploy.
       const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
-      // IMPORTANT: the sideband WS must use the EPHEMERAL key that created the
-      // WebRTC call, not the standard API key — the standard key returns 404
-      // call_id_not_found (confirmed OpenAI behaviour, contra their docs).
+      // Auth (ai-therapist-62): per OpenAI's server-side-controls docs the
+      // sideband WS authenticates with the STANDARD API key, which never
+      // expires — so late reconnects keep working (the per-session ephemeral
+      // key used previously expires minutes into the session). The earlier
+      // "standard key returns 404 call_id_not_found" observation is now
+      // believed to have been the attach-before-call-registered race, which
+      // connect() retries around. If the standard key is genuinely rejected
+      // live, connect()'s unexpected-response handler logs the HTTP status +
+      // body, and the client-supplied ephemeral key is used as a fallback.
       if (!sidebandEnabled) {
         console.log('[Sideband] Disabled via SIDEBAND_ENABLED=false; call_id recorded only.');
-      } else if (typeof ephemeral_key === 'string' && ephemeral_key) {
-        sidebandManager.connect(sessionId, call_id, ephemeral_key).catch(err => {
-          console.warn(`[Sideband] connect() failed for ${sessionId}:`, err instanceof Error ? err.message : err);
-        });
       } else {
-        console.warn('[Sideband] No ephemeral key provided; skipping sideband attach.');
+        const { getOpenAIKey } = await import('../../config/secrets.js');
+        const apiKey = await getOpenAIKey();
+        const fallbackKey = typeof ephemeral_key === 'string' && ephemeral_key ? ephemeral_key : undefined;
+        if (!apiKey) {
+          console.error('[Sideband] No standard OpenAI key available; skipping sideband attach.');
+        } else {
+          sidebandManager.connect(sessionId, call_id, apiKey, 0, fallbackKey).catch(err => {
+            console.warn(`[Sideband] connect() failed for ${sessionId}:`, err instanceof Error ? err.message : err);
+          });
+        }
       }
 
       res.json({ success: true, message: 'Call registered', sessionId, call_id });
