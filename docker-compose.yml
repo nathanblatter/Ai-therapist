@@ -14,10 +14,8 @@ services:
       CORS_ORIGIN: https://ai-therapist.nathanblatter.com
       # Magic-link demo access. Unset => /demo/:token 404s (feature disabled).
       DEMO_MAGIC_TOKEN: ${DEMO_MAGIC_TOKEN}
-      # OpenAI key is pulled from AWS Secrets Manager at runtime.
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_REGION: ${AWS_REGION}
+      # OpenAI Realtime API key
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       FLIGHTDECK_URL: ${FLIGHTDECK_URL:-http://flightdeck:8080}
       FLIGHTDECK_INGEST_KEY: ${FLIGHTDECK_INGEST_KEY}
       # Object storage for session recordings. Endpoint is hardcoded (not

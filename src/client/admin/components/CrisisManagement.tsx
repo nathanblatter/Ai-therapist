@@ -26,21 +26,6 @@ interface ClinicalReview {
   assigned_to?: string;
 }
 
-interface HumanHandoff {
-  handoff_id: string;
-  session_id: string;
-  status: string;
-  handoff_type: string;
-  risk_score: number;
-  initiated_by: string;
-  assigned_to?: string;
-  initiated_at: string;
-  completed_at?: string;
-  external_reference?: string;
-  outcome?: string;
-  notes?: string;
-}
-
 interface InterventionAction {
   action_id: string;
   session_id: string;
@@ -63,7 +48,6 @@ interface RiskScoreHistory {
 interface CrisisData {
   clinicalReviews: ClinicalReview[];
   crisisEvents: CrisisEvent[];
-  humanHandoffs: HumanHandoff[];
   interventionActions: InterventionAction[];
   riskScoreHistory: RiskScoreHistory[];
 }
@@ -74,7 +58,6 @@ export default function CrisisManagement() {
   const [data, setData] = useState<CrisisData>({
     clinicalReviews: [],
     crisisEvents: [],
-    humanHandoffs: [],
     interventionActions: [],
     riskScoreHistory: []
   });
@@ -104,7 +87,6 @@ export default function CrisisManagement() {
       console.log('[CrisisManagement] Fetched data:', {
         clinicalReviews: crisisData.clinicalReviews?.length || 0,
         crisisEvents: crisisData.crisisEvents?.length || 0,
-        humanHandoffs: crisisData.humanHandoffs?.length || 0,
         interventionActions: crisisData.interventionActions?.length || 0,
         riskScoreHistory: crisisData.riskScoreHistory?.length || 0
       });
@@ -173,12 +155,6 @@ export default function CrisisManagement() {
   // Filter clinical reviews
   const filteredReviews = data.clinicalReviews.filter(review => {
     if (filterStatus !== 'all' && review.status !== filterStatus) return false;
-    return true;
-  });
-
-  // Filter handoffs
-  const filteredHandoffs = data.humanHandoffs.filter(handoff => {
-    if (filterStatus !== 'all' && handoff.status !== filterStatus) return false;
     return true;
   });
 
@@ -281,19 +257,6 @@ export default function CrisisManagement() {
         <div className="bg-white rounded-lg shadow p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600">Human Handoffs</p>
-              <p className="text-2xl font-bold text-purple-600">{data.humanHandoffs.length}</p>
-              <p className="text-xs text-gray-500">
-                {data.humanHandoffs.filter(h => h.status === 'in_progress').length} active
-              </p>
-            </div>
-            <Users className="text-purple-500" size={32} />
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="flex items-center justify-between">
-            <div>
               <p className="text-sm text-gray-600">Interventions</p>
               <p className="text-2xl font-bold text-orange-600">{data.interventionActions.length}</p>
             </div>
@@ -320,7 +283,6 @@ export default function CrisisManagement() {
               { id: 'overview', label: 'Overview', icon: Activity },
               { id: 'events', label: 'Crisis Events', icon: AlertTriangle },
               { id: 'reviews', label: 'Clinical Reviews', icon: FileText },
-              { id: 'handoffs', label: 'Human Handoffs', icon: Users },
               { id: 'interventions', label: 'Interventions', icon: Activity },
               { id: 'risk-history', label: 'Risk History', icon: TrendingUp }
             ].map(tab => {
@@ -553,95 +515,6 @@ export default function CrisisManagement() {
                 {filteredReviews.length === 0 && (
                   <div className="text-center py-12 text-gray-500">
                     No clinical reviews found
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Human Handoffs Tab */}
-          {activeTab === 'handoffs' && (
-            <div>
-              <div className="mb-4">
-                <label className="text-sm font-medium text-gray-700 mr-2">Status:</label>
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="px-3 py-2 border rounded-lg text-sm"
-                >
-                  <option value="all">All</option>
-                  <option value="pending">Pending</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
-
-              <div className="space-y-4">
-                {filteredHandoffs.map(handoff => (
-                  <div key={handoff.handoff_id} className="bg-white border rounded-lg p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(handoff.status)}`}>
-                            {handoff.status}
-                          </span>
-                          <span className="text-sm font-semibold text-gray-700">
-                            {handoff.handoff_type.replace(/_/g, ' ').toUpperCase()}
-                          </span>
-                        </div>
-                        <p className="text-sm text-gray-600">
-                          Session: <code className="bg-gray-100 px-2 py-1 rounded text-xs">{handoff.session_id}</code>
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <div className={`text-2xl font-bold ${getRiskScoreColor(handoff.risk_score)}`}>
-                          {handoff.risk_score}
-                        </div>
-                        <div className="text-xs text-gray-500">Risk Score</div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Initiated by:</span> {handoff.initiated_by}
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Assigned to:</span> {handoff.assigned_to || 'Unassigned'}
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Initiated at:</span> {formatDate(handoff.initiated_at)}
-                      </div>
-                      {handoff.completed_at && (
-                        <div>
-                          <span className="text-gray-600">Completed at:</span> {formatDate(handoff.completed_at)}
-                        </div>
-                      )}
-                      {handoff.external_reference && (
-                        <div className="col-span-2">
-                          <span className="text-gray-600">External Reference:</span> {handoff.external_reference}
-                        </div>
-                      )}
-                    </div>
-
-                    {handoff.outcome && (
-                      <div className="mt-4 p-3 bg-green-50 rounded">
-                        <strong className="text-sm">Outcome:</strong>
-                        <p className="text-sm mt-1">{handoff.outcome}</p>
-                      </div>
-                    )}
-
-                    {handoff.notes && (
-                      <div className="mt-2 text-sm italic text-gray-700">
-                        <strong>Notes:</strong> {handoff.notes}
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {filteredHandoffs.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">
-                    No human handoffs found
                   </div>
                 )}
               </div>

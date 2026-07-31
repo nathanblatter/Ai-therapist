@@ -46,6 +46,7 @@ export interface SessionConfigRow {
   modality: string | null;
   ai_model: string | null;
   transcription_model: string | null;
+  theme: string | null;
 }
 
 export interface UpsertSessionConfigInput {
@@ -63,6 +64,8 @@ export interface UpsertSessionConfigInput {
   ai_model?: string | null;
   /** Exact input-audio transcription model used. */
   transcription_model?: string | null;
+  /** UI theme active at session start ('default', 'sage', 'ocean', 'dusk', 'dark'). */
+  theme?: string | null;
 }
 
 export interface SessionAccessInfo {
@@ -236,7 +239,8 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
     language = 'en',
     modality = null,
     ai_model = null,
-    transcription_model = null
+    transcription_model = null,
+    theme = 'default'
   } = config;
 
   // JSONB fields: stringify when present, otherwise pass null.
@@ -245,8 +249,8 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
 
   const result = await pool.query<SessionConfigRow>(
     `INSERT INTO session_configurations
-     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12)
+     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12, $13)
      ON CONFLICT (session_id)
      DO UPDATE SET
        voice = EXCLUDED.voice,
@@ -262,9 +266,10 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
        -- with no model info (e.g. the /logs/batch lazy default) must not wipe
        -- them.
        ai_model = COALESCE(EXCLUDED.ai_model, session_configurations.ai_model),
-       transcription_model = COALESCE(EXCLUDED.transcription_model, session_configurations.transcription_model)
+       transcription_model = COALESCE(EXCLUDED.transcription_model, session_configurations.transcription_model),
+       theme = EXCLUDED.theme
      RETURNING *`,
-    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model]
+    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme]
   );
   return result.rows[0];
 }
