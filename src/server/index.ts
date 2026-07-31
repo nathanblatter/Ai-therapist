@@ -80,8 +80,7 @@ const io = new Server(httpServer, {
       : 'http://localhost:5173',
     credentials: true
   },
-  transports: ['websocket', 'polling'],
-  allowEIO3: true  // Allow older clients
+  transports: ['websocket', 'polling']
 });
 
 // Make 'io' available globally for event emission

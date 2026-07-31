@@ -18,7 +18,6 @@ interface SessionLimits {
 interface Features {
   voice_enabled: boolean;
   chat_enabled: boolean;
-  file_upload_enabled: boolean;
   session_recording_enabled: boolean;
   output_modalities: string[];
   /** AI tools removed from new sessions (ai-therapist-32). */
@@ -124,7 +123,6 @@ export default function SystemConfig() {
   const [features, setFeatures] = useState<Features>({
     voice_enabled: true,
     chat_enabled: true,
-    file_upload_enabled: false,
     session_recording_enabled: false,
     output_modalities: ["audio"]
   });
@@ -1135,18 +1133,6 @@ export default function SystemConfig() {
         </p>
 
         <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-            <div>
-              <p className="font-medium text-gray-900">File Upload</p>
-              <p className="text-xs text-gray-600">Allow users to upload files during sessions (experimental)</p>
-            </div>
-            <input
-              type="checkbox"
-              checked={features.file_upload_enabled}
-              onChange={(e) => updateFeatures('file_upload_enabled', e.target.checked)}
-              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
-            />
-          </div>
         </div>
       </div>
 

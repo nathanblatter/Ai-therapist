@@ -30,7 +30,6 @@ export default function configRoutes(): Router {
       const features = config.features || {
         voice_enabled: true,
         chat_enabled: true,
-        file_upload_enabled: false,
         session_recording_enabled: false,
         output_modalities: ['audio'],
       };
