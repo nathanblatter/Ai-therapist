@@ -107,6 +107,45 @@ export default function sessionsRoutes(): Router {
     }
   });
 
+  // POST /api/sessions/:sessionId/worksheet-response - store the participant's
+  // completed answers for a personalized worksheet created by
+  // create_custom_worksheet (ai-therapist-73). Owner-gated. The client renders
+  // straight from the model's function-call args (same pattern as the other
+  // overlay tools) and never sees the server-generated instance_id, so this
+  // resolves the most recent draft instance for the session — see
+  // getLatestDraftWorksheetInstance.
+  router.post('/api/sessions/:sessionId/worksheet-response', async (req, res) => {
+    const { sessionId } = req.params;
+    const { responses } = req.body as { responses?: Record<string, string> };
+
+    if (!responses || typeof responses !== 'object') {
+      return res.status(400).json({ error: 'responses{} required' });
+    }
+
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const { getLatestDraftWorksheetInstance, completeWorksheetInstance } = await import('../../db/index.js');
+      const draft = await getLatestDraftWorksheetInstance(sessionId);
+      if (!draft) return res.status(404).json({ error: 'No open worksheet instance for this session' });
+
+      await completeWorksheetInstance(draft.instance_id, sessionId, responses);
+
+      global.io?.to('admin-broadcast').emit('session:worksheet-completed', {
+        sessionId, instanceId: draft.instance_id, completedAt: new Date(),
+      });
+
+      res.json({ success: true, instance_id: draft.instance_id });
+    } catch (err) {
+      console.error('Failed to store worksheet response:', err);
+      res.status(500).json({ error: 'Failed to store worksheet response' });
+    }
+  });
+
   // GET /api/scales/:scaleId - screener definition for the client form
   router.get('/api/scales/:scaleId', async (req, res) => {
     const { SCALES } = await import('../../utils/scales.js');

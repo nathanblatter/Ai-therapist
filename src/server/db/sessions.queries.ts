@@ -47,6 +47,7 @@ export interface SessionConfigRow {
   ai_model: string | null;
   transcription_model: string | null;
   theme: string | null;
+  proactive_offering: boolean | null;
 }
 
 export interface UpsertSessionConfigInput {
@@ -66,6 +67,8 @@ export interface UpsertSessionConfigInput {
   transcription_model?: string | null;
   /** UI theme active at session start ('default', 'sage', 'ocean', 'dusk', 'dark'). */
   theme?: string | null;
+  /** ai-therapist-74 A/B condition resolved for this session; null = not evaluated. */
+  proactive_offering?: boolean | null;
 }
 
 export interface SessionAccessInfo {
@@ -240,7 +243,8 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
     modality = null,
     ai_model = null,
     transcription_model = null,
-    theme = 'default'
+    theme = 'default',
+    proactive_offering = null
   } = config;
 
   // JSONB fields: stringify when present, otherwise pass null.
@@ -249,8 +253,8 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
 
   const result = await pool.query<SessionConfigRow>(
     `INSERT INTO session_configurations
-     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12, $13)
+     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme, proactive_offering)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14)
      ON CONFLICT (session_id)
      DO UPDATE SET
        voice = EXCLUDED.voice,
@@ -267,9 +271,10 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
        -- them.
        ai_model = COALESCE(EXCLUDED.ai_model, session_configurations.ai_model),
        transcription_model = COALESCE(EXCLUDED.transcription_model, session_configurations.transcription_model),
-       theme = EXCLUDED.theme
+       theme = EXCLUDED.theme,
+       proactive_offering = EXCLUDED.proactive_offering
      RETURNING *`,
-    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme]
+    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme, proactive_offering]
   );
   return result.rows[0];
 }

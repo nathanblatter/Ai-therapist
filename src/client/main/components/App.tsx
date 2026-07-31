@@ -1045,6 +1045,26 @@ export default function App() {
       setToolUI({ kind: 'journal', prompt: a.prompt || 'What would you like to put into words right now?' });
       return { shown: true };
     },
+    create_custom_worksheet: async (args: unknown) => {
+      // Renders directly from the model's function-call args (same pattern as
+      // the other overlay tools). The server tool handler independently
+      // validates the same args against the vetted template's structure and
+      // persists the instance for researcher review — see toolRegistry.service.ts.
+      const a = (args ?? {}) as {
+        title?: string; intro?: string;
+        sections?: Array<{ type: 'text' | 'textarea' | 'scale'; label: string; placeholder?: string }>;
+      };
+      if (!a.title || !Array.isArray(a.sections) || a.sections.length === 0) {
+        return { shown: false };
+      }
+      setToolUI({
+        kind: 'custom_worksheet',
+        title: a.title,
+        intro: a.intro ?? null,
+        sections: a.sections,
+      });
+      return { shown: true };
+    },
     display_session_recap: async (args: unknown) => {
       const a = (args ?? {}) as { focus?: string; techniques?: string[]; takeaway?: string };
       setToolUI({ kind: 'recap', focus: a.focus || 'Today’s conversation', techniques: a.techniques, takeaway: a.takeaway || '' });

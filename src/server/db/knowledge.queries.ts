@@ -6,6 +6,7 @@
 import { pool } from '../config/db.js';
 
 export interface KnowledgeChunk {
+  chunk_id: number;
   title: string | null;
   content: string;
   source: string;
@@ -39,7 +40,7 @@ export async function searchKnowledgeChunks(
 ): Promise<KnowledgeChunk[]> {
   const vec = toVectorLiteral(embedding);
   const result = await pool.query<KnowledgeChunk>(
-    `SELECT title, content, source, source_url, topic, kind, modality, metadata,
+    `SELECT chunk_id, title, content, source, source_url, topic, kind, modality, metadata,
             1 - (embedding <=> $1::vector) AS similarity
      FROM knowledge_chunks
      WHERE active IS TRUE
@@ -52,6 +53,27 @@ export async function searchKnowledgeChunks(
     [vec, filter.kind ?? null, filter.topic ?? null, filter.modality ?? null, limit],
   );
   return result.rows;
+}
+
+export interface KnowledgeChunkTemplate {
+  chunk_id: number;
+  kind: string;
+  title: string | null;
+  content: string;
+  source: string;
+  active: boolean;
+  metadata: Record<string, unknown> | null;
+}
+
+/** Fetch a single chunk by id (create_custom_worksheet uses this to validate
+ *  a personalized worksheet against its vetted template's structure). */
+export async function getKnowledgeChunkById(chunkId: number): Promise<KnowledgeChunkTemplate | null> {
+  const result = await pool.query<KnowledgeChunkTemplate>(
+    `SELECT chunk_id, kind, title, content, source, active, metadata
+     FROM knowledge_chunks WHERE chunk_id = $1`,
+    [chunkId],
+  );
+  return result.rows[0] ?? null;
 }
 
 export interface KnowledgeChunkInput {

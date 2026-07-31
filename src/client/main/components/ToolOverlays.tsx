@@ -7,6 +7,12 @@ import { X, Phone, MessageSquare, CheckCircle } from 'react-feather';
 
 // ---------- shared ----------
 
+export interface CustomWorksheetSection {
+  type: 'text' | 'textarea' | 'scale';
+  label: string;
+  placeholder?: string;
+}
+
 export type ToolUI =
   | { kind: 'resource'; resourceType: string }
   | { kind: 'thought_record' }
@@ -15,7 +21,8 @@ export type ToolUI =
   | { kind: 'safety_plan'; plan: SafetyPlanData }
   | { kind: 'scale'; scale: string }
   | { kind: 'values_sort' }
-  | { kind: 'fear_ladder' };
+  | { kind: 'fear_ladder' }
+  | { kind: 'custom_worksheet'; title: string; intro: string | null; sections: CustomWorksheetSection[] };
 
 export interface SafetyPlanData {
   warning_signs?: string[];
@@ -453,6 +460,80 @@ function FearLadder({ onClose, onComplete }: { onClose: () => void; onComplete: 
   );
 }
 
+// ---------- personalized worksheet (create_custom_worksheet, ai-therapist-73) ----------
+// Same step-through pattern as ThoughtRecord, but the sections and their input
+// types come from the model (validated server-side against the vetted
+// template's structure) rather than being hardcoded.
+
+function CustomWorksheet({ title, intro, sections, onClose, onComplete }: {
+  title: string; intro: string | null; sections: CustomWorksheetSection[];
+  onClose: () => void; onComplete: (values: Record<string, string>) => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const current = sections[step];
+  const isLast = step === sections.length - 1;
+  const key = `s${step}`;
+  const value = values[key] ?? (current.type === 'scale' ? '50' : '');
+
+  return (
+    <Shell title={title} onClose={onClose} wide>
+      <div className="px-6 py-5 space-y-4">
+        {intro && step === 0 && <p className="text-sm text-gray-600 italic">{intro}</p>}
+        <div className="flex gap-1.5" aria-hidden="true">
+          {sections.map((s, i) => (
+            <div key={`${s.label}-${i}`} className={`h-1.5 flex-1 rounded-full ${i <= step ? 'bg-blue-500' : 'bg-gray-200'}`} />
+          ))}
+        </div>
+        <div>
+          <label className="block text-base font-medium text-gray-800 mb-2">{current.label}</label>
+          {current.type === 'scale' ? (
+            <div className="flex items-center gap-3">
+              <input
+                type="range" min={0} max={100} value={Number(value)}
+                onChange={(e) => setValues(v => ({ ...v, [key]: e.target.value }))}
+                className="flex-1 accent-blue-600"
+              />
+              <span className="text-sm text-gray-600 w-10 text-right">{value}</span>
+            </div>
+          ) : current.type === 'text' ? (
+            <input
+              value={value}
+              onChange={(e) => setValues(v => ({ ...v, [key]: e.target.value }))}
+              placeholder={current.placeholder}
+              maxLength={300}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+          ) : (
+            <textarea
+              value={value}
+              onChange={(e) => setValues(v => ({ ...v, [key]: e.target.value }))}
+              placeholder={current.placeholder}
+              rows={4}
+              maxLength={1000}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              autoFocus
+            />
+          )}
+        </div>
+        <div className="flex justify-between">
+          <button onClick={() => (step === 0 ? onClose() : setStep(step - 1))}
+            className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">
+            {step === 0 ? 'Cancel' : 'Back'}
+          </button>
+          <button
+            onClick={() => (isLast ? onComplete(values) : setStep(step + 1))}
+            disabled={current.type !== 'scale' && !value.trim()}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg">
+            {isLast ? 'Finish' : 'Next'}
+          </button>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
 // ---------- dispatcher ----------
 
 export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMessage, onLogRecord, sessionId }: ToolOverlaysProps) {
@@ -502,6 +583,30 @@ export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMess
             onLogRecord('values_sort', 'Values selected', { values: vals });
             onInvisibleMessage(
               `[Participant chose the values that matter most to them: ${vals.join(', ')}. Warmly reflect these back, and help them identify ONE small, concrete action aligned with one of these values. Do not lecture.]`
+            );
+            onClose();
+          }}
+        />
+      );
+    case 'custom_worksheet':
+      return (
+        <CustomWorksheet
+          title={ui.title}
+          intro={ui.intro}
+          sections={ui.sections}
+          onClose={onClose}
+          onComplete={(values) => {
+            const answers = ui.sections.map((s, i) => `${s.label}: ${values[`s${i}`] ?? ''}`);
+            onLogRecord('custom_worksheet', 'Personalized worksheet completed', { responses: values });
+            if (sessionId) {
+              fetch(`/api/sessions/${sessionId}/worksheet-response`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ responses: values }),
+              }).catch(() => {/* best-effort; the invisible message still reaches the model */});
+            }
+            onInvisibleMessage(
+              `[Personalized worksheet "${ui.title}" completed by participant] ${answers.join('. ')}. Respond warmly to what they wrote, not the form itself.`
             );
             onClose();
           }}

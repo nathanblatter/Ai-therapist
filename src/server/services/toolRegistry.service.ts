@@ -1001,12 +1001,14 @@ export class ToolRegistry {
           const renderTool = meta.render_tool === 'start_thought_record' ? 'start_thought_record' : 'show_journaling_prompt';
           return {
             found: true,
+            template_id: w.chunk_id,
             title: w.title,
             rationale: w.content,
             source: w.source,
             render_tool: renderTool,
             suggested_prompt: meta.prompt ?? null,
-            guidance: `This worksheet fits. Briefly introduce it in your own warm words, then call ${renderTool}${meta.prompt ? ` with prompt: "${meta.prompt}"` : ''}. Do not invent worksheet content beyond this.`,
+            guidance: `This worksheet fits. Briefly introduce it in your own warm words, then call ${renderTool}${meta.prompt ? ` with prompt: "${meta.prompt}"` : ''}. Do not invent worksheet content beyond this. ` +
+              `If personalizing the wording to what the participant just told you would help more than the generic form, you may instead call create_custom_worksheet with template_id ${w.chunk_id}, keeping the same number and kind of sections as this template.`,
           };
         } catch (error) {
           console.error('[ToolRegistry] find_worksheet failed:', error);
@@ -1238,6 +1240,213 @@ export class ToolRegistry {
           }
         }
         return { available: false, reason: 'No safety plan exists yet. If risk is elevated, consider building one together with create_safety_plan.' };
+      }
+    );
+
+    // Tool 32: Personalized worksheet generation within a vetted template's
+    // structure (ai-therapist-73). find_worksheet retrieves the template
+    // (structure + evidence base); this tool lets the model personalize the
+    // wording while the handler enforces the template's section
+    // count/types so the model cannot invent structure outside the vetted
+    // corpus. The client renders it like start_thought_record; the
+    // generated instance is stored for researcher review/promotion.
+    this.registerTool(
+      'create_custom_worksheet',
+      {
+        type: 'function',
+        name: 'create_custom_worksheet',
+        description:
+          'Generate a worksheet personalized to what the participant just told you, WITHIN the structure of a vetted template retrieved from find_worksheet. Call find_worksheet first to get a template_id. Keep the same number and kind of sections as the template — only wording (title, intro, prompt labels) may be personalized. After calling this, the worksheet opens on the participant\'s screen; you will receive their answers when they finish.',
+        parameters: {
+          type: 'object',
+          properties: {
+            template_id: { type: 'number', description: 'The template_id returned by find_worksheet.' },
+            title: { type: 'string', description: 'Personalized worksheet title (short).' },
+            intro: { type: 'string', description: 'One or two warm sentences introducing the worksheet, referencing what they told you.' },
+            sections: {
+              type: 'array',
+              description: 'Ordered prompts/sections, matching the template\'s structure exactly in count and type.',
+              items: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['text', 'textarea', 'scale'], description: 'Input type: text = short answer, textarea = longer writing, scale = 0-100 slider.' },
+                  label: { type: 'string', description: 'The personalized prompt/question for this section.' },
+                  placeholder: { type: 'string', description: 'Optional short example/placeholder text.' },
+                },
+                required: ['type', 'label'],
+              },
+            },
+          },
+          required: ['template_id', 'title', 'sections'],
+        },
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+
+        const templateId = Number(args['template_id']);
+        if (!Number.isFinite(templateId)) return { error: 'template_id is required — call find_worksheet first to get one' };
+
+        const title = typeof args['title'] === 'string' ? args['title'].trim().substring(0, 200) : '';
+        const intro = typeof args['intro'] === 'string' ? args['intro'].trim().substring(0, 500) : null;
+        if (!title) return { error: 'title is required' };
+
+        const rawSections = Array.isArray(args['sections']) ? args['sections'] : [];
+        const ALLOWED_TYPES = new Set(['text', 'textarea', 'scale']);
+        const sections = rawSections
+          .map((s) => {
+            if (typeof s !== 'object' || s === null) return null;
+            const rec = s as Record<string, unknown>;
+            const type = typeof rec['type'] === 'string' ? rec['type'] : '';
+            const label = typeof rec['label'] === 'string' ? rec['label'].trim().substring(0, 300) : '';
+            const placeholder = typeof rec['placeholder'] === 'string' ? rec['placeholder'].trim().substring(0, 150) : undefined;
+            if (!ALLOWED_TYPES.has(type) || !label) return null;
+            return { type: type as 'text' | 'textarea' | 'scale', label, ...(placeholder ? { placeholder } : {}) };
+          })
+          .filter((s): s is { type: 'text' | 'textarea' | 'scale'; label: string; placeholder?: string } => s !== null);
+
+        if (sections.length === 0) {
+          return { error: 'At least one valid section (type + label) is required' };
+        }
+
+        try {
+          const { getKnowledgeChunkById, insertWorksheetInstance } = await import('../db/index.js');
+          const template = await getKnowledgeChunkById(templateId);
+          if (!template || template.kind !== 'worksheet' || !template.active) {
+            return { error: 'Unknown or inactive worksheet template. Call find_worksheet again to get a valid template_id.' };
+          }
+
+          // Enforce the vetted template's structure: the model may personalize
+          // wording, never invent sections beyond what the template specifies.
+          const meta = (template.metadata ?? {}) as { sections?: Array<{ type?: string }>; max_sections?: number };
+          if (Array.isArray(meta.sections) && meta.sections.length > 0) {
+            if (sections.length !== meta.sections.length) {
+              return {
+                error: `This template has exactly ${meta.sections.length} section(s); you supplied ${sections.length}. Match the template's structure — only personalize the wording.`,
+              };
+            }
+            for (let i = 0; i < sections.length; i++) {
+              const expectedType = meta.sections[i]?.type;
+              if (expectedType && sections[i].type !== expectedType) {
+                return {
+                  error: `Section ${i + 1} must be type "${expectedType}" per the template; got "${sections[i].type}". Only wording may be personalized, not structure.`,
+                };
+              }
+            }
+          } else {
+            // No structured metadata on this template — fall back to generic
+            // sane bounds so an unstructured/legacy template can't be abused
+            // into an arbitrarily long or oddly-typed form.
+            const maxSections = meta.max_sections ?? 6;
+            if (sections.length > maxSections) {
+              return { error: `Too many sections (max ${maxSections} for this template).` };
+            }
+          }
+
+          const instanceId = await insertWorksheetInstance({
+            sessionId: ctx.sessionId,
+            templateChunkId: template.chunk_id,
+            templateTitle: template.title,
+            title,
+            intro,
+            sections,
+          });
+
+          if (global.io) {
+            global.io.to('admin-broadcast').emit('session:worksheet-created', {
+              sessionId: ctx.sessionId, instanceId, templateId: template.chunk_id, createdAt: new Date(),
+            });
+          }
+
+          return {
+            success: true,
+            instance_id: instanceId,
+            title,
+            intro,
+            sections,
+            guidance: 'The personalized worksheet is now on the participant\'s screen. Stay quiet or offer brief encouragement while they fill it in; when they finish you will receive their answers — respond to what they wrote, not the form itself.',
+          };
+        } catch (error) {
+          console.error('[ToolRegistry] create_custom_worksheet failed:', error);
+          return { error: 'Could not create the personalized worksheet right now. Fall back to find_worksheet\'s standard render tool instead.' };
+        }
+      }
+    );
+
+    // Tool 33: Explicit laddered risk assessment logging (ai-therapist-71).
+    // The C-SSRS-style laddered guidance already exists as sideband instruction
+    // (crisisIntervention.service SAFETY_PROTOCOL_GUIDANCE); this tool gives the
+    // study clean, structured data on how far an assessment progressed and what
+    // band it resolved to. It complements — never replaces — the automatic
+    // crisis-detection pipeline (crisisDetection.service.ts).
+    this.registerTool(
+      'run_risk_check',
+      {
+        type: 'function',
+        name: 'run_risk_check',
+        description:
+          'Log one step of a structured, C-SSRS-style safety assessment ladder (ideation → plan → means → timeframe → intent, or protective_factors) after asking the participant that question directly. Use during a safety assessment to record clean data on assessment progression — this does not replace your clinical judgment or the automatic crisis protocol, only documents it. Ask one question at a time; call this after each answer.',
+        parameters: {
+          type: 'object',
+          properties: {
+            step: {
+              type: 'string',
+              enum: ['ideation', 'plan', 'means', 'timeframe', 'intent', 'protective_factors'],
+              description: 'Which ladder question this answer is for.',
+            },
+            answer: { type: 'string', description: "The participant's answer, close to their own words." },
+            risk_band: {
+              type: 'string',
+              enum: ['none', 'low', 'moderate', 'high', 'imminent'],
+              description: 'Your clinical read of risk after this answer.',
+            },
+          },
+          required: ['step', 'answer', 'risk_band'],
+        },
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+
+        const STEPS = new Set(['ideation', 'plan', 'means', 'timeframe', 'intent', 'protective_factors']);
+        const BANDS = new Set(['none', 'low', 'moderate', 'high', 'imminent']);
+        const step = typeof args['step'] === 'string' ? args['step'] : '';
+        const riskBand = typeof args['risk_band'] === 'string' ? args['risk_band'] : '';
+        const answer = typeof args['answer'] === 'string' ? args['answer'].trim().substring(0, 1000) : '';
+
+        if (!STEPS.has(step)) return { error: 'step must be one of ideation, plan, means, timeframe, intent, protective_factors' };
+        if (!BANDS.has(riskBand)) return { error: 'risk_band must be one of none, low, moderate, high, imminent' };
+        if (!answer) return { error: 'answer text is required' };
+
+        try {
+          const { insertRiskCheckStep, getRiskCheckSteps, getLatestCrisisEventId } = await import('../db/index.js');
+          const [priorSteps, crisisEventId] = await Promise.all([
+            getRiskCheckSteps(ctx.sessionId),
+            getLatestCrisisEventId(ctx.sessionId),
+          ]);
+
+          await insertRiskCheckStep({
+            sessionId: ctx.sessionId,
+            crisisEventId,
+            step: step as 'ideation' | 'plan' | 'means' | 'timeframe' | 'intent' | 'protective_factors',
+            answer,
+            riskBand: riskBand as 'none' | 'low' | 'moderate' | 'high' | 'imminent',
+            sequence: priorSteps.length + 1,
+          });
+
+          if (global.io) {
+            global.io.to('admin-broadcast').emit('session:risk-check-step', {
+              sessionId: ctx.sessionId, step, riskBand, loggedAt: new Date(),
+            });
+          }
+
+          return {
+            success: true,
+            logged: { step, risk_band: riskBand },
+            guidance: 'Step logged. Continue the ladder gently, one question at a time, or if you have enough information, move to safety planning or your crisis protocol as clinically indicated.',
+          };
+        } catch (error) {
+          console.error('[ToolRegistry] run_risk_check failed:', error);
+          return { error: 'Could not log this step right now. Continue the assessment verbally and follow your crisis protocol.' };
+        }
       }
     );
 

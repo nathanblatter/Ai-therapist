@@ -17,7 +17,7 @@ import {
   createActiveRealtimeSession,
   recordConsent,
 } from '../../db/index.js';
-import { checkSessionLimits, getSystemPrompt, getActiveModality, getSystemConfig } from '../../utils/sessionHelpers.js';
+import { checkSessionLimits, getSystemPrompt, getActiveModality, getSystemConfig, resolveProactiveOffering } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock, buildToolGuidanceBlock } from '../../utils/promptContext.js';
 import { setSessionCheckin } from '../../db/index.js';
@@ -147,8 +147,11 @@ export default function tokenRoutes(): Router {
       const checkin = sanitizeCheckin(req.body?.checkin);
       const memoryBlock = await buildMemoryBlock(userId);
       const toolGuidance = buildToolGuidanceBlock(tools.map(t => t.name));
+      // Resolved once per session (ai-therapist-74 A/B condition) and persisted
+      // below so the steering baked into `instructions` matches what's recorded.
+      const proactiveOffering = await resolveProactiveOffering();
       const instructions =
-        (await getSystemPrompt(userLanguage, 'realtime')) + toolGuidance + memoryBlock + buildCheckinBlock(checkin);
+        (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) + toolGuidance + memoryBlock + buildCheckinBlock(checkin);
       const activeModality = await getActiveModality();
 
       const dynamicSessionConfig = JSON.stringify({
@@ -356,6 +359,7 @@ export default function tokenRoutes(): Router {
           modality: activeModality?.key ?? null,
           ai_model: resolvedModel,
           transcription_model: transcriptionModel,
+          proactive_offering: proactiveOffering,
         });
         console.log(`Session configuration created for session: ${sessionId.substring(0, 12)}... (voice: ${userVoice}, language: ${userLanguage})`);
       } catch (dbError) {
