@@ -2,7 +2,8 @@
 // the user's voice/language/prompt, creates the backing therapy session, and
 // schedules auto-termination when a max duration is configured. Anonymous users
 // are allowed; rate limits are enforced via checkSessionLimits.
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
+import { createHash, randomUUID } from 'node:crypto';
 import { getOpenAIKey } from '../../config/secrets.js';
 import {
   getActiveSessionForUser,
@@ -19,6 +20,56 @@ import { checkSessionLimits, getSystemPrompt, getActiveModality } from '../../ut
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock, buildToolGuidanceBlock } from '../../utils/promptContext.js';
 import { setSessionCheckin } from '../../db/index.js';
+
+// ---- OpenAI safety identifier (ai-therapist-63) ----
+// OpenAI recommends sending a stable, non-PII `OpenAI-Safety-Identifier` per
+// end user so abuse enforcement targets the individual, not our whole API key.
+// Logged-in users: sha256 of their user id. Anonymous participants: sha256 of
+// a long-lived random participant cookie (NOT the therapy session id, which is
+// per-session, and NOT anything identifying).
+
+const PARTICIPANT_COOKIE = 'att_pid';
+const PARTICIPANT_COOKIE_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000; // ~13 months (browser cap)
+
+/** Read the participant cookie without cookie-parser (only one we need). */
+function readParticipantCookie(req: Request): string | null {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name === PARTICIPANT_COOKIE) {
+      const value = rest.join('=');
+      // Defensive: only accept our own UUID format.
+      if (/^[0-9a-f-]{36}$/i.test(value)) return value;
+    }
+  }
+  return null;
+}
+
+/**
+ * Stable hashed identifier for the requesting end user. Sets the participant
+ * cookie as a side effect for anonymous requesters that don't have one yet.
+ */
+function getSafetyIdentifier(req: Request, res: Response, userId: number | string | null): string {
+  let seed: string;
+  if (userId) {
+    seed = `user:${userId}`;
+  } else {
+    let pid = readParticipantCookie(req);
+    if (!pid) {
+      pid = randomUUID();
+      res.cookie(PARTICIPANT_COOKIE, pid, {
+        maxAge: PARTICIPANT_COOKIE_MAX_AGE_MS,
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/',
+      });
+    }
+    seed = `participant:${pid}`;
+  }
+  return createHash('sha256').update(seed).digest('hex');
+}
 
 export default function tokenRoutes(): Router {
   const router = Router();
@@ -117,9 +168,14 @@ export default function tokenRoutes(): Router {
       });
 
       const apiKey = await getOpenAIKey();
+      const safetyIdentifier = getSafetyIdentifier(req, res, userId);
       const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'OpenAI-Safety-Identifier': safetyIdentifier,
+        },
         body: dynamicSessionConfig,
       });
 
