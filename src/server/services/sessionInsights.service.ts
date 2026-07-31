@@ -13,9 +13,13 @@ import {
   getSessionMessages,
   getSessionInsights,
   upsertSessionInsights,
+  getUserMemoryEnabled,
+  getUserCaseProfile,
+  upsertUserCaseProfile,
   type SessionSummary,
   type SoapNote,
   type SessionCheckin,
+  type CaseProfile,
 } from '../db/index.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -25,7 +29,7 @@ const INSIGHTS_MODEL = 'gpt-4o-mini';
 const MAX_TRANSCRIPT_CHARS = 12000;
 
 const SYSTEM_PROMPT = `You are a clinical documentation assistant for an AI-assisted therapy research study.
-Given a support-conversation transcript, produce STRICT JSON with two parts:
+Given a support-conversation transcript, produce STRICT JSON with parts:
 
 "summary" — a compact memory of the session used to give the AI assistant continuity in this participant's FUTURE sessions. Thematic, not verbatim; never include names, places, or other identifying details.
   - headline: 3-8 words
@@ -41,7 +45,19 @@ Given a support-conversation transcript, produce STRICT JSON with two parts:
   - assessment: descriptive synthesis; note any risk signals or their absence; NO diagnoses
   - plan: what was suggested in-session and sensible next steps
 
-Return ONLY the JSON object: {"summary": {...}, "soap": {...}}`;
+If (and only if) a PRIOR CASE PROFILE is supplied in the user message, ALSO produce:
+"case_profile" — the participant's UPDATED rolling clinical case profile, synthesizing the prior profile with this session (a MERGE, never a plain concatenation — dedupe, re-word, and drop anything superseded):
+  - presenting_concerns: current short list of what brings them (up to 5)
+  - recurring_themes: themes that keep coming up across sessions (up to 5)
+  - stressors: current stressors (up to 5)
+  - support_system: people/resources they've mentioned as support (up to 5)
+  - coping_repertoire: array of {technique, helpfulness: "helped"|"mixed"|"did_not_help"}, ranked with what actually helped first (up to 6)
+  - values: what they've said matters to them (up to 5)
+  - screener_trend: one sentence on how any screener scores (PHQ-2/GAD-2) are trending, if mentioned; empty string if none
+If no prior case profile is supplied, build a fresh one from this session alone (thin is fine).
+
+Never include names, places, or other identifying details anywhere in the JSON.
+Return ONLY the JSON object: {"summary": {...}, "soap": {...}, "case_profile": {...}}`;
 
 let openaiClient: OpenAI | null = null;
 async function getClient(): Promise<OpenAI> {
@@ -85,6 +101,17 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     ? `Pre-session check-in — mood: ${checkin.mood ?? 'n/a'}/10, topic: ${checkin.topic || 'n/a'}, goal: ${checkin.goal || 'n/a'}\n\n`
     : '';
 
+  // Rolling case profile (ai-therapist-47): only participate for logged-in,
+  // memory-consented users — same gate as the injected memory block itself.
+  // Passing the PRIOR profile in the same LLM call lets the model MERGE
+  // instead of us appending, at no extra request.
+  const userId = session.user_id ?? null;
+  const caseProfileEnabled = userId ? await getUserMemoryEnabled(userId) : false;
+  const existingProfile = caseProfileEnabled && userId ? await getUserCaseProfile(userId) : null;
+  const priorProfileLine = existingProfile
+    ? `PRIOR CASE PROFILE (update/merge this):\n${JSON.stringify(existingProfile.profile)}\n\n`
+    : '';
+
   const client = await getClient();
   const response = await client.chat.completions.create({
     model: INSIGHTS_MODEL,
@@ -93,14 +120,14 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     max_tokens: 900,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `${checkinLine}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}` },
+      { role: 'user', content: `${checkinLine}${priorProfileLine}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}` },
     ],
   });
 
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error('Empty insights response from model');
 
-  let parsed: { summary?: SessionSummary; soap?: SoapNote };
+  let parsed: { summary?: SessionSummary; soap?: SoapNote; case_profile?: CaseProfile };
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -112,6 +139,16 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
 
   await upsertSessionInsights(sessionId, session.user_id ?? null, parsed.summary, parsed.soap, INSIGHTS_MODEL);
   log.info(`Insights stored for ${sessionId} ("${parsed.summary.headline ?? ''}")`);
+
+  if (caseProfileEnabled && userId && parsed.case_profile) {
+    try {
+      await upsertUserCaseProfile(userId, parsed.case_profile);
+      log.info(`Case profile updated for user ${userId}`);
+    } catch (err) {
+      // Non-fatal: the session summary/SOAP note above is already saved.
+      log.error({ err }, `Failed to update case profile for user ${userId}`);
+    }
+  }
 }
 
 /** Fire-and-forget wrapper used by the session-end paths. */

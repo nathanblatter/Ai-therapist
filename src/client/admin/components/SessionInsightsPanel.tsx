@@ -30,6 +30,9 @@ interface Insights {
   model?: string | null;
   safety_plan?: { plan: Record<string, string[]>; created_at: string } | null;
   scale_responses?: { scale: string; answers: number[]; score: number; created_at: string }[];
+  notes_for_next_session?: string | null;
+  notes_author?: string | null;
+  notes_created_at?: string | null;
 }
 
 interface Checkin {
@@ -51,6 +54,8 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [notesDraft, setNotesDraft] = useState('');
+  const [notesSaved, setNotesSaved] = useState(false);
 
   const isTherapist = userRole === 'therapist';
 
@@ -60,7 +65,9 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
     try {
       const res = await fetch(`/admin/api/sessions/${sessionId}/insights`);
       if (res.ok) {
-        setInsights(await res.json() as Insights);
+        const data = await res.json() as Insights;
+        setInsights(data);
+        setNotesDraft(data.notes_for_next_session ?? '');
       } else {
         setNotFound(true);
       }
@@ -95,6 +102,24 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
       if (res.ok) {
         setInsights(await res.json() as Insights);
         setNotFound(false);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    setBusy(true);
+    setNotesSaved(false);
+    try {
+      const res = await fetch(`/admin/api/sessions/${sessionId}/insights/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: notesDraft }),
+      });
+      if (res.ok) {
+        setInsights(prev => (prev ? { ...prev, notes_for_next_session: notesDraft } : prev));
+        setNotesSaved(true);
       }
     } finally {
       setBusy(false);
@@ -250,6 +275,38 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                 <p className="text-xs text-gray-400">
                   AI-drafted ({insights?.model}) — verify before any clinical use.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {insights && (
+            <div>
+              <h4 className="font-semibold text-gray-700 mb-1">Notes for next session</h4>
+              <div className="bg-white rounded p-3 space-y-2">
+                <textarea
+                  value={notesDraft}
+                  onChange={e => { setNotesDraft(e.target.value); setNotesSaved(false); }}
+                  placeholder="Guidance for the AI in this participant's next session (private — never shown to them)…"
+                  maxLength={1000}
+                  rows={3}
+                  className="w-full text-sm border border-gray-200 rounded p-2 text-gray-700"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveNotes}
+                    disabled={busy}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded text-xs font-medium"
+                  >
+                    Save notes
+                  </button>
+                  {notesSaved && <span className="text-xs text-green-700">Saved</span>}
+                  {insights.notes_author && (
+                    <span className="text-xs text-gray-400">
+                      last set by {insights.notes_author}
+                      {insights.notes_created_at ? ` on ${new Date(insights.notes_created_at).toLocaleString()}` : ''}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           )}

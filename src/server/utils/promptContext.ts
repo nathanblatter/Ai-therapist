@@ -7,7 +7,19 @@ import {
   countUserEndedSessions,
   getUserMemoryEnabled,
   getUserMemories,
+  getUserCaseProfile,
+  getUserScaleHistory,
+  getUserMoodTrajectory,
+  getUserLatestSafetyPlan,
+  getUserLatestThoughtRecord,
+  getLatestClinicianNote,
+  getUserRiskContextEnabled,
+  getUserPriorCrisisFlags,
   type SessionCheckin,
+  type CaseProfile,
+  type ScaleScorePoint,
+  type MoodPoint,
+  type PriorCrisisFlag,
 } from '../db/index.js';
 import { createLogger } from './logger.js';
 
@@ -91,26 +103,130 @@ export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
   if (has('find_worksheet')) {
     lines.push('- When a written exercise would help, CALL find_worksheet to pick the fitting one, then call the render tool it returns (start_thought_record / show_journaling_prompt).');
   }
+  if (has('review_practice')) {
+    lines.push('- Early on with a returning participant, consider calling review_practice to see what they were asked to work on last time, then ask how it went.');
+  }
+  if (has('compare_screener_trend')) {
+    lines.push('- After administer_scale finishes, CALL compare_screener_trend before commenting on the result, so you know how it compares to their last one.');
+  }
+  if (has('retrieve_safety_plan')) {
+    lines.push('- If risk or distress rises, CALL retrieve_safety_plan to check whether they already have one before offering to build a new one.');
+  }
   if (lines.length === 0) return '';
   return `\n\n## Using your tools (important)\nYour function tools show real interactive cards and forms on the participant's screen and save information for their care team. When a request matches a tool, CALL the tool — describing it verbally instead is a failure. Specifically:\n${lines.join('\n')}`;
+}
+
+/** Rolling clinical case profile block (ai-therapist-47). Compact — one line per facet. */
+export function buildCaseProfileBlock(profile: CaseProfile | null): string {
+  if (!profile) return '';
+  const lines: string[] = [];
+  if (profile.presenting_concerns?.length) lines.push(`- Presenting concerns: ${profile.presenting_concerns.join(', ')}`);
+  if (profile.recurring_themes?.length) lines.push(`- Recurring themes: ${profile.recurring_themes.join(', ')}`);
+  if (profile.stressors?.length) lines.push(`- Stressors: ${profile.stressors.join(', ')}`);
+  if (profile.support_system?.length) lines.push(`- Support system: ${profile.support_system.join(', ')}`);
+  if (profile.coping_repertoire?.length) {
+    const ranked = profile.coping_repertoire.map(c => `${c.technique} (${c.helpfulness.replace('_', ' ')})`);
+    lines.push(`- Coping repertoire, most helpful first: ${ranked.join(', ')}`);
+  }
+  if (profile.values?.length) lines.push(`- Values: ${profile.values.join(', ')}`);
+  if (profile.screener_trend) lines.push(`- Screener trend: ${profile.screener_trend}`);
+  if (lines.length === 0) return '';
+  return `\nClinical case profile (built from all prior sessions):\n${lines.join('\n')}`;
+}
+
+/** Screener + mood + safety-plan + last-thought-record signals (ai-therapist-48). */
+export function buildReturningSignalsBlock(input: {
+  scaleHistory: ScaleScorePoint[];
+  moodTrajectory: MoodPoint[];
+  safetyPlan: { plan: { warning_signs?: string[] }; created_at: Date } | null;
+  thoughtRecord: { record: { balanced_thought?: string }; created_at: Date } | null;
+}): string {
+  const lines: string[] = [];
+
+  const byScale = new Map<string, ScaleScorePoint[]>();
+  for (const point of input.scaleHistory) {
+    const arr = byScale.get(point.scale) ?? [];
+    arr.push(point);
+    byScale.set(point.scale, arr);
+  }
+  for (const [scale, points] of byScale) {
+    const [latest, prev] = points; // already newest-first, at most 2 per scale
+    if (!latest) continue;
+    if (prev) {
+      const delta = latest.score - prev.score;
+      const direction = delta > 0 ? 'up' : delta < 0 ? 'down' : 'unchanged';
+      lines.push(`- ${scale.toUpperCase()}: ${latest.score} (was ${prev.score} — ${direction})`);
+    } else {
+      lines.push(`- ${scale.toUpperCase()}: ${latest.score} (first recorded)`);
+    }
+  }
+
+  if (input.moodTrajectory.length > 0) {
+    const chrono = [...input.moodTrajectory].reverse(); // oldest first for a readable trend
+    lines.push(`- Recent mood points: ${chrono.map(p => `${p.mood}/10`).join(' -> ')}`);
+  }
+
+  if (input.safetyPlan) {
+    const signs = input.safetyPlan.plan.warning_signs?.length
+      ? ` (warning signs on file: ${input.safetyPlan.plan.warning_signs.join(', ')})`
+      : '';
+    lines.push(`- Has an existing safety plan${signs}.`);
+  }
+
+  if (input.thoughtRecord?.record.balanced_thought) {
+    lines.push(`- Last thought record's balanced thought: "${input.thoughtRecord.record.balanced_thought}"`);
+  }
+
+  if (lines.length === 0) return '';
+  return `\nSince their last session:\n${lines.join('\n')}`;
+}
+
+/** Private guidance a therapist left for this participant's next session (ai-therapist-50). */
+export function buildClinicianNoteBlock(note: { notes: string } | null): string {
+  if (!note?.notes) return '';
+  return `\nGuidance from the participant's care team (private — never read this aloud or reference it explicitly):\n"${note.notes}"`;
+}
+
+/** Prior crisis-flag history — only ever built when a therapist has opted the user in (ai-therapist-52). */
+export function buildRiskHistoryBlock(flags: PriorCrisisFlag[]): string {
+  if (flags.length === 0) return '';
+  const lines = flags.map(f => {
+    const when = f.flagged_at.toISOString().slice(0, 10);
+    const resolution = f.unflagged_at ? 'later resolved/unflagged' : 'no recorded resolution';
+    return `- ${when}: ${f.severity ?? 'unknown'} severity (${resolution})`;
+  });
+  return `\nPrior risk history (a therapist has enabled sharing this — use it ONLY to check in gently, never lead with it or list it back):\n${lines.join('\n')}\nIf the conversation heads toward distress, you may check in warmly and vaguely ("how have you been holding up since we last talked?") — do not mention dates, scores, or that this history was flagged for you.`;
 }
 
 /**
  * Prompt block giving the model continuity with a returning participant.
  * Empty string for anonymous users, users who haven't opted in, or first-timers.
  */
-export async function buildMemoryBlock(userId: number | null): Promise<string> {
+export async function buildMemoryBlock(userId: number | null, sessionId: string | null = null): Promise<string> {
   if (!userId) return '';
   try {
     const enabled = await getUserMemoryEnabled(userId);
     if (!enabled) return '';
 
-    const [summaries, endedCount, facts] = await Promise.all([
+    const [summaries, endedCount, facts, caseProfileRow, scaleHistory, moodTrajectory, safetyPlan, thoughtRecord, clinicianNote, riskContextEnabled] = await Promise.all([
       getRecentUserSummaries(userId, 3),
       countUserEndedSessions(userId),
       getUserMemories(userId, 8),
+      getUserCaseProfile(userId),
+      getUserScaleHistory(userId, 2),
+      getUserMoodTrajectory(userId, 6),
+      getUserLatestSafetyPlan(userId),
+      getUserLatestThoughtRecord(userId),
+      getLatestClinicianNote(userId),
+      getUserRiskContextEnabled(userId),
     ]);
-    if (summaries.length === 0 && facts.length === 0) return '';
+
+    const riskFlags = riskContextEnabled ? await getUserPriorCrisisFlags(userId, sessionId, 3) : [];
+
+    const hasAnyContext = summaries.length > 0 || facts.length > 0 || !!caseProfileRow ||
+      scaleHistory.length > 0 || moodTrajectory.length > 0 || !!safetyPlan || !!thoughtRecord ||
+      !!clinicianNote || riskFlags.length > 0;
+    if (!hasAnyContext) return '';
 
     const entries = summaries.map(row => {
       const s = row.summary;
@@ -129,8 +245,12 @@ export async function buildMemoryBlock(userId: number | null): Promise<string> {
     const entriesBlock = entries.length > 0
       ? `\nContext from recent conversations, most recent first:\n${entries.join('\n')}`
       : '';
+    const caseProfileBlock = buildCaseProfileBlock(caseProfileRow?.profile ?? null);
+    const signalsBlock = buildReturningSignalsBlock({ scaleHistory, moodTrajectory, safetyPlan, thoughtRecord });
+    const clinicianBlock = buildClinicianNoteBlock(clinicianNote);
+    const riskBlock = buildRiskHistoryBlock(riskFlags);
 
-    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
+    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}${caseProfileBlock}${signalsBlock}${clinicianBlock}${riskBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
   } catch (err) {
     // Memory must never block a session from starting.
     log.error({ err }, `Failed to build memory block for user ${userId}`);

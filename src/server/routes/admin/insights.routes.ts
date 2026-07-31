@@ -3,7 +3,14 @@
 // researchers must not see.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { getSessionInsights, markSoapReviewed, getSessionSafetyPlan, getSessionScaleResponses } from '../../db/index.js';
+import {
+  getSessionInsights,
+  markSoapReviewed,
+  getSessionSafetyPlan,
+  getSessionScaleResponses,
+  setSessionNotesForNextSession,
+  setUserRiskContextEnabled,
+} from '../../db/index.js';
 
 export default function insightsRoutes(): Router {
   const router = Router();
@@ -56,6 +63,36 @@ export default function insightsRoutes(): Router {
     } catch (err) {
       console.error('Failed to regenerate session insights:', err);
       res.status(500).json({ error: 'Failed to regenerate session insights' });
+    }
+  });
+
+  // POST /admin/api/sessions/:sessionId/insights/notes - therapist guidance for the participant's NEXT session
+  router.post('/admin/api/sessions/:sessionId/insights/notes', requireRole('therapist'), async (req, res) => {
+    try {
+      const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().substring(0, 1000) : '';
+      const ok = await setSessionNotesForNextSession(req.params.sessionId, notes, req.session.username ?? 'unknown');
+      if (!ok) {
+        return res.status(404).json({ error: 'No insights row for this session yet — generate insights first' });
+      }
+      res.json({ success: true, notes });
+    } catch (err) {
+      console.error('Failed to save notes for next session:', err);
+      res.status(500).json({ error: 'Failed to save notes for next session' });
+    }
+  });
+
+  // POST /admin/api/users/:userId/risk-context - therapist opt-in for injecting
+  // this user's prior-crisis history into their future sessions (default off).
+  router.post('/admin/api/users/:userId/risk-context', requireRole('therapist'), async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId, 10);
+      if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
+      const enabled = req.body?.enabled === true;
+      await setUserRiskContextEnabled(userId, enabled);
+      res.json({ success: true, enabled });
+    } catch (err) {
+      console.error('Failed to update risk-context sharing flag:', err);
+      res.status(500).json({ error: 'Failed to update risk-context sharing flag' });
     }
   });
 

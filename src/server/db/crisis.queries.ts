@@ -116,6 +116,53 @@ export async function getAllCrisisData(): Promise<AllCrisisData> {
   };
 }
 
+// ---------- Risk history context (ai-therapist-52) ----------
+// Whether a user's prior-crisis history may be injected into their future
+// sessions. Sensitive wording — default OFF; a therapist opts a participant
+// in from the admin session view (routes/admin/insights.routes.ts).
+
+export async function getUserRiskContextEnabled(userId: number): Promise<boolean> {
+  const result = await pool.query<{ risk_context_share_enabled: boolean }>(
+    'SELECT risk_context_share_enabled FROM users WHERE userid = $1',
+    [userId]
+  );
+  return result.rows[0]?.risk_context_share_enabled ?? false;
+}
+
+export async function setUserRiskContextEnabled(userId: number, enabled: boolean): Promise<void> {
+  await pool.query(
+    'UPDATE users SET risk_context_share_enabled = $2, updated_at = CURRENT_TIMESTAMP WHERE userid = $1',
+    [userId, enabled]
+  );
+}
+
+export interface PriorCrisisFlag {
+  session_id: string;
+  severity: string | null;
+  flagged_at: Date;
+  unflagged_at: Date | null;
+  unflagged_by: string | null;
+}
+
+/** Past sessions where this user was crisis-flagged, most recent first (excludes the current session). */
+export async function getUserPriorCrisisFlags(
+  userId: number,
+  excludeSessionId: string | null,
+  limit = 3
+): Promise<PriorCrisisFlag[]> {
+  const result = await pool.query<PriorCrisisFlag>(
+    `SELECT session_id, crisis_severity AS severity, crisis_flagged_at AS flagged_at,
+            crisis_unflagged_at AS unflagged_at, crisis_unflagged_by AS unflagged_by
+     FROM therapy_sessions
+     WHERE user_id = $1 AND crisis_flagged_at IS NOT NULL
+       AND ($2::text IS NULL OR session_id != $2)
+     ORDER BY crisis_flagged_at DESC
+     LIMIT $3`,
+    [userId, excludeSessionId, limit]
+  );
+  return result.rows;
+}
+
 /** All crisis events (with session name + username), newest first. */
 export async function getAllCrisisEvents(): Promise<Record<string, unknown>[]> {
   const result = await pool.query(`

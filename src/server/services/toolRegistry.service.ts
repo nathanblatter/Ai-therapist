@@ -1123,6 +1123,124 @@ export class ToolRegistry {
       })
     );
 
+    // Tool 29: Follow-through check on last session's assigned practice
+    // (ai-therapist-67). Consent-gated like recall_previous_sessions.
+    this.registerTool(
+      'review_practice',
+      {
+        type: 'function',
+        name: 'review_practice',
+        description: "Look up what the participant was asked to practice or work on after their last session — a thought record, a safety plan, or similar — so you can ask how it went. Only works for logged-in participants with session memory on.",
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+      async (_args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+        const { getSession, getUserMemoryEnabled, getUserLatestThoughtRecord, getUserLatestSafetyPlan } = await import('../db/index.js');
+        const session = await getSession(ctx.sessionId);
+        const userId = session?.user_id;
+        if (!userId) return { available: false, reason: 'Participant is anonymous — no session history exists.' };
+        if (!(await getUserMemoryEnabled(userId))) {
+          return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
+        }
+        const [thoughtRecord, safetyPlan] = await Promise.all([
+          getUserLatestThoughtRecord(userId),
+          getUserLatestSafetyPlan(userId),
+        ]);
+        if (!thoughtRecord && !safetyPlan) {
+          return { available: true, practice: null, note: 'No recorded practice from a previous session — do not invent one.' };
+        }
+        return {
+          available: true,
+          thought_record: thoughtRecord?.record.balanced_thought
+            ? { balanced_thought: thoughtRecord.record.balanced_thought, when: thoughtRecord.created_at.toISOString().slice(0, 10) }
+            : null,
+          has_safety_plan: !!safetyPlan,
+          note: 'Ask how it went in your own warm words. Do not read this back verbatim or claim more detail than shown here.',
+        };
+      }
+    );
+
+    // Tool 30: This session's PHQ-2/GAD-2 vs their previous one (ai-therapist-69).
+    this.registerTool(
+      'compare_screener_trend',
+      {
+        type: 'function',
+        name: 'compare_screener_trend',
+        description: 'Compare this session\'s PHQ-2/GAD-2 screener result (after administer_scale finishes) to the participant\'s previous one, with direction. Only works for logged-in participants with session memory on.',
+        parameters: {
+          type: 'object',
+          properties: {
+            scale: { type: 'string', enum: ['phq2', 'gad2'], description: 'Which screener to compare.' },
+          },
+          required: ['scale'],
+        },
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+        const scale = args['scale'] as string;
+        if (scale !== 'phq2' && scale !== 'gad2') return { error: 'Unknown scale', available: ['phq2', 'gad2'] };
+
+        const { getSession, getUserMemoryEnabled, getSessionScaleResponses, getUserLatestScaleScore } = await import('../db/index.js');
+        const session = await getSession(ctx.sessionId);
+        const userId = session?.user_id;
+        if (!userId) return { available: false, reason: 'Participant is anonymous — no prior screeners on record.' };
+        if (!(await getUserMemoryEnabled(userId))) {
+          return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
+        }
+
+        const thisSessionResponses = (await getSessionScaleResponses(ctx.sessionId)).filter(r => r.scale === scale);
+        const current = thisSessionResponses[thisSessionResponses.length - 1];
+        if (!current) {
+          return { available: false, reason: `No ${scale.toUpperCase()} response recorded yet this session — call administer_scale first.` };
+        }
+        const previous = await getUserLatestScaleScore(userId, scale, ctx.sessionId);
+        if (!previous) {
+          return { available: true, current_score: current.score, previous_score: null, direction: null, note: 'First time this screener has been recorded — no trend yet.' };
+        }
+        const delta = current.score - previous.score;
+        const direction = delta > 0 ? 'up' : delta < 0 ? 'down' : 'unchanged';
+        return {
+          available: true,
+          scale,
+          current_score: current.score,
+          previous_score: previous.score,
+          direction,
+          note: 'These are screeners, not diagnoses — respond supportively in plain language, never announce a "diagnosis".',
+        };
+      }
+    );
+
+    // Tool 31: Surface an existing safety plan mid-session (ai-therapist-72),
+    // e.g. when risk appears to be rising, before offering to build a new one.
+    this.registerTool(
+      'retrieve_safety_plan',
+      {
+        type: 'function',
+        name: 'retrieve_safety_plan',
+        description: 'Check whether the participant already has a safety plan — from this session or (for logged-in, memory-consented participants) a previous one — before offering to build a new one with create_safety_plan.',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+      async (_args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+        const { getSession, getSessionSafetyPlan, getUserMemoryEnabled, getUserLatestSafetyPlan } = await import('../db/index.js');
+
+        const own = await getSessionSafetyPlan(ctx.sessionId);
+        if (own) {
+          return { available: true, source: 'this_session', plan: own.plan, created_at: own.created_at.toISOString().slice(0, 10) };
+        }
+
+        const session = await getSession(ctx.sessionId);
+        const userId = session?.user_id;
+        if (userId && (await getUserMemoryEnabled(userId))) {
+          const prior = await getUserLatestSafetyPlan(userId);
+          if (prior) {
+            return { available: true, source: 'previous_session', plan: prior.plan, created_at: prior.created_at.toISOString().slice(0, 10) };
+          }
+        }
+        return { available: false, reason: 'No safety plan exists yet. If risk is elevated, consider building one together with create_safety_plan.' };
+      }
+    );
+
     console.log('[ToolRegistry] Default tools registered');
   }
 

@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, flagSessionCrisisMock, logInterventionActionMock, searchKnowledgeChunksMock, embedTextMock, getSessionMock, getUserMemoryEnabledMock, searchUserMemoriesMock, getActiveModalityMock } = vi.hoisted(() => ({
+const {
+  queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, flagSessionCrisisMock,
+  logInterventionActionMock, searchKnowledgeChunksMock, embedTextMock, getSessionMock,
+  getUserMemoryEnabledMock, searchUserMemoriesMock, getActiveModalityMock,
+  getUserLatestThoughtRecordMock, getUserLatestSafetyPlanMock, getSessionSafetyPlanMock,
+  getSessionScaleResponsesMock, getUserLatestScaleScoreMock,
+} = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
   setSessionGoalMock: vi.fn(),
@@ -13,6 +19,11 @@ const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, 
   getUserMemoryEnabledMock: vi.fn(),
   searchUserMemoriesMock: vi.fn(),
   getActiveModalityMock: vi.fn(),
+  getUserLatestThoughtRecordMock: vi.fn(),
+  getUserLatestSafetyPlanMock: vi.fn(),
+  getSessionSafetyPlanMock: vi.fn(),
+  getSessionScaleResponsesMock: vi.fn(),
+  getUserLatestScaleScoreMock: vi.fn(),
 }));
 vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
@@ -28,6 +39,11 @@ vi.mock('../db/index.js', () => ({
   getSession: getSessionMock,
   getUserMemoryEnabled: getUserMemoryEnabledMock,
   searchUserMemories: searchUserMemoriesMock,
+  getUserLatestThoughtRecord: getUserLatestThoughtRecordMock,
+  getUserLatestSafetyPlan: getUserLatestSafetyPlanMock,
+  getSessionSafetyPlan: getSessionSafetyPlanMock,
+  getSessionScaleResponses: getSessionScaleResponsesMock,
+  getUserLatestScaleScore: getUserLatestScaleScoreMock,
 }));
 vi.mock('./crisisDetection.service.js', () => ({
   flagSessionCrisis: flagSessionCrisisMock,
@@ -52,6 +68,11 @@ beforeEach(() => {
   getUserMemoryEnabledMock.mockReset().mockResolvedValue(true);
   searchUserMemoriesMock.mockReset().mockResolvedValue([]);
   getActiveModalityMock.mockReset().mockResolvedValue(null);
+  getUserLatestThoughtRecordMock.mockReset().mockResolvedValue(null);
+  getUserLatestSafetyPlanMock.mockReset().mockResolvedValue(null);
+  getSessionSafetyPlanMock.mockReset().mockResolvedValue(null);
+  getSessionScaleResponsesMock.mockReset().mockResolvedValue([]);
+  getUserLatestScaleScoreMock.mockReset().mockResolvedValue(null);
 });
 
 describe('registry mechanics', () => {
@@ -301,5 +322,122 @@ describe('interactive experience tools', () => {
     expect(values.success).toBe(true);
     const ladder = await toolRegistry.executeTool('start_fear_ladder', {}) as { success: boolean };
     expect(ladder.success).toBe(true);
+  });
+});
+
+describe('review_practice (ai-therapist-67)', () => {
+  it('requires session context', async () => {
+    const r = await toolRegistry.executeTool('review_practice', {}) as { error?: string };
+    expect(r.error).toBeTruthy();
+  });
+
+  it('is unavailable for anonymous participants', async () => {
+    getSessionMock.mockResolvedValue({ user_id: null });
+    const r = await toolRegistry.executeTool('review_practice', {}, { sessionId: 's1' }) as { available: boolean };
+    expect(r.available).toBe(false);
+  });
+
+  it('is unavailable when session memory is off', async () => {
+    getUserMemoryEnabledMock.mockResolvedValue(false);
+    const r = await toolRegistry.executeTool('review_practice', {}, { sessionId: 's1' }) as { available: boolean };
+    expect(r.available).toBe(false);
+  });
+
+  it('reports no practice on record without inventing one', async () => {
+    const r = await toolRegistry.executeTool('review_practice', {}, { sessionId: 's1' }) as { available: boolean; practice: null };
+    expect(r.available).toBe(true);
+    expect(r.practice).toBeNull();
+  });
+
+  it('returns the last balanced thought and whether a safety plan exists', async () => {
+    getUserLatestThoughtRecordMock.mockResolvedValue({ record: { balanced_thought: 'I did my best' }, created_at: new Date('2026-07-01T00:00:00Z') });
+    getUserLatestSafetyPlanMock.mockResolvedValue({ plan: {}, created_at: new Date(), session_id: 's0' });
+    const r = await toolRegistry.executeTool('review_practice', {}, { sessionId: 's1' }) as {
+      thought_record: { balanced_thought: string; when: string } | null;
+      has_safety_plan: boolean;
+    };
+    expect(r.thought_record).toEqual({ balanced_thought: 'I did my best', when: '2026-07-01' });
+    expect(r.has_safety_plan).toBe(true);
+  });
+});
+
+describe('compare_screener_trend (ai-therapist-69)', () => {
+  it('requires session context', async () => {
+    const r = await toolRegistry.executeTool('compare_screener_trend', { scale: 'phq2' }) as { error?: string };
+    expect(r.error).toBeTruthy();
+  });
+
+  it('rejects an unknown scale', async () => {
+    const r = await toolRegistry.executeTool('compare_screener_trend', { scale: 'bogus' }, { sessionId: 's1' }) as { error?: string };
+    expect(r.error).toBeTruthy();
+  });
+
+  it('is unavailable for anonymous participants', async () => {
+    getSessionMock.mockResolvedValue({ user_id: null });
+    const r = await toolRegistry.executeTool('compare_screener_trend', { scale: 'phq2' }, { sessionId: 's1' }) as { available: boolean };
+    expect(r.available).toBe(false);
+  });
+
+  it('requires this session to already have a response for the scale', async () => {
+    getSessionScaleResponsesMock.mockResolvedValue([]);
+    const r = await toolRegistry.executeTool('compare_screener_trend', { scale: 'phq2' }, { sessionId: 's1' }) as { available: boolean; reason: string };
+    expect(r.available).toBe(false);
+    expect(r.reason).toMatch(/administer_scale first/);
+  });
+
+  it('reports no trend on a first-ever screener', async () => {
+    getSessionScaleResponsesMock.mockResolvedValue([{ scale: 'phq2', answers: [1, 1], score: 2, created_at: new Date() }]);
+    getUserLatestScaleScoreMock.mockResolvedValue(null);
+    const r = await toolRegistry.executeTool('compare_screener_trend', { scale: 'phq2' }, { sessionId: 's1' }) as { previous_score: null };
+    expect(r.previous_score).toBeNull();
+  });
+
+  it('computes direction against the previous score, excluding the current session', async () => {
+    getSessionScaleResponsesMock.mockResolvedValue([{ scale: 'phq2', answers: [1, 0], score: 1, created_at: new Date() }]);
+    getUserLatestScaleScoreMock.mockResolvedValue({ score: 4, created_at: new Date(), session_id: 's0' });
+    const r = await toolRegistry.executeTool('compare_screener_trend', { scale: 'phq2' }, { sessionId: 's1' }) as { direction: string; current_score: number; previous_score: number };
+    expect(getUserLatestScaleScoreMock).toHaveBeenCalledWith(42, 'phq2', 's1');
+    expect(r.current_score).toBe(1);
+    expect(r.previous_score).toBe(4);
+    expect(r.direction).toBe('down');
+  });
+});
+
+describe('retrieve_safety_plan (ai-therapist-72)', () => {
+  it('requires session context', async () => {
+    const r = await toolRegistry.executeTool('retrieve_safety_plan', {}) as { error?: string };
+    expect(r.error).toBeTruthy();
+  });
+
+  it("prefers this session's own plan over a prior one", async () => {
+    getSessionSafetyPlanMock.mockResolvedValue({ plan: { warning_signs: ['x'] }, created_at: new Date() });
+    const r = await toolRegistry.executeTool('retrieve_safety_plan', {}, { sessionId: 's1' }) as { available: boolean; source: string };
+    expect(r.available).toBe(true);
+    expect(r.source).toBe('this_session');
+    expect(getUserLatestSafetyPlanMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a consented user's prior-session plan", async () => {
+    getSessionSafetyPlanMock.mockResolvedValue(null);
+    getUserLatestSafetyPlanMock.mockResolvedValue({ plan: { warning_signs: ['y'] }, created_at: new Date(), session_id: 's0' });
+    const r = await toolRegistry.executeTool('retrieve_safety_plan', {}, { sessionId: 's1' }) as { available: boolean; source: string };
+    expect(r.available).toBe(true);
+    expect(r.source).toBe('previous_session');
+  });
+
+  it('does not look up a prior plan when memory is off', async () => {
+    getSessionSafetyPlanMock.mockResolvedValue(null);
+    getUserMemoryEnabledMock.mockResolvedValue(false);
+    const r = await toolRegistry.executeTool('retrieve_safety_plan', {}, { sessionId: 's1' }) as { available: boolean };
+    expect(r.available).toBe(false);
+    expect(getUserLatestSafetyPlanMock).not.toHaveBeenCalled();
+  });
+
+  it('reports unavailable and suggests create_safety_plan when nothing exists', async () => {
+    getSessionSafetyPlanMock.mockResolvedValue(null);
+    getUserLatestSafetyPlanMock.mockResolvedValue(null);
+    const r = await toolRegistry.executeTool('retrieve_safety_plan', {}, { sessionId: 's1' }) as { available: boolean; reason: string };
+    expect(r.available).toBe(false);
+    expect(r.reason).toMatch(/create_safety_plan/);
   });
 });
