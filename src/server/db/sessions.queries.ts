@@ -44,6 +44,7 @@ export interface SessionConfigRow {
   max_response_output_tokens: number | null;
   language: string | null;
   modality: string | null;
+  theme: string | null;
 }
 
 export interface UpsertSessionConfigInput {
@@ -57,6 +58,8 @@ export interface UpsertSessionConfigInput {
   language?: string;
   /** Therapeutic modality preset active when instructions were assembled. */
   modality?: string | null;
+  /** UI theme active at session start ('default', 'sage', 'ocean', 'dusk', 'dark'). */
+  theme?: string | null;
 }
 
 export interface SessionAccessInfo {
@@ -228,7 +231,8 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
     temperature = 0.8,
     max_response_output_tokens = 4096,
     language = 'en',
-    modality = null
+    modality = null,
+    theme = 'default'
   } = config;
 
   // JSONB fields: stringify when present, otherwise pass null.
@@ -237,8 +241,8 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
 
   const result = await pool.query<SessionConfigRow>(
     `INSERT INTO session_configurations
-     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10)
+     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality, theme)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11)
      ON CONFLICT (session_id)
      DO UPDATE SET
        voice = EXCLUDED.voice,
@@ -249,9 +253,10 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
        temperature = EXCLUDED.temperature,
        max_response_output_tokens = EXCLUDED.max_response_output_tokens,
        language = EXCLUDED.language,
-       modality = EXCLUDED.modality
+       modality = EXCLUDED.modality,
+       theme = EXCLUDED.theme
      RETURNING *`,
-    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality]
+    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, theme]
   );
   return result.rows[0];
 }
