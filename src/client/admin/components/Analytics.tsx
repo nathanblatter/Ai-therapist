@@ -3,7 +3,7 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import type { PieLabelRenderProps } from "recharts";
 import type { TooltipContentProps } from "recharts";
 import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
-import { Activity, MessageSquare, Clock, Mic } from "react-feather";
+import { Activity, MessageSquare, Clock, Mic, Tool, AlertTriangle, DollarSign } from "react-feather";
 import type { Icon as FeatherIcon, IconProps } from "react-feather";
 import type { FC } from "react";
 
@@ -190,6 +190,286 @@ interface AnalyticsFilters {
   statuses: string[];
   endedBy: string[];
   crisisFlagged: string;
+}
+
+// ---- Tool usage analytics (ai-therapist-75) ----
+
+interface ToolStat {
+  tool_name: string;
+  invocations: number;
+  sessions: number;
+  last_used: string | null;
+  failures: number;
+  failure_rate: number;
+}
+
+interface ToolsPerSessionBucket {
+  distinct_tool_count: number;
+  session_count: number;
+}
+
+interface ToolAnalyticsData {
+  tool_stats: ToolStat[];
+  distinct_tools_per_session: ToolsPerSessionBucket[];
+  dead_tools: string[];
+  registered_tool_count: number;
+  sessions_with_tool_use: number;
+  total_sessions: number;
+}
+
+function ToolUsagePanel() {
+  const [data, setData] = useState<ToolAnalyticsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/admin/api/analytics/tools')
+      .then(r => { if (!r.ok) throw new Error('Failed to fetch tool analytics'); return r.json(); })
+      .then((d: ToolAnalyticsData) => setData(d))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow">
+        <p className="text-gray-500 text-center py-4">Loading tool usage...</p>
+      </div>
+    );
+  }
+  if (error || !data) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow">
+        <p className="text-red-600 text-center py-4">{error || 'No tool analytics available'}</p>
+      </div>
+    );
+  }
+
+  const frequencyData = data.tool_stats.map(t => ({
+    tool: t.tool_name,
+    invocations: t.invocations,
+  }));
+
+  const distributionData = data.distinct_tools_per_session.map(b => ({
+    name: b.distinct_tool_count === 0 ? '0 tools' : `${b.distinct_tool_count} tool${b.distinct_tool_count === 1 ? '' : 's'}`,
+    sessions: b.session_count,
+  }));
+
+  const toolUsePercentage = data.total_sessions > 0
+    ? Math.round((data.sessions_with_tool_use / data.total_sessions) * 100)
+    : 0;
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-xl font-bold flex items-center gap-2"><Tool size={20} /> Tool Usage Analytics</h3>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <MetricCard title="Registered Tools" value={data.registered_tool_count} icon={Tool} />
+        <MetricCard title="Sessions Using a Tool" value={`${toolUsePercentage}%`} icon={Activity} />
+        <MetricCard title="Dead Tools (never fired)" value={data.dead_tools.length} icon={AlertTriangle} />
+      </div>
+
+      {data.dead_tools.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h4 className="text-lg font-semibold mb-2">Dead Tools</h4>
+          <p className="text-sm text-gray-600 mb-3">Registered in the tool registry but never invoked in any logged session.</p>
+          <div className="flex flex-wrap gap-2">
+            {data.dead_tools.map(name => (
+              <span key={name} className="font-mono text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">
+                {name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {frequencyData.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h4 className="text-lg font-semibold mb-4">Tool-Call Frequency</h4>
+          <ResponsiveContainer width="100%" height={Math.max(300, frequencyData.length * 28)}>
+            <BarChart data={frequencyData} layout="vertical" margin={{ left: 40 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis type="number" />
+              <YAxis type="category" dataKey="tool" width={220} tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Bar dataKey="invocations" fill="#0047BA" name="Invocations" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {distributionData.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h4 className="text-lg font-semibold mb-4">Distinct Tools Used Per Session</h4>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={distributionData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="sessions" fill="#002E5D" name="Sessions" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {data.tool_stats.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow overflow-x-auto">
+          <h4 className="text-lg font-semibold mb-4">Failure / Misfire Rates</h4>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600 border-b">
+                <th className="py-2 pr-4">Tool</th>
+                <th className="py-2 pr-4">Invocations</th>
+                <th className="py-2 pr-4">Sessions</th>
+                <th className="py-2 pr-4">Failures</th>
+                <th className="py-2 pr-4">Failure Rate</th>
+                <th className="py-2 pr-4">Last Used</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.tool_stats
+                .slice()
+                .sort((a, b) => b.failure_rate - a.failure_rate)
+                .map(t => (
+                  <tr key={t.tool_name} className="border-b last:border-0">
+                    <td className="py-2 pr-4 font-mono text-xs">{t.tool_name}</td>
+                    <td className="py-2 pr-4">{t.invocations}</td>
+                    <td className="py-2 pr-4">{t.sessions}</td>
+                    <td className="py-2 pr-4">{t.failures}</td>
+                    <td className={`py-2 pr-4 ${t.failure_rate > 10 ? 'text-red-600 font-semibold' : ''}`}>
+                      {t.failure_rate}%
+                    </td>
+                    <td className="py-2 pr-4 text-gray-500">
+                      {t.last_used ? new Date(t.last_used).toLocaleDateString() : '—'}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Cost / token tracking (ai-therapist-25c) ----
+
+interface CostTotals {
+  total_calls: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_estimated_cost_usd: number;
+  total_realtime_minutes: number;
+}
+
+interface DailySpendRow {
+  date: string;
+  calls: number;
+  tokens_in: number;
+  tokens_out: number;
+  estimated_cost_usd: number;
+}
+
+interface FeedbackAggregate {
+  responses: number;
+  avg_helpfulness: number | null;
+  avg_ease: number | null;
+  avg_would_return: number | null;
+}
+
+interface CostAnalyticsData {
+  totals: CostTotals;
+  daily_spend: DailySpendRow[];
+  feedback: FeedbackAggregate;
+}
+
+function CostUsagePanel() {
+  const [data, setData] = useState<CostAnalyticsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/admin/api/analytics/cost')
+      .then(r => { if (!r.ok) throw new Error('Failed to fetch cost analytics'); return r.json(); })
+      .then((d: CostAnalyticsData) => setData(d))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow">
+        <p className="text-gray-500 text-center py-4">Loading cost analytics...</p>
+      </div>
+    );
+  }
+  if (error || !data) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow">
+        <p className="text-red-600 text-center py-4">{error || 'No cost analytics available'}</p>
+      </div>
+    );
+  }
+
+  const dailySpendData = data.daily_spend.slice().reverse().map(d => ({
+    date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    cost: Math.round(d.estimated_cost_usd * 10000) / 10000,
+    calls: d.calls,
+  }));
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-xl font-bold flex items-center gap-2"><DollarSign size={20} /> Cost & Token Tracking</h3>
+      <p className="text-sm text-gray-600">
+        Estimated non-realtime LLM spend (insights, redaction, crisis assessment) from tracked token usage.
+        Realtime voice minutes are shown separately — the Realtime API bills per audio minute, not per token,
+        so no dollar estimate is computed for it here.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <MetricCard title="Est. LLM Spend (all time)" value={`$${data.totals.total_estimated_cost_usd.toFixed(4)}`} icon={DollarSign} />
+        <MetricCard title="Tracked LLM Calls" value={data.totals.total_calls} icon={Activity} />
+        <MetricCard title="Total Realtime Minutes" value={data.totals.total_realtime_minutes.toFixed(1)} icon={Clock} />
+        <MetricCard title="Feedback Responses" value={data.feedback.responses} icon={MessageSquare} />
+      </div>
+
+      {dailySpendData.length > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h4 className="text-lg font-semibold mb-4">Daily Estimated Spend (Last 30 Days)</h4>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={dailySpendData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip formatter={(value?: number) => `$${(value ?? 0).toFixed(4)}`} />
+              <Bar dataKey="cost" fill="#0047BA" name="Estimated Cost (USD)" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {data.feedback.responses > 0 && (
+        <div className="bg-white p-6 rounded-lg shadow">
+          <h4 className="text-lg font-semibold mb-4">Post-Session Feedback Averages</h4>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="border rounded p-4">
+              <p className="text-sm text-gray-600">Helpfulness</p>
+              <p className="text-2xl font-bold text-navy mt-1">{data.feedback.avg_helpfulness ?? 'N/A'} / 5</p>
+            </div>
+            <div className="border rounded p-4">
+              <p className="text-sm text-gray-600">Ease of Use</p>
+              <p className="text-2xl font-bold text-navy mt-1">{data.feedback.avg_ease ?? 'N/A'} / 5</p>
+            </div>
+            <div className="border rounded p-4">
+              <p className="text-sm text-gray-600">Would Return</p>
+              <p className="text-2xl font-bold text-navy mt-1">{data.feedback.avg_would_return ?? 'N/A'} / 5</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Reusable MultiSelectFilter component
@@ -1071,6 +1351,9 @@ export default function Analytics() {
           </div>
         )}
       </div>
+
+      <ToolUsagePanel />
+      <CostUsagePanel />
     </div>
   );
 }

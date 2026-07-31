@@ -8,6 +8,14 @@ interface CrisisContact {
   enabled: boolean;
 }
 
+/** On-call crisis paging (ai-therapist-25a): who gets an SMS when a session
+ *  is flagged high-severity, and whether that's on at all. Distinct from
+ *  CrisisContact above, which is the number shown TO participants. */
+interface CrisisAlert {
+  enabled: boolean;
+  phone: string | null;
+}
+
 interface SessionLimits {
   max_duration_minutes: number;
   max_sessions_per_day: number;
@@ -75,6 +83,7 @@ interface ConfigEntry<T> {
 
 interface SystemConfigData {
   crisis_contact?: ConfigEntry<CrisisContact>;
+  crisis_alert?: ConfigEntry<CrisisAlert>;
   session_limits?: ConfigEntry<SessionLimits>;
   features?: ConfigEntry<Features>;
   ai_model?: ConfigEntry<AiModel>;
@@ -164,6 +173,11 @@ export default function SystemConfig() {
     enabled: true
   });
 
+  const [crisisAlert, setCrisisAlert] = useState<CrisisAlert>({
+    enabled: true,
+    phone: null
+  });
+
   const [sessionLimits, setSessionLimits] = useState<SessionLimits>({
     max_duration_minutes: 30,
     max_sessions_per_day: 3,
@@ -237,6 +251,9 @@ export default function SystemConfig() {
       if (data.crisis_contact) {
         setCrisisContact(data.crisis_contact.value);
       }
+      if (data.crisis_alert) {
+        setCrisisAlert(data.crisis_alert.value);
+      }
       if (data.session_limits) {
         setSessionLimits(data.session_limits.value);
       }
@@ -287,6 +304,14 @@ export default function SystemConfig() {
         body: JSON.stringify({ value: crisisContact })
       });
       if (!crisisResponse.ok) throw new Error('Failed to save crisis contact');
+
+      // Save crisis alert (on-call paging)
+      const crisisAlertResponse = await fetch('/admin/api/config/crisis_alert', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: crisisAlert })
+      });
+      if (!crisisAlertResponse.ok) throw new Error('Failed to save crisis alert config');
 
       // Save session limits
       const limitsResponse = await fetch('/admin/api/config/session_limits', {
@@ -370,6 +395,11 @@ export default function SystemConfig() {
 
   const updateCrisisContact = (field: keyof CrisisContact, value: string | boolean) => {
     setCrisisContact(prev => ({ ...prev, [field]: value }));
+    setHasChanges(true);
+  };
+
+  const updateCrisisAlert = (field: keyof CrisisAlert, value: string | boolean | null) => {
+    setCrisisAlert(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
@@ -584,6 +614,47 @@ export default function SystemConfig() {
               placeholder="Text HELLO to 741741"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
+          </div>
+        </div>
+      </div>
+
+      {/* On-Call Crisis Paging (ai-therapist-25a) */}
+      <div className="mb-6 bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">On-Call Crisis Paging</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          When a session is flagged HIGH severity, an SMS pages this phone via the iMessage relay —
+          in addition to the admin dashboard toast, which only reaches someone with the dashboard open.
+          Failure to send never blocks the session.
+        </p>
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 mb-4">
+            <input
+              type="checkbox"
+              id="crisis-alert-enabled"
+              checked={crisisAlert.enabled}
+              onChange={(e) => updateCrisisAlert('enabled', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+            <label htmlFor="crisis-alert-enabled" className="text-sm font-medium text-gray-700">
+              Page the on-call phone on high-severity crisis flags
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              On-Call Phone Number
+            </label>
+            <input
+              type="text"
+              value={crisisAlert.phone ?? ''}
+              onChange={(e) => updateCrisisAlert('phone', e.target.value || null)}
+              placeholder="+15551234567 (blank = use CRISIS_ALERT_PHONE env var)"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Leave blank to fall back to the server&apos;s CRISIS_ALERT_PHONE environment variable.
+            </p>
           </div>
         </div>
       </div>

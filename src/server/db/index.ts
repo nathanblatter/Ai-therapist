@@ -25,3 +25,5 @@ export * from './returningContext.queries.js';
 export * from './consent.queries.js';
 export * from './worksheets.queries.js';
 export * from './riskCheck.queries.js';
+export * from './feedback.queries.js';
+export * from './costTracking.queries.js';

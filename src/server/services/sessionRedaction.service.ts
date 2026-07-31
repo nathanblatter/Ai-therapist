@@ -35,6 +35,16 @@ export async function redactSession(sessionId: string): Promise<void> {
     const redacted = await redactPHIBatch(rows.map(r => ({ id: r.message_id, content: r.content })));
     const redactedAt = new Date().toISOString();
 
+    // Cost tracking (ai-therapist-25c): redaction runs 2 model calls (double-pass)
+    // via the Responses API, which this codebase doesn't currently pull token
+    // usage out of — log the call count with tokens null rather than skip it.
+    import('../db/index.js')
+      .then(({ recordLlmUsage }) => Promise.all([
+        recordLlmUsage(sessionId, 'redaction', 'gpt-5', null, null),
+        recordLlmUsage(sessionId, 'redaction', 'gpt-5', null, null),
+      ]))
+      .catch(err => console.error('Failed to record redaction LLM usage (non-fatal):', err));
+
     // Persist each redacted message.
     for (const [messageId, content] of redacted) {
       await pool.query(

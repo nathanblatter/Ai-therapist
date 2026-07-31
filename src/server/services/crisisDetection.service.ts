@@ -165,6 +165,7 @@ function resetSweep(sessionId: string): void {
 async function assessRiskWithLLM(
   latestContent: string,
   conversationHistory: HistoryMessage[],
+  sessionId?: string,
 ): Promise<LlmRiskAssessment> {
   const client = await getClient();
 
@@ -187,6 +188,16 @@ async function assessRiskWithLLM(
       },
     ],
   });
+
+  // Cost tracking (ai-therapist-25c): best-effort, never blocks risk assessment.
+  if (sessionId) {
+    import('../db/index.js')
+      .then(({ recordLlmUsage }) => recordLlmUsage(
+        sessionId, 'crisis', RISK_MODEL,
+        response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
+      ))
+      .catch(err => log.error({ err }, '[risk] failed to record LLM usage (non-fatal)'));
+  }
 
   const parsed = JSON.parse(response.choices[0]?.message?.content ?? '{}') as Partial<LlmRiskAssessment>;
   const score = Math.max(0, Math.min(100, Math.round(Number(parsed.risk_score) || 0)));
@@ -311,7 +322,7 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
 
     if (keywordAnalysis.keywordScore > 0 || isSweep) {
       try {
-        llm = await assessRiskWithLLM(message.content, conversationHistory);
+        llm = await assessRiskWithLLM(message.content, conversationHistory, message.session_id);
         resetSweep(message.session_id);
         riskScore = llm.risk_score;
         factors = llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords;

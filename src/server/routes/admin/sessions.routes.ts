@@ -254,7 +254,31 @@ export default function adminSessionsRoutes(): Router {
       const contentColumn: MessageContentColumn = liveExempt ? 'content' : 'content_redacted';
       const messages = await getAdminSessionMessages(sessionId, contentColumn);
 
-      res.json({ session, messages });
+      // Post-session feedback (ai-therapist-25b) + cost/token summary
+      // (ai-therapist-25c) for the Session Detail panel. Best-effort: a
+      // failure here shouldn't hide the core transcript.
+      const [feedback, cost] = await Promise.all([
+        (async () => {
+          try {
+            const { getSessionFeedback } = await import('../../db/index.js');
+            return await getSessionFeedback(sessionId);
+          } catch (err) {
+            console.error('Failed to fetch session feedback:', err);
+            return null;
+          }
+        })(),
+        (async () => {
+          try {
+            const { getSessionCostSummary } = await import('../../db/index.js');
+            return await getSessionCostSummary(sessionId);
+          } catch (err) {
+            console.error('Failed to fetch session cost summary:', err);
+            return null;
+          }
+        })(),
+      ]);
+
+      res.json({ session, messages, feedback, cost });
     } catch (err) {
       console.error('Failed to fetch session details:', err);
       res.status(500).json({ error: 'Failed to fetch session details' });

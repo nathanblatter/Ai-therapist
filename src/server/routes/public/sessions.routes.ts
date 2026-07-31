@@ -121,6 +121,17 @@ export default function sessionsRoutes(): Router {
     if (!responses || typeof responses !== 'object') {
       return res.status(400).json({ error: 'responses{} required' });
     }
+  // POST /api/sessions/:sessionId/feedback - post-session participant survey
+  // (ai-therapist-25b): 2-3 Likert ratings (1-5) + optional free text, shown
+  // once on the post-session screen. Upsert so a resubmit just overwrites.
+  router.post('/api/sessions/:sessionId/feedback', async (req, res) => {
+    const { sessionId } = req.params;
+    const { helpfulness_rating, ease_rating, would_return_rating, comments } = req.body as {
+      helpfulness_rating?: number | null;
+      ease_rating?: number | null;
+      would_return_rating?: number | null;
+      comments?: string | null;
+    };
 
     try {
       const session = await getSessionAccessInfo(sessionId);
@@ -143,6 +154,21 @@ export default function sessionsRoutes(): Router {
     } catch (err) {
       console.error('Failed to store worksheet response:', err);
       res.status(500).json({ error: 'Failed to store worksheet response' });
+      const { upsertSessionFeedback } = await import('../../db/index.js');
+      const feedback = await upsertSessionFeedback(sessionId, {
+        helpfulness_rating: helpfulness_rating ?? null,
+        ease_rating: ease_rating ?? null,
+        would_return_rating: would_return_rating ?? null,
+        comments: comments ?? null,
+      });
+      res.json({ success: true, feedback });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to store feedback';
+      // Validation errors from upsertSessionFeedback (bad rating) are the
+      // participant's fault, not a server error.
+      const isValidationError = /must be an integer 1-5/.test(message);
+      console.error('Failed to store session feedback:', err);
+      res.status(isValidationError ? 400 : 500).json({ error: message });
     }
   });
 
