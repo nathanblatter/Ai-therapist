@@ -121,17 +121,6 @@ export default function sessionsRoutes(): Router {
     if (!responses || typeof responses !== 'object') {
       return res.status(400).json({ error: 'responses{} required' });
     }
-  // POST /api/sessions/:sessionId/feedback - post-session participant survey
-  // (ai-therapist-25b): 2-3 Likert ratings (1-5) + optional free text, shown
-  // once on the post-session screen. Upsert so a resubmit just overwrites.
-  router.post('/api/sessions/:sessionId/feedback', async (req, res) => {
-    const { sessionId } = req.params;
-    const { helpfulness_rating, ease_rating, would_return_rating, comments } = req.body as {
-      helpfulness_rating?: number | null;
-      ease_rating?: number | null;
-      would_return_rating?: number | null;
-      comments?: string | null;
-    };
 
     try {
       const session = await getSessionAccessInfo(sessionId);
@@ -154,6 +143,28 @@ export default function sessionsRoutes(): Router {
     } catch (err) {
       console.error('Failed to store worksheet response:', err);
       res.status(500).json({ error: 'Failed to store worksheet response' });
+    }
+  });
+
+  // POST /api/sessions/:sessionId/feedback - post-session participant survey
+  // (ai-therapist-25b): 2-3 Likert ratings (1-5) + optional free text, shown
+  // once on the post-session screen. Upsert so a resubmit just overwrites.
+  router.post('/api/sessions/:sessionId/feedback', async (req, res) => {
+    const { sessionId } = req.params;
+    const { helpfulness_rating, ease_rating, would_return_rating, comments } = req.body as {
+      helpfulness_rating?: number | null;
+      ease_rating?: number | null;
+      would_return_rating?: number | null;
+      comments?: string | null;
+    };
+
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
       const { upsertSessionFeedback } = await import('../../db/index.js');
       const feedback = await upsertSessionFeedback(sessionId, {
         helpfulness_rating: helpfulness_rating ?? null,
