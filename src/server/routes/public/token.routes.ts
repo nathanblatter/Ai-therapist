@@ -14,17 +14,21 @@ import {
   updateUserPreferences,
   getSessionAccessInfo,
   createActiveRealtimeSession,
+  recordConsent,
 } from '../../db/index.js';
-import { checkSessionLimits, getSystemPrompt, getActiveModality } from '../../utils/sessionHelpers.js';
+import { checkSessionLimits, getSystemPrompt, getActiveModality, getSystemConfig } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock, buildToolGuidanceBlock } from '../../utils/promptContext.js';
 import { setSessionCheckin } from '../../db/index.js';
+import { requireConsent } from '../../middleware/consent.js';
 
 export default function tokenRoutes(): Router {
   const router = Router();
 
-  // Accepts GET (legacy) and POST (with voice/language settings).
-  router.all('/token', async (req, res) => {
+  // Accepts GET (legacy) and POST (with voice/language settings). Blocked
+  // until the participant has accepted the current consent screen — see
+  // routes/public/consent.routes.ts.
+  router.all('/token', requireConsent, async (req, res) => {
     try {
       const userId = req.session?.userId || null;
       const userRole = req.session?.userRole || null;
@@ -153,6 +157,18 @@ export default function tokenRoutes(): Router {
           setSessionCheckin(sessionId, checkin).catch(err =>
             console.error('[Token] Failed to store check-in:', err));
         }
+
+        // Durable per-session consent record, linked to the consent this
+        // browser session already accepted (requireConsent guarantees it's
+        // present and current by this point).
+        getSystemConfig()
+          .then(cfg => recordConsent({
+            sessionId,
+            userId,
+            consentVersion: req.session!.consentVersion!,
+            recordingEnabled: (cfg.features?.session_recording_enabled as boolean | undefined) ?? false,
+          }))
+          .catch(err => console.error('[Consent] Failed to record per-session consent:', err));
 
         global.io.to('admin-broadcast').emit('session:created', {
           sessionId,

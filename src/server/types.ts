@@ -13,6 +13,12 @@ declare module "express-session" {
     tempMFASecret?: string;
     /** Therapy sessions created by this (possibly anonymous) browser session. */
     ownedSessions?: string[];
+    /** Has this browser session accepted the current consent screen? */
+    consentAccepted?: boolean;
+    /** Version of the consent copy that was accepted. */
+    consentVersion?: string;
+    /** When consent was accepted (ISO string). */
+    consentAcceptedAt?: string;
   }
 }
 

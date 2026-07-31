@@ -12,17 +12,20 @@ import {
   getSessionAccessInfo,
   getUserPreferredLanguage,
   setUserPreferredLanguage,
+  recordConsent,
 } from '../../db/index.js';
-import { checkSessionLimits, getSystemPrompt } from '../../utils/sessionHelpers.js';
+import { checkSessionLimits, getSystemPrompt, getSystemConfig } from '../../utils/sessionHelpers.js';
 import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
+import { requireConsent } from '../../middleware/consent.js';
 
 export default function chatRoutes(): Router {
   const router = Router();
 
-  // POST /api/chat/start - start a chat-only therapy session
-  router.post('/api/chat/start', async (req, res) => {
+  // POST /api/chat/start - start a chat-only therapy session. Blocked until
+  // the participant has accepted the current consent screen.
+  router.post('/api/chat/start', requireConsent, async (req, res) => {
     const userId: number | string = req.session?.userId ?? req.sessionID;
     const numericUserId: number | null = typeof userId === 'number' ? userId : null;
 
@@ -89,6 +92,18 @@ export default function chatRoutes(): Router {
         setSessionCheckin(sessionId, checkin).catch(err =>
           console.error('[ChatStart] Failed to store check-in:', err));
       }
+
+      // Durable per-session consent record, linked to the consent this
+      // browser session already accepted (requireConsent guarantees it's
+      // present and current by this point).
+      getSystemConfig()
+        .then(cfg => recordConsent({
+          sessionId,
+          userId: numericUserId,
+          consentVersion: req.session!.consentVersion!,
+          recordingEnabled: (cfg.features?.session_recording_enabled as boolean | undefined) ?? false,
+        }))
+        .catch(err => console.error('[Consent] Failed to record per-session consent:', err));
 
       global.io.to('admin-broadcast').emit('session:started', {
         sessionId,
