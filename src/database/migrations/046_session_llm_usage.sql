@@ -1,4 +1,4 @@
--- Migration 035 (ai-therapist-25c): per-session cost/token tracking.
+-- Migration 046 (ai-therapist-25c): per-session cost/token tracking.
 -- Logs one row per non-realtime LLM call made ON BEHALF OF a session
 -- (insights generation, redaction, crisis risk assessment) so the admin
 -- dashboard can show per-session and daily estimated spend. Realtime voice

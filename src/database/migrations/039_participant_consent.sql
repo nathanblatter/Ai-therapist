@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS participant_consents (
     -- NULL when acceptance happens before a session exists yet (recorded again
     -- against the session once one is created); set for the durable per-session
     -- record.
-    session_id UUID REFERENCES therapy_sessions(session_id) ON DELETE CASCADE,
+    session_id TEXT REFERENCES therapy_sessions(session_id) ON DELETE CASCADE,
     -- Present for logged-in users so consent can be looked up across sessions.
     user_id INTEGER REFERENCES users(userid) ON DELETE SET NULL,
     consent_version VARCHAR(32) NOT NULL,

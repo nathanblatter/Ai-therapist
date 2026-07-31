@@ -1,4 +1,4 @@
--- Migration 033 (ai-therapist-25a): admin-configurable on-call crisis paging.
+-- Migration 044 (ai-therapist-25a): admin-configurable on-call crisis paging.
 -- crisisAlert.service.ts previously read IMESSAGE_API_KEY / CRISIS_ALERT_PHONE
 -- purely from env (no enable toggle, redeploy needed to change the number).
 -- This adds a system_config row so the on-call target and an explicit

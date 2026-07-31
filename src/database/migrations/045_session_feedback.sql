@@ -1,4 +1,4 @@
--- Migration 034 (ai-therapist-25b): post-session participant feedback survey.
+-- Migration 045 (ai-therapist-25b): post-session participant feedback survey.
 -- Shown once, after session end, in the main app. Two short Likert questions
 -- (1-5) + optional free text, stored per session and shown in admin Session
 -- Detail. Participant-optional: rows only exist when they actually submit.
