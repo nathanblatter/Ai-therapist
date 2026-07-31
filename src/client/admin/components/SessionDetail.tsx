@@ -89,12 +89,29 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [flagNotes, setFlagNotes] = useState('');
   const [flagging, setFlagging] = useState(false);
   const [recording, setRecording] = useState<{ url: string; durationMs: number | null } | null>(null);
+  const [redactionStatus, setRedactionStatus] = useState<{
+    status: 'complete' | 'partial' | 'pending' | 'no_content';
+    total: number;
+    redacted: number;
+    pending: number;
+  } | null>(null);
 
   const { socket } = useSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const instructionsTextareaRef = useRef<HTMLTextAreaElement>(null);
   const severitySelectRef = useRef<HTMLSelectElement>(null);
+
+  const fetchRedactionStatus = async () => {
+    try {
+      const res = await fetch(`/admin/api/sessions/${sessionId}/redaction-status`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setRedactionStatus({ status: data.status, total: data.total, redacted: data.redacted, pending: data.pending });
+    } catch (err) {
+      console.error('Failed to fetch redaction status:', err);
+    }
+  };
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -121,6 +138,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     };
 
     fetchSession();
+    fetchRedactionStatus();
   }, [sessionId]);
 
   // Load the session recording once it's available (ready only after the
@@ -215,6 +233,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         .then(r => r.ok ? r.json() : null)
         .then(d => { if (d?.messages) setMessages(d.messages); })
         .catch(err => console.error('Failed to refresh after redaction:', err));
+      fetchRedactionStatus();
     };
 
     const handleSessionStatus = (data: SessionStatusData) => {
@@ -627,6 +646,27 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                 <div>Started: {session.created_at ? formatDate(session.created_at) : ''}</div>
                 {session.ended_at && (
                   <div>Ended: {formatDate(session.ended_at)}</div>
+                )}
+                {session.status === 'ended' && redactionStatus && redactionStatus.status !== 'no_content' && (
+                  <div className="flex items-center gap-2">
+                    <span>Redaction:</span>
+                    <span
+                      className={`px-2 py-0.5 text-xs font-medium rounded ${
+                        redactionStatus.status === 'complete'
+                          ? 'bg-green-600 text-white'
+                          : redactionStatus.status === 'partial'
+                          ? 'bg-yellow-500 text-yellow-900'
+                          : 'bg-red-500 text-white'
+                      }`}
+                      title={`${redactionStatus.redacted}/${redactionStatus.total} messages redacted`}
+                    >
+                      {redactionStatus.status === 'complete'
+                        ? '✅ Complete'
+                        : redactionStatus.status === 'partial'
+                        ? `⚠️ Partial (${redactionStatus.redacted}/${redactionStatus.total})`
+                        : '⏳ Pending'}
+                    </span>
+                  </div>
                 )}
                 <div>{messages.length} messages</div>
                 {filterToolCalls && (
