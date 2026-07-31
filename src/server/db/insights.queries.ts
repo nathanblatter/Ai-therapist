@@ -130,3 +130,44 @@ export async function setUserMemoryEnabled(userId: number, enabled: boolean): Pr
     [userId, enabled]
   );
 }
+
+// ---------- Therapist-in-the-loop notes (ai-therapist-50) ----------
+
+/** Free-text guidance a therapist leaves, from the SOAP review workflow, for the participant's NEXT session. */
+export async function setSessionNotesForNextSession(
+  sessionId: string,
+  notes: string,
+  author: string
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE session_insights
+     SET notes_for_next_session = $2, notes_author = $3, notes_created_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE session_id = $1`,
+    [sessionId, notes, author]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export interface ClinicianNote {
+  notes: string;
+  author: string | null;
+  created_at: Date;
+  session_id: string;
+}
+
+/** The most recent clinician note left on any of this user's sessions (for injection into their next one). */
+export async function getLatestClinicianNote(userId: number): Promise<ClinicianNote | null> {
+  const result = await pool.query<{ session_id: string; notes_for_next_session: string; notes_author: string | null; notes_created_at: Date }>(
+    `SELECT session_id, notes_for_next_session, notes_author, notes_created_at
+     FROM session_insights
+     WHERE user_id = $1 AND notes_for_next_session IS NOT NULL AND notes_for_next_session != ''
+     ORDER BY notes_created_at DESC
+     LIMIT 1`,
+    [userId]
+  );
+  const row = result.rows[0];
+  return row
+    ? { notes: row.notes_for_next_session, author: row.notes_author, created_at: row.notes_created_at, session_id: row.session_id }
+    : null;
+}
