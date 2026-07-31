@@ -194,6 +194,17 @@ export default function tokenRoutes(): Router {
       const sessionId = data.session.id;
       const username = req.session?.username || null;
 
+      // Model pinning (ai-therapist-61): record the EXACT model strings this
+      // session runs on. If OpenAI's response reports a resolved model (e.g. a
+      // dated snapshot behind the alias), store that; otherwise the alias we
+      // requested. Enables per-session reproducibility even when the alias
+      // moves under us mid-study.
+      const resolvedModel: string =
+        (typeof data.session?.model === 'string' && data.session.model) || aiModel;
+      if (resolvedModel !== aiModel) {
+        console.log(`[Token] OpenAI resolved model '${aiModel}' -> '${resolvedModel}' for session ${sessionId.substring(0, 12)}...`);
+      }
+
       // Remember ownership in the requester's cookie session so later requests
       // (/logs/batch, session:join, audio upload, end) can be authorized even
       // for anonymous participants. Recorded before the DB insert on purpose:
@@ -322,6 +333,8 @@ export default function tokenRoutes(): Router {
           max_response_output_tokens: sessionConfigObj.session?.max_response_output_tokens || 4096,
           language: userLanguage,
           modality: activeModality?.key ?? null,
+          ai_model: resolvedModel,
+          transcription_model: transcriptionModel,
         });
         console.log(`Session configuration created for session: ${sessionId.substring(0, 12)}... (voice: ${userVoice}, language: ${userLanguage})`);
       } catch (dbError) {

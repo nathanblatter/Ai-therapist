@@ -98,6 +98,57 @@ const TRANSCRIPTION_MODEL_OPTIONS = [
   { model: 'gpt-4o-transcribe', tier: 'Best accuracy', description: 'Latest highest-accuracy transcription model' },
 ];
 
+// Description stored alongside an admin-entered pinned snapshot so it is
+// recognisable in config exports and on reload.
+const PINNED_DESCRIPTION = 'Pinned snapshot (admin-entered)';
+
+// Free-text "pinned snapshot" card rendered under each model radio list
+// (ai-therapist-61): lets a researcher enter an exact dated model string so
+// the model stays frozen for a study period instead of floating with the alias.
+function PinnedModelOption({ radioGroup, currentModel, presetModels, placeholder, onSelect }: {
+  radioGroup: string;
+  currentModel: string;
+  presetModels: string[];
+  placeholder: string;
+  onSelect: (model: string) => void;
+}) {
+  const isCustom = !presetModels.includes(currentModel);
+  return (
+    <div
+      className={`p-4 rounded-lg border-2 transition ${
+        isCustom ? 'border-royal bg-blue-50' : 'border-gray-200 hover:border-gray-300 bg-white'
+      }`}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <p className="font-medium text-gray-900">Pinned snapshot</p>
+          <p className="text-xs text-gray-500">
+            Enter an exact dated model string to freeze the model for a study period.
+            Upgrades then become a deliberate config change instead of following the alias.
+          </p>
+        </div>
+        <input
+          type="radio"
+          name={radioGroup}
+          checked={isCustom}
+          onChange={() => onSelect('')}
+          className="w-4 h-4 text-royal border-gray-300 focus:ring-royal"
+        />
+      </div>
+      <input
+        type="text"
+        value={isCustom ? currentModel : ''}
+        onChange={(e) => onSelect(e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-royal"
+      />
+      {isCustom && !currentModel.trim() && (
+        <p className="text-xs text-red-600 mt-1">Enter a model string (or pick a preset above) before saving.</p>
+      )}
+    </div>
+  );
+}
+
 export default function SystemConfig() {
   const [config, setConfig] = useState<SystemConfigData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -219,6 +270,13 @@ export default function SystemConfig() {
   };
 
   const handleSave = async () => {
+    // A blank pinned-snapshot field would silently fall back to the server
+    // default — refuse to save until a model string is entered.
+    if (!aiModel.model.trim() || !transcriptionModel.model.trim()) {
+      setError('Model selection is empty — enter a pinned model string or pick a preset.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
     setSaveSuccess(null);
@@ -643,7 +701,18 @@ export default function SystemConfig() {
               />
             </div>
           ))}
+          <PinnedModelOption
+            radioGroup="ai_model"
+            currentModel={aiModel.model}
+            presetModels={REALTIME_MODEL_OPTIONS.map(o => o.model)}
+            placeholder="e.g. gpt-realtime-2025-08-28"
+            onSelect={(model) => updateAiModel(model, PINNED_DESCRIPTION)}
+          />
         </div>
+        <p className="text-xs text-gray-500 mt-3">
+          For research reproducibility the exact model string used is recorded on every
+          session; pin a dated snapshot here during data-collection periods (see docs/model-pinning.md).
+        </p>
       </div>
 
       {/* Transcription Model Configuration */}
@@ -678,6 +747,13 @@ export default function SystemConfig() {
               />
             </div>
           ))}
+          <PinnedModelOption
+            radioGroup="transcription_model"
+            currentModel={transcriptionModel.model}
+            presetModels={TRANSCRIPTION_MODEL_OPTIONS.map(o => o.model)}
+            placeholder="e.g. gpt-4o-transcribe-2025-06-11"
+            onSelect={(model) => updateTranscriptionModel(model, PINNED_DESCRIPTION)}
+          />
         </div>
       </div>
 

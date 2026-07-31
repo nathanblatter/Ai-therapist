@@ -44,6 +44,8 @@ export interface SessionConfigRow {
   max_response_output_tokens: number | null;
   language: string | null;
   modality: string | null;
+  ai_model: string | null;
+  transcription_model: string | null;
 }
 
 export interface UpsertSessionConfigInput {
@@ -57,6 +59,10 @@ export interface UpsertSessionConfigInput {
   language?: string;
   /** Therapeutic modality preset active when instructions were assembled. */
   modality?: string | null;
+  /** Exact realtime model used (resolved snapshot when known, else the configured alias). */
+  ai_model?: string | null;
+  /** Exact input-audio transcription model used. */
+  transcription_model?: string | null;
 }
 
 export interface SessionAccessInfo {
@@ -228,7 +234,9 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
     temperature = 0.8,
     max_response_output_tokens = 4096,
     language = 'en',
-    modality = null
+    modality = null,
+    ai_model = null,
+    transcription_model = null
   } = config;
 
   // JSONB fields: stringify when present, otherwise pass null.
@@ -237,8 +245,8 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
 
   const result = await pool.query<SessionConfigRow>(
     `INSERT INTO session_configurations
-     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10)
+     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12)
      ON CONFLICT (session_id)
      DO UPDATE SET
        voice = EXCLUDED.voice,
@@ -249,9 +257,14 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
        temperature = EXCLUDED.temperature,
        max_response_output_tokens = EXCLUDED.max_response_output_tokens,
        language = EXCLUDED.language,
-       modality = EXCLUDED.modality
+       modality = EXCLUDED.modality,
+       -- Model stamps record what the session was CREATED with; a later upsert
+       -- with no model info (e.g. the /logs/batch lazy default) must not wipe
+       -- them.
+       ai_model = COALESCE(EXCLUDED.ai_model, session_configurations.ai_model),
+       transcription_model = COALESCE(EXCLUDED.transcription_model, session_configurations.transcription_model)
      RETURNING *`,
-    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality]
+    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model]
   );
   return result.rows[0];
 }
