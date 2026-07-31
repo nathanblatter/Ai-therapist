@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, flagSessionCrisisMock, logInterventionActionMock, searchKnowledgeChunksMock, embedTextMock, getSessionMock, getUserMemoryEnabledMock, searchUserMemoriesMock, getActiveModalityMock } = vi.hoisted(() => ({
+const {
+  queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, flagSessionCrisisMock,
+  logInterventionActionMock, searchKnowledgeChunksMock, embedTextMock, getSessionMock,
+  getUserMemoryEnabledMock, searchUserMemoriesMock, getActiveModalityMock,
+  getKnowledgeChunkByIdMock, insertWorksheetInstanceMock,
+  insertRiskCheckStepMock, getRiskCheckStepsMock, getLatestCrisisEventIdMock,
+} = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
   setSessionGoalMock: vi.fn(),
@@ -13,6 +19,11 @@ const { queryMock, getSystemConfigMock, setSessionGoalMock, getSessionGoalMock, 
   getUserMemoryEnabledMock: vi.fn(),
   searchUserMemoriesMock: vi.fn(),
   getActiveModalityMock: vi.fn(),
+  getKnowledgeChunkByIdMock: vi.fn(),
+  insertWorksheetInstanceMock: vi.fn(),
+  insertRiskCheckStepMock: vi.fn(),
+  getRiskCheckStepsMock: vi.fn(),
+  getLatestCrisisEventIdMock: vi.fn(),
 }));
 vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
@@ -28,6 +39,11 @@ vi.mock('../db/index.js', () => ({
   getSession: getSessionMock,
   getUserMemoryEnabled: getUserMemoryEnabledMock,
   searchUserMemories: searchUserMemoriesMock,
+  getKnowledgeChunkById: getKnowledgeChunkByIdMock,
+  insertWorksheetInstance: insertWorksheetInstanceMock,
+  insertRiskCheckStep: insertRiskCheckStepMock,
+  getRiskCheckSteps: getRiskCheckStepsMock,
+  getLatestCrisisEventId: getLatestCrisisEventIdMock,
 }));
 vi.mock('./crisisDetection.service.js', () => ({
   flagSessionCrisis: flagSessionCrisisMock,
@@ -52,6 +68,11 @@ beforeEach(() => {
   getUserMemoryEnabledMock.mockReset().mockResolvedValue(true);
   searchUserMemoriesMock.mockReset().mockResolvedValue([]);
   getActiveModalityMock.mockReset().mockResolvedValue(null);
+  getKnowledgeChunkByIdMock.mockReset();
+  insertWorksheetInstanceMock.mockReset().mockResolvedValue(1);
+  insertRiskCheckStepMock.mockReset().mockResolvedValue(1);
+  getRiskCheckStepsMock.mockReset().mockResolvedValue([]);
+  getLatestCrisisEventIdMock.mockReset().mockResolvedValue(null);
 });
 
 describe('registry mechanics', () => {
@@ -301,5 +322,160 @@ describe('interactive experience tools', () => {
     expect(values.success).toBe(true);
     const ladder = await toolRegistry.executeTool('start_fear_ladder', {}) as { success: boolean };
     expect(ladder.success).toBe(true);
+  });
+});
+
+describe('create_custom_worksheet (ai-therapist-73)', () => {
+  const structuredTemplate = {
+    chunk_id: 5,
+    kind: 'worksheet',
+    title: 'Thought challenge',
+    content: '...',
+    source: 'CBT',
+    active: true,
+    metadata: { sections: [{ type: 'textarea' }, { type: 'text' }] },
+  };
+
+  it('requires session context and template_id', async () => {
+    const noCtx = await toolRegistry.executeTool('create_custom_worksheet', { template_id: 5, title: 't', sections: [] }) as { error?: string };
+    expect(noCtx.error).toBeTruthy();
+    const noTemplate = await toolRegistry.executeTool('create_custom_worksheet', { title: 't', sections: [] }, { sessionId: 's1' }) as { error?: string };
+    expect(noTemplate.error).toMatch(/template_id/);
+  });
+
+  it('rejects an unknown or inactive template', async () => {
+    getKnowledgeChunkByIdMock.mockResolvedValue(null);
+    const r = await toolRegistry.executeTool(
+      'create_custom_worksheet',
+      { template_id: 99, title: 'My worksheet', sections: [{ type: 'text', label: 'a' }] },
+      { sessionId: 's1' }
+    ) as { error?: string };
+    expect(r.error).toMatch(/unknown or inactive/i);
+    expect(insertWorksheetInstanceMock).not.toHaveBeenCalled();
+  });
+
+  it('enforces the vetted template\'s section count and types (structural mismatch rejected)', async () => {
+    getKnowledgeChunkByIdMock.mockResolvedValue(structuredTemplate);
+    const tooFew = await toolRegistry.executeTool(
+      'create_custom_worksheet',
+      { template_id: 5, title: 'Personalized', sections: [{ type: 'textarea', label: 'only one' }] },
+      { sessionId: 's1' }
+    ) as { error?: string };
+    expect(tooFew.error).toMatch(/exactly 2 section/i);
+
+    const wrongType = await toolRegistry.executeTool(
+      'create_custom_worksheet',
+      { template_id: 5, title: 'Personalized', sections: [{ type: 'scale', label: 'a' }, { type: 'text', label: 'b' }] },
+      { sessionId: 's1' }
+    ) as { error?: string };
+    expect(wrongType.error).toMatch(/must be type "textarea"/i);
+    expect(insertWorksheetInstanceMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts personalized wording that matches the template structure and stores the instance', async () => {
+    getKnowledgeChunkByIdMock.mockResolvedValue(structuredTemplate);
+    const r = await toolRegistry.executeTool(
+      'create_custom_worksheet',
+      {
+        template_id: 5,
+        title: 'Your thought about the interview',
+        intro: 'Let\'s look at that thought together.',
+        sections: [
+          { type: 'textarea', label: 'What went through your mind before the interview?' },
+          { type: 'text', label: 'One word for how that felt' },
+        ],
+      },
+      { sessionId: 's1' }
+    ) as { success: boolean; instance_id: number };
+    expect(r.success).toBe(true);
+    expect(r.instance_id).toBe(1);
+    expect(insertWorksheetInstanceMock).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's1',
+      templateChunkId: 5,
+      title: 'Your thought about the interview',
+    }));
+  });
+
+  it('falls back to generic bounds for a legacy template with no structured metadata', async () => {
+    getKnowledgeChunkByIdMock.mockResolvedValue({ ...structuredTemplate, metadata: null });
+    const tooMany = await toolRegistry.executeTool(
+      'create_custom_worksheet',
+      {
+        template_id: 5,
+        title: 'Big form',
+        sections: Array.from({ length: 8 }, (_, i) => ({ type: 'text', label: `q${i}` })),
+      },
+      { sessionId: 's1' }
+    ) as { error?: string };
+    expect(tooMany.error).toMatch(/too many sections/i);
+
+    const ok = await toolRegistry.executeTool(
+      'create_custom_worksheet',
+      { template_id: 5, title: 'Small form', sections: [{ type: 'text', label: 'q1' }] },
+      { sessionId: 's1' }
+    ) as { success: boolean };
+    expect(ok.success).toBe(true);
+  });
+
+  it('drops malformed sections (missing label / bad type) before validating', async () => {
+    getKnowledgeChunkByIdMock.mockResolvedValue({ ...structuredTemplate, metadata: null });
+    const r = await toolRegistry.executeTool(
+      'create_custom_worksheet',
+      { template_id: 5, title: 'Form', sections: [{ type: 'not_a_type', label: 'x' }, { type: 'text', label: '' }] },
+      { sessionId: 's1' }
+    ) as { error?: string };
+    expect(r.error).toMatch(/at least one valid section/i);
+  });
+});
+
+describe('run_risk_check (ai-therapist-71)', () => {
+  it('validates step, answer, and risk_band', async () => {
+    const badStep = await toolRegistry.executeTool('run_risk_check', { step: 'nope', answer: 'a', risk_band: 'low' }, { sessionId: 's1' }) as { error?: string };
+    expect(badStep.error).toMatch(/step must be one of/i);
+
+    const badBand = await toolRegistry.executeTool('run_risk_check', { step: 'ideation', answer: 'a', risk_band: 'nope' }, { sessionId: 's1' }) as { error?: string };
+    expect(badBand.error).toMatch(/risk_band must be one of/i);
+
+    const noAnswer = await toolRegistry.executeTool('run_risk_check', { step: 'ideation', answer: '  ', risk_band: 'low' }, { sessionId: 's1' }) as { error?: string };
+    expect(noAnswer.error).toMatch(/answer text is required/i);
+
+    expect(insertRiskCheckStepMock).not.toHaveBeenCalled();
+  });
+
+  it('requires a session context', async () => {
+    const r = await toolRegistry.executeTool('run_risk_check', { step: 'ideation', answer: 'no', risk_band: 'none' }) as { error?: string };
+    expect(r.error).toBeTruthy();
+  });
+
+  it('logs a step, sequencing after prior steps and linking the latest crisis event', async () => {
+    getRiskCheckStepsMock.mockResolvedValue([{ check_step_id: 1 }, { check_step_id: 2 }]);
+    getLatestCrisisEventIdMock.mockResolvedValue(77);
+
+    const r = await toolRegistry.executeTool(
+      'run_risk_check',
+      { step: 'plan', answer: 'They described a specific plan.', risk_band: 'high' },
+      { sessionId: 's1' }
+    ) as { success: boolean; logged: { step: string; risk_band: string } };
+
+    expect(r.success).toBe(true);
+    expect(r.logged).toEqual({ step: 'plan', risk_band: 'high' });
+    expect(insertRiskCheckStepMock).toHaveBeenCalledWith({
+      sessionId: 's1',
+      crisisEventId: 77,
+      step: 'plan',
+      answer: 'They described a specific plan.',
+      riskBand: 'high',
+      sequence: 3,
+    });
+  });
+
+  it('first step of a session gets sequence 1 with no linked crisis event', async () => {
+    const r = await toolRegistry.executeTool(
+      'run_risk_check',
+      { step: 'ideation', answer: 'Yes, sometimes.', risk_band: 'moderate' },
+      { sessionId: 's1' }
+    ) as { success: boolean };
+    expect(r.success).toBe(true);
+    expect(insertRiskCheckStepMock).toHaveBeenCalledWith(expect.objectContaining({ sequence: 1, crisisEventId: null }));
   });
 });

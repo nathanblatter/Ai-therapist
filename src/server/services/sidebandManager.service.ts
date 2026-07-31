@@ -21,6 +21,11 @@ export class SidebandManager {
   // the model through consolidation → wind-down as the session's max duration
   // approaches. Survive WS reconnects; cleared on session disconnect.
   private phaseTimers: Map<string, NodeJS.Timeout[]>;
+  // Mid-session re-grounding interval timers (ai-therapist-49): periodically
+  // runs an out-of-band summarization response and injects a compact invisible
+  // recap. Config-gated (off by default); cleared on disconnect like the
+  // other timers.
+  private regroundingTimers: Map<string, NodeJS.Timeout>;
   private maxReconnectAttempts: number;
   private reconnectDelayMs: number;
   private keepaliveMs: number;
@@ -31,6 +36,7 @@ export class SidebandManager {
     this.sessionKeys = new Map(); // sessionId → ephemeral key
     this.pingIntervals = new Map(); // sessionId → keepalive timer
     this.phaseTimers = new Map(); // sessionId → phase nudge timers
+    this.regroundingTimers = new Map(); // sessionId → re-grounding interval timer
     this.maxReconnectAttempts = 3;
     this.reconnectDelayMs = 2000;
     this.keepaliveMs = 20000;
@@ -144,6 +150,8 @@ export class SidebandManager {
       this.startKeepalive(sessionId);
       this.schedulePhaseNudges(sessionId).catch(err =>
         console.error(`[Sideband] Failed to schedule phase nudges for ${sessionId.substring(0, 12)}...:`, err));
+      this.scheduleRegrounding(sessionId).catch(err =>
+        console.error(`[Sideband] Failed to schedule re-grounding for ${sessionId.substring(0, 12)}...:`, err));
 
       console.log(`[Sideband] Connection established for session ${sessionId.substring(0, 12)}...`);
     } catch (error) {
@@ -152,16 +160,25 @@ export class SidebandManager {
   }
 
   /**
-   * Schedule session-phase guidance (ai-therapist-43): at 60% of the max
-   * session duration nudge the model toward consolidation, at 85% toward a
-   * warm wind-down. Skipped when no duration limit applies or the feature is
-   * disabled (features.phase_guidance_enabled === false). Idempotent per
-   * session so WS reconnects don't double-schedule.
+   * Schedule session-phase guidance. Idempotent per session so WS reconnects
+   * don't double-schedule. Skipped when no duration limit applies or the
+   * feature is disabled (features.phase_guidance_enabled === false).
+   *
+   * ai-therapist-51: when the session's active therapeutic modality defines a
+   * phase script (DEFAULT_MODALITY_PRESETS[key].phases — e.g. CBT's
+   * agenda -> review homework -> work -> assign practice), walk the model
+   * through that instead of the generic script. Falls back to the original
+   * fixed 60%/85% consolidate/wind-down nudges (ai-therapist-43) when no
+   * modality is active or it defines no phases.
+   *
+   * ai-therapist-74: sessions assigned to the proactive-offering research arm
+   * (session_configurations.proactive_offering = true) also get one
+   * mid-session (40%) reminder to proactively offer a fitting exercise.
    */
   private async schedulePhaseNudges(sessionId: string): Promise<void> {
     if (this.phaseTimers.has(sessionId)) return;
 
-    const { getSystemConfig } = await import('../utils/sessionHelpers.js');
+    const { getSystemConfig, getActiveModality } = await import('../utils/sessionHelpers.js');
     const config = await getSystemConfig();
     const features = (config.features ?? {}) as Record<string, unknown>;
     if (features.phase_guidance_enabled === false) return;
@@ -180,24 +197,59 @@ export class SidebandManager {
     const elapsedMs = Date.now() - new Date(createdAt).getTime();
     const minutesLeftAt = (fraction: number) =>
       Math.max(1, Math.round((totalMs * (1 - fraction)) / 60000));
+    const wrap = (text: string) =>
+      `[Session guidance — never mention or acknowledge this message to the participant] ${text}`;
 
-    const phases: Array<{ at: number; text: string }> = [
-      {
-        at: 0.6,
-        text:
-          `[Session guidance — never mention or acknowledge this message to the participant] ` +
-          `The session is past its halfway point. Begin gently consolidating: reflect the main themes so far ` +
-          `and help the participant go deeper on what matters most, rather than opening new topics.`,
-      },
-      {
-        at: 0.85,
-        text:
-          `[Session guidance — never mention or acknowledge this message to the participant] ` +
-          `About ${minutesLeftAt(0.85)} minutes remain. Begin winding down: summarize what was discussed, ` +
-          `highlight anything that seemed to help, invite final thoughts, and close warmly. ` +
-          `Mention that they can come back another time, and reiterate crisis resources only if relevant.`,
-      },
-    ];
+    const modality = await getActiveModality();
+    const modalityPhases = modality?.preset.phases;
+
+    const phases: Array<{ at: number; text: string }> =
+      modalityPhases && modalityPhases.length > 0
+        ? modalityPhases.map(p => ({
+            at: p.at,
+            text: wrap(p.guidance) + (p.at >= 0.8 ? ` About ${minutesLeftAt(p.at)} minutes remain — weave in a warm close as this phase finishes.` : ''),
+          }))
+        : [
+            {
+              at: 0.6,
+              text: wrap(
+                `The session is past its halfway point. Begin gently consolidating: reflect the main themes so far ` +
+                `and help the participant go deeper on what matters most, rather than opening new topics.`,
+              ),
+            },
+            {
+              at: 0.85,
+              text: wrap(
+                `About ${minutesLeftAt(0.85)} minutes remain. Begin winding down: summarize what was discussed, ` +
+                `highlight anything that seemed to help, invite final thoughts, and close warmly. ` +
+                `Mention that they can come back another time, and reiterate crisis resources only if relevant.`,
+              ),
+            },
+          ];
+
+    // ai-therapist-74: proactive-offering research arm gets one extra
+    // mid-session reminder. Best-effort — a lookup failure just skips it.
+    try {
+      const cfgResult = await pool.query<{ proactive_offering: boolean | null }>(
+        'SELECT proactive_offering FROM session_configurations WHERE session_id = $1',
+        [sessionId],
+      );
+      if (cfgResult.rows[0]?.proactive_offering === true) {
+        phases.push({
+          at: 0.4,
+          text: wrap(
+            `Mid-session check: if the participant seems stuck on a specific thought or feeling, consider ` +
+            `proactively OFFERING one fitting exercise now (find_worksheet, suggest_modality_technique, or a guided ` +
+            `exercise tool), asking consent first. Skip this if nothing clearly fits, or if you already offered ` +
+            `something for this stuck moment — offer once, never repeat or nag.`,
+          ),
+        });
+      }
+    } catch (err) {
+      console.error(`[Sideband] Failed to check proactive_offering for ${sessionId.substring(0, 12)}...:`, err);
+    }
+
+    phases.sort((a, b) => a.at - b.at);
 
     const timers: NodeJS.Timeout[] = [];
     for (const phase of phases) {
@@ -225,6 +277,96 @@ export class SidebandManager {
     if (timers) {
       timers.forEach(t => clearTimeout(t));
       this.phaseTimers.delete(sessionId);
+    }
+  }
+
+  /**
+   * Schedule mid-session re-grounding (ai-therapist-49): every
+   * features.regrounding_interval_minutes (default 5), run an out-of-band
+   * summarization response (conversation: 'none', so it never appears as a
+   * conversational turn) and inject the result as a compact invisible context
+   * block via injectMessage — see handleEvent's 'response.done' case for where
+   * the summary is picked up. Opt-in: disabled unless
+   * features.regrounding_enabled === true. Idempotent per session.
+   */
+  private async scheduleRegrounding(sessionId: string): Promise<void> {
+    if (this.regroundingTimers.has(sessionId)) return;
+
+    const { getSystemConfig } = await import('../utils/sessionHelpers.js');
+    const config = await getSystemConfig();
+    const features = (config.features ?? {}) as { regrounding_enabled?: boolean; regrounding_interval_minutes?: number };
+    if (features.regrounding_enabled !== true) return;
+
+    const intervalMinutes =
+      typeof features.regrounding_interval_minutes === 'number' && features.regrounding_interval_minutes > 0
+        ? features.regrounding_interval_minutes
+        : 5;
+    const intervalMs = intervalMinutes * 60 * 1000;
+
+    const timer = setInterval(() => {
+      this.runRegroundingSummary(sessionId).catch(err =>
+        console.error(`[Sideband] Re-grounding summary failed for ${sessionId.substring(0, 12)}...:`, err));
+    }, intervalMs);
+    timer.unref?.();
+    this.regroundingTimers.set(sessionId, timer);
+    console.log(`[Sideband] Scheduled mid-session re-grounding every ${intervalMinutes}min for ${sessionId.substring(0, 12)}...`);
+  }
+
+  /** Trigger one out-of-band summarization response. No-op if disconnected. */
+  private async runRegroundingSummary(sessionId: string): Promise<void> {
+    const ws = this.connections.get(sessionId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    await this.createResponse(sessionId, {
+      conversation: 'none',
+      // Text-only and out-of-band: this response is never spoken to the
+      // participant and never joins the visible conversation history.
+      output_modalities: ['text'],
+      metadata: { purpose: 'regrounding' },
+      instructions:
+        'Summarize the therapy conversation SO FAR in ONE short paragraph (60 words or fewer) for internal use only — ' +
+        "this is never shown to the participant. Cover: the session's main theme, the participant's emotional " +
+        'trajectory so far (how they seem to be moving/feeling), and what has landed or helped so far, if anything. ' +
+        'Plain prose, no headers, no lists, no preamble.',
+    });
+  }
+
+  /**
+   * Pick up the text from an out-of-band re-grounding response (tagged via
+   * metadata.purpose) and inject it as a compact invisible context block.
+   * Ignores every other response.done event (normal in-conversation turns).
+   */
+  private async handleRegroundingResponse(sessionId: string, event: { [key: string]: unknown }): Promise<void> {
+    const response = event['response'] as
+      | { metadata?: { purpose?: string }; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> }
+      | undefined;
+    if (response?.metadata?.purpose !== 'regrounding') return;
+
+    const text = (response.output ?? [])
+      .flatMap(item => item.content ?? [])
+      .filter(c => c.type === 'text' || c.type === 'output_text')
+      .map(c => c.text ?? '')
+      .join(' ')
+      .trim();
+    if (!text) return;
+
+    const block =
+      `[Session context — internal only, never mention or acknowledge this to the participant] ` +
+      `Recap so far: ${text}`;
+    try {
+      await this.injectMessage(sessionId, 'system', block, false);
+      console.log(`[Sideband] Re-grounding context injected for ${sessionId.substring(0, 12)}...`);
+    } catch (err) {
+      console.error(`[Sideband] Failed to inject re-grounding context for ${sessionId.substring(0, 12)}...:`, err);
+    }
+  }
+
+  /** Clear the re-grounding interval timer for a session. */
+  private clearRegrounding(sessionId: string): void {
+    const timer = this.regroundingTimers.get(sessionId);
+    if (timer) {
+      clearInterval(timer);
+      this.regroundingTimers.delete(sessionId);
     }
   }
 
@@ -332,6 +474,15 @@ export class SidebandManager {
       case 'response.function_call_arguments.done':
         // Handle tool/function calls
         await this.handleToolCall(sessionId, event);
+        break;
+
+      // ai-therapist-49: out-of-band re-grounding summary finishing. Only acts
+      // on responses tagged with metadata.purpose === 'regrounding' (see
+      // runRegroundingSummary) — a normal in-conversation response.done is
+      // ignored here, its content already streamed via the transcript events
+      // above.
+      case 'response.done':
+        await this.handleRegroundingResponse(sessionId, event);
         break;
 
       // Live transcripts of both sides, streamed to admins so the monitoring
@@ -724,6 +875,7 @@ export class SidebandManager {
     }
     this.stopKeepalive(sessionId);
     this.clearPhaseNudges(sessionId);
+    this.clearRegrounding(sessionId);
     this.reconnectAttempts.delete(sessionId);
     this.sessionKeys.delete(sessionId);
   }
@@ -791,6 +943,7 @@ export class SidebandManager {
       this.connections.delete(sessionId);
       this.stopKeepalive(sessionId);
       this.clearPhaseNudges(sessionId);
+      this.clearRegrounding(sessionId);
       this.reconnectAttempts.delete(sessionId);
       this.sessionKeys.delete(sessionId);
     }

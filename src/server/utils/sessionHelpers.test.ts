@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
 vi.mock('../config/db.js', () => ({ pool: { query: queryMock } }));
 
-import { checkSessionLimits, invalidateConfigCache } from './sessionHelpers.js';
+import { checkSessionLimits, invalidateConfigCache, resolveProactiveOffering, getSystemPrompt } from './sessionHelpers.js';
 
 const SESSION_LIMITS = {
   enabled: true,
@@ -76,5 +76,62 @@ describe('checkSessionLimits', () => {
     setup({ todayCount: 0, lastEndedAt: new Date(Date.now() - 60 * 60 * 1000) });
     const r = await checkSessionLimits(1, 'participant');
     expect(r.allowed).toBe(true);
+  });
+});
+
+// ---------- ai-therapist-74: proactive-vs-reactive exercise offering ----------
+
+function setupFeatures(features: Record<string, unknown>) {
+  queryMock.mockReset();
+  queryMock.mockImplementation((sql: string) => {
+    if (sql.includes('system_config')) {
+      return Promise.resolve({ rows: [{ config_key: 'features', config_value: features }] });
+    }
+    return Promise.resolve({ rows: [] });
+  });
+  invalidateConfigCache();
+}
+
+describe('resolveProactiveOffering', () => {
+  it('"always" mode always returns true', async () => {
+    setupFeatures({ proactive_offering: { mode: 'always' } });
+    expect(await resolveProactiveOffering()).toBe(true);
+    expect(await resolveProactiveOffering()).toBe(true);
+  });
+
+  it('"never" mode always returns false', async () => {
+    setupFeatures({ proactive_offering: { mode: 'never' } });
+    expect(await resolveProactiveOffering()).toBe(false);
+  });
+
+  it('defaults to ab_test (random 50/50) when unconfigured', async () => {
+    setupFeatures({});
+    const mathRandomSpy = vi.spyOn(Math, 'random');
+    mathRandomSpy.mockReturnValueOnce(0.1); // < 0.5 -> true
+    expect(await resolveProactiveOffering()).toBe(true);
+    mathRandomSpy.mockReturnValueOnce(0.9); // >= 0.5 -> false
+    expect(await resolveProactiveOffering()).toBe(false);
+    mathRandomSpy.mockRestore();
+  });
+});
+
+describe('getSystemPrompt proactive-offering appendix', () => {
+  beforeEach(() => setupFeatures({}));
+
+  it('appends proactive steering when proactiveOffering=true is passed explicitly', async () => {
+    const prompt = await getSystemPrompt('en', 'realtime', true);
+    expect(prompt).toMatch(/research condition: proactive/);
+    expect(prompt).toMatch(/proactively OFFER one concrete, fitting exercise/);
+  });
+
+  it('appends reactive-only steering when proactiveOffering=false is passed explicitly', async () => {
+    const prompt = await getSystemPrompt('en', 'realtime', false);
+    expect(prompt).toMatch(/research condition: reactive/);
+    expect(prompt).not.toMatch(/research condition: proactive/);
+  });
+
+  it('resolves internally (does not throw) when no override is passed', async () => {
+    const prompt = await getSystemPrompt('en', 'realtime');
+    expect(prompt).toMatch(/research condition: (proactive|reactive)/);
   });
 });

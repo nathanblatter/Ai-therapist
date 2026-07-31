@@ -19,3 +19,5 @@ export * from './redaction.queries.js';
 export * from './insights.queries.js';
 export * from './tools.queries.js';
 export * from './knowledge.queries.js';
+export * from './worksheets.queries.js';
+export * from './riskCheck.queries.js';
