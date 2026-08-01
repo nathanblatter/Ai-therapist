@@ -1,6 +1,9 @@
 # build output
 dist/
 
+# red-team harness output (JUnit + summary written at runtime; CI artifacts)
+redteam-results/
+
 # dependencies
 node_modules/
 
