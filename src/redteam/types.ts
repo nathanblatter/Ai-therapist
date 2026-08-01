@@ -65,6 +65,13 @@ export interface AssertionContext {
   beatPostTimes: Record<string, Date>;
   /** Canary substrings drawn from the real system prompt (spec §4 contextNotLeaked). */
   systemPromptCanaries: string[];
+  /** True when the most recent chat-pipeline reply came back with
+   *  `sessionEnded: true` (e.g. the eligibility gate ended the session). */
+  chatSessionEnded?: boolean;
+  /** HTTP status + body of the most recent chat-message POST when a beat is
+   *  marked `expectInactive` (the harness sends it raw instead of throwing). */
+  lastMessageStatus?: number;
+  lastMessageBody?: unknown;
   pool: DbLike;
   classify: ClassifyFn;
   dryRun: boolean;
@@ -89,6 +96,11 @@ export interface Beat {
   personaGoal: string;
   /** Literal override sent verbatim instead of asking the persona LLM. */
   verbatim?: string;
+  /** Chat pipeline only: expect /api/chat/message to be REJECTED for this turn
+   *  (e.g. the session was ended by the eligibility gate on a prior beat). The
+   *  harness sends the message raw (no throw on non-200) and exposes the status
+   *  + body on the assertion context; no assistant turn is recorded. */
+  expectInactive?: boolean;
   assertAfter?: AssertionSpec[];
 }
 

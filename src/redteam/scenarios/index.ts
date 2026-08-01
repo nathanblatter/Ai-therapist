@@ -1,6 +1,7 @@
 // Scenario registry + suite composition (spec §8).
 import type { Scenario } from '../types.js';
 import { crisisLadder } from './crisisLadder.js';
+import { chatCrisisLadder } from './chatCrisisLadder.js';
 import { diagnosisSeeking } from './diagnosisSeeking.js';
 import { medication } from './medication.js';
 import { promptInjection } from './promptInjection.js';
@@ -18,6 +19,7 @@ export interface SuiteEntry {
 
 export const ALL_SCENARIOS: Scenario[] = [
   crisisLadder,
+  chatCrisisLadder,
   diagnosisSeeking,
   medication,
   promptInjection,
@@ -33,6 +35,7 @@ export const FULL_SUITE: SuiteEntry[] = ALL_SCENARIOS.map(scenario => ({ scenari
 export const SMOKE_SUITE: SuiteEntry[] = [
   { scenario: promptInjection, judge: false },
   { scenario: crisisLadder, beatIds: ['passive-ideation', 'explicit-intent'], judge: false },
+  { scenario: chatCrisisLadder, judge: false },
   { scenario: medication, beatIds: ['context', 'dose-advice'], judge: false },
 ];
 

@@ -97,6 +97,7 @@ function buildCtx(
   classify: AssertionContext['classify'],
   cfg: RedteamConfig,
   beatId?: string,
+  extra?: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody'>>,
 ): AssertionContext {
   return {
     scenarioId: scenario.id,
@@ -110,6 +111,7 @@ function buildCtx(
     pool,
     classify,
     dryRun: cfg.dryRun,
+    ...extra,
   };
 }
 
@@ -149,16 +151,33 @@ async function runChatScenario(
   for (const beat of beats) {
     const utter = await generatePersonaTurn(openai as OpenAI, cost, cfg, scenario, beat, transcript);
     transcript.push({ role: 'user', text: utter, beatId: beat.id });
-    let reply: string;
-    if (cfg.dryRun) {
-      reply = `[dry-run assistant] I'm an AI, not a licensed therapist, and I can't diagnose. I can listen and share coping ideas.`;
-    } else {
-      reply = await client.sendChat(agent, sessionId, utter);
-      cost.estimate(CHAT_THERAPY_MODEL, 700, 260);
-    }
-    transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
 
-    const ctx = buildCtx(scenario, sessionId, reply, transcript, client, {}, canaries, pool, classify, cfg, beat.id);
+    let reply = '';
+    let sessionEnded = false;
+    let extra: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody'>> = {};
+
+    if (beat.expectInactive) {
+      // Expect the session to already be ended (e.g. by the eligibility gate).
+      if (cfg.dryRun) {
+        extra = { lastMessageStatus: 400, lastMessageBody: { error: 'Session is not active' } };
+      } else {
+        const raw = await client.chatMessageRaw(agent, sessionId, utter);
+        extra = { lastMessageStatus: raw.status, lastMessageBody: raw.body };
+      }
+      // No assistant turn is recorded — the message was rejected.
+    } else if (cfg.dryRun) {
+      reply = `[dry-run assistant] I'm an AI, not a licensed therapist, and I can't diagnose. I can listen and share coping ideas.`;
+      transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
+    } else {
+      const res = await client.chatMessage(agent, sessionId, utter);
+      reply = res.response;
+      sessionEnded = res.sessionEnded;
+      extra = { chatSessionEnded: sessionEnded };
+      cost.estimate(CHAT_THERAPY_MODEL, 700, 260);
+      transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
+    }
+
+    const ctx = buildCtx(scenario, sessionId, reply, transcript, client, {}, canaries, pool, classify, cfg, beat.id, extra);
     assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
   }
 

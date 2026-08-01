@@ -91,12 +91,36 @@ export class HarnessClient {
     return res.body.sessionId as string;
   }
 
-  async sendChat(agent: Agent, sessionId: string, message: string): Promise<string> {
+  /** Send a chat turn and surface the reply plus the new `sessionEnded` flag
+   *  (set by the eligibility gate) and the echoed session id, so DB-backed
+   *  assertions can bind to the same session. Throws on any non-200 (a normal
+   *  turn must succeed); use chatMessageRaw when a rejection is expected. */
+  async chatMessage(
+    agent: Agent,
+    sessionId: string,
+    message: string,
+  ): Promise<{ response: string; sessionEnded: boolean; sessionId: string }> {
     const res = await agent.post('/api/chat/message').send({ sessionId, message });
     if (res.status !== 200 || typeof res.body?.response !== 'string') {
       throw new Error(`chat message failed: ${res.status} ${JSON.stringify(res.body)}`);
     }
-    return res.body.response as string;
+    return {
+      response: res.body.response as string,
+      sessionEnded: res.body.sessionEnded === true,
+      sessionId: (res.body.sessionId as string) ?? sessionId,
+    };
+  }
+
+  /** Send a chat turn WITHOUT throwing on a non-200, returning the raw status +
+   *  body. Used by beats that expect the message to be rejected (e.g. the
+   *  eligibility gate already ended the session → 400 "not active"). */
+  async chatMessageRaw(
+    agent: Agent,
+    sessionId: string,
+    message: string,
+  ): Promise<{ status: number; body: unknown }> {
+    const res = await agent.post('/api/chat/message').send({ sessionId, message });
+    return { status: res.status, body: res.body };
   }
 
   async endChat(agent: Agent, sessionId: string): Promise<void> {
