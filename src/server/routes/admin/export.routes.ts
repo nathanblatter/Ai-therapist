@@ -12,6 +12,7 @@ import {
   type ExportContentColumn,
   type ExportFilters,
 } from '../../db/index.js';
+import { buildDataset, streamDatasetZip } from '../../services/datasetExport.service.js';
 
 // Serialise rows to CSV using the given header order; quote/escape every cell.
 function toCsv(headers: string[], rows: ExportRow[]): string {
@@ -90,6 +91,30 @@ export default function exportRoutes(): Router {
     } catch (err) {
       console.error('Failed to export data:', err);
       res.status(500).json({ error: 'Failed to export data' });
+    }
+  });
+
+  // GET /admin/api/export/dataset?asOf=<iso>&includeTranscripts=true|false
+  // De-identified research dataset (ai-therapist-96). Researcher ONLY: the raw
+  // content export above already serves therapists; this pseudonymized artifact
+  // is a researcher deliverable. Streams a zip built by datasetExport.service.
+  router.get('/admin/api/export/dataset', requireRole('researcher'), async (req, res) => {
+    const asOf = req.query.asOf ? String(req.query.asOf) : new Date().toISOString();
+    if (isNaN(new Date(asOf).getTime())) {
+      return res.status(400).json({ error: 'asOf must be an ISO-8601 timestamp' });
+    }
+    const includeTranscripts = req.query.includeTranscripts === 'true';
+
+    try {
+      const result = await buildDataset(asOf, { includeTranscripts });
+      const dateStamp = asOf.slice(0, 10);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="ai-therapist-dataset-${dateStamp}.zip"`);
+      await streamDatasetZip(result, res);
+    } catch (err) {
+      console.error('Failed to export dataset:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Failed to export dataset' });
+      else res.end();
     }
   });
 

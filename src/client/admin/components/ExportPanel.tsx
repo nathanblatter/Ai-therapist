@@ -107,9 +107,78 @@ export default function ExportPanel() {
     }
   };
 
+  const [dsAsOf, setDsAsOf] = useState('');
+  const [dsIncludeTranscripts, setDsIncludeTranscripts] = useState(false);
+  const [dsLoading, setDsLoading] = useState(false);
+  const [dsError, setDsError] = useState<string | null>(null);
+
+  const handleDatasetExport = async () => {
+    setDsLoading(true);
+    setDsError(null);
+    try {
+      const params = new URLSearchParams();
+      if (dsAsOf) params.append('asOf', new Date(dsAsOf + 'T23:59:59Z').toISOString());
+      if (dsIncludeTranscripts) params.append('includeTranscripts', 'true');
+      const response = await fetch(`/admin/api/export/dataset?${params}`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || 'Dataset export failed');
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ai-therapist-dataset-${(dsAsOf || new Date().toISOString().split('T')[0])}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: unknown) {
+      setDsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDsLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 max-w-2xl mx-auto">
       <h2 className="text-2xl font-bold mb-6">Export Data</h2>
+
+      {userRole === 'researcher' && (
+        <div className="mb-6 bg-white p-6 rounded-lg shadow border border-royal border-opacity-30">
+          <h3 className="text-lg font-semibold mb-1">Research dataset (de-identified)</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Pseudonymized CSVs + generated codebook. Demo data excluded; the same as-of date
+            always produces the same bytes. No message content, usernames, or the pseudonym mapping
+            are ever included.
+          </p>
+          <div className="space-y-4">
+            <div>
+              <label className="block font-medium mb-2 text-gray-700">As-of date (inclusion cutoff)</label>
+              <input type="date" value={dsAsOf} onChange={(e) => setDsAsOf(e.target.value)}
+                className="border rounded px-3 py-2" />
+              <p className="text-sm text-gray-500 mt-1">Leave blank to use now.</p>
+            </div>
+            <div className="flex items-start gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded">
+              <input type="checkbox" id="dsIncludeTranscripts" checked={dsIncludeTranscripts}
+                onChange={(e) => setDsIncludeTranscripts(e.target.checked)}
+                className="w-4 h-4 mt-0.5 text-royal border-gray-300 rounded focus:ring-royal" />
+              <label htmlFor="dsIncludeTranscripts" className="text-sm text-gray-700">
+                Include redacted transcripts (opt-in). Adds a separate artifact with redacted turn
+                text and <strong>verbatim</strong> feedback comments — handle as identifiable data.
+              </label>
+            </div>
+            {dsError && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">Error: {dsError}</div>
+            )}
+            <button onClick={handleDatasetExport} disabled={dsLoading}
+              className="w-full bg-royal text-white py-3 rounded-lg font-semibold hover:bg-navy transition flex items-center justify-center gap-2 disabled:opacity-50 min-h-[44px]">
+              <Download size={20} aria-hidden="true" />
+              {dsLoading ? 'Building dataset…' : 'Download de-identified dataset'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="space-y-4">
