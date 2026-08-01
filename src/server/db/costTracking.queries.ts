@@ -106,7 +106,11 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
     date: string; purpose: LlmUsagePurpose; model: string | null;
     calls: string; tokens_in: string; tokens_out: string;
   }>(
-    `SELECT DATE(created_at) AS date, purpose, model,
+    // Cast DATE(created_at) to text: pg returns a bare DATE as a JS Date object,
+    // which breaks the Map dedup below (Date keys never match) and the string
+    // sort at the end (b.date.localeCompare is not a function). Returning the
+    // date as an ISO 'YYYY-MM-DD' string fixes both.
+    `SELECT DATE(created_at)::text AS date, purpose, model,
             COUNT(*) AS calls,
             COALESCE(SUM(tokens_in), 0) AS tokens_in,
             COALESCE(SUM(tokens_out), 0) AS tokens_out

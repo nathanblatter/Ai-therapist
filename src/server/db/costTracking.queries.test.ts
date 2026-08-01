@@ -10,6 +10,7 @@ import {
   recordLlmUsage,
   getSessionCostSummary,
   getCostTotals,
+  getDailySpend,
 } from './costTracking.queries.js';
 
 beforeEach(() => {
@@ -99,5 +100,37 @@ describe('getCostTotals', () => {
     expect(totals.total_tokens_out).toBe(1000);
     expect(totals.total_realtime_minutes).toBe(456.7);
     expect(totals.total_estimated_cost_usd).toBeGreaterThan(0);
+  });
+});
+
+describe('getDailySpend', () => {
+  it('selects DATE(created_at) as text so date keys are strings, not JS Date objects', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await getDailySpend(30);
+    const sql = queryMock.mock.calls[0][0] as string;
+    expect(sql).toContain('DATE(created_at)::text AS date');
+  });
+
+  it('merges rows for the same day and sorts descending by date string', async () => {
+    // Two rows on the same day (different purpose/model) must merge into one,
+    // which only works when row.date is a string the Map can key on. A regression
+    // to Date-object keys would leave them unmerged and crash the final sort.
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        { date: '2026-07-30', purpose: 'insights', model: 'gpt-4o-mini', calls: '2', tokens_in: '2000', tokens_out: '600' },
+        { date: '2026-07-30', purpose: 'crisis', model: 'gpt-4o-mini', calls: '1', tokens_in: '500', tokens_out: '100' },
+        { date: '2026-07-29', purpose: 'redaction', model: 'gpt-5', calls: '2', tokens_in: '0', tokens_out: '0' },
+      ],
+    });
+
+    const rows = await getDailySpend(30);
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map(r => r.date)).toEqual(['2026-07-30', '2026-07-29']);
+    const day30 = rows.find(r => r.date === '2026-07-30')!;
+    expect(day30.calls).toBe(3);
+    expect(day30.tokens_in).toBe(2500);
+    expect(day30.tokens_out).toBe(700);
+    expect(day30.estimated_cost_usd).toBeGreaterThan(0);
   });
 });
