@@ -43,6 +43,7 @@ import sessionsRoutes from "./routes/public/sessions.routes.js";
 import tokenRoutes from "./routes/public/token.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
 import consentRoutes from "./routes/public/consent.routes.js";
+import adminConsentRoutes from "./routes/admin/consent.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
 import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
@@ -467,6 +468,9 @@ app.use(configRoutes());
 app.use(voicesRoutes());
 // Admin config read/write API -> routes/admin/config.routes.ts.
 app.use(adminConfigRoutes());
+
+// Versioned IRB consent documents (publish/re-consent) -> routes/admin/consent.routes.ts.
+app.use(adminConsentRoutes());
 
 
 // Content Retention / Data Wipe Endpoints -> routes/admin/contentRetention.routes.ts

@@ -119,6 +119,8 @@ export default function App() {
   const [isConsentOpen, setIsConsentOpen] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [consentVersion, setConsentVersion] = useState('');
+  const [consentBody, setConsentBody] = useState('');
+  const [reconsentRequired, setReconsentRequired] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
@@ -146,6 +148,8 @@ export default function App() {
       .then(data => {
         setConsentVersion(data.currentVersion);
         setConsentAccepted(!!data.accepted);
+        setConsentBody(data.body ?? '');
+        setReconsentRequired(!!data.reconsentRequired);
       })
       .catch(err => console.error('Failed to fetch consent status:', err));
 
@@ -1237,9 +1241,12 @@ export default function App() {
         isOpen={isConsentOpen}
         recordingEnabled={features.session_recording_enabled === true}
         consentVersion={consentVersion}
+        body={consentBody}
+        reconsentRequired={reconsentRequired}
         onCancel={() => setIsConsentOpen(false)}
         onAccept={() => {
           setConsentAccepted(true);
+          setReconsentRequired(false);
           setIsConsentOpen(false);
           setIsCheckInOpen(true);
         }}
