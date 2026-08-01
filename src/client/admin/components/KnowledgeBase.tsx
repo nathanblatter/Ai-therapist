@@ -12,6 +12,9 @@ interface Chunk {
   license: string | null;
   modality: string | null;
   active: boolean;
+  approved_by: string | null;
+  approved_at: string | null;
+  approval_note: string | null;
   created_at: string;
 }
 
@@ -50,13 +53,20 @@ export default function KnowledgeBase() {
   useEffect(() => { load(); }, [load]);
 
   const setActive = async (id: number, active: boolean) => {
+    // Approvals are recorded with the admin's identity + an optional rationale
+    // note (ai-therapist-88 audit trail). Ask for the note only on approve.
+    let note: string | null = null;
+    if (active) {
+      note = window.prompt('Approval note (optional — recorded in the audit trail):', '');
+      if (note === null) return; // cancelled
+    }
     setBusy(id);
     try {
       const res = await fetch(`/admin/api/knowledge/${id}/active`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ active }),
+        body: JSON.stringify({ active, note: note || undefined }),
       });
       if (!res.ok) throw new Error('update failed');
       await load();
@@ -84,13 +94,15 @@ export default function KnowledgeBase() {
   const approveAll = async () => {
     const scope = kind ? `all pending ${kind}` : 'ALL pending';
     if (!confirm(`Approve ${scope} content? It becomes retrievable in live sessions.`)) return;
+    const note = window.prompt('Approval note for this batch (optional — recorded in the audit trail):', '');
+    if (note === null) return; // cancelled
     setBusy('bulk');
     try {
       const res = await fetch('/admin/api/knowledge/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(kind ? { kind } : {}),
+        body: JSON.stringify({ ...(kind ? { kind } : {}), ...(note ? { note } : {}) }),
       });
       if (!res.ok) throw new Error('approve failed');
       await load();
@@ -184,6 +196,13 @@ export default function KnowledgeBase() {
                     )}
                     {c.license && <span>· {c.license}</span>}
                   </p>
+                  {c.active && c.approved_by && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Approved by <strong>{c.approved_by}</strong>
+                      {c.approved_at && ` · ${new Date(c.approved_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`}
+                      {c.approval_note && <span className="italic text-gray-400"> — {c.approval_note}</span>}
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-col gap-2 shrink-0">
                   {c.active ? (

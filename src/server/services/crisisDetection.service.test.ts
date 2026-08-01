@@ -3,13 +3,20 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // Mock the DB pool, secrets, and OpenAI so the tests exercise the two-stage
 // risk pipeline (keyword screen → LLM context assessment → fallback) without
 // touching Postgres or the network.
-const { queryMock, createMock } = vi.hoisted(() => ({
+const { queryMock, createMock, connectMock, draftAeMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   createMock: vi.fn(),
+  connectMock: vi.fn(),
+  draftAeMock: vi.fn(),
 }));
 
 vi.mock('../config/db.js', () => ({
-  pool: { query: queryMock, connect: vi.fn() },
+  pool: { query: queryMock, connect: connectMock },
+}));
+
+// The high-severity flag fires a fire-and-forget AE auto-draft (ai-therapist-95).
+vi.mock('./adverseEvent.service.js', () => ({
+  draftAdverseEventFromCrisis: draftAeMock,
 }));
 
 vi.mock('../config/secrets.js', () => ({
@@ -22,7 +29,7 @@ vi.mock('openai', () => ({
   },
 }));
 
-const { detectCrisisKeywords, analyzeMessageRisk } = await import('./crisisDetection.service.js');
+const { detectCrisisKeywords, analyzeMessageRisk, flagSessionCrisis } = await import('./crisisDetection.service.js');
 
 function llmResponse(payload: Record<string, unknown>) {
   return { choices: [{ message: { content: JSON.stringify(payload) } }] };
@@ -192,5 +199,28 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
     expect(factorsJson.keyword_score).toBe(75);
     expect(factorsJson.llm_score).toBe(5);
     expect(factorsJson.llm_context).toBe('bystander');
+  });
+});
+
+describe('flagSessionCrisis → adverse-event auto-draft hook', () => {
+  beforeEach(() => {
+    draftAeMock.mockReset().mockResolvedValue(1);
+    // A fake pooled client whose BEGIN/UPDATE/INSERT/COMMIT all succeed.
+    const client = { query: vi.fn().mockResolvedValue({ rows: [] }), release: vi.fn() };
+    connectMock.mockReset().mockResolvedValue(client);
+  });
+
+  it('schedules an AE draft on a high-severity flag', async () => {
+    await flagSessionCrisis('sess-hi', 'high', 90, 'system', 'auto', 1, ['plan'], null);
+    // The draft is fire-and-forget after COMMIT; let the microtask run.
+    await new Promise(r => setTimeout(r, 0));
+    expect(draftAeMock).toHaveBeenCalledWith('sess-hi');
+  });
+
+  it('does NOT schedule an AE draft on medium or low flags', async () => {
+    await flagSessionCrisis('sess-med', 'medium', 60, 'system', 'auto', 1, [], null);
+    await flagSessionCrisis('sess-low', 'low', 30, 'system', 'auto', 1, [], null);
+    await new Promise(r => setTimeout(r, 0));
+    expect(draftAeMock).not.toHaveBeenCalled();
   });
 });

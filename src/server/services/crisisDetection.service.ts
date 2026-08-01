@@ -451,6 +451,16 @@ export async function flagSessionCrisis(
   } finally {
     client.release();
   }
+
+  // IRB adverse-event auto-draft (ai-therapist-95): a high-severity flag is a
+  // qualifying adverse event. Fire-and-forget after COMMIT so it can never
+  // affect the crisis pipeline; the assembler is idempotent per crisis_event_id.
+  // Dynamic import matches the crisisAlert pattern and keeps test mocking easy.
+  if (severity === 'high') {
+    import('./adverseEvent.service.js')
+      .then(m => m.draftAdverseEventFromCrisis(sessionId))
+      .catch(err => console.error('AE auto-draft failed:', err));
+  }
 }
 
 /**

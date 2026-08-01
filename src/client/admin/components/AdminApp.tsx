@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2, BookOpen, X } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2, BookOpen, Clipboard, FilePlus, X } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
@@ -21,6 +21,8 @@ const CrisisManagement = lazy(() => import("./CrisisManagement"));
 const MFASetup = lazy(() => import("./MFASetup"));
 const DataRetention = lazy(() => import("./DataRetention"));
 const KnowledgeBase = lazy(() => import("./KnowledgeBase"));
+const ConsentVersions = lazy(() => import("./ConsentVersions"));
+const AdverseEvents = lazy(() => import("./AdverseEvents"));
 
 function ViewLoading() {
   return (
@@ -37,6 +39,9 @@ export default function AdminApp() {
   const [isClient, setIsClient] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // Adverse-event deadline reminder: count of overdue + due-soon drafts, shown
+  // as a red badge on the Adverse Events nav item (ai-therapist-95).
+  const [aeReminderCount, setAeReminderCount] = useState(0);
 
   // Handle SSR - only render interactive parts on client
   useEffect(() => {
@@ -64,6 +69,16 @@ export default function AdminApp() {
     fetchUserRole();
   }, []);
 
+  // Fetch AE deadline counts once on mount for the nav badge.
+  useEffect(() => {
+    fetch('/admin/api/adverse-events?status=draft', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (data?.counts) setAeReminderCount((data.counts.overdue ?? 0) + (data.counts.due_soon ?? 0));
+      })
+      .catch(() => { /* nav badge is best-effort */ });
+  }, []);
+
   const handleViewSession = (sessionId: string, editMode = false) => {
     setSelectedSessionId(sessionId);
     setIsEditMode(editMode);
@@ -80,12 +95,14 @@ export default function AdminApp() {
     { id: 'dashboard', label: 'Dashboard', icon: BarChart2 },
     { id: 'sessions', label: 'Sessions', icon: List },
     { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle },
+    { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus },
     { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle },
     { id: 'mfa', label: 'MFA Security', icon: Shield },
     { id: 'users', label: 'Users', icon: Users, researcherOnly: true },
     { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
     { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
     { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
+    { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true },
     { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
     { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
     { id: 'export', label: 'Export', icon: Download },
@@ -147,6 +164,11 @@ export default function AdminApp() {
                 >
                   <Icon size={20} />
                   <span className="font-medium">{item.label}</span>
+                  {item.id === 'adverse-events' && aeReminderCount > 0 && (
+                    <span className="ml-auto bg-red-600 text-white rounded-full px-2 py-0.5 text-xs font-bold">
+                      {aeReminderCount}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -160,12 +182,14 @@ export default function AdminApp() {
               {currentView === 'sessions' && <SessionList onViewSession={handleViewSession} />}
               {currentView === 'live' && <LiveMonitoring onViewSession={handleViewSession} />}
               {currentView === 'crisis' && <CrisisManagement />}
+              {currentView === 'adverse-events' && <AdverseEvents />}
               {currentView === 'rate-limits' && <RateLimitedUsers />}
               {currentView === 'mfa' && <MFASetup />}
               {currentView === 'users' && <UserManagement />}
               {currentView === 'user-sessions' && <UserSessions />}
               {currentView === 'prompts' && <SystemPrompts />}
               {currentView === 'knowledge' && <KnowledgeBase />}
+              {currentView === 'consent' && <ConsentVersions />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'config' && <SystemConfig />}
               {currentView === 'export' && <ExportPanel />}

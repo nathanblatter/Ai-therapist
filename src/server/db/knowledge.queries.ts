@@ -129,15 +129,24 @@ export interface KnowledgeStatusCounts {
   pending: number;
 }
 
-/** Approve chunks (active=true) by kind/topic, or all pending. Returns rows changed. */
-export async function approveKnowledgeChunks(filter: { kind?: string | null; topic?: string | null }): Promise<number> {
+/** Approve chunks (active=true) by kind/topic, or all pending. Returns rows changed.
+ *  Stamps approver identity + optional note (ai-therapist-88 audit trail). */
+export async function approveKnowledgeChunks(
+  filter: { kind?: string | null; topic?: string | null },
+  actor: string,
+  note?: string | null,
+): Promise<number> {
   const result = await pool.query(
     `UPDATE knowledge_chunks
-     SET active = TRUE, updated_at = CURRENT_TIMESTAMP
+     SET active = TRUE,
+         approved_by = $3,
+         approved_at = CURRENT_TIMESTAMP,
+         approval_note = $4,
+         updated_at = CURRENT_TIMESTAMP
      WHERE active IS NOT TRUE
        AND ($1::text IS NULL OR kind = $1)
        AND ($2::text IS NULL OR topic = $2)`,
-    [filter.kind ?? null, filter.topic ?? null],
+    [filter.kind ?? null, filter.topic ?? null, actor, note ?? null],
   );
   return result.rowCount ?? 0;
 }
@@ -183,13 +192,17 @@ export interface KnowledgeChunkAdmin {
   license: string | null;
   modality: string | null;
   active: boolean;
+  approved_by: string | null;
+  approved_at: Date | null;
+  approval_note: string | null;
   created_at: Date;
 }
 
 /** List chunks for the admin curation view (no embedding), newest-pending first. */
 export async function listKnowledgeChunks(filter: { kind?: string | null; active?: boolean | null }): Promise<KnowledgeChunkAdmin[]> {
   const result = await pool.query<KnowledgeChunkAdmin>(
-    `SELECT chunk_id, kind, topic, title, content, source, source_url, license, modality, active, created_at
+    `SELECT chunk_id, kind, topic, title, content, source, source_url, license, modality, active,
+            approved_by, approved_at, approval_note, created_at
      FROM knowledge_chunks
      WHERE ($1::text IS NULL OR kind = $1)
        AND ($2::boolean IS NULL OR active = $2)
@@ -199,12 +212,32 @@ export async function listKnowledgeChunks(filter: { kind?: string | null; active
   return result.rows;
 }
 
-/** Approve/unapprove a single chunk. Returns false if the id doesn't exist. */
-export async function setKnowledgeChunkActive(chunkId: number, active: boolean): Promise<boolean> {
-  const r = await pool.query(
-    `UPDATE knowledge_chunks SET active = $2, updated_at = CURRENT_TIMESTAMP WHERE chunk_id = $1`,
-    [chunkId, active],
-  );
+/** Approve/unapprove a single chunk. Returns false if the id doesn't exist.
+ *  On approve (active=true) the approver identity + timestamp + optional note
+ *  are recorded; on unapprove (active=false) those fields are deliberately left
+ *  intact so `active=false` + populated approval reads as "approved then revoked"
+ *  (ai-therapist-88 audit trail). */
+export async function setKnowledgeChunkActive(
+  chunkId: number,
+  active: boolean,
+  actor: string,
+  note?: string | null,
+): Promise<boolean> {
+  const r = active
+    ? await pool.query(
+        `UPDATE knowledge_chunks
+         SET active = TRUE,
+             approved_by = $2,
+             approved_at = CURRENT_TIMESTAMP,
+             approval_note = $3,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE chunk_id = $1`,
+        [chunkId, actor, note ?? null],
+      )
+    : await pool.query(
+        `UPDATE knowledge_chunks SET active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE chunk_id = $1`,
+        [chunkId],
+      );
   return (r.rowCount ?? 0) > 0;
 }
 

@@ -65,6 +65,15 @@ export default function CrisisManagement() {
   const [expandedSessions, setExpandedSessions] = useState(new Set());
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterSeverity, setFilterSeverity] = useState('all');
+  // Adverse-event drafts pending review (ai-therapist-95) — crisis staff live here.
+  const [aeDrafts, setAeDrafts] = useState(0);
+
+  useEffect(() => {
+    fetch('/admin/api/adverse-events?status=draft', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d?.counts) setAeDrafts(d.counts.draft ?? 0); })
+      .catch(() => { /* best-effort */ });
+  }, []);
 
   useEffect(() => {
     fetchCrisisData();
@@ -219,6 +228,12 @@ export default function CrisisManagement() {
           <p className="text-gray-600 mt-1">
             Monitor and manage all crisis-related events, interventions, and reviews
           </p>
+          {aeDrafts > 0 && (
+            <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+              <FileText size={14} />
+              {aeDrafts} adverse-event draft{aeDrafts === 1 ? '' : 's'} pending — see the Adverse Events tab
+            </p>
+          )}
         </div>
         <button
           onClick={fetchCrisisData}

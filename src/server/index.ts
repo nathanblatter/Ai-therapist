@@ -27,6 +27,7 @@ import bugReportRoutes from "./routes/public/bugReport.routes.js";
 import contentRetentionRoutes from "./routes/admin/contentRetention.routes.js";
 import userSessionsRoutes from "./routes/admin/userSessions.routes.js";
 import crisisRoutes from "./routes/admin/crisis.routes.js";
+import adverseEventsRoutes from "./routes/admin/adverseEvents.routes.js";
 import redactionRoutes from "./routes/admin/redaction.routes.js";
 import adminConfigRoutes from "./routes/admin/config.routes.js";
 import analyticsRoutes from "./routes/admin/analytics.routes.js";
@@ -43,6 +44,7 @@ import sessionsRoutes from "./routes/public/sessions.routes.js";
 import tokenRoutes from "./routes/public/token.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
 import consentRoutes from "./routes/public/consent.routes.js";
+import adminConsentRoutes from "./routes/admin/consent.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
 import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
@@ -468,6 +470,9 @@ app.use(voicesRoutes());
 // Admin config read/write API -> routes/admin/config.routes.ts.
 app.use(adminConfigRoutes());
 
+// Versioned IRB consent documents (publish/re-consent) -> routes/admin/consent.routes.ts.
+app.use(adminConsentRoutes());
+
 
 // Content Retention / Data Wipe Endpoints -> routes/admin/contentRetention.routes.ts
 app.use(contentRetentionRoutes());
@@ -481,6 +486,9 @@ app.use(adminRateLimitsRoutes());
 
 // Crisis Management API Routes -> routes/admin/crisis.routes.ts
 app.use(crisisRoutes());
+
+// IRB adverse-event reports -> routes/admin/adverseEvents.routes.ts
+app.use(adverseEventsRoutes());
 
 // Redaction-verification API -> routes/admin/redaction.routes.ts
 app.use(redactionRoutes());

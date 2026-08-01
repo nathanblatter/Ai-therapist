@@ -106,7 +106,12 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
     const cutoffTime = new Date();
     cutoffTime.setHours(cutoffTime.getHours() - settings.retention_hours);
 
-    // Build the wipe query based on settings
+    // NOTE (ai-therapist-95, IRB): this wipe only nulls messages.content. The
+    // REDACTED transcript excerpts snapshotted into adverse_event_reports
+    // (transcript_excerpt) are deliberately NOT swept here — filed AE reports
+    // are IRB regulatory records and are exempt from the content-retention
+    // wipe. They contain redacted-only text (no raw PHI), so retaining them is
+    // safe; do not add adverse_event_reports to this sweep.
     let wipeQuery: string;
     let queryParams: unknown[];
 

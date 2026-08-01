@@ -1,8 +1,12 @@
 // Participant consent screen (IRB requirement, ai-therapist-24). Blocks
 // session start until the participant explicitly acknowledges recording,
 // transcription, live admin monitoring, data retention, and the
-// crisis-protocol disclosure. Acceptance is recorded server-side (timestamp +
-// consent version) via POST /api/consent/accept.
+// crisis-protocol disclosure. The stable disclosure copy is now served from
+// the versioned consent_documents table (migration 047, ai-therapist-94) and
+// rendered from the `body` prop; the recording-disclosure bullet stays
+// client-rendered because it varies with features.session_recording_enabled.
+// Acceptance is recorded server-side (timestamp + version + body hash) via
+// POST /api/consent/accept.
 import { useState } from 'react';
 
 interface ConsentScreenProps {
@@ -11,11 +15,71 @@ interface ConsentScreenProps {
    * recording disclosure's wording (and whether it's shown as active at all). */
   recordingEnabled: boolean;
   consentVersion: string;
+  /** Stable consent copy (markdown) from GET /api/consent/status. */
+  body: string;
+  /** True when the participant previously accepted an OLDER version. */
+  reconsentRequired: boolean;
   onCancel: () => void;
   onAccept: () => void;
 }
 
-export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion, onCancel, onAccept }: ConsentScreenProps) {
+/** Minimal renderer for the consent body: `## heading`, `- **bold** rest`
+ *  bullets, and plain paragraphs. The copy is authored/controlled server-side. */
+function renderConsentBody(body: string) {
+  const lines = body.replace(/\r\n/g, '\n').split('\n');
+  const blocks: JSX.Element[] = [];
+  let bullets: string[] = [];
+
+  const flushBullets = () => {
+    if (!bullets.length) return;
+    blocks.push(
+      <ul key={`ul-${blocks.length}`} className="space-y-3 text-sm text-gray-700 mb-5">
+        {bullets.map((b, i) => (
+          <li key={i} className="flex gap-2">
+            <span aria-hidden="true">•</span>
+            <span>{renderInline(b)}</span>
+          </li>
+        ))}
+      </ul>
+    );
+    bullets = [];
+  };
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (line.startsWith('## ')) {
+      flushBullets();
+      blocks.push(
+        <h2 key={`h-${blocks.length}`} className="text-xl font-semibold text-gray-900 mb-1">
+          {line.slice(3)}
+        </h2>
+      );
+    } else if (line.startsWith('- ')) {
+      bullets.push(line.slice(2));
+    } else if (line.trim() === '') {
+      flushBullets();
+    } else {
+      flushBullets();
+      blocks.push(
+        <p key={`p-${blocks.length}`} className="text-sm text-gray-500 mb-4">
+          {renderInline(line)}
+        </p>
+      );
+    }
+  }
+  flushBullets();
+  return blocks;
+}
+
+/** Render **bold** spans within a line of consent copy. */
+function renderInline(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) =>
+    p.startsWith('**') && p.endsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>
+  );
+}
+
+export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion, body, reconsentRequired, onCancel, onAccept }: ConsentScreenProps) {
   const [acknowledged, setAcknowledged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,13 +120,16 @@ export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion
         aria-labelledby="consent-heading"
       >
         <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
-          <h2 id="consent-heading" className="text-xl font-semibold text-gray-900 mb-1">
-            Before we begin
-          </h2>
-          <p className="text-sm text-gray-500 mb-4">Please review and accept to start your session.</p>
+          {reconsentRequired && (
+            <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-800">
+              Our consent terms have been updated since you last agreed. Please review and re-accept to continue.
+            </div>
+          )}
 
-          <ul className="space-y-3 text-sm text-gray-700 mb-5">
-            {recordingEnabled && (
+          <div id="consent-heading">{renderConsentBody(body)}</div>
+
+          {recordingEnabled && (
+            <ul className="space-y-3 text-sm text-gray-700 mb-5 -mt-2">
               <li className="flex gap-2">
                 <span aria-hidden="true">🎙️</span>
                 <span>
@@ -71,38 +138,8 @@ export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion
                   period below.
                 </span>
               </li>
-            )}
-            <li className="flex gap-2">
-              <span aria-hidden="true">📝</span>
-              <span>
-                <strong>Transcription.</strong> What you say is transcribed to text so the assistant can
-                respond and so your session can be reviewed as part of this study.
-              </span>
-            </li>
-            <li className="flex gap-2">
-              <span aria-hidden="true">👀</span>
-              <span>
-                <strong>Live monitoring.</strong> A researcher or therapist may be monitoring sessions in
-                real time and can send messages into your conversation if needed.
-              </span>
-            </li>
-            <li className="flex gap-2">
-              <span aria-hidden="true">🗄️</span>
-              <span>
-                <strong>Data retention.</strong> Session content is retained only as long as needed for
-                the study and is redacted of identifying details before long-term storage. Raw content is
-                automatically deleted after the retention period.
-              </span>
-            </li>
-            <li className="flex gap-2">
-              <span aria-hidden="true">🚨</span>
-              <span>
-                <strong>Crisis protocol.</strong> If anything you say suggests you may be in danger, our
-                system may show you crisis resources (e.g. the 988 Suicide &amp; Crisis Lifeline), and in
-                some cases a member of our team may be notified so they can reach out to you directly.
-              </span>
-            </li>
-          </ul>
+            </ul>
+          )}
 
           <label className="flex items-start gap-2 mb-4 cursor-pointer">
             <input

@@ -17,6 +17,7 @@ export interface UserRow {
   mfa_secret?: string | null;
   mfa_backup_codes?: string[] | null;
   mfa_enabled_at?: Date | null;
+  risk_context_share_enabled?: boolean;
   created_at?: Date;
   updated_at?: Date;
 }
@@ -161,7 +162,7 @@ export async function createUser(username: string, password: string, role: strin
 export async function getAllUsers(): Promise<UserRow[]> {
   try {
     const result = await pool.query<UserRow>(
-      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, created_at, updated_at FROM users ORDER BY created_at DESC'
+      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, created_at, updated_at FROM users ORDER BY created_at DESC'
     );
     return result.rows;
   } catch (error) {
