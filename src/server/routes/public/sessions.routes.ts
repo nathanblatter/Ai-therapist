@@ -333,10 +333,14 @@ export default function sessionsRoutes(): Router {
         console.error('[Sideband] cleanup on session end failed:', e);
       }
 
-      // Redact the whole session in one batched job (fire-and-forget).
+      // Redact the whole session in one batched job (fire-and-forget), THEN
+      // auto-name from the redacted transcript. Naming must run after redaction
+      // completes — before it, content_redacted is null and the namer sees a
+      // blank transcript and produces junk (ai-therapist wave1 bug 1).
       import('../../services/sessionRedaction.service.js')
         .then(m => m.redactSession(sessionId))
-        .catch(e => console.error('[Redaction] session redaction failed:', e));
+        .then(() => generateSessionNameAsync(sessionId))
+        .catch(e => console.error('[Redaction] session redaction/naming failed:', e));
 
       // Finalize the audio recording (wrap buffered PCM → WAV → object storage).
       import('../../services/recorder.service.js')
@@ -355,9 +359,6 @@ export default function sessionsRoutes(): Router {
 
       global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' });
       global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'user' });
-
-      // Auto-name from the conversation in the background.
-      generateSessionNameAsync(sessionId);
 
       res.json({ ...updatedSession, message: 'Session ended successfully' });
     } catch (err) {

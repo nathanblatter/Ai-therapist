@@ -208,10 +208,13 @@ export default function chatRoutes(): Router {
 
       const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 
-      // Redact the whole session in one batched job (fire-and-forget).
+      // Redact the whole session in one batched job (fire-and-forget), THEN
+      // auto-name from the redacted transcript — naming must run after redaction
+      // populates content_redacted, or it names a blank transcript (wave1 bug 1).
       import('../../services/sessionRedaction.service.js')
         .then(m => m.redactSession(sessionId))
-        .catch(e => console.error('[Redaction] session redaction failed:', e));
+        .then(() => generateSessionNameAsync(sessionId))
+        .catch(e => console.error('[Redaction] session redaction/naming failed:', e));
 
       // Memory summary + draft SOAP note (fire-and-forget).
       import('../../services/sessionInsights.service.js')
@@ -220,9 +223,6 @@ export default function chatRoutes(): Router {
 
       global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedBy: 'user', endedAt: new Date() });
       global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt: new Date() });
-
-      // Auto-name from the conversation in the background.
-      generateSessionNameAsync(sessionId);
 
       console.log(`Chat session ${sessionId.substring(0, 12)}... ended by user`);
 

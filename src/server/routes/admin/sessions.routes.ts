@@ -68,10 +68,14 @@ export default function adminSessionsRoutes(): Router {
         console.error('[Sideband] cleanup on admin session end failed:', e);
       }
 
-      // Redact the whole session in one batched job (fire-and-forget).
+      // Redact the whole session in one batched job (fire-and-forget), THEN
+      // auto-name from the redacted transcript. Naming must run after redaction
+      // completes, else content_redacted is null and the namer sees a blank
+      // transcript and produces junk (wave1 bug 1).
       import('../../services/sessionRedaction.service.js')
         .then(m => m.redactSession(sessionId))
-        .catch(e => console.error('[Redaction] session redaction failed:', e));
+        .then(() => generateSessionNameAsync(sessionId))
+        .catch(e => console.error('[Redaction] session redaction/naming failed:', e));
 
       // Finalize the audio recording (wrap buffered PCM → WAV → object storage).
       import('../../services/recorder.service.js')
@@ -94,9 +98,6 @@ export default function adminSessionsRoutes(): Router {
         endedBy: req.session.username,
         remoteTermination: true,
       });
-
-      // Auto-name the session in the background.
-      generateSessionNameAsync(sessionId);
 
       console.log(`Admin ${req.session.username} remotely ended session ${sessionId}`);
 
