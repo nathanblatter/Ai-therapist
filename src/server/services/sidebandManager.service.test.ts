@@ -42,6 +42,9 @@ function resetInternals() {
   sb.phaseTimers.clear();
   sb.regroundingTimers.clear();
   sb.pingIntervals.clear();
+  sb.reconnectAttempts.clear();
+  sb.sessionKeys.clear();
+  sb.endedSessions.clear();
 }
 
 function sentEventTypes(ws: ReturnType<typeof fakeWs>): Array<Record<string, Internal>> {
@@ -254,5 +257,38 @@ describe('mid-session re-grounding (ai-therapist-49)', () => {
     })));
 
     expect(ws.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('reconnect guard after session end (wave1 bug 4)', () => {
+  it('does NOT query or reconnect once the session has ended, even on a 1006 close', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-ended';
+
+    // disconnect() marks the session ended in-memory.
+    await sidebandManager.disconnect(sessionId);
+    expect(sb.endedSessions.has(sessionId)).toBe(true);
+
+    queryMock.mockClear();
+    // Abnormal (1006) close arrives after the session already ended.
+    await sidebandManager.handleClose(sessionId, 1006, Buffer.from(''));
+
+    // No status lookup and no reconnect scheduled — the guard short-circuits.
+    const statusQueries = queryMock.mock.calls.filter((c: unknown[]) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('SELECT status'));
+    expect(statusQueries.length).toBe(0);
+    expect(sb.reconnectAttempts.has(sessionId)).toBe(false);
+  });
+
+  it('aborts an attach retry attempt for an ended session', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-ended-attach';
+    sb.endedSessions.add(sessionId);
+
+    // attempt > 0 (a retry) must throw/abort rather than open a socket.
+    await expect(
+      sidebandManager.connect(sessionId, 'call-x', 'sk-test', 1),
+    ).rejects.toThrow(/ended/i);
+    expect(sb.connections.has(sessionId)).toBe(false);
   });
 });

@@ -29,6 +29,11 @@ export class SidebandManager {
   // recap. Config-gated (off by default); cleared on disconnect like the
   // other timers.
   private regroundingTimers: Map<string, NodeJS.Timeout>;
+  // Sessions that have been ended/finalized (via disconnect()). Once a session is
+  // here, we must NOT attempt any (re)attach for it — the OpenAI call_id is gone,
+  // so retries just spam 404 "No session found for the provided call_id". Guards
+  // both the post-1006 reconnect path and the call-not-registered attach retry.
+  private endedSessions: Set<string>;
   private maxReconnectAttempts: number;
   private reconnectDelayMs: number;
   private keepaliveMs: number;
@@ -40,6 +45,7 @@ export class SidebandManager {
     this.pingIntervals = new Map(); // sessionId → keepalive timer
     this.phaseTimers = new Map(); // sessionId → phase nudge timers
     this.regroundingTimers = new Map(); // sessionId → re-grounding interval timer
+    this.endedSessions = new Set(); // sessionIds that ended — never reattach
     this.maxReconnectAttempts = 3;
     this.reconnectDelayMs = 2000;
     this.keepaliveMs = 20000;
@@ -57,6 +63,16 @@ export class SidebandManager {
    * @returns {Promise<WebSocket>} - The WebSocket connection
    */
   async connect(sessionId: string, callId: string, apiKey: string, attempt = 0, fallbackKey?: string): Promise<WebSocket> {
+    // Never (re)attach for a session that has already ended — the call_id is gone
+    // and every attempt just yields 404 call-not-found spam. A fresh initial
+    // attach (attempt 0) clears any stale ended flag for a reused sessionId.
+    if (attempt === 0) {
+      this.endedSessions.delete(sessionId);
+    } else if (this.endedSessions.has(sessionId)) {
+      console.log(`[Sideband] Session ${sessionId.substring(0, 12)}... has ended; skipping attach retry.`);
+      throw new Error('Session ended; sideband attach aborted');
+    }
+
     // Check if already connected
     if (this.connections.has(sessionId)) {
       console.warn(`[Sideband] Already connected for session ${sessionId.substring(0, 12)}...`);
@@ -94,6 +110,13 @@ export class SidebandManager {
           // A 404 call_id_not_found right after the call starts usually means the
           // Realtime session isn't registered yet (the WebRTC connection is still
           // finishing negotiation). Retry a few times before giving up.
+          // If the session ended while an attach was in flight, stop retrying —
+          // the call_id is gone for good, so further 404 retries are pure spam.
+          if (this.endedSessions.has(sessionId)) {
+            console.log(`[Sideband] Session ${sessionId.substring(0, 12)}... ended; abandoning attach retries.`);
+            return;
+          }
+
           const callNotReady = res.statusCode === 404 && body.includes('call_id_not_found');
           if (callNotReady && attempt < this.maxReconnectAttempts) {
             const delay = this.reconnectDelayMs * (attempt + 1);
@@ -839,13 +862,23 @@ export class SidebandManager {
         });
       }
 
+      // Fast path: if the session was ended/finalized in-process, don't even
+      // query — skip reconnection entirely and log one line (prevents the
+      // post-1006 reconnect → 404 call-not-found spam after a session ends).
+      if (this.endedSessions.has(sessionId)) {
+        console.log(`[Sideband] Session ${sessionId.substring(0, 12)}... has ended; skipping reconnection.`);
+        return;
+      }
+
       // Attempt reconnection if session still active and not exceeding max attempts
       const sessionStatus = await pool.query(
         'SELECT status FROM therapy_sessions WHERE session_id = $1',
         [sessionId]
       );
 
-      // Attempt reconnection if session still active and not a normal close
+      // Attempt reconnection only if the session is still active in the DB and
+      // the close wasn't a normal (1000) close. A non-active status (ended/
+      // finalized) also means the call_id is gone, so don't reattach.
       if (sessionStatus.rows[0]?.status === 'active' && code !== 1000) {
         const attempts = this.reconnectAttempts.get(sessionId) || 0;
         if (attempts < this.maxReconnectAttempts) {
@@ -886,6 +919,9 @@ export class SidebandManager {
    * @param {string} sessionId
    */
   async disconnect(sessionId: string): Promise<void> {
+    // Mark ended FIRST so any in-flight attach/reconnect (e.g. a pending 404
+    // retry or a post-1006 close handler) bails out instead of spamming attaches.
+    this.endedSessions.add(sessionId);
     const ws = this.connections.get(sessionId);
     if (ws) {
       console.log(`[Sideband] Disconnecting session ${sessionId.substring(0, 12)}...`);
@@ -958,6 +994,7 @@ export class SidebandManager {
   async shutdown(): Promise<void> {
     console.log('[Sideband] Shutting down all sideband connections...');
     for (const [sessionId, ws] of this.connections.entries()) {
+      this.endedSessions.add(sessionId);
       ws.close(1000, 'Server shutdown');
       this.connections.delete(sessionId);
       this.stopKeepalive(sessionId);
