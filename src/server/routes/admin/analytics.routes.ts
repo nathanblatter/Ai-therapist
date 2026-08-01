@@ -117,5 +117,58 @@ export default function analyticsRoutes(): Router {
     }
   });
 
+  // GET /admin/api/analytics/pairwise?promptVersion=pw-v1 - pairwise A/B eval
+  // win-rates with Wilson 95% CIs (ai-therapist-81).
+  router.get('/admin/api/analytics/pairwise', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const { getPairwiseAggregates } = await import('../../db/index.js');
+      const { PAIRWISE_PROMPT_VERSION } = await import('../../services/pairwiseEval.service.js');
+      const { wilsonInterval } = await import('../../utils/stats.js');
+      const promptVersion = req.query.promptVersion ? String(req.query.promptVersion) : PAIRWISE_PROMPT_VERSION;
+
+      const aggregates = await getPairwiseAggregates(promptVersion);
+      const comparisons = aggregates.map(a => {
+        const nDecisive = a.wins_x + a.wins_y;
+        const ci = wilsonInterval(a.wins_x, nDecisive);
+        const winRateX = ci ? ci.p : null;
+        const significant = ci ? ci.lo > 0.5 || ci.hi < 0.5 : false;
+        return {
+          comparison_axis: a.comparison_axis,
+          arm_x: a.arm_x,
+          arm_y: a.arm_y,
+          wins_x: a.wins_x,
+          wins_y: a.wins_y,
+          ties: a.ties,
+          inconsistent: a.inconsistent,
+          total: a.total,
+          win_rate_x: winRateX,
+          ci_lo: ci ? ci.lo : null,
+          ci_hi: ci ? ci.hi : null,
+          significant,
+        };
+      });
+
+      res.json({ prompt_version: promptVersion, comparisons });
+    } catch (err) {
+      console.error('Failed to fetch pairwise analytics:', err);
+      res.status(500).json({ error: 'Failed to fetch pairwise analytics' });
+    }
+  });
+
+  // GET /admin/api/analytics/evals?weeks=12 - weekly rubric-score trend + open
+  // drift alerts (ai-therapist-84).
+  router.get('/admin/api/analytics/evals', requireRole('therapist', 'researcher'), async (req, res) => {
+    const rawWeeks = req.query.weeks ? parseInt(String(req.query.weeks), 10) : 12;
+    const weeks = Number.isFinite(rawWeeks) ? Math.min(104, Math.max(1, rawWeeks)) : 12;
+    try {
+      const { getEvalScoreTrend, getOpenDriftAlerts } = await import('../../db/index.js');
+      const [trend, openAlerts] = await Promise.all([getEvalScoreTrend(weeks), getOpenDriftAlerts()]);
+      res.json({ trend, open_alerts: openAlerts });
+    } catch (err) {
+      console.error('Failed to fetch eval trend analytics:', err);
+      res.status(500).json({ error: 'Failed to fetch eval trend analytics' });
+    }
+  });
+
   return router;
 }
