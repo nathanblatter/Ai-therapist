@@ -49,12 +49,18 @@ mkdir -p "$STAGE"
     > "$STAGE/ai-therapist-recordings-$STAMP.tar.gz.age"
 
   # 3. Push off-box (Tailscale/NAS), prune local 14d / remote 60d.
-  /usr/bin/rsync -av --timeout=300 \
+  # Off-box push is non-fatal: local encrypted backups must survive a dead/
+  # renamed NAS (imac-nas was found unresolvable 2026-07-31), and local prune
+  # must still run or the Mini fills up.
+  if /usr/bin/rsync -av --timeout=300 \
     -e "/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=15" \
-    "$STAGE/" --exclude '.recordings-mirror' "$BACKUP_DEST"
+    "$STAGE/" --exclude '.recordings-mirror' "$BACKUP_DEST"; then
+    /usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=15 "${BACKUP_DEST%%:*}" \
+      "find ${BACKUP_DEST#*:} -name 'ai-therapist-*.age' -mtime +60 -delete" || true
+  else
+    echo "WARN: off-box push to $BACKUP_DEST failed -- backups are LOCAL-ONLY tonight"
+  fi
   find "$STAGE" -name 'ai-therapist-*.age' -mtime +14 -delete
-  /usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=15 "${BACKUP_DEST%%:*}" \
-    "find ${BACKUP_DEST#*:} -name 'ai-therapist-*.age' -mtime +60 -delete"
 
   echo "== ok $(date -u '+%Y-%m-%d %H:%M:%S')"
 } >>"$LOG" 2>&1

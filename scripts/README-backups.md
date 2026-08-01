@@ -43,7 +43,9 @@ in the repo; installation is a host step, documented below.
    already uses (BatchMode SSH, key already trusted by imac-nas).
 4. **Make the script executable** (committed with +x, but verify):
    ```sh
-   chmod +x ~/Desktop/Ai-therapist/scripts/backup-ai-therapist.sh
+   install -m 755 ~/Desktop/Ai-therapist/scripts/backup-ai-therapist.sh ~/docker-services/backup-ai-therapist.sh
+   # (launchd runs the ~/docker-services copy: background agents cannot read the
+   #  TCC-protected, iCloud-synced Desktop -- re-run this install after script edits)
    ```
 5. **Install the launchd job** (do NOT commit the installed copy; this is a host
    action):

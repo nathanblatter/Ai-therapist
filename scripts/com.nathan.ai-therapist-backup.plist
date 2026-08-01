@@ -4,7 +4,7 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>com.nathan.ai-therapist-backup</string>
   <key>ProgramArguments</key><array>
-    <string>/Users/nathanblatter/Desktop/Ai-therapist/scripts/backup-ai-therapist.sh</string>
+    <string>/Users/nathanblatter/docker-services/backup-ai-therapist.sh</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>10</integer></dict>
