@@ -17,7 +17,10 @@
     "export:dataset": "tsx src/database/scripts/exportDataset.ts",
     "retention:run": "tsx src/database/scripts/runRetention.ts",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx,.ts,.tsx",
-    "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx,.ts,.tsx --fix"
+    "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx,.ts,.tsx --fix",
+    "redteam": "tsx src/redteam/cli.ts",
+    "redteam:smoke": "tsx src/redteam/cli.ts --suite smoke",
+    "redteam:full": "tsx src/redteam/cli.ts --suite full"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

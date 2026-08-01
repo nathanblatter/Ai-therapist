@@ -1,0 +1,44 @@
+name: Red-team (full)
+on:
+  schedule:
+    - cron: '0 8 * * *' # 02:00 America/Denver ≈ 08:00 UTC
+  workflow_dispatch:
+jobs:
+  redteam-full:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_therapist_redteam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam
+      DATABASE_SSL: 'false'
+      SESSION_SECRET: ci-redteam-secret
+      NODE_ENV: test
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Set up red-team DB (migrate + seed)
+        run: bash scripts/redteam-db-setup.sh
+      - name: Red-team full suite
+        # Non-gating for the nightly: report the result (visible in the run) but
+        # never fail the workflow — the smoke suite is the deploy gate.
+        run: npm run redteam:full -- --allow-fail
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteam-full-results
+          path: redteam-results/

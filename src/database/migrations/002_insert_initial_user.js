@@ -3,7 +3,9 @@
 // Usage: node migrations/002_insert_initial_user.js
 
 import bcrypt from 'bcrypt';
-import { pool } from '../db.js';
+// The pool lives in the server config module (there is no src/database/db.js).
+// Run this file with tsx so the .js specifier resolves to config/db.ts.
+import { pool } from '../../server/config/db.js';
 
 const SALT_ROUNDS = 10;
 
