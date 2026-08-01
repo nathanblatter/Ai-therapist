@@ -5,8 +5,12 @@
 //   npx tsx src/database/scripts/approveKnowledge.js                 # show status + list pending (read-only, no DB write)
 //   npx tsx src/database/scripts/approveKnowledge.js --kind worksheet
 //   npx tsx src/database/scripts/approveKnowledge.js --topic ptsd
-//   npx tsx src/database/scripts/approveKnowledge.js --all           # approve everything pending
+//   npx tsx src/database/scripts/approveKnowledge.js --all --by nathan           # approve everything pending
+//   npx tsx src/database/scripts/approveKnowledge.js --all --by nathan --note "IRB batch 3"
 //   npx tsx src/database/scripts/approveKnowledge.js --all --dry-run # preview what --all/--kind/--topic would approve, no write
+//
+// Any writing invocation (--all/--kind/--topic without --dry-run) requires
+// --by <name> so the approval audit trail (ai-therapist-88) records who did it.
 import { pool } from '../../server/config/db.js';
 import {
   approveKnowledgeChunks,
@@ -24,6 +28,8 @@ async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const kind = arg('--kind');
   const topic = arg('--topic');
+  const by = arg('--by');
+  const note = arg('--note');
 
   if (!all && !kind && !topic) {
     // Status only (always read-only, regardless of --dry-run)
@@ -60,8 +66,17 @@ async function main() {
     return;
   }
 
-  const n = await approveKnowledgeChunks(filter);
-  console.log(`Approved ${n} chunk(s)${kind ? ` kind=${kind}` : ''}${topic ? ` topic=${topic}` : ''}.`);
+  // Writing invocations must be attributed (ai-therapist-88 audit trail).
+  if (typeof by !== 'string' || !by.trim()) {
+    console.error('Refusing to approve without attribution. Pass --by <name> (e.g. --by nathan).');
+    console.error('Add --dry-run to preview without writing, or run with no filter for read-only status.');
+    process.exit(1);
+  }
+  const actor = by.trim();
+  const approvalNote = typeof note === 'string' && note.trim() ? note.trim() : 'approved via approveKnowledge.js';
+
+  const n = await approveKnowledgeChunks(filter, actor, approvalNote);
+  console.log(`Approved ${n} chunk(s)${kind ? ` kind=${kind}` : ''}${topic ? ` topic=${topic}` : ''} as ${actor}.`);
 }
 
 main().then(() => pool.end()).catch(e => { console.error(e); pool.end(); process.exit(1); });
