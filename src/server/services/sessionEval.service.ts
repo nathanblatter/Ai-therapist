@@ -101,8 +101,30 @@ async function getEvalsConfig(): Promise<EvalsConfig> {
   return (config.evals ?? {}) as EvalsConfig;
 }
 
+/**
+ * Build the judge transcript for a session: only user/assistant turns, original
+ * content preferred and falling back to redacted text after the retention wipe,
+ * truncated to `maxChars`. Returns null when there is no conversation content.
+ * Single-sourced here so the single-session and pairwise judges share the same
+ * truncation policy.
+ */
+export async function buildJudgeTranscript(
+  sessionId: string,
+  maxChars: number = MAX_TRANSCRIPT_CHARS
+): Promise<string | null> {
+  const messages = await getSessionMessages(sessionId, false);
+  const conversation = messages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, text: (m.content ?? m.content_redacted ?? '').trim() }))
+    .filter(m => m.text)
+    .map(m => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.text}`)
+    .join('\n');
+  if (!conversation) return null;
+  return conversation.substring(0, maxChars);
+}
+
 /** Human-readable description of the session's configured modality for the judge. */
-function describeModality(modalityKey: string | null): string {
+export function describeModality(modalityKey: string | null): string {
   if (!modalityKey || modalityKey === 'none') {
     return 'No specific therapeutic modality was configured for this session.';
   }
@@ -140,13 +162,7 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
 
   // Transcript: prefer original content; fall back to redacted text after the
   // retention wipe (same policy as the insights pipeline).
-  const messages = await getSessionMessages(sessionId, false);
-  const conversation = messages
-    .filter(m => m.role === 'user' || m.role === 'assistant')
-    .map(m => ({ role: m.role, text: (m.content ?? m.content_redacted ?? '').trim() }))
-    .filter(m => m.text)
-    .map(m => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.text}`)
-    .join('\n');
+  const conversation = await buildJudgeTranscript(sessionId);
   if (!conversation) {
     log.info(`Session ${sessionId} has no conversation content; skipping eval`);
     return null;
@@ -168,7 +184,7 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
         role: 'user',
         content:
           `Session context:\n${describeModality(config?.modality ?? null)}\n\n` +
-          `Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}`,
+          `Transcript:\n${conversation}`,
       },
     ],
   });
@@ -189,6 +205,13 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
   const row = await upsertSessionEval(sessionId, rubric, overallComments, judgeModel, EVAL_PROMPT_VERSION);
   const scores = EVAL_DIMENSIONS.map(d => `${d}=${rubric[d].score}`).join(' ');
   log.info(`Eval stored for ${sessionId} [${judgeModel}/${EVAL_PROMPT_VERSION}]: ${scores}`);
+
+  // Drift check after every stored eval (fire-and-forget). Dynamic import keeps
+  // this free of a module-eval cycle with evalDrift.service.ts.
+  import('./evalDrift.service.js')
+    .then(m => m.maybeCheckEvalDrift())
+    .catch(err => log.error({ err }, 'Failed to schedule eval drift check'));
+
   return row;
 }
 

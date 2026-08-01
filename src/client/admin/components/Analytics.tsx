@@ -6,6 +6,9 @@ import type { ValueType, NameType } from "recharts/types/component/DefaultToolti
 import { Activity, MessageSquare, Clock, Mic, Tool, AlertTriangle, DollarSign } from "react-feather";
 import type { Icon as FeatherIcon, IconProps } from "react-feather";
 import type { FC } from "react";
+import EvalDriftPanel from "./EvalDriftPanel";
+import PairwiseEvalPanel from "./PairwiseEvalPanel";
+import EvalCalibrationPanel from "./EvalCalibrationPanel";
 
 const COLORS = ['#0047BA', '#002E5D', '#BDD6E6', '#8B959E'];
 
@@ -1354,6 +1357,9 @@ export default function Analytics() {
 
       <ToolUsagePanel />
       <CostUsagePanel />
+      <EvalDriftPanel />
+      <PairwiseEvalPanel />
+      <EvalCalibrationPanel />
     </div>
   );
 }

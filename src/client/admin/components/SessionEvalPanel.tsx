@@ -10,6 +10,21 @@ interface EvalDimension {
   rationale: string;
 }
 
+interface HumanRatingDimension {
+  score: number;
+  note?: string;
+}
+
+interface HumanRating {
+  rating_id: number;
+  rater_user_id: number;
+  rater_username?: string;
+  rubric: Record<string, HumanRatingDimension>;
+  overall_notes: string | null;
+  rubric_version: string;
+  updated_at: string;
+}
+
 interface SessionEval {
   eval_id: number;
   rubric: Record<string, EvalDimension>;
@@ -165,6 +180,190 @@ export default function SessionEvalPanel({ sessionId, sessionStatus }: SessionEv
               )}
             </div>
           )}
+
+          <HumanRatingSection sessionId={sessionId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Human rating subsection (ai-therapist-80) ----
+
+function avgRating(rubric: Record<string, HumanRatingDimension>): string {
+  const scores = DIMENSION_LABELS.map(([k]) => rubric[k]?.score).filter((s): s is number => typeof s === 'number');
+  if (!scores.length) return '—';
+  return (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
+}
+
+function HumanRatingSection({ sessionId }: { sessionId: string }) {
+  const [ratings, setRatings] = useState<HumanRating[]>([]);
+  const [myUserId, setMyUserId] = useState<number | null>(null);
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [overallNotes, setOverallNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [expandedOther, setExpandedOther] = useState<number | null>(null);
+
+  const applyMine = useCallback((mine: HumanRating | undefined) => {
+    if (!mine) return;
+    const s: Record<string, number> = {};
+    const n: Record<string, string> = {};
+    for (const [key] of DIMENSION_LABELS) {
+      if (mine.rubric[key]) {
+        s[key] = mine.rubric[key].score;
+        if (mine.rubric[key].note) n[key] = mine.rubric[key].note as string;
+      }
+    }
+    setScores(s);
+    setNotes(n);
+    setOverallNotes(mine.overall_notes ?? '');
+  }, []);
+
+  const fetchRatings = useCallback(async () => {
+    try {
+      const res = await fetch(`/admin/api/sessions/${sessionId}/human-ratings`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setRatings(data.ratings ?? []);
+      setMyUserId(data.my_user_id ?? null);
+      const mine = (data.ratings ?? []).find((r: HumanRating) => r.rater_user_id === data.my_user_id);
+      applyMine(mine);
+    } catch (err) {
+      console.error('Failed to fetch human ratings:', err);
+    }
+  }, [sessionId, applyMine]);
+
+  useEffect(() => {
+    fetchRatings();
+  }, [fetchRatings]);
+
+  const mine = ratings.find(r => r.rater_user_id === myUserId);
+  const others = ratings.filter(r => r.rater_user_id !== myUserId);
+  const allChosen = DIMENSION_LABELS.every(([key]) => typeof scores[key] === 'number');
+
+  const save = async () => {
+    if (!allChosen) return;
+    setSaving(true);
+    try {
+      const rubric: Record<string, HumanRatingDimension> = {};
+      for (const [key] of DIMENSION_LABELS) {
+        rubric[key] = { score: scores[key] };
+        if (notes[key]?.trim()) rubric[key].note = notes[key].trim();
+      }
+      const res = await fetch(`/admin/api/sessions/${sessionId}/human-rating`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rubric, overall_notes: overallNotes || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'Failed to save rating');
+        return;
+      }
+      toast.success('Rating saved');
+      await fetchRatings();
+    } catch (err) {
+      console.error('Failed to save rating:', err);
+      toast.error('Failed to save rating');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-gray-200">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-sm font-semibold text-navy">Human rating</h4>
+        {mine && (
+          <span className="text-xs text-gray-500">
+            Your rating · saved {new Date(mine.updated_at).toLocaleString()}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        {DIMENSION_LABELS.map(([key, label]) => (
+          <div key={key} className="flex flex-col gap-1 p-2 bg-gray-50 rounded">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-gray-900">{label}</span>
+              <div className="flex gap-1 shrink-0">
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setScores(prev => ({ ...prev, [key]: n }))}
+                    className={`w-7 h-7 rounded text-xs font-bold border transition ${
+                      scores[key] === n
+                        ? `${scoreClasses(n)} border-transparent`
+                        : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-100'
+                    }`}
+                    aria-pressed={scores[key] === n}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <input
+              type="text"
+              value={notes[key] ?? ''}
+              onChange={e => setNotes(prev => ({ ...prev, [key]: e.target.value }))}
+              placeholder="Optional note"
+              className="text-xs border border-gray-200 rounded px-2 py-1 w-full"
+            />
+          </div>
+        ))}
+      </div>
+
+      <textarea
+        value={overallNotes}
+        onChange={e => setOverallNotes(e.target.value)}
+        rows={2}
+        maxLength={4000}
+        placeholder="Overall notes (optional)"
+        className="mt-2 w-full text-sm border border-gray-200 rounded px-2 py-1"
+      />
+
+      <button
+        onClick={save}
+        disabled={saving || !allChosen}
+        className="mt-2 px-3 py-1.5 bg-royal text-white rounded hover:bg-navy transition text-sm disabled:opacity-50 min-h-[36px]"
+      >
+        {saving ? 'Saving…' : 'Save rating'}
+      </button>
+      {!allChosen && <p className="mt-1 text-xs text-gray-500">Choose all six scores to save.</p>}
+
+      {others.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold text-gray-600 mb-1">Other raters</p>
+          <div className="space-y-1">
+            {others.map(r => (
+              <div key={r.rating_id} className="text-xs">
+                <button
+                  type="button"
+                  onClick={() => setExpandedOther(expandedOther === r.rating_id ? null : r.rating_id)}
+                  className="flex items-center gap-1 text-gray-700 hover:text-navy"
+                >
+                  {expandedOther === r.rating_id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  <span className="font-medium">{r.rater_username ?? `user ${r.rater_user_id}`}</span>
+                  <span className="text-gray-500">· avg {avgRating(r.rubric)}/5 · {new Date(r.updated_at).toLocaleDateString()}</span>
+                </button>
+                {expandedOther === r.rating_id && (
+                  <div className="mt-1 ml-4 space-y-0.5">
+                    {DIMENSION_LABELS.map(([key, label]) => (
+                      <div key={key} className="flex justify-between gap-2">
+                        <span className="text-gray-600">{label}</span>
+                        <span className="font-semibold">{r.rubric[key]?.score ?? '—'}/5</span>
+                      </div>
+                    ))}
+                    {r.overall_notes && <p className="text-gray-600 italic mt-1">{r.overall_notes}</p>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
