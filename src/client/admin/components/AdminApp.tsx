@@ -23,6 +23,7 @@ const DataRetention = lazy(() => import("./DataRetention"));
 const KnowledgeBase = lazy(() => import("./KnowledgeBase"));
 const ConsentVersions = lazy(() => import("./ConsentVersions"));
 const AdverseEvents = lazy(() => import("./AdverseEvents"));
+const StudyOps = lazy(() => import("./StudyOps"));
 
 function ViewLoading() {
   return (
@@ -103,6 +104,7 @@ export default function AdminApp() {
     { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
     { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
     { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true },
+    { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true },
     { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
     { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
     { id: 'export', label: 'Export', icon: Download },
@@ -190,6 +192,7 @@ export default function AdminApp() {
               {currentView === 'prompts' && <SystemPrompts />}
               {currentView === 'knowledge' && <KnowledgeBase />}
               {currentView === 'consent' && <ConsentVersions />}
+              {currentView === 'study-ops' && <StudyOps />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'config' && <SystemConfig />}
               {currentView === 'export' && <ExportPanel />}
