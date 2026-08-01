@@ -27,6 +27,7 @@ import bugReportRoutes from "./routes/public/bugReport.routes.js";
 import contentRetentionRoutes from "./routes/admin/contentRetention.routes.js";
 import userSessionsRoutes from "./routes/admin/userSessions.routes.js";
 import crisisRoutes from "./routes/admin/crisis.routes.js";
+import adverseEventsRoutes from "./routes/admin/adverseEvents.routes.js";
 import redactionRoutes from "./routes/admin/redaction.routes.js";
 import adminConfigRoutes from "./routes/admin/config.routes.js";
 import analyticsRoutes from "./routes/admin/analytics.routes.js";
@@ -485,6 +486,9 @@ app.use(adminRateLimitsRoutes());
 
 // Crisis Management API Routes -> routes/admin/crisis.routes.ts
 app.use(crisisRoutes());
+
+// IRB adverse-event reports -> routes/admin/adverseEvents.routes.ts
+app.use(adverseEventsRoutes());
 
 // Redaction-verification API -> routes/admin/redaction.routes.ts
 app.use(redactionRoutes());

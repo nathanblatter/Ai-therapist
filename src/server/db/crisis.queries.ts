@@ -150,6 +150,46 @@ export async function getUserPriorCrisisFlags(
   return result.rows;
 }
 
+export interface SessionAeSnapshot {
+  session_id: string;
+  user_id: number | null;
+  crisis_severity: string | null;
+  crisis_risk_score: number | null;
+  crisis_flagged_at: Date | null;
+}
+
+/** Core session fields the adverse-event draft assembler snapshots
+ *  (ai-therapist-95). Null if the session doesn't exist. */
+export async function getSessionAeSnapshot(sessionId: string): Promise<SessionAeSnapshot | null> {
+  const result = await pool.query<SessionAeSnapshot>(
+    `SELECT session_id, user_id, crisis_severity, crisis_risk_score, crisis_flagged_at
+     FROM therapy_sessions WHERE session_id = $1`,
+    [sessionId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export interface SessionInterventionAction {
+  action_id: number;
+  action_type: string;
+  performed_at: Date;
+  performed_by: string | null;
+  risk_score: number | null;
+}
+
+/** Intervention actions logged for a session, chronological — used by the
+ *  adverse-event draft assembler (ai-therapist-95). */
+export async function getSessionInterventionActions(sessionId: string): Promise<SessionInterventionAction[]> {
+  const result = await pool.query<SessionInterventionAction>(
+    `SELECT action_id, action_type, performed_at, performed_by, risk_score
+     FROM intervention_actions
+     WHERE session_id = $1
+     ORDER BY performed_at ASC`,
+    [sessionId],
+  );
+  return result.rows;
+}
+
 /** All crisis events (with session name + username), newest first. */
 export async function getAllCrisisEvents(): Promise<Record<string, unknown>[]> {
   const result = await pool.query(`
