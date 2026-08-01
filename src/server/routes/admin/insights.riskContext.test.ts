@@ -1,0 +1,63 @@
+// Auth coverage for the risk-context sharing toggle route (ai-therapist-91).
+// The write route was widened from therapist-only to therapist+researcher so
+// the researcher-only Users tab can drive it; participants must still be denied.
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import express from 'express';
+import request from 'supertest';
+
+const { setEnabledMock } = vi.hoisted(() => ({ setEnabledMock: vi.fn() }));
+vi.mock('../../db/index.js', () => ({
+  getSessionInsights: vi.fn(),
+  markSoapReviewed: vi.fn(),
+  getSessionSafetyPlan: vi.fn(),
+  getSessionScaleResponses: vi.fn(),
+  setSessionNotesForNextSession: vi.fn(),
+  setUserRiskContextEnabled: setEnabledMock,
+}));
+
+import insightsRoutes from './insights.routes.js';
+
+function appAs(role: string | null) {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    // Stand in for the real session middleware.
+    (req as unknown as { session: Record<string, unknown> }).session = role
+      ? { userId: 1, userRole: role, username: 'tester' }
+      : {};
+    next();
+  });
+  app.use(insightsRoutes());
+  return app;
+}
+
+beforeEach(() => setEnabledMock.mockReset());
+
+describe('POST /admin/api/users/:userId/risk-context auth', () => {
+  it('allows a researcher to flip the flag', async () => {
+    setEnabledMock.mockResolvedValueOnce(undefined);
+    const res = await request(appAs('researcher')).post('/admin/api/users/42/risk-context').send({ enabled: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, enabled: true });
+    expect(setEnabledMock).toHaveBeenCalledWith(42, true);
+  });
+
+  it('allows a therapist to flip the flag (unchanged behavior)', async () => {
+    setEnabledMock.mockResolvedValueOnce(undefined);
+    const res = await request(appAs('therapist')).post('/admin/api/users/42/risk-context').send({ enabled: false });
+    expect(res.status).toBe(200);
+    expect(setEnabledMock).toHaveBeenCalledWith(42, false);
+  });
+
+  it('denies a participant with 403', async () => {
+    const res = await request(appAs('participant')).post('/admin/api/users/42/risk-context').send({ enabled: true });
+    expect(res.status).toBe(403);
+    expect(setEnabledMock).not.toHaveBeenCalled();
+  });
+
+  it('denies an unauthenticated request with 401', async () => {
+    const res = await request(appAs(null)).post('/admin/api/users/42/risk-context').send({ enabled: true });
+    expect(res.status).toBe(401);
+    expect(setEnabledMock).not.toHaveBeenCalled();
+  });
+});

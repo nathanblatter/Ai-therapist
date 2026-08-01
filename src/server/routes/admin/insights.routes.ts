@@ -81,9 +81,12 @@ export default function insightsRoutes(): Router {
     }
   });
 
-  // POST /admin/api/users/:userId/risk-context - therapist opt-in for injecting
-  // this user's prior-crisis history into their future sessions (default off).
-  router.post('/admin/api/users/:userId/risk-context', requireRole('therapist'), async (req, res) => {
+  // POST /admin/api/users/:userId/risk-context - clinical/study-staff opt-in for
+  // injecting this user's prior-crisis history into their future sessions
+  // (default off). Widened to therapist+researcher (ai-therapist-91): the Users
+  // tab and /api/users are researcher-only, so a therapist-only write route
+  // makes the toggle unusable from the only screen that lists participants.
+  router.post('/admin/api/users/:userId/risk-context', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });

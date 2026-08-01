@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter } from "react-feather";
+import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter, Info } from "react-feather";
 
 const VOICE_OPTIONS = [
   { value: 'alloy', label: 'Alloy' },
@@ -45,8 +45,14 @@ interface User {
   preferred_voice?: string;
   preferred_language?: string;
   mfa_enabled: boolean;
+  risk_context_share_enabled?: boolean;
   created_at: string;
 }
+
+const RISK_CONTEXT_EXPLANATION =
+  "When on, a brief note about this participant's prior crisis flags is shared " +
+  "with the AI at the start of their future sessions so it can be appropriately " +
+  "attentive. Off by default; enable only after clinical review.";
 
 interface UserUpdates {
   username: string;
@@ -192,6 +198,24 @@ export default function UserManagement() {
         throw new Error(data.error || 'Failed to delete user');
       }
 
+      await fetchUsers();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const toggleRiskContext = async (userid: number, enabled: boolean) => {
+    try {
+      const response = await fetch(`/admin/api/users/${userid}/risk-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update risk-context sharing');
+      }
       await fetchUsers();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -717,6 +741,12 @@ export default function UserManagement() {
                 MFA Status
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                <span className="inline-flex items-center gap-1" title={RISK_CONTEXT_EXPLANATION}>
+                  Risk context
+                  <Info size={13} className="text-gray-400" aria-label={RISK_CONTEXT_EXPLANATION} />
+                </span>
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
                 Created At
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
@@ -763,6 +793,27 @@ export default function UserManagement() {
                     )
                   ) : (
                     <span className="text-gray-400 text-xs">N/A</span>
+                  )}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                  {user.role === 'participant' ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleRiskContext(user.userid, !user.risk_context_share_enabled)}
+                      title={RISK_CONTEXT_EXPLANATION}
+                      aria-pressed={!!user.risk_context_share_enabled}
+                      aria-label={`Risk context sharing for ${user.username}: ${user.risk_context_share_enabled ? 'on' : 'off'}`}
+                      className={`px-2.5 py-1 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full transition ${
+                        user.risk_context_share_enabled
+                          ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${user.risk_context_share_enabled ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                      {user.risk_context_share_enabled ? 'On' : 'Off'}
+                    </button>
+                  ) : (
+                    <span className="text-gray-400 text-xs" aria-hidden="true">—</span>
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
