@@ -27,7 +27,8 @@ jobs:
     steps:
       - name: Deploy
         run: |
-          cd /Users/nathanblatter/Desktop/Ai-therapist
+          # Deploy checkout lives outside iCloud (the Desktop repo suffers EDEADLK evictions mid-deploy)
+          cd /Users/nathanblatter/deploy/Ai-therapist
           git pull origin main
 
           # Build new image
