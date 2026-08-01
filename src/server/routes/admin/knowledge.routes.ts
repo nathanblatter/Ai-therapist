@@ -10,6 +10,8 @@ import {
   deleteKnowledgeChunk,
   approveKnowledgeChunks,
   getKnowledgeStatusCounts,
+  listRerankDecisions,
+  getRerankStats,
 } from '../../db/index.js';
 
 /** Trim an optional approval note and cap it at 500 chars; blank => null. */
@@ -38,6 +40,24 @@ export default function knowledgeRoutes(): Router {
     } catch (error) {
       console.error('[Knowledge] list failed:', error);
       res.status(500).json({ error: 'Failed to load knowledge base' });
+    }
+  });
+
+  // RAG rerank eval hook (ai-therapist-88): recent listwise rerank decisions +
+  // movement / fallback-rate / p95-latency stats, so we can judge whether
+  // reranking earns its latency before building a fuller eval.
+  router.get('/admin/api/knowledge/rerank-decisions', canRead, async (req, res) => {
+    const toolName = typeof req.query.tool === 'string' && req.query.tool ? req.query.tool : null;
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
+    try {
+      const [stats, decisions] = await Promise.all([
+        getRerankStats({ toolName }),
+        listRerankDecisions({ toolName, limit: Number.isInteger(limit) ? limit : 100 }),
+      ]);
+      res.json({ stats, decisions });
+    } catch (error) {
+      console.error('[Knowledge] rerank-decisions failed:', error);
+      res.status(500).json({ error: 'Failed to load rerank decisions' });
     }
   });
 

@@ -868,7 +868,7 @@ export class ToolRegistry {
           required: ['query'],
         },
       },
-      async (args: Record<string, unknown>) => {
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
         const query = typeof args['query'] === 'string' ? args['query'].trim() : '';
         if (!query) return { error: 'query text is required' };
         const topic = typeof args['topic'] === 'string' && args['topic'].trim()
@@ -879,15 +879,22 @@ export class ToolRegistry {
           const { embedText } = await import('./embeddings.service.js');
           const { searchKnowledgeChunks } = await import('../db/index.js');
           const embedding = await embedText(query);
-          const rows = await searchKnowledgeChunks(embedding, { kind: 'psychoeducation', topic }, 4);
+          // Widen the vector candidate set, then LLM-rerank down to the 3 that
+          // most directly answer the query (ai-therapist-88).
+          const candidates = await searchKnowledgeChunks(embedding, { kind: 'psychoeducation', topic }, 8);
 
-          if (rows.length === 0) {
+          if (candidates.length === 0) {
             return {
               results: [],
               guidance:
                 'No matching passages in the knowledge base. Rely on general supportive knowledge, keep it brief, and do NOT invent citations, statistics, or specific clinical claims.',
             };
           }
+
+          const { rerankChunks } = await import('./rerank.service.js');
+          const { chunks: rows } = await rerankChunks(query, candidates, 3, {
+            sessionId: ctx.sessionId ?? null, toolName: 'retrieve_psychoeducation',
+          });
 
           return {
             results: rows.map(r => ({
@@ -982,20 +989,25 @@ export class ToolRegistry {
           required: ['concern'],
         },
       },
-      async (args: Record<string, unknown>) => {
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
         const concern = typeof args['concern'] === 'string' ? args['concern'].trim() : '';
         if (!concern) return { error: 'concern text is required' };
         try {
           const { embedText } = await import('./embeddings.service.js');
           const { searchKnowledgeChunks } = await import('../db/index.js');
           const embedding = await embedText(concern);
-          const rows = await searchKnowledgeChunks(embedding, { kind: 'worksheet' }, 1);
-          if (rows.length === 0) {
+          // Widen to 5 vector candidates, then LLM-rerank to the single best fit.
+          const candidates = await searchKnowledgeChunks(embedding, { kind: 'worksheet' }, 5);
+          if (candidates.length === 0) {
             return {
               found: false,
               guidance: 'No matching worksheet found. You can still open a blank thought record (start_thought_record) or offer a journaling prompt (show_journaling_prompt) if it would help. Do not invent a named worksheet.',
             };
           }
+          const { rerankChunks } = await import('./rerank.service.js');
+          const { chunks: rows } = await rerankChunks(concern, candidates, 1, {
+            sessionId: ctx.sessionId ?? null, toolName: 'find_worksheet',
+          });
           const w = rows[0];
           const meta = (w.metadata ?? {}) as { render_tool?: string; prompt?: string };
           const renderTool = meta.render_tool === 'start_thought_record' ? 'start_thought_record' : 'show_journaling_prompt';
@@ -1035,7 +1047,7 @@ export class ToolRegistry {
           required: ['concern'],
         },
       },
-      async (args: Record<string, unknown>) => {
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
         const concern = typeof args['concern'] === 'string' ? args['concern'].trim() : '';
         if (!concern) return { error: 'concern text is required' };
         try {
@@ -1048,16 +1060,21 @@ export class ToolRegistry {
           const embedding = await embedText(`${label}${concern}`);
 
           // Prefer the active modality's techniques; fall back to any technique.
-          let rows = await searchKnowledgeChunks(embedding, { kind: 'technique', modality: modalityKey }, 1);
-          if (rows.length === 0) {
-            rows = await searchKnowledgeChunks(embedding, { kind: 'technique' }, 1);
+          // Widen to 5 vector candidates, then LLM-rerank to the single best fit.
+          let candidates = await searchKnowledgeChunks(embedding, { kind: 'technique', modality: modalityKey }, 5);
+          if (candidates.length === 0) {
+            candidates = await searchKnowledgeChunks(embedding, { kind: 'technique' }, 5);
           }
-          if (rows.length === 0) {
+          if (candidates.length === 0) {
             return {
               found: false,
               guidance: 'No matching technique in the library. Offer support in your own words consistent with the approach; do not invent named techniques or cite sources.',
             };
           }
+          const { rerankChunks } = await import('./rerank.service.js');
+          const { chunks: rows } = await rerankChunks(concern, candidates, 1, {
+            sessionId: ctx.sessionId ?? null, toolName: 'suggest_modality_technique',
+          });
           const t = rows[0];
           return {
             found: true,

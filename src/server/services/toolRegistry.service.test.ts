@@ -8,6 +8,7 @@ const {
   getSessionScaleResponsesMock, getUserLatestScaleScoreMock,
   getKnowledgeChunkByIdMock, insertWorksheetInstanceMock,
   insertRiskCheckStepMock, getRiskCheckStepsMock, getLatestCrisisEventIdMock,
+  rerankChunksMock,
 } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
@@ -31,6 +32,11 @@ const {
   insertRiskCheckStepMock: vi.fn(),
   getRiskCheckStepsMock: vi.fn(),
   getLatestCrisisEventIdMock: vi.fn(),
+  // Rerank is exercised in rerank.service.test.ts; here it just passes the
+  // vector candidates through in order so the RAG-tool assertions stay focused.
+  rerankChunksMock: vi.fn(async (_q: string, candidates: unknown[], topN: number) => ({
+    chunks: candidates.slice(0, topN), usedFallback: false, latencyMs: 1,
+  })),
 }));
 vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
@@ -63,6 +69,9 @@ vi.mock('./crisisDetection.service.js', () => ({
 }));
 vi.mock('./embeddings.service.js', () => ({
   embedText: embedTextMock,
+}));
+vi.mock('./rerank.service.js', () => ({
+  rerankChunks: rerankChunksMock,
 }));
 
 import { toolRegistry } from './toolRegistry.service.js';
@@ -197,7 +206,7 @@ describe('retrieve_psychoeducation (RAG)', () => {
     ]);
     const result = await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'what is depression', topic: 'depression' }) as { results: unknown[]; guidance: string };
     expect(embedTextMock).toHaveBeenCalledWith('what is depression');
-    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'psychoeducation', topic: 'depression' }, 4);
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'psychoeducation', topic: 'depression' }, 8);
     expect(result.results).toEqual([
       { title: 'What depression is', content: 'Depression is...', source: 'NIMH', source_url: 'https://nimh' },
     ]);
@@ -207,7 +216,7 @@ describe('retrieve_psychoeducation (RAG)', () => {
   it('passes null topic when none is given', async () => {
     searchKnowledgeChunksMock.mockResolvedValue([]);
     await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'coping tips' });
-    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'psychoeducation', topic: null }, 4);
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'psychoeducation', topic: null }, 8);
   });
 
   it('on empty results, instructs the model not to fabricate citations', async () => {
@@ -267,7 +276,7 @@ describe('find_worksheet', () => {
       { title: 'Unsent letter', content: 'Write a letter...', source: 'Expressive writing', source_url: null, topic: 'grief', kind: 'worksheet', modality: null, metadata: { render_tool: 'show_journaling_prompt', prompt: 'Write a letter you will never send.' }, similarity: 0.7 },
     ]);
     const r = await toolRegistry.executeTool('find_worksheet', { concern: 'grief about a breakup' }) as { found: boolean; render_tool: string; suggested_prompt: string };
-    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'worksheet' }, 1);
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'worksheet' }, 5);
     expect(r.found).toBe(true);
     expect(r.render_tool).toBe('show_journaling_prompt');
     expect(r.suggested_prompt).toBe('Write a letter you will never send.');
@@ -298,7 +307,7 @@ describe('suggest_modality_technique', () => {
     ]);
     const r = await toolRegistry.executeTool('suggest_modality_technique', { concern: 'no motivation' }) as { found: boolean; technique: string; approach: string };
     expect(embedTextMock).toHaveBeenCalledWith('CBT-informed: no motivation');
-    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'technique', modality: 'cbt' }, 1);
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith([0.1, 0.2, 0.3], { kind: 'technique', modality: 'cbt' }, 5);
     expect(r.found).toBe(true);
     expect(r.approach).toBe('cbt');
   });
@@ -309,8 +318,8 @@ describe('suggest_modality_technique', () => {
       .mockResolvedValueOnce([]) // no mi-tagged technique
       .mockResolvedValueOnce([{ title: '5-4-3-2-1 grounding', content: '...', source: 'x', source_url: null, topic: 'grounding', kind: 'technique', modality: null, metadata: null, similarity: 0.5 }]);
     const r = await toolRegistry.executeTool('suggest_modality_technique', { concern: 'panic' }) as { found: boolean; technique: string };
-    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(1, [0.1, 0.2, 0.3], { kind: 'technique', modality: 'mi' }, 1);
-    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(2, [0.1, 0.2, 0.3], { kind: 'technique' }, 1);
+    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(1, [0.1, 0.2, 0.3], { kind: 'technique', modality: 'mi' }, 5);
+    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(2, [0.1, 0.2, 0.3], { kind: 'technique' }, 5);
     expect(r.found).toBe(true);
     expect(r.technique).toBe('5-4-3-2-1 grounding');
   });
@@ -320,7 +329,7 @@ describe('suggest_modality_technique', () => {
     searchKnowledgeChunksMock.mockResolvedValue([]);
     await toolRegistry.executeTool('suggest_modality_technique', { concern: 'stress' });
     expect(embedTextMock).toHaveBeenCalledWith('stress');
-    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(1, [0.1, 0.2, 0.3], { kind: 'technique', modality: null }, 1);
+    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(1, [0.1, 0.2, 0.3], { kind: 'technique', modality: null }, 5);
   });
 });
 

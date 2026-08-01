@@ -31,3 +31,4 @@ export * from './worksheets.queries.js';
 export * from './riskCheck.queries.js';
 export * from './feedback.queries.js';
 export * from './costTracking.queries.js';
+export * from './rerank.queries.js';
