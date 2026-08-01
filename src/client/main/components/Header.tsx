@@ -2,7 +2,7 @@
 import React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, X } from 'react-feather';
+import { Menu, X, ChevronUp, ChevronDown } from 'react-feather';
 import CopyButton from '../../shared/components/CopyButton';
 
 interface HeaderProps {
@@ -10,12 +10,41 @@ interface HeaderProps {
   timeRemaining: number | null;
 }
 
+// localStorage key for the header collapse preference (persists across sessions).
+const HEADER_COLLAPSED_KEY = 'aithx.headerCollapsed';
+
 const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
   const [username, setUsername] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  // Collapsed state. Start expanded so SSR and first client render agree, then
+  // hydrate the persisted preference from localStorage in an effect (below).
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
+
+  // Load the persisted collapse preference on mount (client-only).
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(HEADER_COLLAPSED_KEY) === 'true') {
+        setIsCollapsed(true);
+      }
+    } catch {
+      // localStorage unavailable (private mode / SSR) — keep the default.
+    }
+  }, []);
+
+  const toggleCollapsed = () => {
+    setIsCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem(HEADER_COLLAPSED_KEY, next ? 'true' : 'false');
+      } catch {
+        // Persistence is best-effort; ignore storage failures.
+      }
+      return next;
+    });
+  };
 
   // Close the mobile menu when tapping outside it or pressing Escape
   useEffect(() => {
@@ -96,8 +125,49 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
   };
 
   return (
-    <header className="bg-navy text-white p-3 md:p-6 [@media(max-height:500px)]:py-1.5 font-sans" role="banner">
-      <div className="max-w-5xl mx-auto">
+    <header
+      className={`bg-navy text-white font-sans transition-all duration-200 ${
+        isCollapsed ? 'py-1.5 px-3' : 'p-3 md:p-6 [@media(max-height:500px)]:py-1.5'
+      }`}
+      role="banner"
+    >
+      <div className="max-w-5xl mx-auto relative">
+        {/* Collapse / expand toggle — grab this to shrink the header to a slim bar.
+            The choice is persisted to localStorage so it sticks across sessions. */}
+        <button
+          onClick={toggleCollapsed}
+          className="absolute right-0 top-0 bg-royal hover:bg-blue-700 rounded-full p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center z-10"
+          aria-label={isCollapsed ? 'Expand header' : 'Collapse header'}
+          aria-expanded={!isCollapsed}
+          title={isCollapsed ? 'Expand header' : 'Collapse header'}
+        >
+          {isCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+        </button>
+
+        {isCollapsed ? (
+          /* Slim collapsed bar: title + live timer + Call 988 stay reachable. */
+          <div className="flex items-center gap-3 pr-10">
+            <h1 className="text-base font-bold whitespace-nowrap">AI Therapist Assistant</h1>
+            {timeRemaining !== null && (
+              <span
+                className={`text-sm font-mono ${getTimerColor(timeRemaining)}`}
+                role="timer"
+                aria-live="polite"
+                aria-label="Session time remaining"
+              >
+                {formatTimeRemaining(timeRemaining)}
+              </span>
+            )}
+            <a
+              href="tel:988"
+              className="ml-auto bg-royal hover:bg-red-700 px-3 py-1 rounded-full text-xs font-semibold flex items-center justify-center min-h-[36px]"
+              aria-label="Call the 988 Suicide & Crisis Lifeline at 988"
+            >
+              Call 988
+            </a>
+          </div>
+        ) : (
+        <>
         <h1 className="text-2xl md:text-5xl [@media(max-height:500px)]:text-base font-bold text-center">AI Therapist Assistant</h1>
         {username && (
           <p className="text-center text-lg text-lightBlue mt-2 [@media(max-height:500px)]:hidden" aria-label={`Logged in as ${username}`}>
@@ -229,7 +299,8 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
             )}
           </div>
         </nav>
-
+        </>
+        )}
       </div>
     </header>
   );
