@@ -68,8 +68,11 @@ echo "==> [2/4] runMigrationRange 003 020"
 $TSX "$REPO_ROOT/src/database/scripts/runMigrationRange.js" 003 020
 echo "==> [2/4] 021_add_composite_message_index.sql (CONCURRENTLY, autocommit)"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$MIG_DIR/021_add_composite_message_index.sql"
-echo "==> [2/4] runMigrationRange 022 046"
-$TSX "$REPO_ROOT/src/database/scripts/runMigrationRange.js" 022 046
+# Upper bound tracks the newest migration on disk so this bootstrap can't go
+# stale when new migrations land (it broke once at 046 vs a 053 schema).
+MAX_MIG=$(ls "$MIG_DIR" | grep -E '^[0-9]{3}_.*\.sql$' | grep -v rollback | sort | tail -1 | cut -c1-3)
+echo "==> [2/4] runMigrationRange 022 $MAX_MIG"
+$TSX "$REPO_ROOT/src/database/scripts/runMigrationRange.js" 022 "$MAX_MIG"
 
 # --- Step 3: initial researcher user -----------------------------------------
 echo "==> [3/4] 002_insert_initial_user.js"
