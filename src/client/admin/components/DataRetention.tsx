@@ -489,6 +489,194 @@ export default function DataRetention() {
           </div>
         )}
       </div>
+
+      {/* Recordings & wiped-user retention (ai-therapist-97) */}
+      <RecordingRetentionCard />
+    </div>
+  );
+}
+
+interface DataRetentionSettings {
+  enabled: boolean;
+  recordings_retention_days: number;
+  wiped_user_grace_days: number;
+  run_time: string;
+  last_run_at: string | null;
+  last_run_deletions: number;
+}
+
+interface DeletionLogEntry {
+  deletion_id: string;
+  executed_at: string;
+  artifact_type: string;
+  artifact_ref: string;
+  reason: string;
+  triggered_by: string;
+  triggered_by_user: string | null;
+  success: boolean;
+  error_message: string | null;
+}
+
+function RecordingRetentionCard() {
+  const [settings, setSettings] = useState<DataRetentionSettings | null>(null);
+  const [log, setLog] = useState<DeletionLogEntry[]>([]);
+  const [scheduler, setScheduler] = useState<{ running: boolean; nextScheduledRun: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const fetchData = async () => {
+    setErr(null);
+    try {
+      const [sRes, lRes] = await Promise.all([
+        fetch('/admin/api/data-retention'),
+        fetch('/admin/api/data-retention/log?limit=25'),
+      ]);
+      if (!sRes.ok) throw new Error('Failed to load data retention settings');
+      const s = await sRes.json() as { settings: DataRetentionSettings; scheduler: { running: boolean; nextScheduledRun: string | null } };
+      setSettings(s.settings);
+      setScheduler(s.scheduler);
+      if (lRes.ok) {
+        const l = await lRes.json() as { entries: DeletionLogEntry[] };
+        setLog(l.entries);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const save = async () => {
+    if (!settings) return;
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const res = await fetch('/admin/api/data-retention', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }),
+      });
+      if (!res.ok) {
+        const d = await res.json() as { error?: string };
+        throw new Error(d.error || 'Save failed');
+      }
+      setMsg('Retention settings saved.');
+      await fetchData();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+
+  const runNow = async () => {
+    if (!window.confirm('Run retention enforcement now? This permanently deletes recordings past the window.')) return;
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const res = await fetch('/admin/api/data-retention/run', { method: 'POST' });
+      if (!res.ok) throw new Error('Run failed');
+      const d = await res.json() as { recordingsDeleted: number; graceDeleted: number; failures: number };
+      setMsg(`Run complete: ${d.recordingsDeleted} aged-out, ${d.graceDeleted} grace, ${d.failures} failures.`);
+      await fetchData();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+
+  const update = <K extends keyof DataRetentionSettings>(k: K, v: DataRetentionSettings[K]) =>
+    setSettings(prev => prev ? { ...prev, [k]: v } : prev);
+
+  if (!settings) {
+    return (
+      <div className="mt-6 bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900">Recording & Account Retention</h3>
+        <p className="text-sm text-gray-500 mt-2">{err ?? 'Loading…'}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 bg-white rounded-lg shadow p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Recording & Account Retention</h3>
+          <p className="text-sm text-gray-600 mt-1">
+            Nightly age-out of session recordings + wiped-user grace deletion. Ships disabled.
+          </p>
+        </div>
+        <span className={`px-2 py-1 rounded text-xs font-medium ${settings.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+          {settings.enabled ? 'Enabled' : 'Disabled'}
+        </span>
+      </div>
+
+      {err && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{err}</div>}
+      {msg && <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-700">{msg}</div>}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <label className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <span className="text-sm font-medium text-gray-900">Enable nightly enforcement</span>
+          <input type="checkbox" checked={settings.enabled} onChange={e => update('enabled', e.target.checked)} className="w-5 h-5" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-gray-700">Run time (HH:MM)</span>
+          <input type="time" value={settings.run_time} onChange={e => update('run_time', e.target.value)}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-gray-700">Recordings retention (days)</span>
+          <input type="number" min={1} value={settings.recordings_retention_days}
+            onChange={e => update('recordings_retention_days', parseInt(e.target.value) || 90)}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-gray-700">Wiped-user grace (days)</span>
+          <input type="number" min={0} value={settings.wiped_user_grace_days}
+            onChange={e => update('wiped_user_grace_days', parseInt(e.target.value) || 0)}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+        </label>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={save} disabled={busy}
+          className="px-4 py-2 bg-royal text-white rounded-lg hover:bg-navy disabled:opacity-50">Save</button>
+        <button onClick={runNow} disabled={busy}
+          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">Run now</button>
+        {scheduler?.nextScheduledRun && settings.enabled && (
+          <span className="text-xs text-gray-500">Next: {new Date(scheduler.nextScheduledRun).toLocaleString()}</span>
+        )}
+        {settings.last_run_at && (
+          <span className="text-xs text-gray-500">Last: {new Date(settings.last_run_at).toLocaleString()} ({settings.last_run_deletions} deleted)</span>
+        )}
+      </div>
+
+      <h4 className="text-sm font-semibold text-gray-700 mb-2">Deletion log</h4>
+      {log.length === 0 ? (
+        <p className="text-sm text-gray-500">No deletions recorded yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                {['Time', 'Type', 'Ref', 'Reason', 'By', 'Result'].map(h => (
+                  <th key={h} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {log.map(e => (
+                <tr key={e.deletion_id}>
+                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{new Date(e.executed_at).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-gray-700">{e.artifact_type}</td>
+                  <td className="px-3 py-2 text-gray-500 font-mono text-xs max-w-xs truncate">{e.artifact_ref}</td>
+                  <td className="px-3 py-2 text-gray-700">{e.reason}</td>
+                  <td className="px-3 py-2 text-gray-600">{e.triggered_by}{e.triggered_by_user ? ` (${e.triggered_by_user})` : ''}</td>
+                  <td className="px-3 py-2">
+                    <span className={`px-2 py-0.5 rounded text-xs ${e.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      {e.success ? 'ok' : 'failed'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

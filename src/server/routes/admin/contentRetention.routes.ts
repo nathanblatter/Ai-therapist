@@ -7,7 +7,14 @@ import {
   getWipeStats,
   getSchedulerStatus,
 } from '../../services/contentWipe.service.js';
-import { getContentWipeLog } from '../../db/index.js';
+import { getContentWipeLog, getDataDeletionLog } from '../../db/index.js';
+import {
+  getDataRetentionSettings,
+  updateDataRetentionSettings,
+  enforceRetention,
+  getSchedulerStatus as getRetentionSchedulerStatus,
+  type DataRetentionSettings,
+} from '../../services/dataRetention.service.js';
 
 export default function contentRetentionRoutes(): Router {
   const router = Router();
@@ -85,6 +92,66 @@ export default function contentRetentionRoutes(): Router {
     } catch (err) {
       console.error('Failed to fetch content wipe log:', err);
       res.status(500).json({ error: 'Failed to fetch content wipe log' });
+    }
+  });
+
+  // ---- Data retention (ai-therapist-97): recordings age-out + wiped-user grace ----
+
+  // GET /admin/api/data-retention - settings + scheduler status
+  router.get('/admin/api/data-retention', requireRole('researcher'), async (_req, res) => {
+    try {
+      const settings = await getDataRetentionSettings();
+      res.json({ settings, scheduler: getRetentionSchedulerStatus() });
+    } catch (err) {
+      console.error('Failed to fetch data retention settings:', err);
+      res.status(500).json({ error: 'Failed to fetch data retention settings' });
+    }
+  });
+
+  // PUT /admin/api/data-retention - update settings (restarts scheduler)
+  router.put('/admin/api/data-retention', requireRole('researcher'), async (req, res) => {
+    const { settings } = req.body as { settings?: DataRetentionSettings };
+    if (!settings) return res.status(400).json({ error: 'Settings are required' });
+    if (typeof settings.enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be a boolean' });
+    if (typeof settings.recordings_retention_days !== 'number' || settings.recordings_retention_days < 1 || settings.recordings_retention_days > 3650) {
+      return res.status(400).json({ error: 'recordings_retention_days must be between 1 and 3650' });
+    }
+    if (typeof settings.wiped_user_grace_days !== 'number' || settings.wiped_user_grace_days < 0 || settings.wiped_user_grace_days > 3650) {
+      return res.status(400).json({ error: 'wiped_user_grace_days must be between 0 and 3650' });
+    }
+    if (!/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(settings.run_time)) {
+      return res.status(400).json({ error: 'run_time must be in HH:MM format' });
+    }
+    try {
+      const updated = await updateDataRetentionSettings(settings, req.session.username!);
+      res.json({ success: true, settings: updated });
+    } catch (err) {
+      console.error('Failed to update data retention settings:', err);
+      res.status(500).json({ error: 'Failed to update data retention settings' });
+    }
+  });
+
+  // POST /admin/api/data-retention/run - manual enforcement pass
+  router.post('/admin/api/data-retention/run', requireRole('researcher'), async (req, res) => {
+    try {
+      const result = await enforceRetention('manual', req.session.username);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      console.error('Failed to run data retention:', err);
+      res.status(500).json({ error: 'Failed to run data retention' });
+    }
+  });
+
+  // GET /admin/api/data-retention/log - data_deletion_log page
+  router.get('/admin/api/data-retention/log', requireRole('researcher'), async (req, res) => {
+    const limit = parseInt(String(req.query.limit ?? '')) || 50;
+    const offset = parseInt(String(req.query.offset ?? '')) || 0;
+    try {
+      const { entries, total } = await getDataDeletionLog(limit, offset);
+      res.json({ entries, total, limit, offset });
+    } catch (err) {
+      console.error('Failed to fetch data deletion log:', err);
+      res.status(500).json({ error: 'Failed to fetch data deletion log' });
     }
   });
 

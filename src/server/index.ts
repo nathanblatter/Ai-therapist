@@ -30,6 +30,7 @@ import crisisRoutes from "./routes/admin/crisis.routes.js";
 import redactionRoutes from "./routes/admin/redaction.routes.js";
 import adminConfigRoutes from "./routes/admin/config.routes.js";
 import analyticsRoutes from "./routes/admin/analytics.routes.js";
+import studyOpsRoutes from "./routes/admin/studyOps.routes.js";
 import exportRoutes from "./routes/admin/export.routes.js";
 import adminRateLimitsRoutes from "./routes/admin/rateLimits.routes.js";
 import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
@@ -45,6 +46,7 @@ import logsRoutes from "./routes/public/logs.routes.js";
 import consentRoutes from "./routes/public/consent.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
+import { startScheduler as startDataRetentionScheduler } from "./services/dataRetention.service.js";
 import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
 import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
 
@@ -456,6 +458,9 @@ app.use(adminSessionsRoutes());
 // Admin analytics dashboard -> routes/admin/analytics.routes.ts.
 app.use(analyticsRoutes());
 
+// Study-ops dashboard (enrollment/arm-balance/deviations) -> routes/admin/studyOps.routes.ts.
+app.use(studyOpsRoutes());
+
 
 // Research-data export (JSON/CSV) -> routes/admin/export.routes.ts.
 app.use(exportRoutes());
@@ -688,6 +693,15 @@ if (isEntrypoint) {
       console.log(`Content wipe scheduler initialized`);
     } catch (err) {
       console.error('Failed to start content wipe scheduler:', err);
+    }
+
+    // Start the data retention scheduler (ai-therapist-97). Ships disabled via
+    // system_config.data_retention.enabled; no-ops until enabled deliberately.
+    try {
+      await startDataRetentionScheduler();
+      console.log(`Data retention scheduler initialized`);
+    } catch (err) {
+      console.error('Failed to start data retention scheduler:', err);
     }
 
     // Daily sweep of expired magic-link demo accounts and their data
