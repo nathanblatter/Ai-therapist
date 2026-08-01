@@ -48,6 +48,12 @@ async function main() {
   } else {
     const result = await evaluateAllEnded({ force, judgeModel });
     console.log(`[Evals] done: ${result.evaluated} evaluated, ${result.skipped} skipped, ${result.failed} failed`);
+
+    // Run one drift check over the freshly-scored corpus (ai-therapist-84).
+    const { checkEvalDrift } = await import('../../server/services/evalDrift.service.js');
+    const drift = await checkEvalDrift();
+    console.log(`[Evals] drift check: ${drift.checked} bucket-dimensions checked, ${drift.alerted} new alert(s)`);
+
     if (result.failed > 0) process.exitCode = 1;
   }
 }

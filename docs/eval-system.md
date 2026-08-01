@@ -65,11 +65,9 @@ Stored shape: `rubric` JSONB `{dimension: {score, rationale}}` plus
   `EVAL_PROMPT_VERSION` — scores are only comparable within a version, and the
   `(session_id, prompt_version)` uniqueness means a bump lets you re-score the
   corpus side-by-side with the old scores intact.
-- **Human ratings:** add a parallel table (e.g. `session_human_ratings`) with
-  the same rubric keys and a `rater` column; agreement with the LLM judge
-  (e.g. weighted kappa per dimension) validates the judge before trusting it
-  at scale. The admin panel component (`SessionEvalPanel.tsx`) is the natural
-  place to add a rating form.
+- **Human ratings + calibration:** shipped in v2 — `session_human_ratings`
+  (migration 050), the rating form in `SessionEvalPanel.tsx`, and per-dimension
+  weighted-kappa calibration. See "Eval system v2" below.
 - **A/B across therapist-model snapshots:** `session_configurations.ai_model`
   (migration 033, see docs/model-pinning.md) records the exact model per
   session. Compare conditions with:
@@ -94,3 +92,93 @@ Stored shape: `rubric` JSONB `{dimension: {score, rationale}}` plus
 One judge call per session (~transcript + ~1.2k output tokens on
 `gpt-4o-mini`) — negligible next to the realtime session itself, fine to
 auto-run once verified.
+
+---
+
+# Eval system v2 (ai-therapist-80 / -81 / -84)
+
+v2 adds human-rating calibration, position-debiased pairwise A/B judging, and
+rubric-score drift monitoring. All three build on the same six `EVAL_DIMENSIONS`
+and are surfaced under Admin → Analytics (three self-fetching panels) plus the
+per-session rating form in Session Detail.
+
+## Human ratings + judge calibration (ai-therapist-80)
+
+- **Table `session_human_ratings`** (migration 050): one row per
+  `(session_id, rater_user_id)`; `rubric` JSONB is `{dim: {score 1-5, note?}}`
+  over the same six dimensions as the LLM judge; `rubric_version` (currently
+  `v1`, `HUMAN_RUBRIC_VERSION`) records the dimension set so calibration only
+  compares like with like. Re-saving upserts.
+- **Rating UI:** Session Detail → Quality Eval panel → "Human rating"
+  subsection (ended sessions only). Six 1-5 score rows + optional per-dimension
+  note + overall notes. Other raters' ratings show read-only.
+  API: `GET /admin/api/sessions/:id/human-ratings`,
+  `PUT /admin/api/sessions/:id/human-rating`.
+- **Calibration:** `GET /admin/api/evals/calibration?promptVersion=v1` returns
+  per-dimension **quadratic weighted Cohen's kappa** between human and LLM
+  scores (`evalCalibration.service.ts`), plus mean bias (`llm − human`), exact
+  agreement %, and an overall pooled kappa. κ is `null` (not NaN) when n < 5 or
+  when expected disagreement is 0. `EvalCalibrationPanel` renders it with a
+  prompt-version selector and a readiness badge.
+- **Auto-run rule:** enable `evals.auto_run_enabled` ONLY after calibration
+  shows κ ≥ 0.6 on **every** dimension with **≥ 20 paired ratings** for the
+  current prompt version. The panel shows a green "Calibration OK" badge only
+  when that bar is met; otherwise amber "keep auto-run disabled".
+
+## Pairwise A/B eval (ai-therapist-81)
+
+- **Table `session_eval_pairs`** (migration 051): one row per judged canonical
+  pair (`session_a < session_b`), matched within identical `(modality,
+  duration_band)` strata across arms of a comparison axis (`ai_model` or
+  `proactive_offering`). Demo and message-less sessions excluded.
+- **Position debias:** every pair is judged in BOTH orderings; `verdict_ab` /
+  `verdict_ba` store each ordering's winner in canonical a/b terms.
+  `final_verdict` merge (`mergeVerdicts`): both agree → that value; one side +
+  one tie → the side (half-win); `a` vs `b` → `inconsistent`. Inconsistent =
+  position bias, counted as a tie in win-rates but reported separately.
+- **CLI:** `npx tsx src/database/scripts/runPairwiseEvals.ts --axis
+  <ai_model|proactive_offering> [--limit N] [--judge-model M]`. Idempotent —
+  already-paired sessions are skipped; to re-judge a corpus bump
+  `PAIRWISE_PROMPT_VERSION`. Two judge calls per pair; default `--limit 20`.
+  Per-session transcript budget is 12k chars (half the single-session 24k), so
+  pairwise and single-session scores are NOT comparable — never mix them.
+- **Win-rate + CI:** `GET /admin/api/analytics/pairwise`. For arm_x vs arm_y,
+  `n_decisive = wins_x + wins_y`, `win_rate_x = wins_x / n_decisive`, with a 95%
+  **Wilson** interval (`utils/stats.ts`) on `(wins_x, n_decisive)`. A CI that
+  excludes 0.5 is significant (~p<.05). `PairwiseEvalPanel` shows it per axis.
+
+## Drift monitoring (ai-therapist-84)
+
+- After every stored eval (single, batch, or auto) the drift check
+  (`evalDrift.service.ts`, fire-and-forget via dynamic import) compares each
+  dimension's rolling mean (last `drift_window`) against the prior baseline per
+  `(dimension, ai_model, prompt_version)` bucket. `session_evals` has no
+  `ai_model`, so buckets LEFT JOIN `session_configurations`; NULL-model
+  (pre-033) sessions form an `unknown` bucket.
+- A drop ≥ `drift_threshold` with ≥ `drift_min_window` samples inserts exactly
+  one **open** `eval_drift_alerts` row per bucket (partial unique index dedups).
+  `EvalDriftPanel` shows open alerts as a banner with Acknowledge
+  (`POST /admin/api/evals/drift-alerts/:id/ack`) and a weekly-mean trend chart
+  (`GET /admin/api/analytics/evals?weeks=N`), one line per
+  `(ai_model, prompt_version)` group, dimension- and range-selectable.
+- **Paging:** the admin-visible alert is always on. iMessage paging reuses the
+  crisis channel (`sendCrisisAlert`, which respects `crisis_alert.enabled`) but
+  is additionally gated behind `evals.drift_page_enabled` (default **false**),
+  so eval noise cannot page the crisis on-call unless explicitly opted in
+  (double-gated, fail-closed).
+
+## Config keys (`system_config.evals`)
+
+```sql
+INSERT INTO system_config (config_key, config_value, description)
+VALUES ('evals', '{
+  "auto_run_enabled": false,
+  "judge_model": "gpt-4o-mini",
+  "drift_window": 20,
+  "drift_baseline": 100,
+  "drift_threshold": 0.5,
+  "drift_min_window": 10,
+  "drift_page_enabled": false
+}', 'Session eval harness settings (v1 + v2)')
+ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value;
+```
