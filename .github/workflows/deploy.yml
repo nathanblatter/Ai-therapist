@@ -26,7 +26,7 @@ jobs:
     needs: verify
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod)
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: ai_therapist_redteam
