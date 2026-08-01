@@ -152,13 +152,53 @@ export default function chatRoutes(): Router {
         return res.status(403).json({ error: 'Unauthorized: You do not own this session' });
       }
 
-      const { sendMessage } = await import('../../services/chatTherapy.service.js');
+      // Persist the USER turn FIRST so crisis/eligibility detection has a real
+      // message_id and a model failure no longer loses the participant's words
+      // (they used to be inserted only after a successful model call).
+      const [userMsg] = await insertMessagesBatch([
+        { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
+      ]);
+
+      const { detectCrisisKeywords } = await import('../../services/crisisDetection.service.js');
+      const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
+      const { sendMessage, injectGuidance } = await import('../../services/chatTherapy.service.js');
+
+      // Crisis screen: run the cheap sync keyword screen pre-model. Only
+      // keyword-hit turns pay for an inline LLM assessment — which buys
+      // SAME-TURN steering. Clean turns defer everything (incl. the 8-turn LLM
+      // sweep) to post-response, exactly like /logs/batch, so the happy path
+      // adds no LLM call before the reply.
+      let steering: string | null = null;
+      try {
+        if (detectCrisisKeywords(message).keywordScore > 0) {
+          const risk = await runCrisisPipeline(
+            { sessionId, messageId: userMsg.message_id, content: message },
+            'chat',
+          );
+          steering = risk.steeringGuidance;
+        } else {
+          // Clean turn: run the pipeline after the response ships (covers the
+          // periodic sweep); any steering lands on the NEXT turn.
+          res.on('finish', () => void runCrisisPipeline(
+            { sessionId, messageId: userMsg.message_id, content: message },
+            'chat',
+          )
+            .then(r => { if (r.steeringGuidance) injectGuidance(sessionId, r.steeringGuidance); })
+            .catch(err => console.error('[ChatCrisis] deferred pipeline failed:', err)));
+        }
+      } catch (err) {
+        // A crisis-pipeline error must degrade to "reply without steering",
+        // never a 500. analyzeMessageRisk already zeros on internal error.
+        console.error('[ChatCrisis] inline pipeline failed (fail-open, no steering):', err);
+      }
+
+      // Model call, with steering injected BEFORE the turn when present.
+      if (steering) injectGuidance(sessionId, steering);
       const aiResponse = await sendMessage(sessionId, message);
 
-      // Persist both turns; content_redacted is filled in once per session at
-      // session end (see sessionRedaction.service), not per message.
+      // Persist the assistant turn; content_redacted is filled in once per
+      // session at session end (see sessionRedaction.service), not per message.
       await insertMessagesBatch([
-        { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
         { session_id: sessionId, role: 'assistant', message_type: 'text', content: aiResponse, content_redacted: null },
       ]);
 
@@ -205,6 +245,11 @@ export default function chatRoutes(): Router {
 
       const { endChatSession } = await import('../../services/chatTherapy.service.js');
       endChatSession(sessionId);
+
+      // Drop the per-session steering cooldown entry (mirrors the opportunistic
+      // in-memory cleanup on the realtime side).
+      const { clearSteeringState } = await import('../../services/crisisIntervention.service.js');
+      clearSteeringState(sessionId);
 
       const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 
