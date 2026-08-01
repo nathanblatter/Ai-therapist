@@ -24,7 +24,8 @@ export interface AdverseEventRow {
   participant_ref: string | null;
   occurred_at: Date;
   severity: 'low' | 'medium' | 'high';
-  trigger_source: 'auto_crisis_flag' | 'manual';
+  trigger_source: 'auto_crisis_flag' | 'manual' | 'auto_eligibility';
+  category: 'crisis' | 'eligibility_violation';
   summary: string;
   timeline: AdverseEventTimelineEntry[];
   transcript_excerpt: string | null;
@@ -52,7 +53,9 @@ export interface InsertAdverseEventDraftInput {
   participantRef: string | null;
   occurredAt: Date;
   severity: 'low' | 'medium' | 'high';
-  triggerSource: 'auto_crisis_flag' | 'manual';
+  triggerSource: 'auto_crisis_flag' | 'manual' | 'auto_eligibility';
+  /** Defaults to 'crisis' when omitted (back-compat with the crisis assembler). */
+  category?: 'crisis' | 'eligibility_violation';
   summary: string;
   timeline: AdverseEventTimelineEntry[];
   transcriptExcerpt: string | null;
@@ -62,22 +65,29 @@ export interface InsertAdverseEventDraftInput {
 }
 
 /**
- * Insert an AE draft. Idempotent per crisis_event_id via the partial unique
- * index (ON CONFLICT DO NOTHING). Returns the new report_id, or null when a
- * draft for this crisis event already exists.
+ * Insert an AE draft. Idempotent DO NOTHING on the relevant partial unique
+ * index: per crisis_event_id for the crisis path, per session_id for the
+ * auto_eligibility path (migration 054). Returns the new report_id, or null
+ * when a matching draft already exists.
  */
 export async function insertAdverseEventDraft(input: InsertAdverseEventDraftInput): Promise<number | null> {
+  const category = input.category ?? 'crisis';
+  // The two auto paths key on different partial unique indexes, so the
+  // ON CONFLICT target must match the row being inserted.
+  const conflictClause = input.triggerSource === 'auto_eligibility'
+    ? `ON CONFLICT (session_id) WHERE trigger_source = 'auto_eligibility' DO NOTHING`
+    : `ON CONFLICT (crisis_event_id) WHERE crisis_event_id IS NOT NULL DO NOTHING`;
   const result = await pool.query<{ report_id: number }>(
     `INSERT INTO adverse_event_reports
        (session_id, crisis_event_id, user_id, session_ref, participant_ref, occurred_at,
-        severity, trigger_source, summary, timeline, transcript_excerpt, actions_taken,
+        severity, trigger_source, category, summary, timeline, transcript_excerpt, actions_taken,
         due_at, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12::jsonb, $13, $14)
-     ON CONFLICT (crisis_event_id) WHERE crisis_event_id IS NOT NULL DO NOTHING
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13::jsonb, $14, $15)
+     ${conflictClause}
      RETURNING report_id`,
     [
       input.sessionId, input.crisisEventId, input.userId, input.sessionRef, input.participantRef,
-      input.occurredAt, input.severity, input.triggerSource, input.summary,
+      input.occurredAt, input.severity, input.triggerSource, category, input.summary,
       JSON.stringify(input.timeline), input.transcriptExcerpt, JSON.stringify(input.actionsTaken),
       input.dueAt, input.createdBy,
     ],

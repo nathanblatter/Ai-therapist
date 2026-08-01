@@ -32,7 +32,7 @@ vi.mock('../db/index.js', () => ({
 vi.mock('./crisisDetection.service.js', () => ({ getSessionCrisisEvents: getSessionCrisisEventsMock }));
 vi.mock('./redaction.service.js', () => ({ redactPHIBatch: redactPHIBatchMock }));
 
-const { draftAdverseEventFromCrisis } = await import('./adverseEvent.service.js');
+const { draftAdverseEventFromCrisis, draftAdverseEventFromEligibility } = await import('./adverseEvent.service.js');
 
 const OCCURRED = new Date('2026-07-31T12:00:00Z');
 
@@ -113,6 +113,46 @@ describe('draftAdverseEventFromCrisis', () => {
   it('returns null when the session does not exist', async () => {
     getSessionAeSnapshotMock.mockResolvedValueOnce(null);
     expect(await draftAdverseEventFromCrisis('missing')).toBeNull();
+    expect(insertAdverseEventDraftMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('draftAdverseEventFromEligibility', () => {
+  it('drafts an eligibility_violation AE — category, trigger, medium severity, redacted excerpt only', async () => {
+    const id = await draftAdverseEventFromEligibility('sess-1', { statedAge: 15, messageId: 9 });
+    expect(id).toBe(101);
+
+    const input = insertAdverseEventDraftMock.mock.calls[0][0];
+    expect(input.category).toBe('eligibility_violation');
+    expect(input.triggerSource).toBe('auto_eligibility');
+    expect(input.severity).toBe('medium');
+    expect(input.crisisEventId).toBeNull();
+    expect(input.summary).toContain('stated age 15');
+    // Redacted-only excerpt (no raw content).
+    expect(JSON.stringify(input)).not.toContain('RAW');
+    expect(input.transcriptExcerpt).toContain('[REDACTED: NAME]');
+    // Does not consult the crisis-event linkage.
+    expect(getLatestCrisisEventIdMock).not.toHaveBeenCalled();
+  });
+
+  it('summary handles unknown stated age', async () => {
+    await draftAdverseEventFromEligibility('sess-1', { statedAge: null });
+    expect(insertAdverseEventDraftMock.mock.calls[0][0].summary).toContain('stated age unknown');
+  });
+
+  it('is idempotent per session (returns null when a draft already exists)', async () => {
+    insertAdverseEventDraftMock.mockResolvedValueOnce(null);
+    expect(await draftAdverseEventFromEligibility('sess-1', { statedAge: 16 })).toBeNull();
+  });
+
+  it('never throws — swallows collaborator errors and returns null', async () => {
+    getSessionInterventionActionsMock.mockRejectedValueOnce(new Error('db down'));
+    await expect(draftAdverseEventFromEligibility('sess-1', { statedAge: 15 })).resolves.toBeNull();
+  });
+
+  it('returns null when the session does not exist', async () => {
+    getSessionAeSnapshotMock.mockResolvedValueOnce(null);
+    expect(await draftAdverseEventFromEligibility('missing', { statedAge: 15 })).toBeNull();
     expect(insertAdverseEventDraftMock).not.toHaveBeenCalled();
   });
 });

@@ -10,6 +10,8 @@ import {
   updateSessionStatus,
   getActiveSessionForUser,
   getSessionAccessInfo,
+  getSessionIsDemo,
+  getRecentSessionMessages,
   getUserPreferredLanguage,
   setUserPreferredLanguage,
   recordConsent,
@@ -158,6 +160,39 @@ export default function chatRoutes(): Router {
       const [userMsg] = await insertMessagesBatch([
         { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
       ]);
+
+      // Minor / age-eligibility gate (ai-therapist-106). Runs BEFORE the crisis
+      // screen and the model call: on a first-person age-disclosure pattern hit
+      // (non-demo), confirm with gpt-4o-mini and, if confirmed, return a
+      // server-authored goodbye and end the session — the model is never called
+      // on a confirmed turn, so the copy can't be paraphrased away. Fail-open:
+      // any confirmation error degrades to normal handling.
+      const { detectMinorDisclosurePatterns } = await import('../../services/minorSafeguard.service.js');
+      if (detectMinorDisclosurePatterns(message).matched && !(await getSessionIsDemo(sessionId))) {
+        try {
+          const { confirmMinorDisclosure, handleConfirmedMinor, MINOR_ELIGIBILITY_MESSAGE } =
+            await import('../../services/minorSafeguard.service.js');
+          const history = await getRecentSessionMessages(sessionId, 10);
+          const verdict = await confirmMinorDisclosure(message, history, sessionId);
+          if (verdict.isMinor && verdict.confidence !== 'low') {
+            await insertMessagesBatch([
+              { session_id: sessionId, role: 'assistant', message_type: 'text', content: MINOR_ELIGIBILITY_MESSAGE, content_redacted: null },
+            ]);
+            await handleConfirmedMinor({ sessionId, messageId: userMsg.message_id, channel: 'chat', statedAge: verdict.statedAge });
+            global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
+            global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'assistant', message: MINOR_ELIGIBILITY_MESSAGE, timestamp: new Date() });
+            return res.json({ success: true, response: MINOR_ELIGIBILITY_MESSAGE, sessionId, sessionEnded: true, reason: 'eligibility' });
+          }
+          if (verdict.isMinor && verdict.confidence === 'low' && global.io) {
+            // False-positive escape valve: flag for a human look, don't auto-end.
+            global.io.to('admin-broadcast').emit('session:eligibility-review', {
+              sessionId, statedAge: verdict.statedAge, reasoning: verdict.reasoning, channel: 'chat', at: new Date(),
+            });
+          }
+        } catch (err) {
+          console.error('[MinorSafeguard] confirm failed (fail-open):', err);
+        }
+      }
 
       const { detectCrisisKeywords } = await import('../../services/crisisDetection.service.js');
       const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');

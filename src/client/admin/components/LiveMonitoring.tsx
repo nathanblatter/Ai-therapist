@@ -154,6 +154,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     socket.on('session:crisis-detected', handleCrisisDetected);
     socket.on('session:crisis-flagged', handleCrisisFlagged);
     socket.on('session:crisis-unflagged', handleCrisisUnflagged);
+    socket.on('session:eligibility-violation', handleEligibilityViolation);
 
     // Sideband event listeners
     socket.on('sideband:connected', handleSidebandConnected);
@@ -173,6 +174,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       socket.off('session:crisis-detected', handleCrisisDetected);
       socket.off('session:crisis-flagged', handleCrisisFlagged);
       socket.off('session:crisis-unflagged', handleCrisisUnflagged);
+      socket.off('session:eligibility-violation', handleEligibilityViolation);
       socket.off('sideband:connected', handleSidebandConnected);
       socket.off('sideband:disconnected', handleSidebandDisconnected);
       socket.off('sideband:status-update', handleSidebandStatusUpdate);
@@ -399,6 +401,16 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
         }
         return { ...session, message_count: nextCount, last_activity: data.lastActivity };
       })
+    );
+  };
+
+  // Age-eligibility violation (ai-therapist-106): a participant disclosed being
+  // a minor and the session was auto-ended. Not a crisis flag — just a toast +
+  // AE draft (surfaced in the Adverse Events tab).
+  const handleEligibilityViolation = (data: { sessionId: string; statedAge: number | null; channel: string }) => {
+    toast.warning(
+      `Eligibility: session ${data.sessionId.substring(0, 12)}… disclosed being a minor` +
+      `${data.statedAge != null ? ` (stated age ${data.statedAge})` : ''} and was ended. An adverse-event draft was created.`,
     );
   };
 

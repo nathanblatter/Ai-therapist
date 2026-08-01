@@ -167,9 +167,54 @@ export async function runCrisisPipeline(
       }
     }
 
+    // ---- Minor / age-eligibility safeguard (ai-therapist-106) ----
+    // Realtime only: the chat route runs this gate itself (before its model
+    // call) so it can return a server-authored goodbye. Runs AFTER the crisis
+    // block so, when a turn is both high-crisis and minor-confirmed, the page
+    // has already gone out and both AE drafts exist; the goodbye copy carries
+    // the hotlines. Independent of risk score (e.g. "I'm 15" scores 0).
+    if (channel === 'realtime') {
+      await runRealtimeMinorSafeguard(turn);
+    }
+
     return { riskScore: risk.riskScore, severity, factors: risk.factors, flagged, steeringGuidance };
   } catch (err) {
     console.error('[CrisisPipeline] pipeline failed (non-fatal):', err);
     return NONE_RESULT;
+  }
+}
+
+/**
+ * Realtime minor safeguard: pattern screen → LLM confirm → on confirmation,
+ * inject the goodbye guidance to the live model over the sideband and run the
+ * shared teardown (60s grace before force-end). Fail-open and never throws.
+ */
+async function runRealtimeMinorSafeguard(turn: ParticipantTurn): Promise<void> {
+  try {
+    const {
+      detectMinorDisclosurePatterns, confirmMinorDisclosure, handleConfirmedMinor, REALTIME_MINOR_GUIDANCE,
+    } = await import('./minorSafeguard.service.js');
+
+    if (!detectMinorDisclosurePatterns(turn.content).matched) return;
+
+    const history = await getRecentSessionMessages(turn.sessionId, 10);
+    const verdict = await confirmMinorDisclosure(turn.content, history, turn.sessionId);
+
+    if (verdict.isMinor && verdict.confidence !== 'low') {
+      const { sidebandManager } = await import('./sidebandManager.service.js');
+      if (sidebandManager.getActiveConnections().includes(turn.sessionId)) {
+        await sidebandManager.injectMessage(turn.sessionId, 'system', REALTIME_MINOR_GUIDANCE, false);
+      }
+      await handleConfirmedMinor({
+        sessionId: turn.sessionId, messageId: turn.messageId ?? null, channel: 'realtime', statedAge: verdict.statedAge,
+      });
+    } else if (verdict.isMinor && verdict.confidence === 'low' && global.io) {
+      global.io.to('admin-broadcast').emit('session:eligibility-review', {
+        sessionId: turn.sessionId, statedAge: verdict.statedAge, reasoning: verdict.reasoning, channel: 'realtime', at: new Date(),
+      });
+    }
+  } catch (err) {
+    // Fail-open: an eligibility confirmation error must never end a session.
+    console.error('[MinorSafeguard] realtime safeguard failed (fail-open):', err);
   }
 }

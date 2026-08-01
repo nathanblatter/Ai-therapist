@@ -14,6 +14,7 @@ interface Report {
   occurred_at: string;
   severity: 'low' | 'medium' | 'high';
   trigger_source: string;
+  category: 'crisis' | 'eligibility_violation';
   summary: string;
   timeline: TimelineEntry[];
   transcript_excerpt: string | null;
@@ -45,6 +46,15 @@ function dueRelative(due: string): { text: string; cls: string } {
   return { text: `due ${new Date(due).toLocaleDateString()}`, cls: 'text-gray-500' };
 }
 
+function CategoryBadge({ category }: { category: 'crisis' | 'eligibility_violation' }) {
+  const isEligibility = category === 'eligibility_violation';
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isEligibility ? 'bg-purple-100 text-purple-700' : 'bg-red-100 text-red-700'}`}>
+      {isEligibility ? 'Eligibility' : 'Crisis'}
+    </span>
+  );
+}
+
 export default function AdverseEvents() {
   const [reports, setReports] = useState<Report[]>([]);
   const [counts, setCounts] = useState<Counts>({ draft: 0, submitted: 0, overdue: 0, due_soon: 0 });
@@ -53,6 +63,7 @@ export default function AdverseEvents() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Report | null>(null);
   const [saving, setSaving] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'crisis' | 'eligibility_violation'>('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -113,6 +124,7 @@ export default function AdverseEvents() {
   };
 
   const reminders = reports.filter(r => r.overdue || (r.status === 'draft' && new Date(r.due_at).getTime() - Date.now() <= 48 * 3600_000 && new Date(r.due_at).getTime() >= Date.now()));
+  const visibleReports = categoryFilter === 'all' ? reports : reports.filter(r => r.category === categoryFilter);
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -139,8 +151,8 @@ export default function AdverseEvents() {
         </div>
       )}
 
-      {/* Status tabs */}
-      <div className="flex gap-2 mb-4">
+      {/* Status tabs + category filter */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         {STATUS_TABS.map(t => (
           <button
             key={t}
@@ -150,31 +162,42 @@ export default function AdverseEvents() {
             {t}
           </button>
         ))}
+        <select
+          value={categoryFilter}
+          onChange={e => setCategoryFilter(e.target.value as typeof categoryFilter)}
+          className="ml-auto px-3 py-1.5 rounded-lg text-sm border border-gray-300 bg-white text-gray-700"
+          aria-label="Filter by category"
+        >
+          <option value="all">All types</option>
+          <option value="crisis">Crisis</option>
+          <option value="eligibility_violation">Eligibility</option>
+        </select>
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
 
       {loading ? (
         <div className="text-gray-500 p-8 text-center">Loading…</div>
-      ) : reports.length === 0 ? (
+      ) : visibleReports.length === 0 ? (
         <div className="text-gray-500 p-8 text-center bg-white rounded-lg shadow">No reports in this view.</div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                {['ID', 'Session', 'Severity', 'Occurred', 'Due', 'Status', 'Reporter'].map(h => (
+                {['ID', 'Session', 'Type', 'Severity', 'Occurred', 'Due', 'Status', 'Reporter'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {reports.map(r => {
+              {visibleReports.map(r => {
                 const due = dueRelative(r.due_at);
                 return (
                   <tr key={r.report_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelected(r)}>
                     <td className="px-4 py-3 text-sm text-gray-900">#{r.report_id}</td>
                     <td className="px-4 py-3 text-sm text-gray-700 font-mono truncate max-w-[10rem]">{r.session_ref}</td>
+                    <td className="px-4 py-3 text-sm"><CategoryBadge category={r.category} /></td>
                     <td className="px-4 py-3 text-sm capitalize">{r.severity}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{fmtDate(r.occurred_at)}</td>
                     <td className={`px-4 py-3 text-sm ${due.cls}`}>{due.text}</td>
@@ -243,6 +266,7 @@ function DetailDrawer({ report, saving, onClose, onSave, onTransition }: DrawerP
           <div><span className="text-gray-500">Participant:</span> {report.participant_ref ?? '—'}</div>
           <div><span className="text-gray-500">Session:</span> <span className="font-mono">{report.session_ref}</span></div>
           <div><span className="text-gray-500">Severity:</span> <span className="capitalize">{report.severity}</span></div>
+          <div><span className="text-gray-500">Type:</span> <CategoryBadge category={report.category} /></div>
           <div><span className="text-gray-500">Trigger:</span> {report.trigger_source}</div>
           <div><span className="text-gray-500">Occurred:</span> {fmtDate(report.occurred_at)}</div>
           <div><span className="text-gray-500">Status:</span> <span className="capitalize">{report.status}</span></div>
