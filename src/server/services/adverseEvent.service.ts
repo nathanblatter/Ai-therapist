@@ -151,3 +151,77 @@ export async function draftAdverseEventFromCrisis(sessionId: string, opts: Draft
     return null;
   }
 }
+
+/**
+ * Auto-draft an AE report from a confirmed age-eligibility violation
+ * (ai-therapist-106). Same snapshot machinery as the crisis assembler
+ * (timeline from intervention actions, redacted excerpt) but categorized as an
+ * eligibility_violation with trigger_source='auto_eligibility'. Idempotent per
+ * session via the partial unique index (ON CONFLICT DO NOTHING). Fire-and-forget
+ * — MUST NEVER throw. Returns the new report_id, or null (already drafted / no
+ * session / error).
+ */
+export async function draftAdverseEventFromEligibility(
+  sessionId: string,
+  opts: { statedAge: number | null; messageId?: string | number | null } = { statedAge: null },
+): Promise<number | null> {
+  try {
+    const snapshot = await getSessionAeSnapshot(sessionId);
+    if (!snapshot) {
+      log.warn({ sessionId }, 'Eligibility AE draft skipped: session not found');
+      return null;
+    }
+
+    const actions = await getSessionInterventionActions(sessionId);
+
+    const timeline: AdverseEventTimelineEntry[] = actions.map(a => ({
+      at: toIso(a.performed_at),
+      kind: 'intervention',
+      detail: a.action_type,
+    }));
+    timeline.sort((x, y) => (x.at ?? '').localeCompare(y.at ?? ''));
+
+    const actionsTaken: AdverseEventActionEntry[] = actions.map(a => ({
+      at: toIso(a.performed_at),
+      action: a.action_type,
+      by: a.performed_by,
+    }));
+
+    const transcriptExcerpt = await buildRedactedExcerpt(sessionId);
+
+    const occurredAt = new Date();
+    const dueAt = new Date(occurredAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const participantRef = snapshot.user_id != null ? `user ${snapshot.user_id}` : 'anonymous';
+    const summary =
+      `Auto-drafted: participant disclosed being a minor (stated age ${opts.statedAge ?? 'unknown'}) ` +
+      `at ${occurredAt.toISOString()}. Session ended per protocol. Review and complete.`;
+
+    const reportId = await insertAdverseEventDraft({
+      sessionId,
+      crisisEventId: null,
+      userId: snapshot.user_id,
+      sessionRef: sessionId,
+      participantRef,
+      occurredAt,
+      severity: 'medium',
+      triggerSource: 'auto_eligibility',
+      category: 'eligibility_violation',
+      summary,
+      timeline,
+      transcriptExcerpt,
+      actionsTaken,
+      dueAt,
+      createdBy: 'system',
+    });
+
+    if (reportId == null) {
+      log.info({ sessionId }, 'Eligibility AE draft already exists for this session (idempotent no-op)');
+    } else {
+      log.info({ sessionId, reportId }, 'Eligibility AE draft created');
+    }
+    return reportId;
+  } catch (err) {
+    log.error({ err, sessionId }, 'Eligibility AE draft assembly failed (non-fatal)');
+    return null;
+  }
+}

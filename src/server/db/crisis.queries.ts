@@ -190,6 +190,18 @@ export async function getSessionInterventionActions(sessionId: string): Promise<
   return result.rows;
 }
 
+/** Whether a session already has an intervention action of the given type.
+ *  Used as an idempotence guard for the minor-eligibility safeguard
+ *  (ai-therapist-106) so a re-disclosure in a re-fetched transcript never
+ *  double-ends / double-drafts. */
+export async function hasInterventionAction(sessionId: string, actionType: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM intervention_actions WHERE session_id = $1 AND action_type = $2 LIMIT 1`,
+    [sessionId, actionType],
+  );
+  return result.rows.length > 0;
+}
+
 /** All crisis events (with session name + username), newest first. */
 export async function getAllCrisisEvents(): Promise<Record<string, unknown>[]> {
   const result = await pool.query(`

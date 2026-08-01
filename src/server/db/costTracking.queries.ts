@@ -6,7 +6,7 @@
 // here must never break the underlying feature.
 import { pool } from '../config/db.js';
 
-export type LlmUsagePurpose = 'insights' | 'redaction' | 'crisis';
+export type LlmUsagePurpose = 'insights' | 'redaction' | 'crisis' | 'eligibility' | 'rerank';
 
 // Rough, hand-maintained $/1M-token rates for the models this app calls
 // LLMs with for insights/redaction/crisis (all OpenAI as of writing). This is
@@ -70,7 +70,7 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
     ),
   ]);
 
-  const callsByPurpose: Record<LlmUsagePurpose, number> = { insights: 0, redaction: 0, crisis: 0 };
+  const callsByPurpose: Record<LlmUsagePurpose, number> = { insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0 };
   let tokensIn = 0;
   let tokensOut = 0;
   let estimatedCost = 0;

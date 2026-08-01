@@ -416,6 +416,15 @@ export default function App() {
       }
     });
 
+    // Age-eligibility end (ai-therapist-106): the participant disclosed being a
+    // minor. The server has injected goodbye guidance to the model and will
+    // force-end the session after a short grace; the client closes its own
+    // end-session flow (same family as the remote-termination notice above).
+    socket.on('session:eligibility-end', () => {
+      toast.warning('This study is only open to adults 18 and older, so this session is ending. Take good care.');
+      stopSession();
+    });
+
     // Listen for crisis intervention messages
     socket.on('messages:new', (data) => {
       console.log('[Crisis] Received messages:new event:', data);
@@ -928,6 +937,13 @@ export default function App() {
           ...prev,
           { id: crypto.randomUUID(), role: "assistant", text: data.response },
         ]);
+
+        // Age-eligibility end (ai-therapist-106): the server ended the session
+        // and authored the goodbye above. Run the normal teardown UI path
+        // (stopSession re-POSTs /api/chat/end, which is idempotent).
+        if (data.sessionEnded) {
+          await stopSession();
+        }
 
       } catch (error) {
         console.error('Failed to send chat message:', error);

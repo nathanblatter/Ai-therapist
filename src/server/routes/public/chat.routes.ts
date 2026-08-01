@@ -10,6 +10,8 @@ import {
   updateSessionStatus,
   getActiveSessionForUser,
   getSessionAccessInfo,
+  getSessionIsDemo,
+  getRecentSessionMessages,
   getUserPreferredLanguage,
   setUserPreferredLanguage,
   recordConsent,
@@ -152,13 +154,86 @@ export default function chatRoutes(): Router {
         return res.status(403).json({ error: 'Unauthorized: You do not own this session' });
       }
 
-      const { sendMessage } = await import('../../services/chatTherapy.service.js');
+      // Persist the USER turn FIRST so crisis/eligibility detection has a real
+      // message_id and a model failure no longer loses the participant's words
+      // (they used to be inserted only after a successful model call).
+      const [userMsg] = await insertMessagesBatch([
+        { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
+      ]);
+
+      // Minor / age-eligibility gate (ai-therapist-106). Runs BEFORE the crisis
+      // screen and the model call: on a first-person age-disclosure pattern hit
+      // (non-demo), confirm with gpt-4o-mini and, if confirmed, return a
+      // server-authored goodbye and end the session — the model is never called
+      // on a confirmed turn, so the copy can't be paraphrased away. Fail-open:
+      // any confirmation error degrades to normal handling.
+      const { detectMinorDisclosurePatterns } = await import('../../services/minorSafeguard.service.js');
+      if (detectMinorDisclosurePatterns(message).matched && !(await getSessionIsDemo(sessionId))) {
+        try {
+          const { confirmMinorDisclosure, handleConfirmedMinor, MINOR_ELIGIBILITY_MESSAGE } =
+            await import('../../services/minorSafeguard.service.js');
+          const history = await getRecentSessionMessages(sessionId, 10);
+          const verdict = await confirmMinorDisclosure(message, history, sessionId);
+          if (verdict.isMinor && verdict.confidence !== 'low') {
+            await insertMessagesBatch([
+              { session_id: sessionId, role: 'assistant', message_type: 'text', content: MINOR_ELIGIBILITY_MESSAGE, content_redacted: null },
+            ]);
+            await handleConfirmedMinor({ sessionId, messageId: userMsg.message_id, channel: 'chat', statedAge: verdict.statedAge });
+            global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
+            global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'assistant', message: MINOR_ELIGIBILITY_MESSAGE, timestamp: new Date() });
+            return res.json({ success: true, response: MINOR_ELIGIBILITY_MESSAGE, sessionId, sessionEnded: true, reason: 'eligibility' });
+          }
+          if (verdict.isMinor && verdict.confidence === 'low' && global.io) {
+            // False-positive escape valve: flag for a human look, don't auto-end.
+            global.io.to('admin-broadcast').emit('session:eligibility-review', {
+              sessionId, statedAge: verdict.statedAge, reasoning: verdict.reasoning, channel: 'chat', at: new Date(),
+            });
+          }
+        } catch (err) {
+          console.error('[MinorSafeguard] confirm failed (fail-open):', err);
+        }
+      }
+
+      const { detectCrisisKeywords } = await import('../../services/crisisDetection.service.js');
+      const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
+      const { sendMessage, injectGuidance } = await import('../../services/chatTherapy.service.js');
+
+      // Crisis screen: run the cheap sync keyword screen pre-model. Only
+      // keyword-hit turns pay for an inline LLM assessment — which buys
+      // SAME-TURN steering. Clean turns defer everything (incl. the 8-turn LLM
+      // sweep) to post-response, exactly like /logs/batch, so the happy path
+      // adds no LLM call before the reply.
+      let steering: string | null = null;
+      try {
+        if (detectCrisisKeywords(message).keywordScore > 0) {
+          const risk = await runCrisisPipeline(
+            { sessionId, messageId: userMsg.message_id, content: message },
+            'chat',
+          );
+          steering = risk.steeringGuidance;
+        } else {
+          // Clean turn: run the pipeline after the response ships (covers the
+          // periodic sweep); any steering lands on the NEXT turn.
+          res.on('finish', () => void runCrisisPipeline(
+            { sessionId, messageId: userMsg.message_id, content: message },
+            'chat',
+          )
+            .then(r => { if (r.steeringGuidance) injectGuidance(sessionId, r.steeringGuidance); })
+            .catch(err => console.error('[ChatCrisis] deferred pipeline failed:', err)));
+        }
+      } catch (err) {
+        // A crisis-pipeline error must degrade to "reply without steering",
+        // never a 500. analyzeMessageRisk already zeros on internal error.
+        console.error('[ChatCrisis] inline pipeline failed (fail-open, no steering):', err);
+      }
+
+      // Model call, with steering injected BEFORE the turn when present.
+      if (steering) injectGuidance(sessionId, steering);
       const aiResponse = await sendMessage(sessionId, message);
 
-      // Persist both turns; content_redacted is filled in once per session at
-      // session end (see sessionRedaction.service), not per message.
+      // Persist the assistant turn; content_redacted is filled in once per
+      // session at session end (see sessionRedaction.service), not per message.
       await insertMessagesBatch([
-        { session_id: sessionId, role: 'user', message_type: 'text', content: message, content_redacted: null },
         { session_id: sessionId, role: 'assistant', message_type: 'text', content: aiResponse, content_redacted: null },
       ]);
 
@@ -205,6 +280,11 @@ export default function chatRoutes(): Router {
 
       const { endChatSession } = await import('../../services/chatTherapy.service.js');
       endChatSession(sessionId);
+
+      // Drop the per-session steering cooldown entry (mirrors the opportunistic
+      // in-memory cleanup on the realtime side).
+      const { clearSteeringState } = await import('../../services/crisisIntervention.service.js');
+      clearSteeringState(sessionId);
 
       const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 

@@ -51,30 +51,17 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
   const messages = conversationHistory.get(sessionId)!;
 
   try {
-    // Extract system message and conversation history
-    const systemMessage = messages.find((m: ChatMessage) => m.role === 'system')?.content || '';
-    const conversationMessages = messages.filter((m: ChatMessage) => m.role !== 'system');
-
-    // Build input array for OpenAI Responses API
-    // Convert system role to developer role, keep user and assistant roles
-    const inputMessages: ChatMessage[] = [];
-
-    // Add system instructions as developer message if present
-    if (systemMessage) {
-      inputMessages.push({
-        role: 'system',
-        content: systemMessage
-      });
-    }
-
-    // Add conversation history
-    inputMessages.push(...conversationMessages);
-
-    // Add current user message
-    inputMessages.push({
-      role: 'user',
-      content: userMessage
-    });
+    // Build the input array for the OpenAI Responses API by preserving the
+    // stored history IN ORDER (system prompt at index 0, then the alternating
+    // turns, plus any mid-conversation clinical-guidance system items injected
+    // via injectGuidance — ai-therapist-105), then appending the current user
+    // message. Order is load-bearing: injected guidance must reach the model
+    // before the turn it is meant to steer, so we can no longer collapse all
+    // system messages to a single leading one.
+    const inputMessages: ChatMessage[] = [
+      ...messages,
+      { role: 'user', content: userMessage },
+    ];
 
     // Call OpenAI Responses API
     const response = await (client as unknown as { responses: { create: (opts: Record<string, unknown>) => Promise<{ output_text: string }> } }).responses.create({
@@ -108,6 +95,21 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
     const msg = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to generate response: ${msg}`);
   }
+}
+
+/**
+ * Append an invisible steering/clinical-guidance message to a session's model
+ * context (ai-therapist-105). It persists in the in-memory history — parity
+ * with sideband injection, which also persists in the realtime conversation —
+ * so it shapes every subsequent turn until the session ends. It is NOT
+ * persisted to the `messages` table (same as sideband injections); the audit
+ * trail lives in intervention_actions. No-op when the session is unknown.
+ *
+ * The Responses API accepts mid-conversation `system` items in `input` (same
+ * shape already used at index 0), so this rides along with the next sendMessage.
+ */
+export function injectGuidance(sessionId: string, guidance: string): void {
+  conversationHistory.get(sessionId)?.push({ role: 'system', content: guidance });
 }
 
 /**

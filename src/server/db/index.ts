@@ -34,3 +34,4 @@ export * from './costTracking.queries.js';
 export * from './datasetExport.queries.js';
 export * from './dataRetention.queries.js';
 export * from './studyOps.queries.js';
+export * from './rerank.queries.js';

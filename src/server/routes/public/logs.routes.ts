@@ -10,10 +10,7 @@ import {
   insertMessagesBatch,
   upsertSessionConfig,
   createActiveRealtimeSession,
-  getRecentSessionMessages,
-  getSessionCrisisState,
   getSessionMessageCount,
-  getSessionIsDemo,
   type InsertMessageInput,
 } from '../../db/index.js';
 import { getSystemPrompt } from '../../utils/sessionHelpers.js';
@@ -132,22 +129,11 @@ export default function logsRoutes(): Router {
   ): Promise<void> {
     {
       // ========== MULTI-LAYERED CRISIS DETECTION ==========
-      const { analyzeMessageRisk, flagSessionCrisis, logInterventionAction } = await import('../../services/crisisDetection.service.js');
-      const { executeGraduatedResponse } = await import('../../services/crisisIntervention.service.js');
-
-      // Demo (magic-link) sessions never enter the real crisis pipeline: no
-      // scoring, no flags, no admin alerts, and crucially no SMS page to the
-      // on-call — a resume viewer must not be able to trigger a real crisis
-      // response. The live model still replies safely with crisis resources on
-      // its own. Memoized per session so a batch does one lookup each.
-      const demoSessionCache = new Map<string, boolean>();
-      const isDemoSession = async (sessionId: string): Promise<boolean> => {
-        const cached = demoSessionCache.get(sessionId);
-        if (cached !== undefined) return cached;
-        const demo = await getSessionIsDemo(sessionId);
-        demoSessionCache.set(sessionId, demo);
-        return demo;
-      };
+      // The full per-turn pipeline (demo skip, risk scoring, steering, flagging,
+      // paging, AE auto-draft) lives in crisisPipeline.service so /logs/batch
+      // and /api/chat/message run identical logic. This route only fans out the
+      // socket activity events below.
+      const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
 
       for (const msg of insertedMessages) {
         // Only participant messages are scored: the assistant reciting crisis
@@ -155,72 +141,10 @@ export default function logsRoutes(): Router {
         // session as a high-severity crisis. Assistant turns still reach the
         // stage-2 LLM as conversation context.
         if (msg.role === 'user') {
-          if (await isDemoSession(msg.session_id)) continue;
-
-          const conversationHistory = await getRecentSessionMessages(msg.session_id, 10);
-
-          const riskAnalysis = await analyzeMessageRisk(
-            { content: msg.content ?? '', session_id: msg.session_id, message_id: msg.message_id },
-            conversationHistory
+          await runCrisisPipeline(
+            { sessionId: msg.session_id, messageId: msg.message_id, content: msg.content ?? '' },
+            'realtime',
           );
-
-          if (riskAnalysis.riskScore > 0) {
-            // Risk-adaptive steering: nudge the live model toward de-escalation
-            // (own thresholds + cooldown inside; independent of crisis flagging).
-            const { maybeSteerSession } = await import('../../services/crisisIntervention.service.js');
-            await maybeSteerSession(msg.session_id, riskAnalysis.riskScore, riskAnalysis.severity);
-
-            console.log(` Risk detected in session ${msg.session_id}:
-            Score=${riskAnalysis.riskScore},
-            Severity=${riskAnalysis.severity},
-            Factors=${JSON.stringify(riskAnalysis.factors)}`);
-
-            const state = await getSessionCrisisState(msg.session_id);
-            const currentScore = state?.crisis_risk_score || 0;
-
-            // Graduated flagging: medium (50+) and high (75+) both flag the
-            // session for human review; only high (below) additionally fires
-            // the emergency admin alert. Re-flag only on meaningful escalation.
-            const severityRank: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3 };
-            const shouldFlag = (riskAnalysis.severity === 'high' || riskAnalysis.severity === 'medium') &&
-              (!state?.crisis_flagged ||
-                severityRank[riskAnalysis.severity] > (severityRank[state?.crisis_severity ?? 'none'] ?? 0) ||
-                riskAnalysis.riskScore > currentScore + 10);
-
-            if (shouldFlag) {
-              await flagSessionCrisis(
-                msg.session_id,
-                riskAnalysis.severity,
-                riskAnalysis.riskScore,
-                'system',
-                'auto',
-                msg.message_id,
-                riskAnalysis.factors,
-                `Risk score: ${riskAnalysis.riskScore} - Factors: ${riskAnalysis.factors.join(', ')}`
-              );
-
-              await logInterventionAction(msg.session_id, 'auto_flag', {
-                riskScore: riskAnalysis.riskScore,
-                severity: riskAnalysis.severity,
-                messageId: msg.message_id,
-                factors: riskAnalysis.factors,
-              });
-
-              global.io.to('admin-broadcast').emit('session:crisis-detected', {
-                sessionId: msg.session_id,
-                severity: riskAnalysis.severity,
-                riskScore: riskAnalysis.riskScore,
-                factors: riskAnalysis.factors,
-                messageId: msg.message_id,
-                detectedAt: new Date(),
-                message: `${riskAnalysis.severity.toUpperCase()} risk detected (score: ${riskAnalysis.riskScore})`,
-              });
-
-              await executeGraduatedResponse(msg.session_id, riskAnalysis.severity, riskAnalysis.riskScore);
-
-              console.log(`Session ${msg.session_id} flagged as ${riskAnalysis.severity} risk (score: ${riskAnalysis.riskScore})`);
-            }
-          }
         }
       }
       // ========== END CRISIS DETECTION ==========

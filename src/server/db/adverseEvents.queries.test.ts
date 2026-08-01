@@ -36,6 +36,26 @@ describe('insertAdverseEventDraft', () => {
     queryMock.mockResolvedValueOnce({ rows: [] });
     expect(await insertAdverseEventDraft(draftInput)).toBeNull();
   });
+
+  it("defaults category to 'crisis' and passes it as a bound param", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ report_id: 9 }] });
+    await insertAdverseEventDraft(draftInput);
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain('category');
+    expect(params).toContain('crisis');
+  });
+
+  it('auto_eligibility drafts key on the session_id partial index and carry the eligibility category', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ report_id: 10 }] });
+    await insertAdverseEventDraft({
+      ...draftInput, crisisEventId: null, triggerSource: 'auto_eligibility', category: 'eligibility_violation', severity: 'medium',
+    });
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain("ON CONFLICT (session_id) WHERE trigger_source = 'auto_eligibility'");
+    expect(sql).toContain('DO NOTHING');
+    expect(params).toContain('eligibility_violation');
+    expect(params).toContain('auto_eligibility');
+  });
 });
 
 describe('status-transition guards', () => {
