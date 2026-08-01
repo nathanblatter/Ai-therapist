@@ -47,11 +47,31 @@ export class HarnessClient {
   }
 
   /** Log in the dedicated participant so the agent's session carries a numeric
-   *  user_id (required by /api/chat/start — anonymous cookie-only sessions 500). */
+   *  user_id (required by /api/chat/start — anonymous cookie-only sessions 500).
+   *
+   *  The login route persists req.session.userId with a fire-and-forget
+   *  req.session.save(): the HTTP response can return BEFORE the pg-backed
+   *  session store has committed the userId. If the very next request
+   *  (acceptConsent) loads the session before that write lands, it reads a
+   *  session without userId and its own save clobbers login's write — so
+   *  /api/chat/start then falls back to req.sessionID (a string) and 500s on the
+   *  integer user_id column. Poll /api/auth/status until the store reflects the
+   *  login before doing anything else on this agent, closing the race. */
   async loginParticipant(agent: Agent): Promise<void> {
     const res = await agent.post('/api/auth/login').send(this.participant);
     if (res.status !== 200 || res.body?.success !== true) {
       throw new Error(`participant login failed: ${res.status} ${JSON.stringify(res.body)}`);
+    }
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const status = await agent.get('/api/auth/status');
+      if (status.status === 200 && status.body?.authenticated === true && typeof status.body?.user?.userid === 'number') {
+        return;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`participant login did not persist to the session store within 10s (last status: ${JSON.stringify(status.body)})`);
+      }
+      await sleep(100);
     }
   }
 
