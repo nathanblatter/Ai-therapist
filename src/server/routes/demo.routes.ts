@@ -18,6 +18,11 @@ import {
   demoCrisisAll,
   demoRateLimitedUsers,
   demoExport,
+  demoToolAnalytics,
+  demoCostAnalytics,
+  demoPairwiseAnalytics,
+  demoEvalTrend,
+  demoCalibration,
 } from '../demo/demoFixtures.js';
 
 export default function demoRoutes(): Router {
@@ -64,6 +69,25 @@ export default function demoRoutes(): Router {
 
   router.get('/admin/api/analytics', (_req, res) => {
     res.json(demoAnalytics());
+  });
+
+  // Dashboard sub-panels (ai-therapist-114): these MUST be registered — the
+  // catch-all's `{}` fallback crashed every panel that dereferences arrays
+  // from the payload, white-screening the whole Dashboard tab.
+  router.get('/admin/api/analytics/tools', (_req, res) => {
+    res.json(demoToolAnalytics());
+  });
+  router.get('/admin/api/analytics/cost', (_req, res) => {
+    res.json(demoCostAnalytics());
+  });
+  router.get('/admin/api/analytics/pairwise', (_req, res) => {
+    res.json(demoPairwiseAnalytics());
+  });
+  router.get('/admin/api/analytics/evals', (_req, res) => {
+    res.json(demoEvalTrend());
+  });
+  router.get('/admin/api/evals/calibration', (_req, res) => {
+    res.json(demoCalibration());
   });
 
   router.get('/admin/api/crisis/all', (_req, res) => {

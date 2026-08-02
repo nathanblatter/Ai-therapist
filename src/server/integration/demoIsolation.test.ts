@@ -144,6 +144,39 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
     expect(appQueriesSince(mark)).toEqual([]);
   });
 
+  it('dashboard sub-panel endpoints return array-bearing fixtures, not the {} catch-all (ai-therapist-114)', async () => {
+    // The Dashboard tab dereferences arrays from these payloads unguarded; the
+    // catch-all's `{}` white-screened the whole demo admin portal.
+    const agent = await demoAgent();
+    const mark = queryMock.mock.calls.length;
+
+    const tools = await agent.get('/admin/api/analytics/tools');
+    expect(tools.status).toBe(200);
+    expect(Array.isArray(tools.body.tool_stats)).toBe(true);
+    expect(Array.isArray(tools.body.distinct_tools_per_session)).toBe(true);
+    expect(Array.isArray(tools.body.dead_tools)).toBe(true);
+
+    const cost = await agent.get('/admin/api/analytics/cost');
+    expect(cost.status).toBe(200);
+    expect(Array.isArray(cost.body.daily_spend)).toBe(true);
+    expect(cost.body.totals).toBeTruthy();
+
+    const pairwise = await agent.get('/admin/api/analytics/pairwise');
+    expect(pairwise.status).toBe(200);
+    expect(Array.isArray(pairwise.body.comparisons)).toBe(true);
+
+    const evals = await agent.get('/admin/api/analytics/evals');
+    expect(evals.status).toBe(200);
+    expect(Array.isArray(evals.body.trend)).toBe(true);
+    expect(Array.isArray(evals.body.open_alerts)).toBe(true);
+
+    const calibration = await agent.get('/admin/api/evals/calibration');
+    expect(calibration.status).toBe(200);
+    expect(Array.isArray(calibration.body.report?.dimensions)).toBe(true);
+
+    expect(appQueriesSince(mark)).toEqual([]);
+  });
+
   it('GET /api/users returns a synthetic roster, not real users', async () => {
     const agent = await demoAgent();
     const mark = queryMock.mock.calls.length;

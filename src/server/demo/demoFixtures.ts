@@ -421,3 +421,112 @@ export function demoExport() {
     started_at: iso(s.createdMsAgo),
   }));
 }
+
+// ---- Dashboard sub-panel fixtures (ai-therapist-114) ----
+// The Analytics view fetches four additional endpoints (tools/cost/pairwise/
+// evals) plus the calibration panel; without these the demo catch-all's `{}`
+// crashed the whole Dashboard tab to a white screen.
+
+export function demoToolAnalytics() {
+  const tools = [
+    ['start_breathing_exercise', 34, 28], ['show_resource_card', 22, 19],
+    ['log_mood', 41, 30], ['get_coping_strategies', 18, 15],
+    ['start_grounding_exercise', 12, 11], ['display_session_recap', 26, 26],
+    ['administer_scale', 9, 9], ['create_safety_plan', 4, 4],
+  ] as const;
+  return {
+    tool_stats: tools.map(([tool_name, invocations, sessions]) => ({
+      tool_name, invocations, sessions,
+      last_used: iso(2 * HOUR),
+      failures: 0, failure_rate: 0,
+    })),
+    distinct_tools_per_session: [
+      { distinct_tool_count: 0, session_count: 6 },
+      { distinct_tool_count: 1, session_count: 9 },
+      { distinct_tool_count: 2, session_count: 12 },
+      { distinct_tool_count: 3, session_count: 7 },
+      { distinct_tool_count: 4, session_count: 3 },
+    ],
+    dead_tools: ['start_fear_ladder', 'switch_language'],
+    registered_tool_count: tools.length + 2,
+    sessions_with_tool_use: 31,
+    total_sessions: 37,
+  };
+}
+
+export function demoCostAnalytics() {
+  return {
+    totals: {
+      total_calls: 412,
+      total_tokens_in: 1_284_000,
+      total_tokens_out: 96_500,
+      total_estimated_cost_usd: 4.87,
+      total_realtime_minutes: 186,
+    },
+    daily_spend: Array.from({ length: 14 }, (_, i) => ({
+      date: iso(i * 24 * HOUR).slice(0, 10),
+      calls: 18 + ((i * 7) % 22),
+      tokens_in: 60_000 + ((i * 13_337) % 45_000),
+      tokens_out: 4_200 + ((i * 911) % 3_800),
+      estimated_cost_usd: 0.18 + ((i * 7) % 22) * 0.011,
+    })),
+    feedback: { responses: 21, avg_helpfulness: 4.3, avg_ease: 4.6, avg_would_return: 4.1 },
+  };
+}
+
+export function demoPairwiseAnalytics() {
+  return {
+    prompt_version: 'pw-v1',
+    comparisons: [
+      {
+        comparison_axis: 'proactive_offering', arm_x: 'on', arm_y: 'off',
+        wins_x: 14, wins_y: 9, ties: 5, inconsistent: 2, total: 30,
+        win_rate_x: 0.609, ci_lo: 0.408, ci_hi: 0.778, significant: false,
+      },
+      {
+        comparison_axis: 'ai_model', arm_x: 'gpt-realtime', arm_y: 'gpt-realtime-mini',
+        wins_x: 19, wins_y: 6, ties: 3, inconsistent: 2, total: 30,
+        win_rate_x: 0.76, ci_lo: 0.566, ci_hi: 0.885, significant: true,
+      },
+    ],
+  };
+}
+
+export function demoEvalTrend() {
+  const dims = ['safety_protocol', 'empathy', 'modality_fidelity', 'disclaimer_compliance'];
+  const trend = [] as Array<Record<string, unknown>>;
+  for (let w = 7; w >= 0; w--) {
+    for (const dimension of dims) {
+      trend.push({
+        week: iso(w * 7 * 24 * HOUR).slice(0, 10),
+        ai_model: 'gpt-realtime',
+        prompt_version: 'v3',
+        dimension,
+        mean_score: Math.round((4.1 + Math.sin(w + dims.indexOf(dimension)) * 0.35) * 100) / 100,
+        n: 12 + ((w * 3) % 9),
+      });
+    }
+  }
+  return { trend, open_alerts: [] };
+}
+
+export function demoCalibration() {
+  const dims = [
+    ['safety_protocol', 0.74], ['empathy', 0.66], ['modality_fidelity', 0.61],
+    ['disclaimer_compliance', 0.81], ['non_directiveness', 0.58], ['clinical_claims', 0.7],
+  ] as const;
+  return {
+    report: {
+      prompt_version: 'v3',
+      rubric_version: 'r2',
+      pair_count: 132,
+      session_count: 22,
+      dimensions: dims.map(([dimension, kappa]) => ({
+        dimension, n: 22, kappa,
+        human_mean: 4.2, llm_mean: 4.05, mean_bias: -0.15, exact_agreement_pct: 68,
+      })),
+      overall_kappa: 0.68,
+    },
+    available_prompt_versions: ['v3', 'v2'],
+  };
+}

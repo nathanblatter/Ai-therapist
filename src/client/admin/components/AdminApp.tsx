@@ -3,6 +3,7 @@ import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key,
 import AdminHeader from "./AdminHeader";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
+import ErrorBoundary from "../../shared/components/ErrorBoundary";
 
 // Heavy, independently-navigable views are code-split so the initial admin
 // bundle stays small. They're rendered client-only (see isClient gate below),
@@ -179,6 +180,7 @@ export default function AdminApp() {
 
         <div className="flex-1 overflow-auto">
           {isClient ? (
+            <ErrorBoundary resetKey={currentView}>
             <Suspense fallback={<ViewLoading />}>
               {currentView === 'dashboard' && <Analytics />}
               {currentView === 'sessions' && <SessionList onViewSession={handleViewSession} />}
@@ -197,6 +199,7 @@ export default function AdminApp() {
               {currentView === 'config' && <SystemConfig />}
               {currentView === 'export' && <ExportPanel />}
             </Suspense>
+            </ErrorBoundary>
           ) : (
             <ViewLoading />
           )}
