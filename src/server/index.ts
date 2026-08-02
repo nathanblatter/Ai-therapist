@@ -341,14 +341,35 @@ io.on('connection', (socket: AuthSocket) => {
 
     console.log(`[Socket.io] Admin ${socket.username} sending ${messageType} message to session ${sessionId}`);
 
-    // Broadcast message to all participants in the session (but not back to the sending admin)
-    socket.to(`session:${sessionId}`).emit('admin:message', {
-      sessionId,
-      message,
-      messageType, // 'visible' or 'invisible'
-      senderName: socket.username,
-      timestamp: new Date().toISOString()
-    });
+    // Invisible steers go over the server-side sideband when one is live —
+    // the old path (relay to the participant's browser, which re-injects over
+    // its WebRTC data channel) silently drops the steer whenever the
+    // participant socket is flaky (ai-therapist-18/112). The client relay
+    // remains only as the fallback (chat sessions, no sideband).
+    let deliveredVia = 'client-relay';
+    if (messageType === 'invisible') {
+      try {
+        const { sidebandManager } = await import('./services/sidebandManager.service.js');
+        if (await sidebandManager.tryInject(sessionId, 'system', message, true)) {
+          deliveredVia = 'sideband';
+        }
+      } catch (err) {
+        console.error('[Socket.io] Sideband inject for admin message failed, falling back to relay:', err);
+      }
+    }
+
+    // Visible messages are display-only and always go to the participant's
+    // screen; invisible ones are relayed only when the sideband couldn't
+    // deliver them (otherwise the model would receive the steer twice).
+    if (messageType === 'visible' || deliveredVia === 'client-relay') {
+      socket.to(`session:${sessionId}`).emit('admin:message', {
+        sessionId,
+        message,
+        messageType, // 'visible' or 'invisible'
+        senderName: socket.username,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     // Log the admin intervention
     const logData = {
@@ -360,6 +381,7 @@ io.on('connection', (socket: AuthSocket) => {
       metadata: {
         admin_username: socket.username,
         message_type: messageType,
+        delivered_via: deliveredVia,
         sent_at: new Date().toISOString()
       },
       created_at: new Date()

@@ -127,6 +127,128 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
 }
 
 // ============================================
+// MANUAL-FLAG STEERING (ai-therapist-112)
+// ============================================
+// A manual admin flag is the most informed risk signal in the system, but it
+// used to only record/alert — the live model was never told. Mirror the auto
+// pipeline: high gets the structured safety protocol, low/medium gets the
+// de-escalation steer. Bypasses the shouldSteer cooldown on purpose — a human
+// clicking "flag" always wins over rate limiting.
+export async function injectManualFlagGuidance(
+  sessionId: string,
+  severity: string,
+  riskScore: number,
+  flaggedBy: string,
+): Promise<boolean> {
+  try {
+    const { sidebandManager } = await import('./sidebandManager.service.js');
+    const guidance = severity === 'high'
+      ? SAFETY_PROTOCOL_GUIDANCE
+      : steeringGuidance(riskScore, severity);
+    const injected = await sidebandManager.tryInject(sessionId, 'system', guidance, false);
+    if (injected) {
+      await logInterventionAction(sessionId, severity === 'high' ? 'safety_protocol' : 'risk_steering', {
+        riskScore, severity, trigger: 'manual_flag', flaggedBy,
+      });
+      console.log(`Manual-flag guidance injected for session ${sessionId} (${severity}, by ${flaggedBy})`);
+    }
+    return injected;
+  } catch (error) {
+    console.error('Error injecting manual-flag guidance:', error);
+    return false;
+  }
+}
+
+// ============================================
+// CRISIS WIND-DOWN (ai-therapist-112)
+// ============================================
+// Admin-triggered graceful end for a crisis session: instead of yanking the
+// connection (the only previous option), ask the live model to surface crisis
+// resources, close warmly, and end the session itself — same two-phase shape
+// as the duration-limit path in token.routes.ts, with a hard server-side end
+// as the backstop if the model/client doesn't finish within the grace window.
+
+const CRISIS_WIND_DOWN_GUIDANCE =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  `A human monitor has decided this session should come to a close now. In your next reply: ` +
+  `calmly and warmly let the participant know the session is wrapping up (do not say why or mention any monitor); ` +
+  `call the show_resource_card tool so crisis lines are on their screen; ` +
+  `remind them they can call or text 988 any time, day or night; ` +
+  `give a brief, caring goodbye (2-3 sentences, no new topics); then immediately call the end_session tool.`;
+
+const WIND_DOWN_GRACE_MS = 75 * 1000;
+
+export async function initiateCrisisWindDown(
+  sessionId: string,
+  initiatedBy: string,
+): Promise<{ injected: boolean }> {
+  const { sidebandManager } = await import('./sidebandManager.service.js');
+  const injected = await sidebandManager.tryInject(sessionId, 'system', CRISIS_WIND_DOWN_GUIDANCE, true);
+
+  await logInterventionAction(sessionId, 'handoff_initiated', {
+    action: 'crisis_wind_down',
+    initiatedBy,
+    injected,
+    graceMs: WIND_DOWN_GRACE_MS,
+  });
+
+  // Backstop: if the model/client didn't end the session within the grace
+  // window (or there was no sideband to ask), hard-end it server-side. When
+  // nothing could be injected, skip the wait — end now.
+  const graceMs = injected ? WIND_DOWN_GRACE_MS : 0;
+  setTimeout(() => {
+    void hardEndCrisisSession(sessionId, initiatedBy).catch(err =>
+      console.error(`[CrisisWindDown] hard-end failed for ${sessionId}:`, err));
+  }, graceMs);
+
+  return { injected };
+}
+
+/** Mirrors the /end route's finalize chain for a server-forced crisis end. */
+async function hardEndCrisisSession(sessionId: string, endedBy: string): Promise<void> {
+  const { getSession, updateSessionStatus } = await import('../db/index.js');
+  const session = await getSession(sessionId);
+  if (!session || session.status !== 'active') return; // model/client ended it cleanly
+
+  console.log(`[CrisisWindDown] Grace elapsed — hard-ending session ${sessionId}`);
+  await updateSessionStatus(sessionId, 'ended', endedBy);
+
+  try {
+    const { sidebandManager } = await import('./sidebandManager.service.js');
+    await sidebandManager.disconnect(sessionId);
+  } catch (e) {
+    console.error('[CrisisWindDown] sideband cleanup failed:', e);
+  }
+
+  import('./sessionRedaction.service.js')
+    .then(m => m.redactSession(sessionId))
+    .then(() => import('./sessionName.service.js').then(m => m.generateSessionNameAsync(sessionId)))
+    .catch(e => console.error('[CrisisWindDown] redaction/naming failed:', e));
+  import('./recorder.service.js')
+    .then(m => m.finalize(sessionId))
+    .catch(e => console.error('[CrisisWindDown] recorder finalize failed:', e));
+  import('./sessionInsights.service.js')
+    .then(m => m.generateSessionInsightsAsync(sessionId))
+    .catch(e => console.error('[CrisisWindDown] insights failed:', e));
+  import('./sessionEval.service.js')
+    .then(m => m.maybeAutoEvalSession(sessionId))
+    .catch(e => console.error('[CrisisWindDown] auto-eval failed:', e));
+
+  if (global.io) {
+    global.io.to(`session:${sessionId}`).emit('session:status', {
+      status: 'ended',
+      endedBy,
+      reason: 'crisis_wind_down',
+      message: 'Your session has ended. Please reach out to the resources shared with you any time.',
+      remoteTermination: true,
+    });
+    global.io.to('admin-broadcast').emit('session:ended', {
+      sessionId, endedAt: new Date(), endedBy, reason: 'crisis_wind_down',
+    });
+  }
+}
+
+// ============================================
 // GRADUATED RESPONSE SYSTEM
 // ============================================
 

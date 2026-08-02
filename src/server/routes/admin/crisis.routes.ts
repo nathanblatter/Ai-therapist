@@ -49,6 +49,12 @@ export default function crisisRoutes(): Router {
         notes,
       });
 
+      // Steer the live model too (ai-therapist-112): a manual flag used to be
+      // record/alert only, leaving the model blind to the human's judgment.
+      // No-ops when the session has no live sideband (chat, already ended).
+      const { injectManualFlagGuidance } = await import('../../services/crisisIntervention.service.js');
+      const steered = await injectManualFlagGuidance(sessionId, severity, riskScore, req.session.username!);
+
       global.io.to('admin-broadcast').emit('session:crisis-flagged', {
         sessionId,
         severity,
@@ -66,10 +72,50 @@ export default function crisisRoutes(): Router {
         riskScore,
         flaggedBy: req.session.username,
         flaggedAt: new Date(),
+        modelSteered: steered,
       });
     } catch (err) {
       console.error('Failed to flag session as crisis:', err);
       res.status(500).json({ error: 'Failed to flag session' });
+    }
+  });
+
+  // POST /admin/api/sessions/:sessionId/crisis/wind-down - gracefully end a
+  // crisis session (ai-therapist-112). Asks the live model over the sideband
+  // to surface crisis resources, close warmly, and call end_session itself;
+  // hard-ends server-side after a grace window (immediately when no sideband).
+  // Contrast with POST /admin/api/sessions/:id/end, which yanks the session
+  // with no closure for the participant.
+  router.post('/admin/api/sessions/:sessionId/crisis/wind-down', requireRole('therapist', 'researcher'), async (req, res) => {
+    const { sessionId } = req.params;
+    try {
+      const { getSession } = await import('../../db/index.js');
+      const session = await getSession(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (session.status !== 'active') {
+        return res.status(400).json({ error: 'Session is not active' });
+      }
+
+      const { initiateCrisisWindDown } = await import('../../services/crisisIntervention.service.js');
+      const { injected } = await initiateCrisisWindDown(sessionId, req.session.username!);
+
+      global.io.to('admin-broadcast').emit('session:crisis-wind-down', {
+        sessionId,
+        initiatedBy: req.session.username,
+        injected,
+        at: new Date(),
+      });
+
+      res.json({
+        success: true,
+        injected,
+        message: injected
+          ? 'Model asked to share resources and close the session; hard-end backstop scheduled.'
+          : 'No live sideband — session is being ended server-side now.',
+      });
+    } catch (err) {
+      console.error('Failed to initiate crisis wind-down:', err);
+      res.status(500).json({ error: 'Failed to initiate crisis wind-down' });
     }
   });
 

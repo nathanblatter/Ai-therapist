@@ -113,6 +113,13 @@ export default function App() {
   const [sessionEndTime, setSessionEndTime] = useState<number | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Wrap-up state (ai-therapist-101/112): when the client countdown hits zero
+  // in a realtime session, the mic locks and we WAIT for the server-driven
+  // close (model wrap-up → end_session, or the server hard-end) instead of
+  // tearing the call down mid-sentence. The failsafe covers the worst case
+  // where neither ever arrives.
+  const [micLocked, setMicLocked] = useState(false);
+  const wrapUpFailsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sessionType, setSessionType] = useState<string | null>(null); // 'realtime' or 'chat'
 
   // Consent (ai-therapist-24): must be accepted before a session can start.
@@ -199,13 +206,30 @@ export default function App() {
       const remaining = sessionEndTime - Date.now();
 
       if (remaining <= 0) {
-        // Time's up! End the session
         setTimeRemaining(0);
         clearInterval(timerIntervalRef.current!);
         timerIntervalRef.current = null;
 
-        toast.warning("Your session time has ended. The session will now close.");
-        stopSession();
+        if (sessionType === 'chat') {
+          // Chat has no server-driven wrap-up; end it here as before.
+          toast.warning("Your session time has ended. The session will now close.");
+          stopSession();
+          return;
+        }
+
+        // Realtime (ai-therapist-101/112): the SERVER clock is authoritative.
+        // It has already asked the model (over the sideband) to give a warm
+        // closing and call end_session, with a hard end as backstop. Tearing
+        // down here used to cut the assistant off mid-sentence. Lock the mic
+        // so no new participant turns start, and let the wrap-up land.
+        toast.warning("Time's up — the session is wrapping up and will close in a moment.");
+        setMicLocked(true);
+        peerConnection.current?.getSenders().forEach(sender => {
+          if (sender.track) sender.track.enabled = false;
+        });
+        // Failsafe: if neither the model's end_session nor the server's hard
+        // end ever reaches us, close locally rather than hanging forever.
+        wrapUpFailsafeRef.current = setTimeout(() => void stopSession(), 120 * 1000);
       } else {
         setTimeRemaining(remaining);
       }
@@ -217,7 +241,7 @@ export default function App() {
         timerIntervalRef.current = null;
       }
     };
-  }, [sessionEndTime, isSessionActive]);
+  }, [sessionEndTime, isSessionActive, sessionType]);
 
   // ---- Batched logger ----
   const logBufferRef = useRef<LogRecord[]>([]);
@@ -749,6 +773,11 @@ export default function App() {
   async function stopSession() {
     setActiveExercise(null);
     setToolUI(null);
+    setMicLocked(false);
+    if (wrapUpFailsafeRef.current) {
+      clearTimeout(wrapUpFailsafeRef.current);
+      wrapUpFailsafeRef.current = null;
+    }
 
     // Snapshot what the participant chose to keep/share before clearing
     // per-session state, so the post-session screen (recap + safety plan +
@@ -1007,6 +1036,30 @@ export default function App() {
     }
   }
 
+  // Report a participant-side tool outcome (exercise finished, worksheet
+  // done, journal kept private…) to the SERVER, which informs the live model
+  // over the sideband — the reliable path (ai-therapist-112). The old
+  // data-channel invisible prompt is kept only as the fallback for sessions
+  // with no sideband (chat) or when the request fails.
+  async function reportToolEvent(kind: string, summary: string) {
+    try {
+      if (sessionId && sessionType === 'realtime') {
+        const res = await fetch(`/api/sessions/${sessionId}/tool-event`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind, summary }),
+        });
+        if (res.ok) {
+          const data = await res.json() as { injected?: boolean };
+          if (data.injected) return;
+        }
+      }
+    } catch (err) {
+      console.error('[reportToolEvent] server report failed, falling back to data channel:', err);
+    }
+    sendInvisiblePrompt(summary);
+  }
+
   function getPreambleForLanguage(language: string, includeVoiceInstructions = true) {
     const crisisText = crisisContact.enabled
       ? `call the ${crisisContact.hotline} crisis line at ${crisisContact.phone}${crisisContact.text ? ' or text ' + crisisContact.text : ''}`
@@ -1202,12 +1255,31 @@ export default function App() {
             onOpenSettings={() => setIsSettingsOpen(true)}
             chatEnabled={features.chat_enabled !== false}
             sessionType={sessionType}
+            micLocked={micLocked}
           />
         </div>
       </main>
 
-      {/* Guided exercise overlay (launched by AI tool calls) */}
-      <ExerciseOverlay exercise={activeExercise} onClose={() => setActiveExercise(null)} />
+      {/* Guided exercise overlay (launched by AI tool calls). Completion or
+          early dismissal is reported so the live model knows when to check in
+          instead of guessing from the clock (ai-therapist-112). */}
+      <ExerciseOverlay
+        exercise={activeExercise}
+        onFinish={(status) => {
+          const ex = activeExercise;
+          setActiveExercise(null);
+          if (!ex) return;
+          const label = ex.type === 'breathing' ? 'breathing exercise'
+            : ex.type === 'body_scan' ? 'body scan'
+            : 'grounding exercise';
+          void reportToolEvent(
+            status === 'completed' ? 'exercise_completed' : 'exercise_dismissed',
+            status === 'completed'
+              ? `[The participant's ${label} just finished. Check in gently in one short question — ask how they feel now.]`
+              : `[The participant closed the ${label} early. Don't push — acknowledge gently and ask what they'd prefer to do instead.]`
+          );
+        }}
+      />
 
       {/* Wave-2 tool surfaces: resource card, thought record, journal, recap, safety plan, screeners */}
       <ToolOverlays
@@ -1221,6 +1293,7 @@ export default function App() {
           }
         }}
         onInvisibleMessage={(text) => sendInvisiblePrompt(text)}
+        onToolEvent={(kind, summary) => void reportToolEvent(kind, summary)}
         onLogRecord={(type, message, extras) => {
           logConversation({ sessionId, role: 'user', type, message, extras });
           // Kept for "Download my work" (ai-therapist-76) — participant-entered

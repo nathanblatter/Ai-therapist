@@ -566,6 +566,31 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     }
   };
 
+  // Graceful crisis end (ai-therapist-112): the AI shares resources and closes
+  // warmly over the sideband, with a server-side hard end as backstop —
+  // contrast with the abrupt remote end.
+  const handleCrisisWindDown = async () => {
+    if (!window.confirm('Ask the AI to share crisis resources, close warmly, and end this session? It will be force-ended after 75 seconds if the wrap-up does not complete.')) {
+      return;
+    }
+    try {
+      const response = await fetch(`/admin/api/sessions/${sessionId}/crisis/wind-down`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      const data = await response.json();
+      if (response.ok) {
+        toast.success(data.message || 'Wind-down initiated');
+      } else {
+        toast.error(`Failed to start wind-down: ${data.error}`);
+      }
+    } catch (error: unknown) {
+      console.error('Error initiating crisis wind-down:', error);
+      toast.error('Error initiating crisis wind-down');
+    }
+  };
+
   const handleUnflagCrisis = async () => {
     const confirmMessage = 'Are you sure you want to remove the crisis flag from this session?';
 
@@ -708,6 +733,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                 </button>
               )}
               {session?.crisis_flagged ? (
+                <>
                 <button
                   onClick={handleUnflagCrisis}
                   className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium transition min-h-[44px]"
@@ -715,6 +741,17 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                 >
                   Unflag Crisis
                 </button>
+                {session?.status === 'active' && (
+                  <button
+                    onClick={handleCrisisWindDown}
+                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded text-sm font-medium transition min-h-[44px]"
+                    aria-label="Have the AI share crisis resources, close warmly, and end the session"
+                    title="The AI shares crisis resources and closes warmly; the session is force-ended if that doesn't finish within 75 seconds"
+                  >
+                    Wind Down & End
+                  </button>
+                )}
+                </>
               ) : (
                 <button
                   onClick={() => setShowFlagModal(true)}

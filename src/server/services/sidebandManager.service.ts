@@ -561,7 +561,15 @@ export class SidebandManager {
         // Some errors are expected no-ops from the control surface and should
         // not alarm the admin: cancelling when nothing is generating, or
         // clearing an already-empty audio buffer. The session is unaffected.
-        const benignCodes = new Set(['response_cancel_not_active', 'response_cancel_no_active_response']);
+        // conversation_already_has_active_response: a server-event inject with
+        // respond=true landed while the model was already speaking (e.g. an
+        // exercise finished mid-narration). The injected item still lands in
+        // the conversation; only the extra response.create is a no-op.
+        const benignCodes = new Set([
+          'response_cancel_not_active',
+          'response_cancel_no_active_response',
+          'conversation_already_has_active_response',
+        ]);
         if (errObj?.code && benignCodes.has(errObj.code)) {
           console.log(`[Sideband] Benign control no-op for ${sessionId.substring(0, 12)}...: ${errObj.code}`);
           break;
@@ -809,6 +817,28 @@ export class SidebandManager {
    */
   async createResponse(sessionId: string, response?: Record<string, unknown>): Promise<void> {
     this.sendEvent(sessionId, response ? { type: 'response.create', response } : { type: 'response.create' });
+  }
+
+  /**
+   * Best-effort injectMessage: false when the session has no live sideband
+   * (chat sessions, pre-registration, ended) or the send fails, true after a
+   * successful inject. Callers that have a client-side fallback path key off
+   * the return value; pure server-side callers can just ignore it.
+   */
+  async tryInject(
+    sessionId: string,
+    role: 'system' | 'user',
+    text: string,
+    respond: boolean,
+  ): Promise<boolean> {
+    if (!this.isConnected(sessionId)) return false;
+    try {
+      await this.injectMessage(sessionId, role, text, respond);
+      return true;
+    } catch (err) {
+      console.error(`[Sideband] tryInject failed for ${sessionId.substring(0, 12)}...:`, err);
+      return false;
+    }
   }
 
   /**

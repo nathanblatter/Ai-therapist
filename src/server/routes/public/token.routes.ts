@@ -309,6 +309,28 @@ export default function tokenRoutes(): Router {
             });
           };
 
+          // T-60s pacing nudge (ai-therapist-112): the model used to learn
+          // about time only at the hard limit (or by calling
+          // get_time_remaining), so closings were rushed or cut off. One
+          // minute of runway lets it consolidate and land the recap naturally.
+          if (durationMs > 90 * 1000) {
+            setTimeout(async () => {
+              try {
+                const current = await getSessionAccessInfo(sessionId);
+                if (!current || current.status !== 'active') return;
+                const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+                await sidebandManager.tryInject(
+                  sessionId,
+                  'system',
+                  '[About one minute remains in this session. Begin wrapping up naturally — consolidate one takeaway, no new topics. If it fits, call display_session_recap now.]',
+                  false,
+                );
+              } catch (err) {
+                console.error(`[Token] T-60s wrap-up nudge failed for ${sessionId}:`, err);
+              }
+            }, durationMs - 60 * 1000);
+          }
+
           setTimeout(async () => {
             try {
               const current = await getSessionAccessInfo(sessionId);

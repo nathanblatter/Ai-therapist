@@ -100,7 +100,20 @@ export default function sessionsRoutes(): Router {
         sessionId, scale: def.id, score, maxScore: def.max_score, completedAt: new Date(),
       });
 
-      res.json({ success: true, scale: def.id, score, max_score: def.max_score });
+      // Tell the live model directly over the sideband (ai-therapist-112) —
+      // previously the model only learned the score if the participant's
+      // browser managed to inject an invisible message over its data channel.
+      // The client falls back to that old path only when injected=false.
+      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+      const injected = await sidebandManager.tryInject(
+        sessionId,
+        'system',
+        `[${def.name} completed] Score ${score}/${def.max_score}. Item answers: ${answers.join(', ')}. ` +
+        `Respond supportively and naturally — do not read the score out as a verdict or diagnosis.`,
+        true,
+      );
+
+      res.json({ success: true, scale: def.id, score, max_score: def.max_score, injected });
     } catch (err) {
       console.error('Failed to store scale response:', err);
       res.status(500).json({ error: 'Failed to store scale response' });
@@ -116,7 +129,7 @@ export default function sessionsRoutes(): Router {
   // getLatestDraftWorksheetInstance.
   router.post('/api/sessions/:sessionId/worksheet-response', async (req, res) => {
     const { sessionId } = req.params;
-    const { responses } = req.body as { responses?: Record<string, string> };
+    const { responses, summary } = req.body as { responses?: Record<string, string>; summary?: string };
 
     if (!responses || typeof responses !== 'object') {
       return res.status(400).json({ error: 'responses{} required' });
@@ -139,10 +152,65 @@ export default function sessionsRoutes(): Router {
         sessionId, instanceId: draft.instance_id, completedAt: new Date(),
       });
 
-      res.json({ success: true, instance_id: draft.instance_id });
+      // Inform the live model server-side (ai-therapist-112). The client
+      // composes `summary` with the worksheet's section labels (it renders
+      // from the model's own function-call args, which never reach this
+      // route); text length is capped and it lands as a system item in the
+      // participant's OWN session, same trust level as their data channel.
+      let injected = false;
+      if (typeof summary === 'string' && summary.trim()) {
+        const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+        injected = await sidebandManager.tryInject(sessionId, 'system', summary.trim().slice(0, 4000), true);
+      }
+
+      res.json({ success: true, instance_id: draft.instance_id, injected });
     } catch (err) {
       console.error('Failed to store worksheet response:', err);
       res.status(500).json({ error: 'Failed to store worksheet response' });
+    }
+  });
+
+  // POST /api/sessions/:sessionId/tool-event - participant-side tool/overlay
+  // outcomes (ai-therapist-112): exercise finished or dismissed, thought
+  // record / values sort / fear ladder completed, journal kept private. The
+  // server logs the event and informs the LIVE model over the sideband; the
+  // client only falls back to its old data-channel invisible message when
+  // injected=false (no sideband — e.g. chat sessions). Owner-gated.
+  router.post('/api/sessions/:sessionId/tool-event', async (req, res) => {
+    const { sessionId } = req.params;
+    const { kind, summary } = req.body as { kind?: string; summary?: string };
+
+    const KINDS = new Set([
+      'exercise_completed', 'exercise_dismissed',
+      'thought_record', 'values_sort', 'fear_ladder', 'journal_private',
+    ]);
+    if (!kind || !KINDS.has(kind) || typeof summary !== 'string' || !summary.trim()) {
+      return res.status(400).json({ error: 'valid kind and non-empty summary required' });
+    }
+
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const text = summary.trim().slice(0, 4000);
+
+      const { insertMessage } = await import('../../db/index.js');
+      await insertMessage(sessionId, 'system', `tool_event_${kind}`, text, text, { source: 'tool-event' });
+
+      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+      const injected = await sidebandManager.tryInject(sessionId, 'system', text, true);
+
+      global.io?.to('admin-broadcast').emit('session:tool-event', {
+        sessionId, kind, injected, at: new Date(),
+      });
+
+      res.json({ success: true, injected });
+    } catch (err) {
+      console.error('Failed to record tool event:', err);
+      res.status(500).json({ error: 'Failed to record tool event' });
     }
   });
 
@@ -325,9 +393,16 @@ export default function sessionsRoutes(): Router {
       const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 
       // Cleanly tear down the sideband observer so it doesn't 1006 and churn
-      // through reconnect attempts after the call ends.
+      // through reconnect attempts after the call ends. A closing note is
+      // injected first so the transcript records WHY the conversation stops
+      // (participant-initiated) instead of just going silent.
       try {
         const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+        await sidebandManager.tryInject(
+          sessionId, 'system',
+          '[The participant ended the session from their screen. The session is now closing.]',
+          false,
+        );
         await sidebandManager.disconnect(sessionId);
       } catch (e) {
         console.error('[Sideband] cleanup on session end failed:', e);

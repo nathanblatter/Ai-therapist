@@ -292,3 +292,48 @@ describe('reconnect guard after session end (wave1 bug 4)', () => {
     expect(sb.connections.has(sessionId)).toBe(false);
   });
 });
+
+describe('tryInject (ai-therapist-112)', () => {
+  it('returns false without throwing when the session has no sideband connection', async () => {
+    const result = await sidebandManager.tryInject('s-no-conn', 'system', 'hello', true);
+    expect(result).toBe(false);
+  });
+
+  it('injects the item (and response.create when respond=true) over a live connection', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-tryinject';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    const result = await sidebandManager.tryInject(sessionId, 'system', 'exercise finished', true);
+
+    expect(result).toBe(true);
+    const events = sentEventTypes(ws);
+    expect(events.map(e => e.type)).toEqual(['conversation.item.create', 'response.create']);
+    expect(events[0].item.role).toBe('system');
+    expect(events[0].item.content[0].text).toBe('exercise finished');
+  });
+
+  it('omits response.create when respond=false', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-tryinject-quiet';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    const result = await sidebandManager.tryInject(sessionId, 'system', 'closing note', false);
+
+    expect(result).toBe(true);
+    expect(sentEventTypes(ws).map(e => e.type)).toEqual(['conversation.item.create']);
+  });
+
+  it('returns false when the underlying send fails', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-tryinject-err';
+    const ws = fakeWs();
+    ws.send.mockImplementation(() => { throw new Error('socket torn down'); });
+    sb.connections.set(sessionId, ws);
+
+    const result = await sidebandManager.tryInject(sessionId, 'system', 'text', false);
+    expect(result).toBe(false);
+  });
+});

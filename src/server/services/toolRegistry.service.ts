@@ -758,13 +758,45 @@ export class ToolRegistry {
         if (!target) {
           return { error: `Language '${language}' is not available`, available: enabled.map(l => l.value) };
         }
+        // Push the change into the LIVE session config too (ai-therapist-112):
+        // previously only the DB row changed, so the running OpenAI session
+        // kept its original-language instructions and the model was merely
+        // asked to comply. Append a language-override block to the session's
+        // stored instructions (replacing any earlier override so repeated
+        // switches don't stack) and session.update over the sideband.
+        const LANG_OVERRIDE_MARKER = '\n\n[LANGUAGE OVERRIDE]';
+        let liveUpdated = false;
+        const cfg = await pool.query<{ instructions: string | null }>(
+          'SELECT instructions FROM session_configurations WHERE session_id = $1',
+          [ctx.sessionId]
+        );
+        const baseInstructions = cfg.rows[0]?.instructions;
+        let newInstructions: string | null = null;
+        if (baseInstructions) {
+          const markerIdx = baseInstructions.indexOf(LANG_OVERRIDE_MARKER);
+          const withoutOverride = markerIdx >= 0 ? baseInstructions.slice(0, markerIdx) : baseInstructions;
+          newInstructions =
+            withoutOverride +
+            `${LANG_OVERRIDE_MARKER} The participant has switched languages mid-session. ` +
+            `Conduct the rest of this session entirely in ${target.label}, including all tool narration and your closing.`;
+          try {
+            const { sidebandManager } = await import('./sidebandManager.service.js');
+            if (sidebandManager.isConnected(ctx.sessionId)) {
+              await sidebandManager.updateSession(ctx.sessionId, { instructions: newInstructions });
+              liveUpdated = true;
+            }
+          } catch (err) {
+            console.error('[switch_language] live session.update failed (guidance-only fallback):', err);
+          }
+        }
         await pool.query(
-          'UPDATE session_configurations SET language = $2 WHERE session_id = $1',
-          [ctx.sessionId, target.value]
+          'UPDATE session_configurations SET language = $2, instructions = COALESCE($3, instructions) WHERE session_id = $1',
+          [ctx.sessionId, target.value, newInstructions]
         );
         return {
           success: true,
           language: target.label,
+          live_config_updated: liveUpdated,
           guidance: `Continue the conversation entirely in ${target.label} from your next sentence. Keep the same warmth and approach.`
         };
       }

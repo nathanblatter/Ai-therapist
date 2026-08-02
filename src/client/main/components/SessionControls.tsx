@@ -43,9 +43,12 @@ interface SessionActiveProps {
   localStream: MediaStream | null;
   chatEnabled: boolean;
   sessionType: string | null;
+  /** True once the session hit its time limit and is wrapping up: the mic is
+   *  forced off and can't be re-enabled (ai-therapist-101/112). */
+  micLocked: boolean;
 }
 
-function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled, sessionType }: SessionActiveProps) {
+function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled, sessionType, micLocked }: SessionActiveProps) {
   const [message, setMessage] = useState("");
   const [isMicOn, setIsMicOn] = useState(true);
   const [micPermission, setMicPermission] = useState('unknown'); // 'granted', 'denied', 'prompt', 'unknown'
@@ -90,7 +93,18 @@ function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled,
     }
   }
 
+  // Session wrap-up: force the mic off and keep the button state in sync so
+  // it can't drift from the actual track state (App disables the sender
+  // tracks when the countdown hits zero).
+  useEffect(() => {
+    if (!micLocked) return;
+    const track = streamRef.current?.getAudioTracks()[0];
+    if (track) track.enabled = false;
+    setIsMicOn(false);
+  }, [micLocked]);
+
   const toggleMic = () => {
+    if (micLocked) return;
     const stream = streamRef.current;
     if (!stream) return;
     const audioTrack = stream.getAudioTracks()[0];
@@ -124,7 +138,7 @@ function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled,
           <button
             onClick={toggleMic}
             className={`p-3 sm:px-4 sm:py-2 rounded-full ${
-              micPermission === 'denied'
+              micPermission === 'denied' || micLocked
                 ? "bg-gray-400 cursor-not-allowed"
                 : isMicOn
                 ? "bg-green-600 hover:bg-green-700"
@@ -133,11 +147,13 @@ function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled,
             title={
               micPermission === 'denied'
                 ? "Microphone access denied - check browser permissions"
+                : micLocked
+                ? "Session is wrapping up - microphone is off"
                 : isMicOn
                 ? "Click to mute microphone"
                 : "Click to unmute microphone"
             }
-            disabled={micPermission === 'denied'}
+            disabled={micPermission === 'denied' || micLocked}
             aria-label={
               micPermission === 'denied'
                 ? "Microphone access denied"
@@ -214,6 +230,7 @@ interface SessionControlsProps {
   onOpenSettings: () => void;
   chatEnabled: boolean;
   sessionType: string | null;
+  micLocked?: boolean;
 }
 
 export default function SessionControls({
@@ -225,6 +242,7 @@ export default function SessionControls({
   onOpenSettings,
   chatEnabled,
   sessionType,
+  micLocked = false,
 }: SessionControlsProps) {
   return (
     <div className="flex gap-4 border-t-2 border-gray-200 h-full pt-4">
@@ -235,6 +253,7 @@ export default function SessionControls({
           localStream={localStream}
           chatEnabled={chatEnabled}
           sessionType={sessionType}
+          micLocked={micLocked}
         />
       ) : (
         <SessionStopped startSession={startSession} onOpenSettings={onOpenSettings} />

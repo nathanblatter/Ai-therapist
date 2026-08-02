@@ -36,8 +36,13 @@ interface ToolOverlaysProps {
   onClose: () => void;
   /** Send text into the conversation as the participant (journal "share"). */
   onShareText: (text: string) => void;
-  /** Tell the model something invisibly (thought record / scale results). */
+  /** Raw data-channel invisible prompt — FALLBACK ONLY, used when a server
+   *  route already handled persistence but couldn't reach the live model
+   *  (scale / worksheet responses with injected=false). */
   onInvisibleMessage: (text: string) => void;
+  /** Report a tool outcome server-side so the live model is informed over the
+   *  sideband (ai-therapist-112); falls back to the data channel internally. */
+  onToolEvent: (kind: string, summary: string) => void;
   /** Persist a structured record into the session log. */
   onLogRecord: (type: string, message: string, extras: Record<string, unknown>) => void;
   sessionId: string | null;
@@ -309,8 +314,13 @@ function ScaleForm({ scale, sessionId, onClose, onResult }: {
         body: JSON.stringify({ scale: def.id, answers }),
       });
       if (res.ok) {
-        const data = await res.json() as { score: number; max_score: number };
-        onResult(`[${def.name} completed] Score ${data.score}/${data.max_score}. Item answers: ${answers.join(', ')}. Respond supportively and naturally — do not read the score out as a verdict or diagnosis.`);
+        const data = await res.json() as { score: number; max_score: number; injected?: boolean };
+        // The server now injects the result to the live model over the
+        // sideband (ai-therapist-112); only fall back to the data channel
+        // when it couldn't (injected=false — e.g. no sideband connection).
+        if (!data.injected) {
+          onResult(`[${def.name} completed] Score ${data.score}/${data.max_score}. Item answers: ${answers.join(', ')}. Respond supportively and naturally — do not read the score out as a verdict or diagnosis.`);
+        }
       }
     } finally {
       setSubmitting(false);
@@ -536,7 +546,7 @@ function CustomWorksheet({ title, intro, sections, onClose, onComplete }: {
 
 // ---------- dispatcher ----------
 
-export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMessage, onLogRecord, sessionId }: ToolOverlaysProps) {
+export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMessage, onToolEvent, onLogRecord, sessionId }: ToolOverlaysProps) {
   if (!ui) return null;
 
   switch (ui.kind) {
@@ -548,7 +558,7 @@ export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMess
           onClose={onClose}
           onComplete={(record) => {
             onLogRecord('thought_record', 'Thought record completed', record);
-            onInvisibleMessage(
+            onToolEvent('thought_record',
               `[Thought record completed by participant] Situation: ${record.situation}. Automatic thought: ${record.thought}. Feeling: ${record.feeling}. Evidence for: ${record.evidence_for}. Evidence against: ${record.evidence_against}. Balanced thought: ${record.balanced_thought}. Respond warmly to their balanced thought.`
             );
             onClose();
@@ -560,7 +570,7 @@ export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMess
         <Journal
           prompt={ui.prompt}
           onClose={() => {
-            onInvisibleMessage('[The participant finished writing privately and chose not to share it. Ask gently how the writing felt — do not ask what they wrote.]');
+            onToolEvent('journal_private', '[The participant finished writing privately and chose not to share it. Ask gently how the writing felt — do not ask what they wrote.]');
             onClose();
           }}
           onShare={(text) => {
@@ -581,7 +591,7 @@ export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMess
           onClose={onClose}
           onComplete={(vals) => {
             onLogRecord('values_sort', 'Values selected', { values: vals });
-            onInvisibleMessage(
+            onToolEvent('values_sort',
               `[Participant chose the values that matter most to them: ${vals.join(', ')}. Warmly reflect these back, and help them identify ONE small, concrete action aligned with one of these values. Do not lecture.]`
             );
             onClose();
@@ -595,20 +605,26 @@ export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMess
           intro={ui.intro}
           sections={ui.sections}
           onClose={onClose}
-          onComplete={(values) => {
+          onComplete={async (values) => {
             const answers = ui.sections.map((s, i) => `${s.label}: ${values[`s${i}`] ?? ''}`);
+            const summary =
+              `[Personalized worksheet "${ui.title}" completed by participant] ${answers.join('. ')}. Respond warmly to what they wrote, not the form itself.`;
             onLogRecord('custom_worksheet', 'Personalized worksheet completed', { responses: values });
-            if (sessionId) {
-              fetch(`/api/sessions/${sessionId}/worksheet-response`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ responses: values }),
-              }).catch(() => {/* best-effort; the invisible message still reaches the model */});
-            }
-            onInvisibleMessage(
-              `[Personalized worksheet "${ui.title}" completed by participant] ${answers.join('. ')}. Respond warmly to what they wrote, not the form itself.`
-            );
             onClose();
+            // Server persists AND informs the live model over the sideband
+            // (ai-therapist-112); the data-channel prompt is fallback only.
+            let injected = false;
+            if (sessionId) {
+              try {
+                const res = await fetch(`/api/sessions/${sessionId}/worksheet-response`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ responses: values, summary }),
+                });
+                if (res.ok) injected = Boolean((await res.json() as { injected?: boolean }).injected);
+              } catch { /* fall through to data-channel fallback */ }
+            }
+            if (!injected) onInvisibleMessage(summary);
           }}
         />
       );
@@ -619,7 +635,7 @@ export default function ToolOverlays({ ui, onClose, onShareText, onInvisibleMess
           onComplete={(ladder) => {
             const sorted = [...ladder].sort((a, b) => a.rating - b.rating);
             onLogRecord('fear_ladder', 'Fear ladder built', { items: sorted });
-            onInvisibleMessage(
+            onToolEvent('fear_ladder',
               `[Participant built a fear ladder (easiest to hardest): ${sorted.map((it, i) => `${i + 1}. ${it.situation} (${it.rating})`).join('; ')}. Praise the courage to name these, and gently offer the lowest rung as a possible first step — only if they're willing.]`
             );
             onClose();

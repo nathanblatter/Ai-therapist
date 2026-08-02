@@ -15,7 +15,11 @@ export interface ActiveExercise {
 
 interface ExerciseOverlayProps {
   exercise: ActiveExercise | null;
-  onClose: () => void;
+  /** Called exactly once when the exercise ends: 'completed' when it ran its
+   *  course (timer elapsed / last grounding step done), 'dismissed' when the
+   *  participant closed it early via the X. The parent reports this to the
+   *  server so the live model knows the exercise is over (ai-therapist-112). */
+  onFinish: (status: 'completed' | 'dismissed') => void;
 }
 
 // 4-4-4-4 box breathing, one phase per 4 seconds.
@@ -150,12 +154,14 @@ function BodyScan({ durationSeconds = 120, onClose }: { durationSeconds?: number
   );
 }
 
-export default function ExerciseOverlay({ exercise, onClose }: ExerciseOverlayProps) {
+export default function ExerciseOverlay({ exercise, onFinish }: ExerciseOverlayProps) {
   if (!exercise) return null;
 
   const label = exercise.type === 'breathing' ? 'Breathing exercise'
     : exercise.type === 'body_scan' ? 'Body scan exercise'
     : 'Grounding exercise';
+
+  const complete = () => onFinish('completed');
 
   return (
     <div
@@ -166,15 +172,15 @@ export default function ExerciseOverlay({ exercise, onClose }: ExerciseOverlayPr
       aria-label={label}
     >
       <button
-        onClick={onClose}
+        onClick={() => onFinish('dismissed')}
         className="absolute top-4 right-4 p-2 text-blue-200 hover:text-white transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
         aria-label="End exercise"
       >
         <X size={22} />
       </button>
-      {exercise.type === 'breathing' && <BreathingExercise durationSeconds={exercise.durationSeconds} onClose={onClose} />}
-      {exercise.type === 'grounding' && <GroundingExercise onClose={onClose} />}
-      {exercise.type === 'body_scan' && <BodyScan durationSeconds={exercise.durationSeconds} onClose={onClose} />}
+      {exercise.type === 'breathing' && <BreathingExercise durationSeconds={exercise.durationSeconds} onClose={complete} />}
+      {exercise.type === 'grounding' && <GroundingExercise onClose={complete} />}
+      {exercise.type === 'body_scan' && <BodyScan durationSeconds={exercise.durationSeconds} onClose={complete} />}
     </div>
   );
 }
