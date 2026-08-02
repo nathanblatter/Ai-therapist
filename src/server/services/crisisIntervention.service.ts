@@ -204,48 +204,15 @@ export async function initiateCrisisWindDown(
   return { injected };
 }
 
-/** Mirrors the /end route's finalize chain for a server-forced crisis end. */
+/** Server-forced crisis end via the shared finalize chain (no-op if already ended). */
 async function hardEndCrisisSession(sessionId: string, endedBy: string): Promise<void> {
-  const { getSession, updateSessionStatus } = await import('../db/index.js');
-  const session = await getSession(sessionId);
-  if (!session || session.status !== 'active') return; // model/client ended it cleanly
-
-  console.log(`[CrisisWindDown] Grace elapsed — hard-ending session ${sessionId}`);
-  await updateSessionStatus(sessionId, 'ended', endedBy);
-
-  try {
-    const { sidebandManager } = await import('./sidebandManager.service.js');
-    await sidebandManager.disconnect(sessionId);
-  } catch (e) {
-    console.error('[CrisisWindDown] sideband cleanup failed:', e);
-  }
-
-  import('./sessionRedaction.service.js')
-    .then(m => m.redactSession(sessionId))
-    .then(() => import('./sessionName.service.js').then(m => m.generateSessionNameAsync(sessionId)))
-    .catch(e => console.error('[CrisisWindDown] redaction/naming failed:', e));
-  import('./recorder.service.js')
-    .then(m => m.finalize(sessionId))
-    .catch(e => console.error('[CrisisWindDown] recorder finalize failed:', e));
-  import('./sessionInsights.service.js')
-    .then(m => m.generateSessionInsightsAsync(sessionId))
-    .catch(e => console.error('[CrisisWindDown] insights failed:', e));
-  import('./sessionEval.service.js')
-    .then(m => m.maybeAutoEvalSession(sessionId))
-    .catch(e => console.error('[CrisisWindDown] auto-eval failed:', e));
-
-  if (global.io) {
-    global.io.to(`session:${sessionId}`).emit('session:status', {
-      status: 'ended',
-      endedBy,
-      reason: 'crisis_wind_down',
-      message: 'Your session has ended. Please reach out to the resources shared with you any time.',
-      remoteTermination: true,
-    });
-    global.io.to('admin-broadcast').emit('session:ended', {
-      sessionId, endedAt: new Date(), endedBy, reason: 'crisis_wind_down',
-    });
-  }
+  const { serverEndSession } = await import('./sessionLifecycle.service.js');
+  const ended = await serverEndSession(sessionId, {
+    endedBy,
+    reason: 'crisis_wind_down',
+    message: 'Your session has ended. Please reach out to the resources shared with you any time.',
+  });
+  if (ended) console.log(`[CrisisWindDown] Grace elapsed — hard-ended session ${sessionId}`);
 }
 
 // ============================================

@@ -87,6 +87,59 @@ async function getIdleDurationMs(sessionId: string, createdAt: Date): Promise<nu
   return Date.now() - new Date(lastKnown).getTime();
 }
 
+/**
+ * Server-authoritative session end (ai-therapist-112/113): status update,
+ * sideband teardown, redaction→naming, recording finalize, insights, evals,
+ * and the socket notifications — the same chain the /end route runs. No-ops
+ * if the session already ended (client beat us to it). Used by the crisis
+ * wind-down backstop and the end_session tool's server-side backstop, so a
+ * session can never stay active just because the client's POST /end was lost.
+ */
+export async function serverEndSession(
+  sessionId: string,
+  opts: { endedBy: string; reason: string; message?: string },
+): Promise<boolean> {
+  const session = await getSession(sessionId);
+  if (!session || session.status !== 'active') return false;
+
+  await updateSessionStatus(sessionId, 'ended', opts.endedBy);
+
+  try {
+    const { sidebandManager } = await import('./sidebandManager.service.js');
+    await sidebandManager.disconnect(sessionId);
+  } catch (err) {
+    log.error({ err }, `[serverEnd] sideband cleanup failed for ${sessionId}`);
+  }
+
+  import('./sessionRedaction.service.js')
+    .then(m => m.redactSession(sessionId))
+    .then(() => import('./sessionName.service.js').then(m => m.generateSessionNameAsync(sessionId)))
+    .catch(err => log.error({ err }, `[serverEnd] redaction/naming failed for ${sessionId}`));
+  import('./recorder.service.js')
+    .then(m => m.finalize(sessionId))
+    .catch(err => log.error({ err }, `[serverEnd] recorder finalize failed for ${sessionId}`));
+  import('./sessionInsights.service.js')
+    .then(m => m.generateSessionInsightsAsync(sessionId))
+    .catch(err => log.error({ err }, `[serverEnd] insights failed for ${sessionId}`));
+  import('./sessionEval.service.js')
+    .then(m => m.maybeAutoEvalSession(sessionId))
+    .catch(err => log.error({ err }, `[serverEnd] auto-eval failed for ${sessionId}`));
+
+  if (global.io) {
+    global.io.to(`session:${sessionId}`).emit('session:status', {
+      status: 'ended',
+      endedBy: opts.endedBy,
+      reason: opts.reason,
+      ...(opts.message ? { message: opts.message } : {}),
+      remoteTermination: true,
+    });
+    global.io.to('admin-broadcast').emit('session:ended', {
+      sessionId, endedAt: new Date(), endedBy: opts.endedBy, reason: opts.reason,
+    });
+  }
+  return true;
+}
+
 /** End the session, finalize its recording, and trigger redaction — mirrors the /end route. */
 async function finalizeAbandonedSession(sessionId: string): Promise<void> {
   await updateSessionStatus(sessionId, 'ended', 'system');

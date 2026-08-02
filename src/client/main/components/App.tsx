@@ -82,6 +82,13 @@ export default function App() {
   const audioTeeRef = useRef<AudioTeeHandle | null>(null);
   const audioUploaderRef = useRef<AudioUploader | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  // Latest-ref for stopSession (ai-therapist-113): the WebRTC data-channel
+  // handler is attached once inside startRealtimeSession, closing over THAT
+  // render's stopSession — in which sessionId state is still null. Calling it
+  // directly made model-initiated end_session silently skip the POST /end
+  // (and the session_end log, and the post-session snapshot). Handlers must
+  // go through this ref so they always get the current-render closure.
+  const stopSessionRef = useRef<() => Promise<void>>(async () => {});
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
     language: 'en'
@@ -1105,8 +1112,11 @@ export default function App() {
 
   // Client-side reactions to AI tool calls, dispatched from the WebRTC data
   // channel (the server sideband executes the canonical tool; these drive UI).
+  // Keep the ref pointing at the freshest closure on every render.
+  stopSessionRef.current = stopSession;
+
   const fns = {
-    stopSession: () => stopSession(),
+    stopSession: () => stopSessionRef.current(),
     start_breathing_exercise: async (args: unknown) => {
       const a = (args ?? {}) as { duration_seconds?: number };
       const duration = Math.min(Math.max(Number(a.duration_seconds) || 60, 20), 300);
@@ -1185,7 +1195,9 @@ export default function App() {
     },
     end_session: async () => {
       // Give the model's goodbye audio a moment to finish before teardown.
-      setTimeout(() => void stopSession(), 6000);
+      // Via the latest-ref: the direct call here used the session-start
+      // render's stale closure (sessionId=null) and never POSTed /end.
+      setTimeout(() => void stopSessionRef.current(), 6000);
       return { ending: true };
     },
   };

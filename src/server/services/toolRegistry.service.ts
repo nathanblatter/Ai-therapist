@@ -721,10 +721,30 @@ export class ToolRegistry {
         description: 'End the session cleanly. Call ONLY after you have fully said goodbye and the participant has agreed the conversation is complete — the session closes a few seconds after you call this.',
         parameters: { type: 'object', properties: {}, required: [] }
       },
-      async () => ({
-        success: true,
-        message: 'The session will close in a few seconds. Do not start any new topics.'
-      })
+      async (_args: Record<string, unknown>, ctx: ToolContext) => {
+        // Server-side backstop (ai-therapist-113): ending used to depend
+        // entirely on the client reacting to this tool call and POSTing /end
+        // — a lost POST left the session active until the abandonment sweep.
+        // The sideband executes this handler, so schedule an authoritative
+        // end after a grace window for the goodbye audio + the client's own
+        // (idempotent) /end. serverEndSession no-ops if the client got there
+        // first.
+        if (ctx.sessionId) {
+          const sessionId = ctx.sessionId;
+          setTimeout(() => {
+            import('./sessionLifecycle.service.js')
+              .then(m => m.serverEndSession(sessionId, { endedBy: 'model', reason: 'model_end_session' }))
+              .then(ended => {
+                if (ended) console.log(`[end_session] server backstop ended session ${sessionId}`);
+              })
+              .catch(err => console.error('[end_session] server backstop failed:', err));
+          }, 15 * 1000);
+        }
+        return {
+          success: true,
+          message: 'The session will close in a few seconds. Do not start any new topics.'
+        };
+      }
     );
 
     // Mid-session language switch (steers the model; config recorded).
