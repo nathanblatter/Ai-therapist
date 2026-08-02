@@ -820,6 +820,50 @@ export class SidebandManager {
   }
 
   /**
+   * Re-attach sidebands for sessions that were live when this process started
+   * (ai-therapist-112 follow-up). Blue-green deploys stop the old container,
+   * which takes every in-memory sideband WS with it — leaving active sessions
+   * with no tool execution, no crisis steering, and no live monitoring until
+   * they end. On startup, find recent active realtime sessions with a call_id
+   * and re-attach using the standard API key (the per-session ephemeral key is
+   * gone with the old process; connect() already supports standard-key auth).
+   * Best-effort per session: a dead call (participant hung up during the
+   * cutover) just 404s and is skipped by connect()'s existing handling.
+   */
+  async reattachActiveSessions(apiKey: string): Promise<{ attempted: number }> {
+    const result = await pool.query<{ session_id: string; openai_call_id: string }>(
+      `SELECT session_id, openai_call_id
+         FROM therapy_sessions
+        WHERE status = 'active'
+          AND session_type = 'realtime'
+          AND openai_call_id IS NOT NULL
+          AND created_at > NOW() - INTERVAL '2 hours'`
+    );
+
+    for (const row of result.rows) {
+      if (this.connections.has(row.session_id)) continue;
+      console.log(`[Sideband] Re-attaching orphaned session ${row.session_id.substring(0, 12)}... after restart`);
+      try {
+        await this.connect(row.session_id, row.openai_call_id, apiKey);
+        await this.injectMessage(
+          row.session_id,
+          'system',
+          '[Monitoring briefly reconnected after a server restart. Continue the conversation naturally — do not mention this.]',
+          false,
+        );
+      } catch (err) {
+        console.error(`[Sideband] Re-attach failed for ${row.session_id.substring(0, 12)}...:`,
+          err instanceof Error ? err.message : err);
+      }
+    }
+
+    if (result.rows.length > 0) {
+      console.log(`[Sideband] Startup re-attach: ${result.rows.length} candidate session(s)`);
+    }
+    return { attempted: result.rows.length };
+  }
+
+  /**
    * Best-effort injectMessage: false when the session has no live sideband
    * (chat sessions, pre-registration, ended) or the send fails, true after a
    * successful inject. Callers that have a client-side fallback path key off

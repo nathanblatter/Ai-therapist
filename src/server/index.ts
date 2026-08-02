@@ -741,6 +741,20 @@ if (isEntrypoint) {
     // tunnel connection, closed tab, crashed browser): finalizes recording +
     // triggers redaction so they don't sit "active" forever.
     startAbandonedSessionSweeper();
+
+    // Re-attach sidebands orphaned by a blue-green cutover: the old container
+    // dies with every in-memory sideband WS, which silently kills tool
+    // execution + crisis steering for sessions that stay live through the
+    // deploy (ai-therapist-112). Small delay so the tunnel/route flip settles.
+    setTimeout(async () => {
+      try {
+        const { getOpenAIKey } = await import('./config/secrets.js');
+        const { sidebandManager } = await import('./services/sidebandManager.service.js');
+        await sidebandManager.reattachActiveSessions(await getOpenAIKey());
+      } catch (err) {
+        console.error('[Sideband] startup re-attach sweep failed:', err);
+      }
+    }, 5000);
   });
 }
 

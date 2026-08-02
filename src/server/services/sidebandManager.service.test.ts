@@ -337,3 +337,62 @@ describe('tryInject (ai-therapist-112)', () => {
     expect(result).toBe(false);
   });
 });
+
+describe('startup re-attach sweep (ai-therapist-112 follow-up)', () => {
+  it('re-connects each orphaned active realtime session and skips already-connected ones', async () => {
+    const sb = sidebandManager as Internal;
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes("status = 'active'") && sql.includes('openai_call_id')) {
+        return Promise.resolve({ rows: [
+          { session_id: 's-orphan-1', openai_call_id: 'call-1' },
+          { session_id: 's-already', openai_call_id: 'call-2' },
+        ] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    // s-already still has a live connection (e.g. attached between query and loop).
+    sb.connections.set('s-already', fakeWs());
+
+    const connectSpy = vi.spyOn(sb, 'connect').mockImplementation(async (...args: unknown[]) => {
+      const sessionId = args[0] as string;
+      sb.connections.set(sessionId, fakeWs());
+      return sb.connections.get(sessionId);
+    });
+
+    const { attempted } = await sidebandManager.reattachActiveSessions('sk-standard');
+
+    expect(attempted).toBe(2);
+    expect(connectSpy).toHaveBeenCalledTimes(1);
+    expect(connectSpy).toHaveBeenCalledWith('s-orphan-1', 'call-1', 'sk-standard');
+    connectSpy.mockRestore();
+  });
+
+  it('continues past individual re-attach failures', async () => {
+    const sb = sidebandManager as Internal;
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes("status = 'active'") && sql.includes('openai_call_id')) {
+        return Promise.resolve({ rows: [
+          { session_id: 's-dead-call', openai_call_id: 'call-gone' },
+          { session_id: 's-alive', openai_call_id: 'call-ok' },
+        ] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const connectSpy = vi.spyOn(sb, 'connect').mockImplementation(async (...args: unknown[]) => {
+      const sessionId = args[0] as string;
+      if (sessionId === 's-dead-call') throw new Error('404 call_id_not_found');
+      sb.connections.set(sessionId, fakeWs());
+      return sb.connections.get(sessionId);
+    });
+
+    const { attempted } = await sidebandManager.reattachActiveSessions('sk-standard');
+
+    expect(attempted).toBe(2);
+    expect(connectSpy).toHaveBeenCalledTimes(2);
+    // The healthy session got its reconnect note injected despite the earlier failure.
+    const ws = sb.connections.get('s-alive');
+    expect(sentEventTypes(ws).some((e: Internal) => e.type === 'conversation.item.create')).toBe(true);
+    connectSpy.mockRestore();
+  });
+});
