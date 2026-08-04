@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 
@@ -169,6 +169,68 @@ describe('health + bug-report', () => {
     // Without FLIGHTDECK_INGEST_KEY the route returns 503; with it, empty body -> 400.
     const res = await request(app).post('/api/bug-report').send({});
     expect([400, 503]).toContain(res.status);
+  });
+});
+
+describe('bug-report screenshots', () => {
+  // These paths are all rejected before any forward to flightdeck, so a dummy
+  // ingest key keeps the route configured without touching the network.
+  const UUID = '123e4567-e89b-12d3-a456-426614174000';
+  let savedKey: string | undefined;
+  beforeAll(() => { savedKey = process.env.FLIGHTDECK_INGEST_KEY; process.env.FLIGHTDECK_INGEST_KEY = 'test-key'; });
+  afterAll(() => {
+    if (savedKey === undefined) delete process.env.FLIGHTDECK_INGEST_KEY;
+    else process.env.FLIGHTDECK_INGEST_KEY = savedKey;
+  });
+
+  it('rejects a non-uuid item id (400)', async () => {
+    const res = await request(app)
+      .post('/api/bug-report/not-a-uuid/screenshots')
+      .attach('files', Buffer.from([0x89, 0x50]), 'shot.png');
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects non-multipart bodies (400)', async () => {
+    const res = await request(app)
+      .post(`/api/bug-report/${UUID}/screenshots`)
+      .send({ nope: true });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an empty multipart upload (400)', async () => {
+    const res = await request(app)
+      .post(`/api/bug-report/${UUID}/screenshots`)
+      .field('note', 'no files here')
+      .catch((e: { status?: number }) => e as { status?: number });
+    // fields are disallowed (limits.fields=0) and there are no files -> 400.
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects non-image bytes (415)', async () => {
+    const res = await request(app)
+      .post(`/api/bug-report/${UUID}/screenshots`)
+      .attach('files', Buffer.from('definitely not an image'), 'notes.txt');
+    expect(res.status).toBe(415);
+  });
+
+  it('rejects more than 4 files (400)', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    let req = request(app).post(`/api/bug-report/${UUID}/screenshots`);
+    for (let i = 0; i < 5; i++) req = req.attach('files', png, `shot-${i}.png`);
+    const res = await req.catch((e: { status?: number }) => e as { status?: number });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 503 when bug reporting is not configured', async () => {
+    delete process.env.FLIGHTDECK_INGEST_KEY;
+    try {
+      const res = await request(app)
+        .post(`/api/bug-report/${UUID}/screenshots`)
+        .attach('files', Buffer.from([0x89, 0x50]), 'shot.png');
+      expect(res.status).toBe(503);
+    } finally {
+      process.env.FLIGHTDECK_INGEST_KEY = 'test-key';
+    }
   });
 });
 
