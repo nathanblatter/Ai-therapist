@@ -54,6 +54,8 @@ export interface SessionListFilters {
   endedBy: string[] | null;
   crisisFlagged: boolean | null;
   crisisSeverity: string | null;
+  /** Restrict to one user's sessions (participant profile view). */
+  userId?: number | null;
 }
 
 /** One page of sessions matching the filters, with per-session message stats. */
@@ -101,6 +103,7 @@ export async function listSessions(f: SessionListFilters): Promise<AdminSessionR
         AND ($12::TEXT[] IS NULL OR ts.ended_by = ANY($12))
         AND ($13::BOOLEAN IS NULL OR ts.crisis_flagged = $13)
         AND ($14::TEXT IS NULL OR ts.crisis_severity = $14)
+        AND ($16::INT IS NULL OR ts.user_id = $16)
       GROUP BY ts.session_id, u.username, ts.ended_by, ts.session_type, ts.crisis_flagged, ts.crisis_severity, sc.voice, sc.language
     )
     SELECT * FROM session_stats
@@ -126,6 +129,7 @@ export async function listSessions(f: SessionListFilters): Promise<AdminSessionR
     f.crisisFlagged,  // $13
     f.crisisSeverity, // $14
     f.durations,      // $15
+    f.userId ?? null, // $16
   ]);
   return result.rows;
 }
@@ -149,6 +153,7 @@ export async function countSessions(f: SessionListFilters): Promise<number> {
       AND ($8::TEXT[] IS NULL OR ts.ended_by = ANY($8))
       AND ($9::BOOLEAN IS NULL OR ts.crisis_flagged = $9)
       AND ($10::TEXT IS NULL OR ts.crisis_severity = $10)
+      AND ($11::INT IS NULL OR ts.user_id = $11)
   `, [
     f.search,
     f.startDate,
@@ -160,6 +165,7 @@ export async function countSessions(f: SessionListFilters): Promise<number> {
     f.endedBy,
     f.crisisFlagged,
     f.crisisSeverity,
+    f.userId ?? null,
   ]);
   return parseInt(result.rows[0].total);
 }

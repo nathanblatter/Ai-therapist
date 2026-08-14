@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// Mock the db barrel so buildMemoryBlock's composition can be tested without
-// Postgres. Individual block-builder functions (buildCaseProfileBlock etc.)
-// are pure and tested directly against fixtures.
+// Mock the individual db query modules so buildMemoryBlock's composition —
+// which now flows through the shared getUserProfileBundle fan-out
+// (ai-therapist-110) — can be tested without Postgres. Individual
+// block-builder functions (buildCaseProfileBlock etc.) are pure and tested
+// directly against fixtures.
 const {
   getRecentUserSummariesMock,
   countUserEndedSessionsMock,
   getUserMemoryEnabledMock,
-  getUserMemoriesMock,
+  getUserMemoriesWithDatesMock,
   getUserCaseProfileMock,
   getUserScaleHistoryMock,
   getUserMoodTrajectoryMock,
@@ -20,7 +22,7 @@ const {
   getRecentUserSummariesMock: vi.fn(),
   countUserEndedSessionsMock: vi.fn(),
   getUserMemoryEnabledMock: vi.fn(),
-  getUserMemoriesMock: vi.fn(),
+  getUserMemoriesWithDatesMock: vi.fn(),
   getUserCaseProfileMock: vi.fn(),
   getUserScaleHistoryMock: vi.fn(),
   getUserMoodTrajectoryMock: vi.fn(),
@@ -31,17 +33,30 @@ const {
   getUserPriorCrisisFlagsMock: vi.fn(),
 }));
 
-vi.mock('../db/index.js', () => ({
+vi.mock('../db/insights.queries.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   getRecentUserSummaries: getRecentUserSummariesMock,
   countUserEndedSessions: countUserEndedSessionsMock,
   getUserMemoryEnabled: getUserMemoryEnabledMock,
-  getUserMemories: getUserMemoriesMock,
+  getLatestClinicianNote: getLatestClinicianNoteMock,
+}));
+vi.mock('../db/tools.queries.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getUserMemoriesWithDates: getUserMemoriesWithDatesMock,
+}));
+vi.mock('../db/caseProfile.queries.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   getUserCaseProfile: getUserCaseProfileMock,
+}));
+vi.mock('../db/returningContext.queries.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   getUserScaleHistory: getUserScaleHistoryMock,
   getUserMoodTrajectory: getUserMoodTrajectoryMock,
   getUserLatestSafetyPlan: getUserLatestSafetyPlanMock,
   getUserLatestThoughtRecord: getUserLatestThoughtRecordMock,
-  getLatestClinicianNote: getLatestClinicianNoteMock,
+}));
+vi.mock('../db/crisis.queries.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   getUserRiskContextEnabled: getUserRiskContextEnabledMock,
   getUserPriorCrisisFlags: getUserPriorCrisisFlagsMock,
 }));
@@ -59,7 +74,7 @@ beforeEach(() => {
   getRecentUserSummariesMock.mockReset().mockResolvedValue([]);
   countUserEndedSessionsMock.mockReset().mockResolvedValue(0);
   getUserMemoryEnabledMock.mockReset().mockResolvedValue(true);
-  getUserMemoriesMock.mockReset().mockResolvedValue([]);
+  getUserMemoriesWithDatesMock.mockReset().mockResolvedValue([]);
   getUserCaseProfileMock.mockReset().mockResolvedValue(null);
   getUserScaleHistoryMock.mockReset().mockResolvedValue([]);
   getUserMoodTrajectoryMock.mockReset().mockResolvedValue([]);

@@ -35,3 +35,4 @@ export * from './datasetExport.queries.js';
 export * from './dataRetention.queries.js';
 export * from './studyOps.queries.js';
 export * from './rerank.queries.js';
+export * from './participantProfile.queries.js';

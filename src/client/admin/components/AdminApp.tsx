@@ -25,6 +25,20 @@ const KnowledgeBase = lazy(() => import("./KnowledgeBase"));
 const ConsentVersions = lazy(() => import("./ConsentVersions"));
 const AdverseEvents = lazy(() => import("./AdverseEvents"));
 const StudyOps = lazy(() => import("./StudyOps"));
+const ParticipantProfile = lazy(() => import("./ParticipantProfile"));
+
+// The subset of the users-table row the profile page needs up front.
+export interface ProfileUserSummary {
+  userid: number;
+  username: string;
+  role: string;
+  preferred_voice?: string | null;
+  preferred_language?: string | null;
+  mfa_enabled?: boolean;
+  memory_enabled?: boolean;
+  risk_context_share_enabled?: boolean;
+  created_at?: string | null;
+}
 
 function ViewLoading() {
   return (
@@ -37,6 +51,9 @@ function ViewLoading() {
 export default function AdminApp() {
   const [currentView, setCurrentView] = useState('sessions');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  // Participant profile drill-down from the Users table (ai-therapist-110);
+  // mirrors the selectedSessionId/SessionDetail pattern.
+  const [selectedUser, setSelectedUser] = useState<ProfileUserSummary | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -189,7 +206,7 @@ export default function AdminApp() {
               {currentView === 'adverse-events' && <AdverseEvents />}
               {currentView === 'rate-limits' && <RateLimitedUsers />}
               {currentView === 'mfa' && <MFASetup />}
-              {currentView === 'users' && <UserManagement />}
+              {currentView === 'users' && <UserManagement onViewUser={setSelectedUser} />}
               {currentView === 'user-sessions' && <UserSessions />}
               {currentView === 'prompts' && <SystemPrompts />}
               {currentView === 'knowledge' && <KnowledgeBase />}
@@ -205,6 +222,17 @@ export default function AdminApp() {
           )}
         </div>
       </main>
+
+      {selectedUser && (
+        <Suspense fallback={null}>
+          <ParticipantProfile
+            user={selectedUser}
+            userRole={userRole}
+            onClose={() => setSelectedUser(null)}
+            onViewSession={(sessionId) => handleViewSession(sessionId)}
+          />
+        </Suspense>
+      )}
 
       {selectedSessionId && (
         <Suspense fallback={null}>
