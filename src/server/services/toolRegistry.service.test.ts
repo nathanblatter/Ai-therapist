@@ -8,7 +8,7 @@ const {
   getSessionScaleResponsesMock, getUserLatestScaleScoreMock,
   getKnowledgeChunkByIdMock, insertWorksheetInstanceMock,
   insertRiskCheckStepMock, getRiskCheckStepsMock, getLatestCrisisEventIdMock,
-  rerankChunksMock,
+  rerankChunksMock, getSessionCrisisStateMock, sidebandIsConnectedMock, sidebandHoldFloorMock,
 } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
@@ -32,6 +32,9 @@ const {
   insertRiskCheckStepMock: vi.fn(),
   getRiskCheckStepsMock: vi.fn(),
   getLatestCrisisEventIdMock: vi.fn(),
+  getSessionCrisisStateMock: vi.fn(),
+  sidebandIsConnectedMock: vi.fn(),
+  sidebandHoldFloorMock: vi.fn(),
   // Rerank is exercised in rerank.service.test.ts; here it just passes the
   // vector candidates through in order so the RAG-tool assertions stay focused.
   rerankChunksMock: vi.fn(async (_q: string, candidates: unknown[], topN: number) => ({
@@ -62,6 +65,14 @@ vi.mock('../db/index.js', () => ({
   insertRiskCheckStep: insertRiskCheckStepMock,
   getRiskCheckSteps: getRiskCheckStepsMock,
   getLatestCrisisEventId: getLatestCrisisEventIdMock,
+  getSessionCrisisState: getSessionCrisisStateMock,
+}));
+vi.mock('./sidebandManager.service.js', () => ({
+  sidebandManager: {
+    isConnected: sidebandIsConnectedMock,
+    holdFloor: sidebandHoldFloorMock,
+    updateSession: vi.fn(),
+  },
 }));
 vi.mock('./crisisDetection.service.js', () => ({
   flagSessionCrisis: flagSessionCrisisMock,
@@ -99,6 +110,9 @@ beforeEach(() => {
   insertRiskCheckStepMock.mockReset().mockResolvedValue(1);
   getRiskCheckStepsMock.mockReset().mockResolvedValue([]);
   getLatestCrisisEventIdMock.mockReset().mockResolvedValue(null);
+  getSessionCrisisStateMock.mockReset().mockResolvedValue({ crisis_flagged: false, crisis_severity: null, crisis_risk_score: null });
+  sidebandIsConnectedMock.mockReset().mockReturnValue(true);
+  sidebandHoldFloorMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe('registry mechanics', () => {
@@ -620,5 +634,61 @@ describe('run_risk_check (ai-therapist-71)', () => {
     ) as { success: boolean };
     expect(r.success).toBe(true);
     expect(insertRiskCheckStepMock).toHaveBeenCalledWith(expect.objectContaining({ sequence: 1, crisisEventId: null }));
+  });
+});
+
+describe('hold_floor (ai-therapist-102)', () => {
+  it('returns not-available without a session context', async () => {
+    const r = await toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'safety message' });
+    expect(r).toEqual({ held: false, reason: 'not-available' });
+    expect(sidebandHoldFloorMock).not.toHaveBeenCalled();
+  });
+
+  it('returns not-available when there is no live sideband connection (non-realtime)', async () => {
+    sidebandIsConnectedMock.mockReturnValue(false);
+    const r = await toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'safety message' }, { sessionId: 's1' });
+    expect(r).toEqual({ held: false, reason: 'not-available' });
+    expect(sidebandHoldFloorMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses while a high-severity crisis flag is active', async () => {
+    getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: true, crisis_severity: 'high', crisis_risk_score: 85 });
+    const r = await toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'key insight' }, { sessionId: 's1' });
+    expect(r).toEqual({ held: false, reason: 'crisis-active' });
+    expect(sidebandHoldFloorMock).not.toHaveBeenCalled();
+  });
+
+  it('still holds when a crisis flag is active but not high severity', async () => {
+    getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: true, crisis_severity: 'medium', crisis_risk_score: 50 });
+    const r = await toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'key insight' }, { sessionId: 's1' }) as { held: boolean };
+    expect(r.held).toBe(true);
+    expect(sidebandHoldFloorMock).toHaveBeenCalledWith('s1', 10);
+  });
+
+  it('clamps seconds to [1, 20] and defaults non-numeric input', async () => {
+    await toolRegistry.executeTool('hold_floor', { seconds: 45, reason: 'r' }, { sessionId: 's1' });
+    expect(sidebandHoldFloorMock).toHaveBeenLastCalledWith('s1', 20);
+
+    await toolRegistry.executeTool('hold_floor', { seconds: 0.2, reason: 'r' }, { sessionId: 's1' });
+    expect(sidebandHoldFloorMock).toHaveBeenLastCalledWith('s1', 1);
+
+    await toolRegistry.executeTool('hold_floor', { seconds: 'a while', reason: 'r' }, { sessionId: 's1' });
+    expect(sidebandHoldFloorMock).toHaveBeenLastCalledWith('s1', 10);
+  });
+
+  it('refuses (fail-safe) when the crisis lookup throws', async () => {
+    getSessionCrisisStateMock.mockRejectedValue(new Error('db down'));
+    const r = await toolRegistry.executeTool('hold_floor', { seconds: 5, reason: 'r' }, { sessionId: 's1' });
+    expect(r).toEqual({ held: false, reason: 'not-available' });
+    expect(sidebandHoldFloorMock).not.toHaveBeenCalled();
+  });
+
+  it('returns held:true with the applied duration on success', async () => {
+    const r = await toolRegistry.executeTool('hold_floor', { seconds: 8, reason: 'safety message' }, { sessionId: 's1' }) as {
+      held: boolean; seconds: number; guidance: string;
+    };
+    expect(r.held).toBe(true);
+    expect(r.seconds).toBe(8);
+    expect(r.guidance).toContain('8 seconds');
   });
 });

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
-import { Activity, Users, MessageSquare, AlertTriangle, X, Radio } from 'react-feather';
+import { Activity, Users, MessageSquare, AlertTriangle, X, Radio, Tool } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../../shared/components/Toast';
 import { AudioStreamPlayer } from '../lib/audioStreamPlayer';
@@ -106,12 +106,34 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   const [injectText, setInjectText] = useState('');
   const [injectRole, setInjectRole] = useState<'system' | 'user'>('system');
   const [injectRespond, setInjectRespond] = useState(false);
+  // Trigger-tool control (ai-therapist-103): dropdown of enabled tools +
+  // one-shot trigger via /admin/api/sideband/trigger-tool.
+  const [availableTools, setAvailableTools] = useState<{ name: string; description: string }[]>([]);
+  const [selectedTool, setSelectedTool] = useState('');
+  const [triggerPending, setTriggerPending] = useState(false);
 
   // Initial fetch. After that the list is driven LIVE by socket/sideband
   // events (session:created / session:ended / session:activity); the endpoint
   // is only re-hit as a reconciliation seed after a socket reconnect.
   useEffect(() => {
     fetchActiveSessions();
+  }, []);
+
+  // Seed the trigger-tool dropdown once from the tools registry listing.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/admin/api/tools', { credentials: 'include' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const tools = (data.tools || [])
+          .filter((t: { enabled: boolean }) => t.enabled)
+          .map((t: { name: string; description: string }) => ({ name: t.name, description: t.description }));
+        setAvailableTools(tools);
+      } catch (err) {
+        console.error('[LiveMonitoring] Failed to load tools list:', err);
+      }
+    })();
   }, []);
 
   // Reconcile after every (re)connect: while the socket was down we missed
@@ -678,6 +700,30 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     }
   };
 
+  // Force the model to call a specific tool now (ai-therapist-103). The server
+  // refuses only unknown/disabled tools; end_session gets a confirm here since
+  // it terminates the participant's session.
+  const handleTriggerTool = async () => {
+    if (!selectedSidebandSession || !selectedTool || triggerPending) return;
+    if (
+      selectedTool === 'end_session' &&
+      !window.confirm('Force the AI to end this session? The AI will wrap up and the session will close shortly after.')
+    ) {
+      return;
+    }
+    setTriggerPending(true);
+    try {
+      const ok = await postSideband(
+        'trigger-tool',
+        { sessionId: selectedSidebandSession.sessionId, toolName: selectedTool },
+        `Triggered ${selectedTool} — watch the tool-call feed below`,
+      );
+      if (ok) setSelectedTool('');
+    } finally {
+      setTriggerPending(false);
+    }
+  };
+
   const handleDisconnectSideband = async (sessionId: string) => {
     if (!confirm('Are you sure you want to disconnect this sideband connection?')) return;
 
@@ -1157,6 +1203,33 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       >
                         ▶ Respond
                       </button>
+                      <div className="flex items-center gap-1">
+                        <select
+                          value={selectedTool}
+                          onChange={(e) => setSelectedTool(e.target.value)}
+                          aria-label="Tool to trigger"
+                          title={availableTools.find(t => t.name === selectedTool)?.description || 'Pick a tool to force the AI to call'}
+                          className="border border-gray-300 rounded px-2 py-1.5 text-sm min-h-[44px] max-w-[180px] bg-white text-gray-900"
+                        >
+                          <option value="">Trigger tool…</option>
+                          {availableTools.map(t => (
+                            <option key={t.name} value={t.name}>{t.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={handleTriggerTool}
+                          disabled={!selectedTool || triggerPending}
+                          title="Force the AI to call the selected tool now"
+                          className={`px-3 py-1.5 rounded transition text-sm min-h-[44px] flex items-center gap-1 ${
+                            selectedTool && !triggerPending
+                              ? 'bg-purple-600 text-white hover:bg-purple-700'
+                              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          }`}
+                        >
+                          <Tool size={14} aria-hidden="true" />
+                          {triggerPending ? 'Triggering…' : 'Trigger'}
+                        </button>
+                      </div>
                       <button
                         onClick={() => setShowUpdateModal(true)}
                         className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition text-sm min-h-[44px]"

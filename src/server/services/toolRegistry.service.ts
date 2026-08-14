@@ -1519,6 +1519,70 @@ export class ToolRegistry {
       }
     );
 
+    // Tool 34: Uninterruptible moment (ai-therapist-102). Does NOT mute the
+    // participant's microphone — it only disables server-side turn detection
+    // over the sideband for a few seconds, so their speech won't cancel the
+    // model's response while it delivers something important. Refused while a
+    // high-severity crisis flag is active (the participant must always be able
+    // to interrupt during a crisis) and outside realtime sessions (no sideband).
+    this.registerTool(
+      'hold_floor',
+      {
+        type: 'function',
+        name: 'hold_floor',
+        description:
+          "Briefly prevent your speech from being interrupted while you deliver something important (a safety message, a key insight). The participant's microphone stays on; their speech simply won't cut you off. Use sparingly.",
+        parameters: {
+          type: 'object',
+          properties: {
+            seconds: { type: 'number', description: 'How long to hold the floor, 1-20 seconds.' },
+            reason: { type: 'string', description: 'One short sentence: why this moment must not be interrupted.' },
+          },
+          required: ['seconds', 'reason'],
+        },
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { held: false, reason: 'not-available' };
+
+        // Realtime only: without a live sideband there is no turn detection to
+        // suppress (chat sessions, or the sideband dropped).
+        const { sidebandManager } = await import('./sidebandManager.service.js');
+        if (!sidebandManager.isConnected(ctx.sessionId)) {
+          return { held: false, reason: 'not-available' };
+        }
+
+        const rawSeconds = Number(args['seconds']);
+        const seconds = Math.min(Math.max(Number.isFinite(rawSeconds) ? rawSeconds : 10, 1), 20);
+
+        // Never hold the floor during an active high-severity crisis — the
+        // participant must always be able to interrupt. A failed lookup also
+        // refuses: err on the side of interruptibility.
+        try {
+          const { getSessionCrisisState } = await import('../db/index.js');
+          const crisis = await getSessionCrisisState(ctx.sessionId);
+          if (crisis?.crisis_flagged && crisis.crisis_severity === 'high') {
+            return { held: false, reason: 'crisis-active' };
+          }
+        } catch (error) {
+          console.error('[ToolRegistry] hold_floor crisis check failed (refusing hold):', error);
+          return { held: false, reason: 'not-available' };
+        }
+
+        try {
+          await sidebandManager.holdFloor(ctx.sessionId, seconds);
+        } catch (error) {
+          console.error('[ToolRegistry] hold_floor failed:', error);
+          return { held: false, reason: 'not-available' };
+        }
+
+        return {
+          held: true,
+          seconds,
+          guidance: `You have the floor for about ${seconds} seconds — the participant's speech will not cut you off, but they can still hear and speak. Deliver the important message calmly, then pause and invite their response; normal turn-taking resumes automatically.`,
+        };
+      }
+    );
+
     console.log('[ToolRegistry] Default tools registered');
   }
 

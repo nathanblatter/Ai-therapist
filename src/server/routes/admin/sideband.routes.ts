@@ -206,6 +206,53 @@ export default function sidebandRoutes(): Router {
     }
   });
 
+  // POST /admin/api/sideband/trigger-tool - force the model to call a specific
+  // tool now (ai-therapist-103). Forces tool_choice to that function, injects
+  // an invisible clinician nudge, triggers a response, and auto-resets
+  // tool_choice back to 'auto' on the next response.done (30s fallback).
+  // Server-side we refuse only unknown/disabled tools; sensitive tools like
+  // end_session are confirm-gated client-side.
+  router.post('/admin/api/sideband/trigger-tool', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const { sessionId, toolName, args } = req.body;
+      if (!sessionId || typeof toolName !== 'string' || !toolName.trim()) {
+        return res.status(400).json({ error: 'Missing required fields', details: 'sessionId and toolName are required' });
+      }
+      if (args !== undefined && (typeof args !== 'object' || args === null || Array.isArray(args))) {
+        return res.status(400).json({ error: 'Invalid args', details: 'args must be a JSON object when provided' });
+      }
+
+      const { toolRegistry } = await import('../../services/toolRegistry.service.js');
+      const enabled = await toolRegistry.getEnabledToolDefinitions();
+      if (!enabled.some(def => def.name === toolName)) {
+        return res.status(400).json({
+          error: 'Unknown or disabled tool',
+          details: `'${toolName}' is not an enabled tool`,
+          available: enabled.map(def => def.name),
+        });
+      }
+
+      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+      if (!sidebandManager.isConnected(sessionId)) {
+        return res.status(400).json({ error: 'No active sideband connection', details: 'Session must have an active sideband connection' });
+      }
+
+      await sidebandManager.triggerTool(sessionId, toolName, args as Record<string, unknown> | undefined);
+
+      await logSidebandAction(sessionId, `Admin triggered tool ${toolName} via sideband`, {
+        admin_user: req.session.user?.username,
+        action: 'trigger_tool',
+        tool: toolName,
+        args: args ?? null,
+      });
+
+      res.json({ success: true, message: `Tool ${toolName} triggered` });
+    } catch (error: unknown) {
+      console.error('Failed to trigger tool via sideband:', error);
+      res.status(500).json({ error: 'Failed to trigger tool', details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   // POST /admin/api/sideband/disconnect - disconnect a sideband connection
   router.post('/admin/api/sideband/disconnect', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
