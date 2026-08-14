@@ -229,7 +229,7 @@ export default function chatRoutes(): Router {
 
       // Model call, with steering injected BEFORE the turn when present.
       if (steering) injectGuidance(sessionId, steering);
-      const aiResponse = await sendMessage(sessionId, message);
+      const { text: aiResponse, toolEvents } = await sendMessage(sessionId, message);
 
       // Persist the assistant turn; content_redacted is filled in once per
       // session at session end (see sessionRedaction.service), not per message.
@@ -243,7 +243,11 @@ export default function chatRoutes(): Router {
 
       console.log(`[ChatTherapy] Message exchanged for session ${sessionId.substring(0, 12)}...`);
 
-      res.json({ success: true, response: aiResponse, sessionId });
+      // toolEvents: overlay tools the model invoked this turn (resource card,
+      // safety plan, thought record, ...). The chat client dispatches these
+      // through the same fns map the realtime data channel drives, so tool
+      // overlays render identically in both modes (ai-therapist-118).
+      res.json({ success: true, response: aiResponse, toolEvents, sessionId });
     } catch (error: unknown) {
       console.error('Failed to process chat message:', error);
       res.status(500).json({

@@ -6,7 +6,7 @@
 // here must never break the underlying feature.
 import { pool } from '../config/db.js';
 
-export type LlmUsagePurpose = 'insights' | 'redaction' | 'crisis' | 'eligibility' | 'rerank';
+export type LlmUsagePurpose = 'insights' | 'redaction' | 'crisis' | 'eligibility' | 'rerank' | 'chat';
 
 // Rough, hand-maintained $/1M-token rates for the models this app calls
 // LLMs with for insights/redaction/crisis (all OpenAI as of writing). This is
@@ -17,6 +17,7 @@ const TOKEN_RATES_PER_MILLION: Record<string, { input: number; output: number }>
   'gpt-4o': { input: 2.5, output: 10 },
   'gpt-5-mini': { input: 0.25, output: 2 },
   'gpt-5': { input: 1.25, output: 10 },
+  'gpt-5.2': { input: 1.25, output: 10 }, // chat pipeline (ai-therapist-118); estimate mirrors gpt-5
 };
 const DEFAULT_RATE = { input: 0.5, output: 1.5 }; // fallback for unlisted models
 
@@ -70,7 +71,7 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
     ),
   ]);
 
-  const callsByPurpose: Record<LlmUsagePurpose, number> = { insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0 };
+  const callsByPurpose: Record<LlmUsagePurpose, number> = { insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0, chat: 0 };
   let tokensIn = 0;
   let tokensOut = 0;
   let estimatedCost = 0;

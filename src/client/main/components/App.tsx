@@ -1090,6 +1090,23 @@ export default function App() {
           { id: crypto.randomUUID(), role: "assistant", text: data.response },
         ]);
 
+        // Tool parity (ai-therapist-118): the server executes chat tool calls
+        // and returns the visual ones as toolEvents; dispatch them through the
+        // same fns map the realtime data channel drives so overlays (resource
+        // card, safety plan, thought record, ...) render identically. Unknown
+        // or teardown-related names are skipped gracefully.
+        const toolEvents = (data.toolEvents ?? []) as Array<{ name: string; args?: unknown }>;
+        for (const ev of toolEvents) {
+          if (ev.name === 'end_session' || ev.name === 'stopSession') continue;
+          const fn = (fns as Record<string, ((args: unknown) => Promise<unknown>) | undefined>)[ev.name];
+          if (fn === undefined) continue;
+          try {
+            await fn(ev.args ?? {});
+          } catch (err) {
+            console.error(`[Chat] Failed to render tool overlay ${ev.name}:`, err);
+          }
+        }
+
         // Age-eligibility end (ai-therapist-106): the server ended the session
         // and authored the goodbye above. Run the normal teardown UI path
         // (stopSession re-POSTs /api/chat/end, which is idempotent).
@@ -1166,7 +1183,10 @@ export default function App() {
   // with no sideband (chat) or when the request fails.
   async function reportToolEvent(kind: string, summary: string) {
     try {
-      if (sessionId && sessionType === 'realtime') {
+      // Both channels report server-side now: realtime injects over the
+      // sideband; chat appends to the in-memory history so the outcome rides
+      // the next turn (ai-therapist-118).
+      if (sessionId && (sessionType === 'realtime' || sessionType === 'chat')) {
         const res = await fetch(`/api/sessions/${sessionId}/tool-event`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1433,7 +1453,12 @@ export default function App() {
             setSessionWriteups(prev => [...prev, { type: 'journal', label: 'Something I wrote', summary: text }]);
           }
         }}
-        onInvisibleMessage={(text) => sendInvisiblePrompt(text)}
+        onInvisibleMessage={(text) => {
+          // Chat sessions have no data channel — report server-side so the
+          // text rides the next chat turn instead (ai-therapist-118).
+          if (sessionType === 'chat') void reportToolEvent('scale_result', text);
+          else sendInvisiblePrompt(text);
+        }}
         onToolEvent={(kind, summary) => void reportToolEvent(kind, summary)}
         onLogRecord={(type, message, extras) => {
           logConversation({ sessionId, role: 'user', type, message, extras });
