@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, Shield, FileText, Trash2, BookOpen, Clipboard, FilePlus, X } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
@@ -25,6 +25,7 @@ const KnowledgeBase = lazy(() => import("./KnowledgeBase"));
 const ConsentVersions = lazy(() => import("./ConsentVersions"));
 const AdverseEvents = lazy(() => import("./AdverseEvents"));
 const StudyOps = lazy(() => import("./StudyOps"));
+const EvalsView = lazy(() => import("./EvalsView"));
 const ParticipantProfile = lazy(() => import("./ParticipantProfile"));
 
 // The subset of the users-table row the profile page needs up front.
@@ -123,43 +124,77 @@ export default function AdminApp() {
     setIsEditMode(false);
   };
 
-  // Base navigation items. researchOnly marks study-specific surfaces that
-  // are hidden when deployment_mode is 'clinical' (therapist pilot framing).
-  // demoVisible opens a researcher-gated item to magic-link demo accounts,
-  // whose entire admin API is served synthetic fixtures (demo.routes.ts).
-  const allNavItems = [
-    { id: 'live', label: 'Live Monitoring', icon: Activity },
-    { id: 'dashboard', label: 'Dashboard', icon: BarChart2 },
-    { id: 'sessions', label: 'Sessions', icon: List },
-    { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle },
-    { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus },
-    { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle },
-    { id: 'mfa', label: 'MFA Security', icon: Shield },
-    { id: 'users', label: 'Users', icon: Users, researcherOnly: true, demoVisible: true },
-    { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
-    { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
-    { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
-    { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true, researchOnly: true },
-    { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true, researchOnly: true },
-    { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
-    { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
-    { id: 'export', label: 'Export', icon: Download, researchOnly: true },
-  ] as Array<{ id: string; label: string; icon: typeof Activity; researcherOnly?: boolean; researchOnly?: boolean; demoVisible?: boolean }>;
+  // Grouped navigation (ai-therapist-120). researchOnly marks study-specific
+  // surfaces that are hidden when deployment_mode is 'clinical' (therapist
+  // pilot framing). demoVisible opens a researcher-gated item to magic-link
+  // demo accounts, whose entire admin API is served synthetic fixtures
+  // (demo.routes.ts). MFA Security lives in the header account area, not here.
+  type NavItem = { id: string; label: string; icon: typeof Activity; researcherOnly?: boolean; researchOnly?: boolean; demoVisible?: boolean };
+  const navGroups: Array<{ label: string; items: NavItem[] }> = [
+    {
+      label: 'Operations',
+      items: [
+        { id: 'live', label: 'Live Monitoring', icon: Activity },
+        { id: 'sessions', label: 'Sessions', icon: List },
+        // Historic id: 'dashboard' renders the Analytics view.
+        { id: 'dashboard', label: 'Analytics', icon: BarChart2 },
+      ],
+    },
+    {
+      label: 'Safety',
+      items: [
+        { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle },
+        { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus },
+      ],
+    },
+    {
+      label: 'People',
+      items: [
+        { id: 'users', label: 'Users', icon: Users, researcherOnly: true, demoVisible: true },
+        { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
+        { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle },
+      ],
+    },
+    {
+      label: 'Research',
+      items: [
+        { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
+        { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
+        { id: 'evals', label: 'Evals', icon: CheckSquare, researcherOnly: true },
+        { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true, researchOnly: true },
+        { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true, researchOnly: true },
+        { id: 'export', label: 'Export', icon: Download, researchOnly: true },
+      ],
+    },
+    {
+      label: 'System',
+      items: [
+        { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
+        { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
+      ],
+    },
+  ];
 
-  // Filter nav items based on user role and deployment posture.
-  const navItems = allNavItems.filter(item => {
-    if (item.researchOnly && deploymentMode === 'clinical') {
-      return false;
-    }
-    if (item.researcherOnly) {
-      return userRole === 'researcher' || (item.demoVisible === true && userRole === 'demo');
-    }
-    return true;
-  });
+  // Filter nav items based on user role and deployment posture; drop groups
+  // left empty for this user.
+  const visibleGroups = navGroups
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => {
+        if (item.researchOnly && deploymentMode === 'clinical') {
+          return false;
+        }
+        if (item.researcherOnly) {
+          return userRole === 'researcher' || (item.demoVisible === true && userRole === 'demo');
+        }
+        return true;
+      }),
+    }))
+    .filter(group => group.items.length > 0);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      <AdminHeader onMenuClick={() => setIsSidebarOpen(true)} />
+      <AdminHeader onMenuClick={() => setIsSidebarOpen(true)} onMfaClick={() => setCurrentView('mfa')} />
       <DemoSwitcher context="admin" role={userRole} />
 
       <main className="flex-1 overflow-hidden flex relative">
@@ -187,32 +222,41 @@ export default function AdminApp() {
               <X size={20} />
             </button>
           </div>
-          <nav className="p-4 pt-0 md:pt-4 space-y-2 overflow-y-auto h-full">
-            {navItems.map(item => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setCurrentView(item.id);
-                    setIsSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
-                    currentView === item.id
-                      ? 'bg-royal text-white'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
-                >
-                  <Icon size={20} />
-                  <span className="font-medium">{item.label}</span>
-                  {item.id === 'adverse-events' && aeReminderCount > 0 && (
-                    <span className="ml-auto bg-red-600 text-white rounded-full px-2 py-0.5 text-xs font-bold">
-                      {aeReminderCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+          <nav className="p-4 pt-0 md:pt-4 overflow-y-auto h-full">
+            {visibleGroups.map(group => (
+              <div key={group.label} className="mb-4">
+                <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  {group.label}
+                </p>
+                <div className="space-y-1">
+                  {group.items.map(item => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setCurrentView(item.id);
+                          setIsSidebarOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition ${
+                          currentView === item.id
+                            ? 'bg-royal text-white'
+                            : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        <Icon size={20} />
+                        <span className="font-medium">{item.label}</span>
+                        {item.id === 'adverse-events' && aeReminderCount > 0 && (
+                          <span className="ml-auto bg-red-600 text-white rounded-full px-2 py-0.5 text-xs font-bold">
+                            {aeReminderCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
         </aside>
 
@@ -233,6 +277,7 @@ export default function AdminApp() {
               {currentView === 'knowledge' && <KnowledgeBase />}
               {currentView === 'consent' && <ConsentVersions />}
               {currentView === 'study-ops' && <StudyOps />}
+              {currentView === 'evals' && <EvalsView />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'config' && <SystemConfig />}
               {currentView === 'export' && <ExportPanel />}

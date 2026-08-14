@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Menu, Moon, Sun } from 'react-feather';
+import { Menu, Moon, Shield, Sun } from 'react-feather';
 import { getStoredTheme, setTheme, ADMIN_THEME_STORAGE_KEY } from '../../shared/theme';
 
 interface AdminHeaderProps {
   onMenuClick?: () => void;
+  // Opens the MFA Security (MFASetup) view; account-level, so it lives here
+  // next to Logout instead of in the main nav (ai-therapist-120).
+  onMfaClick?: () => void;
 }
 
-export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
+export default function AdminHeader({ onMenuClick, onMfaClick }: AdminHeaderProps) {
   const [username, setUsername] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
@@ -83,6 +86,17 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {onMfaClick && (
+            <button
+              onClick={onMfaClick}
+              className="flex items-center gap-1.5 p-2 text-white hover:bg-white/10 rounded-full text-sm font-semibold"
+              title="MFA Security"
+              aria-label="MFA Security"
+            >
+              <Shield size={20} />
+              <span className="hidden md:inline">MFA</span>
+            </button>
+          )}
           <button
             onClick={toggleDarkMode}
             className="p-2 text-white hover:bg-white/10 rounded-full"

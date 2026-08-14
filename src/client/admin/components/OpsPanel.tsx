@@ -1,11 +1,11 @@
 // Ops telemetry panel (pass-3 telemetry): in-process HTTP metrics (rolling
 // 60-min window), process health, client error-beacon aggregation, and the
-// product funnel. Rendered as an additive section in the Analytics dashboard;
+// product funnel. Rendered on the Performance tab of the Analytics dashboard;
 // data comes from /admin/api/analytics/ops and /admin/api/analytics/funnel.
-import { useState, useEffect } from "react";
 import { Server, AlertTriangle, Clock, Cpu, Activity } from "react-feather";
-import type { IconProps } from "react-feather";
-import type { FC } from "react";
+import useAdminFetch from "../hooks/useAdminFetch";
+import Panel from "./ui/Panel";
+import StatCard from "./ui/StatCard";
 
 interface GroupErrorRates {
   count_4xx: number;
@@ -79,56 +79,19 @@ function formatMs(ms: number | null): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
 }
 
-interface OpsStatCardProps {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  icon: FC<IconProps>;
-}
-
-function OpsStatCard({ title, value, subtitle, icon: Icon }: OpsStatCardProps) {
-  return (
-    <div className="bg-white p-6 rounded-lg shadow">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-600">{title}</p>
-          <p className="text-2xl font-bold text-navy mt-1">{value}</p>
-          {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
-        </div>
-        <Icon size={24} className="text-gray-400" />
-      </div>
-    </div>
-  );
-}
-
 export default function OpsPanel() {
-  const [ops, setOps] = useState<OpsData | null>(null);
-  const [funnel, setFunnel] = useState<FunnelData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: ops, loading: opsLoading, error } = useAdminFetch<OpsData>('/admin/api/analytics/ops');
+  // Funnel is best-effort: if it fails, the funnel section is simply omitted.
+  const { data: funnel, loading: funnelLoading } = useAdminFetch<FunnelData>('/admin/api/analytics/funnel?days=30');
 
-  useEffect(() => {
-    Promise.all([
-      fetch('/admin/api/analytics/ops').then(r => { if (!r.ok) throw new Error('Failed to fetch ops telemetry'); return r.json(); }),
-      fetch('/admin/api/analytics/funnel?days=30').then(r => { if (!r.ok) throw new Error('Failed to fetch funnel'); return r.json(); }),
-    ])
-      .then(([o, f]: [OpsData, FunnelData]) => { setOps(o); setFunnel(f); })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
+  if (opsLoading || funnelLoading) {
     return (
-      <div className="bg-white p-6 rounded-lg shadow">
-        <p className="text-gray-500 text-center py-4">Loading ops telemetry...</p>
-      </div>
+      <Panel><p className="text-gray-500 text-center py-4">Loading ops telemetry...</p></Panel>
     );
   }
   if (error || !ops) {
     return (
-      <div className="bg-white p-6 rounded-lg shadow">
-        <p className="text-red-600 text-center py-4">{error || 'No ops telemetry available'}</p>
-      </div>
+      <Panel><p className="text-red-600 text-center py-4">{error || 'No ops telemetry available'}</p></Panel>
     );
   }
 
@@ -151,15 +114,14 @@ export default function OpsPanel() {
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <OpsStatCard title="Request Rate" value={`${requestsPerMinute.toFixed(1)}/min`} subtitle={`${totalRequests} in window`} icon={Activity} />
-        <OpsStatCard title="5xx Rate" value={`${rate5xx.toFixed(2)}%`} subtitle={`${total5xx} errors`} icon={AlertTriangle} />
-        <OpsStatCard title="API p95 Latency" value={formatMs(apiP95)} subtitle="participant API" icon={Clock} />
-        <OpsStatCard title="Memory (RSS)" value={`${rssMb} MB`} icon={Cpu} />
-        <OpsStatCard title="Uptime" value={formatUptime(ops.uptime)} icon={Server} />
+        <StatCard label="Request Rate" value={`${requestsPerMinute.toFixed(1)}/min`} sub={`${totalRequests} in window`} icon={Activity} />
+        <StatCard label="5xx Rate" value={`${rate5xx.toFixed(2)}%`} sub={`${total5xx} errors`} icon={AlertTriangle} />
+        <StatCard label="API p95 Latency" value={formatMs(apiP95)} sub="participant API" icon={Clock} />
+        <StatCard label="Memory (RSS)" value={`${rssMb} MB`} icon={Cpu} />
+        <StatCard label="Uptime" value={formatUptime(ops.uptime)} icon={Server} />
       </div>
 
-      <div className="bg-white p-6 rounded-lg shadow overflow-x-auto">
-        <h4 className="text-lg font-semibold mb-4">Requests by Route Group</h4>
+      <Panel title="Requests by Route Group" className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead>
             <tr className="text-left text-gray-600 border-b">
@@ -186,10 +148,9 @@ export default function OpsPanel() {
             ))}
           </tbody>
         </table>
-      </div>
+      </Panel>
 
-      <div className="bg-white p-6 rounded-lg shadow overflow-x-auto">
-        <h4 className="text-lg font-semibold mb-2">Client Errors (Last 7 Days)</h4>
+      <Panel title="Client Errors (Last 7 Days)" className="overflow-x-auto">
         <p className="text-sm text-gray-600 mb-3">
           Browser-reported failures via the error beacon: WebRTC, mic permission, chat send, uncaught JS.
         </p>
@@ -215,11 +176,10 @@ export default function OpsPanel() {
             </tbody>
           </table>
         )}
-      </div>
+      </Panel>
 
       {funnelCounts && (
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h4 className="text-lg font-semibold mb-2">Session Funnel (Last {funnel?.days ?? 30} Days)</h4>
+        <Panel title={`Session Funnel (Last ${funnel?.days ?? 30} Days)`}>
           <p className="text-sm text-gray-600 mb-4">
             Consent and start through graceful end, derived from session, message, and tool records.
           </p>
@@ -247,7 +207,7 @@ export default function OpsPanel() {
               })}
             </div>
           )}
-        </div>
+        </Panel>
       )}
     </div>
   );
