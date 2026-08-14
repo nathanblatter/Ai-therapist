@@ -51,6 +51,7 @@ import logsRoutes from "./routes/public/logs.routes.js";
 import clientEventsRoutes from "./routes/public/clientEvents.routes.js";
 import opsRoutes from "./routes/admin/ops.routes.js";
 import consentRoutes from "./routes/public/consent.routes.js";
+import progressRoutes from "./routes/public/progress.routes.js";
 import adminConsentRoutes from "./routes/admin/consent.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
@@ -498,6 +499,9 @@ app.use(tokenRoutes());
 
 // Participant consent screen (accept/status) -> routes/public/consent.routes.ts.
 app.use(consentRoutes());
+
+// Participant progress home (/api/me/*) -> routes/public/progress.routes.ts.
+app.use(progressRoutes());
 
 
 // ===================== Chat-Only Therapy Endpoints =====================

@@ -9,6 +9,7 @@ import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
 import PostSessionScreen, { type PostSessionData, type SessionRecapData, type SharedWriteup } from "./PostSessionScreen";
 import Header from './Header';
+import Home from './Home';
 import VoiceOrb from './VoiceOrb';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
@@ -1399,13 +1400,11 @@ export default function App() {
               onDismiss={() => setPostSessionData(null)}
             />
           ) : (
-            <div className="flex items-center justify-center h-full text-center px-4">
-              <div className="w-full max-w-2xl">
-                <p className="text-gray-500 text-xl">
-                  Press "Start Session" to begin your conversation with the AI Therapist.
-                </p>
-              </div>
-            </div>
+            /* Between-sessions Home (ai-therapist-121): progress, worksheets,
+               safety plan for logged-in participants; anonymous users still get
+               the plain start prompt. The Start controls below stay outside the
+               scroll area, so they are always visible and never blocked. */
+            <Home />
           )}
         </div>
         <div className="w-full max-w-4xl p-2 sm:p-4">
