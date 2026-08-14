@@ -48,7 +48,9 @@ interface ToolOverlaysProps {
   sessionId: string | null;
 }
 
-function Shell({ title, onClose, children, wide = false }: {
+// Exported for reuse by the between-sessions Home view (ai-therapist-121):
+// read-only worksheet and safety-plan modals share this dialog chrome.
+export function Shell({ title, onClose, children, wide = false }: {
   title: string; onClose: () => void; children: React.ReactNode; wide?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -256,7 +258,8 @@ const PLAN_SECTIONS: { key: keyof SafetyPlanData; label: string }[] = [
   { key: 'reasons_worth_living', label: 'What matters to me' },
 ];
 
-function SafetyPlanCard({ plan, onClose }: { plan: SafetyPlanData; onClose: () => void }) {
+// Also rendered read-only from the between-sessions Home view (ai-therapist-121).
+export function SafetyPlanCard({ plan, onClose }: { plan: SafetyPlanData; onClose: () => void }) {
   return (
     <Shell title="Your safety plan" onClose={onClose} wide>
       <div className="px-6 py-5 space-y-4">
