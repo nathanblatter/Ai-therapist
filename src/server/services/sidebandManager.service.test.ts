@@ -23,6 +23,16 @@ vi.mock('../db/index.js', () => ({ insertMessagesBatch: insertMessagesBatchMock 
 vi.mock('../utils/sessionHelpers.js', () => ({
   getSystemConfig: getSystemConfigMock,
   getActiveModality: getActiveModalityMock,
+  // Mirrors the real default (sessionHelpers.ts) — restoreTurnDetection reads
+  // the semantic-VAD config from here.
+  sessionConfigDefault: {
+    session: {
+      type: 'realtime',
+      audio: {
+        input: { turn_detection: { type: 'semantic_vad', eagerness: 'low' } },
+      },
+    },
+  },
 }));
 
 import { sidebandManager } from './sidebandManager.service.js';
@@ -45,6 +55,8 @@ function resetInternals() {
   sb.reconnectAttempts.clear();
   sb.sessionKeys.clear();
   sb.endedSessions.clear();
+  sb.holdFloorTimers.clear();
+  sb.pendingToolChoiceResets.clear();
 }
 
 function sentEventTypes(ws: ReturnType<typeof fakeWs>): Array<Record<string, Internal>> {
@@ -394,5 +406,146 @@ describe('startup re-attach sweep (ai-therapist-112 follow-up)', () => {
     const ws = sb.connections.get('s-alive');
     expect(sentEventTypes(ws).some((e: Internal) => e.type === 'conversation.item.create')).toBe(true);
     connectSpy.mockRestore();
+  });
+});
+
+describe('admin trigger-tool control (ai-therapist-103)', () => {
+  it('forces tool_choice, injects the invisible nudge (with args context), and triggers a response', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-trigger';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.triggerTool(sessionId, 'start_breathing_exercise', { duration_seconds: 90 });
+
+    const events = sentEventTypes(ws);
+    expect(events.map(e => e.type)).toEqual(['session.update', 'conversation.item.create', 'response.create']);
+    expect(events[0].session.tool_choice).toEqual({ type: 'function', name: 'start_breathing_exercise' });
+    const nudge = events[1].item.content[0].text as string;
+    expect(nudge).toMatch(/clinician overseeing this session asks you to use the start_breathing_exercise tool now/i);
+    expect(nudge).toContain('"duration_seconds":90');
+    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(true);
+  });
+
+  it('omits the args context when no args are given', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-trigger-noargs';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.triggerTool(sessionId, 'end_session');
+
+    const nudge = sentEventTypes(ws).find(e => e.type === 'conversation.item.create')!.item.content[0].text as string;
+    expect(nudge).not.toMatch(/context for the tool arguments/);
+  });
+
+  it('resets tool_choice to auto on the next response.done', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-trigger-reset';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.triggerTool(sessionId, 'log_mood');
+    ws.send.mockClear();
+
+    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({
+      type: 'response.done',
+      response: { output: [] },
+    })));
+
+    const events = sentEventTypes(ws);
+    const reset = events.find(e => e.type === 'session.update');
+    expect(reset).toBeTruthy();
+    expect(reset!.session.tool_choice).toBe('auto');
+    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
+
+    // A second response.done is a no-op (nothing pending).
+    ws.send.mockClear();
+    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({
+      type: 'response.done',
+      response: { output: [] },
+    })));
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a timed reset when no response.done ever arrives', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-trigger-fallback';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.triggerTool(sessionId, 'log_mood');
+    ws.send.mockClear();
+
+    await vi.advanceTimersByTimeAsync(30 * 1000);
+
+    const reset = sentEventTypes(ws).find(e => e.type === 'session.update');
+    expect(reset!.session.tool_choice).toBe('auto');
+    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
+  });
+});
+
+describe('hold_floor turn-taking suppression (ai-therapist-102)', () => {
+  it('disables turn detection (GA audio.input nesting) and restores semantic VAD after the duration', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-hold';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.holdFloor(sessionId, 8);
+
+    let updates = sentEventTypes(ws).filter(e => e.type === 'session.update');
+    expect(updates.length).toBe(1);
+    expect(updates[0].session.audio.input.turn_detection).toBeNull();
+    expect(sb.holdFloorTimers.has(sessionId)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(8 * 1000);
+
+    updates = sentEventTypes(ws).filter(e => e.type === 'session.update');
+    expect(updates.length).toBe(2);
+    expect(updates[1].session.audio.input.turn_detection).toEqual({ type: 'semantic_vad', eagerness: 'low' });
+    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
+  });
+
+  it('a second hold replaces the pending restore timer instead of stacking', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-hold-restack';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.holdFloor(sessionId, 5);
+    await vi.advanceTimersByTimeAsync(3 * 1000);
+    await sidebandManager.holdFloor(sessionId, 10);
+
+    // 5s mark passes (old timer would have fired) — still held.
+    await vi.advanceTimersByTimeAsync(4 * 1000);
+    let restores = sentEventTypes(ws).filter(e =>
+      e.type === 'session.update' && e.session.audio?.input?.turn_detection?.type === 'semantic_vad');
+    expect(restores.length).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(6 * 1000);
+    restores = sentEventTypes(ws).filter(e =>
+      e.type === 'session.update' && e.session.audio?.input?.turn_detection?.type === 'semantic_vad');
+    expect(restores.length).toBe(1);
+  });
+
+  it('disconnect() restores VAD defensively when a hold is pending, then clears the timer', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-hold-cleanup';
+    const ws = fakeWs();
+    (ws as Internal).close = vi.fn();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.holdFloor(sessionId, 15);
+    await sidebandManager.disconnect(sessionId);
+
+    const updates = sentEventTypes(ws).filter(e => e.type === 'session.update');
+    expect(updates[updates.length - 1].session.audio.input.turn_detection).toEqual({ type: 'semantic_vad', eagerness: 'low' });
+    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
+    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
+  });
+
+  it('restoreTurnDetection is a no-op when the session has no live connection', async () => {
+    await expect(sidebandManager.restoreTurnDetection('s-gone')).resolves.toBeUndefined();
   });
 });

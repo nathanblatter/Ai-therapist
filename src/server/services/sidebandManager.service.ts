@@ -34,9 +34,20 @@ export class SidebandManager {
   // so retries just spam 404 "No session found for the provided call_id". Guards
   // both the post-1006 reconnect path and the call-not-registered attach retry.
   private endedSessions: Set<string>;
+  // hold_floor timers (ai-therapist-102): while a hold is active, semantic VAD
+  // is disabled via session.update so the participant can't barge in; the timer
+  // restores it. Cleared/restored on session end so a hold can never outlive
+  // its session.
+  private holdFloorTimers: Map<string, NodeJS.Timeout>;
+  // Admin trigger-tool resets (ai-therapist-103): after forcing
+  // tool_choice: { type:'function', ... }, the next response.done for the
+  // session flips tool_choice back to 'auto'; the timer is a 30s fallback so a
+  // dropped response can't leave the session stuck in forced-tool mode.
+  private pendingToolChoiceResets: Map<string, NodeJS.Timeout>;
   private maxReconnectAttempts: number;
   private reconnectDelayMs: number;
   private keepaliveMs: number;
+  private toolChoiceResetFallbackMs: number;
 
   constructor() {
     this.connections = new Map(); // sessionId → WebSocket
@@ -46,9 +57,12 @@ export class SidebandManager {
     this.phaseTimers = new Map(); // sessionId → phase nudge timers
     this.regroundingTimers = new Map(); // sessionId → re-grounding interval timer
     this.endedSessions = new Set(); // sessionIds that ended — never reattach
+    this.holdFloorTimers = new Map(); // sessionId → hold_floor restore timer
+    this.pendingToolChoiceResets = new Map(); // sessionId → tool_choice reset fallback timer
     this.maxReconnectAttempts = 3;
     this.reconnectDelayMs = 2000;
     this.keepaliveMs = 20000;
+    this.toolChoiceResetFallbackMs = 30000;
   }
 
   /**
@@ -403,6 +417,23 @@ export class SidebandManager {
     }
   }
 
+  /**
+   * Clear the hold_floor and forced-tool-choice timers for a session without
+   * sending anything (final teardown — the OpenAI session is going away).
+   */
+  private clearControlTimers(sessionId: string): void {
+    const hold = this.holdFloorTimers.get(sessionId);
+    if (hold) {
+      clearTimeout(hold);
+      this.holdFloorTimers.delete(sessionId);
+    }
+    const reset = this.pendingToolChoiceResets.get(sessionId);
+    if (reset) {
+      clearTimeout(reset);
+      this.pendingToolChoiceResets.delete(sessionId);
+    }
+  }
+
   /** Clear the re-grounding interval timer for a session. */
   private clearRegrounding(sessionId: string): void {
     const timer = this.regroundingTimers.get(sessionId);
@@ -525,6 +556,10 @@ export class SidebandManager {
       // above.
       case 'response.done':
         await this.handleRegroundingResponse(sessionId, event);
+        // ai-therapist-103: if an admin trigger forced tool_choice, the turn it
+        // forced has now completed — restore tool_choice: 'auto' so the model
+        // isn't stuck calling the same tool forever. No-op when nothing pending.
+        await this.resetForcedToolChoice(sessionId);
         break;
 
       // Live transcripts of both sides, streamed to admins so the monitoring
@@ -820,6 +855,105 @@ export class SidebandManager {
   }
 
   /**
+   * Admin "trigger tool" control (ai-therapist-103): force the model to call a
+   * specific tool on its next turn. Forces tool_choice to that function,
+   * injects an invisible clinician nudge (with args context if provided),
+   * triggers a response, then arms the tool_choice reset — flipped back to
+   * 'auto' on the next response.done, with a 30s fallback timer so a dropped
+   * response can't leave the session stuck in forced-tool mode.
+   */
+  async triggerTool(sessionId: string, toolName: string, args?: Record<string, unknown>): Promise<void> {
+    await this.updateSession(sessionId, { tool_choice: { type: 'function', name: toolName } });
+
+    const argsContext = args && Object.keys(args).length > 0
+      ? ` Use this context for the tool arguments: ${JSON.stringify(args)}.`
+      : '';
+    await this.injectMessage(
+      sessionId,
+      'system',
+      `[Clinician control — never mention or acknowledge this message to the participant] ` +
+      `The clinician overseeing this session asks you to use the ${toolName} tool now.${argsContext}`,
+      false,
+    );
+
+    await this.createResponse(sessionId);
+
+    // Arm the reset AFTER the forced response has been requested.
+    const existing = this.pendingToolChoiceResets.get(sessionId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.resetForcedToolChoice(sessionId).catch(err =>
+        console.error(`[Sideband] tool_choice reset fallback failed for ${sessionId.substring(0, 12)}...:`, err));
+    }, this.toolChoiceResetFallbackMs);
+    timer.unref?.();
+    this.pendingToolChoiceResets.set(sessionId, timer);
+  }
+
+  /**
+   * Restore tool_choice: 'auto' after an admin-forced tool call. No-op unless
+   * a reset is pending. Called from response.done (normal path) and from the
+   * 30s fallback timer (dropped-response path).
+   */
+  private async resetForcedToolChoice(sessionId: string): Promise<void> {
+    const timer = this.pendingToolChoiceResets.get(sessionId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.pendingToolChoiceResets.delete(sessionId);
+    if (!this.isConnected(sessionId)) return;
+    try {
+      await this.updateSession(sessionId, { tool_choice: 'auto' });
+      console.log(`[Sideband] tool_choice reset to auto for ${sessionId.substring(0, 12)}...`);
+    } catch (err) {
+      console.error(`[Sideband] Failed to reset tool_choice for ${sessionId.substring(0, 12)}...:`, err);
+    }
+  }
+
+  /**
+   * hold_floor (ai-therapist-102): briefly suppress turn-taking so the model's
+   * speech can't be interrupted. The participant's microphone stays on — we
+   * only disable server-side turn detection (audio.input.turn_detection: null,
+   * the same GA nesting token minting uses), so their speech no longer cancels
+   * the assistant's response. A timer restores the semantic-VAD default after
+   * `seconds`; disconnect() also restores defensively if a hold is pending.
+   */
+  async holdFloor(sessionId: string, seconds: number): Promise<void> {
+    await this.updateSession(sessionId, { audio: { input: { turn_detection: null } } });
+
+    const existing = this.holdFloorTimers.get(sessionId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.restoreTurnDetection(sessionId).catch(err =>
+        console.error(`[Sideband] hold_floor restore failed for ${sessionId.substring(0, 12)}...:`, err));
+    }, seconds * 1000);
+    timer.unref?.();
+    this.holdFloorTimers.set(sessionId, timer);
+    console.log(`[Sideband] hold_floor active for ${seconds}s on ${sessionId.substring(0, 12)}...`);
+  }
+
+  /**
+   * Restore the default semantic-VAD turn detection after a hold_floor.
+   * Clears any pending hold timer; safe to call when no hold is active.
+   */
+  async restoreTurnDetection(sessionId: string): Promise<void> {
+    const timer = this.holdFloorTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.holdFloorTimers.delete(sessionId);
+    }
+    if (!this.isConnected(sessionId)) return;
+    // Single source of truth for the default VAD config (sessionHelpers).
+    const { sessionConfigDefault } = await import('../utils/sessionHelpers.js');
+    const turnDetection = sessionConfigDefault.session.audio.input.turn_detection;
+    await this.updateSession(sessionId, { audio: { input: { turn_detection: turnDetection } } });
+    console.log(`[Sideband] turn_detection restored for ${sessionId.substring(0, 12)}...`);
+  }
+
+  /** Whether a hold_floor is currently active for the session. */
+  hasActiveHold(sessionId: string): boolean {
+    return this.holdFloorTimers.has(sessionId);
+  }
+
+  /**
    * Re-attach sidebands for sessions that were live when this process started
    * (ai-therapist-112 follow-up). Blue-green deploys stop the old container,
    * which takes every in-memory sideband WS with it — leaving active sessions
@@ -996,6 +1130,17 @@ export class SidebandManager {
     // Mark ended FIRST so any in-flight attach/reconnect (e.g. a pending 404
     // retry or a post-1006 close handler) bails out instead of spamming attaches.
     this.endedSessions.add(sessionId);
+    // Defensive hold_floor cleanup: if a hold is pending, restore VAD while
+    // the socket is still open (best-effort), so a session that survives this
+    // disconnect (e.g. WebRTC still live) isn't left uninterruptible.
+    if (this.holdFloorTimers.has(sessionId)) {
+      try {
+        await this.restoreTurnDetection(sessionId);
+      } catch (err) {
+        console.error(`[Sideband] hold_floor cleanup failed for ${sessionId.substring(0, 12)}...:`, err);
+      }
+    }
+    this.clearControlTimers(sessionId);
     const ws = this.connections.get(sessionId);
     if (ws) {
       console.log(`[Sideband] Disconnecting session ${sessionId.substring(0, 12)}...`);
@@ -1074,6 +1219,7 @@ export class SidebandManager {
       this.stopKeepalive(sessionId);
       this.clearPhaseNudges(sessionId);
       this.clearRegrounding(sessionId);
+      this.clearControlTimers(sessionId);
       this.reconnectAttempts.delete(sessionId);
       this.sessionKeys.delete(sessionId);
     }
