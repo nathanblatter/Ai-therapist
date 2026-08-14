@@ -1,7 +1,7 @@
 // Demo dashboard interceptor. For magic-link 'demo' accounts ONLY, admin API
 // requests are answered with fully synthetic fixtures — the real admin routers
 // (and the database behind them) are never reached, so no real participant data
-// can ever leak to a resume viewer.
+// can ever leak to a demo viewer.
 //
 // This router is mounted BEFORE the real admin/users routers. Its first
 // middleware short-circuits out (next('router')) for every non-demo request, so
@@ -14,6 +14,7 @@ import {
   demoActiveSessions,
   demoSessionsList,
   demoSessionDetail,
+  demoRiskHistory,
   demoAnalytics,
   demoCrisisAll,
   demoRateLimitedUsers,
@@ -23,6 +24,17 @@ import {
   demoPairwiseAnalytics,
   demoEvalTrend,
   demoCalibration,
+  demoUsers,
+  demoUserById,
+  demoUserProfile,
+  demoUserSessions,
+  demoOps,
+  demoFunnel,
+  demoKnowledge,
+  demoKnowledgeUsage,
+  demoRerankDecisions,
+  demoAdverseEvents,
+  demoAdverseEventById,
 } from '../demo/demoFixtures.js';
 
 export default function demoRoutes(): Router {
@@ -53,8 +65,8 @@ export default function demoRoutes(): Router {
   router.get('/admin/api/sessions/:sessionId/recording-info', (_req, res) => {
     res.json({ available: false, status: 'none' });
   });
-  router.get('/admin/api/sessions/:sessionId/risk-history', (_req, res) => {
-    res.json({ history: [] });
+  router.get('/admin/api/sessions/:sessionId/risk-history', (req, res) => {
+    res.json(demoRiskHistory(req.params.sessionId));
   });
   router.get('/admin/api/sessions/:sessionId/insights', (_req, res) => {
     // Panel treats 404 as "no insights yet" and renders gracefully.
@@ -90,6 +102,15 @@ export default function demoRoutes(): Router {
     res.json(demoCalibration());
   });
 
+  // Ops telemetry + product funnel (pass-3 surfaces on the Dashboard).
+  router.get('/admin/api/analytics/ops', (_req, res) => {
+    res.json(demoOps());
+  });
+  router.get('/admin/api/analytics/funnel', (req, res) => {
+    const days = parseInt(String(req.query.days ?? '30')) || 30;
+    res.json(demoFunnel(days));
+  });
+
   router.get('/admin/api/crisis/all', (_req, res) => {
     res.json(demoCrisisAll());
   });
@@ -98,6 +119,39 @@ export default function demoRoutes(): Router {
   });
   router.get('/admin/api/crisis/events', (_req, res) => {
     res.json({ events: demoCrisisAll().crisisEvents });
+  });
+
+  // IRB adverse events: Client B's crisis report, already submitted.
+  router.get('/admin/api/adverse-events', (req, res) => {
+    res.json(demoAdverseEvents(typeof req.query.status === 'string' ? req.query.status : undefined));
+  });
+  router.get('/admin/api/adverse-events/:id', (req, res) => {
+    const report = demoAdverseEventById(parseInt(req.params.id, 10));
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+    res.json(report);
+  });
+
+  // Participant profile drill-down (ai-therapist-110): the "what the AI
+  // remembers" page for each caseload client.
+  router.get('/admin/api/users/:userId/profile', (req, res) => {
+    const bundle = demoUserProfile(parseInt(req.params.userId, 10));
+    if (!bundle) return res.status(404).json({ error: 'User not found' });
+    res.json(bundle);
+  });
+  router.get('/admin/api/users/:userId/sessions', (req, res) => {
+    const limit = parseInt(String(req.query.limit ?? '50')) || 50;
+    res.json(demoUserSessions(parseInt(req.params.userId, 10), limit));
+  });
+
+  // Knowledge base curation view + retrieval usage + rerank decision log.
+  router.get('/admin/api/knowledge', (_req, res) => {
+    res.json(demoKnowledge());
+  });
+  router.get('/admin/api/knowledge/usage', (_req, res) => {
+    res.json(demoKnowledgeUsage());
+  });
+  router.get('/admin/api/knowledge/rerank-decisions', (_req, res) => {
+    res.json(demoRerankDecisions());
   });
 
   router.get('/admin/api/rate-limits/users', (_req, res) => {
@@ -119,25 +173,32 @@ export default function demoRoutes(): Router {
     res.json({ data: rows, count: rows.length, demo: true });
   });
 
-  // Fake "list users" view (UserManagement) — synthetic roster, no real users.
+  // Fake "list users" view (UserManagement) — the synthetic caseload roster.
   router.get('/api/users', (_req, res) => {
-    res.json({
-      users: [
-        { userid: 9001, username: 'participant_042', role: 'participant', created_at: new Date().toISOString() },
-        { userid: 9002, username: 'participant_017', role: 'participant', created_at: new Date().toISOString() },
-        { userid: 9100, username: 'dr_demo', role: 'therapist', created_at: new Date().toISOString() },
-        { userid: 9200, username: 'research_demo', role: 'researcher', created_at: new Date().toISOString() },
-      ],
-    });
+    res.json(demoUsers());
   });
-  router.get(/^\/api\/users\/\d+$/, (_req, res) => {
-    res.json({ user: { userid: 9001, username: 'participant_042', role: 'participant' } });
+  router.get(/^\/api\/users\/\d+$/, (req, res) => {
+    const id = parseInt(req.path.split('/').pop() ?? '', 10);
+    const user = demoUserById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  });
+
+  // User-management writes (create/edit/delete) must never reach the real
+  // /api/users handlers for a demo account — a demo session IS authenticated,
+  // and PUT /api/users/:id allows self-edits. Accept and discard instead.
+  // /api/users/preferences is deliberately NOT matched (non-numeric segment):
+  // demo accounts keep their real, harmless preference writes.
+  router.all(/^\/api\/users(\/\d+)?$/, (_req, res) => {
+    res.json({ success: true, demo: true, message: 'Demo mode — changes are not saved.' });
   });
 
   // ---- Everything else under the admin API surface ----
-  // Writes are accepted but never persisted; unmatched GETs return an empty but
-  // valid shape. This is the safety net: no admin path ever falls through to a
-  // real handler for a demo account.
+  // Writes (including the newer POST surfaces: sideband trigger-tool /
+  // update-session / disconnect, knowledge create/edit/approve/delete, config
+  // PUTs, adverse-event transitions) are accepted but never persisted;
+  // unmatched GETs return an empty but valid shape. This is the safety net:
+  // no admin path ever falls through to a real handler for a demo account.
   router.all(/^\/admin\/api\//, (req, res) => {
     if (req.method === 'GET') {
       return res.json({});
