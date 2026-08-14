@@ -33,6 +33,7 @@ export interface DashboardAnalyticsRow {
   engagement_pace: unknown;
   response_times: unknown;
   turn_taking: unknown;
+  sideband_reliability: unknown;
 }
 
 /** Compute every dashboard metric for the given filter set in one round-trip. */
@@ -228,34 +229,35 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
           GROUP BY ts.session_id, ts.created_at, ts.ended_at
         ) ts
       ),
+      -- Real turn latency (telemetry pass 3): p50/p95 time-to-first-audio and
+      -- total turn time from turn_latency (ground-truth sideband/chat timing).
+      -- Replaces the old message-timestamp diff, which only measured the
+      -- client's 15s batched log-flush cadence, not latency.
       response_times AS (
         SELECT
-          AVG(response_time_seconds) AS avg_response_time_seconds,
-          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY response_time_seconds) AS median_response_time_seconds,
-          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time_seconds) AS p95_response_time_seconds
-        FROM (
-          SELECT
-            EXTRACT(EPOCH FROM (assistant_msg.created_at - user_msg.created_at)) AS response_time_seconds
-          FROM (
-            SELECT
-              session_id,
-              created_at,
-              ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at) AS msg_order
-            FROM date_filtered_messages
-            WHERE role = 'user'
-          ) user_msg
-          INNER JOIN (
-            SELECT
-              session_id,
-              created_at,
-              ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at) AS msg_order
-            FROM date_filtered_messages
-            WHERE role = 'assistant'
-          ) assistant_msg
-          ON user_msg.session_id = assistant_msg.session_id
-          AND assistant_msg.msg_order = user_msg.msg_order + 1
-          WHERE assistant_msg.created_at > user_msg.created_at
-        ) response_times
+          COUNT(*) AS measured_turns,
+          PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY tl.ttfa_ms)  AS p50_ttfa_ms,
+          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY tl.ttfa_ms)  AS p95_ttfa_ms,
+          PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY tl.total_ms) AS p50_total_ms,
+          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY tl.total_ms) AS p95_total_ms
+        FROM turn_latency tl
+        INNER JOIN date_filtered_sessions ts ON tl.session_id = ts.session_id
+      ),
+      -- Reliability KPI: sideband attach success over the last 7 days
+      -- (deliberately a fixed window, independent of the dashboard filters).
+      sideband_reliability AS (
+        SELECT
+          COUNT(*) AS realtime_sessions,
+          COUNT(*) FILTER (WHERE sideband_connected_at IS NOT NULL) AS attached_sessions,
+          COUNT(*) FILTER (WHERE sideband_error IS NOT NULL) AS error_sessions,
+          ROUND(
+            COUNT(*) FILTER (WHERE sideband_connected_at IS NOT NULL) * 100.0 / NULLIF(COUNT(*), 0),
+            1
+          ) AS attach_success_rate
+        FROM therapy_sessions
+        WHERE is_demo IS NOT TRUE
+          AND session_type = 'realtime'
+          AND created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
       ),
       turn_taking_ratio AS (
         SELECT
@@ -280,7 +282,8 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
         (SELECT json_agg(session_depth_by_user_type.*) FROM session_depth_by_user_type) AS session_depth,
         (SELECT row_to_json(messages_per_minute.*) FROM messages_per_minute) AS engagement_pace,
         (SELECT row_to_json(response_times.*) FROM response_times) AS response_times,
-        (SELECT row_to_json(turn_taking_ratio.*) FROM turn_taking_ratio) AS turn_taking
+        (SELECT row_to_json(turn_taking_ratio.*) FROM turn_taking_ratio) AS turn_taking,
+        (SELECT row_to_json(sideband_reliability.*) FROM sideband_reliability) AS sideband_reliability
     `, [
     f.startDate,        // $1
     f.endDate,          // $2

@@ -2,11 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Capture the input the Responses API is called with, so we can assert that
 // injected clinical guidance rides along in the right position.
-const { createMock, getEnabledToolDefinitionsMock, executeLoggedToolCallMock, recordLlmUsageMock } = vi.hoisted(() => ({
+const { createMock, getEnabledToolDefinitionsMock, executeLoggedToolCallMock, recordLlmUsageMock, insertTurnLatencyMock } = vi.hoisted(() => ({
   createMock: vi.fn(),
   getEnabledToolDefinitionsMock: vi.fn(),
   executeLoggedToolCallMock: vi.fn(),
   recordLlmUsageMock: vi.fn(),
+  insertTurnLatencyMock: vi.fn(),
 }));
 
 vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue('test-key') }));
@@ -23,6 +24,7 @@ vi.mock('./toolExecution.helpers.js', () => ({
 }));
 vi.mock('../db/index.js', () => ({
   recordLlmUsage: recordLlmUsageMock,
+  insertTurnLatency: insertTurnLatencyMock,
 }));
 
 const {
@@ -43,6 +45,7 @@ beforeEach(() => {
   getEnabledToolDefinitionsMock.mockResolvedValue([SAMPLE_DEF]);
   executeLoggedToolCallMock.mockResolvedValue({ result: { success: true }, success: true });
   recordLlmUsageMock.mockResolvedValue(undefined);
+  insertTurnLatencyMock.mockResolvedValue(undefined);
 });
 
 describe('injectGuidance', () => {
@@ -178,6 +181,34 @@ describe('chat tool calling (ai-therapist-118)', () => {
     await sendMessage(sid, 'hi');
     await vi.waitFor(() => expect(recordLlmUsageMock).toHaveBeenCalled());
     expect(recordLlmUsageMock).toHaveBeenCalledWith(sid, 'chat', 'gpt-5.2', 100, 20);
+    endChatSession(sid);
+  });
+
+  it('records one turn_latency row per turn with ttfa == total (telemetry pass 3)', async () => {
+    const sid = 'chat_latency';
+    initializeChatSession(sid, 'SYSTEM');
+    createMock
+      .mockResolvedValueOnce({
+        output_text: '',
+        output: [{ type: 'function_call', call_id: 'call_1', name: 'show_resource_card', arguments: '{}' }],
+      })
+      .mockResolvedValueOnce({ output_text: 'done', output: [] });
+
+    await sendMessage(sid, 'first turn');
+    await vi.waitFor(() => expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1));
+
+    // One row for the whole turn even though the tool loop made two model calls.
+    const row = insertTurnLatencyMock.mock.calls[0][0];
+    expect(row.sessionId).toBe(sid);
+    expect(row.channel).toBe('chat');
+    expect(row.turnIndex).toBe(1);
+    // Non-streaming: first output == response done == end of the tool loop.
+    expect(row.firstOutputAt).toEqual(row.responseDoneAt);
+    expect(row.responseDoneAt.getTime()).toBeGreaterThanOrEqual(row.userDoneAt.getTime());
+
+    await sendMessage(sid, 'second turn');
+    await vi.waitFor(() => expect(insertTurnLatencyMock).toHaveBeenCalledTimes(2));
+    expect(insertTurnLatencyMock.mock.calls[1][0].turnIndex).toBe(2);
     endChatSession(sid);
   });
 

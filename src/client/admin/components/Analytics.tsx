@@ -155,10 +155,30 @@ interface EngagementPace {
   avg_messages_per_minute: string | number | null;
 }
 
+// Real turn latency from the turn_latency table (telemetry pass 3): ground
+// truth captured server-side, not the old message-flush-cadence math.
 interface ResponseTimes {
-  avg_response_time_seconds: string | number | null;
-  median_response_time_seconds: string | number | null;
-  p95_response_time_seconds: string | number | null;
+  measured_turns: number;
+  p50_ttfa_ms: string | number | null;
+  p95_ttfa_ms: string | number | null;
+  p50_total_ms: string | number | null;
+  p95_total_ms: string | number | null;
+}
+
+// Format a millisecond metric as seconds (values arrive as numeric strings
+// from row_to_json / PERCENTILE_CONT).
+function formatMs(v: string | number | null | undefined): string {
+  if (v == null) return 'N/A';
+  const n = parseFloat(String(v));
+  if (!Number.isFinite(n)) return 'N/A';
+  return (n / 1000).toFixed(2) + 's';
+}
+
+interface SidebandReliability {
+  realtime_sessions: number;
+  attached_sessions: number;
+  error_sessions: number;
+  attach_success_rate: string | number | null;
 }
 
 interface TurnTaking {
@@ -183,6 +203,7 @@ interface AnalyticsData {
   engagement_pace?: EngagementPace;
   response_times?: ResponseTimes;
   turn_taking?: TurnTaking;
+  sideband_reliability?: SidebandReliability;
 }
 
 interface AnalyticsFilters {
@@ -365,6 +386,8 @@ interface CostTotals {
   total_tokens_out: number;
   total_estimated_cost_usd: number;
   total_realtime_minutes: number;
+  total_realtime_responses: number;
+  total_realtime_cost_usd: number;
 }
 
 interface DailySpendRow {
@@ -373,6 +396,7 @@ interface DailySpendRow {
   tokens_in: number;
   tokens_out: number;
   estimated_cost_usd: number;
+  realtime_cost_usd: number;
 }
 
 interface FeedbackAggregate {
@@ -419,6 +443,7 @@ function CostUsagePanel() {
   const dailySpendData = data.daily_spend.slice().reverse().map(d => ({
     date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     cost: Math.round(d.estimated_cost_usd * 10000) / 10000,
+    realtimeCost: Math.round((d.realtime_cost_usd ?? 0) * 10000) / 10000,
     calls: d.calls,
   }));
 
@@ -426,15 +451,16 @@ function CostUsagePanel() {
     <div className="space-y-4">
       <h3 className="text-xl font-bold flex items-center gap-2"><DollarSign size={20} /> Cost & Token Tracking</h3>
       <p className="text-sm text-gray-600">
-        Estimated non-realtime LLM spend (insights, redaction, crisis assessment) from tracked token usage.
-        Realtime voice minutes are shown separately — the Realtime API bills per audio minute, not per token,
-        so no dollar estimate is computed for it here.
+        Estimated LLM spend from tracked token usage: text-pipeline calls (chat, insights, redaction,
+        crisis assessment) plus metered realtime voice usage captured per response from the Realtime API
+        (text/audio/cached token split). Realtime minutes are a legacy wall-clock estimate kept for reference.
       </p>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <MetricCard title="Est. LLM Spend (all time)" value={`$${data.totals.total_estimated_cost_usd.toFixed(4)}`} icon={DollarSign} />
+        <MetricCard title="Realtime Voice Spend (metered)" value={`$${(data.totals.total_realtime_cost_usd ?? 0).toFixed(4)}`} icon={DollarSign} />
         <MetricCard title="Tracked LLM Calls" value={data.totals.total_calls} icon={Activity} />
-        <MetricCard title="Total Realtime Minutes" value={data.totals.total_realtime_minutes.toFixed(1)} icon={Clock} />
+        <MetricCard title="Realtime Minutes (legacy estimate)" value={data.totals.total_realtime_minutes.toFixed(1)} icon={Clock} />
         <MetricCard title="Feedback Responses" value={data.feedback.responses} icon={MessageSquare} />
       </div>
 
@@ -447,7 +473,9 @@ function CostUsagePanel() {
               <XAxis dataKey="date" />
               <YAxis />
               <Tooltip formatter={(value?: number) => `$${(value ?? 0).toFixed(4)}`} />
-              <Bar dataKey="cost" fill="#0047BA" name="Estimated Cost (USD)" />
+              <Legend />
+              <Bar dataKey="cost" stackId="spend" fill="#0047BA" name="Text LLM Cost (USD)" />
+              <Bar dataKey="realtimeCost" stackId="spend" fill="#7C3AED" name="Realtime Voice Cost (USD)" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1295,37 +1323,66 @@ export default function Analytics() {
           {analytics.response_times && (
             <>
               <div className="border rounded p-4">
-                <p className="text-sm text-gray-600">Avg Response Time</p>
+                <p className="text-sm text-gray-600">Time to First Audio (p50)</p>
                 <p className="text-2xl font-bold text-navy mt-1">
-                  {analytics.response_times.avg_response_time_seconds
-                    ? parseFloat(String(analytics.response_times.avg_response_time_seconds)).toFixed(2) + 's'
-                    : 'N/A'}
+                  {formatMs(analytics.response_times.p50_ttfa_ms)}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">System latency</p>
+                <p className="text-xs text-gray-500 mt-1">Measured turn latency, median</p>
               </div>
 
               <div className="border rounded p-4">
-                <p className="text-sm text-gray-600">Median Response Time</p>
+                <p className="text-sm text-gray-600">Time to First Audio (p95)</p>
                 <p className="text-2xl font-bold text-navy mt-1">
-                  {analytics.response_times.median_response_time_seconds
-                    ? parseFloat(String(analytics.response_times.median_response_time_seconds)).toFixed(2) + 's'
-                    : 'N/A'}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">50th percentile</p>
-              </div>
-
-              <div className="border rounded p-4">
-                <p className="text-sm text-gray-600">P95 Response Time</p>
-                <p className="text-2xl font-bold text-navy mt-1">
-                  {analytics.response_times.p95_response_time_seconds
-                    ? parseFloat(String(analytics.response_times.p95_response_time_seconds)).toFixed(2) + 's'
-                    : 'N/A'}
+                  {formatMs(analytics.response_times.p95_ttfa_ms)}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">95th percentile</p>
+              </div>
+
+              <div className="border rounded p-4">
+                <p className="text-sm text-gray-600">Total Turn Time (p50 / p95)</p>
+                <p className="text-2xl font-bold text-navy mt-1">
+                  {formatMs(analytics.response_times.p50_total_ms)}
+                  {' / '}
+                  {formatMs(analytics.response_times.p95_total_ms)}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  User turn end to response done ({analytics.response_times.measured_turns || 0} turns measured)
+                </p>
               </div>
             </>
           )}
         </div>
+
+        {analytics.sideband_reliability && (
+          <div className="mt-4 p-4 border rounded bg-gray-50">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <p className="text-sm text-gray-600">Sideband Attach Success (7d)</p>
+                <p className="text-2xl font-bold text-navy mt-1">
+                  {analytics.sideband_reliability.attach_success_rate != null
+                    ? parseFloat(String(analytics.sideband_reliability.attach_success_rate)).toFixed(1) + '%'
+                    : 'N/A'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {analytics.sideband_reliability.attached_sessions || 0} of{' '}
+                  {analytics.sideband_reliability.realtime_sessions || 0} realtime sessions attached
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Realtime Sessions (7d)</p>
+                <p className="text-2xl font-bold text-navy mt-1">
+                  {analytics.sideband_reliability.realtime_sessions || 0}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600">Sessions with Sideband Errors (7d)</p>
+                <p className="text-2xl font-bold text-navy mt-1">
+                  {analytics.sideband_reliability.error_sessions || 0}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {analytics.turn_taking && (
           <div className="mt-4 p-4 border rounded bg-gray-50">

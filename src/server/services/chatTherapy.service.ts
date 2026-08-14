@@ -5,6 +5,7 @@
  */
 
 import { getOpenAIKey } from "../config/secrets.js";
+import { insertTurnLatency } from "../db/index.js";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 dotenv.config();
@@ -110,12 +111,29 @@ function recordChatUsage(sessionId: string, usage: ResponsesResult['usage']): vo
 }
 
 /**
+ * Fire-and-forget turn-latency logging (telemetry pass 3). Chat is
+ * non-streaming, so time-to-first-output equals total turn time; total is the
+ * full tool-loop wall time, which is what the participant actually waited.
+ */
+function recordChatLatency(sessionId: string, turnIndex: number, startedAt: Date, finishedAt: Date): void {
+  insertTurnLatency({
+    sessionId,
+    turnIndex,
+    userDoneAt: startedAt,
+    firstOutputAt: finishedAt,
+    responseDoneAt: finishedAt,
+    channel: 'chat',
+  }).catch(err => console.error('[ChatTherapy] Failed to record turn latency (non-fatal):', err));
+}
+
+/**
  * Send a message and get AI response
  * @param {string} sessionId - Session identifier
  * @param {string} userMessage - User's message
  * @returns {Promise<ChatTurnResult>} - Assistant text + executed tool events
  */
 export async function sendMessage(sessionId: string, userMessage: string): Promise<ChatTurnResult> {
+  const turnStartedAt = new Date();
   const apiKey = await getOpenAIKey();
   const client = new OpenAI({ apiKey }) as unknown as ResponsesClient;
 
@@ -201,6 +219,11 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
 
     // Extract assistant message from response
     const assistantMessage = response.output_text;
+
+    // Telemetry pass 3: log the full turn wall time (user request -> final
+    // text, including any tool rounds). turn_index = this user turn's ordinal.
+    const turnIndex = messages.filter(m => (m as ChatMessage).role === 'user').length + 1;
+    recordChatLatency(sessionId, turnIndex, turnStartedAt, new Date());
 
     // Persist the turn in order: user message, any tool call/output items,
     // then the assistant's text.

@@ -11,15 +11,24 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // unawaited promise chain races unpredictably against fake-timer advancement),
 // most tests call the private scheduler methods directly and await them; one
 // integration test asserts handleOpen actually wires both up.
-const { queryMock, getSystemConfigMock, getActiveModalityMock, insertMessagesBatchMock } = vi.hoisted(() => ({
+const {
+  queryMock, getSystemConfigMock, getActiveModalityMock, insertMessagesBatchMock,
+  insertTurnLatencyMock, insertRealtimeUsageMock,
+} = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
   getActiveModalityMock: vi.fn(),
   insertMessagesBatchMock: vi.fn(),
+  insertTurnLatencyMock: vi.fn(),
+  insertRealtimeUsageMock: vi.fn(),
 }));
 
 vi.mock('../config/db.js', () => ({ pool: { query: queryMock } }));
-vi.mock('../db/index.js', () => ({ insertMessagesBatch: insertMessagesBatchMock }));
+vi.mock('../db/index.js', () => ({
+  insertMessagesBatch: insertMessagesBatchMock,
+  insertTurnLatency: insertTurnLatencyMock,
+  insertRealtimeUsage: insertRealtimeUsageMock,
+}));
 vi.mock('../utils/sessionHelpers.js', () => ({
   getSystemConfig: getSystemConfigMock,
   getActiveModality: getActiveModalityMock,
@@ -57,6 +66,8 @@ function resetInternals() {
   sb.endedSessions.clear();
   sb.holdFloorTimers.clear();
   sb.pendingToolChoiceResets.clear();
+  sb.pendingTurns.clear();
+  sb.turnCounters.clear();
 }
 
 function sentEventTypes(ws: ReturnType<typeof fakeWs>): Array<Record<string, Internal>> {
@@ -71,6 +82,8 @@ beforeEach(() => {
   resetInternals();
   queryMock.mockReset();
   insertMessagesBatchMock.mockReset().mockResolvedValue(undefined);
+  insertTurnLatencyMock.mockReset().mockResolvedValue(undefined);
+  insertRealtimeUsageMock.mockReset().mockResolvedValue(undefined);
   getSystemConfigMock.mockReset().mockResolvedValue({
     features: {},
     session_limits: { enabled: true, max_duration_minutes: MAX_DURATION_MINUTES },
@@ -547,5 +560,166 @@ describe('hold_floor turn-taking suppression (ai-therapist-102)', () => {
 
   it('restoreTurnDetection is a no-op when the session has no live connection', async () => {
     await expect(sidebandManager.restoreTurnDetection('s-gone')).resolves.toBeUndefined();
+  });
+});
+
+describe('turn-latency capture (telemetry pass 3)', () => {
+  const sessionId = 's-latency';
+
+  async function fire(event: Record<string, unknown>): Promise<void> {
+    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify(event)));
+    // Flush the fire-and-forget dynamic-import chain.
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it('records one row for user turn -> first audio delta -> response.done', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i1', transcript: 'hello' });
+    await vi.advanceTimersByTimeAsync(800);
+    await fire({ type: 'response.output_audio.delta', item_id: 'i2', delta: 'AAAA' });
+    await vi.advanceTimersByTimeAsync(2200);
+    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
+
+    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1);
+    const row = insertTurnLatencyMock.mock.calls[0][0];
+    expect(row.sessionId).toBe(sessionId);
+    expect(row.channel).toBe('realtime');
+    expect(row.turnIndex).toBe(1);
+    expect(row.firstOutputAt!.getTime() - row.userDoneAt.getTime()).toBe(800);
+    expect(row.responseDoneAt.getTime() - row.userDoneAt.getTime()).toBe(3000);
+  });
+
+  it('only the first output delta stamps time-to-first-audio', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i1', transcript: 'hi' });
+    await vi.advanceTimersByTimeAsync(500);
+    await fire({ type: 'response.output_audio.delta' });
+    await vi.advanceTimersByTimeAsync(500);
+    await fire({ type: 'response.output_audio.delta' });
+    await fire({ type: 'response.done', response: { output: [] } });
+
+    const row = insertTurnLatencyMock.mock.calls[0][0];
+    expect(row.firstOutputAt!.getTime() - row.userDoneAt.getTime()).toBe(500);
+  });
+
+  it('skips a response.done with no pending user turn (e.g. admin-triggered response)', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
+
+    expect(insertTurnLatencyMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the turn pending across a tool-call-only response and records the post-tool response once', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i1', transcript: 'help' });
+    await vi.advanceTimersByTimeAsync(1000);
+    // Intermediate response: function_call only, no audible output yet.
+    await fire({ type: 'response.done', response: { output: [{ type: 'function_call' }] } });
+    expect(insertTurnLatencyMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await fire({ type: 'response.output_audio.delta' });
+    await vi.advanceTimersByTimeAsync(500);
+    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
+
+    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1);
+    const row = insertTurnLatencyMock.mock.calls[0][0];
+    expect(row.firstOutputAt!.getTime() - row.userDoneAt.getTime()).toBe(2500);
+    expect(row.responseDoneAt.getTime() - row.userDoneAt.getTime()).toBe(3000);
+
+    // The consumed turn does not get double-counted by a later response.done.
+    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
+    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('an out-of-band regrounding response.done does not consume the pending turn', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i1', transcript: 'hi' });
+    await fire({
+      type: 'response.done',
+      response: { metadata: { purpose: 'regrounding' }, output: [{ content: [{ type: 'output_text', text: 'recap' }] }] },
+    });
+    expect(insertTurnLatencyMock).not.toHaveBeenCalled();
+
+    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
+    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('increments turn_index across measured turns', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    for (let i = 0; i < 2; i++) {
+      await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: `t${i}`, transcript: 'x' });
+      await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
+    }
+
+    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(2);
+    expect(insertTurnLatencyMock.mock.calls.map(c => c[0].turnIndex)).toEqual([1, 2]);
+  });
+});
+
+describe('realtime usage capture (telemetry pass 3)', () => {
+  const sessionId = 's-usage';
+
+  async function fire(event: Record<string, unknown>): Promise<void> {
+    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify(event)));
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it('records response.usage with the audio/text/cached split on response.done', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    await fire({
+      type: 'response.done',
+      response: {
+        id: 'resp_123',
+        output: [{ type: 'message' }],
+        usage: {
+          input_tokens: 1200,
+          output_tokens: 800,
+          input_token_details: { text_tokens: 400, audio_tokens: 700, cached_tokens: 100 },
+          output_token_details: { text_tokens: 300, audio_tokens: 500 },
+        },
+      },
+    });
+
+    expect(insertRealtimeUsageMock).toHaveBeenCalledTimes(1);
+    expect(insertRealtimeUsageMock).toHaveBeenCalledWith(sessionId, 'resp_123', {
+      inputTokens: 1200,
+      outputTokens: 800,
+      inputAudioTokens: 700,
+      outputAudioTokens: 500,
+      cachedTokens: 100,
+    });
+  });
+
+  it('is defensive about missing detail fields (nulls, not NaN)', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    await fire({
+      type: 'response.done',
+      response: { output: [{ type: 'message' }], usage: { input_tokens: 50 } },
+    });
+
+    expect(insertRealtimeUsageMock).toHaveBeenCalledWith(sessionId, null, {
+      inputTokens: 50,
+      outputTokens: null,
+      inputAudioTokens: null,
+      outputAudioTokens: null,
+      cachedTokens: null,
+    });
+  });
+
+  it('skips a response.done without usage', async () => {
+    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
+
+    await fire({ type: 'response.done', response: { output: [] } });
+
+    expect(insertRealtimeUsageMock).not.toHaveBeenCalled();
   });
 });
