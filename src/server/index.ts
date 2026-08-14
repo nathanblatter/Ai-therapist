@@ -185,7 +185,13 @@ app.post(
   }
 );
 
-app.use(express.json()); // Needed to parse JSON bodies
+// Global JSON body parsing — except the client-events beacon, which mounts
+// its own parser with a much tighter limit (4kb, clientEvents.routes.ts) so
+// oversized beacon bodies are rejected before parsing.
+const globalJsonParser = express.json();
+app.use((req, res, next) =>
+  req.path === '/api/client-events' ? next() : globalJsonParser(req, res, next)
+);
 
 // ==================== HTTP TELEMETRY ====================
 // In-process ops metrics (rolling 60-min request/error/latency window per

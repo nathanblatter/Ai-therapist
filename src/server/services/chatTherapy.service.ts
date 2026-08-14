@@ -181,13 +181,23 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
     // until the model produces text. The final permitted round forces text
     // with tool_choice:'none' so a runaway tool chain can't eat the turn.
     const toolEvents: ChatToolEvent[] = [];
-    const turnItems: ChatHistoryItem[] = []; // function-call items to persist in history
+    const turnItems: ChatHistoryItem[] = []; // raw output + tool-output items to persist in history
+    let toolCallCount = 0;
     let response = await callModel('auto');
     recordChatUsage(sessionId, response.usage);
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const calls = (response.output ?? []).filter(o => o.type === 'function_call' && o.name && o.call_id);
       if (calls.length === 0) break;
+
+      // Replay the model's raw output items VERBATIM (not reconstructed
+      // function_call items): reasoning models emit sibling `reasoning` items
+      // that MUST accompany their function_call on the next request, or the
+      // API 400s. Passing the whole output block through keeps every item the
+      // model needs, then the function_call_output items follow by call_id.
+      const rawOutputItems = (response.output ?? []) as unknown as ChatHistoryItem[];
+      input.push(...rawOutputItems);
+      turnItems.push(...rawOutputItems);
 
       const { executeLoggedToolCall } = await import('./toolExecution.helpers.js');
       for (const call of calls) {
@@ -198,19 +208,17 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
           console.error(`[ChatTherapy] Unparseable arguments for ${call.name}; executing with {}`);
         }
         const { result } = await executeLoggedToolCall(sessionId, call.name!, args, call.call_id!, 'chat');
+        toolCallCount++;
 
         if (CLIENT_RENDERED_TOOLS.has(call.name!)) {
           toolEvents.push({ name: call.name!, args, result });
         }
 
-        const callItem: Record<string, unknown> = {
-          type: 'function_call', call_id: call.call_id, name: call.name, arguments: call.arguments ?? '{}',
-        };
         const outputItem: Record<string, unknown> = {
           type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result),
         };
-        input.push(callItem, outputItem);
-        turnItems.push(callItem, outputItem);
+        input.push(outputItem);
+        turnItems.push(outputItem);
       }
 
       response = await callModel(round + 1 >= MAX_TOOL_ROUNDS ? 'none' : 'auto');
@@ -236,7 +244,7 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
 
     console.log(
       `[ChatTherapy] Session ${sessionId.substring(0, 12)}... - Message exchanged` +
-      `${toolEvents.length > 0 || turnItems.length > 0 ? ` (${turnItems.length / 2} tool call(s))` : ''}` +
+      `${toolCallCount > 0 ? ` (${toolCallCount} tool call(s))` : ''}` +
       ` (${messages.length - 1} items in history)`
     );
 

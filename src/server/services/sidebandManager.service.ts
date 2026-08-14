@@ -44,6 +44,19 @@ export class SidebandManager {
   // session flips tool_choice back to 'auto'; the timer is a 30s fallback so a
   // dropped response can't leave the session stuck in forced-tool mode.
   private pendingToolChoiceResets: Map<string, NodeJS.Timeout>;
+  // Restore-retry counters: the disabled-VAD / forced-tool state lives in the
+  // OpenAI session and survives a sideband WS drop, so a restore that fires
+  // during a reconnect gap must be retried once the sideband re-attaches, not
+  // dropped — otherwise the participant is uninterruptible (or tool_choice
+  // stays pinned) for the rest of the session. Capped so an unrecoverable
+  // session can't retry forever.
+  private holdRestoreRetries: Map<string, number>;
+  private toolResetRetries: Map<string, number>;
+  // Sessions with an in-flight model response (response.created seen, no
+  // terminal response.done yet). Lets triggerTool() fail fast instead of
+  // returning success while OpenAI rejects the response.create with
+  // conversation_already_has_active_response.
+  private activeResponses: Set<string>;
   // Turn-latency capture (telemetry pass 3): the timestamp of the last
   // completed user transcription plus the first output delta seen since. On
   // response.done the pair becomes one turn_latency row (fire-and-forget).
@@ -57,6 +70,8 @@ export class SidebandManager {
   private reconnectDelayMs: number;
   private keepaliveMs: number;
   private toolChoiceResetFallbackMs: number;
+  private restoreRetryDelayMs: number;
+  private maxRestoreRetries: number;
 
   constructor() {
     this.connections = new Map(); // sessionId → WebSocket
@@ -68,12 +83,17 @@ export class SidebandManager {
     this.endedSessions = new Set(); // sessionIds that ended — never reattach
     this.holdFloorTimers = new Map(); // sessionId → hold_floor restore timer
     this.pendingToolChoiceResets = new Map(); // sessionId → tool_choice reset fallback timer
+    this.holdRestoreRetries = new Map(); // sessionId → VAD-restore retry count
+    this.toolResetRetries = new Map(); // sessionId → tool_choice-reset retry count
+    this.activeResponses = new Set(); // sessionIds with an in-flight response
     this.pendingTurns = new Map(); // sessionId → in-flight turn-latency state
     this.turnCounters = new Map(); // sessionId → measured-turn counter
     this.maxReconnectAttempts = 3;
     this.reconnectDelayMs = 2000;
     this.keepaliveMs = 20000;
     this.toolChoiceResetFallbackMs = 30000;
+    this.restoreRetryDelayMs = 2000;
+    this.maxRestoreRetries = 10;
   }
 
   /**
@@ -529,6 +549,8 @@ export class SidebandManager {
       clearTimeout(reset);
       this.pendingToolChoiceResets.delete(sessionId);
     }
+    this.holdRestoreRetries.delete(sessionId);
+    this.toolResetRetries.delete(sessionId);
   }
 
   /** Clear the re-grounding interval timer for a session. */
@@ -646,12 +668,21 @@ export class SidebandManager {
         await this.handleToolCall(sessionId, event);
         break;
 
+      // A response is now in flight; triggerTool() refuses to force a second
+      // one on top of it (OpenAI would reject the response.create with
+      // conversation_already_has_active_response while the route reported
+      // success). Cleared on the terminal response.done below.
+      case 'response.created':
+        this.activeResponses.add(sessionId);
+        break;
+
       // ai-therapist-49: out-of-band re-grounding summary finishing. Only acts
       // on responses tagged with metadata.purpose === 'regrounding' (see
       // runRegroundingSummary) — a normal in-conversation response.done is
       // ignored here, its content already streamed via the transcript events
       // above.
       case 'response.done':
+        this.activeResponses.delete(sessionId);
         await this.handleRegroundingResponse(sessionId, event);
         // ai-therapist-103: if an admin trigger forced tool_choice, the turn it
         // forced has now completed — restore tool_choice: 'auto' so the model
@@ -977,6 +1008,17 @@ export class SidebandManager {
    * response can't leave the session stuck in forced-tool mode.
    */
   async triggerTool(sessionId: string, toolName: string, args?: Record<string, unknown>): Promise<void> {
+    // Fail fast if a response is already in flight: OpenAI would reject our
+    // response.create with conversation_already_has_active_response, the
+    // forced tool would never run, and the pending reset would be consumed by
+    // the already-active response's response.done. Surfacing the conflict lets
+    // the route return an honest error instead of a false success.
+    if (this.hasActiveResponse(sessionId)) {
+      throw new Error(
+        'conversation_already_has_active_response: the model is still responding; wait for the current response to finish and retry',
+      );
+    }
+
     await this.updateSession(sessionId, { tool_choice: { type: 'function', name: toolName } });
 
     const argsContext = args && Object.keys(args).length > 0
@@ -1013,7 +1055,27 @@ export class SidebandManager {
     if (timer === undefined) return;
     clearTimeout(timer);
     this.pendingToolChoiceResets.delete(sessionId);
-    if (!this.isConnected(sessionId)) return;
+    if (!this.isConnected(sessionId)) {
+      // The forced tool_choice lives in the OpenAI session and survives a
+      // sideband WS drop — dropping the reset here would leave tool_choice
+      // pinned for the rest of the session. Re-arm a short retry instead
+      // (capped; abandoned outright once the session has ended).
+      const attempts = this.toolResetRetries.get(sessionId) ?? 0;
+      if (this.endedSessions.has(sessionId) || attempts >= this.maxRestoreRetries) {
+        this.toolResetRetries.delete(sessionId);
+        console.warn(`[Sideband] Giving up on tool_choice reset for ${sessionId.substring(0, 12)}... (disconnected)`);
+        return;
+      }
+      this.toolResetRetries.set(sessionId, attempts + 1);
+      const retry = setTimeout(() => {
+        this.resetForcedToolChoice(sessionId).catch(err =>
+          console.error(`[Sideband] tool_choice reset retry failed for ${sessionId.substring(0, 12)}...:`, err));
+      }, this.restoreRetryDelayMs);
+      retry.unref?.();
+      this.pendingToolChoiceResets.set(sessionId, retry);
+      return;
+    }
+    this.toolResetRetries.delete(sessionId);
     try {
       await this.updateSession(sessionId, { tool_choice: 'auto' });
       console.log(`[Sideband] tool_choice reset to auto for ${sessionId.substring(0, 12)}...`);
@@ -1054,7 +1116,27 @@ export class SidebandManager {
       clearTimeout(timer);
       this.holdFloorTimers.delete(sessionId);
     }
-    if (!this.isConnected(sessionId)) return;
+    if (!this.isConnected(sessionId)) {
+      // Disabled VAD lives in the OpenAI session and survives a sideband WS
+      // drop — dropping the restore here would leave the participant unable
+      // to interrupt for the rest of the session. Re-arm a short retry
+      // instead (capped; abandoned outright once the session has ended).
+      const attempts = this.holdRestoreRetries.get(sessionId) ?? 0;
+      if (this.endedSessions.has(sessionId) || attempts >= this.maxRestoreRetries) {
+        this.holdRestoreRetries.delete(sessionId);
+        console.warn(`[Sideband] Giving up on turn_detection restore for ${sessionId.substring(0, 12)}... (disconnected)`);
+        return;
+      }
+      this.holdRestoreRetries.set(sessionId, attempts + 1);
+      const retry = setTimeout(() => {
+        this.restoreTurnDetection(sessionId).catch(err =>
+          console.error(`[Sideband] turn_detection restore retry failed for ${sessionId.substring(0, 12)}...:`, err));
+      }, this.restoreRetryDelayMs);
+      retry.unref?.();
+      this.holdFloorTimers.set(sessionId, retry);
+      return;
+    }
+    this.holdRestoreRetries.delete(sessionId);
     // Single source of truth for the default VAD config (sessionHelpers).
     const { sessionConfigDefault } = await import('../utils/sessionHelpers.js');
     const turnDetection = sessionConfigDefault.session.audio.input.turn_detection;
@@ -1092,13 +1174,34 @@ export class SidebandManager {
       if (this.connections.has(row.session_id)) continue;
       console.log(`[Sideband] Re-attaching orphaned session ${row.session_id.substring(0, 12)}... after restart`);
       try {
-        await this.connect(row.session_id, row.openai_call_id, apiKey);
+        const ws = await this.connect(row.session_id, row.openai_call_id, apiKey);
+        // connect() resolves before the upgrade completes; wait (bounded) for
+        // the socket to open so the sends below don't race the handshake.
+        if (ws.readyState !== WebSocket.OPEN && typeof ws.once === 'function') {
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('Sideband open timed out')), 15000);
+            timer.unref?.();
+            ws.once('open', () => { clearTimeout(timer); resolve(); });
+            ws.once('close', () => { clearTimeout(timer); reject(new Error('Sideband closed before open')); });
+          });
+        }
         await this.injectMessage(
           row.session_id,
           'system',
           '[Monitoring briefly reconnected after a server restart. Continue the conversation naturally — do not mention this.]',
           false,
         );
+        // Defensive control-state reset: the old process may have died while a
+        // hold_floor or forced tool_choice was pending — the OpenAI session
+        // kept that state but the restore timers died with the container.
+        // Re-assert the defaults (same shapes restoreTurnDetection /
+        // resetForcedToolChoice send) so a re-attached session can never stay
+        // uninterruptible or tool-pinned.
+        const { sessionConfigDefault } = await import('../utils/sessionHelpers.js');
+        await this.updateSession(row.session_id, {
+          tool_choice: 'auto',
+          audio: { input: { turn_detection: sessionConfigDefault.session.audio.input.turn_detection } },
+        });
       } catch (err) {
         console.error(`[Sideband] Re-attach failed for ${row.session_id.substring(0, 12)}...:`,
           err instanceof Error ? err.message : err);
@@ -1165,6 +1268,9 @@ export class SidebandManager {
 
     this.connections.delete(sessionId);
     this.stopKeepalive(sessionId);
+    // The WS is gone, so we can no longer observe whether an in-flight
+    // response finished; drop the flag rather than block triggerTool forever.
+    this.activeResponses.delete(sessionId);
 
     try {
       await pool.query(
@@ -1268,6 +1374,7 @@ export class SidebandManager {
     this.sessionKeys.delete(sessionId);
     this.pendingTurns.delete(sessionId);
     this.turnCounters.delete(sessionId);
+    this.activeResponses.delete(sessionId);
   }
 
   /**
@@ -1321,6 +1428,12 @@ export class SidebandManager {
   isConnected(sessionId: string): boolean {
     const ws = this.connections.get(sessionId);
     return !!(ws && ws.readyState === WebSocket.OPEN);
+  }
+
+  /** Whether a model response is currently in flight for the session
+   *  (response.created observed without a terminal response.done yet). */
+  hasActiveResponse(sessionId: string): boolean {
+    return this.activeResponses.has(sessionId);
   }
 
   /**

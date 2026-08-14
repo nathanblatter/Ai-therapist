@@ -37,6 +37,18 @@ const VALID_THEMES = ['default', 'sage', 'ocean', 'dusk', 'dark'];
 export default function usersRoutes(): Router {
   const router = Router();
 
+  // Defense-in-depth for demo isolation: the demo interceptor (demo.routes.ts)
+  // should swallow every /api/users write for 'demo' accounts before it ever
+  // reaches this router, but if a path variant slips past it, reject writes
+  // here too (same swallow shape the interceptor uses, so the demo UI behaves
+  // identically). Preference writes stay real for demo accounts on purpose.
+  router.use('/api/users', (req, res, next) => {
+    if (req.method === 'GET') return next();
+    if (req.session?.userRole !== 'demo') return next();
+    if (/^\/preferences(\/|$)/i.test(req.path)) return next();
+    return res.json({ success: true, demo: true, message: 'Demo mode — changes are not saved.' });
+  });
+
   // GET /api/users - all users (researcher only)
   router.get('/api/users', requireRole('researcher'), async (_req, res) => {
     try {

@@ -41,8 +41,10 @@ function appAs(role: string | null) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
+    // Mirrors the real login session shape (auth.routes.ts): username is
+    // stored directly on the session, NOT under a nested user object.
     req.session = role
-      ? ({ userId: 1, userRole: role, user: { username: 'tester' } } as unknown as typeof req.session)
+      ? ({ userId: 1, userRole: role, username: 'tester' } as unknown as typeof req.session)
       : ({} as unknown as typeof req.session);
     next();
   });
@@ -137,5 +139,36 @@ describe('POST /admin/api/sideband/trigger-tool', () => {
       .send({ sessionId: SESSION_ID, toolName: 'start_breathing_exercise' })
       .expect(500);
     expect(dbMocks.logSidebandAction).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 (not success) when a model response is already in flight', async () => {
+    sidebandMocks.triggerTool.mockRejectedValueOnce(new Error(
+      'conversation_already_has_active_response: the model is still responding; wait for the current response to finish and retry',
+    ));
+    const res = await request(appAs('therapist'))
+      .post('/admin/api/sideband/trigger-tool')
+      .send({ sessionId: SESSION_ID, toolName: 'start_breathing_exercise' })
+      .expect(409);
+    expect(res.body.error).toBe('Model response in progress');
+    expect(dbMocks.logSidebandAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('audit attribution (admin_user from the real session shape)', () => {
+  // The login session stores username directly (req.session.username); the
+  // audit rows must never log admin_user: undefined.
+  it.each([
+    ['inject', '/admin/api/sideband/inject', { sessionId: SESSION_ID, text: 'steer' }],
+    ['interrupt', '/admin/api/sideband/interrupt', { sessionId: SESSION_ID }],
+    ['respond', '/admin/api/sideband/respond', { sessionId: SESSION_ID }],
+    ['update-session', '/admin/api/sideband/update-session', { sessionId: SESSION_ID, instructions: 'be brief' }],
+    ['disconnect', '/admin/api/sideband/disconnect', { sessionId: SESSION_ID }],
+  ])('%s logs admin_user from req.session.username', async (_name, path, body) => {
+    await request(appAs('therapist')).post(path).send(body).expect(200);
+    expect(dbMocks.logSidebandAction).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.any(String),
+      expect.objectContaining({ admin_user: 'tester' }),
+    );
   });
 });

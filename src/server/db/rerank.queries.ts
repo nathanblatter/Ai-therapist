@@ -76,7 +76,9 @@ export interface ChunkRetrievalStats {
 /** Per-chunk usage stats aggregated from rag_rerank_decisions: how often each
  *  chunk was retrieved (appeared as a candidate), how often it actually won
  *  (appeared in chosen), and when it was last seen. Powers the dead-weight /
- *  workhorse badges in the Knowledge Base admin (ai-therapist-116). */
+ *  workhorse badges in the Knowledge Base admin (ai-therapist-116).
+ *  Bounded to the last 90 days: the badges are about RECENT usage, and the
+ *  bound keeps this off a full scan of an ever-growing decisions table. */
 export async function getChunkRetrievalStats(): Promise<ChunkRetrievalStats[]> {
   const result = await pool.query<ChunkRetrievalStats>(
     `WITH retrieved AS (
@@ -85,6 +87,7 @@ export async function getChunkRetrievalStats(): Promise<ChunkRetrievalStats[]> {
               MAX(d.created_at) AS last_retrieved
        FROM rag_rerank_decisions d
        CROSS JOIN LATERAL jsonb_array_elements(d.candidates) AS c(value)
+       WHERE d.created_at >= NOW() - INTERVAL '90 days'
        GROUP BY 1
      ),
      chosen AS (
@@ -93,6 +96,7 @@ export async function getChunkRetrievalStats(): Promise<ChunkRetrievalStats[]> {
               MAX(d.created_at) AS last_chosen
        FROM rag_rerank_decisions d
        CROSS JOIN LATERAL jsonb_array_elements_text(d.chosen) AS c(value)
+       WHERE d.created_at >= NOW() - INTERVAL '90 days'
        GROUP BY 1
      )
      SELECT COALESCE(r.chunk_id, ch.chunk_id) AS chunk_id,

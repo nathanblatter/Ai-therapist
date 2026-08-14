@@ -107,7 +107,7 @@ export default function sidebandRoutes(): Router {
       await sidebandManager.updateSession(sessionId, payload);
 
       await logSidebandAction(sessionId, 'Session config updated via sideband', {
-        admin_user: req.session.user?.username,
+        admin_user: req.session.username,
         action: 'update_session',
         fields: Object.keys(payload),
       });
@@ -136,7 +136,7 @@ export default function sidebandRoutes(): Router {
       await sidebandManager.interrupt(sessionId);
 
       await logSidebandAction(sessionId, 'AI response interrupted via sideband', {
-        admin_user: req.session.user?.username,
+        admin_user: req.session.username,
         action: 'interrupt',
       });
 
@@ -166,7 +166,7 @@ export default function sidebandRoutes(): Router {
       await sidebandManager.injectMessage(sessionId, role, text.trim(), Boolean(respond));
 
       await logSidebandAction(sessionId, `Injected ${role} message via sideband`, {
-        admin_user: req.session.user?.username,
+        admin_user: req.session.username,
         action: 'inject_message',
         role,
         respond: Boolean(respond),
@@ -194,7 +194,7 @@ export default function sidebandRoutes(): Router {
       await sidebandManager.createResponse(sessionId, response && typeof response === 'object' ? response : undefined);
 
       await logSidebandAction(sessionId, 'Forced response via sideband', {
-        admin_user: req.session.user?.username,
+        admin_user: req.session.username,
         action: 'force_response',
         out_of_band: Boolean(response),
       });
@@ -240,7 +240,7 @@ export default function sidebandRoutes(): Router {
       await sidebandManager.triggerTool(sessionId, toolName, args as Record<string, unknown> | undefined);
 
       await logSidebandAction(sessionId, `Admin triggered tool ${toolName} via sideband`, {
-        admin_user: req.session.user?.username,
+        admin_user: req.session.username,
         action: 'trigger_tool',
         tool: toolName,
         args: args ?? null,
@@ -248,8 +248,18 @@ export default function sidebandRoutes(): Router {
 
       res.json({ success: true, message: `Tool ${toolName} triggered` });
     } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      // A response already in flight is a conflict, not a server fault: the
+      // forced response.create would be rejected by OpenAI, so surface it
+      // honestly instead of reporting success (or a generic 500).
+      if (message.includes('conversation_already_has_active_response')) {
+        return res.status(409).json({
+          error: 'Model response in progress',
+          details: 'The model is still responding; wait for the current response to finish and retry.',
+        });
+      }
       console.error('Failed to trigger tool via sideband:', error);
-      res.status(500).json({ error: 'Failed to trigger tool', details: error instanceof Error ? error.message : String(error) });
+      res.status(500).json({ error: 'Failed to trigger tool', details: message });
     }
   });
 
@@ -271,7 +281,7 @@ export default function sidebandRoutes(): Router {
       await sidebandManager.disconnect(sessionId);
 
       await logSidebandAction(sessionId, 'Sideband connection manually disconnected', {
-        admin_user: req.session.user?.username,
+        admin_user: req.session.username,
         action: 'disconnect_sideband',
       });
 

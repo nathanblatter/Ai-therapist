@@ -11,11 +11,12 @@ vi.mock('../../db/index.js', () => ({
   insertClientEvent: insertClientEventMock,
 }));
 
-import clientEventsRoutes, { capDetail, MAX_DETAIL_BYTES, CLIENT_EVENT_KINDS } from './clientEvents.routes.js';
+import clientEventsRoutes, { capDetail, cleanSessionId, MAX_DETAIL_BYTES, CLIENT_EVENT_KINDS } from './clientEvents.routes.js';
 
 function makeApp(sessionUserId: number | null = null) {
   const app = express();
-  app.use(express.json());
+  // No app-level express.json() on purpose: the route mounts its own parser
+  // with a 4kb limit (index.ts skips the global parser for this path too).
   app.use((req, _res, next) => {
     (req as unknown as { session: Record<string, unknown> }).session =
       sessionUserId ? { userId: sessionUserId } : {};
@@ -74,12 +75,12 @@ describe('POST /api/client-events', () => {
   it('stores sessionId, session userId, and capped detail', async () => {
     const res = await request(makeApp(7))
       .post('/api/client-events')
-      .send({ kind: 'webrtc_failed', sessionId: 'sess-abc', detail: { stage: 'start' } });
+      .send({ kind: 'webrtc_failed', sessionId: 'sess_abc123', detail: { stage: 'start' } });
     expect(res.status).toBe(204);
     expect(insertClientEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'webrtc_failed',
-        sessionId: 'sess-abc',
+        sessionId: 'sess_abc123',
         userId: 7,
         detail: { stage: 'start' },
       })
@@ -87,14 +88,39 @@ describe('POST /api/client-events', () => {
   });
 
   it('drops an over-long sessionId rather than storing it', async () => {
-    await request(makeApp()).post('/api/client-events').send({ kind: 'js_error', sessionId: 'x'.repeat(200) });
+    await request(makeApp()).post('/api/client-events').send({ kind: 'js_error', sessionId: 'sess_' + 'x'.repeat(200) });
     expect(insertClientEventMock).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null }));
   });
 
-  it('truncates an oversized detail payload', async () => {
+  it('nulls sessionIds that do not match the app id shapes', async () => {
+    for (const bad of ['sess-abc', 'DROP TABLE;--', 'random', 'sess_', 'sess_abc def']) {
+      insertClientEventMock.mockClear();
+      await request(makeApp()).post('/api/client-events').send({ kind: 'js_error', sessionId: bad });
+      expect(insertClientEventMock).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null }));
+    }
+  });
+
+  it('accepts each real session id prefix (sess_/chat_/redteam_)', () => {
+    expect(cleanSessionId('sess_CAZFtG3xyz')).toBe('sess_CAZFtG3xyz');
+    expect(cleanSessionId('chat_1723600000_ab12cd')).toBe('chat_1723600000_ab12cd');
+    expect(cleanSessionId('redteam_rt_1723600000_x1y2z3')).toBe('redteam_rt_1723600000_x1y2z3');
+    expect(cleanSessionId(42)).toBeNull();
+    expect(cleanSessionId(null)).toBeNull();
+  });
+
+  it('rejects an oversized body pre-parse with 413 (route-local 4kb json limit)', async () => {
+    const res = await request(makeApp())
+      .post('/api/client-events')
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ kind: 'js_error', detail: { blob: 'z'.repeat(10_000) } }));
+    expect(res.status).toBe(413);
+    expect(insertClientEventMock).not.toHaveBeenCalled();
+  });
+
+  it('truncates an oversized detail payload (over the 2KB detail cap, under the 4kb body limit)', async () => {
     await request(makeApp())
       .post('/api/client-events')
-      .send({ kind: 'js_error', detail: { message: 'y'.repeat(5000) } });
+      .send({ kind: 'js_error', detail: { message: 'y'.repeat(3000) } });
     expect(insertClientEventMock).toHaveBeenCalledWith(
       expect.objectContaining({ detail: expect.objectContaining({ truncated: true }) })
     );

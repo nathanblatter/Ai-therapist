@@ -45,6 +45,7 @@ export default function analyticsRoutes(): Router {
         session_depth: data.session_depth || [],
         engagement_pace: data.engagement_pace || {},
         response_times: data.response_times || {},
+        chat_response_times: data.chat_response_times || {},
         turn_taking: data.turn_taking || {},
         sideband_reliability: data.sideband_reliability || {},
       });
