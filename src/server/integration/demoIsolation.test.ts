@@ -88,7 +88,9 @@ beforeAll(async () => {
   });
 
   app = (await import('../index.js')).app as Express;
-});
+  // Importing the server graph vite-transforms hundreds of modules; on a loaded
+  // machine (or cold cache) that legitimately exceeds the 10s default.
+}, 60_000);
 
 /** Queries issued during a window, excluding express-session bookkeeping. */
 function appQueriesSince(callIndex: number): string[] {

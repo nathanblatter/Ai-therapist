@@ -45,7 +45,9 @@ beforeAll(async () => {
   // thanks to the entrypoint guard, does NOT start an HTTP listener.
   app = (await import('../index.js')).app as Express;
   ({ invalidateConfigCache } = await import('../utils/sessionHelpers.js'));
-});
+  // Importing the server graph vite-transforms hundreds of modules; on a loaded
+  // machine (or cold cache) that legitimately exceeds the 10s default.
+}, 60_000);
 
 beforeEach(() => invalidateConfigCache());
 
