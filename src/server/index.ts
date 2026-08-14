@@ -43,6 +43,7 @@ import sidebandRoutes from "./routes/admin/sideband.routes.js";
 import insightsRoutes from "./routes/admin/insights.routes.js";
 import participantProfileRoutes from "./routes/admin/participantProfile.routes.js";
 import knowledgeRoutes from "./routes/admin/knowledge.routes.js";
+import prepRoutes from "./routes/admin/prep.routes.js";
 import evalsRoutes from "./routes/admin/evals.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
@@ -582,6 +583,9 @@ app.use(insightsRoutes());
 
 // Participant profile (memory-first clinical view + per-user sessions) -> routes/admin/participantProfile.routes.ts
 app.use(participantProfileRoutes());
+
+// Clinician pre-session prep digest -> routes/admin/prep.routes.ts
+app.use(prepRoutes());
 
 // RAG knowledge-base curation (Knowledge Base tab) -> routes/admin/knowledge.routes.ts.
 app.use(knowledgeRoutes());

@@ -13,6 +13,8 @@ import {
   getOwnProgress,
   getUserLatestSafetyPlan,
   listUserWorksheetInstances,
+  listUserAssignments,
+  completeAssignment,
 } from '../../db/index.js';
 
 export default function progressRoutes(): Router {
@@ -51,6 +53,40 @@ export default function progressRoutes(): Router {
     } catch (error) {
       console.error('Error fetching own worksheets:', error);
       res.status(500).json({ error: 'Failed to fetch worksheets' });
+    }
+  });
+
+  // GET /api/me/assignments - open + recent practice assignments, newest first
+  router.get('/api/me/assignments', progressLimiter, requireAuth, async (req, res) => {
+    try {
+      const assignments = await listUserAssignments(req.session.userId!, { limit: 50 });
+      res.json({ assignments });
+    } catch (error) {
+      console.error('Error fetching own assignments:', error);
+      res.status(500).json({ error: 'Failed to fetch assignments' });
+    }
+  });
+
+  // POST /api/me/assignments/:id/complete {note?} - mark one of YOUR OWN
+  // assignments done. completeAssignment is scoped by (id, user_id), so a
+  // guessed id belonging to someone else just comes back null -> 404.
+  router.post('/api/me/assignments/:id/complete', progressLimiter, requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'Invalid assignment id' });
+      }
+      const note = typeof req.body?.note === 'string' && req.body.note.trim()
+        ? req.body.note.trim().substring(0, 500)
+        : null;
+      const assignment = await completeAssignment(id, req.session.userId!, note);
+      if (!assignment) {
+        return res.status(404).json({ error: 'Assignment not found' });
+      }
+      res.json({ assignment });
+    } catch (error) {
+      console.error('Error completing assignment:', error);
+      res.status(500).json({ error: 'Failed to complete assignment' });
     }
   });
 

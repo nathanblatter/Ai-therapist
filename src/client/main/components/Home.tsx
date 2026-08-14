@@ -8,7 +8,7 @@
 // the main participant bundle doesn't ship Recharts today (only the admin
 // client does), and these tiny labeled small-multiples don't justify adding it.
 import { useEffect, useState } from 'react';
-import { TrendingUp, FileText, Shield, ChevronRight, Phone } from 'react-feather';
+import { TrendingUp, FileText, Shield, ChevronRight, Phone, Target, CheckCircle } from 'react-feather';
 import { Shell, SafetyPlanCard, type SafetyPlanData, type CustomWorksheetSection } from './ToolOverlays';
 
 // ---------- server payload shapes (dates arrive as ISO strings) ----------
@@ -44,6 +44,18 @@ interface WorksheetItem {
   status: 'draft' | 'completed';
   created_at: string;
   completed_at: string | null;
+}
+
+interface AssignmentItem {
+  id: number;
+  title: string;
+  description: string;
+  kind: 'worksheet' | 'exercise' | 'observation' | 'custom';
+  suggested_frequency: string | null;
+  status: 'assigned' | 'completed' | 'skipped';
+  assigned_at: string;
+  completed_at: string | null;
+  completion_note: string | null;
 }
 
 // ---------- small helpers ----------
@@ -113,6 +125,130 @@ function TrendRow({ label, values, min, max, latestLabel, dateRange }: {
   );
 }
 
+// ---------- practice assignments card ----------
+
+/** Open practice with a "Mark done" flow (+ optional short note); anything
+ *  completed in the last week stays visible, checked, for the small win. */
+function PracticeCard({ assignments, onCompleted }: {
+  assignments: AssignmentItem[];
+  onCompleted: (updated: AssignmentItem) => void;
+}) {
+  const [noteFor, setNoteFor] = useState<number | null>(null);
+  const [noteText, setNoteText] = useState('');
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const open = assignments.filter(a => a.status === 'assigned');
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  const doneThisWeek = assignments.filter(
+    a => a.status === 'completed' && a.completed_at !== null && new Date(a.completed_at).getTime() >= weekAgo
+  );
+  if (open.length === 0 && doneThisWeek.length === 0) return null;
+
+  const markDone = async (assignment: AssignmentItem, note: string) => {
+    setBusyId(assignment.id);
+    try {
+      const res = await fetch(`/api/me/assignments/${assignment.id}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(note.trim() ? { note: note.trim() } : {}),
+      });
+      if (res.ok) {
+        const data = await res.json() as { assignment: AssignmentItem };
+        onCompleted(data.assignment);
+        setNoteFor(null);
+        setNoteText('');
+      }
+    } catch {
+      /* leave the item as-is; they can try again */
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow p-5 sm:p-6">
+      <div className="flex items-center gap-2 mb-3">
+        <Target size={18} className="text-blue-600" aria-hidden="true" />
+        <h3 className="text-base font-semibold text-gray-800">Your practice</h3>
+      </div>
+      {open.length > 0 && (
+        <p className="text-sm text-gray-500 mb-2">
+          What you and your AI companion agreed to try between conversations.
+        </p>
+      )}
+      <ul className="divide-y divide-gray-100">
+        {open.map(a => (
+          <li key={a.id} className="py-3 space-y-2">
+            <div className="flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-800">{a.title}</p>
+                <p className="text-sm text-gray-500">{a.description}</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  From your conversation {friendlyDay(a.assigned_at)}
+                  {a.suggested_frequency ? ` · ${a.suggested_frequency}` : ''}
+                </p>
+              </div>
+              {noteFor !== a.id && (
+                <button
+                  onClick={() => { setNoteFor(a.id); setNoteText(''); }}
+                  disabled={busyId !== null}
+                  className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white min-h-[36px]"
+                >
+                  Mark done
+                </button>
+              )}
+            </div>
+            {noteFor === a.id && (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={noteText}
+                  onChange={e => setNoteText(e.target.value)}
+                  maxLength={500}
+                  placeholder="How did it go? (optional)"
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => void markDone(a, noteText)}
+                    disabled={busyId !== null}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white min-h-[36px]"
+                  >
+                    {busyId === a.id ? 'Saving…' : 'Done'}
+                  </button>
+                  <button
+                    onClick={() => { setNoteFor(null); setNoteText(''); }}
+                    disabled={busyId !== null}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg text-gray-500 hover:bg-gray-50 min-h-[36px]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </li>
+        ))}
+        {doneThisWeek.map(a => (
+          <li key={a.id} className="py-3 flex items-start gap-3">
+            <CheckCircle size={16} className="text-green-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-500 line-through decoration-gray-300">{a.title}</p>
+              <p className="text-xs text-gray-400">
+                Done {a.completed_at ? friendlyDay(a.completed_at) : ''}
+                {a.completion_note ? ` — "${a.completion_note}"` : ''}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-gray-400 mt-2">
+        No pressure — practice is something to notice, not a score. You can talk through any of it next time.
+      </p>
+    </div>
+  );
+}
+
 // ---------- read-only worksheet view ----------
 
 function WorksheetReadOnly({ worksheet, onClose }: { worksheet: WorksheetItem; onClose: () => void }) {
@@ -155,6 +291,7 @@ export default function Home() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [progress, setProgress] = useState<OwnProgress | null>(null);
   const [worksheets, setWorksheets] = useState<WorksheetItem[] | null>(null);
+  const [assignments, setAssignments] = useState<AssignmentItem[] | null>(null);
   const [safetyPlan, setSafetyPlan] = useState<SafetyPlanData | null>(null);
   const [openWorksheet, setOpenWorksheet] = useState<WorksheetItem | null>(null);
   const [showSafetyPlan, setShowSafetyPlan] = useState(false);
@@ -175,6 +312,13 @@ export default function Home() {
         fetch('/api/me/progress', { credentials: 'include' })
           .then(res => (res.ok ? res.json() : null))
           .then((p: OwnProgress | null) => { if (!cancelled && p) setProgress(p); })
+          .catch(() => { /* card stays hidden */ });
+
+        fetch('/api/me/assignments', { credentials: 'include' })
+          .then(res => (res.ok ? res.json() : null))
+          .then((d: { assignments: AssignmentItem[] } | null) => {
+            if (!cancelled && d && Array.isArray(d.assignments)) setAssignments(d.assignments);
+          })
           .catch(() => { /* card stays hidden */ });
 
         fetch('/api/me/worksheets', { credentials: 'include' })
@@ -312,6 +456,16 @@ export default function Home() {
             These are brief check-ins over time, not a diagnosis or a grade.
           </p>
         </div>
+      )}
+
+      {/* Your practice (between-session assignments) */}
+      {assignments !== null && (
+        <PracticeCard
+          assignments={assignments}
+          onCompleted={updated =>
+            setAssignments(prev => (prev ? prev.map(a => (a.id === updated.id ? updated : a)) : prev))
+          }
+        />
       )}
 
       {/* Your worksheets */}

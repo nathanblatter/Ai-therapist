@@ -4,6 +4,7 @@
 // both artifacts derive from unredacted content).
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw, CheckCircle } from 'react-feather';
+import PrepBrief from './PrepBrief';
 
 interface SessionSummary {
   headline?: string;
@@ -46,9 +47,11 @@ interface SessionInsightsPanelProps {
   userRole: string | null;
   sessionStatus?: string;
   checkin?: Checkin | null;
+  /** The session's participant, for the pre-session prep digest (null/absent = anonymous). */
+  participantUserId?: number | null;
 }
 
-export default function SessionInsightsPanel({ sessionId, userRole, sessionStatus, checkin }: SessionInsightsPanelProps) {
+export default function SessionInsightsPanel({ sessionId, userRole, sessionStatus, checkin, participantUserId }: SessionInsightsPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [insights, setInsights] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(false);
@@ -150,6 +153,10 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
 
       {expanded && (
         <div className="px-4 pb-4 space-y-4 text-sm">
+          {/* Structured pre-session prep digest (ai-therapist-123), keyed by
+              participant — only for logged-in participants. */}
+          {typeof participantUserId === 'number' && <PrepBrief userId={participantUserId} />}
+
           {checkin && (
             <div>
               <h4 className="font-semibold text-gray-700 mb-1">Pre-session check-in</h4>
