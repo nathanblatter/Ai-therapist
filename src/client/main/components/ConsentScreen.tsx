@@ -7,7 +7,8 @@
 // client-rendered because it varies with features.session_recording_enabled.
 // Acceptance is recorded server-side (timestamp + version + body hash) via
 // POST /api/consent/accept.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Mic } from 'react-feather';
 
 interface ConsentScreenProps {
   isOpen: boolean;
@@ -83,6 +84,21 @@ export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion
   const [acknowledged, setAcknowledged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Shared modal a11y: Escape closes (same path as Cancel) and focus moves
+  // into the dialog when it opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!panelRef.current?.contains(document.activeElement)) {
+      panelRef.current?.focus();
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onCancel]);
 
   if (!isOpen) return null;
 
@@ -119,7 +135,7 @@ export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion
         aria-modal="true"
         aria-labelledby="consent-heading"
       >
-        <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
+        <div ref={panelRef} tabIndex={-1} className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 focus:outline-none">
           {reconsentRequired && (
             <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-800">
               Our consent terms have been updated since you last agreed. Please review and re-accept to continue.
@@ -131,7 +147,7 @@ export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion
           {recordingEnabled && (
             <ul className="space-y-3 text-sm text-gray-700 mb-5 -mt-2">
               <li className="flex gap-2">
-                <span aria-hidden="true">🎙️</span>
+                <Mic size={16} className="mt-0.5 flex-shrink-0 text-gray-500" aria-hidden="true" />
                 <span>
                   <strong>Audio recording.</strong> This session's audio (your microphone and the
                   assistant's voice) is recorded and stored securely for the duration of the retention

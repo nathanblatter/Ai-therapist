@@ -1,38 +1,48 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, MicOff, PhoneOff, Send, Play, Settings, AlertCircle } from "react-feather";
+import { Mic, MicOff, PhoneOff, Send, Settings, AlertCircle } from "react-feather";
 import { toast } from '../../shared/components/Toast';
 
 interface SessionStoppedProps {
   startSession: () => void;
   onOpenSettings: () => void;
+  /** True while a session start is in flight (token fetch → data channel open). */
+  isConnecting: boolean;
+  /** True when the participant has hit the daily session limit. */
+  rateLimited: boolean;
+  /** ISO timestamp for when the daily limit resets (if rate limited). */
+  rateLimitResetsAt: string | null;
 }
 
-function SessionStopped({ startSession, onOpenSettings }: SessionStoppedProps) {
-  const [isActivating, setIsActivating] = useState(false);
-
-  function handleStartSession() {
-    if (isActivating) return;
-    setIsActivating(true);
-    startSession();
-  }
+function SessionStopped({ startSession, onOpenSettings, isConnecting, rateLimited, rateLimitResetsAt }: SessionStoppedProps) {
+  const resetLabel = rateLimitResetsAt
+    ? new Date(rateLimitResetsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : null;
 
   return (
-    <div className="flex items-center justify-center w-full h-full gap-3">
-      <button
-        className="p-3 bg-royal hover:bg-green-700 text-white rounded-full font-semibold px-4 py-3 flex items-center justify-center gap-2 min-h-[44px] min-w-[44px]"
-        onClick={handleStartSession}
-        disabled={isActivating}
-        aria-label="Start new therapy session"
-      >
-        <span className="">Start Session</span>
-      </button>
-      <button
-        className="p-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-full flex items-center justify-center min-h-[44px] min-w-[44px]"
-        onClick={onOpenSettings}
-        aria-label="Open session settings"
-      >
-        <Settings size={20} />
-      </button>
+    <div className="flex flex-col items-center justify-center w-full h-full gap-2">
+      <div className="flex items-center justify-center gap-3">
+        <button
+          className="p-3 bg-royal hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-full font-semibold px-4 py-3 flex items-center justify-center gap-2 min-h-[44px] min-w-[44px]"
+          onClick={startSession}
+          disabled={isConnecting || rateLimited}
+          aria-label={isConnecting ? "Connecting to session" : "Start new therapy session"}
+        >
+          <span className="">{isConnecting ? "Connecting..." : "Start Session"}</span>
+        </button>
+        <button
+          className="p-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-full flex items-center justify-center min-h-[44px] min-w-[44px]"
+          onClick={onOpenSettings}
+          aria-label="Open session settings"
+        >
+          <Settings size={20} />
+        </button>
+      </div>
+      {rateLimited && (
+        <p className="text-sm text-amber-700" role="status">
+          You&apos;ve reached today&apos;s session limit
+          {resetLabel ? ` — resets at ${resetLabel}` : ' — it resets tonight'}.
+        </p>
+      )}
     </div>
   );
 }
@@ -231,6 +241,9 @@ interface SessionControlsProps {
   chatEnabled: boolean;
   sessionType: string | null;
   micLocked?: boolean;
+  isConnecting?: boolean;
+  rateLimited?: boolean;
+  rateLimitResetsAt?: string | null;
 }
 
 export default function SessionControls({
@@ -243,6 +256,9 @@ export default function SessionControls({
   chatEnabled,
   sessionType,
   micLocked = false,
+  isConnecting = false,
+  rateLimited = false,
+  rateLimitResetsAt = null,
 }: SessionControlsProps) {
   return (
     <div className="flex gap-4 border-t-2 border-gray-200 h-full pt-4">
@@ -256,7 +272,13 @@ export default function SessionControls({
           micLocked={micLocked}
         />
       ) : (
-        <SessionStopped startSession={startSession} onOpenSettings={onOpenSettings} />
+        <SessionStopped
+          startSession={startSession}
+          onOpenSettings={onOpenSettings}
+          isConnecting={isConnecting}
+          rateLimited={rateLimited}
+          rateLimitResetsAt={rateLimitResetsAt}
+        />
       )}
     </div>
   );

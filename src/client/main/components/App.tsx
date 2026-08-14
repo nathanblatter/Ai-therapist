@@ -129,6 +129,20 @@ export default function App() {
   const wrapUpFailsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sessionType, setSessionType] = useState<string | null>(null); // 'realtime' or 'chat'
 
+  // Start-flow feedback (ai-therapist-117): true from the moment the
+  // participant confirms the check-in until the data channel opens (realtime)
+  // or the chat session is created — drives the "Connecting..." state on the
+  // Start button and guards against double-clicks. Always cleared on error.
+  const [isConnecting, setIsConnecting] = useState(false);
+  // Early rate-limit check: fetched on mount so participants learn they've
+  // hit the daily cap BEFORE going through consent + check-in.
+  const [rateLimitInfo, setRateLimitInfo] = useState<{ limited: boolean; resetsAt: string | null }>({
+    limited: false,
+    resetsAt: null,
+  });
+  // Debounce for WebRTC 'disconnected' (it can self-heal); 'failed' acts immediately.
+  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Consent (ai-therapist-24): must be accepted before a session can start.
   const [isConsentOpen, setIsConsentOpen] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
@@ -147,6 +161,17 @@ export default function App() {
       .then(res => res.json())
       .then(data => setCrisisContact(data))
       .catch(err => console.error('Failed to fetch crisis contact:', err));
+
+    // Fetch daily-session rate-limit status so a capped participant sees the
+    // limit up front instead of after consent + check-in (429 on /token).
+    fetch('/api/rate-limits/status', { credentials: 'include' })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data && data.is_rate_limited) {
+          setRateLimitInfo({ limited: true, resetsAt: data.limit_resets_at ?? null });
+        }
+      })
+      .catch(err => console.error('Failed to fetch rate limit status:', err));
 
     // Fetch features config
     fetch('/api/config/features')
@@ -302,13 +327,54 @@ export default function App() {
     }
   }
 
-  // Wrapper function that routes to realtime or chat-only based on features
+  // Wrapper function that routes to realtime or chat-only based on features.
+  // Any failure on the start path (mic permission, token fetch, SDP exchange)
+  // lands here: show a specific toast and always re-enable the Start button
+  // instead of failing silently (ai-therapist-117).
   async function startSession(checkin: CheckinData | null = null) {
     setPostSessionData(null); // clear the previous session's post-session screen
-    if (features.voice_enabled === false) {
-      await startChatSession(checkin);
-    } else {
-      await startRealtimeSession(checkin);
+    setIsConnecting(true);
+    try {
+      if (features.voice_enabled === false) {
+        await startChatSession(checkin);
+        // Chat has no data channel; the session is live once the fetch returns.
+        setIsConnecting(false);
+      } else {
+        await startRealtimeSession(checkin);
+        // isConnecting stays true until the data channel opens (or an early
+        // return inside startRealtimeSession already cleared it).
+      }
+    } catch (error) {
+      console.error('Failed to start session:', error);
+      const name = error instanceof DOMException ? error.name : '';
+      if (name === 'NotAllowedError' || name === 'NotFoundError') {
+        toast.error('We could not access your microphone. Please allow microphone access in your browser settings (or plug one in) and try again.');
+      } else {
+        toast.error('Could not start your session — there was a problem reaching the server. Please check your connection and try again.');
+      }
+      setIsConnecting(false);
+      // Best-effort teardown of whatever the failed start left behind
+      // (socket, peer connection, mic track) so the next attempt is clean.
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      if (dataChannelRef.current) {
+        dataChannelRef.current.close();
+        dataChannelRef.current = null;
+      }
+      if (peerConnection.current) {
+        peerConnection.current.getSenders().forEach((sender) => {
+          if (sender.track) sender.track.stop();
+        });
+        peerConnection.current.close();
+        peerConnection.current = null;
+      }
+      setLocalStream(null);
+      setSessionId(null);
+      setSessionType(null);
+      setSessionEndTime(null);
+      setTimeRemaining(null);
     }
   }
 
@@ -328,6 +394,7 @@ export default function App() {
         const errorData = await response.json();
         toast.error(errorData.message || "You have reached your session limit. Please try again later.");
         console.warn("Rate limit exceeded:", errorData);
+        setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
         return;
       }
 
@@ -395,7 +462,13 @@ export default function App() {
       const errorData = await tokenResponse.json();
       toast.error(errorData.message || "You have reached your session limit. Please try again later.");
       console.warn("Rate limit exceeded:", errorData);
+      setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
+      setIsConnecting(false);
       return;
+    }
+
+    if (!tokenResponse.ok) {
+      throw new Error(`Token request failed with status ${tokenResponse.status}`);
     }
 
     const data = await tokenResponse.json();
@@ -405,6 +478,7 @@ export default function App() {
     if (data.session?.exists) {
       toast.warning(data.message || "You already have an active session. Please end it before starting a new one.");
       console.warn("Active session already exists:", data.session.id);
+      setIsConnecting(false);
       return; // Don't proceed with session creation
     }
 
@@ -586,8 +660,43 @@ export default function App() {
       message: "Session settings",
       extras: trimmedData, // This will include trimmed session metadata
     });
-    // Create a peer connection
+    // Create a peer connection. Assigned to the ref immediately so a failure
+    // later in the start path (mic permission, SDP exchange) can be torn down
+    // from startSession()'s catch block.
     const pc = new RTCPeerConnection();
+    peerConnection.current = pc;
+
+    // Surface connection drops (ai-therapist-117): 'failed' ends the session
+    // right away; 'disconnected' can self-heal, so give it a short grace
+    // period before treating it as a drop. Either way the participant gets an
+    // explanation and the post-session screen instead of a frozen orb.
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === 'connected') {
+        if (disconnectTimerRef.current) {
+          clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
+      } else if (state === 'failed') {
+        if (disconnectTimerRef.current) {
+          clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
+        toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+        void stopSessionRef.current();
+      } else if (state === 'disconnected') {
+        if (!disconnectTimerRef.current) {
+          disconnectTimerRef.current = setTimeout(() => {
+            disconnectTimerRef.current = null;
+            const s = pc.connectionState;
+            if (s === 'disconnected' || s === 'failed') {
+              toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+              void stopSessionRef.current();
+            }
+          }, 7000);
+        }
+      }
+    };
     // Set up to play remote audio from the model
     const audioEl = document.createElement("audio");
     audioEl.autoplay = true;
@@ -684,6 +793,7 @@ export default function App() {
 
     dc.addEventListener("open", () => {
       console.log('[DataChannel] Channel opened');
+      setIsConnecting(false);
       setIsSessionActive(true);
       setEvents([]);
       setMessages([]);
@@ -773,17 +883,23 @@ export default function App() {
         });
       }
     }
-
-    peerConnection.current = pc;
   }
 
   async function stopSession() {
     setActiveExercise(null);
     setToolUI(null);
     setMicLocked(false);
+    setIsConnecting(false);
     if (wrapUpFailsafeRef.current) {
       clearTimeout(wrapUpFailsafeRef.current);
       wrapUpFailsafeRef.current = null;
+    }
+    if (disconnectTimerRef.current) {
+      clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = null;
+    }
+    if (peerConnection.current) {
+      peerConnection.current.onconnectionstatechange = null;
     }
 
     // Snapshot what the participant chose to keep/share before clearing
@@ -1252,6 +1368,16 @@ export default function App() {
           )}
         </div>
         <div className="w-full max-w-4xl p-2 sm:p-4">
+          {/* Persistent wrap-up notice (ai-therapist-101/112): the transient
+              toast was easy to miss; this stays visible until teardown. */}
+          {isSessionActive && micLocked && (
+            <div
+              className="mb-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm text-center px-3 py-2"
+              role="status"
+            >
+              Wrapping up your session... the AI is saying goodbye, and the session will close in a moment.
+            </div>
+          )}
           <SessionControls
             startSession={() => {
               if (consentAccepted) {
@@ -1268,6 +1394,9 @@ export default function App() {
             chatEnabled={features.chat_enabled !== false}
             sessionType={sessionType}
             micLocked={micLocked}
+            isConnecting={isConnecting}
+            rateLimited={rateLimitInfo.limited}
+            rateLimitResetsAt={rateLimitInfo.resetsAt}
           />
         </div>
       </main>

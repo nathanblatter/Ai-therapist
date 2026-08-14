@@ -35,7 +35,7 @@ export default function ChatLog({ messages, assistantStream }: ChatLogProps) {
             aria-label={`${msg.role === "user" ? "Your message" : msg.role === "assistant" ? "Therapist message" : "System message"}`}
           >
             <div
-              className={`max-w-xs px-4 py-2 rounded-2xl whitespace-pre-line ${
+              className={`max-w-xs sm:max-w-md lg:max-w-lg px-4 py-2 rounded-2xl whitespace-pre-line ${
                 msg.role === "system"
                   ? "bg-yellow-100 text-yellow-900 border-2 border-yellow-400 italic text-sm font-medium mb-2"
                   : msg.role === "user"
@@ -51,7 +51,7 @@ export default function ChatLog({ messages, assistantStream }: ChatLogProps) {
 
       {assistantStream && (
         <div className="flex justify-start" role="status" aria-label="Therapist is typing">
-          <div className="max-w-xs px-4 py-2 rounded-2xl bg-gray-200 text-black rounded-bl-none opacity-70 whitespace-pre-line" aria-live="assertive">
+          <div className="max-w-xs sm:max-w-md lg:max-w-lg px-4 py-2 rounded-2xl bg-gray-200 text-black rounded-bl-none opacity-70 whitespace-pre-line" aria-live="assertive">
             {assistantStream}
           </div>
         </div>
