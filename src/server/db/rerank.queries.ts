@@ -47,16 +47,61 @@ export interface RerankDecisionRow {
   created_at: Date;
 }
 
-/** Recent rerank decisions, newest first, optionally filtered by tool. */
-export async function listRerankDecisions(filter: { toolName?: string | null; limit?: number }): Promise<RerankDecisionRow[]> {
+/** Recent rerank decisions, newest first, optionally filtered by tool and/or session. */
+export async function listRerankDecisions(filter: { toolName?: string | null; sessionId?: string | null; limit?: number }): Promise<RerankDecisionRow[]> {
   const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
   const toolName = filter.toolName && filter.toolName !== 'all' ? filter.toolName : null;
+  const sessionId = filter.sessionId && filter.sessionId.trim() ? filter.sessionId.trim() : null;
   const result = await pool.query<RerankDecisionRow>(
     `SELECT * FROM rag_rerank_decisions
      WHERE ($1::text IS NULL OR tool_name = $1)
+       AND ($3::text IS NULL OR session_id = $3)
      ORDER BY created_at DESC
      LIMIT $2`,
-    [toolName, limit],
+    [toolName, limit, sessionId],
+  );
+  return result.rows;
+}
+
+export interface ChunkRetrievalStats {
+  chunk_id: number;
+  /** Times this chunk appeared in a rerank candidate set (i.e. was retrieved). */
+  retrieved_count: number;
+  /** Times this chunk made the final chosen list. */
+  chosen_count: number;
+  /** Most recent decision this chunk appeared in (candidate or chosen). */
+  last_used: Date | null;
+}
+
+/** Per-chunk usage stats aggregated from rag_rerank_decisions: how often each
+ *  chunk was retrieved (appeared as a candidate), how often it actually won
+ *  (appeared in chosen), and when it was last seen. Powers the dead-weight /
+ *  workhorse badges in the Knowledge Base admin (ai-therapist-116). */
+export async function getChunkRetrievalStats(): Promise<ChunkRetrievalStats[]> {
+  const result = await pool.query<ChunkRetrievalStats>(
+    `WITH retrieved AS (
+       SELECT (c.value ->> 'chunk_id')::int AS chunk_id,
+              COUNT(*)::int AS retrieved_count,
+              MAX(d.created_at) AS last_retrieved
+       FROM rag_rerank_decisions d
+       CROSS JOIN LATERAL jsonb_array_elements(d.candidates) AS c(value)
+       GROUP BY 1
+     ),
+     chosen AS (
+       SELECT c.value::int AS chunk_id,
+              COUNT(*)::int AS chosen_count,
+              MAX(d.created_at) AS last_chosen
+       FROM rag_rerank_decisions d
+       CROSS JOIN LATERAL jsonb_array_elements_text(d.chosen) AS c(value)
+       GROUP BY 1
+     )
+     SELECT COALESCE(r.chunk_id, ch.chunk_id) AS chunk_id,
+            COALESCE(r.retrieved_count, 0) AS retrieved_count,
+            COALESCE(ch.chosen_count, 0) AS chosen_count,
+            GREATEST(r.last_retrieved, ch.last_chosen) AS last_used
+     FROM retrieved r
+     FULL OUTER JOIN chosen ch ON ch.chunk_id = r.chunk_id
+     ORDER BY 1`,
   );
   return result.rows;
 }

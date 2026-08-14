@@ -35,6 +35,9 @@ export interface RerankResult {
 export interface RerankContext {
   sessionId: string | null;
   toolName: string;
+  /** Admin test-retrieval playground: don't log to rag_rerank_decisions —
+   *  test calls aren't session traffic and would pollute the eval stats. */
+  skipDecisionLog?: boolean;
 }
 
 /**
@@ -147,6 +150,7 @@ function logDecision(
   chosen: KnowledgeChunk[],
   result: RerankResult,
 ): void {
+  if (ctx.skipDecisionLog) return;
   insertRerankDecision({
     sessionId: ctx.sessionId,
     toolName: ctx.toolName,
