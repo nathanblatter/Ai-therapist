@@ -944,6 +944,19 @@ export function demoUserProfile(userId: number) {
   return bundle;
 }
 
+// AI "since last review" brief (ai-therapist-122): static believable text so
+// the demo never hits the real LLM.
+const DEMO_BRIEFS: Record<number, string> = {
+  9001: 'Doing noticeably better over the last two weeks. Both screeners are trending down (PHQ-2 now 2, GAD-2 now 3) and the most recent session produced a completed thought record that cut the hot-thought belief from 90 to 40 percent. Mood check-ins are climbing. The product presentation on the 22nd is the main upcoming stressor; paced breathing before meetings remains the most reliable skill. Worth reviewing the completed thought record together before the presentation.',
+  9002: 'Stabilizing after a high-severity crisis flag two nights ago, disclosed ahead of the loss anniversary this weekend. The flag was reviewed and resolved the next morning: ideation without plan or intent, protective factors intact, sister engaged, safety plan created and used. Mood dipped to 2 during the flagged session and recovered to 4 at the morning follow-up. PHQ-2 remains elevated but stable at 4-5. Priority before the next session: confirm the anniversary-weekend plan and the extra post-weekend check-in.',
+  9003: 'Steady, meaningful progress on burnout. Left work on time on both target days for the first time and cooked again after weeks of takeout. Mood check-ins have improved from 3-4 a month ago to 7 this week and no screeners are elevated. The values audit surfaced connection as the most starved area; the open follow-up is choosing one cancelled plan to un-cancel. Consider adding a third protected evening if the Tuesday/Thursday pattern holds.',
+};
+
+export function demoUserBrief(userId: number) {
+  if (!CLIENTS.some(c => c.userid === userId)) return null;
+  return { brief: DEMO_BRIEFS[userId] ?? null };
+}
+
 export function demoUserSessions(userId: number, limit = 50) {
   const rows = SESSIONS.filter(s => s.user_id === userId).map(s => ({
     ...listRow(s),
