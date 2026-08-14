@@ -9,6 +9,7 @@ import type { FC } from "react";
 import EvalDriftPanel from "./EvalDriftPanel";
 import PairwiseEvalPanel from "./PairwiseEvalPanel";
 import EvalCalibrationPanel from "./EvalCalibrationPanel";
+import OpsPanel from "./OpsPanel";
 
 const COLORS = ['#0047BA', '#002E5D', '#BDD6E6', '#8B959E'];
 
@@ -1360,6 +1361,7 @@ export default function Analytics() {
       <EvalDriftPanel />
       <PairwiseEvalPanel />
       <EvalCalibrationPanel />
+      <OpsPanel />
     </div>
   );
 }
