@@ -1,16 +1,16 @@
-// Participant profile drill-down (ai-therapist-110): a memory-first clinical
-// view of one participant — what the AI remembers about them (the exact bundle
-// promptContext injects at session start), risk/safety context, screener and
-// mood trends, and their session history. Opened from the Users table; session
-// rows open the existing SessionDetail on top.
-import { useState, useEffect, useCallback } from 'react';
+// Participant profile v2 (ai-therapist-122): answers the clinician's three
+// questions in reading order — "How is this person doing?" (status strip),
+// "What changed recently?" (AI brief + unified timeline), "What should I know
+// before their next session?" (timeline detail + collapsed clinical drawer).
+// Opened from the Users table; session entries open SessionDetail on top.
+import { useState, useEffect, useMemo } from 'react';
 import {
-  X, User, Cpu, Shield, AlertTriangle, TrendingUp, List, MessageCircle,
-  Calendar, Mic, Globe, Lock, BookOpen, Heart, FileText, Eye,
+  X, User, Cpu, Shield, AlertTriangle, TrendingUp, TrendingDown, Minus,
+  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity,
 } from 'react-feather';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
-} from 'recharts';
+import Panel from './ui/Panel';
+import StatCard from './ui/StatCard';
+import useAdminFetch from '../hooks/useAdminFetch';
 
 interface ProfileUser {
   userid: number;
@@ -80,10 +80,19 @@ interface ParticipantProfileProps {
   onViewSession: (sessionId: string) => void;
 }
 
-const SCALE_COLORS: Record<string, string> = { phq2: '#4f46e5', gad2: '#0d9488' };
+// ---------- helpers ----------
 
 function formatDate(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleDateString() : '—';
+}
+
+function relativeDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const days = Math.floor((Date.now() - new Date(value).getTime()) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days}d ago`;
+  return new Date(value).toLocaleDateString();
 }
 
 function formatDuration(seconds: number | null): string {
@@ -91,103 +100,267 @@ function formatDuration(seconds: number | null): string {
   const s = Math.round(Number(seconds));
   const m = Math.floor(s / 60);
   if (m < 1) return `${s}s`;
-  if (m < 60) return `${m}m ${s % 60}s`;
+  if (m < 60) return `${m}m`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-function Badge({ on, labelOn, labelOff, icon: Icon }: { on: boolean; labelOn: string; labelOff: string; icon: React.ComponentType<{ size?: number | string }> }) {
+type Trend = 'improving' | 'worsening' | 'flat';
+
+/** Trend over the last 3 points; `higherIsBetter` flips the reading. */
+function computeTrend(values: number[], higherIsBetter: boolean): Trend {
+  const recent = values.slice(-3);
+  if (recent.length < 2) return 'flat';
+  const delta = recent[recent.length - 1] - recent[0];
+  if (delta === 0) return 'flat';
+  return (delta > 0) === higherIsBetter ? 'improving' : 'worsening';
+}
+
+const TREND_META: Record<Trend, { icon: typeof Minus; tone: string; label: string }> = {
+  improving: { icon: TrendingUp, tone: 'text-emerald-600', label: 'improving' },
+  worsening: { icon: TrendingDown, tone: 'text-red-600', label: 'worsening' },
+  flat: { icon: Minus, tone: 'text-gray-400', label: 'flat' },
+};
+
+function Sparkline({ values, max }: { values: number[]; max: number }) {
+  if (values.length < 2) return null;
+  const w = 72, h = 22, pad = 2;
+  const points = values
+    .map((v, i) => `${pad + (i * (w - 2 * pad)) / (values.length - 1)},${h - pad - (Math.min(v, max) / max) * (h - 2 * pad)}`)
+    .join(' ');
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-      on ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'
-    }`}>
-      <Icon size={12} />
-      {on ? labelOn : labelOff}
-    </span>
+    <svg width={w} height={h} className="shrink-0" aria-hidden="true">
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-royal" />
+    </svg>
   );
 }
 
-function SectionCard({ title, icon: Icon, children, accent = 'text-gray-500' }: {
-  title: string;
-  icon: React.ComponentType<{ size?: number | string; className?: string }>;
-  children: React.ReactNode;
-  accent?: string;
+/** Compact status-strip tile: value + trend arrow + inline sparkline. */
+function TrendTile({ label, values, max, higherIsBetter, unit, empty }: {
+  label: string; values: number[]; max: number; higherIsBetter: boolean; unit?: string; empty: string;
 }) {
+  if (values.length === 0) {
+    return (
+      <Panel className="!p-4">
+        <p className="text-xs text-gray-500">{label}</p>
+        <p className="text-sm text-gray-400 mt-2">{empty}</p>
+      </Panel>
+    );
+  }
+  const trend = computeTrend(values, higherIsBetter);
+  const { icon: Icon, tone, label: trendLabel } = TREND_META[trend];
   return (
-    <div className="bg-white rounded-lg shadow p-4">
-      <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2 mb-3">
-        <Icon size={16} className={accent} />
-        {title}
-      </h3>
-      {children}
-    </div>
+    <Panel className="!p-4">
+      <p className="text-xs text-gray-500">{label}</p>
+      <div className="flex items-end justify-between gap-2 mt-1">
+        <p className="text-2xl font-bold text-navy">
+          {values[values.length - 1]}{unit && <span className="text-sm font-normal text-gray-400">{unit}</span>}
+        </p>
+        <Sparkline values={values} max={max} />
+      </div>
+      <p className={`text-xs mt-1 inline-flex items-center gap-1 ${tone}`}>
+        <Icon size={12} /> {trendLabel}
+      </p>
+    </Panel>
   );
-}
-
-function EmptyNote({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-gray-400">{children}</p>;
 }
 
 function TagList({ items, tone = 'bg-gray-100 text-gray-700' }: { items: string[]; tone?: string }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {items.map(item => (
-        <span key={item} className={`px-2 py-0.5 rounded text-xs ${tone}`}>{item}</span>
-      ))}
+      {items.map(item => <span key={item} className={`px-2 py-0.5 rounded text-xs ${tone}`}>{item}</span>)}
     </div>
   );
 }
 
+function DrawerSection({ title, defaultOpen = false, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  return (
+    <details open={defaultOpen} className="border-b border-gray-100 last:border-b-0 py-2 group">
+      <summary className="cursor-pointer text-sm font-semibold text-gray-700 hover:text-gray-900 select-none list-none flex items-center justify-between">
+        {title}
+        <span className="text-gray-400 text-xs group-open:hidden">show</span>
+        <span className="text-gray-400 text-xs hidden group-open:inline">hide</span>
+      </summary>
+      <div className="mt-2 text-sm text-gray-700">{children}</div>
+    </details>
+  );
+}
+
+// ---------- timeline ----------
+
+type TimelineEvent =
+  | { kind: 'session'; date: string; session: UserSessionRow; summary: SessionSummary | null }
+  | { kind: 'summary'; date: string; sessionId: string; name: string | null; summary: SessionSummary }
+  | { kind: 'crisis'; date: string; sessionId: string; severity: string | null; resolvedAt: string | null; resolvedBy: string | null }
+  | { kind: 'note'; date: string; author: string | null; notes: string }
+  | { kind: 'safety'; date: string; sessionId: string | null }
+  | { kind: 'worksheet'; date: string; record: Record<string, string | undefined> };
+
+function buildTimeline(profile: ProfileBundle | null, sessions: UserSessionRow[] | null): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+  const summariesById = new Map((profile?.summaries ?? []).map(s => [s.session_id, s]));
+  const sessionIds = new Set<string>();
+
+  for (const s of sessions ?? []) {
+    sessionIds.add(s.session_id);
+    events.push({ kind: 'session', date: s.start_time, session: s, summary: summariesById.get(s.session_id)?.summary ?? null });
+  }
+  for (const row of profile?.summaries ?? []) {
+    if (!sessionIds.has(row.session_id)) {
+      events.push({ kind: 'summary', date: row.ended_at ?? row.created_at, sessionId: row.session_id, name: row.session_name, summary: row.summary });
+    }
+  }
+  for (const f of profile?.prior_crisis_flags ?? []) {
+    events.push({ kind: 'crisis', date: f.flagged_at, sessionId: f.session_id, severity: f.severity, resolvedAt: f.unflagged_at, resolvedBy: f.unflagged_by });
+  }
+  if (profile?.clinician_note) {
+    events.push({ kind: 'note', date: profile.clinician_note.created_at, author: profile.clinician_note.author, notes: profile.clinician_note.notes });
+  }
+  if (profile?.safety_plan) {
+    events.push({ kind: 'safety', date: profile.safety_plan.created_at, sessionId: profile.safety_plan.session_id });
+  }
+  if (profile?.thought_record) {
+    events.push({ kind: 'worksheet', date: profile.thought_record.created_at, record: profile.thought_record.record });
+  }
+  return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
+function SummaryBody({ summary }: { summary: SessionSummary }) {
+  return (
+    <div className="mt-1.5 space-y-1 text-sm text-gray-600">
+      {summary.topics?.length ? <TagList items={summary.topics} tone="bg-indigo-100 text-indigo-800" /> : null}
+      {summary.mood_trajectory && <p>Mood: {summary.mood_trajectory}</p>}
+      {summary.techniques_helped?.length ? <p className="text-emerald-700">Helped: {summary.techniques_helped.join(', ')}</p> : null}
+      {summary.follow_up && <p className="text-gray-500">Follow-up: {summary.follow_up}</p>}
+    </div>
+  );
+}
+
+function TimelineEntry({ event, onViewSession }: { event: TimelineEvent; onViewSession: (id: string) => void }) {
+  const meta = {
+    session: { icon: MessageCircle, tone: 'bg-gray-100 text-gray-500' },
+    summary: { icon: MessageCircle, tone: 'bg-indigo-100 text-indigo-600' },
+    crisis: { icon: AlertTriangle, tone: 'bg-red-100 text-red-600' },
+    note: { icon: FileText, tone: 'bg-purple-100 text-purple-600' },
+    safety: { icon: Heart, tone: 'bg-red-50 text-red-500' },
+    worksheet: { icon: BookOpen, tone: 'bg-teal-100 text-teal-600' },
+  }[event.kind];
+  const Icon = meta.icon;
+
+  return (
+    <li className="flex gap-3">
+      <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${meta.tone}`} aria-hidden="true">
+        <Icon size={14} />
+      </span>
+      <div className="min-w-0 flex-1 pb-4 border-b border-gray-100">
+        {event.kind === 'session' && (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => onViewSession(event.session.session_id)} className="text-sm font-semibold text-royal hover:underline text-left">
+                {event.summary?.headline || event.session.session_name || event.session.session_id.slice(0, 8)}
+              </button>
+              <span className="text-xs text-gray-400">{formatDate(event.date)}</span>
+              {event.session.crisis_flagged && (
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                  event.session.crisis_severity === 'high' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                }`}>crisis: {event.session.crisis_severity ?? 'flagged'}</span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {formatDuration(event.session.duration_seconds)} · {event.session.total_messages} messages
+              {event.session.eval_score !== null && <> · eval {event.session.eval_score}</>}
+              {event.session.feedback_rating !== null && <> · feedback {event.session.feedback_rating}/5</>}
+              {event.session.status === 'active' && <> · <span className="text-emerald-700 font-medium">active</span></>}
+            </p>
+            {event.summary && <SummaryBody summary={event.summary} />}
+          </>
+        )}
+        {event.kind === 'summary' && (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => onViewSession(event.sessionId)} className="text-sm font-semibold text-royal hover:underline text-left">
+                {event.summary.headline || event.name || 'Session'}
+              </button>
+              <span className="text-xs text-gray-400">{formatDate(event.date)}</span>
+            </div>
+            <SummaryBody summary={event.summary} />
+          </>
+        )}
+        {event.kind === 'crisis' && (
+          <>
+            <div className="flex items-center gap-2 flex-wrap text-sm">
+              <span className="font-semibold text-red-700">Crisis flag</span>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                event.severity === 'high' ? 'bg-red-100 text-red-800' : event.severity === 'medium' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'
+              }`}>{event.severity ?? 'unknown'}</span>
+              <span className="text-xs text-gray-400">{formatDate(event.date)}</span>
+            </div>
+            <p className="text-xs mt-0.5">
+              {event.resolvedAt
+                ? <span className="text-gray-500">Resolved {formatDate(event.resolvedAt)}{event.resolvedBy && <> by {event.resolvedBy}</>}</span>
+                : <span className="text-red-600 font-medium">Unresolved</span>}
+              {' · '}
+              <button onClick={() => onViewSession(event.sessionId)} className="text-royal hover:underline">view session</button>
+            </p>
+          </>
+        )}
+        {event.kind === 'note' && (
+          <>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="font-semibold text-purple-700">Clinician note</span>
+              <span className="text-xs text-gray-400">{event.author ?? 'unknown'} · {formatDate(event.date)}</span>
+            </div>
+            <blockquote className="text-sm text-gray-700 border-l-2 border-purple-300 pl-3 italic mt-1">{event.notes}</blockquote>
+            <p className="text-xs text-gray-400 mt-1">Injected into their next session · never shown to the participant.</p>
+          </>
+        )}
+        {event.kind === 'safety' && (
+          <div className="text-sm">
+            <span className="font-semibold text-gray-800">Safety plan created</span>
+            <span className="text-xs text-gray-400 ml-2">{formatDate(event.date)}</span>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Full plan in the drawer below
+              {event.sessionId && <> · <button onClick={() => onViewSession(event.sessionId!)} className="text-royal hover:underline">view session</button></>}
+            </p>
+          </div>
+        )}
+        {event.kind === 'worksheet' && (
+          <details className="text-sm">
+            <summary className="cursor-pointer select-none">
+              <span className="font-semibold text-gray-800">Thought record completed</span>
+              <span className="text-xs text-gray-400 ml-2">{formatDate(event.date)}</span>
+            </summary>
+            <div className="mt-1 space-y-0.5 text-gray-600">
+              {Object.entries(event.record).map(([k, v]) => v ? (
+                <p key={k}><span className="font-medium capitalize">{k.replace(/_/g, ' ')}:</span> {v}</p>
+              ) : null)}
+            </div>
+          </details>
+        )}
+      </div>
+    </li>
+  );
+}
+
+// ---------- main component ----------
+
 export default function ParticipantProfile({ user, userRole, onClose, onViewSession }: ParticipantProfileProps) {
-  const [profile, setProfile] = useState<ProfileBundle | null>(null);
-  const [profileDenied, setProfileDenied] = useState(false);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [loadingProfile, setLoadingProfile] = useState(true);
-  const [sessions, setSessions] = useState<UserSessionRow[] | null>(null);
-  const [sessionsDenied, setSessionsDenied] = useState(false);
+  const profileFetch = useAdminFetch<ProfileBundle>(`/admin/api/users/${user.userid}/profile`);
+  const sessionsFetch = useAdminFetch<{ sessions: UserSessionRow[] }>(`/admin/api/users/${user.userid}/sessions?limit=50`);
+  // Fail-soft brief: any error (403, LLM down) simply hides the paragraph.
+  const briefFetch = useAdminFetch<{ brief: string | null }>(`/admin/api/users/${user.userid}/brief`);
+
+  const profile = profileFetch.data;
+  const profileDenied = profileFetch.error?.includes('(403)') ?? false;
+  const sessions = sessionsFetch.data?.sessions ?? null;
+  const sessionsDenied = sessionsFetch.error?.includes('(403)') ?? false;
+  const brief = briefFetch.error ? null : briefFetch.data?.brief ?? null;
+
   const [riskBusy, setRiskBusy] = useState(false);
   // Local mirror so the toggle works even when the full profile is 403 for researchers.
   const [riskShareEnabled, setRiskShareEnabled] = useState(!!user.risk_context_share_enabled);
-
-  const fetchProfile = useCallback(async () => {
-    setLoadingProfile(true);
-    setProfileError(null);
-    setProfileDenied(false);
-    try {
-      const res = await fetch(`/admin/api/users/${user.userid}/profile`, { credentials: 'include' });
-      if (res.status === 403) {
-        setProfileDenied(true);
-      } else if (res.ok) {
-        const data = await res.json() as ProfileBundle;
-        setProfile(data);
-        setRiskShareEnabled(data.risk_context_share_enabled);
-      } else {
-        setProfileError('Failed to load the clinical profile.');
-      }
-    } catch {
-      setProfileError('Failed to load the clinical profile.');
-    } finally {
-      setLoadingProfile(false);
-    }
-  }, [user.userid]);
-
-  const fetchSessions = useCallback(async () => {
-    try {
-      const res = await fetch(`/admin/api/users/${user.userid}/sessions?limit=50`, { credentials: 'include' });
-      if (res.status === 403) {
-        setSessionsDenied(true);
-      } else if (res.ok) {
-        const data = await res.json();
-        setSessions(data.sessions as UserSessionRow[]);
-      } else {
-        setSessions([]);
-      }
-    } catch {
-      setSessions([]);
-    }
-  }, [user.userid]);
-
-  useEffect(() => { void fetchProfile(); }, [fetchProfile]);
-  useEffect(() => { void fetchSessions(); }, [fetchSessions]);
+  useEffect(() => {
+    if (profile) setRiskShareEnabled(profile.risk_context_share_enabled);
+  }, [profile]);
 
   // Escape closes the profile (matching SessionDetail behavior).
   useEffect(() => {
@@ -208,7 +381,7 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
       if (res.ok) {
         setRiskShareEnabled(!riskShareEnabled);
         // Prior-flag visibility follows the toggle — refresh the bundle.
-        if (!profileDenied) void fetchProfile();
+        if (!profileDenied) profileFetch.refetch();
       }
     } finally {
       setRiskBusy(false);
@@ -218,66 +391,42 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
   const memoryEnabled = profile?.memory_enabled ?? user.memory_enabled ?? false;
   const caseProfile = profile?.case_profile?.profile ?? null;
 
-  // Screener chart: one point per response, a line per scale, oldest first.
-  const scaleChartData = (() => {
-    if (!profile || profile.scale_history.length === 0) return [];
-    const byDate = new Map<string, Record<string, number | string>>();
-    const sorted = [...profile.scale_history].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    for (const point of sorted) {
-      const key = new Date(point.created_at).toISOString();
-      const row = byDate.get(key) ?? { date: new Date(point.created_at).toLocaleDateString() };
-      row[point.scale] = point.score;
-      byDate.set(key, row);
-    }
-    return Array.from(byDate.values());
-  })();
-  const scalesPresent = profile ? Array.from(new Set(profile.scale_history.map(p => p.scale))) : [];
+  // Status-strip series, oldest first.
+  const scaleSeries = (scale: string) => (profile?.scale_history ?? [])
+    .filter(p => p.scale === scale)
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .map(p => p.score);
+  const moodSeries = useMemo(() => [...(profile?.mood_trajectory ?? [])]
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .map(p => p.mood), [profile]);
 
-  const moodChartData = profile
-    ? [...profile.mood_trajectory]
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-        .map(p => ({ date: new Date(p.date).toLocaleDateString(), mood: p.mood, source: p.source }))
-    : [];
+  const lastSession = sessions?.find(s => s.start_time) ?? null;
+  const unresolvedFlags = (profile?.prior_crisis_flags ?? []).filter(f => !f.unflagged_at);
 
-  const accountFacts = [
-    { icon: Calendar, label: 'Joined', value: formatDate(user.created_at) },
-    { icon: Mic, label: 'Voice', value: user.preferred_voice || 'cedar' },
-    { icon: Globe, label: 'Language', value: user.preferred_language || 'en' },
-    { icon: Lock, label: 'MFA', value: user.mfa_enabled ? 'Enabled' : 'Off' },
-  ];
+  const timeline = useMemo(() => buildTimeline(profile ?? null, sessions), [profile, sessions]);
+  const loading = profileFetch.loading || sessionsFetch.loading;
 
   return (
     <div className="fixed inset-0 z-40 bg-gray-100 overflow-y-auto" role="dialog" aria-modal="true" aria-label={`Participant profile for ${user.username}`}>
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white border-b shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="w-10 h-10 rounded-full bg-royal text-white flex items-center justify-center shrink-0">
-                <User size={20} />
-              </span>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900 truncate">{user.username}</h2>
-                <p className="text-xs text-gray-500">
-                  <span className="capitalize">{user.role}</span>
-                  {profile !== null && <> · {profile.ended_session_count} completed session{profile.ended_session_count === 1 ? '' : 's'}</>}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap ml-1">
-                <Badge on={memoryEnabled} labelOn="Memory on" labelOff="Memory off" icon={Cpu} />
-                <Badge on={riskShareEnabled} labelOn="Risk context shared" labelOff="Risk context private" icon={Shield} />
-              </div>
-            </div>
-            <div className="mt-2 flex items-center gap-4 flex-wrap text-xs text-gray-500">
-              {accountFacts.map(f => {
-                const Icon = f.icon;
-                return (
-                  <span key={f.label} className="inline-flex items-center gap-1">
-                    <Icon size={12} className="text-gray-400" />
-                    {f.label}: <span className="text-gray-700 font-medium capitalize">{f.value}</span>
-                  </span>
-                );
-              })}
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="w-10 h-10 rounded-full bg-royal text-white flex items-center justify-center shrink-0">
+              <User size={20} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-gray-900 truncate">{user.username}</h2>
+              <p className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
+                <span className="capitalize">{user.role}</span>
+                <span className="inline-flex items-center gap-1"><Calendar size={11} /> joined {formatDate(user.created_at)}</span>
+                <span className={`inline-flex items-center gap-1 ${memoryEnabled ? 'text-emerald-700' : 'text-gray-400'}`}>
+                  <Cpu size={11} /> memory {memoryEnabled ? 'on' : 'off'}
+                </span>
+                <span className={`inline-flex items-center gap-1 ${riskShareEnabled ? 'text-emerald-700' : 'text-gray-400'}`}>
+                  <Shield size={11} /> risk context {riskShareEnabled ? 'shared' : 'private'}
+                </span>
+              </p>
             </div>
           </div>
           <button
@@ -290,78 +439,118 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {loadingProfile && (
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {loading && (
           <div className="text-center py-10 text-gray-500" role="status" aria-live="polite">Loading profile…</div>
         )}
 
-        {profileError && !loadingProfile && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{profileError}</div>
+        {profileFetch.error && !profileDenied && !profileFetch.loading && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">Failed to load the clinical profile.</div>
         )}
 
-        {profileDenied && !loadingProfile && (
+        {profileDenied && !profileFetch.loading && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
             <Lock size={18} className="text-amber-600 shrink-0 mt-0.5" />
             <div className="text-sm text-amber-800">
               <p className="font-semibold">Clinical sections require the therapist role.</p>
               <p className="mt-1">
-                The memory, risk, and screener sections below are derived from unredacted clinical content and are
-                only visible to therapists (the same rule as session insights). Your {userRole ?? 'current'} account
-                can still browse this participant&rsquo;s session history and manage the risk-context toggle.
+                The status strip, AI brief, and clinical timeline entries are derived from unredacted clinical
+                content and are only visible to therapists (the same rule as session insights). Your{' '}
+                {userRole ?? 'current'} account can still browse this participant&rsquo;s session history and
+                manage the risk-context toggle.
               </p>
             </div>
           </div>
         )}
 
-        {/* ============ Memory and clinical model ============ */}
-        {!loadingProfile && !profileDenied && profile && (
-          <>
-            <section aria-label="Memory and clinical model">
-              <div className="flex items-baseline justify-between mb-3">
-                <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                  <Cpu size={18} className="text-indigo-600" />
-                  Memory and clinical model
-                </h2>
-                <span className="text-xs text-gray-400">What the AI remembers about this participant at session start</span>
-              </div>
+        {/* ============ 1. Status strip — the 5-second read ============ */}
+        {!loading && profile && (
+          <section aria-label="Status at a glance" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <TrendTile label="PHQ-2" values={scaleSeries('phq2')} max={6} higherIsBetter={false} empty="No screeners yet" />
+            <TrendTile label="GAD-2" values={scaleSeries('gad2')} max={6} higherIsBetter={false} empty="No screeners yet" />
+            <TrendTile label="Mood" values={moodSeries} max={10} higherIsBetter={true} unit="/10" empty="No mood data yet" />
+            <StatCard
+              label="Sessions"
+              value={profile.ended_session_count}
+              sub={lastSession ? `Last ${relativeDate(lastSession.start_time)}` : 'No sessions yet'}
+              icon={MessageCircle}
+            />
+            <Panel className={`!p-4 ${unresolvedFlags.length > 0 ? '!bg-red-50 border border-red-200' : ''}`}>
+              <p className="text-xs text-gray-500">Risk</p>
+              {unresolvedFlags.length > 0 ? (
+                <p className="text-sm font-semibold text-red-700 mt-2 inline-flex items-center gap-1.5">
+                  <AlertTriangle size={14} /> {unresolvedFlags.length} unresolved flag{unresolvedFlags.length === 1 ? '' : 's'}
+                </p>
+              ) : (
+                <p className="text-sm text-gray-600 mt-2 inline-flex items-center gap-1.5">
+                  <Shield size={14} className="text-gray-400" /> No active flags
+                </p>
+              )}
+              {!riskShareEnabled && <p className="text-xs text-gray-400 mt-1">Risk sharing off</p>}
+            </Panel>
+          </section>
+        )}
 
-              {!profile.memory_enabled && (
-                <div className="bg-white rounded-lg shadow p-4 mb-4 text-sm text-gray-600">
-                  This participant has not opted into cross-session memory, so the AI starts every conversation
-                  fresh — nothing below is injected into their sessions. Any data shown here was stored before
-                  memory was turned off, or by tools during individual sessions.
-                </div>
+        {/* ============ 2. AI brief ============ */}
+        {!loading && profile && brief && (
+          <section aria-label="AI brief" className="px-1">
+            <p className="text-sm text-gray-600 italic leading-relaxed">{brief}</p>
+            <p className="text-xs text-gray-400 mt-1">AI-generated summary — verify against the record.</p>
+          </section>
+        )}
+
+        {/* ============ 3. Unified timeline ============ */}
+        {!loading && (
+          <section aria-label="Timeline">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <Activity size={15} className="text-gray-500" /> Timeline
+            </h3>
+            <Panel>
+              {sessionsDenied && !profile ? (
+                <p className="text-sm text-gray-500">Your role does not have access to this participant&rsquo;s session list.</p>
+              ) : timeline.length === 0 ? (
+                <p className="text-sm text-gray-400">Nothing yet — this participant has not started a conversation.</p>
+              ) : (
+                <ol className="space-y-4">
+                  {timeline.map((event, i) => (
+                    <TimelineEntry key={`${event.kind}-${event.date}-${i}`} event={event} onViewSession={onViewSession} />
+                  ))}
+                </ol>
+              )}
+            </Panel>
+          </section>
+        )}
+
+        {/* ============ 4. Details drawer — memory and clinical model ============ */}
+        {!loading && (profile || profileDenied) && (
+          <section aria-label="Memory and clinical model">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <List size={15} className="text-gray-500" /> Memory and clinical model
+            </h3>
+            <Panel>
+              {profile && !profile.memory_enabled && (
+                <p className="text-sm text-gray-500 mb-2">
+                  This participant has not opted into cross-session memory — nothing below is injected into their
+                  sessions. Data shown was stored before memory was turned off, or by tools during individual sessions.
+                </p>
               )}
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Case profile */}
-                <SectionCard title="Clinical case profile" icon={FileText} accent="text-indigo-600">
+              {profile && (
+                <DrawerSection title="Clinical case profile" defaultOpen>
                   {caseProfile ? (
-                    <div className="space-y-3 text-sm text-gray-700">
-                      {caseProfile.presenting_concerns?.length ? (
-                        <div>
-                          <p className="text-xs font-medium text-gray-500 mb-1">Presenting concerns</p>
-                          <TagList items={caseProfile.presenting_concerns} tone="bg-indigo-100 text-indigo-800" />
+                    <div className="space-y-3">
+                      {([
+                        ['Presenting concerns', caseProfile.presenting_concerns, 'bg-indigo-100 text-indigo-800'],
+                        ['Recurring themes', caseProfile.recurring_themes, 'bg-gray-100 text-gray-700'],
+                        ['Stressors', caseProfile.stressors, 'bg-amber-100 text-amber-800'],
+                        ['Support system', caseProfile.support_system, 'bg-emerald-100 text-emerald-800'],
+                        ['Values', caseProfile.values, 'bg-sky-100 text-sky-800'],
+                      ] as const).map(([label, items, tone]) => items?.length ? (
+                        <div key={label}>
+                          <p className="text-xs font-medium text-gray-500 mb-1">{label}</p>
+                          <TagList items={items} tone={tone} />
                         </div>
-                      ) : null}
-                      {caseProfile.recurring_themes?.length ? (
-                        <div>
-                          <p className="text-xs font-medium text-gray-500 mb-1">Recurring themes</p>
-                          <TagList items={caseProfile.recurring_themes} />
-                        </div>
-                      ) : null}
-                      {caseProfile.stressors?.length ? (
-                        <div>
-                          <p className="text-xs font-medium text-gray-500 mb-1">Stressors</p>
-                          <TagList items={caseProfile.stressors} tone="bg-amber-100 text-amber-800" />
-                        </div>
-                      ) : null}
-                      {caseProfile.support_system?.length ? (
-                        <div>
-                          <p className="text-xs font-medium text-gray-500 mb-1">Support system</p>
-                          <TagList items={caseProfile.support_system} tone="bg-emerald-100 text-emerald-800" />
-                        </div>
-                      ) : null}
+                      ) : null)}
                       {caseProfile.coping_repertoire?.length ? (
                         <div>
                           <p className="text-xs font-medium text-gray-500 mb-1">Coping repertoire (most helpful first)</p>
@@ -369,40 +558,29 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
                             {caseProfile.coping_repertoire.map(c => (
                               <li key={c.technique} className="flex items-center justify-between gap-2">
                                 <span>{c.technique}</span>
-                                <span className={`text-xs px-2 py-0.5 rounded ${
-                                  c.helpfulness === 'helped' ? 'bg-emerald-100 text-emerald-800'
-                                    : c.helpfulness === 'mixed' ? 'bg-amber-100 text-amber-800'
-                                    : 'bg-gray-100 text-gray-600'
-                                }`}>{c.helpfulness.replace(/_/g, ' ')}</span>
+                                <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">{c.helpfulness.replace(/_/g, ' ')}</span>
                               </li>
                             ))}
                           </ul>
-                        </div>
-                      ) : null}
-                      {caseProfile.values?.length ? (
-                        <div>
-                          <p className="text-xs font-medium text-gray-500 mb-1">Values</p>
-                          <TagList items={caseProfile.values} tone="bg-sky-100 text-sky-800" />
                         </div>
                       ) : null}
                       {caseProfile.screener_trend && (
                         <p className="text-xs text-gray-500">Screener trend: <span className="text-gray-700">{caseProfile.screener_trend}</span></p>
                       )}
                       {profile.case_profile && (
-                        <p className="text-xs text-gray-400 pt-1 border-t border-gray-100">
-                          Rolled up from all prior sessions · updated {formatDate(profile.case_profile.updated_at)}
-                        </p>
+                        <p className="text-xs text-gray-400">Rolled up from all prior sessions · updated {formatDate(profile.case_profile.updated_at)}</p>
                       )}
                     </div>
                   ) : (
-                    <EmptyNote>No case profile yet. One is built automatically after their first few completed sessions.</EmptyNote>
+                    <p className="text-gray-400">No case profile yet. One is built automatically after their first few completed sessions.</p>
                   )}
-                </SectionCard>
+                </DrawerSection>
+              )}
 
-                {/* Remembered facts */}
-                <SectionCard title="Remembered facts" icon={BookOpen} accent="text-indigo-600">
+              {profile && (
+                <DrawerSection title={`Remembered facts (${profile.memories.length})`}>
                   {profile.memories.length > 0 ? (
-                    <ul className="space-y-2 text-sm text-gray-700 max-h-72 overflow-y-auto pr-1">
+                    <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
                       {profile.memories.map((m, i) => (
                         <li key={i} className="flex items-start justify-between gap-3 bg-indigo-50/60 rounded px-3 py-2">
                           <span>{m.fact}</span>
@@ -411,293 +589,67 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
                       ))}
                     </ul>
                   ) : (
-                    <EmptyNote>
-                      Nothing stored. Facts appear here when the participant asks the AI to remember something
-                      (the remember_this tool).
-                    </EmptyNote>
+                    <p className="text-gray-400">Nothing stored. Facts appear here when the participant asks the AI to remember something (the remember_this tool).</p>
                   )}
-                </SectionCard>
-              </div>
-
-              {/* Session summaries timeline */}
-              <div className="mt-4">
-                <SectionCard title="Session summaries" icon={MessageCircle} accent="text-indigo-600">
-                  {profile.summaries.length > 0 ? (
-                    <ol className="relative border-l border-indigo-200 ml-2 space-y-4">
-                      {profile.summaries.map(row => {
-                        const s = row.summary;
-                        return (
-                          <li key={row.session_id} className="ml-4">
-                            <span className="absolute -left-[5px] mt-1.5 w-2.5 h-2.5 rounded-full bg-indigo-400" aria-hidden="true" />
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <button
-                                onClick={() => onViewSession(row.session_id)}
-                                className="text-sm font-semibold text-royal hover:underline text-left"
-                              >
-                                {s.headline || row.session_name || 'Session'}
-                              </button>
-                              <span className="text-xs text-gray-400">{formatDate(row.ended_at ?? row.created_at)}</span>
-                            </div>
-                            <div className="mt-1 text-sm text-gray-600 space-y-1">
-                              {s.topics?.length ? <TagList items={s.topics} tone="bg-indigo-100 text-indigo-800" /> : null}
-                              {s.mood_trajectory && <p>{s.mood_trajectory}</p>}
-                              {s.techniques_helped?.length ? <p className="text-emerald-700">Helped: {s.techniques_helped.join(', ')}</p> : null}
-                              {s.follow_up && <p className="text-gray-500">Follow-up: {s.follow_up}</p>}
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  ) : (
-                    <EmptyNote>
-                      No end-of-session summaries yet. A summary is generated when this participant finishes a session
-                      with memory enabled.
-                    </EmptyNote>
-                  )}
-                </SectionCard>
-              </div>
-
-              {profile.clinician_note && (
-                <div className="mt-4">
-                  <SectionCard title="Latest clinician note (injected into their next session)" icon={FileText} accent="text-purple-600">
-                    <blockquote className="text-sm text-gray-700 border-l-2 border-purple-300 pl-3 italic">
-                      {profile.clinician_note.notes}
-                    </blockquote>
-                    <p className="text-xs text-gray-400 mt-2">
-                      Left by {profile.clinician_note.author ?? 'unknown'} on {formatDate(profile.clinician_note.created_at)} — private, never shown to the participant.
-                    </p>
-                  </SectionCard>
-                </div>
+                </DrawerSection>
               )}
-            </section>
 
-            {/* ============ Risk and safety ============ */}
-            <section aria-label="Risk and safety">
-              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-3">
-                <AlertTriangle size={18} className="text-red-600" />
-                Risk and safety
-              </h2>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <SectionCard title="Prior crisis flags" icon={AlertTriangle} accent="text-red-600">
-                  <div className="mb-3 flex items-center justify-between gap-3 bg-gray-50 rounded px-3 py-2">
-                    <p className="text-xs text-gray-600">
-                      Share prior crisis history with the AI at session start
-                    </p>
-                    <button
-                      type="button"
-                      onClick={toggleRiskContext}
-                      disabled={riskBusy}
-                      aria-pressed={riskShareEnabled}
-                      className={`px-2.5 py-1 inline-flex items-center gap-1 text-xs font-semibold rounded-full transition disabled:opacity-50 ${
-                        riskShareEnabled ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${riskShareEnabled ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-                      {riskShareEnabled ? 'On' : 'Off'}
-                    </button>
+              <DrawerSection title="Sharing controls" defaultOpen={profileDenied}>
+                <div className="flex items-center justify-between gap-3 bg-gray-50 rounded px-3 py-2">
+                  <p className="text-xs text-gray-600">Share prior crisis history with the AI at session start</p>
+                  <button
+                    type="button"
+                    onClick={toggleRiskContext}
+                    disabled={riskBusy}
+                    aria-pressed={riskShareEnabled}
+                    className={`px-2.5 py-1 inline-flex items-center gap-1 text-xs font-semibold rounded-full transition disabled:opacity-50 ${
+                      riskShareEnabled ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${riskShareEnabled ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                    {riskShareEnabled ? 'On' : 'Off'}
+                  </button>
+                </div>
+                {!riskShareEnabled && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    Sharing is off, so prior-crisis history is not compiled here or for the AI. Enable it only after clinical review.
+                  </p>
+                )}
+              </DrawerSection>
+
+              {profile?.thought_record && (
+                <DrawerSection title="Latest thought record">
+                  <div className="space-y-1">
+                    {Object.entries(profile.thought_record.record).map(([k, v]) => v ? (
+                      <p key={k}><span className="font-medium capitalize">{k.replace(/_/g, ' ')}:</span> {v}</p>
+                    ) : null)}
+                    <p className="text-xs text-gray-400 pt-1">Completed {formatDate(profile.thought_record.created_at)}</p>
                   </div>
-                  {riskShareEnabled ? (
-                    profile.prior_crisis_flags.length > 0 ? (
-                      <ul className="space-y-2 text-sm">
-                        {profile.prior_crisis_flags.map(f => (
-                          <li key={`${f.session_id}-${f.flagged_at}`} className="flex items-center justify-between gap-2">
-                            <button onClick={() => onViewSession(f.session_id)} className="text-royal hover:underline text-left">
-                              {formatDate(f.flagged_at)}
-                            </button>
-                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                              f.severity === 'high' ? 'bg-red-100 text-red-800'
-                                : f.severity === 'medium' ? 'bg-amber-100 text-amber-800'
-                                : 'bg-gray-100 text-gray-600'
-                            }`}>{f.severity ?? 'unknown'}</span>
-                            <span className="text-xs text-gray-400">
-                              {f.unflagged_at ? `resolved ${formatDate(f.unflagged_at)}` : 'unresolved'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <EmptyNote>No prior crisis flags on record.</EmptyNote>
-                    )
-                  ) : (
-                    <EmptyNote>
-                      Sharing is off, so prior-crisis history is not compiled here or for the AI. Enable it only
-                      after clinical review.
-                    </EmptyNote>
-                  )}
-                </SectionCard>
-
-                <SectionCard title="Latest safety plan" icon={Heart} accent="text-red-600">
-                  {profile.safety_plan ? (
-                    <div className="space-y-2 text-sm text-gray-700">
-                      {Object.entries(profile.safety_plan.plan).map(([section, items]) =>
-                        Array.isArray(items) && items.length > 0 ? (
-                          <div key={section}>
-                            <span className="font-medium capitalize">{section.replace(/_/g, ' ')}:</span>{' '}
-                            {items.join('; ')}
-                          </div>
-                        ) : null
-                      )}
-                      <p className="text-xs text-gray-400 pt-1 border-t border-gray-100">
-                        Created {formatDate(profile.safety_plan.created_at)}
-                        {profile.safety_plan.session_id && (
-                          <>
-                            {' '}in{' '}
-                            <button onClick={() => onViewSession(profile.safety_plan!.session_id!)} className="text-royal hover:underline">
-                              this session
-                            </button>
-                          </>
-                        )}
-                      </p>
-                    </div>
-                  ) : (
-                    <EmptyNote>No safety plan on file. One is saved when the participant builds one with the AI.</EmptyNote>
-                  )}
-                </SectionCard>
-              </div>
-            </section>
-
-            {/* ============ Screeners and mood ============ */}
-            <section aria-label="Screeners and mood">
-              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-3">
-                <TrendingUp size={18} className="text-teal-600" />
-                Screeners and mood
-              </h2>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <SectionCard title="PHQ-2 / GAD-2 trend" icon={TrendingUp} accent="text-teal-600">
-                  {scaleChartData.length > 0 ? (
-                    <>
-                      <ResponsiveContainer width="100%" height={200}>
-                        <LineChart data={scaleChartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="date" fontSize={11} />
-                          <YAxis domain={[0, 6]} allowDecimals={false} fontSize={11} />
-                          <Tooltip />
-                          <ReferenceLine y={3} stroke="#f59e0b" strokeDasharray="4 4" />
-                          {scalesPresent.map(scale => (
-                            <Line
-                              key={scale}
-                              type="monotone"
-                              dataKey={scale}
-                              stroke={SCALE_COLORS[scale] ?? '#6b7280'}
-                              name={scale.toUpperCase()}
-                              connectNulls
-                            />
-                          ))}
-                        </LineChart>
-                      </ResponsiveContainer>
-                      <p className="text-xs text-gray-400 mt-1">Dashed line marks the clinical cutoff (3). Screeners, not diagnoses.</p>
-                    </>
-                  ) : (
-                    <EmptyNote>No screener responses yet. Scores appear after the AI administers a PHQ-2 or GAD-2 in session.</EmptyNote>
-                  )}
-                </SectionCard>
-
-                <SectionCard title="Mood trajectory" icon={Heart} accent="text-teal-600">
-                  {moodChartData.length > 0 ? (
-                    <>
-                      <ResponsiveContainer width="100%" height={200}>
-                        <LineChart data={moodChartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="date" fontSize={11} />
-                          <YAxis domain={[0, 10]} allowDecimals={false} fontSize={11} />
-                          <Tooltip />
-                          <Line type="monotone" dataKey="mood" stroke="#0d9488" name="Mood (1-10)" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                      <p className="text-xs text-gray-400 mt-1">From pre-session check-ins and in-session mood logs.</p>
-                    </>
-                  ) : (
-                    <EmptyNote>No mood data yet. Points come from pre-session check-ins and in-session mood ratings.</EmptyNote>
-                  )}
-                </SectionCard>
-              </div>
-
-              {profile.thought_record && (
-                <div className="mt-4">
-                  <SectionCard title="Latest thought record" icon={FileText} accent="text-teal-600">
-                    <div className="space-y-1 text-sm text-gray-700">
-                      {(['situation', 'thought', 'feeling', 'evidence_for', 'evidence_against', 'balanced_thought'] as const).map(k =>
-                        profile.thought_record!.record[k] ? (
-                          <div key={k}>
-                            <span className="font-medium capitalize">{k.replace(/_/g, ' ')}:</span>{' '}
-                            {profile.thought_record!.record[k]}
-                          </div>
-                        ) : null
-                      )}
-                      <p className="text-xs text-gray-400 pt-1">Completed {formatDate(profile.thought_record.created_at)}</p>
-                    </div>
-                  </SectionCard>
-                </div>
+                </DrawerSection>
               )}
-            </section>
-          </>
-        )}
 
-        {/* ============ Session history ============ */}
-        <section aria-label="Session history">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-3">
-            <List size={18} className="text-gray-600" />
-            Session history
-          </h2>
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            {sessionsDenied ? (
-              <p className="p-4 text-sm text-gray-500">Your role does not have access to this participant&rsquo;s session list.</p>
-            ) : sessions === null ? (
-              <p className="p-4 text-sm text-gray-500" role="status">Loading sessions…</p>
-            ) : sessions.length === 0 ? (
-              <p className="p-4 text-sm text-gray-400">No sessions yet — this participant has not started a conversation.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      {['Session', 'Started', 'Duration', 'Messages', 'Ended by', 'Crisis', 'Eval', 'Feedback', ''].map(h => (
-                        <th key={h} scope="col" className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {sessions.map(s => (
-                      <tr key={s.session_id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 max-w-[220px]">
-                          <button onClick={() => onViewSession(s.session_id)} className="text-royal hover:underline font-medium text-left truncate block max-w-full">
-                            {s.session_name || s.session_id.slice(0, 8)}
-                          </button>
-                        </td>
-                        <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{new Date(s.start_time).toLocaleString()}</td>
-                        <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{formatDuration(s.duration_seconds)}</td>
-                        <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{s.total_messages}</td>
-                        <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">
-                          {s.status === 'active' ? <span className="text-emerald-700 font-medium">active</span> : (s.ended_by || '—')}
-                        </td>
-                        <td className="px-4 py-2.5 whitespace-nowrap">
-                          {s.crisis_flagged ? (
-                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                              s.crisis_severity === 'high' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
-                            }`}>{s.crisis_severity ?? 'flagged'}</span>
-                          ) : (
-                            <span className="text-gray-300">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{s.eval_score !== null ? s.eval_score : '—'}</td>
-                        <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{s.feedback_rating !== null ? `${s.feedback_rating}/5` : '—'}</td>
-                        <td className="px-4 py-2.5 whitespace-nowrap text-right">
-                          <button
-                            onClick={() => onViewSession(s.session_id)}
-                            className="text-royal hover:text-blue-700 inline-flex items-center gap-1"
-                            aria-label={`View session ${s.session_name || s.session_id}`}
-                          >
-                            <Eye size={14} /> View
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </section>
+              {profile?.safety_plan && (
+                <DrawerSection title="Safety plan">
+                  <div className="space-y-2">
+                    {Object.entries(profile.safety_plan.plan).map(([section, items]) =>
+                      Array.isArray(items) && items.length > 0 ? (
+                        <div key={section}>
+                          <span className="font-medium capitalize">{section.replace(/_/g, ' ')}:</span> {items.join('; ')}
+                        </div>
+                      ) : null
+                    )}
+                    <p className="text-xs text-gray-400 pt-1">
+                      Created {formatDate(profile.safety_plan.created_at)}
+                      {profile.safety_plan.session_id && (
+                        <> in <button onClick={() => onViewSession(profile.safety_plan!.session_id!)} className="text-royal hover:underline">this session</button></>
+                      )}
+                    </p>
+                  </div>
+                </DrawerSection>
+              )}
+            </Panel>
+          </section>
+        )}
       </div>
     </div>
   );

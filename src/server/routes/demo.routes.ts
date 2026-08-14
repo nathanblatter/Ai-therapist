@@ -27,6 +27,7 @@ import {
   demoUsers,
   demoUserById,
   demoUserProfile,
+  demoUserBrief,
   demoUserSessions,
   demoOps,
   demoFunnel,
@@ -137,6 +138,11 @@ export default function demoRoutes(): Router {
     const bundle = demoUserProfile(parseInt(req.params.userId, 10));
     if (!bundle) return res.status(404).json({ error: 'User not found' });
     res.json(bundle);
+  });
+  router.get('/admin/api/users/:userId/brief', (req, res) => {
+    const brief = demoUserBrief(parseInt(req.params.userId, 10));
+    if (!brief) return res.status(404).json({ error: 'User not found' });
+    res.json(brief);
   });
   router.get('/admin/api/users/:userId/sessions', (req, res) => {
     const limit = parseInt(String(req.query.limit ?? '50')) || 50;

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   getSessionScoreExtras: vi.fn(),
   listSessions: vi.fn(),
   countSessions: vi.fn(),
+  recordLlmUsage: vi.fn(),
+  openaiCreate: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => ({
@@ -20,9 +22,20 @@ vi.mock('../../db/index.js', () => ({
   getSessionScoreExtras: mocks.getSessionScoreExtras,
   listSessions: mocks.listSessions,
   countSessions: mocks.countSessions,
+  recordLlmUsage: mocks.recordLlmUsage,
 }));
 
-import participantProfileRoutes from './participantProfile.routes.js';
+vi.mock('../../config/secrets.js', () => ({
+  getOpenAIKey: vi.fn().mockResolvedValue('test-key'),
+}));
+
+vi.mock('openai', () => ({
+  default: class {
+    chat = { completions: { create: mocks.openaiCreate } };
+  },
+}));
+
+import participantProfileRoutes, { _clearBriefCache } from './participantProfile.routes.js';
 
 function appAs(role: string | null) {
   const app = express();
@@ -62,6 +75,12 @@ beforeEach(() => {
   mocks.getSessionScoreExtras.mockReset().mockResolvedValue([]);
   mocks.listSessions.mockReset().mockResolvedValue([]);
   mocks.countSessions.mockReset().mockResolvedValue(0);
+  mocks.recordLlmUsage.mockReset().mockResolvedValue(undefined);
+  mocks.openaiCreate.mockReset().mockResolvedValue({
+    choices: [{ message: { content: 'Doing steadily better since the last review.' } }],
+    usage: { prompt_tokens: 120, completion_tokens: 60 },
+  });
+  _clearBriefCache();
 });
 
 describe('GET /admin/api/users/:userId/profile auth', () => {
@@ -117,5 +136,70 @@ describe('GET /admin/api/users/:userId/sessions', () => {
   it('is open to therapists too, but not participants', async () => {
     expect((await request(appAs('therapist')).get('/admin/api/users/42/sessions')).status).toBe(200);
     expect((await request(appAs('participant')).get('/admin/api/users/42/sessions')).status).toBe(403);
+  });
+});
+
+describe('GET /admin/api/users/:userId/brief (ai-therapist-122)', () => {
+  it('is therapist-only: 403 for researcher/participant, 401 anonymous', async () => {
+    expect((await request(appAs('researcher')).get('/admin/api/users/42/brief')).status).toBe(403);
+    expect((await request(appAs('participant')).get('/admin/api/users/42/brief')).status).toBe(403);
+    expect((await request(appAs(null)).get('/admin/api/users/42/brief')).status).toBe(401);
+    expect(mocks.openaiCreate).not.toHaveBeenCalled();
+  });
+
+  it('404s for an unknown user and 400s for a garbage id', async () => {
+    mocks.getUserById.mockResolvedValue(null);
+    expect((await request(appAs('therapist')).get('/admin/api/users/999/brief')).status).toBe(404);
+    expect((await request(appAs('therapist')).get('/admin/api/users/abc/brief')).status).toBe(400);
+  });
+
+  it('generates a brief from the bundle and records LLM usage', async () => {
+    const res = await request(appAs('therapist')).get('/admin/api/users/42/brief');
+    expect(res.status).toBe(200);
+    expect(res.body.brief).toBe('Doing steadily better since the last review.');
+    expect(mocks.openaiCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.recordLlmUsage).toHaveBeenCalledWith(null, 'insights', 'gpt-4o-mini', 120, 60);
+  });
+
+  it('serves repeat views from cache, but a new latest session regenerates', async () => {
+    await request(appAs('therapist')).get('/admin/api/users/42/brief');
+    const cached = await request(appAs('therapist')).get('/admin/api/users/42/brief');
+    expect(cached.status).toBe(200);
+    expect(cached.body).toMatchObject({ brief: 'Doing steadily better since the last review.', cached: true });
+    expect(mocks.openaiCreate).toHaveBeenCalledTimes(1);
+
+    // A newly ended session changes the cache key and regenerates.
+    mocks.getUserProfileBundle.mockResolvedValue({
+      ...EMPTY_BUNDLE,
+      ended_session_count: 3,
+      summaries: [{
+        session_id: 's-new', session_name: 'New session', ended_at: new Date(), created_at: new Date(),
+        summary: { headline: 'New headline', topics: ['sleep'], mood_trajectory: 'improving', follow_up: 'Keep the wind-down routine.' },
+      }],
+    });
+    const fresh = await request(appAs('therapist')).get('/admin/api/users/42/brief');
+    expect(fresh.status).toBe(200);
+    expect(fresh.body.cached).toBeUndefined();
+    expect(mocks.openaiCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a null brief without calling the model when there is nothing to summarize', async () => {
+    mocks.getUserProfileBundle.mockResolvedValue({ ...EMPTY_BUNDLE, ended_session_count: 0, summaries: [] });
+    const res = await request(appAs('therapist')).get('/admin/api/users/42/brief');
+    expect(res.status).toBe(200);
+    expect(res.body.brief).toBeNull();
+    expect(mocks.openaiCreate).not.toHaveBeenCalled();
+  });
+
+  it('fails soft: an LLM error still returns 200 with a null brief and does not poison the cache', async () => {
+    mocks.openaiCreate.mockRejectedValueOnce(new Error('model down'));
+    const res = await request(appAs('therapist')).get('/admin/api/users/42/brief');
+    expect(res.status).toBe(200);
+    expect(res.body.brief).toBeNull();
+
+    // Next request retries and succeeds.
+    const retry = await request(appAs('therapist')).get('/admin/api/users/42/brief');
+    expect(retry.body.brief).toBe('Doing steadily better since the last review.');
+    expect(mocks.openaiCreate).toHaveBeenCalledTimes(2);
   });
 });
