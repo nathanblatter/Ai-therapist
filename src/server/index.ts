@@ -38,6 +38,7 @@ import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
 import adminSessionsRoutes from "./routes/admin/sessions.routes.js";
 import sidebandRoutes from "./routes/admin/sideband.routes.js";
 import insightsRoutes from "./routes/admin/insights.routes.js";
+import participantProfileRoutes from "./routes/admin/participantProfile.routes.js";
 import knowledgeRoutes from "./routes/admin/knowledge.routes.js";
 import evalsRoutes from "./routes/admin/evals.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
@@ -522,6 +523,9 @@ app.use(redactionRoutes());
 
 // Session insights (memory summary + SOAP review) -> routes/admin/insights.routes.ts
 app.use(insightsRoutes());
+
+// Participant profile (memory-first clinical view + per-user sessions) -> routes/admin/participantProfile.routes.ts
+app.use(participantProfileRoutes());
 
 // RAG knowledge-base curation (Knowledge Base tab) -> routes/admin/knowledge.routes.ts.
 app.use(knowledgeRoutes());

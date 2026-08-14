@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter, Info } from "react-feather";
+import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter, Info, Eye, Cpu } from "react-feather";
 
 const VOICE_OPTIONS = [
   { value: 'alloy', label: 'Alloy' },
@@ -46,7 +46,13 @@ interface User {
   preferred_language?: string;
   mfa_enabled: boolean;
   risk_context_share_enabled?: boolean;
+  memory_enabled?: boolean;
   created_at: string;
+}
+
+interface UserManagementProps {
+  /** Opens the participant-profile drill-down for a row (ai-therapist-110). */
+  onViewUser?: (user: User) => void;
 }
 
 const RISK_CONTEXT_EXPLANATION =
@@ -80,7 +86,7 @@ interface EditModalProps {
   onSave: (userid: number, updates: UserUpdates) => void;
 }
 
-export default function UserManagement() {
+export default function UserManagement({ onViewUser }: UserManagementProps = {}) {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -741,6 +747,12 @@ export default function UserManagement() {
                 MFA Status
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                <span className="inline-flex items-center gap-1" title="Whether this participant has opted into cross-session AI memory.">
+                  Memory
+                  <Info size={13} className="text-gray-400" aria-label="Whether this participant has opted into cross-session AI memory." />
+                </span>
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
                 <span className="inline-flex items-center gap-1" title={RISK_CONTEXT_EXPLANATION}>
                   Risk context
                   <Info size={13} className="text-gray-400" aria-label={RISK_CONTEXT_EXPLANATION} />
@@ -761,7 +773,17 @@ export default function UserManagement() {
                   {user.userid}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {user.username}
+                  {onViewUser ? (
+                    <button
+                      onClick={() => onViewUser(user)}
+                      className="text-royal hover:underline font-medium"
+                      aria-label={`View profile for ${user.username}`}
+                    >
+                      {user.username}
+                    </button>
+                  ) : (
+                    user.username
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -797,6 +819,18 @@ export default function UserManagement() {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   {user.role === 'participant' ? (
+                    <span className={`px-2 py-1 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${
+                      user.memory_enabled ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      <Cpu size={12} />
+                      {user.memory_enabled ? 'On' : 'Off'}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400 text-xs" aria-hidden="true">—</span>
+                  )}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                  {user.role === 'participant' ? (
                     <button
                       type="button"
                       onClick={() => toggleRiskContext(user.userid, !user.risk_context_share_enabled)}
@@ -821,6 +855,16 @@ export default function UserManagement() {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                   <div className="flex gap-2">
+                    {onViewUser && (
+                      <button
+                        onClick={() => onViewUser(user)}
+                        className="text-royal hover:text-blue-700 flex items-center gap-1 min-h-[44px]"
+                        aria-label={`View profile for ${user.username}`}
+                      >
+                        <Eye size={16} aria-hidden="true" />
+                        View profile
+                      </button>
+                    )}
                     <button
                       onClick={() => setEditingUser(user)}
                       className="text-royal hover:text-blue-700 flex items-center gap-1 min-h-[44px]"

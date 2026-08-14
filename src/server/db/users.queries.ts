@@ -18,6 +18,7 @@ export interface UserRow {
   mfa_backup_codes?: string[] | null;
   mfa_enabled_at?: Date | null;
   risk_context_share_enabled?: boolean;
+  memory_enabled?: boolean;
   created_at?: Date;
   updated_at?: Date;
 }
@@ -162,7 +163,7 @@ export async function createUser(username: string, password: string, role: strin
 export async function getAllUsers(): Promise<UserRow[]> {
   try {
     const result = await pool.query<UserRow>(
-      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, created_at, updated_at FROM users ORDER BY created_at DESC'
+      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users ORDER BY created_at DESC'
     );
     return result.rows;
   } catch (error) {
@@ -175,7 +176,7 @@ export async function getAllUsers(): Promise<UserRow[]> {
 export async function getUserById(userid: number | string): Promise<UserRow | null> {
   try {
     const result = await pool.query<UserRow>(
-      'SELECT userid, username, role, preferred_voice, preferred_language, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
+      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
       [userid]
     );
 

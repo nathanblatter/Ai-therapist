@@ -3,24 +3,16 @@
 // for logged-in participants who opted in, cross-session memory built from
 // structured end-of-session summaries (ai-therapist-39).
 import {
-  getRecentUserSummaries,
-  countUserEndedSessions,
   getUserMemoryEnabled,
-  getUserMemories,
-  getUserCaseProfile,
-  getUserScaleHistory,
-  getUserMoodTrajectory,
-  getUserLatestSafetyPlan,
-  getUserLatestThoughtRecord,
-  getLatestClinicianNote,
-  getUserRiskContextEnabled,
-  getUserPriorCrisisFlags,
   type SessionCheckin,
   type CaseProfile,
   type ScaleScorePoint,
   type MoodPoint,
   type PriorCrisisFlag,
 } from '../db/index.js';
+// Imported from the module (not the barrel) so the shared fan-out itself runs
+// against the same (mockable) individual query modules as the admin routes.
+import { getUserProfileBundle } from '../db/participantProfile.queries.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('promptContext');
@@ -208,20 +200,29 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
     const enabled = await getUserMemoryEnabled(userId);
     if (!enabled) return '';
 
-    const [summaries, endedCount, facts, caseProfileRow, scaleHistory, moodTrajectory, safetyPlan, thoughtRecord, clinicianNote, riskContextEnabled] = await Promise.all([
-      getRecentUserSummaries(userId, 3),
-      countUserEndedSessions(userId),
-      getUserMemories(userId, 8),
-      getUserCaseProfile(userId),
-      getUserScaleHistory(userId, 2),
-      getUserMoodTrajectory(userId, 6),
-      getUserLatestSafetyPlan(userId),
-      getUserLatestThoughtRecord(userId),
-      getLatestClinicianNote(userId),
-      getUserRiskContextEnabled(userId),
-    ]);
-
-    const riskFlags = riskContextEnabled ? await getUserPriorCrisisFlags(userId, sessionId, 3) : [];
+    // Same bundle the admin participant-profile page renders (ai-therapist-110)
+    // — one fan-out, so the two views can never drift. Limits here are the
+    // prompt-sized ones this block has always used.
+    const bundle = await getUserProfileBundle(userId, {
+      sessionId,
+      summariesLimit: 3,
+      memoriesLimit: 8,
+      scalePerScale: 2,
+      moodLimit: 6,
+      crisisFlagsLimit: 3,
+    });
+    const {
+      summaries,
+      ended_session_count: endedCount,
+      case_profile: caseProfileRow,
+      scale_history: scaleHistory,
+      mood_trajectory: moodTrajectory,
+      safety_plan: safetyPlan,
+      thought_record: thoughtRecord,
+      clinician_note: clinicianNote,
+      prior_crisis_flags: riskFlags,
+    } = bundle;
+    const facts = bundle.memories.map(m => m.fact);
 
     const hasAnyContext = summaries.length > 0 || facts.length > 0 || !!caseProfileRow ||
       scaleHistory.length > 0 || moodTrajectory.length > 0 || !!safetyPlan || !!thoughtRecord ||

@@ -163,6 +163,21 @@ export async function getUserMemories(userId: number, limit = 10): Promise<strin
   return result.rows.map(r => r.fact);
 }
 
+export interface UserMemoryFact {
+  fact: string;
+  session_id: string | null;
+  created_at: Date;
+}
+
+/** Same rows as getUserMemories but with provenance (when/where each fact was stored). */
+export async function getUserMemoriesWithDates(userId: number, limit = 10): Promise<UserMemoryFact[]> {
+  const result = await pool.query<UserMemoryFact>(
+    'SELECT fact, session_id, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+    [userId, limit]
+  );
+  return result.rows;
+}
+
 export interface RelevantMemory {
   fact: string;
   created_at: Date;
