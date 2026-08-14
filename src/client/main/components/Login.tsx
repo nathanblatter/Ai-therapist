@@ -264,7 +264,7 @@ export default function Login() {
                     }}
                     className="text-sm text-gray-600 hover:text-gray-800"
                   >
-                    ← Back to login
+                    Back to login
                   </button>
                 </div>
               </form>
@@ -274,8 +274,8 @@ export default function Login() {
           <div className="text-center pt-4 border-t border-gray-200">
             <p className="text-sm text-gray-500">
               If you experience emotional distress or crisis, please contact{' '}
-              <a href="tel:8014223035" className="text-royal hover:underline font-medium">
-                <br/>988 Suicide & Crisis Lifeline: 988
+              <a href="tel:988" className="text-royal hover:underline font-medium">
+                988 Suicide & Crisis Lifeline: 988
               </a>
             </p>
           </div>

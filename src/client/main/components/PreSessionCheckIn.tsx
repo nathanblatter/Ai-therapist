@@ -2,7 +2,7 @@
 // session starts. Whatever the participant shares is injected into the AI's
 // instructions so it opens the conversation relevantly, and is stored with the
 // session for research. Fully skippable.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'react-feather';
 
 export interface CheckinData {
@@ -40,6 +40,21 @@ export default function PreSessionCheckIn({ isOpen, onCancel, onStart }: PreSess
   const [moodTouched, setMoodTouched] = useState(false);
   const [topic, setTopic] = useState('');
   const [goal, setGoal] = useState('');
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Shared modal a11y: Escape closes (same path as the close button) and
+  // focus moves into the dialog when it opens.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!panelRef.current?.contains(document.activeElement)) {
+      panelRef.current?.focus();
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onCancel]);
 
   if (!isOpen) return null;
 
@@ -64,7 +79,7 @@ export default function PreSessionCheckIn({ isOpen, onCancel, onStart }: PreSess
         aria-modal="true"
         aria-labelledby="checkin-modal-title"
       >
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fadeIn">
+        <div ref={panelRef} tabIndex={-1} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fadeIn focus:outline-none">
           <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 id="checkin-modal-title" className="text-lg font-semibold text-gray-800">
               Before we start…

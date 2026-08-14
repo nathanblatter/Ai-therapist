@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { MessageSquare, X } from "react-feather";
 
 const SEVERITIES = [
   { value: "low", label: "Minor — a small annoyance" },
@@ -139,7 +140,7 @@ export default function BugReport() {
                    text-sm font-medium text-white shadow-lg shadow-royal/25 transition
                    hover:-translate-y-0.5 hover:bg-navy focus:outline-none focus-visible:ring-2 focus-visible:ring-lightBlue"
       >
-        <span aria-hidden="true">💬</span>
+        <MessageSquare size={16} aria-hidden="true" />
         <span className="hidden sm:inline">Report a problem</span>
       </button>
 
@@ -205,7 +206,7 @@ export default function BugReport() {
                             aria-label={`Remove ${s.file.name || `screenshot ${i + 1}`}`}
                             className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full
                                        bg-navy text-[10px] leading-none text-white shadow transition hover:bg-red-500">
-                            ✕
+                            <X size={10} aria-hidden="true" />
                           </button>
                         </div>
                       ))}

@@ -2,7 +2,7 @@
 // channel (same pattern as ExerciseOverlay): crisis resource card, CBT thought
 // record, private journal, session recap, safety plan card, and PHQ-2/GAD-2
 // screener form. One overlay at a time, dispatched by `kind`.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Phone, MessageSquare, CheckCircle } from 'react-feather';
 
 // ---------- shared ----------
@@ -51,11 +51,27 @@ interface ToolOverlaysProps {
 function Shell({ title, onClose, children, wide = false }: {
   title: string; onClose: () => void; children: React.ReactNode; wide?: boolean;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Shared modal a11y: Escape closes (same handler as the close button) and
+  // focus moves into the dialog on open — unless a child (e.g. an autoFocus
+  // textarea) already took it.
+  useEffect(() => {
+    if (!panelRef.current?.contains(document.activeElement)) {
+      panelRef.current?.focus();
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 z-40" aria-hidden="true" />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
-        <div className={`bg-white rounded-2xl shadow-2xl w-full ${wide ? 'max-w-xl' : 'max-w-md'} max-h-[90vh] overflow-y-auto animate-fadeIn`}>
+        <div ref={panelRef} tabIndex={-1} className={`bg-white rounded-2xl shadow-2xl w-full ${wide ? 'max-w-xl' : 'max-w-md'} max-h-[90vh] overflow-y-auto animate-fadeIn focus:outline-none`}>
           <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
             <button onClick={onClose} aria-label="Close"
@@ -225,7 +241,7 @@ function Recap({ focus, techniques, takeaway, onClose }: { focus: string; techni
           <p className="text-xs uppercase tracking-wide text-blue-400 mb-1">Worth keeping</p>
           <p className="text-blue-900">{takeaway}</p>
         </div>
-        <p className="text-xs text-gray-400 text-center">Screenshot this if you&apos;d like to keep it.</p>
+        <p className="text-xs text-gray-400 text-center">This recap is included in your post-session download if you&apos;d like to keep it.</p>
       </div>
     </Shell>
   );
@@ -266,7 +282,7 @@ function SafetyPlanCard({ plan, onClose }: { plan: SafetyPlanData; onClose: () =
           <a href="sms:741741?&body=HOME" className="block text-sm text-red-900">Text HOME to 741741 — Crisis Text Line</a>
           <p className="text-sm text-red-900">Call 911 for immediate danger</p>
         </div>
-        <p className="text-xs text-gray-400 text-center">Screenshot this so it&apos;s with you when you need it.</p>
+        <p className="text-xs text-gray-400 text-center">You can download this from the post-session screen so it&apos;s with you when you need it.</p>
       </div>
     </Shell>
   );
