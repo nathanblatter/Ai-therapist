@@ -9,6 +9,7 @@ const {
   getKnowledgeChunkByIdMock, insertWorksheetInstanceMock,
   insertRiskCheckStepMock, getRiskCheckStepsMock, getLatestCrisisEventIdMock,
   rerankChunksMock, getSessionCrisisStateMock, sidebandIsConnectedMock, sidebandHoldFloorMock,
+  insertPracticeAssignmentMock, listUserAssignmentsMock,
 } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
@@ -35,6 +36,8 @@ const {
   getSessionCrisisStateMock: vi.fn(),
   sidebandIsConnectedMock: vi.fn(),
   sidebandHoldFloorMock: vi.fn(),
+  insertPracticeAssignmentMock: vi.fn(),
+  listUserAssignmentsMock: vi.fn(),
   // Rerank is exercised in rerank.service.test.ts; here it just passes the
   // vector candidates through in order so the RAG-tool assertions stay focused.
   rerankChunksMock: vi.fn(async (_q: string, candidates: unknown[], topN: number) => ({
@@ -66,6 +69,8 @@ vi.mock('../db/index.js', () => ({
   getRiskCheckSteps: getRiskCheckStepsMock,
   getLatestCrisisEventId: getLatestCrisisEventIdMock,
   getSessionCrisisState: getSessionCrisisStateMock,
+  insertPracticeAssignment: insertPracticeAssignmentMock,
+  listUserAssignments: listUserAssignmentsMock,
 }));
 vi.mock('./sidebandManager.service.js', () => ({
   sidebandManager: {
@@ -113,6 +118,8 @@ beforeEach(() => {
   getSessionCrisisStateMock.mockReset().mockResolvedValue({ crisis_flagged: false, crisis_severity: null, crisis_risk_score: null });
   sidebandIsConnectedMock.mockReset().mockReturnValue(true);
   sidebandHoldFloorMock.mockReset().mockResolvedValue(undefined);
+  insertPracticeAssignmentMock.mockReset().mockResolvedValue({ id: 1 });
+  listUserAssignmentsMock.mockReset().mockResolvedValue([]);
 });
 
 describe('registry mechanics', () => {
@@ -452,6 +459,79 @@ describe('review_practice (ai-therapist-67)', () => {
     };
     expect(r.thought_record).toEqual({ balanced_thought: 'I did my best', when: '2026-07-01' });
     expect(r.has_safety_plan).toBe(true);
+  });
+
+  it('surfaces open assignments from assign_practice so the model can follow up', async () => {
+    listUserAssignmentsMock.mockResolvedValue([
+      {
+        id: 3, user_id: 42, session_id: 's0', title: 'Two-minute breathing', description: 'Before bed.',
+        kind: 'exercise', suggested_frequency: 'daily', status: 'assigned',
+        assigned_at: new Date('2026-08-01T00:00:00Z'), completed_at: null, completion_note: null,
+      },
+    ]);
+    const r = await toolRegistry.executeTool('review_practice', {}, { sessionId: 's1' }) as {
+      available: boolean;
+      open_assignments: { title: string; assigned: string }[];
+    };
+    expect(listUserAssignmentsMock).toHaveBeenCalledWith(42, { status: 'assigned', limit: 5 });
+    expect(r.available).toBe(true);
+    expect(r.open_assignments).toEqual([
+      { title: 'Two-minute breathing', kind: 'exercise', suggested_frequency: 'daily', assigned: '2026-08-01' },
+    ]);
+  });
+});
+
+describe('assign_practice (ai-therapist-123)', () => {
+  const args = { title: 'Two-minute breathing', description: 'Before bed, two minutes of slow breathing.' };
+
+  it('is registered on both channels (chat + realtime)', async () => {
+    const chat = (await toolRegistry.getEnabledToolDefinitions({ channel: 'chat' })).map(d => d.name);
+    const realtime = (await toolRegistry.getEnabledToolDefinitions({ channel: 'realtime' })).map(d => d.name);
+    expect(chat).toContain('assign_practice');
+    expect(realtime).toContain('assign_practice');
+  });
+
+  it('requires session context', async () => {
+    const r = await toolRegistry.executeTool('assign_practice', args) as { error?: string };
+    expect(r.error).toBeTruthy();
+    expect(insertPracticeAssignmentMock).not.toHaveBeenCalled();
+  });
+
+  it('requires title and description', async () => {
+    const r = await toolRegistry.executeTool('assign_practice', { title: '  ' }, { sessionId: 's1' }) as { error?: string };
+    expect(r.error).toBeTruthy();
+    expect(insertPracticeAssignmentMock).not.toHaveBeenCalled();
+  });
+
+  it('does not store for anonymous participants', async () => {
+    getSessionMock.mockResolvedValue({ user_id: null });
+    const r = await toolRegistry.executeTool('assign_practice', args, { sessionId: 's1' }) as { assigned: boolean };
+    expect(r.assigned).toBe(false);
+    expect(insertPracticeAssignmentMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves the user from the session and stores the agreed practice (kind defaults to 'custom')", async () => {
+    const r = await toolRegistry.executeTool(
+      'assign_practice',
+      { ...args, suggested_frequency: 'daily' },
+      { sessionId: 's1' }
+    ) as { assigned: boolean; title: string };
+    expect(insertPracticeAssignmentMock).toHaveBeenCalledWith({
+      userId: 42,
+      sessionId: 's1',
+      title: 'Two-minute breathing',
+      description: 'Before bed, two minutes of slow breathing.',
+      kind: 'custom',
+      suggestedFrequency: 'daily',
+    });
+    expect(r).toEqual({ assigned: true, title: 'Two-minute breathing' });
+  });
+
+  it('ignores an invalid kind (falls back to custom) but keeps a valid one', async () => {
+    await toolRegistry.executeTool('assign_practice', { ...args, kind: 'homework' }, { sessionId: 's1' });
+    expect(insertPracticeAssignmentMock).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'custom' }));
+    await toolRegistry.executeTool('assign_practice', { ...args, kind: 'observation' }, { sessionId: 's1' });
+    expect(insertPracticeAssignmentMock).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'observation' }));
   });
 });
 

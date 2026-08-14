@@ -1251,18 +1251,19 @@ export class ToolRegistry {
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
-        const { getSession, getUserMemoryEnabled, getUserLatestThoughtRecord, getUserLatestSafetyPlan } = await import('../db/index.js');
+        const { getSession, getUserMemoryEnabled, getUserLatestThoughtRecord, getUserLatestSafetyPlan, listUserAssignments } = await import('../db/index.js');
         const session = await getSession(ctx.sessionId);
         const userId = session?.user_id;
         if (!userId) return { available: false, reason: 'Participant is anonymous — no session history exists.' };
         if (!(await getUserMemoryEnabled(userId))) {
           return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
         }
-        const [thoughtRecord, safetyPlan] = await Promise.all([
+        const [thoughtRecord, safetyPlan, openAssignments] = await Promise.all([
           getUserLatestThoughtRecord(userId),
           getUserLatestSafetyPlan(userId),
+          listUserAssignments(userId, { status: 'assigned', limit: 5 }),
         ]);
-        if (!thoughtRecord && !safetyPlan) {
+        if (!thoughtRecord && !safetyPlan && openAssignments.length === 0) {
           return { available: true, practice: null, note: 'No recorded practice from a previous session — do not invent one.' };
         }
         return {
@@ -1271,8 +1272,66 @@ export class ToolRegistry {
             ? { balanced_thought: thoughtRecord.record.balanced_thought, when: thoughtRecord.created_at.toISOString().slice(0, 10) }
             : null,
           has_safety_plan: !!safetyPlan,
+          // Assigned via assign_practice and not yet marked done by the participant.
+          open_assignments: openAssignments.map(a => ({
+            title: a.title,
+            kind: a.kind,
+            suggested_frequency: a.suggested_frequency,
+            assigned: a.assigned_at.toISOString().slice(0, 10),
+          })),
           note: 'Ask how it went in your own warm words. Do not read this back verbatim or claim more detail than shown here.',
         };
+      }
+    );
+
+    // Tool 32b: forward-looking practice (ai-therapist-123) — the counterpart
+    // to review_practice. Stores a small agreed between-session practice that
+    // the participant sees on their progress home and can mark done there;
+    // open ones resurface in the next session's prompt block.
+    this.registerTool(
+      'assign_practice',
+      {
+        type: 'function',
+        name: 'assign_practice',
+        description: 'Assign a small, concrete between-session practice the participant agreed to. Only after discussing it with them. One assignment per topic.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Short name for the practice, in plain words (e.g. "Two-minute breathing before bed").' },
+            description: { type: 'string', description: 'What to actually do, phrased close to how you agreed on it together. One or two sentences.' },
+            kind: { type: 'string', enum: ['worksheet', 'exercise', 'observation', 'custom'], description: 'What kind of practice this is.' },
+            suggested_frequency: { type: 'string', description: 'How often, if you agreed on one (e.g. "daily", "when the worry shows up").' },
+          },
+          required: ['title', 'description'],
+        },
+        channel: 'both',
+      },
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+        const title = typeof args['title'] === 'string' ? args['title'].trim().substring(0, 200) : '';
+        const description = typeof args['description'] === 'string' ? args['description'].trim().substring(0, 1000) : '';
+        if (!title || !description) return { error: 'title and description are both required' };
+        const kinds = ['worksheet', 'exercise', 'observation', 'custom'] as const;
+        const kind = kinds.find(k => k === args['kind']) ?? 'custom';
+        const suggestedFrequency = typeof args['suggested_frequency'] === 'string'
+          ? args['suggested_frequency'].trim().substring(0, 200) || null
+          : null;
+
+        const { getSession, insertPracticeAssignment } = await import('../db/index.js');
+        const session = await getSession(ctx.sessionId);
+        const userId = session?.user_id;
+        if (!userId) {
+          return { assigned: false, reason: 'Participant is anonymous — practice assignments need an account. Suggest the practice verbally instead.' };
+        }
+        await insertPracticeAssignment({
+          userId,
+          sessionId: ctx.sessionId,
+          title,
+          description,
+          kind,
+          suggestedFrequency,
+        });
+        return { assigned: true, title };
       }
     );
 

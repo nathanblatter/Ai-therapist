@@ -10,6 +10,8 @@ const dbMocks = vi.hoisted(() => ({
   getOwnProgress: vi.fn(),
   getUserLatestSafetyPlan: vi.fn(),
   listUserWorksheetInstances: vi.fn(),
+  listUserAssignments: vi.fn(),
+  completeAssignment: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
 
@@ -37,8 +39,26 @@ const PROGRESS = {
   has_safety_plan: true,
 };
 
+const ASSIGNMENT = {
+  id: 5,
+  user_id: 7,
+  session_id: 's1',
+  title: 'Two-minute breathing',
+  description: 'Before bed.',
+  kind: 'exercise',
+  suggested_frequency: 'daily',
+  status: 'assigned',
+  assigned_at: new Date('2026-08-09T00:00:00Z'),
+  completed_at: null,
+  completion_note: null,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  dbMocks.listUserAssignments.mockResolvedValue([ASSIGNMENT]);
+  dbMocks.completeAssignment.mockResolvedValue({
+    ...ASSIGNMENT, status: 'completed', completed_at: new Date('2026-08-12T00:00:00Z'), completion_note: 'went ok',
+  });
   dbMocks.getOwnProgress.mockResolvedValue(PROGRESS);
   dbMocks.getUserLatestSafetyPlan.mockResolvedValue({
     plan: { warning_signs: ['x'] },
@@ -61,7 +81,7 @@ beforeEach(() => {
 });
 
 describe('auth is required on every /api/me/* endpoint', () => {
-  it.each(['/api/me/progress', '/api/me/safety-plan', '/api/me/worksheets'])(
+  it.each(['/api/me/progress', '/api/me/safety-plan', '/api/me/worksheets', '/api/me/assignments'])(
     'GET %s without a session returns 401 and touches no db function',
     async (path) => {
       const res = await request(appAs(null)).get(path);
@@ -69,8 +89,15 @@ describe('auth is required on every /api/me/* endpoint', () => {
       expect(dbMocks.getOwnProgress).not.toHaveBeenCalled();
       expect(dbMocks.getUserLatestSafetyPlan).not.toHaveBeenCalled();
       expect(dbMocks.listUserWorksheetInstances).not.toHaveBeenCalled();
+      expect(dbMocks.listUserAssignments).not.toHaveBeenCalled();
     }
   );
+
+  it('POST /api/me/assignments/:id/complete without a session returns 401', async () => {
+    const res = await request(appAs(null)).post('/api/me/assignments/5/complete').send({});
+    expect(res.status).toBe(401);
+    expect(dbMocks.completeAssignment).not.toHaveBeenCalled();
+  });
 });
 
 describe('self-scoping: user id comes from the session, never the request', () => {
@@ -94,6 +121,21 @@ describe('self-scoping: user id comes from the session, never the request', () =
     const res = await request(appAs(7)).get('/api/me/worksheets?userId=999');
     expect(res.status).toBe(200);
     expect(dbMocks.listUserWorksheetInstances).toHaveBeenCalledWith(7);
+  });
+
+  it('GET /api/me/assignments resolves the session user only', async () => {
+    const res = await request(appAs(7)).get('/api/me/assignments?userId=999');
+    expect(res.status).toBe(200);
+    expect(dbMocks.listUserAssignments).toHaveBeenCalledWith(7, { limit: 50 });
+  });
+
+  it('POST /api/me/assignments/:id/complete is scoped to the session user (cross-user completion blocked)', async () => {
+    // The route always passes the SESSION user's id; a guessed id belonging
+    // to another user comes back null from the scoped UPDATE -> 404.
+    dbMocks.completeAssignment.mockResolvedValue(null);
+    const res = await request(appAs(7)).post('/api/me/assignments/123/complete').send({ note: 'done' });
+    expect(res.status).toBe(404);
+    expect(dbMocks.completeAssignment).toHaveBeenCalledWith(123, 7, 'done');
   });
 
   it('there is no path variant that accepts a user id (param probing 404s)', async () => {
@@ -145,6 +187,40 @@ describe('response shapes', () => {
       status: 'completed',
     });
     expect(res.body.worksheets[0].created_at).toBeTruthy();
+  });
+
+  it('GET /api/me/assignments returns the list', async () => {
+    const res = await request(appAs(7)).get('/api/me/assignments');
+    expect(res.status).toBe(200);
+    expect(res.body.assignments).toHaveLength(1);
+    expect(res.body.assignments[0]).toMatchObject({
+      id: 5,
+      title: 'Two-minute breathing',
+      status: 'assigned',
+    });
+  });
+
+  it('POST /api/me/assignments/:id/complete returns the completed row and trims/caps the note', async () => {
+    const res = await request(appAs(7))
+      .post('/api/me/assignments/5/complete')
+      .send({ note: `  ${'x'.repeat(600)}  ` });
+    expect(res.status).toBe(200);
+    expect(res.body.assignment.status).toBe('completed');
+    const note = dbMocks.completeAssignment.mock.calls[0][2] as string;
+    expect(note).toHaveLength(500);
+  });
+
+  it('POST /api/me/assignments/:id/complete passes a null note when absent or blank', async () => {
+    await request(appAs(7)).post('/api/me/assignments/5/complete').send({});
+    expect(dbMocks.completeAssignment).toHaveBeenCalledWith(5, 7, null);
+    await request(appAs(7)).post('/api/me/assignments/5/complete').send({ note: '   ' });
+    expect(dbMocks.completeAssignment).toHaveBeenLastCalledWith(5, 7, null);
+  });
+
+  it('POST /api/me/assignments/:id/complete rejects a non-numeric id', async () => {
+    const res = await request(appAs(7)).post('/api/me/assignments/abc/complete').send({});
+    expect(res.status).toBe(400);
+    expect(dbMocks.completeAssignment).not.toHaveBeenCalled();
   });
 
   it('db failures return 500 with a generic error (no internals leaked)', async () => {

@@ -22,6 +22,7 @@ interface Message {
 interface Session {
   session_id?: string;
   session_name?: string;
+  user_id?: number | null;
   username?: string;
   status?: string;
   created_at?: string;
@@ -781,6 +782,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
               userRole={userRole}
               sessionStatus={session?.status}
               checkin={session?.checkin}
+              participantUserId={session?.user_id}
             />
           )}
 

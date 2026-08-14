@@ -18,6 +18,7 @@ const {
   getLatestClinicianNoteMock,
   getUserRiskContextEnabledMock,
   getUserPriorCrisisFlagsMock,
+  listUserAssignmentsMock,
 } = vi.hoisted(() => ({
   getRecentUserSummariesMock: vi.fn(),
   countUserEndedSessionsMock: vi.fn(),
@@ -31,6 +32,7 @@ const {
   getLatestClinicianNoteMock: vi.fn(),
   getUserRiskContextEnabledMock: vi.fn(),
   getUserPriorCrisisFlagsMock: vi.fn(),
+  listUserAssignmentsMock: vi.fn(),
 }));
 
 vi.mock('../db/insights.queries.js', async (importOriginal) => ({
@@ -60,6 +62,10 @@ vi.mock('../db/crisis.queries.js', async (importOriginal) => ({
   getUserRiskContextEnabled: getUserRiskContextEnabledMock,
   getUserPriorCrisisFlags: getUserPriorCrisisFlagsMock,
 }));
+vi.mock('../db/practiceAssignments.queries.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  listUserAssignments: listUserAssignmentsMock,
+}));
 
 const {
   buildMemoryBlock,
@@ -68,6 +74,7 @@ const {
   buildClinicianNoteBlock,
   buildRiskHistoryBlock,
   buildToolGuidanceBlock,
+  buildPracticeBlock,
 } = await import('./promptContext.js');
 
 beforeEach(() => {
@@ -83,6 +90,7 @@ beforeEach(() => {
   getLatestClinicianNoteMock.mockReset().mockResolvedValue(null);
   getUserRiskContextEnabledMock.mockReset().mockResolvedValue(false);
   getUserPriorCrisisFlagsMock.mockReset().mockResolvedValue([]);
+  listUserAssignmentsMock.mockReset().mockResolvedValue([]);
 });
 
 describe('buildCaseProfileBlock (ai-therapist-47)', () => {
@@ -185,6 +193,44 @@ describe('buildToolGuidanceBlock — wave 3 tools', () => {
   });
 });
 
+describe('buildPracticeBlock (ai-therapist-123)', () => {
+  const assignment = (over: Record<string, unknown>) => ({
+    id: 1, user_id: 42, session_id: 's1', title: 'Practice', description: 'd',
+    kind: 'custom' as const, suggested_frequency: null, status: 'assigned' as const,
+    assigned_at: new Date('2026-08-01T00:00:00Z'), completed_at: null, completion_note: null,
+    ...over,
+  });
+
+  it('returns empty string when there is nothing to show', () => {
+    expect(buildPracticeBlock([], [])).toBe('');
+  });
+
+  it('lists open practice with title + assigned date on one compact line', () => {
+    const block = buildPracticeBlock(
+      [assignment({ title: 'Two-minute breathing' }), assignment({ id: 2, title: 'Worry log', assigned_at: new Date('2026-08-03T00:00:00Z') })],
+      []
+    );
+    expect(block).toContain('Open practice from last time: Two-minute breathing (assigned 2026-08-01); Worry log (assigned 2026-08-03)');
+  });
+
+  it('lists completed-since-last-session practice one line each, capped at 3', () => {
+    const completed = [1, 2, 3, 4].map(i =>
+      assignment({ id: i, title: `Done ${i}`, status: 'completed', completed_at: new Date() })
+    );
+    const block = buildPracticeBlock([], completed);
+    expect(block).toContain('- They completed: Done 1');
+    expect(block).toContain('- They completed: Done 3');
+    expect(block).not.toContain('Done 4');
+  });
+
+  it('caps the open list at 3', () => {
+    const open = [1, 2, 3, 4].map(i => assignment({ id: i, title: `Open ${i}` }));
+    const block = buildPracticeBlock(open, []);
+    expect(block).toContain('Open 3');
+    expect(block).not.toContain('Open 4');
+  });
+});
+
 describe('buildMemoryBlock composition', () => {
   it('returns empty string for anonymous users', async () => {
     expect(await buildMemoryBlock(null)).toBe('');
@@ -225,6 +271,46 @@ describe('buildMemoryBlock composition', () => {
     expect(block).toContain('Ask about the new job.');
     expect(block).toContain('medium severity');
     expect(getUserPriorCrisisFlagsMock).toHaveBeenCalledWith(42, 's-current', 3);
+  });
+
+  it('surfaces open practice (and completions since the last session) in the returning block', async () => {
+    getRecentUserSummariesMock.mockResolvedValue([
+      { session_id: 's1', summary: { headline: 'x' }, session_name: null, ended_at: new Date('2026-08-05T00:00:00Z'), created_at: new Date('2026-08-05T00:00:00Z') },
+    ]);
+    listUserAssignmentsMock.mockImplementation(async (_userId: number, opts: { status?: string }) => {
+      if (opts.status === 'assigned') {
+        return [{
+          id: 1, user_id: 42, session_id: 's1', title: 'Two-minute breathing', description: 'd',
+          kind: 'exercise', suggested_frequency: 'daily', status: 'assigned',
+          assigned_at: new Date('2026-08-05T00:00:00Z'), completed_at: null, completion_note: null,
+        }];
+      }
+      return [
+        { // completed AFTER the last session ended -> shown
+          id: 2, user_id: 42, session_id: 's1', title: 'Worry log', description: 'd',
+          kind: 'observation', suggested_frequency: null, status: 'completed',
+          assigned_at: new Date('2026-08-01T00:00:00Z'), completed_at: new Date('2026-08-08T00:00:00Z'), completion_note: null,
+        },
+        { // completed BEFORE the last session ended -> old news, not shown
+          id: 3, user_id: 42, session_id: 's0', title: 'Old gratitude list', description: 'd',
+          kind: 'custom', suggested_frequency: null, status: 'completed',
+          assigned_at: new Date('2026-07-01T00:00:00Z'), completed_at: new Date('2026-07-02T00:00:00Z'), completion_note: null,
+        },
+      ];
+    });
+
+    const block = await buildMemoryBlock(42);
+    expect(block).toContain('Open practice from last time: Two-minute breathing (assigned 2026-08-05)');
+    expect(block).toContain('They completed: Worry log');
+    expect(block).not.toContain('Old gratitude list');
+  });
+
+  it('a practice-assignments failure only drops that line — the rest of the block survives', async () => {
+    getUserCaseProfileMock.mockResolvedValue({ user_id: 42, profile: { presenting_concerns: ['anxiety'] }, updated_at: new Date() });
+    listUserAssignmentsMock.mockRejectedValue(new Error('table missing'));
+    const block = await buildMemoryBlock(42);
+    expect(block).toContain('Presenting concerns: anxiety');
+    expect(block).not.toContain('Open practice');
   });
 
   it('never throws — a DB failure yields an empty block so the session can still start', async () => {

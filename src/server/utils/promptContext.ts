@@ -13,6 +13,8 @@ import {
 // Imported from the module (not the barrel) so the shared fan-out itself runs
 // against the same (mockable) individual query modules as the admin routes.
 import { getUserProfileBundle } from '../db/participantProfile.queries.js';
+// Module import (not the barrel) for the same mockability reason as above.
+import { listUserAssignments, type PracticeAssignment } from '../db/practiceAssignments.queries.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('promptContext');
@@ -97,6 +99,9 @@ export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
   }
   if (has('review_practice')) {
     lines.push('- Early on with a returning participant, consider calling review_practice to see what they were asked to work on last time, then ask how it went.');
+  }
+  if (has('assign_practice')) {
+    lines.push('- When you and the participant AGREE on a small between-session practice, CALL assign_practice so it shows up on their home screen — never assign one they did not agree to.');
   }
   if (has('compare_screener_trend')) {
     lines.push('- After administer_scale finishes, CALL compare_screener_trend before commenting on the result, so you know how it compares to their last one.');
@@ -191,6 +196,24 @@ export function buildRiskHistoryBlock(flags: PriorCrisisFlag[]): string {
 }
 
 /**
+ * Between-session practice follow-up (ai-therapist-123): open assignments from
+ * assign_practice, plus ones completed since the last session, so the model
+ * naturally asks how the practice went. Compact — one line each, capped.
+ */
+export function buildPracticeBlock(open: PracticeAssignment[], completedSinceLast: PracticeAssignment[]): string {
+  const lines: string[] = [];
+  if (open.length > 0) {
+    const items = open.slice(0, 3).map(a => `${a.title} (assigned ${a.assigned_at.toISOString().slice(0, 10)})`);
+    lines.push(`- Open practice from last time: ${items.join('; ')}`);
+  }
+  for (const a of completedSinceLast.slice(0, 3)) {
+    lines.push(`- They completed: ${a.title}`);
+  }
+  if (lines.length === 0) return '';
+  return `\nBetween-session practice:\n${lines.join('\n')}\nAsk warmly how the practice went — celebrate follow-through, never scold a skipped one.`;
+}
+
+/**
  * Prompt block giving the model continuity with a returning participant.
  * Empty string for anonymous users, users who haven't opted in, or first-timers.
  */
@@ -224,9 +247,30 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
     } = bundle;
     const facts = bundle.memories.map(m => m.fact);
 
+    // Practice assignments (ai-therapist-123): best-effort, individually
+    // guarded — a failure here must not cost the rest of the memory block.
+    let openAssignments: PracticeAssignment[] = [];
+    let completedSinceLast: PracticeAssignment[] = [];
+    try {
+      const [open, completed] = await Promise.all([
+        listUserAssignments(userId, { status: 'assigned', limit: 3 }),
+        listUserAssignments(userId, { status: 'completed', limit: 10 }),
+      ]);
+      openAssignments = open;
+      // "Since last session" = since the most recent summarized session ended
+      // (fallback: the last 7 days when there is no summary to anchor on).
+      const lastSessionAt = summaries[0]
+        ? (summaries[0].ended_at ?? summaries[0].created_at)
+        : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      completedSinceLast = completed.filter(a => a.completed_at !== null && a.completed_at >= lastSessionAt);
+    } catch (err) {
+      log.error({ err }, `Failed to load practice assignments for user ${userId}`);
+    }
+
     const hasAnyContext = summaries.length > 0 || facts.length > 0 || !!caseProfileRow ||
       scaleHistory.length > 0 || moodTrajectory.length > 0 || !!safetyPlan || !!thoughtRecord ||
-      !!clinicianNote || riskFlags.length > 0;
+      !!clinicianNote || riskFlags.length > 0 ||
+      openAssignments.length > 0 || completedSinceLast.length > 0;
     if (!hasAnyContext) return '';
 
     const entries = summaries.map(row => {
@@ -248,10 +292,11 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
       : '';
     const caseProfileBlock = buildCaseProfileBlock(caseProfileRow?.profile ?? null);
     const signalsBlock = buildReturningSignalsBlock({ scaleHistory, moodTrajectory, safetyPlan, thoughtRecord });
+    const practiceBlock = buildPracticeBlock(openAssignments, completedSinceLast);
     const clinicianBlock = buildClinicianNoteBlock(clinicianNote);
     const riskBlock = buildRiskHistoryBlock(riskFlags);
 
-    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}${caseProfileBlock}${signalsBlock}${clinicianBlock}${riskBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
+    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}${caseProfileBlock}${signalsBlock}${practiceBlock}${clinicianBlock}${riskBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
   } catch (err) {
     // Memory must never block a session from starting.
     log.error({ err }, `Failed to build memory block for user ${userId}`);

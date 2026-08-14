@@ -40,3 +40,4 @@ export * from './progress.queries.js';
 export * from './clientEvents.queries.js';
 export * from './funnel.queries.js';
 export * from './latency.queries.js';
+export * from './practiceAssignments.queries.js';
