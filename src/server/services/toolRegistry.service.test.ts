@@ -142,6 +142,60 @@ describe('registry mechanics', () => {
   });
 });
 
+describe('channel filtering (ai-therapist-118)', () => {
+  it('the chat channel excludes realtime-only tools but keeps text-safe ones', async () => {
+    const chat = await toolRegistry.getEnabledToolDefinitions({ channel: 'chat' });
+    const names = chat.map(d => d.name);
+    // Realtime-only: narrated live exercises, language switch, session end.
+    for (const rt of [
+      'start_breathing_exercise', 'start_grounding_exercise', 'start_body_scan',
+      'start_values_sort', 'start_fear_ladder', 'switch_language', 'end_session',
+    ]) {
+      expect(names).not.toContain(rt);
+    }
+    // Text-safe: crisis, safety plan, memory, screeners, RAG, risk logging.
+    for (const ok of [
+      'get_crisis_resources', 'show_resource_card', 'create_safety_plan', 'retrieve_safety_plan',
+      'remember_this', 'recall_previous_sessions', 'recall_relevant_history',
+      'log_mood', 'set_session_goal', 'recall_session_goal',
+      'get_session_summary', 'get_time_remaining', 'get_coping_strategies',
+      'retrieve_psychoeducation', 'find_worksheet', 'suggest_modality_technique',
+      'start_thought_record', 'show_journaling_prompt', 'display_session_recap',
+      'administer_scale', 'flag_notable_moment', 'compare_screener_trend',
+      'review_practice', 'create_custom_worksheet', 'escalate_to_human', 'run_risk_check',
+    ]) {
+      expect(names).toContain(ok);
+    }
+  });
+
+  it('the realtime channel keeps the historical full set', async () => {
+    const realtime = await toolRegistry.getEnabledToolDefinitions({ channel: 'realtime' });
+    expect(realtime.length).toBe(toolRegistry.getAllToolDefinitions().length);
+  });
+
+  it('chat filtering still respects features.disabled_tools', async () => {
+    getSystemConfigMock.mockResolvedValue({ features: { disabled_tools: ['run_risk_check'] } });
+    const chat = await toolRegistry.getEnabledToolDefinitions({ channel: 'chat' });
+    expect(chat.map(d => d.name)).not.toContain('run_risk_check');
+  });
+
+  it('an explicit definition channel overrides the default set', async () => {
+    toolRegistry.registerTool(
+      'chat_only_probe',
+      { type: 'function', name: 'chat_only_probe', description: 'test', parameters: { type: 'object', properties: {}, required: [] }, channel: 'chat' },
+      async () => ({ ok: true }),
+    );
+    try {
+      const chat = (await toolRegistry.getEnabledToolDefinitions({ channel: 'chat' })).map(d => d.name);
+      const realtime = (await toolRegistry.getEnabledToolDefinitions({ channel: 'realtime' })).map(d => d.name);
+      expect(chat).toContain('chat_only_probe');
+      expect(realtime).not.toContain('chat_only_probe');
+    } finally {
+      toolRegistry.unregisterTool('chat_only_probe');
+    }
+  });
+});
+
 describe('log_mood', () => {
   it('rejects out-of-range and non-numeric scores', async () => {
     for (const score of [0, 11, 'high', NaN, undefined]) {

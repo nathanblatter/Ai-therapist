@@ -10,11 +10,46 @@ interface ToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  /**
+   * Which pipeline(s) may offer this tool to the model (ai-therapist-118).
+   * Omitted = resolved via CHAT_CAPABLE_TOOLS below, so existing/concurrent
+   * registrations don't need to change: tools NOT in that set default to
+   * 'realtime' (safe default — a new voice-only tool never leaks into chat).
+   */
+  channel?: 'realtime' | 'chat' | 'both';
+}
+
+/**
+ * Text-safe tools (ai-therapist-118): everything that works over the chat
+ * pipeline — persistence/retrieval tools plus overlays the chat client can
+ * render from response toolEvents. Excluded (realtime-only): the narrated
+ * live exercises (breathing/grounding/body scan/values sort/fear ladder),
+ * switch_language (rewrites realtime session_configurations/sideband
+ * instructions) and end_session (chat has its own explicit /api/chat/end
+ * path; the handler's server-backstop semantics assume the realtime
+ * teardown flow).
+ */
+const CHAT_CAPABLE_TOOLS = new Set([
+  'get_crisis_resources', 'show_resource_card', 'create_safety_plan', 'retrieve_safety_plan',
+  'remember_this', 'recall_previous_sessions', 'recall_relevant_history',
+  'log_mood', 'set_session_goal', 'recall_session_goal',
+  'get_session_summary', 'get_time_remaining', 'get_coping_strategies',
+  'retrieve_psychoeducation', 'find_worksheet', 'suggest_modality_technique',
+  'start_thought_record', 'show_journaling_prompt', 'display_session_recap',
+  'administer_scale', 'flag_notable_moment', 'compare_screener_trend',
+  'review_practice', 'create_custom_worksheet', 'escalate_to_human', 'run_risk_check',
+]);
+
+/** Effective channel for a definition: explicit field wins, else the set. */
+function toolChannel(def: ToolDefinition): 'realtime' | 'chat' | 'both' {
+  return def.channel ?? (CHAT_CAPABLE_TOOLS.has(def.name) ? 'both' : 'realtime');
 }
 
 /** Server-side context injected per invocation (the model never supplies it). */
 export interface ToolContext {
   sessionId?: string;
+  /** Which pipeline invoked the tool ('realtime' sideband vs 'chat' loop). */
+  channel?: 'realtime' | 'chat';
 }
 
 type ToolHandler = (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
@@ -96,10 +131,20 @@ export class ToolRegistry {
     return Array.from(this.tools.values()).map(tool => tool.definition);
   }
 
-  /** Definitions minus the admin-disabled set — what new sessions are minted with. */
-  async getEnabledToolDefinitions(): Promise<ToolDefinition[]> {
+  /**
+   * Definitions minus the admin-disabled set — what new sessions are minted
+   * with. Pass { channel } to also filter by pipeline: 'chat' returns only
+   * text-safe tools (ai-therapist-118); 'realtime' excludes chat-only ones.
+   * Omitting channel keeps the historical behavior (all enabled tools).
+   */
+  async getEnabledToolDefinitions(opts: { channel?: 'realtime' | 'chat' } = {}): Promise<ToolDefinition[]> {
     const disabled = await this.getDisabledTools();
-    return this.getAllToolDefinitions().filter(def => !disabled.includes(def.name));
+    return this.getAllToolDefinitions().filter(def => {
+      if (disabled.includes(def.name)) return false;
+      if (!opts.channel) return true;
+      const ch = toolChannel(def);
+      return ch === 'both' || ch === opts.channel;
+    });
   }
 
   /**

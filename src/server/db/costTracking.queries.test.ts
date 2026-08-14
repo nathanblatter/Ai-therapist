@@ -65,7 +65,7 @@ describe('getSessionCostSummary', () => {
     const summary = await getSessionCostSummary('sess-1');
 
     expect(summary.realtime_minutes).toBe(12.3);
-    expect(summary.calls_by_purpose).toEqual({ insights: 0, redaction: 1, crisis: 2, eligibility: 0, rerank: 0 });
+    expect(summary.calls_by_purpose).toEqual({ insights: 0, redaction: 1, crisis: 2, eligibility: 0, rerank: 0, chat: 0 });
     expect(summary.tokens_in).toBe(1500);
     expect(summary.tokens_out).toBe(300);
     expect(summary.estimated_cost_usd).toBeGreaterThan(0);
@@ -78,7 +78,7 @@ describe('getSessionCostSummary', () => {
 
     const summary = await getSessionCostSummary('sess-missing');
     expect(summary.realtime_minutes).toBeNull();
-    expect(summary.calls_by_purpose).toEqual({ insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0 });
+    expect(summary.calls_by_purpose).toEqual({ insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0, chat: 0 });
   });
 });
 

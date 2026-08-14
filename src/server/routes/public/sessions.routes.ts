@@ -183,6 +183,7 @@ export default function sessionsRoutes(): Router {
     const KINDS = new Set([
       'exercise_completed', 'exercise_dismissed',
       'thought_record', 'values_sort', 'fear_ladder', 'journal_private',
+      'scale_result', // chat sessions report screener answers here (ai-therapist-118)
     ]);
     if (!kind || !KINDS.has(kind) || typeof summary !== 'string' || !summary.trim()) {
       return res.status(400).json({ error: 'valid kind and non-empty summary required' });
@@ -201,7 +202,19 @@ export default function sessionsRoutes(): Router {
       await insertMessage(sessionId, 'system', `tool_event_${kind}`, text, text, { source: 'tool-event' });
 
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
-      const injected = await sidebandManager.tryInject(sessionId, 'system', text, true);
+      let injected = await sidebandManager.tryInject(sessionId, 'system', text, true);
+
+      // Chat sessions have no sideband: append the outcome to the in-memory
+      // chat history instead so it rides along with the next turn — same
+      // mechanism as crisis steering (ai-therapist-118). The client treats
+      // injected=true as "the model will know" and skips its fallback.
+      if (!injected && session.session_type === 'chat') {
+        const { injectGuidance, getConversationHistory } = await import('../../services/chatTherapy.service.js');
+        if (getConversationHistory(sessionId).length > 0) {
+          injectGuidance(sessionId, text);
+          injected = true;
+        }
+      }
 
       global.io?.to('admin-broadcast').emit('session:tool-event', {
         sessionId, kind, injected, at: new Date(),
