@@ -63,6 +63,16 @@ export default function adminConfigRoutes(): Router {
           updated_by: row.updated_by,
         };
       });
+      // deployment_mode (migration 060) always appears in the response, even
+      // on databases that predate the row — default is the research posture.
+      if (!config.deployment_mode) {
+        config.deployment_mode = {
+          value: { mode: 'research' },
+          description: 'Deployment posture: research or clinical (default, not yet persisted)',
+          updated_at: null,
+          updated_by: null,
+        };
+      }
       res.json(config);
     } catch (err) {
       console.error('Failed to fetch system configuration:', err);
@@ -101,6 +111,17 @@ export default function adminConfigRoutes(): Router {
     try {
       const row = await getSystemConfigByKey(key);
       if (!row) {
+        // Same fallback as the list endpoint: deployment_mode reads as
+        // 'research' until the migration-060 row exists.
+        if (key === 'deployment_mode') {
+          return res.json({
+            key,
+            value: { mode: 'research' },
+            description: 'Deployment posture: research or clinical (default, not yet persisted)',
+            updated_at: null,
+            updated_by: null,
+          });
+        }
         return res.status(404).json({ error: 'Configuration key not found' });
       }
       res.json({

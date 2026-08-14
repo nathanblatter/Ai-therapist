@@ -57,6 +57,10 @@ export default function AdminApp() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  // Deployment posture (migration 060): 'research' shows every study surface;
+  // 'clinical' (therapist pilot) hides the research-only nav items. UI framing
+  // only — server-side authorization is unchanged.
+  const [deploymentMode, setDeploymentMode] = useState<'research' | 'clinical'>('research');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   // Adverse-event deadline reminder: count of overdue + due-soon drafts, shown
   // as a red badge on the Adverse Events nav item (ai-therapist-95).
@@ -88,6 +92,17 @@ export default function AdminApp() {
     fetchUserRole();
   }, []);
 
+  // Fetch the deployment mode once; anything but an explicit 'clinical' keeps
+  // the research default (missing row, demo fixtures, fetch failure).
+  useEffect(() => {
+    fetch('/admin/api/config/deployment_mode', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (data?.value?.mode === 'clinical') setDeploymentMode('clinical');
+      })
+      .catch(() => { /* keep research default */ });
+  }, []);
+
   // Fetch AE deadline counts once on mount for the nav badge.
   useEffect(() => {
     fetch('/admin/api/adverse-events?status=draft', { credentials: 'include' })
@@ -108,7 +123,10 @@ export default function AdminApp() {
     setIsEditMode(false);
   };
 
-  // Base navigation items
+  // Base navigation items. researchOnly marks study-specific surfaces that
+  // are hidden when deployment_mode is 'clinical' (therapist pilot framing).
+  // demoVisible opens a researcher-gated item to magic-link demo accounts,
+  // whose entire admin API is served synthetic fixtures (demo.routes.ts).
   const allNavItems = [
     { id: 'live', label: 'Live Monitoring', icon: Activity },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart2 },
@@ -117,21 +135,24 @@ export default function AdminApp() {
     { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus },
     { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle },
     { id: 'mfa', label: 'MFA Security', icon: Shield },
-    { id: 'users', label: 'Users', icon: Users, researcherOnly: true },
+    { id: 'users', label: 'Users', icon: Users, researcherOnly: true, demoVisible: true },
     { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
     { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
     { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
-    { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true },
-    { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true },
+    { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true, researchOnly: true },
+    { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true, researchOnly: true },
     { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
     { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
-    { id: 'export', label: 'Export', icon: Download },
-  ];
+    { id: 'export', label: 'Export', icon: Download, researchOnly: true },
+  ] as Array<{ id: string; label: string; icon: typeof Activity; researcherOnly?: boolean; researchOnly?: boolean; demoVisible?: boolean }>;
 
-  // Filter nav items based on user role
+  // Filter nav items based on user role and deployment posture.
   const navItems = allNavItems.filter(item => {
+    if (item.researchOnly && deploymentMode === 'clinical') {
+      return false;
+    }
     if (item.researcherOnly) {
-      return userRole === 'researcher';
+      return userRole === 'researcher' || (item.demoVisible === true && userRole === 'demo');
     }
     return true;
   });
