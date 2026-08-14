@@ -36,3 +36,5 @@ export * from './dataRetention.queries.js';
 export * from './studyOps.queries.js';
 export * from './rerank.queries.js';
 export * from './participantProfile.queries.js';
+export * from './clientEvents.queries.js';
+export * from './funnel.queries.js';

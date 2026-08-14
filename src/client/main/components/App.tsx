@@ -18,6 +18,7 @@ import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
 import { createParticipantSocket } from '../lib/participantSocket';
 import { getStoredTheme, setTheme } from '../../shared/theme';
+import { reportClientEvent } from '../utils/telemetry';
 
 interface CrisisContact {
   hotline: string;
@@ -346,11 +347,14 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to start session:', error);
-      const name = error instanceof DOMException ? error.name : '';
+      const name = error instanceof DOMException || error instanceof Error ? error.name : '';
+      const errMessage = (error instanceof Error ? error.message : String(error)).slice(0, 300);
       if (name === 'NotAllowedError' || name === 'NotFoundError') {
         toast.error('We could not access your microphone. Please allow microphone access in your browser settings (or plug one in) and try again.');
+        reportClientEvent('mic_permission_denied', { name });
       } else {
         toast.error('Could not start your session — there was a problem reaching the server. Please check your connection and try again.');
+        reportClientEvent(name === 'SdpFetchError' ? 'sdp_fetch_failed' : 'webrtc_failed', { stage: 'start', name, message: errMessage });
       }
       setIsConnecting(false);
       // Best-effort teardown of whatever the failed start left behind
@@ -438,6 +442,7 @@ export default function App() {
     } catch (error) {
       console.error('Failed to start chat session:', error);
       toast.error('Failed to start chat session. Please try again.');
+      reportClientEvent('chat_send_failed', { where: 'start', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) });
     }
   }
 
@@ -683,6 +688,7 @@ export default function App() {
           disconnectTimerRef.current = null;
         }
         toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+        reportClientEvent('webrtc_failed', { stage: 'connectionstatechange' }, newSessionId);
         void stopSessionRef.current();
       } else if (state === 'disconnected') {
         if (!disconnectTimerRef.current) {
@@ -691,6 +697,7 @@ export default function App() {
             const s = pc.connectionState;
             if (s === 'disconnected' || s === 'failed') {
               toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+              reportClientEvent('webrtc_disconnected', { stage: 'grace-period-expired', state: s }, newSessionId);
               void stopSessionRef.current();
             }
           }, 7000);
@@ -730,6 +737,10 @@ export default function App() {
     // Set up data channel for sending and receiving events
     const dc = pc.createDataChannel("oai-events");
     dataChannelRef.current = dc;
+    dc.addEventListener("error", (e) => {
+      console.error('[DataChannel] error:', e);
+      reportClientEvent('data_channel_error', { stage: 'oai-events' }, newSessionId);
+    });
 
     // Set up data channel event listeners
     dc.addEventListener("message", async (e) => {
@@ -834,6 +845,15 @@ export default function App() {
       // If this is null the header likely isn't CORS-exposed to the browser —
       // the server can't attach the sideband without it.
       console.warn('[Sideband] No readable Location header on the SDP response; sideband will not attach.');
+    }
+
+    // A non-2xx SDP answer means the Realtime call never came up. Name the
+    // error so startSession()'s catch reports it as sdp_fetch_failed (rather
+    // than a generic webrtc_failed) before showing the network-problem toast.
+    if (!sdpResponse.ok) {
+      const sdpError = new Error(`SDP exchange failed with status ${sdpResponse.status}`);
+      sdpError.name = 'SdpFetchError';
+      throw sdpError;
     }
 
     const answer: RTCSessionDescriptionInit = {
@@ -1116,6 +1136,7 @@ export default function App() {
 
       } catch (error) {
         console.error('Failed to send chat message:', error);
+        reportClientEvent('chat_send_failed', { where: 'message', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) }, sessionId);
         setMessages((prev) => [
           ...prev,
           { id: crypto.randomUUID(), role: "system", text: "Error: Failed to send message. Please try again." },

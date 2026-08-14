@@ -10,6 +10,9 @@ import session, { type Session, type SessionData } from "express-session";
 import type { IncomingMessage } from "http";
 import connectPgSimple from "connect-pg-simple";
 import helmet from "helmet";
+import { pinoHttp } from "pino-http";
+import { randomUUID } from "crypto";
+import { opsMetricsMiddleware } from "./services/opsMetrics.service.js";
 import { createAdapter as createPostgresAdapter } from "@socket.io/postgres-adapter";
 import {pool } from "./config/db.js";
 import { requireRole } from "./middleware/auth.js";
@@ -45,6 +48,8 @@ import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
 import tokenRoutes from "./routes/public/token.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
+import clientEventsRoutes from "./routes/public/clientEvents.routes.js";
+import opsRoutes from "./routes/admin/ops.routes.js";
 import consentRoutes from "./routes/public/consent.routes.js";
 import adminConsentRoutes from "./routes/admin/consent.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
@@ -181,6 +186,41 @@ app.post(
 );
 
 app.use(express.json()); // Needed to parse JSON bodies
+
+// ==================== HTTP TELEMETRY ====================
+// In-process ops metrics (rolling 60-min request/error/latency window per
+// route group) feed the admin ops dashboard. Independent of logging.
+app.use(opsMetricsMiddleware());
+
+// Structured request logging (pino-http). Quiet paths — health checks,
+// static/build assets, vite HMR internals, socket.io polling — are skipped
+// entirely to keep production log volume sane; everything else logs one line
+// per response: info for 2xx/3xx, warn for 4xx, error for 5xx.
+const QUIET_PATH_PREFIXES = ['/health', '/socket.io', '/assets/', '/@vite', '/@fs', '/@react-refresh', '/node_modules/', '/src/', '/favicon'];
+const STATIC_ASSET_RE = /\.(js|mjs|cjs|css|map|png|jpe?g|gif|svg|ico|woff2?|ttf|webp|mp3|wasm)(\?|$)/;
+function isQuietPath(url: string): boolean {
+  const pathOnly = url.split('?')[0];
+  return QUIET_PATH_PREFIXES.some((p) => pathOnly.startsWith(p)) || STATIC_ASSET_RE.test(pathOnly);
+}
+app.use(
+  pinoHttp({
+    // Silent under vitest so integration tests don't drown their output in
+    // request lines; LOG_LEVEL still wins everywhere when set explicitly.
+    level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'test' ? 'silent' : 'info'),
+    genReqId: (req) => (req.headers['x-request-id'] as string) || randomUUID(),
+    autoLogging: { ignore: (req) => isQuietPath(req.url || '') },
+    customLogLevel: (_req, res, err) => {
+      if (err || res.statusCode >= 500) return 'error';
+      if (res.statusCode >= 400) return 'warn';
+      return 'info';
+    },
+    redact: {
+      paths: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
+      censor: '[redacted]',
+    },
+  })
+);
+// ==================== END HTTP TELEMETRY ====================
 
 // Health + bug-report (public, pre-session/IP middleware).
 app.use(healthRoutes());
@@ -474,6 +514,9 @@ app.use(sessionsRoutes());
 // Batch message logging + crisis detection -> routes/public/logs.routes.ts.
 app.use(logsRoutes());
 
+// Client error beacon (rate-limited, allowlisted kinds) -> routes/public/clientEvents.routes.ts.
+app.use(clientEventsRoutes());
+
 
 // ===================== Admin API Routes =====================
 
@@ -482,6 +525,9 @@ app.use(adminSessionsRoutes());
 
 // Admin analytics dashboard -> routes/admin/analytics.routes.ts.
 app.use(analyticsRoutes());
+
+// Ops telemetry + product funnel -> routes/admin/ops.routes.ts.
+app.use(opsRoutes());
 
 // Study-ops dashboard (enrollment/arm-balance/deviations) -> routes/admin/studyOps.routes.ts.
 app.use(studyOpsRoutes());

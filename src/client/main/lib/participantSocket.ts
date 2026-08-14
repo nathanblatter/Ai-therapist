@@ -26,6 +26,7 @@
 // sessionLifecycle.service.ts independent of a clean disconnect. This socket
 // is used only for remote-termination notices and live crisis messages.
 import { io, type Socket } from 'socket.io-client';
+import { reportClientEvent } from '../utils/telemetry';
 
 export function createParticipantSocket(sessionId: string, label: string): Socket {
   const socket = io({
@@ -47,6 +48,7 @@ export function createParticipantSocket(sessionId: string, label: string): Socke
 
   socket.on('connect_error', (err) => {
     console.error(`[socket:${label}] connect_error:`, err.message, err);
+    reportClientEvent('socket_connect_error', { label, message: String(err.message ?? err).slice(0, 300) }, sessionId);
   });
 
   socket.on('disconnect', (reason) => {
