@@ -195,6 +195,37 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
     expect(appQueriesSince(mark)).toEqual([]);
   });
 
+  it('user-management writes with trailing slashes or odd casing are still swallowed (pass-5 review)', async () => {
+    // Express matches its string routes case-insensitively and non-strictly,
+    // so the interceptor's regex layers must be equally permissive — otherwise
+    // PUT /api/users/123/ or /API/users/123 would bypass the demo wall and
+    // reach the real handler (demo self-edits would persist).
+    const agent = await demoAgent();
+    const mark = queryMock.mock.calls.length;
+
+    const trailingSlash = await agent.put('/api/users/4242/').send({ username: 'evil' });
+    expect(trailingSlash.status).toBe(200);
+    expect(trailingSlash.body.demo).toBe(true);
+
+    const upperPrefix = await agent.put('/API/users/4242').send({ username: 'evil' });
+    expect(upperPrefix.status).toBe(200);
+    expect(upperPrefix.body.demo).toBe(true);
+
+    const mixedCase = await agent.delete('/api/USERS/4242/');
+    expect(mixedCase.status).toBe(200);
+    expect(mixedCase.body.demo).toBe(true);
+
+    const createSlash = await agent.post('/api/users/').send({ username: 'evil', password: 'x', role: 'researcher' });
+    expect(createSlash.status).toBe(200);
+    expect(createSlash.body.demo).toBe(true);
+
+    const adminCase = await agent.post('/ADMIN/API/config').send({ anything: true });
+    expect(adminCase.status).toBe(200);
+    expect(adminCase.body.demo).toBe(true);
+
+    expect(appQueriesSince(mark)).toEqual([]);
+  });
+
   it('unmatched admin GETs never fall through to a real handler', async () => {
     const agent = await demoAgent();
     const mark = queryMock.mock.calls.length;

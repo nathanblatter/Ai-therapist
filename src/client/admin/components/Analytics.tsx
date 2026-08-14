@@ -157,10 +157,19 @@ interface EngagementPace {
 
 // Real turn latency from the turn_latency table (telemetry pass 3): ground
 // truth captured server-side, not the old message-flush-cadence math.
+// Realtime channel only — chat turns (where ttfa == total tool-loop wall
+// time) are reported separately so they don't inflate the TTFA KPI.
 interface ResponseTimes {
   measured_turns: number;
   p50_ttfa_ms: string | number | null;
   p95_ttfa_ms: string | number | null;
+  p50_total_ms: string | number | null;
+  p95_total_ms: string | number | null;
+}
+
+// Chat is non-streaming: only the full turn wall time is meaningful.
+interface ChatResponseTimes {
+  measured_turns: number;
   p50_total_ms: string | number | null;
   p95_total_ms: string | number | null;
 }
@@ -202,6 +211,7 @@ interface AnalyticsData {
   session_depth?: SessionDepthItem[];
   engagement_pace?: EngagementPace;
   response_times?: ResponseTimes;
+  chat_response_times?: ChatResponseTimes;
   turn_taking?: TurnTaking;
   sideband_reliability?: SidebandReliability;
 }
@@ -1346,12 +1356,21 @@ export default function Analytics() {
                   {formatMs(analytics.response_times.p95_total_ms)}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  User turn end to response done ({analytics.response_times.measured_turns || 0} turns measured)
+                  User turn end to response done ({analytics.response_times.measured_turns || 0} turns measured, realtime only)
                 </p>
               </div>
             </>
           )}
         </div>
+
+        {analytics.chat_response_times && (analytics.chat_response_times.measured_turns || 0) > 0 && (
+          <p className="text-xs text-gray-500 mt-3">
+            Chat turn time (p50 / p95): {formatMs(analytics.chat_response_times.p50_total_ms)}
+            {' / '}
+            {formatMs(analytics.chat_response_times.p95_total_ms)}
+            {' '}({analytics.chat_response_times.measured_turns} chat turns; full tool-loop wall time, not comparable to realtime TTFA)
+          </p>
+        )}
 
         {analytics.sideband_reliability && (
           <div className="mt-4 p-4 border rounded bg-gray-50">

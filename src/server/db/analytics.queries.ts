@@ -32,6 +32,7 @@ export interface DashboardAnalyticsRow {
   session_depth: unknown;
   engagement_pace: unknown;
   response_times: unknown;
+  chat_response_times: unknown;
   turn_taking: unknown;
   sideband_reliability: unknown;
 }
@@ -233,6 +234,8 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
       -- total turn time from turn_latency (ground-truth sideband/chat timing).
       -- Replaces the old message-timestamp diff, which only measured the
       -- client's 15s batched log-flush cadence, not latency.
+      -- Realtime-only: chat rows record ttfa == total tool-loop wall time,
+      -- which would inflate the TTFA KPI; chat gets its own CTE below.
       response_times AS (
         SELECT
           COUNT(*) AS measured_turns,
@@ -242,6 +245,18 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
           PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY tl.total_ms) AS p95_total_ms
         FROM turn_latency tl
         INNER JOIN date_filtered_sessions ts ON tl.session_id = ts.session_id
+        WHERE tl.channel = 'realtime'
+      ),
+      -- Chat turn time: non-streaming, so there is no meaningful TTFA — only
+      -- the full tool-loop wall time the participant actually waited.
+      chat_response_times AS (
+        SELECT
+          COUNT(*) AS measured_turns,
+          PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY tl.total_ms) AS p50_total_ms,
+          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY tl.total_ms) AS p95_total_ms
+        FROM turn_latency tl
+        INNER JOIN date_filtered_sessions ts ON tl.session_id = ts.session_id
+        WHERE tl.channel = 'chat'
       ),
       -- Reliability KPI: sideband attach success over the last 7 days
       -- (deliberately a fixed window, independent of the dashboard filters).
@@ -282,6 +297,7 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
         (SELECT json_agg(session_depth_by_user_type.*) FROM session_depth_by_user_type) AS session_depth,
         (SELECT row_to_json(messages_per_minute.*) FROM messages_per_minute) AS engagement_pace,
         (SELECT row_to_json(response_times.*) FROM response_times) AS response_times,
+        (SELECT row_to_json(chat_response_times.*) FROM chat_response_times) AS chat_response_times,
         (SELECT row_to_json(turn_taking_ratio.*) FROM turn_taking_ratio) AS turn_taking,
         (SELECT row_to_json(sideband_reliability.*) FROM sideband_reliability) AS sideband_reliability
     `, [

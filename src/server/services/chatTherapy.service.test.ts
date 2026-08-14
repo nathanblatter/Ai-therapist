@@ -212,6 +212,39 @@ describe('chat tool calling (ai-therapist-118)', () => {
     endChatSession(sid);
   });
 
+  it('passes raw response.output items through verbatim (reasoning items must ride with their function_call)', async () => {
+    const sid = 'chat_raw_passthrough';
+    initializeChatSession(sid, 'SYSTEM');
+
+    // Reasoning models emit a reasoning item alongside the function_call; a
+    // replayed function_call WITHOUT its sibling reasoning item is a 400.
+    const reasoningItem = { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'opaque-blob' };
+    const callItem = {
+      type: 'function_call', id: 'fc_1', call_id: 'call_1',
+      name: 'show_resource_card', arguments: '{"resource_type":"anxiety"}', status: 'completed',
+    };
+    createMock
+      .mockResolvedValueOnce({ output_text: '', output: [reasoningItem, callItem] })
+      .mockResolvedValueOnce({ output_text: 'all set', output: [] });
+
+    await sendMessage(sid, 'help');
+
+    // The second model call sees the EXACT items the model produced (extra
+    // fields like id/status/encrypted_content intact), then the tool output.
+    const secondInput = createMock.mock.calls[1][0].input as Array<Record<string, unknown>>;
+    const reasoningIdx = secondInput.findIndex(i => i === reasoningItem);
+    const callIdx = secondInput.findIndex(i => i === callItem);
+    expect(reasoningIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBe(reasoningIdx + 1);
+    expect(secondInput[callIdx + 1]).toMatchObject({ type: 'function_call_output', call_id: 'call_1' });
+
+    // And they persist verbatim in the stored history for later turns.
+    const history = getConversationHistory(sid);
+    expect(history).toContain(reasoningItem);
+    expect(history).toContain(callItem);
+    endChatSession(sid);
+  });
+
   it('executes a tool with empty args when the arguments string is unparseable', async () => {
     const sid = 'chat_badargs';
     initializeChatSession(sid, 'SYSTEM');

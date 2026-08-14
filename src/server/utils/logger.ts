@@ -53,9 +53,18 @@ function makeConsoleLogger(bindings: LogMeta): Logger {
 
 // ---- pino backend ----
 
+// Under vitest, intentional-failure tests would otherwise spam the runner's
+// output with pino error lines; default to silent there. An explicit
+// LOG_LEVEL still wins everywhere (so a test run can be made verbose).
+function defaultLevel(): string {
+  if (process.env.LOG_LEVEL) return process.env.LOG_LEVEL;
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') return 'silent';
+  return 'info';
+}
+
 function makePinoLogger(): Logger {
   const root = pino({
-    level: process.env.LOG_LEVEL || 'info',
+    level: defaultLevel(),
     // Session transcripts never pass through the logger, but headers can:
     // scrub credentials defensively at the logger level too.
     redact: {

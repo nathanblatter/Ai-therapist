@@ -66,6 +66,9 @@ function resetInternals() {
   sb.endedSessions.clear();
   sb.holdFloorTimers.clear();
   sb.pendingToolChoiceResets.clear();
+  sb.holdRestoreRetries.clear();
+  sb.toolResetRetries.clear();
+  sb.activeResponses.clear();
   sb.pendingTurns.clear();
   sb.turnCounters.clear();
 }
@@ -558,8 +561,137 @@ describe('hold_floor turn-taking suppression (ai-therapist-102)', () => {
     expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
   });
 
-  it('restoreTurnDetection is a no-op when the session has no live connection', async () => {
+  it('restoreTurnDetection does not throw when the session has no live connection', async () => {
     await expect(sidebandManager.restoreTurnDetection('s-gone')).resolves.toBeUndefined();
+  });
+});
+
+describe('restore resilience across sideband drops (pass-5 review)', () => {
+  // Disabled VAD / forced tool_choice live in the OpenAI session and survive
+  // a sideband WS drop; a restore firing during a reconnect gap must retry,
+  // not silently give up.
+  it('re-arms the VAD restore while disconnected and sends it once reconnected', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-hold-gap';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.holdFloor(sessionId, 5);
+    // Sideband drops before the hold expires.
+    sb.connections.delete(sessionId);
+
+    await vi.advanceTimersByTimeAsync(5 * 1000);
+    // Nothing sent (socket gone), but the restore is re-armed, not dropped.
+    expect(sentEventTypes(ws).filter(e => e.type === 'session.update').length).toBe(1); // only the initial disable
+    expect(sb.holdFloorTimers.has(sessionId)).toBe(true);
+
+    // Sideband re-attaches; the retry timer restores semantic VAD.
+    const ws2 = fakeWs();
+    sb.connections.set(sessionId, ws2);
+    await vi.advanceTimersByTimeAsync(2 * 1000);
+
+    const restores = sentEventTypes(ws2).filter(e =>
+      e.type === 'session.update' && e.session.audio?.input?.turn_detection?.type === 'semantic_vad');
+    expect(restores.length).toBe(1);
+    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
+    expect(sb.holdRestoreRetries.has(sessionId)).toBe(false);
+  });
+
+  it('re-arms the tool_choice reset while disconnected and sends it once reconnected', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-tool-gap';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.triggerTool(sessionId, 'log_mood');
+    // Sideband drops before any response.done; the 30s fallback fires into the gap.
+    sb.connections.delete(sessionId);
+    await vi.advanceTimersByTimeAsync(30 * 1000);
+    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(true); // retry armed
+
+    const ws2 = fakeWs();
+    sb.connections.set(sessionId, ws2);
+    await vi.advanceTimersByTimeAsync(2 * 1000);
+
+    const reset = sentEventTypes(ws2).find(e => e.type === 'session.update');
+    expect(reset!.session.tool_choice).toBe('auto');
+    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
+    expect(sb.toolResetRetries.has(sessionId)).toBe(false);
+  });
+
+  it('gives up after the retry cap instead of retrying forever', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-hold-dead';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.holdFloor(sessionId, 1);
+    sb.connections.delete(sessionId);
+
+    // Initial fire + 10 capped retries at 2s each.
+    await vi.advanceTimersByTimeAsync(1000 + 11 * 2000);
+    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
+    expect(sb.holdRestoreRetries.has(sessionId)).toBe(false);
+  });
+
+  it('does not retry once the session has ended', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-hold-ended';
+    const ws = fakeWs();
+    (ws as Internal).close = vi.fn();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.holdFloor(sessionId, 5);
+    sb.connections.delete(sessionId);
+    sb.endedSessions.add(sessionId);
+
+    await vi.advanceTimersByTimeAsync(5 * 1000);
+    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
+    expect(sb.holdRestoreRetries.has(sessionId)).toBe(false);
+  });
+
+  it('reattachActiveSessions defensively resets tool_choice and turn_detection', async () => {
+    const sb = sidebandManager as Internal;
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes("status = 'active'") && sql.includes('openai_call_id')) {
+        return Promise.resolve({ rows: [{ session_id: 's-reattach', openai_call_id: 'call-r' }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const connectSpy = vi.spyOn(sb, 'connect').mockImplementation(async (...args: unknown[]) => {
+      const sessionId = args[0] as string;
+      sb.connections.set(sessionId, fakeWs());
+      return sb.connections.get(sessionId);
+    });
+
+    await sidebandManager.reattachActiveSessions('sk-standard');
+
+    const ws = sb.connections.get('s-reattach');
+    const update = sentEventTypes(ws).find(e => e.type === 'session.update');
+    expect(update).toBeTruthy();
+    expect(update!.session.tool_choice).toBe('auto');
+    expect(update!.session.audio.input.turn_detection).toEqual({ type: 'semantic_vad', eagerness: 'low' });
+    connectSpy.mockRestore();
+  });
+});
+
+describe('trigger-tool active-response guard (pass-5 review)', () => {
+  it('rejects triggerTool while a response is in flight, then allows it after response.done', async () => {
+    const sb = sidebandManager as Internal;
+    const sessionId = 's-trigger-busy';
+    const ws = fakeWs();
+    sb.connections.set(sessionId, ws);
+
+    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({ type: 'response.created' })));
+    await expect(sidebandManager.triggerTool(sessionId, 'log_mood'))
+      .rejects.toThrow(/conversation_already_has_active_response/);
+    expect(ws.send).not.toHaveBeenCalled();
+
+    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({
+      type: 'response.done', response: { output: [] },
+    })));
+    await expect(sidebandManager.triggerTool(sessionId, 'log_mood')).resolves.toBeUndefined();
+    expect(sentEventTypes(ws).some(e => e.type === 'response.create')).toBe(true);
   });
 });
 

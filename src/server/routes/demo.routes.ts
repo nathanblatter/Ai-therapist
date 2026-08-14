@@ -177,8 +177,12 @@ export default function demoRoutes(): Router {
   router.get('/api/users', (_req, res) => {
     res.json(demoUsers());
   });
-  router.get(/^\/api\/users\/\d+$/, (req, res) => {
-    const id = parseInt(req.path.split('/').pop() ?? '', 10);
+  // Case-insensitive + optional trailing slash: Express matches its string
+  // routes case-insensitively and non-strictly, so these regex layers must be
+  // equally permissive or PUT /api/users/123/ (or /API/users/123) would skip
+  // the interceptor and reach the real handler.
+  router.get(/^\/api\/users\/(\d+)\/?$/i, (req, res) => {
+    const id = parseInt(req.params[0], 10);
     const user = demoUserById(id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
@@ -189,7 +193,7 @@ export default function demoRoutes(): Router {
   // and PUT /api/users/:id allows self-edits. Accept and discard instead.
   // /api/users/preferences is deliberately NOT matched (non-numeric segment):
   // demo accounts keep their real, harmless preference writes.
-  router.all(/^\/api\/users(\/\d+)?$/, (_req, res) => {
+  router.all(/^\/api\/users(\/\d+)?\/?$/i, (_req, res) => {
     res.json({ success: true, demo: true, message: 'Demo mode — changes are not saved.' });
   });
 
@@ -199,7 +203,7 @@ export default function demoRoutes(): Router {
   // PUTs, adverse-event transitions) are accepted but never persisted;
   // unmatched GETs return an empty but valid shape. This is the safety net:
   // no admin path ever falls through to a real handler for a demo account.
-  router.all(/^\/admin\/api\//, (req, res) => {
+  router.all(/^\/admin\/api\//i, (req, res) => {
     if (req.method === 'GET') {
       return res.json({});
     }
