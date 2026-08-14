@@ -331,14 +331,22 @@ export function demoAnalytics() {
     ],
     engagement_pace: { avg_messages_per_minute: 1.9 },
     response_times: {
-      avg_response_time_seconds: 3.4,
-      median_response_time_seconds: 2.8,
-      p95_response_time_seconds: 7.9,
+      measured_turns: 214,
+      p50_ttfa_ms: 940,
+      p95_ttfa_ms: 2350,
+      p50_total_ms: 6400,
+      p95_total_ms: 14800,
     },
     turn_taking: {
       user_to_assistant_ratio: 0.98,
       total_user_messages: 980,
       total_assistant_messages: 1004,
+    },
+    sideband_reliability: {
+      realtime_sessions: 42,
+      attached_sessions: 40,
+      error_sessions: 2,
+      attach_success_rate: 95.2,
     },
     _demo_total_local: total,
   };
@@ -462,6 +470,8 @@ export function demoCostAnalytics() {
       total_tokens_out: 96_500,
       total_estimated_cost_usd: 4.87,
       total_realtime_minutes: 186,
+      total_realtime_responses: 638,
+      total_realtime_cost_usd: 21.43,
     },
     daily_spend: Array.from({ length: 14 }, (_, i) => ({
       date: iso(i * 24 * HOUR).slice(0, 10),
@@ -469,6 +479,7 @@ export function demoCostAnalytics() {
       tokens_in: 60_000 + ((i * 13_337) % 45_000),
       tokens_out: 4_200 + ((i * 911) % 3_800),
       estimated_cost_usd: 0.18 + ((i * 7) % 22) * 0.011,
+      realtime_cost_usd: 0.9 + ((i * 11) % 17) * 0.045,
     })),
     feedback: { responses: 21, avg_helpfulness: 4.3, avg_ease: 4.6, avg_would_return: 4.1 },
   };

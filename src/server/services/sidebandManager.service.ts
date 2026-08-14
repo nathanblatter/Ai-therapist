@@ -44,6 +44,15 @@ export class SidebandManager {
   // session flips tool_choice back to 'auto'; the timer is a 30s fallback so a
   // dropped response can't leave the session stuck in forced-tool mode.
   private pendingToolChoiceResets: Map<string, NodeJS.Timeout>;
+  // Turn-latency capture (telemetry pass 3): the timestamp of the last
+  // completed user transcription plus the first output delta seen since. On
+  // response.done the pair becomes one turn_latency row (fire-and-forget).
+  // Tool-call-only responses keep the turn pending so the eventual audible
+  // response is what gets measured; a response.done with no pending user turn
+  // (e.g. the post-tool second response, or an admin-triggered response) is
+  // skipped entirely.
+  private pendingTurns: Map<string, { userDoneAt: Date; firstOutputAt: Date | null }>;
+  private turnCounters: Map<string, number>;
   private maxReconnectAttempts: number;
   private reconnectDelayMs: number;
   private keepaliveMs: number;
@@ -59,6 +68,8 @@ export class SidebandManager {
     this.endedSessions = new Set(); // sessionIds that ended — never reattach
     this.holdFloorTimers = new Map(); // sessionId → hold_floor restore timer
     this.pendingToolChoiceResets = new Map(); // sessionId → tool_choice reset fallback timer
+    this.pendingTurns = new Map(); // sessionId → in-flight turn-latency state
+    this.turnCounters = new Map(); // sessionId → measured-turn counter
     this.maxReconnectAttempts = 3;
     this.reconnectDelayMs = 2000;
     this.keepaliveMs = 20000;
@@ -417,6 +428,92 @@ export class SidebandManager {
     }
   }
 
+  /** Stamp time-to-first-output for the pending turn, if one is waiting. */
+  private markFirstOutput(sessionId: string): void {
+    const pending = this.pendingTurns.get(sessionId);
+    if (pending && pending.firstOutputAt === null) {
+      pending.firstOutputAt = new Date();
+    }
+  }
+
+  /**
+   * Telemetry pass 3: on response.done, turn the pending user-turn state into
+   * one turn_latency row (fire-and-forget, channel 'realtime'). Skips:
+   *  - no pending user turn (post-tool second response, admin-triggered
+   *    responses, regrounding — nothing sane to measure),
+   *  - out-of-band regrounding responses (never a conversational turn),
+   *  - tool-call-only responses (state stays pending so the eventual audible
+   *    response after tool execution is what gets measured).
+   */
+  private recordTurnLatency(sessionId: string, event: { [key: string]: unknown }): void {
+    try {
+      const pending = this.pendingTurns.get(sessionId);
+      if (!pending) return;
+
+      const response = event['response'] as
+        | { metadata?: { purpose?: string }; output?: Array<{ type?: string }> }
+        | undefined;
+      if (response?.metadata?.purpose === 'regrounding') return;
+
+      const output = response?.output ?? [];
+      if (output.length > 0 && output.every(item => item.type === 'function_call')) return;
+
+      this.pendingTurns.delete(sessionId);
+      const turnIndex = (this.turnCounters.get(sessionId) ?? 0) + 1;
+      this.turnCounters.set(sessionId, turnIndex);
+
+      const row = {
+        sessionId,
+        turnIndex,
+        userDoneAt: pending.userDoneAt,
+        firstOutputAt: pending.firstOutputAt,
+        responseDoneAt: new Date(),
+        channel: 'realtime' as const,
+      };
+      import('../db/index.js')
+        .then(db => db.insertTurnLatency(row))
+        .catch(err => console.error('[Sideband] Failed to record turn latency:', err));
+    } catch (err) {
+      console.error('[Sideband] Turn-latency capture failed (non-fatal):', err);
+    }
+  }
+
+  /**
+   * Telemetry pass 3: capture response.usage from every response.done into
+   * realtime_usage (migration 058), so realtime spend is token-metered instead
+   * of wall-clock-estimated. Defensive about missing fields; fire-and-forget.
+   */
+  private recordRealtimeUsage(sessionId: string, event: { [key: string]: unknown }): void {
+    try {
+      const response = event['response'] as
+        | {
+            id?: string;
+            usage?: {
+              input_tokens?: number;
+              output_tokens?: number;
+              input_token_details?: { audio_tokens?: number; cached_tokens?: number };
+              output_token_details?: { audio_tokens?: number };
+            };
+          }
+        | undefined;
+      const usage = response?.usage;
+      if (!usage) return;
+
+      const tokens = {
+        inputTokens: usage.input_tokens ?? null,
+        outputTokens: usage.output_tokens ?? null,
+        inputAudioTokens: usage.input_token_details?.audio_tokens ?? null,
+        outputAudioTokens: usage.output_token_details?.audio_tokens ?? null,
+        cachedTokens: usage.input_token_details?.cached_tokens ?? null,
+      };
+      import('../db/index.js')
+        .then(db => db.insertRealtimeUsage(sessionId, response?.id ?? null, tokens))
+        .catch(err => console.error('[Sideband] Failed to record realtime usage:', err));
+    } catch (err) {
+      console.error('[Sideband] Realtime usage capture failed (non-fatal):', err);
+    }
+  }
+
   /**
    * Clear the hold_floor and forced-tool-choice timers for a session without
    * sending anything (final teardown — the OpenAI session is going away).
@@ -560,6 +657,20 @@ export class SidebandManager {
         // forced has now completed — restore tool_choice: 'auto' so the model
         // isn't stuck calling the same tool forever. No-op when nothing pending.
         await this.resetForcedToolChoice(sessionId);
+        // Telemetry pass 3: both fire-and-forget, defensive against missing
+        // fields — a metering failure must never touch the live session.
+        this.recordTurnLatency(sessionId, event);
+        this.recordRealtimeUsage(sessionId, event);
+        break;
+
+      // Telemetry pass 3: first output delta after a completed user turn marks
+      // time-to-first-audio. Text deltas count too (text-modality responses);
+      // note out-of-band re-grounding responses also stream text deltas, but
+      // that feature is config-gated off by default — accepted imprecision to
+      // keep this small.
+      case 'response.output_audio.delta':
+      case 'response.output_text.delta':
+        this.markFirstOutput(sessionId);
         break;
 
       // Live transcripts of both sides, streamed to admins so the monitoring
@@ -589,6 +700,9 @@ export class SidebandManager {
           role: 'user', itemId: event['item_id'] as string,
           text: event['transcript'] as string, final: true,
         });
+        // Telemetry pass 3: the user's turn just finished — start (or restart)
+        // the latency clock for the model's next response.
+        this.pendingTurns.set(sessionId, { userDoneAt: new Date(), firstOutputAt: null });
         break;
 
       case 'error': {
@@ -1152,6 +1266,8 @@ export class SidebandManager {
     this.clearRegrounding(sessionId);
     this.reconnectAttempts.delete(sessionId);
     this.sessionKeys.delete(sessionId);
+    this.pendingTurns.delete(sessionId);
+    this.turnCounters.delete(sessionId);
   }
 
   /**
@@ -1222,6 +1338,8 @@ export class SidebandManager {
       this.clearControlTimers(sessionId);
       this.reconnectAttempts.delete(sessionId);
       this.sessionKeys.delete(sessionId);
+      this.pendingTurns.delete(sessionId);
+      this.turnCounters.delete(sessionId);
     }
     console.log('[Sideband] All connections closed');
   }

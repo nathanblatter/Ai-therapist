@@ -46,6 +46,7 @@ export default function analyticsRoutes(): Router {
         engagement_pace: data.engagement_pace || {},
         response_times: data.response_times || {},
         turn_taking: data.turn_taking || {},
+        sideband_reliability: data.sideband_reliability || {},
       });
     } catch (err) {
       console.error('Failed to fetch analytics:', err);
