@@ -19,7 +19,8 @@
     "redteam:smoke": "tsx src/redteam/cli.ts --suite smoke",
     "redteam:full": "tsx src/redteam/cli.ts --suite full",
     "redteam:quality": "tsx src/redteam/cli.ts --suite quality",
-    "redteam:voice": "tsx src/redteam/cli.ts --suite voice"
+    "redteam:voice": "tsx src/redteam/cli.ts --suite voice",
+    "redteam:replay": "tsx src/redteam/replay.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

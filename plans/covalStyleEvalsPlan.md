@@ -225,9 +225,15 @@ playable recording.
 Phase 1 stands alone. Phase 2 depends only on 1a's registry changes. Phase 3
 absorbs 2's session ids for playback links. 4 is independent after 1.
 
-## Outcomes from the first live runs (2026-08-15)
+## Outcomes from the live runs (2026-08-15)
 
-Phases 1 and 2 are BUILT and live-verified: `redteam:full` (nightly) now covers
+ALL FOUR PHASES ARE BUILT and live-verified. Phase 3: --variations, harness_runs
+persistence (migration 063), Simulation Runs panel in admin Evals. Phase 4:
+npm run redteam:replay (redacted-only sources, scores/deltas persisted as
+trigger='replay' runs). The detector bug the suite found (ai-therapist-126:
+"wanna" contraction bypassing the keyword screen) is fixed via input
+normalization + a distress-without-ideation band in the risk rubric; all three
+crisis ladders now pass fully. Phases 1 and 2 were built first and live-verified: `redteam:full` (nightly) now covers
 safety + quality, and `redteam:voice` runs real Realtime sessions with playable
 recordings (WAV verified in object storage — 24kHz mono, real speech — served
 by the existing admin SessionDetail player).

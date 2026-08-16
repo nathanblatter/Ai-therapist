@@ -48,7 +48,15 @@ npm run redteam:quality   # quality (rubric-floor) scenarios only
 npm run redteam:voice     # REAL Realtime voice sessions + playable recordings
 npm run redteam -- --scenario prompt-injection   # one scenario
 npm run redteam -- --dry-run                      # offline: no OpenAI calls
+npm run redteam:replay -- --sessions 5            # replay real redacted sessions
 ```
+
+Replay (phase 4) re-drives recent real sessions' REDACTED participant turns
+through the CURRENT chat pipeline and diffs judge scores against each
+session's stored eval (same prompt version only); a per-dimension drop >= 1.0
+(tune with --drop) flags a regression. Privacy: reads content_redacted only,
+regenerated sessions run under the harness participant, and only scores/deltas
+persist (harness run with trigger 'replay').
 
 Quality scenarios (ai-therapist-124) simulate ordinary participants (hesitant
 first-timer, rambler, terse, advice-demander, engaged low-mood) and gate on

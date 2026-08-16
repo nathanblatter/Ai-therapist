@@ -29,11 +29,14 @@ const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
     score: 75,
   },
   // Passive ideation / escape wishes — the phrases the old list missed.
+  // (Colloquial forms like "wanna" are normalized to "want to" before
+  // matching, so spoken variants land here too.)
   medium: {
     keywords: [
       "don't want to be here", 'do not want to be here', "don't want to exist",
+      "don't want to be alive", "don't want to live", "don't want to wake up",
       'want to disappear', "can't go on", 'cannot go on', 'no point in living',
-      'no point going on', 'give up on life',
+      'no point going on', 'give up on life', 'tired of living', 'tired of being alive',
       'everyone would be better off without me', 'better off without me',
     ],
     score: 40,
@@ -61,13 +64,32 @@ interface KeywordAnalysis {
 }
 
 /**
- * Tiered keyword screen. Exported for tests. Curly quotes are normalized so
- * Whisper transcripts ("don’t") match the straight-quote keyword list.
+ * Tiered keyword screen. Exported for tests. Input is normalized before
+ * matching — curly quotes from Whisper transcripts ("don’t"), colloquial
+ * contractions voice transcription produces verbatim ("wanna" — a real spoken
+ * passive-ideation turn scored 0 because "don't wanna be here" missed the
+ * "don't want to be here" keyword, ai-therapist-126), and missing apostrophes
+ * common in typed chat ("dont", "cant"). Over-matching is fine here: a
+ * keyword hit only wakes the stage-2 LLM, which judges context.
  */
+const NORMALIZATIONS: Array<[RegExp, string]> = [
+  [/[‘’]/g, "'"],
+  [/\bwanna\b/g, 'want to'],
+  [/\bgonna\b/g, 'going to'],
+  [/\bgotta\b/g, 'got to'],
+  [/\bdont\b/g, "don't"],
+  [/\bcant\b/g, "can't"],
+  [/\bwont\b/g, "won't"],
+  [/\bim\b/g, "i'm"],
+];
+
 export function detectCrisisKeywords(content: string): KeywordAnalysis {
   if (!content) return { keywords: [], keywordScore: 0, detectedKeywords: [] };
 
-  const lowerContent = content.toLowerCase().replace(/[‘’]/g, "'");
+  let lowerContent = content.toLowerCase();
+  for (const [pattern, replacement] of NORMALIZATIONS) {
+    lowerContent = lowerContent.replace(pattern, replacement);
+  }
   const detectedKeywords: DetectedKeyword[] = [];
   let totalScore = 0;
 
@@ -117,6 +139,7 @@ Context judgment matters more than keywords:
 - "reference": mentioning a hotline's name, suicide prevention, a movie/book/news story → score 0-10, severity none.
 - "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
 - "bystander": talking about someone ELSE's crisis or loss → score 0-20, severity none/low (their own grief may still warrant low).
+- "genuine" acute distress WITHOUT ideation → 15-30, low. Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30, low. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, or not be here. Never score distress alone as medium.
 - "genuine" passive ideation ("I don't want to be here anymore", "no point going on") → 40-60, medium.
 - "genuine" active ideation without plan → 60-75, high.
 - "genuine" ideation with plan, means, or timeframe → 80-100, high.

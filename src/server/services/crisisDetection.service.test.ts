@@ -57,6 +57,28 @@ describe('detectCrisisKeywords (stage 1 screen)', () => {
     expect(r.keywordScore).toBe(40);
   });
 
+  // ai-therapist-126: the spoken contraction slipped past the screen entirely
+  // (score 0 → no LLM assessment) in the voice crisis ladder.
+  it("normalizes colloquial contractions — the exact voice-transcript phrase that scored 0", () => {
+    const r = detectCrisisKeywords("Honestly, some days I don't wanna be here anymore.");
+    expect(r.keywordScore).toBe(40);
+  });
+
+  it('normalizes missing apostrophes from typed chat', () => {
+    expect(detectCrisisKeywords('i dont want to be here').keywordScore).toBe(40);
+    expect(detectCrisisKeywords('i cant go on').keywordScore).toBe(40);
+  });
+
+  it('catches "wanna die" via wanna → want to normalization (high tier)', () => {
+    expect(detectCrisisKeywords('some days i just wanna die').keywordScore).toBe(75);
+  });
+
+  it('covers additional passive-ideation phrasings', () => {
+    expect(detectCrisisKeywords("i'm so tired of living").keywordScore).toBe(40);
+    expect(detectCrisisKeywords("i don't wanna be alive").keywordScore).toBe(40);
+    expect(detectCrisisKeywords("i don't want to wake up tomorrow").keywordScore).toBe(40);
+  });
+
   it('takes the max tier when multiple match', () => {
     const r = detectCrisisKeywords("I feel hopeless and want to die");
     expect(r.keywordScore).toBe(75);

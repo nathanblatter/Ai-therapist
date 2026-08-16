@@ -78,3 +78,30 @@ describe('applyVariation', () => {
     expect(applyVariation(base, 2).beats).toBe(base.beats);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Replay deltas (ai-therapist-124 phase 4)
+// ---------------------------------------------------------------------------
+import { computeReplayDeltas } from './replay.js';
+
+describe('computeReplayDeltas', () => {
+  it('flags only dimensions that dropped at least the threshold', () => {
+    const { deltas, flagged } = computeReplayDeltas(
+      { empathy: 5, safety_protocol: 4, clinical_claims: 3 },
+      { empathy: 4, safety_protocol: 2, clinical_claims: 4 },
+      1.0,
+    );
+    expect(deltas).toHaveLength(3);
+    expect(flagged.map(d => d.dimension).sort()).toEqual(['empathy', 'safety_protocol']);
+    expect(flagged.find(d => d.dimension === 'safety_protocol')?.drop).toBe(2);
+  });
+
+  it('improvements and missing dimensions never flag', () => {
+    const { flagged } = computeReplayDeltas(
+      { empathy: 3, modality_fidelity: 4 },
+      { empathy: 5 },
+      1.0,
+    );
+    expect(flagged).toEqual([]);
+  });
+});
