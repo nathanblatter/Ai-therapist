@@ -30,7 +30,7 @@ import {
 import {
   getRecentSessionMessages,
   getSessionCrisisState,
-  getSessionIsDemo,
+  isDemoAccountSession,
 } from '../db/index.js';
 
 export interface ParticipantTurn {
@@ -73,10 +73,12 @@ export async function runCrisisPipeline(
   channel: 'realtime' | 'chat',
 ): Promise<CrisisPipelineResult> {
   try {
-    // Demo (magic-link) sessions never enter the real crisis pipeline: no
-    // scoring, no flags, no admin alerts, and crucially no SMS page to the
-    // on-call. Preserved for chat demo sessions too.
-    if (await getSessionIsDemo(turn.sessionId)) return NONE_RESULT;
+    // Demo-ACCOUNT (magic-link) sessions never enter the real crisis pipeline:
+    // no scoring, no flags, no admin alerts, and crucially no SMS page to the
+    // on-call. Keyed on the owner's role, NOT the session is_demo flag — the
+    // eval harness's sessions carry is_demo for analytics exclusion but must
+    // still exercise the real pipeline (its runner neuters paging/broadcast).
+    if (await isDemoAccountSession(turn.sessionId)) return NONE_RESULT;
 
     const history = await getRecentSessionMessages(turn.sessionId, 10);
 

@@ -10,7 +10,7 @@ import {
   updateSessionStatus,
   getActiveSessionForUser,
   getSessionAccessInfo,
-  getSessionIsDemo,
+  isDemoAccountSession,
   getRecentSessionMessages,
   getUserPreferredLanguage,
   setUserPreferredLanguage,
@@ -171,7 +171,7 @@ export default function chatRoutes(): Router {
       // on a confirmed turn, so the copy can't be paraphrased away. Fail-open:
       // any confirmation error degrades to normal handling.
       const { detectMinorDisclosurePatterns } = await import('../../services/minorSafeguard.service.js');
-      if (detectMinorDisclosurePatterns(message).matched && !(await getSessionIsDemo(sessionId))) {
+      if (detectMinorDisclosurePatterns(message).matched && !(await isDemoAccountSession(sessionId))) {
         try {
           const { confirmMinorDisclosure, handleConfirmedMinor, MINOR_ELIGIBILITY_MESSAGE } =
             await import('../../services/minorSafeguard.service.js');

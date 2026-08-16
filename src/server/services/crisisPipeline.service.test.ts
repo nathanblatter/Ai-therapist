@@ -7,7 +7,7 @@ const {
   analyzeMessageRiskMock, flagSessionCrisisMock, logInterventionActionMock,
   maybeSteerSessionMock, shouldSteerMock, buildChatSteeringGuidanceMock,
   executeGraduatedResponseMock,
-  getRecentSessionMessagesMock, getSessionCrisisStateMock, getSessionIsDemoMock,
+  getRecentSessionMessagesMock, getSessionCrisisStateMock, isDemoAccountSessionMock,
 } = vi.hoisted(() => ({
   analyzeMessageRiskMock: vi.fn(),
   flagSessionCrisisMock: vi.fn(),
@@ -18,7 +18,7 @@ const {
   executeGraduatedResponseMock: vi.fn(),
   getRecentSessionMessagesMock: vi.fn(),
   getSessionCrisisStateMock: vi.fn(),
-  getSessionIsDemoMock: vi.fn(),
+  isDemoAccountSessionMock: vi.fn(),
 }));
 
 vi.mock('./crisisDetection.service.js', () => ({
@@ -36,7 +36,7 @@ vi.mock('./crisisIntervention.service.js', () => ({
 vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,
   getSessionCrisisState: getSessionCrisisStateMock,
-  getSessionIsDemo: getSessionIsDemoMock,
+  isDemoAccountSession: isDemoAccountSessionMock,
 }));
 
 const { runCrisisPipeline } = await import('./crisisPipeline.service.js');
@@ -47,7 +47,7 @@ const toMock = vi.fn(() => ({ emit: emitMock }));
 beforeEach(() => {
   vi.clearAllMocks();
   (global as unknown as { io: unknown }).io = { to: toMock };
-  getSessionIsDemoMock.mockResolvedValue(false);
+  isDemoAccountSessionMock.mockResolvedValue(false);
   getRecentSessionMessagesMock.mockResolvedValue([]);
   getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: false, crisis_severity: null, crisis_risk_score: null });
   buildChatSteeringGuidanceMock.mockImplementation((s: number) => `CHAT_STEER_${s}`);
@@ -62,7 +62,7 @@ function risk(riskScore: number, severity: string, factors: string[] = []) {
 
 describe('runCrisisPipeline — demo + none', () => {
   it('demo sessions skip everything and return NONE', async () => {
-    getSessionIsDemoMock.mockResolvedValue(true);
+    isDemoAccountSessionMock.mockResolvedValue(true);
     const r = await runCrisisPipeline(TURN, 'chat');
     expect(r).toEqual({ riskScore: 0, severity: 'none', factors: [], flagged: false, steeringGuidance: null });
     expect(analyzeMessageRiskMock).not.toHaveBeenCalled();

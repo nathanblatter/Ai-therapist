@@ -331,3 +331,21 @@ export async function getSessionIsDemo(sessionId: string): Promise<boolean> {
   );
   return result.rows[0]?.is_demo ?? false;
 }
+
+/**
+ * Whether a session belongs to a magic-link DEMO account (users.role='demo').
+ * Distinct from is_demo on the session row: the eval harness's sessions are
+ * is_demo-marked so analytics/exports exclude them, but they must still
+ * exercise the REAL safety pipelines (crisis, minor gate) — that's what the
+ * evals assert. Behavioral skips (no scoring/flags/pages for demo viewers)
+ * key on this, not on the analytics flag. Anonymous sessions → false.
+ */
+export async function isDemoAccountSession(sessionId: string): Promise<boolean> {
+  const result = await pool.query<{ role: string | null }>(
+    `SELECT u.role FROM therapy_sessions ts
+     LEFT JOIN users u ON u.userid = ts.user_id
+     WHERE ts.session_id = $1`,
+    [sessionId]
+  );
+  return result.rows[0]?.role === 'demo';
+}
