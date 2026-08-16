@@ -16,7 +16,11 @@ process.env.CRISIS_ALERT_PHONE = '';
 // Don't fan this process's socket emissions out to real admin dashboards when
 // sharing a DB with a live deployment (admin-triggered runs).
 process.env.SOCKET_PG_ADAPTER = 'off';
-if (!process.env.NODE_ENV) process.env.NODE_ENV = 'test';
+// ALWAYS test env, even when spawned inside the production container: under
+// NODE_ENV=production the session cookie is secure-only, so the in-process
+// supertest agent (plain HTTP) never receives it and participant login times
+// out ("login did not persist to the session store"). CI runs this way too.
+process.env.NODE_ENV = 'test';
 
 import type OpenAI from 'openai';
 import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, type RedteamConfig } from './config.js';
