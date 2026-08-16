@@ -215,3 +215,84 @@ describe('crisis DB assertions', () => {
     expect(r.passed).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Majority-vote classifier (de-flake, ai-therapist-124 phase 1)
+// ---------------------------------------------------------------------------
+import { makeClassifier } from './assertions.js';
+import { CostTracker, DEFAULTS, type RedteamConfig } from './config.js';
+
+function cfgOf(overrides: Partial<RedteamConfig> = {}): RedteamConfig {
+  return { ...DEFAULTS, allowFail: false, dryRun: false, ...overrides };
+}
+
+/** Fake OpenAI client whose classifier answers come from a scripted queue. */
+function fakeClient(verdicts: boolean[], seeds: number[] = []) {
+  let call = 0;
+  return {
+    chat: {
+      completions: {
+        create: async (req: { seed: number }) => {
+          seeds.push(req.seed);
+          const verdict = verdicts[call++];
+          return {
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+            choices: [{ message: { content: JSON.stringify({ verdict, evidence: `run-${call}` }) } }],
+          };
+        },
+      },
+    },
+  } as never;
+}
+
+describe('makeClassifier majority vote', () => {
+  it('single vote (default) makes one call with the base seed', async () => {
+    const seeds: number[] = [];
+    const classify = makeClassifier(fakeClient([true], seeds), cfgOf({ seed: 42 }), new CostTracker());
+    const r = await classify({ version: 'v', question: 'q', text: 't' });
+    expect(r.verdict).toBe(true);
+    expect(seeds).toEqual([42]);
+  });
+
+  it('votes: 3 takes the 2-of-3 majority and reports the tally', async () => {
+    const classify = makeClassifier(fakeClient([true, false, true]), cfgOf(), new CostTracker());
+    const r = await classify({ version: 'v', question: 'q', text: 't', votes: 3 });
+    expect(r.verdict).toBe(true);
+    expect(r.evidence).toContain('[2/3 yes]');
+  });
+
+  it('votes: 3 lets a single flipped run be outvoted', async () => {
+    const classify = makeClassifier(fakeClient([false, true, false]), cfgOf(), new CostTracker());
+    const r = await classify({ version: 'v', question: 'q', text: 't', votes: 3 });
+    expect(r.verdict).toBe(false);
+    expect(r.evidence).toContain('[1/3 yes]');
+  });
+
+  it('votes: 3 varies the seed per run (seed..seed+2)', async () => {
+    const seeds: number[] = [];
+    const classify = makeClassifier(fakeClient([false, false, false], seeds), cfgOf({ seed: 7 }), new CostTracker());
+    await classify({ version: 'v', question: 'q', text: 't', votes: 3 });
+    expect(seeds.sort((a, b) => a - b)).toEqual([7, 8, 9]);
+  });
+
+  it('dry-run skips the network regardless of votes', async () => {
+    const classify = makeClassifier(null, cfgOf({ dryRun: true }), new CostTracker());
+    const r = await classify({ version: 'v', question: 'q', text: 't', votes: 3 });
+    expect(r.verdict).toBe(false);
+    expect(r.evidence).toContain('dry-run');
+  });
+});
+
+describe('contextNotLeaked de-flake', () => {
+  it('requests a 3-vote majority from the classifier', async () => {
+    let seenVotes: number | undefined;
+    const classify: ClassifyFn = async req => {
+      seenVotes = req.votes;
+      return { verdict: false, evidence: 'mock' };
+    };
+    const ctx = { ...ctxOf({ latestReply: 'I hear you.' }), classify };
+    const r = await contextNotLeaked().run(ctx);
+    expect(r.passed).toBe(true);
+    expect(seenVotes).toBe(3);
+  });
+});

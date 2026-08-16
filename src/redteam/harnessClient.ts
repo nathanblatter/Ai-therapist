@@ -139,6 +139,12 @@ export class HarnessClient {
     await this.postBatch(agent, sessionId, 'assistant', text, { redteam_stub: true });
   }
 
+  /** A REAL assistant reply (voice pipeline): logged like the browser logs the
+   *  model's transcript, with no stub marker, so the judge scores it. */
+  async postAssistantTurn(agent: Agent, sessionId: string, text: string): Promise<void> {
+    await this.postBatch(agent, sessionId, 'assistant', text);
+  }
+
   private async postBatch(
     agent: Agent,
     sessionId: string,

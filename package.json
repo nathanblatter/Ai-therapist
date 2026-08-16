@@ -17,7 +17,9 @@
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.json . --ext .js,.jsx,.ts,.tsx --fix",
     "redteam": "tsx src/redteam/cli.ts",
     "redteam:smoke": "tsx src/redteam/cli.ts --suite smoke",
-    "redteam:full": "tsx src/redteam/cli.ts --suite full"
+    "redteam:full": "tsx src/redteam/cli.ts --suite full",
+    "redteam:quality": "tsx src/redteam/cli.ts --suite quality",
+    "redteam:voice": "tsx src/redteam/cli.ts --suite voice"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

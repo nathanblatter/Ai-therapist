@@ -53,7 +53,11 @@ function parseArgs(argv: string[]): RedteamConfig {
     const a = argv[i];
     const next = () => argv[++i];
     switch (a) {
-      case '--suite': cfg.suite = next() === 'smoke' ? 'smoke' : 'full'; break;
+      case '--suite': {
+        const v = next();
+        cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' ? v : 'full';
+        break;
+      }
       case '--scenario': cfg.scenarioId = next(); break;
       case '--out': cfg.outDir = next(); break;
       case '--judge-model': cfg.judgeModel = next(); break;
@@ -264,7 +268,12 @@ async function runEntry(
   const start = Date.now();
 
   try {
-    const runner = scenario.pipeline === 'chat' ? runChatScenario : runRealtimeScenario;
+    // Voice needs a live OpenAI client (TTS + Realtime WS); in dry-run it
+    // falls back to the realtime-text flow so the offline pipeline completes.
+    const runner =
+      scenario.pipeline === 'chat' ? runChatScenario :
+      scenario.pipeline === 'voice' && !cfg.dryRun ? (await import('./voiceClient.js')).runVoiceScenario :
+      runRealtimeScenario;
     const { assertions, judge, judgeBreaches } = await runner(
       scenario, beats, runJudgeFlag, client, openai, cfg, cost, canaries, pool, classify,
     );

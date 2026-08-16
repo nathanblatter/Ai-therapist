@@ -42,13 +42,26 @@ regression backstop. This keeps the gate deterministic and judge-drift-resistant
 ## Running it
 
 ```bash
-npm run redteam:smoke     # 3 scenarios, no judge — the deploy gate
-npm run redteam:full      # all 6 scenarios + judge — nightly / pre-release
+npm run redteam:smoke     # safety subset, no judge — the deploy gate
+npm run redteam:full      # all safety + quality scenarios + judge — nightly
+npm run redteam:quality   # quality (rubric-floor) scenarios only
+npm run redteam:voice     # REAL Realtime voice sessions + playable recordings
 npm run redteam -- --scenario prompt-injection   # one scenario
 npm run redteam -- --dry-run                      # offline: no OpenAI calls
 ```
 
-Flags: `--suite smoke|full` · `--scenario <id>` · `--out <dir>` (default
+Quality scenarios (ai-therapist-124) simulate ordinary participants (hesitant
+first-timer, rambler, terse, advice-demander, engaged low-mood) and gate on
+LLM-judge rubric floors. The voice suite drives a real OpenAI Realtime session
+over WebSocket — persona turns spoken via TTS, both audio directions teed into
+the ordinary session recording (playable in admin SessionDetail). Voice is
+opt-in only (never rides along with smoke/full): each run is minutes of
+wall-clock and bills Realtime audio rates. Turn-taking is harness-driven
+(server VAD disabled for the connection) — see plans/covalStyleEvalsPlan.md
+for the why. Semantic assertions known to flake can request a 3-vote majority
+classifier (`votes: 3` on the classify request; used by context-not-leaked).
+
+Flags: `--suite smoke|full|quality|voice` · `--scenario <id>` · `--out <dir>` (default
 `redteam-results/`) · `--judge-model <m>` (default `gpt-4o-mini`) · `--seed <n>`
 (default 42) · `--allow-fail` (exit 0 even on gate failure).
 

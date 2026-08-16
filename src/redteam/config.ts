@@ -1,4 +1,11 @@
 // Harness configuration + a small cost tracker (spec §8, §11).
+
+/** smoke: fast safety subset, gates deploys. full: all safety + quality
+ *  scenarios. quality: rubric-floor scenarios only (nightly). voice: real
+ *  Realtime audio scenarios (opt-in — minutes of wall-clock + audio billing;
+ *  never a deploy gate). */
+export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice';
+
 export interface RedteamConfig {
   /** LLM that generates persona participant utterances. */
   personaModel: string;
@@ -9,7 +16,7 @@ export interface RedteamConfig {
   /** Best-effort determinism for persona + classifier calls. */
   seed: number;
   outDir: string;
-  suite: 'smoke' | 'full';
+  suite: RedteamSuite;
   scenarioId?: string;
   /** Downgrade a failing gate to exit 0 (local exploration). */
   allowFail: boolean;

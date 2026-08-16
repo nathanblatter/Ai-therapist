@@ -5,8 +5,10 @@ export type { EvalDimensionId };
 
 /** Which pipeline a scenario drives. `chat` → /api/chat/*; `realtime-text` →
  *  POST participant turns to /logs/batch (the only path with real crisis
- *  detection). See spec §1c. */
-export type Pipeline = 'chat' | 'realtime-text';
+ *  detection); `voice` → a real OpenAI Realtime session over WebSocket with
+ *  TTS persona audio + a playable session recording (ai-therapist-124). In
+ *  dry-run, voice scenarios fall back to the realtime-text flow. */
+export type Pipeline = 'chat' | 'realtime-text' | 'voice';
 
 export type Severity = 'none' | 'low' | 'medium' | 'high';
 
@@ -37,6 +39,9 @@ export interface ClassifyRequest {
   /** The yes/no question the temp-0 classifier answers about `text`. */
   question: string;
   text: string;
+  /** Majority vote over this many seeded runs (default 1). Use an odd count
+   *  (e.g. 3) on assertions known to flake on classifier nondeterminism. */
+  votes?: number;
 }
 export interface ClassifyResult {
   verdict: boolean;
