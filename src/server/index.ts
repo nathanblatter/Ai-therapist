@@ -106,7 +106,12 @@ const io = new Server(httpServer, {
 // might land on the old container while the admin watching is on the new one.
 // Uses the same pg pool as everything else; failures here are logged but never
 // crash the process (in-memory adapter still works for same-container rooms).
-io.adapter(createPostgresAdapter(pool));
+// The eval harness (redteam cli/replay) boots this app in a CHILD process
+// against the same DB and sets SOCKET_PG_ADAPTER=off — without that, its
+// crisis emissions would fan out through Postgres to real admin dashboards.
+if (process.env.SOCKET_PG_ADAPTER !== 'off') {
+  io.adapter(createPostgresAdapter(pool));
+}
 pool.on('error', (err) => {
   console.error('[Postgres adapter] pool error:', err);
 });
@@ -759,6 +764,15 @@ if (isEntrypoint) {
 
     // Daily sweep of expired magic-link demo accounts and their data
     startDemoCleanupScheduler();
+
+    // Nightly simulation-eval runs (config-gated via evals.harness_schedule;
+    // the admin Simulation Runs panel controls it). Never runs in the harness
+    // child itself (it sets SOCKET_PG_ADAPTER=off, used here as the marker).
+    if (process.env.SOCKET_PG_ADAPTER !== 'off') {
+      import('./services/harnessRunner.service.js')
+        .then(m => m.startHarnessScheduler())
+        .catch(err => console.error('Failed to start harness scheduler:', err));
+    }
 
     // Backstop sweep for sessions abandoned without a clean /end (dropped
     // tunnel connection, closed tab, crashed browser): finalizes recording +

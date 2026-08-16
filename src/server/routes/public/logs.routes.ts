@@ -78,7 +78,11 @@ export default function logsRoutes(): Router {
             return res.status(403).json({ error: 'Access denied' });
           }
         } else {
-          await createActiveRealtimeSession(sessionId, userId);
+          const { isNonStudyUser } = await import('../../utils/harness.js');
+          await createActiveRealtimeSession(
+            sessionId, userId,
+            isNonStudyUser(req.session?.userRole, req.session?.username),
+          );
           recordSessionOwnership(req, sessionId);
           console.log(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
 

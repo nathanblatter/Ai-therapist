@@ -84,3 +84,62 @@ describe('GET /admin/api/harness/runs/:runId', () => {
     expect(res.body.results).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Run-control endpoints (admin run-now / status / schedule)
+// ---------------------------------------------------------------------------
+const runnerMocks = vi.hoisted(() => ({
+  startHarnessRun: vi.fn(),
+  getRunnerStatus: vi.fn().mockReturnValue({ running: false, logTail: [] }),
+  getHarnessSchedule: vi.fn().mockResolvedValue({ enabled: false, suite: 'voice', hour_utc: 9, variations: 1 }),
+  setHarnessSchedule: vi.fn(),
+}));
+vi.mock('../../services/harnessRunner.service.js', () => runnerMocks);
+
+describe('POST /admin/api/harness/run', () => {
+  beforeEach(() => {
+    runnerMocks.startHarnessRun.mockReset();
+  });
+
+  it('is researcher-only: therapists get 403', async () => {
+    const res = await request(appAs('therapist')).post('/admin/api/harness/run').send({ suite: 'voice' });
+    expect(res.status).toBe(403);
+  });
+
+  it('starts a run and echoes pid/suite', async () => {
+    runnerMocks.startHarnessRun.mockResolvedValueOnce({ pid: 123, suite: 'voice' });
+    const res = await request(appAs('researcher')).post('/admin/api/harness/run').send({ suite: 'voice', variations: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ started: true, pid: 123, suite: 'voice' });
+    expect(runnerMocks.startHarnessRun).toHaveBeenCalledWith({ suite: 'voice', scenarioId: undefined, variations: 2, trigger: 'admin' });
+  });
+
+  it('409s when a run is already in progress', async () => {
+    runnerMocks.startHarnessRun.mockRejectedValueOnce(new Error('a voice run is already in progress (pid 99)'));
+    const res = await request(appAs('researcher')).post('/admin/api/harness/run').send({ suite: 'voice' });
+    expect(res.status).toBe(409);
+  });
+
+  it('400s on an unknown suite', async () => {
+    runnerMocks.startHarnessRun.mockRejectedValueOnce(new Error("unknown suite 'bogus'"));
+    const res = await request(appAs('researcher')).post('/admin/api/harness/run').send({ suite: 'bogus' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /admin/api/harness/status + PUT schedule', () => {
+  it('status includes runner state and the schedule', async () => {
+    const res = await request(appAs('therapist')).get('/admin/api/harness/status');
+    expect(res.status).toBe(200);
+    expect(res.body.running).toBe(false);
+    expect(res.body.schedule.suite).toBe('voice');
+  });
+
+  it('schedule saves are researcher-only and echo the normalized schedule', async () => {
+    expect((await request(appAs('therapist')).put('/admin/api/harness/schedule').send({ enabled: true })).status).toBe(403);
+    runnerMocks.setHarnessSchedule.mockResolvedValueOnce({ enabled: true, suite: 'quality', hour_utc: 8, variations: 2 });
+    const res = await request(appAs('researcher')).put('/admin/api/harness/schedule').send({ enabled: true, suite: 'quality', hour_utc: 8, variations: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body.schedule.enabled).toBe(true);
+  });
+});

@@ -13,6 +13,9 @@ import 'dotenv/config';
 // later dotenv.config() in a server module can't re-populate it from .env.
 process.env.IMESSAGE_API_KEY = '';
 process.env.CRISIS_ALERT_PHONE = '';
+// Don't fan this process's socket emissions out to real admin dashboards when
+// sharing a DB with a live deployment (admin-triggered runs).
+process.env.SOCKET_PG_ADAPTER = 'off';
 if (!process.env.NODE_ENV) process.env.NODE_ENV = 'test';
 
 import type OpenAI from 'openai';

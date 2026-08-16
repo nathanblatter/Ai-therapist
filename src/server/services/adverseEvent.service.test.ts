@@ -40,6 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getSessionAeSnapshotMock.mockResolvedValue({
     session_id: 'sess-1', user_id: 42, crisis_severity: 'high', crisis_risk_score: 88, crisis_flagged_at: OCCURRED,
+    is_demo: false,
   });
   getLatestCrisisEventIdMock.mockResolvedValue(7);
   getSessionCrisisEventsMock.mockResolvedValue([
@@ -60,6 +61,16 @@ beforeEach(() => {
 });
 
 describe('draftAdverseEventFromCrisis', () => {
+  it('skips auto-drafts for non-study (demo/harness) sessions', async () => {
+    getSessionAeSnapshotMock.mockResolvedValueOnce({
+      session_id: 'sess-1', user_id: 42, crisis_severity: 'high', crisis_risk_score: 88, crisis_flagged_at: OCCURRED,
+      is_demo: true,
+    });
+    const id = await draftAdverseEventFromCrisis('sess-1');
+    expect(id).toBeNull();
+    expect(insertAdverseEventDraftMock).not.toHaveBeenCalled();
+  });
+
   it('assembles a draft using only redacted text — no raw content or ladder answers leak', async () => {
     const id = await draftAdverseEventFromCrisis('sess-1');
     expect(id).toBe(101);

@@ -80,13 +80,16 @@ export default function chatRoutes(): Router {
       initializeChatSession(sessionId, systemPrompt);
 
       const username = req.session?.username || null;
+      const { isNonStudyUser } = await import('../../utils/harness.js');
       await createSession({
         sessionId,
         userId: numericUserId,
         sessionName: null, // generated from the conversation when the session ends
         status: 'active',
         sessionType: 'chat',
-        isDemo: userRole === 'demo',
+        // Demo viewers AND the eval-harness participant: non-study data,
+        // excluded from every real analytics/export surface.
+        isDemo: isNonStudyUser(userRole, username),
       });
 
       if (checkin) {

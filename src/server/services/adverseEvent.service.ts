@@ -71,6 +71,13 @@ export async function draftAdverseEventFromCrisis(sessionId: string, opts: Draft
       log.warn({ sessionId }, 'AE draft skipped: session not found');
       return null;
     }
+    // Non-study sessions (demo accounts, eval-harness runs) are not IRB
+    // adverse events — auto-drafting from them would pollute the report queue.
+    // Manual drafts stay allowed for any session.
+    if (snapshot.is_demo && triggerSource !== 'manual') {
+      log.info({ sessionId }, 'AE draft skipped: non-study (demo/harness) session');
+      return null;
+    }
 
     // Manual drafts are not tied to a specific crisis event (avoids colliding
     // with the auto per-event unique index).

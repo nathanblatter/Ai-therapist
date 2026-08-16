@@ -156,13 +156,15 @@ export interface SessionAeSnapshot {
   crisis_severity: string | null;
   crisis_risk_score: number | null;
   crisis_flagged_at: Date | null;
+  is_demo: boolean;
 }
 
 /** Core session fields the adverse-event draft assembler snapshots
  *  (ai-therapist-95). Null if the session doesn't exist. */
 export async function getSessionAeSnapshot(sessionId: string): Promise<SessionAeSnapshot | null> {
   const result = await pool.query<SessionAeSnapshot>(
-    `SELECT session_id, user_id, crisis_severity, crisis_risk_score, crisis_flagged_at
+    `SELECT session_id, user_id, crisis_severity, crisis_risk_score, crisis_flagged_at,
+            COALESCE(is_demo, false) AS is_demo
      FROM therapy_sessions WHERE session_id = $1`,
     [sessionId],
   );

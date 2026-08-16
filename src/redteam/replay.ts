@@ -19,6 +19,7 @@ import 'dotenv/config';
 // ---- env guards (MUST run before importing server modules) ----------------
 process.env.IMESSAGE_API_KEY = '';
 process.env.CRISIS_ALERT_PHONE = '';
+process.env.SOCKET_PG_ADAPTER = 'off'; // never fan emissions to live admin dashboards
 if (!process.env.NODE_ENV) process.env.NODE_ENV = 'test';
 
 import { HarnessClient } from './harnessClient.js';

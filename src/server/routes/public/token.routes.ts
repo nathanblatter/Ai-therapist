@@ -224,7 +224,8 @@ export default function tokenRoutes(): Router {
       recordSessionOwnership(req, sessionId);
 
       try {
-        await createActiveRealtimeSession(sessionId, userId, userRole === 'demo');
+        const { isNonStudyUser } = await import('../../utils/harness.js');
+        await createActiveRealtimeSession(sessionId, userId, isNonStudyUser(userRole, req.session?.username));
         console.log(`Therapy session created with user_id: ${userId}`);
 
         if (checkin) {

@@ -19,6 +19,50 @@ import {
 export default function evalsRoutes(): Router {
   const router = Router();
 
+  // POST /admin/api/harness/run - start a simulation-eval run from the admin
+  // UI (researcher-only: runs spend real API money). One at a time → 409.
+  router.post('/admin/api/harness/run', requireRole('researcher'), async (req, res) => {
+    try {
+      const { startHarnessRun } = await import('../../services/harnessRunner.service.js');
+      const { suite, scenarioId, variations } = req.body ?? {};
+      const started = await startHarnessRun({
+        suite,
+        scenarioId: typeof scenarioId === 'string' && scenarioId ? scenarioId : undefined,
+        variations: Number(variations) || 1,
+        trigger: 'admin',
+      });
+      res.json({ started: true, ...started });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to start run';
+      const inProgress = /already in progress/.test(message);
+      if (!inProgress) console.error('Failed to start harness run:', err);
+      res.status(inProgress ? 409 : /unknown suite/.test(message) ? 400 : 500).json({ error: message });
+    }
+  });
+
+  // GET /admin/api/harness/status - live runner state + schedule
+  router.get('/admin/api/harness/status', requireRole('therapist', 'researcher'), async (_req, res) => {
+    try {
+      const { getRunnerStatus, getHarnessSchedule } = await import('../../services/harnessRunner.service.js');
+      res.json({ ...getRunnerStatus(), schedule: await getHarnessSchedule() });
+    } catch (err) {
+      console.error('Failed to fetch harness status:', err);
+      res.status(500).json({ error: 'Failed to fetch harness status' });
+    }
+  });
+
+  // PUT /admin/api/harness/schedule - nightly-run schedule (researcher-only)
+  router.put('/admin/api/harness/schedule', requireRole('researcher'), async (req, res) => {
+    try {
+      const { setHarnessSchedule } = await import('../../services/harnessRunner.service.js');
+      const schedule = await setHarnessSchedule(req.body, req.session?.username ?? 'researcher');
+      res.json({ schedule });
+    } catch (err) {
+      console.error('Failed to save harness schedule:', err);
+      res.status(500).json({ error: 'Failed to save harness schedule' });
+    }
+  });
+
   // GET /admin/api/harness/runs - simulation-eval run list (Simulation Runs
   // panel, ai-therapist-124 phase 3). Newest first.
   router.get('/admin/api/harness/runs', requireRole('therapist', 'researcher'), async (req, res) => {
