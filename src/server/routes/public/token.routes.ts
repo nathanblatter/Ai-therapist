@@ -138,15 +138,19 @@ export default function tokenRoutes(): Router {
       const aiModel = await getAiModel();
       const transcriptionModel = await getTranscriptionModel();
 
-      const { toolRegistry } = await import('../../services/toolRegistry.service.js');
-      const tools = await toolRegistry.getEnabledToolDefinitions();
+      const { toolRegistry, toRealtimeTools } = await import('../../services/toolRegistry.service.js');
+      // toRealtimeTools projects to the exact OpenAI shape: registry metadata
+      // (channel) sent verbatim is rejected as an unknown parameter and 400s
+      // the whole session mint (ai-therapist-124 regression fix).
+      const toolDefs = await toolRegistry.getEnabledToolDefinitions();
+      const tools = toRealtimeTools(toolDefs);
 
       // Assemble instructions: base prompt (with active modality + language
       // additions) + when-to-call-tools guidance + returning-participant
       // memory (opt-in, logged-in only) + today's pre-session check-in.
       const checkin = sanitizeCheckin(req.body?.checkin);
       const memoryBlock = await buildMemoryBlock(userId);
-      const toolGuidance = buildToolGuidanceBlock(tools.map(t => t.name));
+      const toolGuidance = buildToolGuidanceBlock(toolDefs.map(t => t.name));
       // Resolved once per session (ai-therapist-74 A/B condition) and persisted
       // below so the steering baked into `instructions` matches what's recorded.
       const proactiveOffering = await resolveProactiveOffering();

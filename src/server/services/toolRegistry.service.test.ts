@@ -826,3 +826,36 @@ describe('hold_floor (ai-therapist-102)', () => {
     expect(r.guidance).toContain('8 seconds');
   });
 });
+
+// ---------------------------------------------------------------------------
+// toRealtimeTools (ai-therapist-124 regression): registry metadata must never
+// reach OpenAI — a stray `channel` field 400s /v1/realtime/client_secrets and
+// with it every realtime session mint.
+// ---------------------------------------------------------------------------
+import { toRealtimeTools, toolRegistry as registryForSerialization } from './toolRegistry.service.js';
+
+describe('toRealtimeTools', () => {
+  it('projects to exactly the OpenAI Realtime tool shape', () => {
+    const out = toRealtimeTools([
+      {
+        type: 'function',
+        name: 'assign_practice',
+        description: 'd',
+        parameters: { type: 'object', properties: {} },
+        channel: 'both',
+      },
+    ]);
+    expect(out).toEqual([
+      { type: 'function', name: 'assign_practice', description: 'd', parameters: { type: 'object', properties: {} } },
+    ]);
+    expect(Object.keys(out[0])).toEqual(['type', 'name', 'description', 'parameters']);
+  });
+
+  it('no registered tool definition leaks extra keys through the projection', () => {
+    const all = registryForSerialization.getAllToolDefinitions();
+    expect(all.length).toBeGreaterThan(0);
+    for (const t of toRealtimeTools(all)) {
+      expect(Object.keys(t).sort()).toEqual(['description', 'name', 'parameters', 'type']);
+    }
+  });
+});

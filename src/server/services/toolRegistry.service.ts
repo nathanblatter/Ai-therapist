@@ -45,6 +45,23 @@ function toolChannel(def: ToolDefinition): 'realtime' | 'chat' | 'both' {
   return def.channel ?? (CHAT_CAPABLE_TOOLS.has(def.name) ? 'both' : 'realtime');
 }
 
+/**
+ * Project definitions to the exact OpenAI Realtime tool shape. Registry
+ * definitions may carry harness-side metadata (`channel`) that OpenAI rejects
+ * as an unknown parameter — sending a definition object verbatim to
+ * /v1/realtime/client_secrets 400s the whole session mint (assign_practice's
+ * `channel: 'both'` broke every realtime session; caught by the voice eval
+ * harness, ai-therapist-124). Chat has its own projection (toResponsesTools).
+ */
+export function toRealtimeTools(defs: ToolDefinition[]): Array<Record<string, unknown>> {
+  return defs.map(d => ({
+    type: d.type,
+    name: d.name,
+    description: d.description,
+    parameters: d.parameters,
+  }));
+}
+
 /** Server-side context injected per invocation (the model never supplies it). */
 export interface ToolContext {
   sessionId?: string;

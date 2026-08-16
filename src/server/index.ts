@@ -187,12 +187,15 @@ app.post(
   }
 );
 
-// Global JSON body parsing — except the client-events beacon, which mounts
-// its own parser with a much tighter limit (4kb, clientEvents.routes.ts) so
-// oversized beacon bodies are rejected before parsing.
+// Global JSON body parsing — except routes that mount their own parser with a
+// different limit: the client-events beacon (tighter, 4kb) and the session
+// audio ingest (larger, 8mb — without this exemption the global 100kb default
+// parsed first and 413'd any audio batch bigger than ~1.5s of PCM, silently
+// dropping recording audio whenever a client uploads a backlog).
 const globalJsonParser = express.json();
+const OWN_PARSER_PATHS = /^\/api\/(client-events$|sessions\/[^/]+\/audio$)/;
 app.use((req, res, next) =>
-  req.path === '/api/client-events' ? next() : globalJsonParser(req, res, next)
+  OWN_PARSER_PATHS.test(req.path) ? next() : globalJsonParser(req, res, next)
 );
 
 // ==================== HTTP TELEMETRY ====================
