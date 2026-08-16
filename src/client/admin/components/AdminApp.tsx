@@ -1,13 +1,12 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
 import ErrorBoundary from "../../shared/components/ErrorBoundary";
 
 // Heavy, independently-navigable views are code-split so the initial admin
-// bundle stays small. They're rendered client-only (see isClient gate below),
-// which keeps SSR (renderToString, no Suspense streaming) safe.
+// bundle stays small.
 const SessionList = lazy(() => import("./SessionList"));
 const SessionDetail = lazy(() => import("./SessionDetail"));
 const Analytics = lazy(() => import("./Analytics"));
@@ -27,6 +26,7 @@ const AdverseEvents = lazy(() => import("./AdverseEvents"));
 const StudyOps = lazy(() => import("./StudyOps"));
 const EvalsView = lazy(() => import("./EvalsView"));
 const ParticipantProfile = lazy(() => import("./ParticipantProfile"));
+const RedactionReview = lazy(() => import("./RedactionReview"));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -56,7 +56,6 @@ export default function AdminApp() {
   // mirrors the selectedSessionId/SessionDetail pattern.
   const [selectedUser, setSelectedUser] = useState<ProfileUserSummary | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [isClient, setIsClient] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
   // Deployment posture (migration 060): 'research' shows every study surface;
   // 'clinical' (therapist pilot) hides the research-only nav items. UI framing
@@ -66,11 +65,6 @@ export default function AdminApp() {
   // Adverse-event deadline reminder: count of overdue + due-soon drafts, shown
   // as a red badge on the Adverse Events nav item (ai-therapist-95).
   const [aeReminderCount, setAeReminderCount] = useState(0);
-
-  // Handle SSR - only render interactive parts on client
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
 
   // Fetch user role to determine navigation items
   useEffect(() => {
@@ -161,6 +155,7 @@ export default function AdminApp() {
         { id: 'prompts', label: 'System Prompts', icon: FileText, researcherOnly: true },
         { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
         { id: 'evals', label: 'Evals', icon: CheckSquare, researcherOnly: true },
+        { id: 'redaction', label: 'Redaction Review', icon: EyeOff, researcherOnly: true },
         { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'export', label: 'Export', icon: Download, researchOnly: true },
@@ -261,8 +256,7 @@ export default function AdminApp() {
         </aside>
 
         <div className="flex-1 overflow-auto">
-          {isClient ? (
-            <ErrorBoundary resetKey={currentView}>
+          <ErrorBoundary resetKey={currentView}>
             <Suspense fallback={<ViewLoading />}>
               {currentView === 'dashboard' && <Analytics />}
               {currentView === 'sessions' && <SessionList onViewSession={handleViewSession} />}
@@ -278,14 +272,12 @@ export default function AdminApp() {
               {currentView === 'consent' && <ConsentVersions />}
               {currentView === 'study-ops' && <StudyOps />}
               {currentView === 'evals' && <EvalsView />}
+              {currentView === 'redaction' && <RedactionReview />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'config' && <SystemConfig />}
               {currentView === 'export' && <ExportPanel />}
             </Suspense>
-            </ErrorBoundary>
-          ) : (
-            <ViewLoading />
-          )}
+          </ErrorBoundary>
         </div>
       </main>
 

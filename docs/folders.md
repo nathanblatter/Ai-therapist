@@ -51,9 +51,9 @@ The application supports multiple users having simultaneous therapy sessions wit
   - Root: `src/client/main`
   - Outputs to: `dist/client` and `dist/server`
 
-- **`vite.admin.config.js`**: Build configuration for admin dashboard
+- The same `vite.config.js` builds the admin dashboard (`APP=admin`)
   - Root: `src/client/admin`
-  - Outputs to: `dist/admin-client` and `dist/admin-server`
+  - Outputs to: `dist/admin-client` (plain SPA, no SSR)
 
 - **`reorganize-project.js`**: Script that moved files from old flat structure to organized `src/` structure
 
@@ -253,8 +253,7 @@ Dashboard for therapists and researchers:
 
 ```
 src/client/admin/
-├── admin-entry-client.jsx        # Client-side entry point
-├── admin-entry-server.jsx        # Server-side entry point
+├── admin-entry-client.tsx        # Client-side entry point (SPA, no SSR)
 └── components/
     ├── AdminApp.jsx              # Main admin interface
     ├── AdminHeader.jsx           # Admin navigation header
@@ -454,9 +453,8 @@ Each migration script:
   }
 }
 ```
-- Entry point: `src/client/admin/admin-entry-client.jsx`
-- Server entry: `src/client/admin/admin-entry-server.jsx`
-- Output: `dist/admin-client` and `dist/admin-server`
+- Entry point: `src/client/admin/admin-entry-client.tsx`
+- Output: `dist/admin-client` (plain SPA, no SSR bundle)
 
 ### `package.json` Scripts
 - **`npm run dev`**: Start development server with Vite hot-reload
@@ -465,7 +463,6 @@ Each migration script:
 - **`npm run build:client`**: Build main client app
 - **`npm run build:admin-client`**: Build admin dashboard
 - **`npm run build:server`**: Build main SSR bundle
-- **`npm run build:admin-server`**: Build admin SSR bundle
 
 ---
 
@@ -481,16 +478,14 @@ dist/
 ├── admin-client/             # Admin app static files
 │   ├── admin.html            # Admin entry HTML
 │   └── assets/               # JS, CSS bundles
-├── server/                    # Main app SSR bundle
-│   └── entry-server.js       # Server rendering module
-└── admin-server/             # Admin app SSR bundle
-    └── admin-entry-server.js # Admin server rendering module
+└── server/                    # Main app SSR bundle
+    └── entry-server.js       # Server rendering module
 ```
 
 In production (`NODE_ENV=production`):
 1. Server loads from `dist/` directories
 2. Serves static files from `dist/client` and `dist/admin-client`
-3. Uses SSR modules from `dist/server` and `dist/admin-server`
+3. Uses the SSR module from `dist/server` (main app only; admin is a SPA)
 
 In development (`npm run dev`):
 1. Vite middleware handles hot-reload

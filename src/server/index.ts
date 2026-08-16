@@ -615,23 +615,14 @@ async function startProdServer() {
   // Serve admin static assets (CSS, JS) - admin assets are prefixed with "admin-" so no conflicts
   app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets'), { setHeaders: staticCache }));
 
-  // Dynamically import all SSR modules
-  // @ts-ignore – these modules are generated at build time and not available during type-check
+  // Only the main app is SSR'd; admin is a plain SPA.
+  // @ts-ignore – this module is generated at build time and not available during type-check
   const { render } = await import('../../dist/server/entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
-  // @ts-ignore – build-time module, see above
-  const { render: renderAdmin } = await import('../../dist/admin-server/admin-entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
-  // @ts-ignore – build-time module, see above
-  const { render: renderRedact } = await import('../../dist/redact-server/redact-entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
-
-  // Serve redact static assets
-  app.use('/redact/assets', express.static(path.resolve(__dirname, '../../dist/redact-client/assets'), { setHeaders: staticCache }));
 
   // Admin panel route (demo accounts see a synthetic-data version — see demo.routes.ts)
-  app.get('/admin', requireRole('therapist', 'researcher', 'demo'), async (req, res) => {
+  app.get('/admin', requireRole('therapist', 'researcher', 'demo'), (_req, res) => {
     try {
-      const template = fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8');
-      const appHtml = await renderAdmin(req.originalUrl);
-      const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
+      const html = fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8');
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
       console.error(e instanceof Error ? e.stack : String(e));
@@ -639,18 +630,9 @@ async function startProdServer() {
     }
   });
 
-  // Redact verification page route
-  app.get('/redact', requireRole('researcher'), async (req, res) => {
-    try {
-      const template = fs.readFileSync(path.resolve(__dirname, '../../dist/redact-client/redact.html'), 'utf-8');
-      const appHtml = await renderRedact(req.originalUrl);
-      const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
-      res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
-    } catch (e: unknown) {
-      console.error(e instanceof Error ? e.stack : String(e));
-      res.status(500).send('Internal server error');
-    }
-  });
+  // The standalone /redact app was merged into admin (Research > Redaction
+  // Review); redirect old bookmarks. /redact/api/* stays (redaction.routes.ts).
+  app.get('/redact', (_req, res) => res.redirect('/admin'));
 
   // Handle all other requests with main app SSR.
   app.use('*', async (req, res) => {
@@ -675,24 +657,18 @@ async function startDevServer() {
   });
   app.use(vite.middlewares);
 
-  // Admin panel route in dev (demo accounts get synthetic data — see demo.routes.ts)
+  // Admin panel route in dev (demo accounts get synthetic data — see
+  // demo.routes.ts). Admin is a plain SPA — no SSR pass, just the transformed
+  // template with the entry script pointed at its real location (Vite's root
+  // is src/client/main, so the relative src in admin.html won't resolve).
   app.get("/admin", requireRole('therapist', 'researcher', 'demo'), async (req, res, next) => {
     try {
-      // Read the admin HTML template
       let template = fs.readFileSync(path.resolve(__dirname, "../client/admin/admin.html"), "utf-8");
-
-      // Manually fix the script path for Vite in dev mode
-      // Since Vite's root is src/client/main, we need to go up one level and into admin
       template = template.replace(
-        'src="./admin-entry-client.jsx"',
-        'src="/@fs' + path.resolve(__dirname, "../client/admin/admin-entry-client.jsx") + '"'
+        'src="./admin-entry-client.tsx"',
+        'src="/@fs' + path.resolve(__dirname, "../client/admin/admin-entry-client.tsx") + '"'
       );
-
-      template = await vite.transformIndexHtml(req.originalUrl, template);
-
-      const { render } = await vite.ssrLoadModule("src/client/admin/admin-entry-server.jsx");
-      const appHtml = await render(req.originalUrl);
-      const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
+      const html = await vite.transformIndexHtml(req.originalUrl, template);
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
     } catch (e: unknown) {
       vite.ssrFixStacktrace(e as Error);
@@ -700,29 +676,9 @@ async function startDevServer() {
     }
   });
 
-  // Redact verification page route in dev
-  app.get("/redact", requireRole('researcher'), async (req, res, next) => {
-    try {
-      // Read the redact HTML template
-      let template = fs.readFileSync(path.resolve(__dirname, "../client/redact/redact.html"), "utf-8");
-
-      // Manually fix the script path for Vite in dev mode
-      template = template.replace(
-        'src="./redact-entry-client.jsx"',
-        'src="/@fs' + path.resolve(__dirname, "../client/redact/redact-entry-client.jsx") + '"'
-      );
-
-      template = await vite.transformIndexHtml(req.originalUrl, template);
-
-      const { render } = await vite.ssrLoadModule("src/client/redact/redact-entry-server.jsx");
-      const appHtml = await render(req.originalUrl);
-      const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
-      res.status(200).set({ "Content-Type": "text/html" }).end(html);
-    } catch (e: unknown) {
-      vite.ssrFixStacktrace(e as Error);
-      next(e);
-    }
-  });
+  // The standalone /redact app was merged into admin (Research > Redaction
+  // Review); redirect old bookmarks. /redact/api/* stays (redaction.routes.ts).
+  app.get("/redact", (_req, res) => res.redirect('/admin'));
 
   // Main app SSR (catch-all)
   app.use("/", async (req, res, next) => {

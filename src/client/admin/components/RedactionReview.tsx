@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare, LogOut } from "react-feather";
+import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare } from "react-feather";
 
 interface RedactMessage {
   message_id: string;
@@ -9,7 +9,10 @@ interface RedactMessage {
   content_redacted: string | null;
 }
 
-export default function RedactApp() {
+// Researcher-only redaction-verification view: review and correct the
+// auto-redacted message content served by /redact/api (redaction.routes.ts).
+// Formerly the standalone /redact SSR app; merged into admin.
+export default function RedactionReview() {
   const [messages, setMessages] = useState<RedactMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -17,20 +20,6 @@ export default function RedactApp() {
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
-
-  const handleLogout = async () => {
-    try {
-      const response = await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (response.ok) {
-        window.location.href = '/login';
-      }
-    } catch (err: unknown) {
-      console.error('Logout failed:', err);
-    }
-  };
 
   const fetchMessages = async () => {
     setLoading(true);
@@ -104,7 +93,7 @@ export default function RedactApp() {
   };
 
   return (
-    <div className="h-screen bg-gray-50 overflow-auto">
+    <div className="h-full overflow-auto">
       {/* Header */}
       <header className="bg-white border-b shadow-sm">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -116,23 +105,14 @@ export default function RedactApp() {
               Review and edit redacted message content
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={fetchMessages}
-              disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-              Load More
-            </button>
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
-            >
-              <LogOut size={18} />
-              Logout
-            </button>
-          </div>
+          <button
+            onClick={fetchMessages}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+            Load More
+          </button>
         </div>
       </header>
 

@@ -6,8 +6,8 @@ import "../shared/base.css";
 // Add hydrated class to prevent FOUC
 document.body.classList.add('hydrated');
 
-ReactDOM.hydrateRoot(
-  document.getElementById("root") as Element,
+// Admin is a plain SPA (no SSR) — render into the empty root.
+ReactDOM.createRoot(document.getElementById("root") as Element).render(
   <StrictMode>
     <AdminApp />
   </StrictMode>,
