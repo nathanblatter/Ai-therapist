@@ -12,10 +12,38 @@ import {
   upsertSessionHumanRating,
   getCalibrationPromptVersions,
   acknowledgeDriftAlert,
+  listHarnessRuns,
+  getHarnessRun,
 } from '../../db/index.js';
 
 export default function evalsRoutes(): Router {
   const router = Router();
+
+  // GET /admin/api/harness/runs - simulation-eval run list (Simulation Runs
+  // panel, ai-therapist-124 phase 3). Newest first.
+  router.get('/admin/api/harness/runs', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const limit = Number(req.query.limit) || 50;
+      res.json({ runs: await listHarnessRuns(limit) });
+    } catch (err) {
+      console.error('Failed to list harness runs:', err);
+      res.status(500).json({ error: 'Failed to list harness runs' });
+    }
+  });
+
+  // GET /admin/api/harness/runs/:runId - one run + per-scenario results
+  router.get('/admin/api/harness/runs/:runId', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const id = Number(req.params.runId);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid run id' });
+      const out = await getHarnessRun(id);
+      if (!out) return res.status(404).json({ error: 'Run not found' });
+      res.json(out);
+    } catch (err) {
+      console.error('Failed to fetch harness run:', err);
+      res.status(500).json({ error: 'Failed to fetch harness run' });
+    }
+  });
 
   // GET /admin/api/sessions/:sessionId/eval - latest eval for a session
   router.get('/admin/api/sessions/:sessionId/eval', requireRole('therapist', 'researcher'), async (req, res) => {

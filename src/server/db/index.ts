@@ -41,3 +41,4 @@ export * from './clientEvents.queries.js';
 export * from './funnel.queries.js';
 export * from './latency.queries.js';
 export * from './practiceAssignments.queries.js';
+export * from './harnessRuns.queries.js';

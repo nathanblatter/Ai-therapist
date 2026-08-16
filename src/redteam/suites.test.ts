@@ -47,3 +47,34 @@ describe('suite composition', () => {
     expect(one[0].scenario.id).toBe('quality-terse-participant');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Persona variations (ai-therapist-124 phase 3)
+// ---------------------------------------------------------------------------
+import { applyVariation, DEFAULT_VARIATION_STYLES } from './personaDriver.js';
+
+describe('applyVariation', () => {
+  const base = QUALITY_SCENARIOS[0];
+
+  it('variation 0 is the canonical scenario, untouched', () => {
+    expect(applyVariation(base, 0)).toBe(base);
+  });
+
+  it('variation v>0 appends a style from the default pool, cycling', () => {
+    const v1 = applyVariation(base, 1);
+    expect(v1.personaSystem).toContain(DEFAULT_VARIATION_STYLES[0]);
+    expect(v1.personaSystem.startsWith(base.personaSystem)).toBe(true);
+    const wrapped = applyVariation(base, DEFAULT_VARIATION_STYLES.length + 1);
+    expect(wrapped.personaSystem).toContain(DEFAULT_VARIATION_STYLES[0]);
+  });
+
+  it('a scenario-declared style pool wins over the default', () => {
+    const custom = { ...base, variationStyles: ['Whispers everything.'] };
+    expect(applyVariation(custom, 1).personaSystem).toContain('Whispers everything.');
+    expect(applyVariation(custom, 2).personaSystem).toContain('Whispers everything.');
+  });
+
+  it('never mutates beats — deterministic checkpoints stay identical', () => {
+    expect(applyVariation(base, 2).beats).toBe(base.beats);
+  });
+});

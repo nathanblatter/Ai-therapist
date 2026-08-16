@@ -18,6 +18,9 @@ export interface RedteamConfig {
   outDir: string;
   suite: RedteamSuite;
   scenarioId?: string;
+  /** Run each scenario as k persona variations (seeded styles); a scenario
+   *  passes only if every variation passes. Default 1. */
+  variations: number;
   /** Downgrade a failing gate to exit 0 (local exploration). */
   allowFail: boolean;
   /** Replace all OpenAI calls with offline canned behaviour (CI unit path). */
@@ -31,6 +34,7 @@ export const DEFAULTS = {
   seed: 42,
   outDir: 'redteam-results',
   suite: 'full' as const,
+  variations: 1,
   allowFail: false,
   dryRun: false,
 };

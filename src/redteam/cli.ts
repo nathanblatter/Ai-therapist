@@ -4,8 +4,8 @@
 //
 //   npx tsx src/redteam/cli.ts --suite smoke
 //
-// Flags: --suite smoke|full  --scenario <id>  --out <dir>  --judge-model <m>
-//        --seed <n>  --allow-fail  --dry-run
+// Flags: --suite smoke|full|quality|voice  --scenario <id>  --out <dir>
+//        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 import 'dotenv/config';
 
 // ---- env guards (MUST run before importing server modules) ----------------
@@ -18,7 +18,7 @@ if (!process.env.NODE_ENV) process.env.NODE_ENV = 'test';
 import type OpenAI from 'openai';
 import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, type RedteamConfig } from './config.js';
 import { makeClassifier } from './assertions.js';
-import { generatePersonaTurn } from './personaDriver.js';
+import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
 import { HarnessClient, type Agent } from './harnessClient.js';
 import { writeReports, printConsole, type RunSummary } from './report.js';
@@ -46,6 +46,7 @@ function parseArgs(argv: string[]): RedteamConfig {
     seed: DEFAULTS.seed,
     outDir: DEFAULTS.outDir,
     suite: DEFAULTS.suite,
+    variations: DEFAULTS.variations,
     allowFail: DEFAULTS.allowFail,
     dryRun: DEFAULTS.dryRun,
   };
@@ -62,6 +63,7 @@ function parseArgs(argv: string[]): RedteamConfig {
       case '--out': cfg.outDir = next(); break;
       case '--judge-model': cfg.judgeModel = next(); break;
       case '--seed': cfg.seed = Number(next()); break;
+      case '--variations': cfg.variations = Math.max(1, Number(next()) || 1); break;
       case '--allow-fail': cfg.allowFail = true; break;
       case '--dry-run': cfg.dryRun = true; break;
       default: break;
@@ -144,7 +146,7 @@ async function runChatScenario(
   canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean }> {
+): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string }> {
   const agent: Agent = client.newAgent();
   await client.loginParticipant(agent);
   await client.acceptConsent(agent);
@@ -199,7 +201,7 @@ async function runChatScenario(
       judgeBreaches = outcome.breaches.length > 0;
     }
   }
-  return { assertions, judge, judgeBreaches };
+  return { assertions, judge, judgeBreaches, sessionId };
 }
 
 async function runRealtimeScenario(
@@ -213,7 +215,7 @@ async function runRealtimeScenario(
   canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean }> {
+): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string }> {
   const agent: Agent = client.newAgent();
   await client.acceptConsent(agent);
   const sessionId = `redteam_rt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -249,7 +251,7 @@ async function runRealtimeScenario(
       judgeBreaches = outcome.breaches.length > 0;
     }
   }
-  return { assertions, judge, judgeBreaches };
+  return { assertions, judge, judgeBreaches, sessionId };
 }
 
 async function runEntry(
@@ -259,12 +261,17 @@ async function runEntry(
   cfg: RedteamConfig,
   canaries: string[],
   pool: AssertionContext['pool'],
+  variation = 0,
 ): Promise<ScenarioResult> {
-  const { scenario } = entry;
+  // Variation v>0: styled persona + shifted seed; ids get a #v2/#v3 suffix so
+  // reports and the DB keep each variation as its own row.
+  const scenario = applyVariation(entry.scenario, variation);
+  const vcfg: RedteamConfig = variation > 0 ? { ...cfg, seed: cfg.seed + variation } : cfg;
+  const label = variation > 0 ? `${scenario.id}#v${variation + 1}` : scenario.id;
   const beats = entry.beatIds ? scenario.beats.filter(b => entry.beatIds!.includes(b.id)) : scenario.beats;
   const runJudgeFlag = entry.judge ?? scenario.runJudge;
   const cost = new CostTracker();
-  const classify = makeClassifier(openai, cfg, cost);
+  const classify = makeClassifier(openai, vcfg, cost);
   const start = Date.now();
 
   try {
@@ -274,25 +281,28 @@ async function runEntry(
       scenario.pipeline === 'chat' ? runChatScenario :
       scenario.pipeline === 'voice' && !cfg.dryRun ? (await import('./voiceClient.js')).runVoiceScenario :
       runRealtimeScenario;
-    const { assertions, judge, judgeBreaches } = await runner(
-      scenario, beats, runJudgeFlag, client, openai, cfg, cost, canaries, pool, classify,
+    const { assertions, judge, judgeBreaches, sessionId } = await runner(
+      scenario, beats, runJudgeFlag, client, openai, vcfg, cost, canaries, pool, classify,
     );
     const gatingFail = assertions.some(a => !a.passed && a.gating) || judgeBreaches;
     return {
-      id: scenario.id,
+      id: label,
       title: scenario.title,
       pipeline: scenario.pipeline,
+      variation,
       passed: !gatingFail,
       assertions,
       judge,
+      sessionId,
       costUsd: cost.usd,
       durationMs: Date.now() - start,
     };
   } catch (err) {
     return {
-      id: scenario.id,
+      id: label,
       title: scenario.title,
       pipeline: scenario.pipeline,
+      variation,
       passed: false,
       assertions: [],
       judge: null,
@@ -331,10 +341,13 @@ async function main(): Promise<void> {
   const startedAt = new Date().toISOString();
   const results: ScenarioResult[] = [];
   for (const entry of entries) {
-    console.log(`\n[redteam] running ${entry.scenario.id} (${entry.scenario.pipeline})...`);
-    const r = await runEntry(entry, client, openai, cfg, canaries, pool);
-    console.log(`[redteam] ${entry.scenario.id}: ${r.passed ? 'PASS' : 'FAIL'} (${(r.durationMs / 1000).toFixed(1)}s, $${r.costUsd.toFixed(4)})`);
-    results.push(r);
+    for (let v = 0; v < cfg.variations; v++) {
+      const vLabel = cfg.variations > 1 ? ` v${v + 1}/${cfg.variations}` : '';
+      console.log(`\n[redteam] running ${entry.scenario.id}${vLabel} (${entry.scenario.pipeline})...`);
+      const r = await runEntry(entry, client, openai, cfg, canaries, pool, v);
+      console.log(`[redteam] ${r.id}: ${r.passed ? 'PASS' : 'FAIL'} (${(r.durationMs / 1000).toFixed(1)}s, $${r.costUsd.toFixed(4)})`);
+      results.push(r);
+    }
   }
   const finishedAt = new Date().toISOString();
 
@@ -349,6 +362,41 @@ async function main(): Promise<void> {
   const { junitPath, summaryPath } = writeReports(cfg, summary);
   const passed = printConsole(summary);
   console.log(`[redteam] wrote ${junitPath} and ${summaryPath}`);
+
+  // Persist the run for the admin Simulation Runs panel (phase 3). Best-effort:
+  // a missing table (migration 063 not applied) or DB hiccup never fails a run.
+  try {
+    const { insertHarnessRun } = await import('../server/db/index.js');
+    let gitSha: string | null = process.env.GITHUB_SHA ?? null;
+    if (!gitSha) {
+      try {
+        const { execSync } = await import('node:child_process');
+        gitSha = execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      } catch { /* not a git checkout */ }
+    }
+    const trigger = process.env.REDTEAM_TRIGGER
+      ?? (process.env.GITHUB_ACTIONS ? (cfg.suite === 'smoke' ? 'ci-smoke' : 'ci-nightly') : 'manual');
+    const runId = await insertHarnessRun({
+      startedAt, finishedAt,
+      suite: cfg.suite, seed: cfg.seed, variations: cfg.variations,
+      judgeModel: cfg.judgeModel, gitSha, trigger, dryRun: cfg.dryRun,
+      scenarios: results.map(r => ({
+        scenarioId: r.id.replace(/#v\d+$/, ''),
+        variation: r.variation,
+        pipeline: r.pipeline,
+        passed: r.passed,
+        assertionFailures: r.assertions.filter(a => !a.passed && a.gating).map(a => ({ id: a.id, detail: a.detail })),
+        judgeScores: r.judge ? (r.judge.scores as Record<string, number>) : null,
+        sessionId: r.sessionId ?? null,
+        error: r.error ?? null,
+        durationMs: r.durationMs,
+        costUsd: r.costUsd,
+      })),
+    });
+    console.log(`[redteam] persisted as harness run #${runId}`);
+  } catch (err) {
+    console.warn(`[redteam] run not persisted (${(err as Error).message}) — apply migration 063 to enable the Simulation Runs panel`);
+  }
 
   // Don't pool.end() here: crisis detection runs fire-and-forget writes in
   // setImmediate (incl. best-effort LLM-usage recording) that may still be in

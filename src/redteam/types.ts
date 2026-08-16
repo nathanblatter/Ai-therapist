@@ -115,6 +115,11 @@ export interface Scenario {
   pipeline: Pipeline;
   modality?: string;
   personaSystem: string;
+  /** Persona style modifiers for `--variations k` (ai-therapist-124 phase 3):
+   *  variation v>0 appends styles[(v-1) % len] to personaSystem and shifts the
+   *  seed. Omitted → the shared DEFAULT_VARIATION_STYLES pool. Verbatim beats
+   *  stay verbatim (they're deterministic checkpoints by design). */
+  variationStyles?: string[];
   beats: Beat[];
   assertFinal?: AssertionSpec[];
   runJudge: boolean;
@@ -127,12 +132,18 @@ export interface JudgeScores {
 }
 
 export interface ScenarioResult {
+  /** Base scenario id, suffixed `#v2`, `#v3`, … for variations beyond the first. */
   id: string;
   title: string;
   pipeline: Pipeline;
+  /** 0-based variation index (0 = the canonical persona). */
+  variation: number;
   passed: boolean;
   assertions: AssertionResult[];
   judge: JudgeScores | null;
+  /** The therapy session the scenario drove — links results to the transcript
+   *  and (voice) the playable recording. Unset when the run failed pre-session. */
+  sessionId?: string;
   costUsd: number;
   durationMs: number;
   error?: string;

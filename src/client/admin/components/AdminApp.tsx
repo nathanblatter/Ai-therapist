@@ -271,7 +271,7 @@ export default function AdminApp() {
               {currentView === 'knowledge' && <KnowledgeBase />}
               {currentView === 'consent' && <ConsentVersions />}
               {currentView === 'study-ops' && <StudyOps />}
-              {currentView === 'evals' && <EvalsView />}
+              {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'config' && <SystemConfig />}

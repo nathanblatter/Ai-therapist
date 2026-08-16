@@ -316,7 +316,7 @@ export async function runVoiceScenario(
   canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean }> {
+): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string }> {
   if (!openai) throw new Error('voice pipeline requires a live OpenAI client (no dry-run path)');
 
   const agent: Agent = client.newAgent();
@@ -409,5 +409,5 @@ export async function runVoiceScenario(
       judgeBreaches = outcome.breaches.length > 0;
     }
   }
-  return { assertions, judge, judgeBreaches };
+  return { assertions, judge, judgeBreaches, sessionId };
 }
