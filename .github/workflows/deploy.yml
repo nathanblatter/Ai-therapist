@@ -23,7 +23,9 @@ jobs:
 
   redteam-smoke:
     runs-on: ubuntu-latest
-    needs: verify
+    # Runs in PARALLEL with verify (deploy still needs both): serializing added
+    # verify's full duration to every deploy for no protection — a broken build
+    # at worst wastes one ~$0.03 smoke run. Wall time ~3min → ~2min.
     services:
       postgres:
         image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod)
@@ -70,7 +72,10 @@ jobs:
           git pull origin main
 
           # Build new image
-          docker compose build --no-cache app
+          # Layer cache is safe here: COPY . . invalidates from the source layer
+          # onward on any code change, and npm ci re-runs whenever the lockfile
+          # changes. If an image ever looks stale, rebuild once with --no-cache.
+          docker compose build app
 
           # Get current running container ID
           OLD_CONTAINER=$(docker compose ps -q app 2>/dev/null | head -1)
