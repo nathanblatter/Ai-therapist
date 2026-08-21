@@ -73,19 +73,13 @@ export default function sidebandRoutes(): Router {
       const activeSessions = sidebandManager.getActiveConnections();
 
       let rows = await getActiveSidebandSessions();
-      // getActiveSidebandSessions is not one of the caseload-scoped db list
-      // queries (its rows carry no user_id), so filter therapist views here by
-      // resolving each active session's owner against the caseload.
+      // Rows carry user_id, so therapist views filter directly against the
+      // caseload — no per-row owner lookups.
       const scope = await therapistScopeId(req);
       if (scope !== null) {
         const clientIds = new Set(await getCaseloadClientIds(scope));
-        const owners = await Promise.all(
-          rows.map(r => getSessionAccessInfo(String(r.session_id)))
-        );
-        rows = rows.filter((_, i) => {
-          const uid = owners[i]?.user_id;
-          return uid !== null && uid !== undefined && clientIds.has(Number(uid));
-        });
+        // user_id rides along on the sideband row itself — no per-row lookups.
+        rows = rows.filter(r => r.user_id !== null && r.user_id !== undefined && clientIds.has(Number(r.user_id)));
       }
       const sessions = rows.map(session => ({
         ...session,

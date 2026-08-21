@@ -117,8 +117,8 @@ describe('caseload enforcement (ai-therapist-119)', () => {
 
   it('filters the sideband status list to the therapist caseload', async () => {
     dbMocks.getActiveSidebandSessions.mockResolvedValueOnce([
-      { session_id: 'mine', sideband_connected: true, status: 'active' },
-      { session_id: 'not-mine', sideband_connected: true, status: 'active' },
+      { session_id: 'mine', sideband_connected: true, status: 'active', user_id: 42 },
+      { session_id: 'not-mine', sideband_connected: true, status: 'active', user_id: 99 },
     ]);
     dbMocks.getSessionAccessInfo.mockImplementation(async (id: string) => ({
       status: 'active',

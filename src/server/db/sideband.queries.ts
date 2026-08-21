@@ -15,7 +15,8 @@ export async function getActiveSidebandSessions(): Promise<SidebandSessionRow[]>
       sideband_connected_at,
       sideband_disconnected_at,
       sideband_error,
-      status
+      status,
+      user_id
     FROM therapy_sessions
     WHERE status = 'active'
     ORDER BY created_at DESC
@@ -31,7 +32,8 @@ export async function getSidebandConnectionsByIds(sessionIds: string[]): Promise
       openai_call_id,
       sideband_connected,
       sideband_connected_at,
-      status
+      status,
+      user_id
     FROM therapy_sessions
     WHERE session_id = ANY($1)
     ORDER BY sideband_connected_at DESC

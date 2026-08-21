@@ -412,13 +412,8 @@ io.on('connection', (socket: AuthSocket) => {
       // connections (mirrors the HTTP /admin/api/sideband/status filter).
       if (socket.userRole === 'therapist' && socket.userId != null) {
         const caseload = new Set(await getCaseloadClientIds(socket.userId));
-        const allowed: typeof rows = [];
-        for (const row of rows) {
-          const info = await getSessionAccessInfo(String(row.session_id));
-          const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
-          if (ownerId != null && caseload.has(ownerId)) allowed.push(row);
-        }
-        rows = allowed;
+        // user_id rides along on the sideband row itself — no per-row lookups.
+        rows = rows.filter(row => row.user_id !== null && row.user_id !== undefined && caseload.has(Number(row.user_id)));
       }
 
       const connections = rows.map(session => ({
