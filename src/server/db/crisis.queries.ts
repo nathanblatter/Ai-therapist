@@ -65,33 +65,42 @@ export interface AllCrisisData {
 /** Comprehensive crisis dashboard data (3 live tables joined to session names).
  * clinical_reviews and human_handoffs were dropped in migrations 035 (sunset,
  * ai-therapist-23); their keys remain as empty arrays for API-shape
- * compatibility with the admin client. */
-export async function getAllCrisisData(): Promise<AllCrisisData> {
+ * compatibility with the admin client.
+ * scopeTherapistId (caseload RBAC): when set, restrict every list to sessions
+ * of that therapist's assigned clients; null/undefined = unscoped
+ * (researchers), today's SQL. */
+export async function getAllCrisisData(scopeTherapistId?: number | null): Promise<AllCrisisData> {
+  const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
+  const scopeClause = scoped
+    ? `
+        AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = ts.user_id)`
+    : '';
+  const params: unknown[] = scoped ? [scopeTherapistId] : [];
   const [crisisEvents, interventionActions, riskScoreHistory] = await Promise.all([
     pool.query(`
       SELECT ce.*, ts.session_name
       FROM crisis_events ce
       LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE
+      WHERE ts.is_demo IS NOT TRUE${scopeClause}
       ORDER BY ce.created_at DESC
       LIMIT 500
-    `),
+    `, params),
     pool.query(`
       SELECT ia.*, ts.session_name
       FROM intervention_actions ia
       LEFT JOIN therapy_sessions ts ON ia.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE
+      WHERE ts.is_demo IS NOT TRUE${scopeClause}
       ORDER BY ia.performed_at DESC
       LIMIT 500
-    `),
+    `, params),
     pool.query(`
       SELECT rsh.*, ts.session_name
       FROM risk_score_history rsh
       LEFT JOIN therapy_sessions ts ON rsh.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE
+      WHERE ts.is_demo IS NOT TRUE${scopeClause}
       ORDER BY rsh.calculated_at DESC
       LIMIT 1000
-    `),
+    `, params),
   ]);
 
   return {
@@ -204,16 +213,53 @@ export async function hasInterventionAction(sessionId: string, actionType: strin
   return result.rows.length > 0;
 }
 
-/** All crisis events (with session name + username), newest first. */
-export async function getAllCrisisEvents(): Promise<Record<string, unknown>[]> {
+/** All crisis events (with session name + username), newest first.
+ *  scopeTherapistId (caseload RBAC): when set, restrict to the therapist's
+ *  assigned clients; null/undefined = unscoped (researchers), today's SQL. */
+export async function getAllCrisisEvents(scopeTherapistId?: number | null): Promise<Record<string, unknown>[]> {
+  const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
+  const scopeClause = scoped
+    ? `
+      AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = ts.user_id)`
+    : '';
   const result = await pool.query(`
     SELECT ce.*, ts.session_name, u.username
     FROM crisis_events ce
     LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
     LEFT JOIN users u ON ts.user_id = u.userid
-    WHERE ts.is_demo IS NOT TRUE
+    WHERE ts.is_demo IS NOT TRUE${scopeClause}
     ORDER BY ce.created_at DESC
     LIMIT 100
-  `);
+  `, scoped ? [scopeTherapistId] : []);
+  return result.rows;
+}
+
+/** All currently crisis-flagged sessions (the active-crisis view), highest
+ *  risk first. The active-crisis route historically read this list from
+ *  services/crisisDetection.service.ts#getActiveCrisisSessions; this scoped
+ *  variant lives here so caseload RBAC (ai-therapist-119) can filter it.
+ *  scopeTherapistId: when set, restrict to the therapist's assigned clients;
+ *  null/undefined = unscoped (researchers), matching the service's SQL. */
+export async function getActiveCrisisSessions(scopeTherapistId?: number | null): Promise<Record<string, unknown>[]> {
+  const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
+  const scopeClause = scoped
+    ? `
+       AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = ts.user_id)`
+    : '';
+  const result = await pool.query(
+    `SELECT
+       ts.session_id,
+       ts.user_id,
+       ts.crisis_severity,
+       ts.crisis_risk_score,
+       ts.crisis_flagged_at,
+       ts.crisis_flagged_by,
+       u.username
+     FROM therapy_sessions ts
+     LEFT JOIN users u ON ts.user_id = u.userid
+     WHERE ts.crisis_flagged = TRUE${scopeClause}
+     ORDER BY ts.crisis_risk_score DESC, ts.crisis_flagged_at DESC`,
+    scoped ? [scopeTherapistId] : []
+  );
   return result.rows;
 }

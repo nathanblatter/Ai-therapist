@@ -5,6 +5,7 @@
 // services/evalCalibration.service.ts, and services/evalDrift.service.ts.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { requireSessionClientAccess } from '../../middleware/caseload.js';
 import {
   getSessionEval,
   getSession,
@@ -90,7 +91,7 @@ export default function evalsRoutes(): Router {
   });
 
   // GET /admin/api/sessions/:sessionId/eval - latest eval for a session
-  router.get('/admin/api/sessions/:sessionId/eval', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/eval', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     try {
       const evalRow = await getSessionEval(req.params.sessionId);
       if (!evalRow) return res.status(404).json({ error: 'No eval for this session yet' });
@@ -104,7 +105,7 @@ export default function evalsRoutes(): Router {
   // POST /admin/api/sessions/:sessionId/eval - run (or re-run with force) the
   // LLM judge for an ended session. Synchronous: the judge call takes a few
   // seconds and the admin UI wants the fresh scores back.
-  router.post('/admin/api/sessions/:sessionId/eval', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/eval', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     const force = req.body?.force === true;
     try {
@@ -127,7 +128,7 @@ export default function evalsRoutes(): Router {
 
   // GET /admin/api/sessions/:sessionId/human-ratings - all human ratings for a
   // session (+ my_user_id so the UI can locate "my" rating).
-  router.get('/admin/api/sessions/:sessionId/human-ratings', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/human-ratings', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     try {
       const ratings = await getSessionHumanRatings(req.params.sessionId);
       res.json({ ratings, my_user_id: req.session.userId });
@@ -139,7 +140,7 @@ export default function evalsRoutes(): Router {
 
   // PUT /admin/api/sessions/:sessionId/human-rating - upsert the calling rater's
   // rating on the six-dimension rubric for an ended session.
-  router.put('/admin/api/sessions/:sessionId/human-rating', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.put('/admin/api/sessions/:sessionId/human-rating', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     try {
       const session = await getSession(sessionId);

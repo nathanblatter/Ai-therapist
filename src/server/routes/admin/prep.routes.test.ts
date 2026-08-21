@@ -11,6 +11,9 @@ const dbMocks = vi.hoisted(() => ({
   getRecentUserSummaries: vi.fn(),
   getLatestClinicianNote: vi.fn(),
   getUserPriorCrisisFlags: vi.fn(),
+  // Caseload middleware deps (ai-therapist-119).
+  isAssigned: vi.fn(),
+  getSessionAccessInfo: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
 
@@ -36,6 +39,7 @@ beforeEach(() => {
   dbMocks.getRecentUserSummaries.mockResolvedValue([]);
   dbMocks.getLatestClinicianNote.mockResolvedValue(null);
   dbMocks.getUserPriorCrisisFlags.mockResolvedValue([]);
+  dbMocks.isAssigned.mockResolvedValue(true);
 });
 
 describe('auth matrix', () => {
@@ -60,6 +64,14 @@ describe('auth matrix', () => {
   it('200 for therapists', async () => {
     const res = await request(appAs(1, 'therapist')).get('/admin/api/users/7/prep');
     expect(res.status).toBe(200);
+    expect(dbMocks.isAssigned).toHaveBeenCalledWith(1, 7);
+  });
+
+  it('404 for a therapist whose caseload does not include the user (ai-therapist-119)', async () => {
+    dbMocks.isAssigned.mockResolvedValue(false);
+    const res = await request(appAs(1, 'therapist')).get('/admin/api/users/7/prep');
+    expect(res.status).toBe(404);
+    expect(dbMocks.listUserAssignments).not.toHaveBeenCalled();
   });
 });
 

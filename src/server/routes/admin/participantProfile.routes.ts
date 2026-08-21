@@ -12,6 +12,7 @@
 import { Router } from 'express';
 import OpenAI from 'openai';
 import { requireRole } from '../../middleware/auth.js';
+import { requireClientAccess, therapistScopeId } from '../../middleware/caseload.js';
 import { getOpenAIKey } from '../../config/secrets.js';
 import {
   getUserById,
@@ -103,7 +104,7 @@ export default function participantProfileRoutes(): Router {
   const router = Router();
 
   // GET /admin/api/users/:userId/profile - full memory/clinical bundle
-  router.get('/admin/api/users/:userId/profile', requireRole('therapist'), async (req, res) => {
+  router.get('/admin/api/users/:userId/profile', requireRole('therapist'), requireClientAccess(), async (req, res) => {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
@@ -134,7 +135,7 @@ export default function participantProfileRoutes(): Router {
   // paragraph (ai-therapist-122). Therapist-only like the profile bundle.
   // Fail-soft by design: any LLM/composition failure returns { brief: null }
   // so the profile page never blocks on this.
-  router.get('/admin/api/users/:userId/brief', requireRole('therapist'), async (req, res) => {
+  router.get('/admin/api/users/:userId/brief', requireRole('therapist'), requireClientAccess(), async (req, res) => {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
@@ -183,7 +184,7 @@ export default function participantProfileRoutes(): Router {
   });
 
   // GET /admin/api/users/:userId/sessions - per-user session history
-  router.get('/admin/api/users/:userId/sessions', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.get('/admin/api/users/:userId/sessions', requireRole('therapist', 'researcher'), requireClientAccess(), async (req, res) => {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
@@ -209,9 +210,10 @@ export default function participantProfileRoutes(): Router {
         userId,
       };
 
+      const scope = await therapistScopeId(req);
       const [sessions, totalCount] = await Promise.all([
-        listSessions(filters),
-        countSessions(filters),
+        listSessions(filters, scope),
+        countSessions(filters, scope),
       ]);
 
       const extras = await getSessionScoreExtras(sessions.map(s => String(s.session_id)));

@@ -15,6 +15,7 @@ import {
 } from '../../db/index.js';
 import { getSystemPrompt } from '../../utils/sessionHelpers.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
+import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 export default function logsRoutes(): Router {
   const router = Router();
@@ -173,11 +174,11 @@ export default function logsRoutes(): Router {
         // Emit the ABSOLUTE count (not a delta) so it reconciles the live count
         // the sideband has been incrementing between flushes — no double-counting.
         const totalMessages = await getSessionMessageCount(sessionId);
-        global.io.to('admin-broadcast').emit('session:activity', {
+        void broadcastAdminEventForSession(global.io, 'session:activity', {
           sessionId,
           totalMessages,
           lastActivity: new Date(),
-        });
+        }, sessionId);
       }));
       // ========== END SOCKET.IO EVENT EMISSION ==========
     }

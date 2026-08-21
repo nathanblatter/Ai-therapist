@@ -8,8 +8,15 @@ export type AdminSessionRow = Record<string, unknown>;
 // Therapists see raw content; researchers see the redacted column.
 export type MessageContentColumn = 'content' | 'content_redacted';
 
-/** All currently-active sessions with message counts, crisis-first ordering. */
-export async function getActiveSessions(): Promise<AdminSessionRow[]> {
+/** All currently-active sessions with message counts, crisis-first ordering.
+ *  scopeTherapistId (caseload RBAC): when set, restrict to the therapist's
+ *  assigned clients; null/undefined = unscoped (researchers), today's SQL. */
+export async function getActiveSessions(scopeTherapistId?: number | null): Promise<AdminSessionRow[]> {
+  const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
+  const scopeClause = scoped
+    ? `
+      AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = ts.user_id)`
+    : '';
   const result = await pool.query(`
     SELECT
       ts.session_id,
@@ -30,10 +37,10 @@ export async function getActiveSessions(): Promise<AdminSessionRow[]> {
     LEFT JOIN users u ON ts.user_id = u.userid
     LEFT JOIN messages m ON ts.session_id = m.session_id
     WHERE ts.status = 'active'
-      AND ts.is_demo IS NOT TRUE
+      AND ts.is_demo IS NOT TRUE${scopeClause}
     GROUP BY ts.session_id, u.username
     ORDER BY ts.crisis_flagged DESC, ts.created_at DESC
-  `);
+  `, scoped ? [scopeTherapistId] : []);
   return result.rows;
 }
 
@@ -58,8 +65,15 @@ export interface SessionListFilters {
   userId?: number | null;
 }
 
-/** One page of sessions matching the filters, with per-session message stats. */
-export async function listSessions(f: SessionListFilters): Promise<AdminSessionRow[]> {
+/** One page of sessions matching the filters, with per-session message stats.
+ *  scopeTherapistId (caseload RBAC): when set, restrict to the therapist's
+ *  assigned clients; null/undefined = unscoped (researchers), today's SQL. */
+export async function listSessions(f: SessionListFilters, scopeTherapistId?: number | null): Promise<AdminSessionRow[]> {
+  const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
+  const scopeClause = scoped
+    ? `
+        AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $17 AND tc.client_id = ts.user_id)`
+    : '';
   const result = await pool.query(`
     WITH session_stats AS (
       SELECT
@@ -103,7 +117,7 @@ export async function listSessions(f: SessionListFilters): Promise<AdminSessionR
         AND ($12::TEXT[] IS NULL OR ts.ended_by = ANY($12))
         AND ($13::BOOLEAN IS NULL OR ts.crisis_flagged = $13)
         AND ($14::TEXT IS NULL OR ts.crisis_severity = $14)
-        AND ($16::INT IS NULL OR ts.user_id = $16)
+        AND ($16::INT IS NULL OR ts.user_id = $16)${scopeClause}
       GROUP BY ts.session_id, u.username, ts.ended_by, ts.session_type, ts.crisis_flagged, ts.crisis_severity, sc.voice, sc.language
     )
     SELECT * FROM session_stats
@@ -130,12 +144,20 @@ export async function listSessions(f: SessionListFilters): Promise<AdminSessionR
     f.crisisSeverity, // $14
     f.durations,      // $15
     f.userId ?? null, // $16
+    ...(scoped ? [scopeTherapistId] : []), // $17 (only when scoped)
   ]);
   return result.rows;
 }
 
-/** Total sessions matching the list filters (ignores pagination/message/duration). */
-export async function countSessions(f: SessionListFilters): Promise<number> {
+/** Total sessions matching the list filters (ignores pagination/message/duration).
+ *  scopeTherapistId (caseload RBAC): when set, restrict to the therapist's
+ *  assigned clients; null/undefined = unscoped (researchers), today's SQL. */
+export async function countSessions(f: SessionListFilters, scopeTherapistId?: number | null): Promise<number> {
+  const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
+  const scopeClause = scoped
+    ? `
+      AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $12 AND tc.client_id = ts.user_id)`
+    : '';
   const result = await pool.query<{ total: string }>(`
     SELECT COUNT(DISTINCT ts.session_id) as total
     FROM therapy_sessions ts
@@ -153,7 +175,7 @@ export async function countSessions(f: SessionListFilters): Promise<number> {
       AND ($8::TEXT[] IS NULL OR ts.ended_by = ANY($8))
       AND ($9::BOOLEAN IS NULL OR ts.crisis_flagged = $9)
       AND ($10::TEXT IS NULL OR ts.crisis_severity = $10)
-      AND ($11::INT IS NULL OR ts.user_id = $11)
+      AND ($11::INT IS NULL OR ts.user_id = $11)${scopeClause}
   `, [
     f.search,
     f.startDate,
@@ -166,6 +188,7 @@ export async function countSessions(f: SessionListFilters): Promise<number> {
     f.crisisFlagged,
     f.crisisSeverity,
     f.userId ?? null,
+    ...(scoped ? [scopeTherapistId] : []), // $12 (only when scoped)
   ]);
   return parseInt(result.rows[0].total);
 }

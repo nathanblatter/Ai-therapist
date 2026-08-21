@@ -15,6 +15,7 @@
 import { pool } from '../config/db.js';
 import { updateSessionStatus, getSession } from '../db/sessions.queries.js';
 import { createLogger } from '../utils/logger.js';
+import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 const log = createLogger('sessionLifecycle');
 
@@ -133,9 +134,9 @@ export async function serverEndSession(
       ...(opts.message ? { message: opts.message } : {}),
       remoteTermination: true,
     });
-    global.io.to('admin-broadcast').emit('session:ended', {
+    void broadcastAdminEventForSession(global.io, 'session:ended', {
       sessionId, endedAt: new Date(), endedBy: opts.endedBy, reason: opts.reason,
-    });
+    }, sessionId);
   }
   return true;
 }
@@ -158,7 +159,7 @@ async function finalizeAbandonedSession(sessionId: string): Promise<void> {
   finalize(sessionId).catch(err => log.error({ err }, `[Recorder] abandon-finalize failed for ${sessionId}`));
 
   if (global.io) {
-    global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedAt: new Date(), endedBy: 'system', reason: 'abandoned' });
+    void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'system', reason: 'abandoned' }, sessionId);
     global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'system', reason: 'abandoned' });
   }
 }

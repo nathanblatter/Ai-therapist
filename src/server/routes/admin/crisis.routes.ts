@@ -1,19 +1,36 @@
 // Admin crisis-management routes (therapist/researcher): flag/unflag sessions
 // and read crisis dashboards. Heavy logic lives in crisisDetection.service.
 import { Router } from 'express';
+import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
+import { requireSessionClientAccess, therapistScopeId } from '../../middleware/caseload.js';
 import {
   sessionExists,
   getSessionCrisisFlag,
   getAllCrisisData,
   getAllCrisisEvents,
+  getSessionAccessInfo,
+  isAssigned,
+  getCaseloadClientIds,
 } from '../../db/index.js';
+
+// Caseload guard for session ids arriving via query string (the
+// requireSessionClientAccess middleware only covers :sessionId path params).
+// Non-therapists always pass; a therapist passes only when the session exists,
+// has an owner, and that owner is in their caseload.
+async function therapistMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
+  if (req.session.userRole !== 'therapist') return true;
+  const info = await getSessionAccessInfo(sessionId);
+  if (!info || info.user_id === null || info.user_id === undefined) return false;
+  return isAssigned(req.session.userId!, Number(info.user_id));
+}
 
 export default function crisisRoutes(): Router {
   const router = Router();
 
   // POST /admin/api/sessions/:sessionId/crisis/flag - manually flag a session
-  router.post('/admin/api/sessions/:sessionId/crisis/flag', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/crisis/flag', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     const { severity, notes } = req.body;
 
@@ -55,14 +72,14 @@ export default function crisisRoutes(): Router {
       const { injectManualFlagGuidance } = await import('../../services/crisisIntervention.service.js');
       const steered = await injectManualFlagGuidance(sessionId, severity, riskScore, req.session.username!);
 
-      global.io.to('admin-broadcast').emit('session:crisis-flagged', {
+      void broadcastAdminEventForSession(global.io, 'session:crisis-flagged', {
         sessionId,
         severity,
         riskScore,
         flaggedBy: req.session.username,
         flaggedAt: new Date(),
         message: `Session manually flagged as ${severity} risk by ${req.session.username}`,
-      });
+      }, sessionId);
 
       res.json({
         success: true,
@@ -86,7 +103,7 @@ export default function crisisRoutes(): Router {
   // hard-ends server-side after a grace window (immediately when no sideband).
   // Contrast with POST /admin/api/sessions/:id/end, which yanks the session
   // with no closure for the participant.
-  router.post('/admin/api/sessions/:sessionId/crisis/wind-down', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/crisis/wind-down', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     try {
       const { getSession } = await import('../../db/index.js');
@@ -99,12 +116,12 @@ export default function crisisRoutes(): Router {
       const { initiateCrisisWindDown } = await import('../../services/crisisIntervention.service.js');
       const { injected } = await initiateCrisisWindDown(sessionId, req.session.username!);
 
-      global.io.to('admin-broadcast').emit('session:crisis-wind-down', {
+      void broadcastAdminEventForSession(global.io, 'session:crisis-wind-down', {
         sessionId,
         initiatedBy: req.session.username,
         injected,
         at: new Date(),
-      });
+      }, sessionId);
 
       res.json({
         success: true,
@@ -120,7 +137,7 @@ export default function crisisRoutes(): Router {
   });
 
   // DELETE /admin/api/sessions/:sessionId/crisis/flag - remove a crisis flag
-  router.delete('/admin/api/sessions/:sessionId/crisis/flag', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.delete('/admin/api/sessions/:sessionId/crisis/flag', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     const { notes } = req.body;
 
@@ -137,12 +154,12 @@ export default function crisisRoutes(): Router {
 
       await unflagSessionCrisis(sessionId, req.session.username!, notes || 'Manually unflagged by admin');
 
-      global.io.to('admin-broadcast').emit('session:crisis-unflagged', {
+      void broadcastAdminEventForSession(global.io, 'session:crisis-unflagged', {
         sessionId,
         unflaggedBy: req.session.username,
         unflaggedAt: new Date(),
         message: `Crisis flag removed by ${req.session.username}`,
-      });
+      }, sessionId);
 
       res.json({
         success: true,
@@ -158,9 +175,9 @@ export default function crisisRoutes(): Router {
   });
 
   // GET /admin/api/crisis/all - comprehensive crisis dashboard data
-  router.get('/admin/api/crisis/all', requireRole('therapist', 'researcher'), async (_req, res) => {
+  router.get('/admin/api/crisis/all', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
-      const data = await getAllCrisisData();
+      const data = await getAllCrisisData(await therapistScopeId(req));
       res.json(data);
     } catch (err: unknown) {
       console.error('[Crisis API] Failed to fetch comprehensive crisis data:', err);
@@ -175,11 +192,16 @@ export default function crisisRoutes(): Router {
 
     try {
       if (sessionId) {
+        // Session id arrives via query string, so the path-param caseload
+        // middleware cannot cover it; enforce the same 404 semantics here.
+        if (!(await therapistMayAccessSession(req, String(sessionId)))) {
+          return res.status(404).json({ error: 'Not found' });
+        }
         const { getSessionCrisisEvents } = await import('../../services/crisisDetection.service.js');
         const events = await getSessionCrisisEvents(String(sessionId));
         res.json({ events });
       } else {
-        const events = await getAllCrisisEvents();
+        const events = await getAllCrisisEvents(await therapistScopeId(req));
         res.json({ events });
       }
     } catch (err) {
@@ -191,7 +213,7 @@ export default function crisisRoutes(): Router {
   // GET /admin/api/sessions/:sessionId/risk-history - the per-message risk
   // timeline for one session (scores, severity, and the stage-2 LLM's context
   // judgment + reasoning from score_factors). Drives SessionDetail's timeline.
-  router.get('/admin/api/sessions/:sessionId/risk-history', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/risk-history', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     try {
       const { getSessionRiskHistory } = await import('../../services/crisisDetection.service.js');
       const history = await getSessionRiskHistory(req.params.sessionId);
@@ -203,10 +225,20 @@ export default function crisisRoutes(): Router {
   });
 
   // GET /admin/api/crisis/active - active crisis sessions
-  router.get('/admin/api/crisis/active', requireRole('therapist', 'researcher'), async (_req, res) => {
+  router.get('/admin/api/crisis/active', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
       const { getActiveCrisisSessions } = await import('../../services/crisisDetection.service.js');
-      const sessions = await getActiveCrisisSessions();
+      let sessions = await getActiveCrisisSessions();
+      // getActiveCrisisSessions lives in the crisis-detection service, not a
+      // scoped db module, so the caseload filter is applied here.
+      const scope = await therapistScopeId(req);
+      if (scope !== null) {
+        const clientIds = new Set(await getCaseloadClientIds(scope));
+        sessions = sessions.filter((s) => {
+          const uid = (s as { user_id?: number | null }).user_id;
+          return uid !== null && uid !== undefined && clientIds.has(Number(uid));
+        });
+      }
       res.json({ sessions });
     } catch (err) {
       console.error('Failed to fetch active crisis sessions:', err);

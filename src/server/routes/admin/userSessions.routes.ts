@@ -1,4 +1,8 @@
 // Admin view/management of persisted login sessions (researcher only).
+// Caseload RBAC review (ai-therapist-119): these routes are researcher-only
+// and researchers are unscoped, so no requireClientAccess/therapistScopeId
+// threading applies here; login sessions are also not a participant-scoped
+// therapy surface.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { getActiveUserSessions, deleteUserSession } from '../../db/index.js';

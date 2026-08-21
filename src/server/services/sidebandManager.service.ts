@@ -6,6 +6,7 @@
 import WebSocket from 'ws';
 import { pool } from '../config/db.js';
 import { insertMessagesBatch } from '../db/index.js';
+import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 export class SidebandManager {
   private connections: Map<string, WebSocket>;
@@ -186,11 +187,11 @@ export class SidebandManager {
 
           this.logConnectionError(sessionId, new Error(detail)).catch(() => {});
           if (global.io) {
-            global.io.to('admin-broadcast').emit('sideband:error', {
+            void broadcastAdminEventForSession(global.io, 'sideband:error', {
               sessionId,
               error: detail,
               statusCode: res.statusCode,
-            });
+            }, sessionId);
           }
         });
       });
@@ -227,11 +228,11 @@ export class SidebandManager {
 
       // Emit to admins via Socket.io
       if (global.io) {
-        global.io.to('admin-broadcast').emit('sideband:connected', {
+        void broadcastAdminEventForSession(global.io, 'sideband:connected', {
           sessionId,
           callId,
           connectedAt: new Date()
-        });
+        }, sessionId);
       }
 
       this.startKeepalive(sessionId);
@@ -630,20 +631,20 @@ export class SidebandManager {
     payload: { role: 'assistant' | 'user'; itemId: string; delta?: string; text?: string; final: boolean },
   ): void {
     if (!global.io) return;
-    global.io.to('admin-broadcast').emit('sideband:transcript', {
+    void broadcastAdminEventForSession(global.io, 'sideband:transcript', {
       sessionId,
       ...payload,
       timestamp: new Date(),
-    });
+    }, sessionId);
 
     // Drive the active-sessions list live off the sideband instead of waiting
     // for the participant's 15s log flush. Each finalized turn = one message;
     // every fragment refreshes last-activity so the row never looks idle.
-    global.io.to('admin-broadcast').emit('session:activity', {
+    void broadcastAdminEventForSession(global.io, 'session:activity', {
       sessionId,
       lastActivity: new Date(),
       deltaMessages: payload.final ? 1 : 0,
-    });
+    }, sessionId);
   }
 
   /**
@@ -655,11 +656,11 @@ export class SidebandManager {
       case 'session.updated':
         // Emit to admins (no DB logging to avoid bloat)
         if (global.io) {
-          global.io.to('admin-broadcast').emit('session:openai-update', {
+          void broadcastAdminEventForSession(global.io, 'session:openai-update', {
             sessionId,
             eventType: event.type,
             data: event
-          });
+          }, sessionId);
         }
         break;
 
@@ -759,10 +760,10 @@ export class SidebandManager {
         await this.logError(sessionId, event['error']);
 
         if (global.io) {
-          global.io.to('admin-broadcast').emit('sideband:error', {
+          void broadcastAdminEventForSession(global.io, 'sideband:error', {
             sessionId,
             error: event['error']
-          });
+          }, sessionId);
         }
         break;
       }
@@ -814,9 +815,9 @@ export class SidebandManager {
 
       // Surface the tool call to the admin live-monitoring UI.
       if (global.io) {
-        global.io.to('admin-broadcast').emit('sideband:tool-call', {
+        void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
           sessionId, callId: call_id, toolName, args, status: 'executing', timestamp: new Date(),
-        });
+        }, sessionId);
       }
 
       // Execute tool via registry (session context injected server-side)
@@ -865,9 +866,9 @@ export class SidebandManager {
 
       // Surface the result to the admin live-monitoring UI.
       if (global.io) {
-        global.io.to('admin-broadcast').emit('sideband:tool-call', {
+        void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
           sessionId, callId: call_id, toolName, args, result, status: 'completed', timestamp: new Date(),
-        });
+        }, sessionId);
       }
 
       console.log(`[Sideband] Tool ${toolName} executed for session ${sessionId.substring(0, 12)}...`);
@@ -916,9 +917,9 @@ export class SidebandManager {
 
       // Surface the failure to the admin live-monitoring UI.
       if (global.io) {
-        global.io.to('admin-broadcast').emit('sideband:tool-call', {
+        void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
           sessionId, callId: call_id, toolName, error: errorMessage, status: 'failed', timestamp: new Date(),
-        });
+        }, sessionId);
       }
 
       import('../db/index.js')
@@ -1251,12 +1252,12 @@ export class SidebandManager {
 
     // Emit error status to admin UI
     if (global.io) {
-      global.io.to('admin-broadcast').emit('sideband:status-update', {
+      void broadcastAdminEventForSession(global.io, 'sideband:status-update', {
         sessionId,
         status: 'error',
         error: error.message,
         timestamp: new Date()
-      });
+      }, sessionId);
     }
   }
 
@@ -1282,12 +1283,12 @@ export class SidebandManager {
       );
 
       if (global.io) {
-        global.io.to('admin-broadcast').emit('sideband:disconnected', {
+        void broadcastAdminEventForSession(global.io, 'sideband:disconnected', {
           sessionId,
           code,
           reason: reason?.toString(),
           disconnectedAt: new Date()
-        });
+        }, sessionId);
       }
 
       // Fast path: if the session was ended/finalized in-process, don't even

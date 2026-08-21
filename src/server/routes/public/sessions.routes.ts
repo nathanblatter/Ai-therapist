@@ -19,6 +19,7 @@ import {
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
+import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 export default function sessionsRoutes(): Router {
   const router = Router();
@@ -96,9 +97,9 @@ export default function sessionsRoutes(): Router {
       const { insertScaleResponse } = await import('../../db/index.js');
       await insertScaleResponse(sessionId, def.id, answers, score);
 
-      global.io?.to('admin-broadcast').emit('session:scale-completed', {
+      if (global.io) void broadcastAdminEventForSession(global.io, 'session:scale-completed', {
         sessionId, scale: def.id, score, maxScore: def.max_score, completedAt: new Date(),
-      });
+      }, sessionId);
 
       // Tell the live model directly over the sideband (ai-therapist-112) —
       // previously the model only learned the score if the participant's
@@ -148,9 +149,9 @@ export default function sessionsRoutes(): Router {
 
       await completeWorksheetInstance(draft.instance_id, sessionId, responses);
 
-      global.io?.to('admin-broadcast').emit('session:worksheet-completed', {
+      if (global.io) void broadcastAdminEventForSession(global.io, 'session:worksheet-completed', {
         sessionId, instanceId: draft.instance_id, completedAt: new Date(),
-      });
+      }, sessionId);
 
       // Inform the live model server-side (ai-therapist-112). The client
       // composes `summary` with the worksheet's section labels (it renders
@@ -216,9 +217,9 @@ export default function sessionsRoutes(): Router {
         }
       }
 
-      global.io?.to('admin-broadcast').emit('session:tool-event', {
+      if (global.io) void broadcastAdminEventForSession(global.io, 'session:tool-event', {
         sessionId, kind, injected, at: new Date(),
-      });
+      }, sessionId);
 
       res.json({ success: true, injected });
     } catch (err) {
@@ -445,7 +446,7 @@ export default function sessionsRoutes(): Router {
         .then(m => m.maybeAutoEvalSession(sessionId))
         .catch(e => console.error('[Evals] auto-eval failed:', e));
 
-      global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' });
+      void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' }, sessionId);
       global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'user' });
 
       res.json({ ...updatedSession, message: 'Session ended successfully' });

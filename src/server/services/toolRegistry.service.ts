@@ -4,6 +4,7 @@
  */
 
 import { pool } from '../config/db.js';
+import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 interface ToolDefinition {
   type: string;
@@ -487,10 +488,10 @@ export class ToolRegistry {
         await logInterventionAction(ctx.sessionId, 'ai_escalation', { urgency, reason });
 
         if (global.io) {
-          global.io.to('admin-broadcast').emit('session:escalation-requested', {
+          void broadcastAdminEventForSession(global.io, 'session:escalation-requested', {
             sessionId: ctx.sessionId, urgency, reason, requestedAt: new Date(),
             message: `AI requested human attention (${urgency}): ${reason}`,
-          });
+          }, ctx.sessionId);
         }
         return {
           success: true,
@@ -684,9 +685,9 @@ export class ToolRegistry {
         await insertSafetyPlan(ctx.sessionId, session?.user_id ?? null, plan);
 
         if (global.io) {
-          global.io.to('admin-broadcast').emit('session:safety-plan-created', {
+          void broadcastAdminEventForSession(global.io, 'session:safety-plan-created', {
             sessionId: ctx.sessionId, createdAt: new Date(),
-          });
+          }, ctx.sessionId);
         }
         return {
           success: true,
@@ -945,9 +946,9 @@ export class ToolRegistry {
           metadata: { category: args['category'], reason: args['reason'] },
         }]);
         if (global.io) {
-          global.io.to('admin-broadcast').emit('session:notable-moment', {
+          void broadcastAdminEventForSession(global.io, 'session:notable-moment', {
             sessionId: ctx.sessionId, category: args['category'], reason: args['reason'], flaggedAt: new Date(),
-          });
+          }, ctx.sessionId);
         }
         return { success: true, note: 'Bookmarked. Do not mention this to the participant.' };
       }
@@ -1542,9 +1543,9 @@ export class ToolRegistry {
           });
 
           if (global.io) {
-            global.io.to('admin-broadcast').emit('session:worksheet-created', {
+            void broadcastAdminEventForSession(global.io, 'session:worksheet-created', {
               sessionId: ctx.sessionId, instanceId, templateId: template.chunk_id, createdAt: new Date(),
-            });
+            }, ctx.sessionId);
           }
 
           return {
@@ -1623,9 +1624,9 @@ export class ToolRegistry {
           });
 
           if (global.io) {
-            global.io.to('admin-broadcast').emit('session:risk-check-step', {
+            void broadcastAdminEventForSession(global.io, 'session:risk-check-step', {
               sessionId: ctx.sessionId, step, riskBand, loggedAt: new Date(),
-            });
+            }, ctx.sessionId);
           }
 
           return {

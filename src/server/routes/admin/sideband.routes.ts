@@ -3,14 +3,35 @@
 // session. The sidebandManager service is imported lazily because the feature
 // is currently disabled (OpenAI returns 404 for WebRTC sessions).
 import { Router } from 'express';
+import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { getActiveSidebandSessions, logSidebandAction } from '../../db/index.js';
+import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
+import { requireSessionClientAccess, therapistScopeId } from '../../middleware/caseload.js';
+import {
+  getActiveSidebandSessions,
+  logSidebandAction,
+  getSessionAccessInfo,
+  isAssigned,
+  getCaseloadClientIds,
+} from '../../db/index.js';
+
+// Caseload guard for session ids arriving in the request BODY (most sideband
+// control endpoints), where the :sessionId path-param middleware cannot apply.
+// Non-therapists always pass; a therapist passes only when the session exists,
+// has an owner, and that owner is in their caseload. Mirrors the middleware's
+// 404-never-403 semantics.
+async function therapistMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
+  if (req.session.userRole !== 'therapist') return true;
+  const info = await getSessionAccessInfo(sessionId);
+  if (!info || info.user_id === null || info.user_id === undefined) return false;
+  return isAssigned(req.session.userId!, Number(info.user_id));
+}
 
 export default function sidebandRoutes(): Router {
   const router = Router();
 
   // POST /admin/api/sessions/:sessionId/update-instructions - update AI instructions mid-session
-  router.post('/admin/api/sessions/:sessionId/update-instructions', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/update-instructions', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     const { instructions } = req.body;
 
@@ -27,11 +48,11 @@ export default function sidebandRoutes(): Router {
 
       await sidebandManager.updateSession(sessionId, { instructions });
 
-      global.io.to('admin-broadcast').emit('session:instructions-updated', {
+      void broadcastAdminEventForSession(global.io, 'session:instructions-updated', {
         sessionId,
         updatedBy: req.session.username,
         timestamp: new Date(),
-      });
+      }, sessionId);
 
       console.log(`Instructions updated for session ${sessionId} by ${req.session.username}`);
 
@@ -46,12 +67,26 @@ export default function sidebandRoutes(): Router {
   });
 
   // GET /admin/api/sideband/status - global sideband connection status
-  router.get('/admin/api/sideband/status', requireRole('therapist', 'researcher'), async (_req, res) => {
+  router.get('/admin/api/sideband/status', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
       const activeSessions = sidebandManager.getActiveConnections();
 
-      const rows = await getActiveSidebandSessions();
+      let rows = await getActiveSidebandSessions();
+      // getActiveSidebandSessions is not one of the caseload-scoped db list
+      // queries (its rows carry no user_id), so filter therapist views here by
+      // resolving each active session's owner against the caseload.
+      const scope = await therapistScopeId(req);
+      if (scope !== null) {
+        const clientIds = new Set(await getCaseloadClientIds(scope));
+        const owners = await Promise.all(
+          rows.map(r => getSessionAccessInfo(String(r.session_id)))
+        );
+        rows = rows.filter((_, i) => {
+          const uid = owners[i]?.user_id;
+          return uid !== null && uid !== undefined && clientIds.has(Number(uid));
+        });
+      }
       const sessions = rows.map(session => ({
         ...session,
         connection_active: activeSessions.includes(session.session_id as string),
@@ -80,6 +115,9 @@ export default function sidebandRoutes(): Router {
 
       if (!sessionId) {
         return res.status(400).json({ error: 'Missing required fields', details: 'sessionId is required' });
+      }
+      if (!(await therapistMayAccessSession(req, String(sessionId)))) {
+        return res.status(404).json({ error: 'Not found' });
       }
 
       // Build the update payload. A `config` object takes precedence; otherwise
@@ -127,6 +165,9 @@ export default function sidebandRoutes(): Router {
     try {
       const { sessionId } = req.body;
       if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+      if (!(await therapistMayAccessSession(req, String(sessionId)))) {
+        return res.status(404).json({ error: 'Not found' });
+      }
 
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
       if (!sidebandManager.isConnected(sessionId)) {
@@ -157,6 +198,9 @@ export default function sidebandRoutes(): Router {
       if (role !== 'system' && role !== 'user') {
         return res.status(400).json({ error: 'Invalid role', details: "role must be 'system' or 'user'" });
       }
+      if (!(await therapistMayAccessSession(req, String(sessionId)))) {
+        return res.status(404).json({ error: 'Not found' });
+      }
 
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
       if (!sidebandManager.isConnected(sessionId)) {
@@ -185,6 +229,9 @@ export default function sidebandRoutes(): Router {
     try {
       const { sessionId, response } = req.body;
       if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+      if (!(await therapistMayAccessSession(req, String(sessionId)))) {
+        return res.status(404).json({ error: 'Not found' });
+      }
 
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
       if (!sidebandManager.isConnected(sessionId)) {
@@ -220,6 +267,9 @@ export default function sidebandRoutes(): Router {
       }
       if (args !== undefined && (typeof args !== 'object' || args === null || Array.isArray(args))) {
         return res.status(400).json({ error: 'Invalid args', details: 'args must be a JSON object when provided' });
+      }
+      if (!(await therapistMayAccessSession(req, String(sessionId)))) {
+        return res.status(404).json({ error: 'Not found' });
       }
 
       const { toolRegistry } = await import('../../services/toolRegistry.service.js');
@@ -270,6 +320,9 @@ export default function sidebandRoutes(): Router {
 
       if (!sessionId) {
         return res.status(400).json({ error: 'Missing sessionId' });
+      }
+      if (!(await therapistMayAccessSession(req, String(sessionId)))) {
+        return res.status(404).json({ error: 'Not found' });
       }
 
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');

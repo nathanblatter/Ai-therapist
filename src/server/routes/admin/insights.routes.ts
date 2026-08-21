@@ -3,6 +3,7 @@
 // researchers must not see.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { requireClientAccess, requireSessionClientAccess } from '../../middleware/caseload.js';
 import {
   getSessionInsights,
   markSoapReviewed,
@@ -16,7 +17,7 @@ export default function insightsRoutes(): Router {
   const router = Router();
 
   // GET /admin/api/sessions/:sessionId/insights
-  router.get('/admin/api/sessions/:sessionId/insights', requireRole('therapist'), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/insights', requireRole('therapist'), requireSessionClientAccess(), async (req, res) => {
     try {
       const [insights, safetyPlan, scaleResponses] = await Promise.all([
         getSessionInsights(req.params.sessionId),
@@ -34,7 +35,7 @@ export default function insightsRoutes(): Router {
   });
 
   // POST /admin/api/sessions/:sessionId/insights/review - mark SOAP note reviewed
-  router.post('/admin/api/sessions/:sessionId/insights/review', requireRole('therapist'), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/insights/review', requireRole('therapist'), requireSessionClientAccess(), async (req, res) => {
     try {
       const ok = await markSoapReviewed(req.params.sessionId, req.session.username ?? 'unknown');
       if (!ok) {
@@ -48,7 +49,7 @@ export default function insightsRoutes(): Router {
   });
 
   // POST /admin/api/sessions/:sessionId/insights/regenerate
-  router.post('/admin/api/sessions/:sessionId/insights/regenerate', requireRole('therapist'), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/insights/regenerate', requireRole('therapist'), requireSessionClientAccess(), async (req, res) => {
     try {
       const { generateSessionInsights } = await import('../../services/sessionInsights.service.js');
       // Force regeneration by bypassing the idempotency skip: clear first.
@@ -67,7 +68,7 @@ export default function insightsRoutes(): Router {
   });
 
   // POST /admin/api/sessions/:sessionId/insights/notes - therapist guidance for the participant's NEXT session
-  router.post('/admin/api/sessions/:sessionId/insights/notes', requireRole('therapist'), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/insights/notes', requireRole('therapist'), requireSessionClientAccess(), async (req, res) => {
     try {
       const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().substring(0, 1000) : '';
       const ok = await setSessionNotesForNextSession(req.params.sessionId, notes, req.session.username ?? 'unknown');
@@ -86,7 +87,7 @@ export default function insightsRoutes(): Router {
   // (default off). Widened to therapist+researcher (ai-therapist-91): the Users
   // tab and /api/users are researcher-only, so a therapist-only write route
   // makes the toggle unusable from the only screen that lists participants.
-  router.post('/admin/api/users/:userId/risk-context', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.post('/admin/api/users/:userId/risk-context', requireRole('therapist', 'researcher'), requireClientAccess(), async (req, res) => {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });

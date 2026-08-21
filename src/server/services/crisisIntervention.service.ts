@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { logInterventionAction } from './crisisDetection.service.js';
+import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 // ============================================
 // RISK-ADAPTIVE LIVE STEERING (ai-therapist-42)
@@ -113,12 +114,12 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
     await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity });
 
     if (global.io) {
-      global.io.to('admin-broadcast').emit('session:risk-steering', {
+      void broadcastAdminEventForSession(global.io, 'session:risk-steering', {
         sessionId,
         riskScore,
         severity,
         steeredAt: new Date(),
-      });
+      }, sessionId);
     }
     console.log(`Risk steering injected for session ${sessionId} (score ${riskScore}, ${severity})`);
   } catch (error) {
@@ -296,7 +297,7 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
         riskScore
       });
 
-      global.io.to('admin-broadcast').emit('session:crisis-emergency', {
+      void broadcastAdminEventForSession(global.io, 'session:crisis-emergency', {
         sessionId,
         severity: 'high',
         riskScore,
@@ -304,7 +305,7 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
         message: `CRITICAL: High-risk crisis detected - Immediate attention required`,
         emergencyAt: new Date(),
         requiresImmediateIntervention: true
-      });
+      }, sessionId);
     }
 
     await updateMonitoringFrequency(sessionId, 'critical');

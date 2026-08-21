@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
@@ -27,6 +27,7 @@ const StudyOps = lazy(() => import("./StudyOps"));
 const EvalsView = lazy(() => import("./EvalsView"));
 const ParticipantProfile = lazy(() => import("./ParticipantProfile"));
 const RedactionReview = lazy(() => import("./RedactionReview"));
+const CaseloadView = lazy(() => import("./CaseloadView"));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -145,6 +146,10 @@ export default function AdminApp() {
       label: 'People',
       items: [
         { id: 'users', label: 'Users', icon: Users, researcherOnly: true, demoVisible: true },
+        // Caseload RBAC (ai-therapist-119): therapist sees own clients +
+        // invites; researcher sees the assignment matrix. Hidden from demo
+        // accounts for MVP (demoVisible: false).
+        { id: 'caseload', label: 'Caseload', icon: UserCheck, demoVisible: false },
         { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
         { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle },
       ],
@@ -181,6 +186,11 @@ export default function AdminApp() {
         }
         if (item.researcherOnly) {
           return userRole === 'researcher' || (item.demoVisible === true && userRole === 'demo');
+        }
+        // Non-researcherOnly items may still opt out of demo accounts
+        // (e.g. Caseload: demoVisible: false — no synthetic fixtures for MVP).
+        if (item.demoVisible === false && userRole === 'demo') {
+          return false;
         }
         return true;
       }),
@@ -267,6 +277,7 @@ export default function AdminApp() {
               {currentView === 'mfa' && <MFASetup />}
               {currentView === 'users' && <UserManagement onViewUser={setSelectedUser} />}
               {currentView === 'user-sessions' && <UserSessions />}
+              {currentView === 'caseload' && <CaseloadView userRole={userRole} />}
               {currentView === 'prompts' && <SystemPrompts />}
               {currentView === 'knowledge' && <KnowledgeBase />}
               {currentView === 'consent' && <ConsentVersions />}

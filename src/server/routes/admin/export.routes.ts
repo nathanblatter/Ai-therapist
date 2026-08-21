@@ -3,6 +3,7 @@
 // SQL lives in db/export.queries.ts.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { isAssigned, getSessionAccessInfo } from '../../db/index.js';
 import {
   getMetadataExport,
   getAnonymizedExport,
@@ -45,6 +46,22 @@ export default function exportRoutes(): Router {
     } = req.query;
 
     try {
+      // Caseload RBAC (docs/caseload-rbac.md): bulk export is researcher-only.
+      // A therapist must name a single session and it must belong to an
+      // assigned client (404 semantics — never confirm existence).
+      if (req.session.userRole === 'therapist') {
+        if (!sessionId) {
+          return res.status(403).json({ error: 'Therapist exports require a sessionId' });
+        }
+        const info = await getSessionAccessInfo(String(sessionId));
+        const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
+        const allowed =
+          ownerId != null &&
+          Number.isInteger(ownerId) &&
+          (await isAssigned(req.session.userId as number, ownerId));
+        if (!allowed) return res.status(404).json({ error: 'Not found' });
+      }
+
       // Therapists may export raw content; everyone else gets redacted content.
       const contentColumn: ExportContentColumn = req.session.userRole === 'therapist' ? 'content' : 'content_redacted';
       const filters: ExportFilters = {

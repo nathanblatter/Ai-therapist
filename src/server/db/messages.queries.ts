@@ -88,6 +88,20 @@ export async function getSessionMessages(sessionId: string, redactedOnly = false
   return result.rows;
 }
 
+/** The owning session + participant of a message (caseload enforcement). */
+export async function getMessageOwner(
+  messageId: number | string
+): Promise<{ session_id: string; user_id: number | null } | null> {
+  const result = await pool.query<{ session_id: string; user_id: number | null }>(
+    `SELECT m.session_id, ts.user_id
+     FROM messages m
+     LEFT JOIN therapy_sessions ts ON ts.session_id = m.session_id
+     WHERE m.message_id = $1`,
+    [messageId]
+  );
+  return result.rows[0] ?? null;
+}
+
 /** Number of messages in a session. */
 export async function getSessionMessageCount(sessionId: string): Promise<number> {
   const result = await pool.query<{ count: string }>(

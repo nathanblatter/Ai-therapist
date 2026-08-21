@@ -159,11 +159,20 @@ export async function createUser(username: string, password: string, role: strin
   }
 }
 
-/** All users (admin user-management view), newest first. */
-export async function getAllUsers(): Promise<UserRow[]> {
+/** All users (admin user-management view), newest first.
+ *  scopeTherapistId (caseload RBAC, ai-therapist-119): when set, return only
+ *  participants in that therapist's caseload plus the caller's own row (the
+ *  scope IS the therapist's userid, matched via tc.therapist_id = scope);
+ *  null/undefined = unscoped (researchers), today's SQL exactly. */
+export async function getAllUsers(scopeTherapistId?: number | null): Promise<UserRow[]> {
   try {
+    const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
+    const scopeClause = scoped
+      ? ' WHERE (userid = $1 OR EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = userid))'
+      : '';
     const result = await pool.query<UserRow>(
-      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users ORDER BY created_at DESC'
+      `SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users${scopeClause} ORDER BY created_at DESC`,
+      scoped ? [scopeTherapistId] : []
     );
     return result.rows;
   } catch (error) {

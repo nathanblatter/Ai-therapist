@@ -13,6 +13,7 @@
  * uses it for now.
  */
 import { insertMessagesBatch } from '../db/index.js';
+import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 export interface ExecutedToolCall {
   /** Handler result on success, or an { error, success:false } envelope on failure. */
@@ -45,9 +46,9 @@ export async function executeLoggedToolCall(
   }]).catch(err => console.error('[ToolExecution] Failed to log tool_call message:', err));
 
   if (global.io) {
-    global.io.to('admin-broadcast').emit('sideband:tool-call', {
+    void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
       sessionId, callId, toolName, args, status: 'executing', channel, timestamp: new Date(),
-    });
+    }, sessionId);
   }
 
   try {
@@ -70,9 +71,9 @@ export async function executeLoggedToolCall(
     }]).catch(err => console.error('[ToolExecution] Failed to log tool_response message:', err));
 
     if (global.io) {
-      global.io.to('admin-broadcast').emit('sideband:tool-call', {
+      void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
         sessionId, callId, toolName, args, result, status: 'completed', channel, timestamp: new Date(),
-      });
+      }, sessionId);
     }
 
     return { result, success: true };
@@ -90,9 +91,9 @@ export async function executeLoggedToolCall(
     }]).catch(err => console.error('[ToolExecution] Failed to log tool error message:', err));
 
     if (global.io) {
-      global.io.to('admin-broadcast').emit('sideband:tool-call', {
+      void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
         sessionId, callId, toolName, error: errorMessage, status: 'failed', channel, timestamp: new Date(),
-      });
+      }, sessionId);
     }
 
     import('../db/index.js')

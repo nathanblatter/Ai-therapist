@@ -4,6 +4,7 @@
 // LLM-written brief): the checklist a clinician scans right before a session.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { requireClientAccess } from '../../middleware/caseload.js';
 import {
   listUserAssignments,
   getUserScaleHistory,
@@ -16,7 +17,7 @@ export default function prepRoutes(): Router {
   const router = Router();
 
   // GET /admin/api/users/:userId/prep - structured pre-session checklist
-  router.get('/admin/api/users/:userId/prep', requireRole('therapist'), async (req, res) => {
+  router.get('/admin/api/users/:userId/prep', requireRole('therapist'), requireClientAccess(), async (req, res) => {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isInteger(userId) || userId <= 0) {

@@ -21,6 +21,7 @@ import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../util
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { requireConsent } from '../../middleware/consent.js';
+import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 export default function chatRoutes(): Router {
   const router = Router();
@@ -110,13 +111,13 @@ export default function chatRoutes(): Router {
         }))
         .catch(err => console.error('[Consent] Failed to record per-session consent:', err));
 
-      global.io.to('admin-broadcast').emit('session:started', {
+      void broadcastAdminEvent(global.io, 'session:started', {
         sessionId,
         userId,
         username,
         sessionType: 'chat',
         startedAt: new Date(),
-      });
+      }, numericUserId);
 
       console.log(`Chat-only session started: ${sessionId.substring(0, 12)}... for user ${userId}`);
 
@@ -188,9 +189,9 @@ export default function chatRoutes(): Router {
           }
           if (verdict.isMinor && verdict.confidence === 'low' && global.io) {
             // False-positive escape valve: flag for a human look, don't auto-end.
-            global.io.to('admin-broadcast').emit('session:eligibility-review', {
+            void broadcastAdminEventForSession(global.io, 'session:eligibility-review', {
               sessionId, statedAge: verdict.statedAge, reasoning: verdict.reasoning, channel: 'chat', at: new Date(),
-            });
+            }, sessionId);
           }
         } catch (err) {
           console.error('[MinorSafeguard] confirm failed (fail-open):', err);
@@ -308,7 +309,7 @@ export default function chatRoutes(): Router {
         .then(m => m.generateSessionInsightsAsync(sessionId))
         .catch(e => console.error('[Insights] generation failed:', e));
 
-      global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedBy: 'user', endedAt: new Date() });
+      void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'user', endedAt: new Date() }, sessionId);
       global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt: new Date() });
 
       console.log(`Chat session ${sessionId.substring(0, 12)}... ended by user`);

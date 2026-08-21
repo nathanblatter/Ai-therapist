@@ -32,6 +32,7 @@ import {
   getSessionCrisisState,
   isDemoAccountSession,
 } from '../db/index.js';
+import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 export interface ParticipantTurn {
   sessionId: string;
@@ -113,12 +114,12 @@ export async function runCrisisPipeline(
           });
         }
         if (global.io) {
-          global.io.to('admin-broadcast').emit('session:risk-steering', {
+          void broadcastAdminEventForSession(global.io, 'session:risk-steering', {
             sessionId: turn.sessionId,
             riskScore: risk.riskScore,
             severity,
             steeredAt: new Date(),
-          });
+          }, turn.sessionId);
         }
       }
 
@@ -150,7 +151,7 @@ export async function runCrisisPipeline(
         });
 
         if (global.io) {
-          global.io.to('admin-broadcast').emit('session:crisis-detected', {
+          void broadcastAdminEventForSession(global.io, 'session:crisis-detected', {
             sessionId: turn.sessionId,
             severity,
             riskScore: risk.riskScore,
@@ -159,7 +160,7 @@ export async function runCrisisPipeline(
             detectedAt: new Date(),
             message: `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})`,
             ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
-          });
+          }, turn.sessionId);
         }
 
         await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
@@ -211,9 +212,9 @@ async function runRealtimeMinorSafeguard(turn: ParticipantTurn): Promise<void> {
         sessionId: turn.sessionId, messageId: turn.messageId ?? null, channel: 'realtime', statedAge: verdict.statedAge,
       });
     } else if (verdict.isMinor && verdict.confidence === 'low' && global.io) {
-      global.io.to('admin-broadcast').emit('session:eligibility-review', {
+      void broadcastAdminEventForSession(global.io, 'session:eligibility-review', {
         sessionId: turn.sessionId, statedAge: verdict.statedAge, reasoning: verdict.reasoning, channel: 'realtime', at: new Date(),
-      });
+      }, turn.sessionId);
     }
   } catch (err) {
     // Fail-open: an eligibility confirmation error must never end a session.

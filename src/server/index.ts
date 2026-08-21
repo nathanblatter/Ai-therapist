@@ -23,6 +23,8 @@ import voicesRoutes from "./routes/public/voices.routes.js";
 import authRoutes from "./routes/public/auth.routes.js";
 import magicLinkRoutes from "./routes/public/magicLink.routes.js";
 import demoRoutes from "./routes/demo.routes.js";
+import { canAdminAccessSessionLive } from "./middleware/caseload.js";
+import { getCaseloadClientIds } from "./db/index.js";
 import mfaRoutes from "./routes/public/mfa.routes.js";
 import usersRoutes from "./routes/public/users.routes.js";
 import healthRoutes from "./routes/public/health.routes.js";
@@ -54,6 +56,9 @@ import opsRoutes from "./routes/admin/ops.routes.js";
 import consentRoutes from "./routes/public/consent.routes.js";
 import progressRoutes from "./routes/public/progress.routes.js";
 import adminConsentRoutes from "./routes/admin/consent.routes.js";
+import caseloadRoutes from "./routes/admin/caseload.routes.js";
+import invitesRoutes from "./routes/admin/invites.routes.js";
+import joinRoutes from "./routes/join.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
 import { startScheduler as startDataRetentionScheduler } from "./services/dataRetention.service.js";
@@ -306,10 +311,21 @@ io.on('connection', (socket: AuthSocket) => {
   if (isAdmin) {
     console.log(`[Socket.io] Admin connected: ${socket.username} (${socket.id})`);
 
-    // Auto-join admin broadcast room
-    socket.join('admin-broadcast');
+    // Caseload RBAC (docs/caseload-rbac.md): 'admin-broadcast' is
+    // researchers-only. Therapists join their own therapist:<id> room and
+    // receive participant-linked events only via broadcastAdminEvent, which
+    // fans out per-caseload.
+    if (socket.userRole === 'therapist') {
+      // Fail closed: a therapist socket never joins admin-broadcast.
+      if (typeof socket.userId === 'number') {
+        socket.join(`therapist:${socket.userId}`);
+      }
+    } else {
+      socket.join('admin-broadcast');
+    }
 
-    // Notify other admins
+    // Notify other admins. Carries no participant data; researchers-only is
+    // acceptable (therapists don't need presence pings).
     socket.to('admin-broadcast').emit('admin:joined', {
       username: socket.username,
       role: socket.userRole
@@ -328,6 +344,23 @@ io.on('connection', (socket: AuthSocket) => {
     if (typeof sessionId !== 'string' || !sessionId) return;
 
     if (isAdmin) {
+      // Caseload RBAC (docs/caseload-rbac.md): researchers join anything;
+      // therapists only assigned clients' sessions. Same 404-style silence
+      // as the HTTP layer — deny without confirming existence.
+      if (socket.userRole === 'therapist') {
+        try {
+          const info = await getSessionAccessInfo(sessionId);
+          const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
+          const ok = await canAdminAccessSessionLive(socket.userRole, socket.userId, Number.isInteger(ownerId) ? ownerId : null);
+          if (!ok) {
+            console.warn(`[Socket.io] Denied therapist session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not in caseload)`);
+            return;
+          }
+        } catch (err) {
+          console.error('[Socket.io] caseload session:join check failed:', err);
+          return;
+        }
+      }
       socket.join(`session:${sessionId}`);
       return;
     }
@@ -373,7 +406,20 @@ io.on('connection', (socket: AuthSocket) => {
       const { sidebandManager } = await import('./services/sidebandManager.service.js');
       const activeSessions = sidebandManager.getActiveConnections();
 
-      const rows = await getSidebandConnectionsByIds(activeSessions);
+      let rows = await getSidebandConnectionsByIds(activeSessions);
+
+      // Caseload RBAC: therapists only see their assigned clients' live
+      // connections (mirrors the HTTP /admin/api/sideband/status filter).
+      if (socket.userRole === 'therapist' && socket.userId != null) {
+        const caseload = new Set(await getCaseloadClientIds(socket.userId));
+        const allowed: typeof rows = [];
+        for (const row of rows) {
+          const info = await getSessionAccessInfo(String(row.session_id));
+          const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
+          if (ownerId != null && caseload.has(ownerId)) allowed.push(row);
+        }
+        rows = allowed;
+      }
 
       const connections = rows.map(session => ({
         sessionId: session.session_id,
@@ -394,6 +440,23 @@ io.on('connection', (socket: AuthSocket) => {
     if (!isAdmin) {
       console.warn(`[Socket.io] Unauthorized admin:sendMessage attempt from ${socket.id}`);
       return;
+    }
+
+    // Caseload RBAC (docs/caseload-rbac.md): therapists may only steer/message
+    // assigned clients' sessions. Same silent-deny semantics as session:join.
+    if (socket.userRole === 'therapist') {
+      try {
+        const info = await getSessionAccessInfo(sessionId);
+        const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
+        const ok = await canAdminAccessSessionLive(socket.userRole, socket.userId, Number.isInteger(ownerId) ? ownerId : null);
+        if (!ok) {
+          console.warn(`[Socket.io] Denied therapist admin:sendMessage for ${String(sessionId).substring(0, 12)}... (${socket.username}: not in caseload)`);
+          return;
+        }
+      } catch (err) {
+        console.error('[Socket.io] caseload admin:sendMessage check failed:', err);
+        return;
+      }
     }
 
     console.log(`[Socket.io] Admin ${socket.username} sending ${messageType} message to session ${sessionId}`);
@@ -594,6 +657,15 @@ app.use(participantProfileRoutes());
 
 // Clinician pre-session prep digest -> routes/admin/prep.routes.ts
 app.use(prepRoutes());
+
+// Therapist caseload assignments + management API -> routes/admin/caseload.routes.ts (docs/caseload-rbac.md)
+app.use(caseloadRoutes());
+
+// Client invite links (therapist-generated, single-use) -> routes/admin/invites.routes.ts
+app.use(invitesRoutes());
+
+// Public invite acceptance / client self-registration -> routes/join.routes.ts
+app.use(joinRoutes());
 
 // RAG knowledge-base curation (Knowledge Base tab) -> routes/admin/knowledge.routes.ts.
 app.use(knowledgeRoutes());

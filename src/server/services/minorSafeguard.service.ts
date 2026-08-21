@@ -20,6 +20,7 @@ import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
 import { recordLlmUsage } from '../db/index.js';
 import { createLogger } from '../utils/logger.js';
+import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 const log = createLogger('minorSafeguard');
 
@@ -199,9 +200,9 @@ export async function handleConfirmedMinor(opts: HandleConfirmedMinorOpts): Prom
 
     const endedAt = new Date();
     if (global.io) {
-      global.io.to('admin-broadcast').emit('session:eligibility-violation', {
+      void broadcastAdminEventForSession(global.io, 'session:eligibility-violation', {
         sessionId, statedAge, channel, endedAt,
-      });
+      }, sessionId);
     }
 
     if (channel === 'chat') {
@@ -237,7 +238,7 @@ async function endSessionNow(sessionId: string, channel: 'realtime' | 'chat'): P
 
   const endedAt = new Date();
   if (global.io) {
-    global.io.to('admin-broadcast').emit('session:ended', { sessionId, endedBy: 'system', endedAt });
+    void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'system', endedAt }, sessionId);
     global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt });
   }
 

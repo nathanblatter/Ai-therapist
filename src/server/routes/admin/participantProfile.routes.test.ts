@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   countSessions: vi.fn(),
   recordLlmUsage: vi.fn(),
   openaiCreate: vi.fn(),
+  // Caseload middleware deps (ai-therapist-119).
+  isAssigned: vi.fn(),
+  getSessionAccessInfo: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => ({
@@ -23,6 +26,8 @@ vi.mock('../../db/index.js', () => ({
   listSessions: mocks.listSessions,
   countSessions: mocks.countSessions,
   recordLlmUsage: mocks.recordLlmUsage,
+  isAssigned: mocks.isAssigned,
+  getSessionAccessInfo: mocks.getSessionAccessInfo,
 }));
 
 vi.mock('../../config/secrets.js', () => ({
@@ -76,6 +81,8 @@ beforeEach(() => {
   mocks.listSessions.mockReset().mockResolvedValue([]);
   mocks.countSessions.mockReset().mockResolvedValue(0);
   mocks.recordLlmUsage.mockReset().mockResolvedValue(undefined);
+  mocks.isAssigned.mockReset().mockResolvedValue(true);
+  mocks.getSessionAccessInfo.mockReset().mockResolvedValue(null);
   mocks.openaiCreate.mockReset().mockResolvedValue({
     choices: [{ message: { content: 'Doing steadily better since the last review.' } }],
     usage: { prompt_tokens: 120, completion_tokens: 60 },
@@ -126,8 +133,8 @@ describe('GET /admin/api/users/:userId/sessions', () => {
     const res = await request(appAs('researcher')).get('/admin/api/users/42/sessions');
 
     expect(res.status).toBe(200);
-    expect(mocks.listSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }));
-    expect(mocks.countSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }));
+    expect(mocks.listSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), null);
+    expect(mocks.countSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), null);
     expect(res.body.sessions[0]).toMatchObject({ session_id: 's1', eval_score: 4.2, feedback_rating: 5 });
     expect(res.body.sessions[1]).toMatchObject({ session_id: 's2', eval_score: null, feedback_rating: null });
     expect(res.body.pagination.totalCount).toBe(2);
@@ -136,6 +143,33 @@ describe('GET /admin/api/users/:userId/sessions', () => {
   it('is open to therapists too, but not participants', async () => {
     expect((await request(appAs('therapist')).get('/admin/api/users/42/sessions')).status).toBe(200);
     expect((await request(appAs('participant')).get('/admin/api/users/42/sessions')).status).toBe(403);
+  });
+
+  it('threads the therapist scope id into the scoped list queries', async () => {
+    await request(appAs('therapist')).get('/admin/api/users/42/sessions');
+    expect(mocks.listSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), 1);
+    expect(mocks.countSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), 1);
+  });
+});
+
+describe('caseload enforcement (ai-therapist-119)', () => {
+  it('404s an unassigned therapist on profile, brief, and sessions without leaking data', async () => {
+    mocks.isAssigned.mockResolvedValue(false);
+    for (const path of ['/admin/api/users/42/profile', '/admin/api/users/42/brief', '/admin/api/users/42/sessions']) {
+      const res = await request(appAs('therapist')).get(path);
+      expect(res.status).toBe(404);
+    }
+    expect(mocks.isAssigned).toHaveBeenCalledWith(1, 42);
+    expect(mocks.getUserProfileBundle).not.toHaveBeenCalled();
+    expect(mocks.listSessions).not.toHaveBeenCalled();
+    expect(mocks.openaiCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not consult the caseload for researchers', async () => {
+    mocks.isAssigned.mockResolvedValue(false);
+    const res = await request(appAs('researcher')).get('/admin/api/users/42/sessions');
+    expect(res.status).toBe(200);
+    expect(mocks.isAssigned).not.toHaveBeenCalled();
   });
 });
 

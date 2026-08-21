@@ -22,6 +22,7 @@ import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock, buildToolGuidanceBlock } from '../../utils/promptContext.js';
 import { setSessionCheckin } from '../../db/index.js';
 import { requireConsent } from '../../middleware/consent.js';
+import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 // ---- OpenAI safety identifier (ai-therapist-63) ----
 // OpenAI recommends sending a stable, non-PII `OpenAI-Safety-Identifier` per
@@ -245,13 +246,13 @@ export default function tokenRoutes(): Router {
           }))
           .catch(err => console.error('[Consent] Failed to record per-session consent:', err));
 
-        global.io.to('admin-broadcast').emit('session:created', {
+        void broadcastAdminEvent(global.io, 'session:created', {
           sessionId,
           userId,
           username,
           status: 'active',
           created_at: new Date(),
-        });
+        }, userId);
 
         // Schedule auto-termination when a max duration applies (not researchers).
         // Two phases, because the participant's Socket.io channel is unreliable
@@ -306,12 +307,12 @@ export default function tokenRoutes(): Router {
               message: `Your session has ended after ${maxDurationMinutes} minutes (maximum session duration).`,
               remoteTermination: true,
             });
-            global.io.to('admin-broadcast').emit('session:ended', {
+            void broadcastAdminEventForSession(global.io, 'session:ended', {
               sessionId,
               endedAt: new Date(),
               endedBy: 'system',
               reason: 'duration_limit',
-            });
+            }, sessionId);
           };
 
           // T-60s pacing nudge (ai-therapist-112): the model used to learn

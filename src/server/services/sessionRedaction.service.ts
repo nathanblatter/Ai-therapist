@@ -3,6 +3,7 @@
 // redact the whole session in a single batched job once the session ends.
 import { pool } from '../config/db.js';
 import { redactPHIBatch } from './redaction.service.js';
+import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 interface RedactRow {
   message_id: number;
@@ -58,11 +59,11 @@ export async function redactSession(sessionId: string): Promise<void> {
 
     // Notify admin dashboards so a just-ended session's redacted view refreshes.
     if (global.io) {
-      global.io.to('admin-broadcast').emit('session:redaction-complete', {
+      void broadcastAdminEventForSession(global.io, 'session:redaction-complete', {
         sessionId,
         count: redacted.size,
         redactedAt,
-      });
+      }, sessionId);
     }
 
     console.log(`Session ${sessionId.substring(0, 12)}... redacted (${redacted.size} messages)`);
