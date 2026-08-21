@@ -16,6 +16,7 @@ import {
   markInviteUsedBy,
   createUser,
   assignClient,
+  insertCaseloadAudit,
 } from '../db/index.js';
 
 const GONE_MESSAGE = 'This invite link is no longer valid. Ask your therapist for a new one.';
@@ -179,6 +180,14 @@ export default function joinRoutes(): Router {
       }
 
       await assignClient(invite.therapist_id, user.userid, invite.therapist_id);
+      void insertCaseloadAudit({
+        action: 'invite_consumed',
+        therapistId: invite.therapist_id,
+        clientId: user.userid,
+        actorUserId: user.userid,
+        actorUsername: user.username,
+        detail: { invite_id: invite.invite_id },
+      });
       await markInviteUsedBy(invite.invite_id, user.userid);
 
       // Establish the session, mirroring login.

@@ -22,6 +22,7 @@ vi.mock('../db/index.js', () => ({
   markInviteUsedBy: mocks.markInviteUsedBy,
   createUser: mocks.createUser,
   assignClient: mocks.assignClient,
+  insertCaseloadAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
 import joinRoutes from './join.routes.js';

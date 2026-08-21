@@ -126,3 +126,64 @@ export async function listAllAssignments(): Promise<CaseloadAssignment[]> {
   );
   return result.rows as CaseloadAssignment[];
 }
+
+
+export type CaseloadAuditAction = 'assign' | 'unassign' | 'invite_created' | 'invite_consumed';
+
+export interface CaseloadAuditInput {
+  action: CaseloadAuditAction;
+  therapistId: number | null;
+  clientId: number | null;
+  actorUserId: number | null;
+  actorUsername: string | null;
+  detail?: unknown;
+}
+
+/**
+ * Append one caseload audit row (assignment/invite events). Never throws:
+ * an audit failure must not abort the operation it records, but it is
+ * loudly logged for the ops dashboard.
+ */
+export async function insertCaseloadAudit(input: CaseloadAuditInput): Promise<void> {
+  try {
+    await pool.query(
+      `INSERT INTO caseload_audit_log
+         (action, therapist_id, client_id, actor_user_id, actor_username, detail)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        input.action,
+        input.therapistId,
+        input.clientId,
+        input.actorUserId,
+        input.actorUsername,
+        input.detail === undefined ? null : JSON.stringify(input.detail),
+      ]
+    );
+  } catch (err) {
+    console.error('[caseload-audit] failed to record audit row:', err);
+  }
+}
+
+export interface CaseloadAuditRow {
+  audit_id: number;
+  action: CaseloadAuditAction;
+  therapist_id: number | null;
+  client_id: number | null;
+  actor_user_id: number | null;
+  actor_username: string | null;
+  detail: unknown;
+  created_at: string;
+}
+
+/** Newest-first audit rows (researcher review surface). */
+export async function listCaseloadAudit(limit = 200): Promise<CaseloadAuditRow[]> {
+  const result = await pool.query(
+    `SELECT audit_id, action, therapist_id, client_id, actor_user_id,
+            actor_username, detail, created_at::text AS created_at
+     FROM caseload_audit_log
+     ORDER BY audit_id DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows as CaseloadAuditRow[];
+}

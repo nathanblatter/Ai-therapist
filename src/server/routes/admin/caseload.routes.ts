@@ -6,6 +6,8 @@ import { requireRole } from '../../middleware/auth.js';
 import {
   assignClient,
   unassignClient,
+  insertCaseloadAudit,
+  listCaseloadAudit,
   listCaseload,
   listAllAssignments,
   getAllUsers,
@@ -45,6 +47,17 @@ export default function caseloadRoutes(): Router {
   });
 
   // POST /admin/api/caseload/:therapistId/:clientId - researcher-only assign
+  // GET /admin/api/caseload/audit - append-only assignment/invite audit trail
+  router.get('/admin/api/caseload/audit', requireRole('researcher'), async (_req, res) => {
+    try {
+      const rows = await listCaseloadAudit();
+      res.json({ audit: rows });
+    } catch (err) {
+      console.error('Failed to fetch caseload audit log:', err);
+      res.status(500).json({ error: 'Failed to fetch caseload audit log' });
+    }
+  });
+
   router.post('/admin/api/caseload/:therapistId/:clientId', requireRole('researcher'), async (req, res) => {
     const therapistId = parseInt(req.params.therapistId, 10);
     const clientId = parseInt(req.params.clientId, 10);
@@ -54,6 +67,11 @@ export default function caseloadRoutes(): Router {
 
     try {
       await assignClient(therapistId, clientId, req.session.userId ?? null);
+      void insertCaseloadAudit({
+        action: 'assign', therapistId, clientId,
+        actorUserId: req.session.userId ?? null,
+        actorUsername: req.session.username ?? null,
+      });
       res.json({ success: true, therapistId, clientId });
     } catch (err) {
       if (err instanceof CaseloadRoleError) {
@@ -74,6 +92,13 @@ export default function caseloadRoutes(): Router {
 
     try {
       const removed = await unassignClient(therapistId, clientId);
+      if (removed) {
+        void insertCaseloadAudit({
+          action: 'unassign', therapistId, clientId,
+          actorUserId: req.session.userId ?? null,
+          actorUsername: req.session.username ?? null,
+        });
+      }
       res.json({ success: true, removed, therapistId, clientId });
     } catch (err) {
       console.error('Failed to unassign client:', err);

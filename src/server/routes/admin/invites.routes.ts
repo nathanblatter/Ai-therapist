@@ -8,7 +8,7 @@
 // Demo requests never reach this router (intercepted earlier).
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { createInvite, listInvites } from '../../db/index.js';
+import { createInvite, listInvites, insertCaseloadAudit } from '../../db/index.js';
 import type { ClientInviteRow } from '../../db/invites.queries.js';
 
 function inviteState(invite: ClientInviteRow): 'pending' | 'used' | 'expired' {
@@ -44,6 +44,14 @@ export default function invitesRoutes(): Router {
       }
 
       const { rawToken, invite } = await createInvite(req.session.userId as number, label, ttlHours);
+      void insertCaseloadAudit({
+        action: 'invite_created',
+        therapistId: req.session.userId as number,
+        clientId: null,
+        actorUserId: req.session.userId as number,
+        actorUsername: req.session.username ?? null,
+        detail: { invite_id: invite.invite_id, label: invite.label, expires_at: invite.expires_at },
+      });
       res.json({ link: `/join/${rawToken}`, invite: toApiInvite(invite) });
     } catch (error) {
       console.error('Error creating client invite:', error);

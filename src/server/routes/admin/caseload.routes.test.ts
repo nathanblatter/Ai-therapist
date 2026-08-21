@@ -9,6 +9,8 @@ const dbMocks = vi.hoisted(() => {
   class CaseloadRoleError extends Error {}
   return {
     CaseloadRoleError,
+    insertCaseloadAudit: vi.fn().mockResolvedValue(undefined),
+    listCaseloadAudit: vi.fn().mockResolvedValue([]),
     assignClient: vi.fn(),
     unassignClient: vi.fn(),
     listCaseload: vi.fn(),

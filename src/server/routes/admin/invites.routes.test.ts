@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../db/index.js', () => ({
   createInvite: mocks.createInvite,
   listInvites: mocks.listInvites,
+  insertCaseloadAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
 import invitesRoutes from './invites.routes.js';
