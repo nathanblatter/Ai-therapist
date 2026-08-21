@@ -1,6 +1,8 @@
 # Caseload RBAC — spec (ai-therapist-119, therapist-pilot blocker #1)
 
-Status: MVP implementation 2026-08-21. Owner: Nathan (review); built by agent fleet.
+Status: SHIPPED 2026-08-21 (migrations 064-067 applied; live-verified E2E in
+prod, 12/12 checks; two adversarial review rounds — 5 pre-ship + 5 post-ship
+findings, all fixed). Owner: Nathan (review); built by agent fleet.
 
 ## Problem
 

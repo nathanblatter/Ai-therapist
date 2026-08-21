@@ -86,18 +86,26 @@ associate. Before pilot launch:
 
 ## 4. Pilot-readiness gaps (in priority order)
 
-1. **Caseload RBAC** — flightdeck `ai-therapist-119` (therapist-pilot
-   blocker #1). Today every therapist role sees every session; pilots need a
-   therapist-client assignment and all admin queries scoped to it.
-2. **Client invite flow.** Therapist invites a client by email; client
-   self-registers into that caseload. Today accounts are researcher-created.
+1. **Caseload RBAC** — DONE 2026-08-21 (`docs/caseload-rbac.md`,
+   ai-therapist-119). Therapist accounts are row-scoped to
+   `therapist_clients` assignments across every participant surface (HTTP,
+   exports, Socket.io live events), with 404-over-403 semantics, immediate
+   socket revocation on unassign, and an append-only
+   `caseload_audit_log`. Adversarially reviewed twice (pre-ship coverage
+   sweep + post-ship red team) and live-verified end to end in prod.
+2. **Client invite flow** — DONE 2026-08-21. Therapist mints a single-use
+   hashed-token link (`/join/<token>`, 7-day default TTL) from the Caseload
+   view; the client self-registers and is auto-assigned to the inviting
+   therapist. Link delivery is copy-paste (no email sending yet).
 3. **Clinical-mode consent copy.** Current consent flow is IRB study
    language; clinical mode needs plain "your therapist supervises this tool"
-   consent (the versioned-consent machinery can be reused as-is).
+   consent (the versioned-consent machinery can be reused as-is). NOW THE
+   TOP REMAINING BLOCKER.
 4. **Billing.** None exists. Not needed for a free pilot; needed before any
    paid conversion (likely per-seat per-month).
 5. Smaller: therapist-facing onboarding docs; BAA paperwork from section 2;
-   confirm `deployment_mode=clinical` hides the research surfaces end to end.
+   confirm `deployment_mode=clinical` hides the research surfaces end to
+   end; email delivery for invite links.
 
 ## 5. Suggested pilot structure
 
