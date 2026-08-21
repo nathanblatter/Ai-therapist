@@ -484,6 +484,13 @@ export class ToolRegistry {
             ctx.sessionId, 'high', scoreByUrgency.high,
             'ai_assistant', 'ai_tool', null, ['model_escalation'], reason
           );
+          // The flag above satisfies the risk pipeline's shouldFlag transition
+          // guard, which would otherwise skip the emergency protocol entirely
+          // (paging, 988 resources, safety-assessment steering). A
+          // model-initiated escalation must trigger the same response the
+          // auto pipeline would have.
+          const { executeGraduatedResponse } = await import('./crisisIntervention.service.js');
+          await executeGraduatedResponse(ctx.sessionId, 'high', scoreByUrgency.high);
         }
         await logInterventionAction(ctx.sessionId, 'ai_escalation', { urgency, reason });
 
