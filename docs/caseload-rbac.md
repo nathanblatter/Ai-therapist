@@ -28,9 +28,17 @@ the client invite flow is gap #2 and ships here too.
   the research deployment. New therapists/participants after cutover get
   explicit assignments only (via researcher UI or the invite flow).
 - **Live monitoring (Socket.io)**: therapists may only join
-  `session:<id>` rooms for assigned clients' sessions; the
-  `admin-broadcast` room's session-started events are filtered for
-  therapist sockets. (Researcher sockets unchanged.)
+  `session:<id>` rooms for assigned clients' sessions; therapist sockets
+  never join `admin-broadcast` — participant-linked events fan out through
+  `broadcastAdminEvent(ForSession)` to `therapist:<id>` rooms of assigned
+  therapists only. (Researcher sockets unchanged.)
+- **Revocation**: unassigning a client immediately kicks the therapist's
+  live sockets out of that client's `session:<id>` rooms
+  (`revokeTherapistSessionRooms`); event fan-out re-resolves the caseload
+  per emit, so no restart is needed for either direction.
+- **Exports**: therapists may export only a single named, assigned session
+  (full/metadata/anonymized). `aggregated` exports are researcher-only —
+  the aggregate query is platform-wide by design.
 
 ## Data model
 

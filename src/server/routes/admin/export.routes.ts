@@ -53,6 +53,11 @@ export default function exportRoutes(): Router {
         if (!sessionId) {
           return res.status(403).json({ error: 'Therapist exports require a sessionId' });
         }
+        if (exportType === 'aggregated') {
+          // getAggregatedExport ignores sessionId, so it would return
+          // platform-wide study aggregates — researcher-only surface.
+          return res.status(403).json({ error: 'Aggregated exports are researcher-only' });
+        }
         const info = await getSessionAccessInfo(String(sessionId));
         const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
         const allowed =

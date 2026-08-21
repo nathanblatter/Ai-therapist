@@ -15,6 +15,7 @@ import {
   releaseInvite,
   markInviteUsedBy,
   createUser,
+  deleteUser,
   assignClient,
   insertCaseloadAudit,
 } from '../db/index.js';
@@ -179,7 +180,17 @@ export default function joinRoutes(): Router {
         throw error;
       }
 
-      await assignClient(invite.therapist_id, user.userid, invite.therapist_id);
+      try {
+        await assignClient(invite.therapist_id, user.userid, invite.therapist_id);
+      } catch (assignErr) {
+        // The inviting therapist vanished (or changed role) between consume
+        // and assign: undo everything — no orphaned unassigned participant,
+        // and the client can ask for a fresh link if it was transient.
+        console.error('Invite assignment failed; rolling back registration:', assignErr);
+        try { await deleteUser(user.userid); } catch (e) { console.error('orphan cleanup failed:', e); }
+        try { await releaseInvite(invite.invite_id); } catch (e) { console.error('invite release failed:', e); }
+        return res.status(410).json({ error: GONE_MESSAGE });
+      }
       void insertCaseloadAudit({
         action: 'invite_consumed',
         therapistId: invite.therapist_id,

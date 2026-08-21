@@ -13,6 +13,7 @@ import {
   getAllUsers,
   CaseloadRoleError,
 } from '../../db/index.js';
+import { revokeTherapistSessionRooms } from '../../utils/adminBroadcast.js';
 
 export default function caseloadRoutes(): Router {
   const router = Router();
@@ -93,6 +94,9 @@ export default function caseloadRoutes(): Router {
     try {
       const removed = await unassignClient(therapistId, clientId);
       if (removed) {
+        if (global.io) {
+          void revokeTherapistSessionRooms(global.io, therapistId, clientId);
+        }
         void insertCaseloadAudit({
           action: 'unassign', therapistId, clientId,
           actorUserId: req.session.userId ?? null,

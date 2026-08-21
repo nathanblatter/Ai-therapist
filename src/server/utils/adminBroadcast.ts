@@ -85,15 +85,53 @@ export async function broadcastAdminEventForSession(
       const raw = session?.user_id;
       userId = raw === null || raw === undefined ? null : Number(raw);
       if (userId !== null && !Number.isFinite(userId)) userId = null;
-      if (sessionUserCache.size >= SESSION_USER_CACHE_MAX) {
-        const oldest = sessionUserCache.keys().next().value;
-        if (oldest !== undefined) sessionUserCache.delete(oldest);
+      // Only cache when the session ROW exists. A missing row (insert raced
+      // or deferred to the logs/batch endpoint) must stay uncached, or every
+      // later event for the session — including crisis alerts — would be
+      // permanently misrouted away from the assigned therapist.
+      if (session) {
+        if (sessionUserCache.size >= SESSION_USER_CACHE_MAX) {
+          const oldest = sessionUserCache.keys().next().value;
+          if (oldest !== undefined) sessionUserCache.delete(oldest);
+        }
+        sessionUserCache.set(sessionId, userId);
       }
-      sessionUserCache.set(sessionId, userId);
     } catch (err) {
       console.error(`[AdminBroadcast] Session owner lookup failed for ${sessionId} (event ${event}); therapists skipped:`, err);
       userId = null; // fail closed, do not cache failures
     }
   }
   await broadcastAdminEvent(io, event, payload, userId);
+}
+
+
+/**
+ * Kick a therapist's live sockets out of a client's session rooms after an
+ * unassignment (docs/caseload-rbac.md revocation semantics): future emits
+ * already re-resolve the caseload per event, but session-room membership
+ * (live unredacted transcripts) is only checked at join time.
+ */
+export async function revokeTherapistSessionRooms(
+  io: { in: (room: string) => { fetchSockets: () => Promise<Array<{ rooms: Set<string>; leave: (room: string) => void }>> } },
+  therapistId: number,
+  clientId: number
+): Promise<void> {
+  try {
+    const sockets = await io.in(therapistRoom(therapistId)).fetchSockets();
+    for (const socket of sockets) {
+      for (const room of socket.rooms) {
+        if (!room.startsWith('session:')) continue;
+        const sessionId = room.slice('session:'.length);
+        try {
+          const session = await getSessionAccessInfo(sessionId);
+          const ownerId = session && session.user_id != null ? Number(session.user_id) : null;
+          if (ownerId === clientId) socket.leave(room);
+        } catch (err) {
+          console.error(`[AdminBroadcast] revoke lookup failed for ${sessionId}:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[AdminBroadcast] revokeTherapistSessionRooms failed:', err);
+  }
 }
