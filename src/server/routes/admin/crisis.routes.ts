@@ -250,11 +250,14 @@ export default function crisisRoutes(): Router {
   router.get('/admin/api/crisis/active', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     try {
       const { getActiveCrisisSessions } = await import('../../services/crisisDetection.service.js');
-      let sessions = await getActiveCrisisSessions();
-      // getActiveCrisisSessions lives in the crisis-detection service, not a
-      // scoped db module, so the caseload filter is applied here. Its payload
-      // is flag metadata only (no message content) — summaries-tier safe.
+      // Care-team callers are caseload-filtered below (scope != null);
+      // org-bound researchers (scope null) are scoped by organization in the
+      // query, mirroring getAllCrisisData/getAllCrisisEvents (C13) — otherwise
+      // a researcher saw every org's active-crisis flags. Payload is flag
+      // metadata only (no message content) — summaries-tier safe.
       const scope = await careTeamScopeId(req);
+      const orgId = scope === null ? await orgIdFor(req) : null;
+      let sessions = await getActiveCrisisSessions(orgId);
       if (scope !== null) {
         const clientIds = new Set(await getCaseloadClientIds(scope));
         sessions = sessions.filter((s) => {

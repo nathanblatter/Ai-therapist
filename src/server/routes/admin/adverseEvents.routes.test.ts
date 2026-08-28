@@ -9,6 +9,7 @@ import request from 'supertest';
 const {
   listMock, countsMock, getByIdMock, submitMock,
   insertDraftMock, isAssignedMock, isSandboxMock, auditMock, enqueueMock,
+  getSessionAccessInfoMock, draftFromCrisisMock,
 } = vi.hoisted(() => ({
   listMock: vi.fn(),
   countsMock: vi.fn(),
@@ -19,6 +20,8 @@ const {
   isSandboxMock: vi.fn(),
   auditMock: vi.fn().mockResolvedValue(undefined),
   enqueueMock: vi.fn().mockResolvedValue(null),
+  getSessionAccessInfoMock: vi.fn(),
+  draftFromCrisisMock: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => ({
@@ -34,7 +37,7 @@ vi.mock('../../db/index.js', () => ({
   isSandboxAccount: isSandboxMock,
   // Transitive imports of middleware/caseload.ts + middleware/org.ts.
   isAssigned: isAssignedMock,
-  getSessionAccessInfo: vi.fn(),
+  getSessionAccessInfo: getSessionAccessInfoMock,
   getMessageOwner: vi.fn(),
   getCareNoteById: vi.fn(),
   getEscalationById: vi.fn(),
@@ -42,6 +45,7 @@ vi.mock('../../db/index.js', () => ({
   getIrbStudyOrgId: vi.fn().mockResolvedValue(1),
 }));
 vi.mock('../../services/workQueue.service.js', () => ({ enqueueWorkItem: enqueueMock }));
+vi.mock('../../services/adverseEvent.service.js', () => ({ draftAdverseEventFromCrisis: draftFromCrisisMock }));
 vi.mock('../../utils/aePrintView.js', () => ({ renderAdverseEventPrintHtml: () => '<html></html>' }));
 
 import adverseEventsRoutes from './adverseEvents.routes.js';
@@ -166,6 +170,43 @@ describe('review/lifecycle endpoints stay closed to caseworkers', () => {
       : method === 'post' ? agent.post(path)
       : agent.get(path));
     expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /admin/api/sessions/:sessionId/adverse-events (manual session filing)', () => {
+  it("404s a therapist filing from a session outside their caseload (never 403; no transcript leak)", async () => {
+    // Session owned by client 55, who is NOT on this therapist's caseload.
+    getSessionAccessInfoMock.mockResolvedValueOnce({ user_id: 55 });
+    isAssignedMock.mockResolvedValueOnce(false);
+    const res = await request(appAs('therapist', 7, 'ther1'))
+      .post('/admin/api/sessions/s1/adverse-events');
+    expect(res.status).toBe(404);
+    // The caseload guard must short-circuit before the draft assembler runs,
+    // so no redacted transcript excerpt is ever built or returned.
+    expect(draftFromCrisisMock).not.toHaveBeenCalled();
+  });
+
+  it('files for a session on the caseload therapist', async () => {
+    getSessionAccessInfoMock.mockResolvedValueOnce({ user_id: 55 });
+    isAssignedMock.mockResolvedValueOnce(true);
+    draftFromCrisisMock.mockResolvedValueOnce(77);
+    getByIdMock.mockResolvedValueOnce({ report_id: 77, status: 'draft' });
+    const res = await request(appAs('therapist', 7, 'ther1'))
+      .post('/admin/api/sessions/s1/adverse-events');
+    expect(res.status).toBe(201);
+    expect(res.body.report_id).toBe(77);
+    expect(draftFromCrisisMock).toHaveBeenCalledWith('s1', expect.objectContaining({ triggerSource: 'manual' }));
+  });
+
+  it('lets a researcher (unscoped study staff) file from any session', async () => {
+    getSessionAccessInfoMock.mockResolvedValueOnce({ user_id: 55 });
+    draftFromCrisisMock.mockResolvedValueOnce(88);
+    getByIdMock.mockResolvedValueOnce({ report_id: 88, status: 'draft' });
+    const res = await request(appAs('researcher', 9, 'res1'))
+      .post('/admin/api/sessions/s1/adverse-events');
+    expect(res.status).toBe(201);
+    // Researcher passes the care-team gate without a caseload lookup.
+    expect(isAssignedMock).not.toHaveBeenCalled();
   });
 });
 

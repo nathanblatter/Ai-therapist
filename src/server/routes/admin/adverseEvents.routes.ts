@@ -7,7 +7,7 @@
 // lifecycle management stay therapist+researcher.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { requireClientAccess } from '../../middleware/caseload.js';
+import { requireClientAccess, requireSessionClientAccess } from '../../middleware/caseload.js';
 import {
   listAdverseEvents,
   getAdverseEventCounts,
@@ -194,7 +194,12 @@ export default function adverseEventsRoutes(): Router {
 
   // Manually file an AE from a session (trigger_source='manual'); reuses the
   // draft assembler with crisis_event_id=null so it never collides with auto.
-  router.post('/admin/api/sessions/:sessionId/adverse-events', canWrite, async (req, res) => {
+  // requireSessionClientAccess row-scopes therapists to their caseload (404,
+  // never 403) — without it an off-caseload therapist could draft an AE from
+  // ANY session and read back its redacted transcript excerpt in the response.
+  // Researchers pass through (study staff, unscoped) like every other
+  // :sessionId route (evals/insights/crisis/sessions).
+  router.post('/admin/api/sessions/:sessionId/adverse-events', canWrite, requireSessionClientAccess(), async (req, res) => {
     const createdBy = req.session.username ?? 'unknown-admin';
     try {
       const { draftAdverseEventFromCrisis } = await import('../../services/adverseEvent.service.js');
