@@ -8,6 +8,8 @@ const dbMocks = vi.hoisted(() => ({
   listThreadMessages: vi.fn(),
   updateThreadMessageScan: vi.fn(),
   recordCrisisEvent: vi.fn(),
+  claimStaleScanMessages: vi.fn(),
+  getThreadById: vi.fn(),
 }));
 vi.mock('../db/index.js', () => dbMocks);
 
@@ -30,7 +32,7 @@ vi.mock('./crisisAlert.service.js', () => ({ sendCrisisAlert: sendCrisisAlertMoc
 const { broadcastAdminEventMock } = vi.hoisted(() => ({ broadcastAdminEventMock: vi.fn() }));
 vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEvent: broadcastAdminEventMock }));
 
-import { scanThreadMessage, userRoom } from './messageSafety.service.js';
+import { scanThreadMessage, sweepStaleScans, userRoom } from './messageSafety.service.js';
 import type { MessageThreadRow, ThreadMessageRow } from '../db/messaging.queries.js';
 
 function thread(overrides: Partial<MessageThreadRow> = {}): MessageThreadRow {
@@ -74,6 +76,8 @@ beforeEach(() => {
   dbMocks.listThreadMessages.mockResolvedValue([]);
   dbMocks.updateThreadMessageScan.mockResolvedValue(undefined);
   dbMocks.recordCrisisEvent.mockResolvedValue(900);
+  dbMocks.claimStaleScanMessages.mockResolvedValue([]);
+  dbMocks.getThreadById.mockResolvedValue(thread());
   enqueueWorkItemMock.mockResolvedValue({ item_id: 77 });
   poolQueryMock.mockResolvedValue({ rows: [{ event_id: 900 }] });
   sendCrisisAlertMock.mockResolvedValue(undefined);
@@ -201,10 +205,12 @@ describe('scanThreadMessage', () => {
     ]);
   });
 
-  it('marks scan_failed and swallows the error when analysis throws', async () => {
+  it('marks scan_failed (guarded against clobbering a flag) and swallows the error when analysis throws', async () => {
     analyzeStandaloneRiskMock.mockRejectedValue(new Error('LLM exploded'));
     await expect(scanThreadMessage(message(), thread())).resolves.toBeUndefined();
-    expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, { scanStatus: 'scan_failed' });
+    expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, {
+      scanStatus: 'scan_failed', onlyIfNotFlagged: true,
+    });
     expect(enqueueWorkItemMock).not.toHaveBeenCalled();
   });
 
@@ -216,5 +222,89 @@ describe('scanThreadMessage', () => {
     enqueueWorkItemMock.mockResolvedValueOnce(null);
     await scanThreadMessage(message(), thread());
     expect(sendCrisisAlertMock).toHaveBeenCalled();
+  });
+
+  // ai-therapist-141 #1: the on-call page must fire BEFORE any DB write, so a
+  // persistence failure can never suppress the alert.
+  it('pages the on-call BEFORE writing the crisis event (life-safety ordering)', async () => {
+    analyzeStandaloneRiskMock.mockResolvedValue({
+      riskScore: 90, severity: 'high', factors: ['active ideation'], method: 'llm_assessed',
+    });
+    await scanThreadMessage(message(), thread());
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
+    expect(dbMocks.recordCrisisEvent).toHaveBeenCalledTimes(1);
+    expect(sendCrisisAlertMock.mock.invocationCallOrder[0])
+      .toBeLessThan(dbMocks.recordCrisisEvent.mock.invocationCallOrder[0]);
+  });
+
+  // ai-therapist-141 #1: even if persisting the crisis event throws, the page
+  // has already gone out, and the row is marked scan_failed (guarded) for retry.
+  it('still pages when the crisis-event write throws, then marks scan_failed', async () => {
+    analyzeStandaloneRiskMock.mockResolvedValue({
+      riskScore: 88, severity: 'high', factors: [], method: 'llm_assessed',
+    });
+    dbMocks.recordCrisisEvent.mockRejectedValueOnce(new Error('pg down'));
+    await scanThreadMessage(message(), thread());
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
+    expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, {
+      scanStatus: 'scan_failed', onlyIfNotFlagged: true,
+    });
+  });
+
+  // ai-therapist-141: a re-scan of an already-recorded message must not
+  // duplicate the page or the crisis event.
+  it('re-scan of an already-recorded high message does not duplicate page or event', async () => {
+    analyzeStandaloneRiskMock.mockResolvedValue({
+      riskScore: 90, severity: 'high', factors: ['active ideation'], method: 'llm_assessed',
+    });
+    await scanThreadMessage(message({ crisis_event_id: 555, scan_status: 'scan_failed' }), thread());
+    expect(sendCrisisAlertMock).not.toHaveBeenCalled();
+    expect(dbMocks.recordCrisisEvent).not.toHaveBeenCalled();
+    expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, {
+      scanStatus: 'flagged', riskScore: 90, riskSeverity: 'high', crisisEventId: 555,
+    });
+  });
+
+  // ai-therapist-142: an indeterminate verdict (LLM down, no keyword floor)
+  // must NOT be recorded as clear — leave it scan_failed for the sweeper.
+  it('indeterminate verdict is marked scan_failed, never clear', async () => {
+    analyzeStandaloneRiskMock.mockResolvedValue({
+      riskScore: 0, severity: 'none', factors: [], method: 'llm_unavailable', indeterminate: true,
+    });
+    await scanThreadMessage(message(), thread());
+    expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, {
+      scanStatus: 'scan_failed', onlyIfNotFlagged: true,
+    });
+    expect(dbMocks.updateThreadMessageScan).not.toHaveBeenCalledWith(101, expect.objectContaining({ scanStatus: 'clear' }));
+    expect(dbMocks.recordCrisisEvent).not.toHaveBeenCalled();
+  });
+});
+
+// ai-therapist-141 #2: the sweeper re-scans messages stranded by a crash/deploy.
+describe('sweepStaleScans', () => {
+  it('re-scans each claimed stale message against its thread', async () => {
+    dbMocks.claimStaleScanMessages.mockResolvedValueOnce([
+      message({ message_id: 201, thread_id: 5 }),
+    ]);
+    analyzeStandaloneRiskMock.mockResolvedValue({
+      riskScore: 0, severity: 'none', factors: [], method: 'llm_assessed',
+    });
+    const count = await sweepStaleScans();
+    expect(count).toBe(1);
+    expect(dbMocks.getThreadById).toHaveBeenCalledWith(5);
+    expect(analyzeStandaloneRiskMock).toHaveBeenCalled();
+  });
+
+  it('marks a claimed message whose thread is gone as not_applicable (stops re-sweeping)', async () => {
+    dbMocks.claimStaleScanMessages.mockResolvedValueOnce([message({ message_id: 202, thread_id: 99 })]);
+    dbMocks.getThreadById.mockResolvedValueOnce(null);
+    await sweepStaleScans();
+    expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(202, { scanStatus: 'not_applicable' });
+    expect(analyzeStandaloneRiskMock).not.toHaveBeenCalled();
+  });
+
+  it('never throws when the claim query fails', async () => {
+    dbMocks.claimStaleScanMessages.mockRejectedValueOnce(new Error('db down'));
+    await expect(sweepStaleScans()).resolves.toBe(0);
   });
 });

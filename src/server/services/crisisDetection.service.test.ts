@@ -230,13 +230,28 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
     createMock.mockReset();
   });
 
-  it('returns zero without an LLM call — and without any DB write — when no keywords match', async () => {
-    const r = await analyzeStandaloneRisk('thanks, see you at our appointment');
-    expect(r).toEqual({ riskScore: 0, severity: 'none', factors: [], method: 'keyword_only' });
-    expect(createMock).not.toHaveBeenCalled();
-    // No risk_score_history insert, no trajectory read: standalone content
-    // has no session to log against.
+  // ai-therapist-142: the message path has no periodic sweep, so it must run
+  // the LLM on EVERY message — means/farewell language ("bought a gun", "wrote
+  // goodbye letters") carries no lexicon words and would otherwise score 0.
+  it('runs the LLM even when no keywords match, and still writes nothing to the DB', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 80, severity: 'high', context: 'genuine',
+      factors: ['stated method', 'farewell'], reasoning: 'Describes access to a means and goodbye letters.',
+    }));
+    const r = await analyzeStandaloneRisk('I bought a gun yesterday and wrote letters to everyone');
+    expect(createMock).toHaveBeenCalledOnce();
+    expect(r.severity).toBe('high');
+    expect(r.method).toBe('llm_assessed');
+    // Standalone content has no session to log against — still no DB write.
     expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('returns an INDETERMINATE verdict when the LLM is down and no keyword floor exists', async () => {
+    createMock.mockRejectedValue(new Error('openai down'));
+    const r = await analyzeStandaloneRisk('a neutral-looking message with no lexicon words');
+    expect(r.method).toBe('llm_unavailable');
+    expect(r.indeterminate).toBe(true);
+    expect(r.severity).toBe('none');
   });
 
   it('runs the stage-2 LLM on a keyword hit and returns its contextual verdict', async () => {
@@ -265,11 +280,14 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
     expect(r.factors).toContain('suicide');
   });
 
-  it('never runs a periodic sweep: keyword-free messages stay LLM-free forever', async () => {
-    for (let i = 0; i < 12; i++) {
+  it('assesses keyword-free messages with the LLM every time (no sampling) — ai-therapist-142', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 0, severity: 'none', context: 'neutral', factors: [], reasoning: 'neutral check-in',
+    }));
+    for (let i = 0; i < 3; i++) {
       await analyzeStandaloneRisk('another completely neutral check-in message');
     }
-    expect(createMock).not.toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalledTimes(3);
   });
 });
 

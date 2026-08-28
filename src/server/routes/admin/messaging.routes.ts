@@ -27,7 +27,8 @@ import {
   type ThreadMessageRow,
 } from '../../db/index.js';
 import { userRoom } from '../../services/messageSafety.service.js';
-import { isCareTeamRole, type CareTeamRole } from '../../../shared/roles.js';
+import { isCareTeamRole, dataTierFor, type CareTeamRole } from '../../../shared/roles.js';
+import { scrubRows, CRISIS_EVENT_VERBATIM_FIELDS } from '../../utils/tierScrub.js';
 import { createLogger } from '../../utils/logger.js';
 import { parsePagination } from '../../utils/pagination.js';
 
@@ -240,6 +241,14 @@ export default function adminMessagingRoutes(): Router {
         } else {
           const orgId = await orgIdFor(req);
           events = orgId === null ? [] : await listMessageOriginCrisisEvents(null, orgId);
+        }
+        // Summary-tier scrub (ai-therapist-143): message-origin crisis_events
+        // carry risk_factors/notes that, on the LLM-fallback path, hold the
+        // verbatim crisis keywords the participant typed. Strip them for
+        // caseworkers, exactly as crisis.routes does for every other crisis
+        // surface. Therapists/researchers are full-tier and keep the fields.
+        if (dataTierFor(req.session.userRole) === 'summary') {
+          events = scrubRows(events, CRISIS_EVENT_VERBATIM_FIELDS);
         }
         res.json({ events });
       } catch (err) {

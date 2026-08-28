@@ -235,15 +235,53 @@ export async function updateThreadMessageScan(
     riskScore?: number | null;
     riskSeverity?: 'low' | 'medium' | 'high' | null;
     crisisEventId?: number | null;
+    /** When true, the update is skipped if the row is already 'flagged'. Used
+     *  by the scan's failure path so a late error can't clobber a good crisis
+     *  flag back to scan_failed and null out its score (ai-therapist-141 #5). */
+    onlyIfNotFlagged?: boolean;
   }
 ): Promise<void> {
+  const guard = update.onlyIfNotFlagged ? ` AND scan_status <> 'flagged'` : '';
   await pool.query(
     `UPDATE thread_messages
      SET scan_status = $2, risk_score = $3, risk_severity = $4,
          crisis_event_id = COALESCE($5, crisis_event_id)
-     WHERE message_id = $1`,
+     WHERE message_id = $1${guard}`,
     [messageId, update.scanStatus, update.riskScore ?? null, update.riskSeverity ?? null, update.crisisEventId ?? null]
   );
+}
+
+/**
+ * Atomically claim up to `limit` participant messages whose safety scan never
+ * completed — status 'scan_failed', or 'pending' for longer than the original
+ * fire-and-forget scan could plausibly still be running (a deploy/crash/error
+ * between insert and terminal status leaves these stranded forever otherwise,
+ * ai-therapist-141 #2). FOR UPDATE SKIP LOCKED + resetting to 'pending' makes
+ * the claim safe across overlapping sweepers (e.g. a blue-green window): each
+ * row is handed to exactly one sweep. Returns the claimed rows for re-scan.
+ */
+export async function claimStaleScanMessages(
+  limit: number,
+  pendingGraceSeconds = 120
+): Promise<ThreadMessageRow[]> {
+  const result = await pool.query<ThreadMessageRow>(
+    `UPDATE thread_messages
+     SET scan_status = 'pending'
+     WHERE message_id IN (
+       SELECT message_id FROM thread_messages
+       WHERE sender_role = 'participant'
+         AND (
+           scan_status = 'scan_failed'
+           OR (scan_status = 'pending' AND created_at < now() - make_interval(secs => $2))
+         )
+       ORDER BY created_at ASC
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED
+     )
+     RETURNING ${MESSAGE_COLUMNS}`,
+    [limit, pendingGraceSeconds]
+  );
+  return result.rows;
 }
 
 /** Freeze the pair's active thread on unassignment. Returns frozen thread ids. */

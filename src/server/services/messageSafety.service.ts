@@ -25,6 +25,8 @@ import { broadcastAdminEvent } from '../utils/adminBroadcast.js';
 import {
   listThreadMessages,
   updateThreadMessageScan,
+  claimStaleScanMessages,
+  getThreadById,
   recordCrisisEvent,
   type MessageThreadRow,
   type ThreadMessageRow,
@@ -119,6 +121,14 @@ export async function scanThreadMessage(
     });
 
     const risk = await analyzeStandaloneRisk(message.body, history);
+
+    // Indeterminate verdict (LLM down, no keyword floor): do NOT record this as
+    // clear — leave it scan_failed so the sweeper retries once the LLM recovers
+    // (ai-therapist-142). Throw into the catch, which marks scan_failed.
+    if (risk.indeterminate) {
+      throw new Error('standalone risk verdict indeterminate (LLM unavailable, no keyword floor)');
+    }
+
     const flagged = risk.severity === 'medium' || risk.severity === 'high';
 
     if (!flagged) {
@@ -132,13 +142,32 @@ export async function scanThreadMessage(
     }
 
     const severity = risk.severity as 'medium' | 'high';
-    const crisisEventId = await insertMessageCrisisEvent({
-      messageId: message.message_id,
-      clientUserId: thread.client_id,
-      severity,
-      riskScore: risk.riskScore,
-      factors: risk.factors,
-    });
+
+    // LIFE-SAFETY FIRST (ai-therapist-141 #1): page the on-call BEFORE any DB
+    // write, so a transient failure persisting the crisis event / work item can
+    // never suppress the alert. On a re-scan of a message that was already
+    // recorded (crisis_event_id set), the original page already fired (paging
+    // precedes persistence), so skip re-paging to avoid duplicate alerts.
+    const alreadyRecorded = message.crisis_event_id != null;
+    if (severity === 'high' && !alreadyRecorded) {
+      await pageOnCall(
+        `CRISIS MESSAGE ALERT: high-severity risk flagged in a client message ` +
+          `(score ${risk.riskScore}/100). Review the crisis dashboard.`
+      ).catch((err) => log.error({ err }, '[scan] on-call page failed for high-severity message'));
+    }
+
+    // Record-keeping. If any of this throws, the catch marks scan_failed and the
+    // sweeper retries — but the page above has already gone out. Reuse an
+    // existing crisis_event_id on re-scan so retries don't duplicate the event.
+    const crisisEventId = alreadyRecorded
+      ? message.crisis_event_id!
+      : await insertMessageCrisisEvent({
+          messageId: message.message_id,
+          clientUserId: thread.client_id,
+          severity,
+          riskScore: risk.riskScore,
+          factors: risk.factors,
+        });
 
     await updateThreadMessageScan(message.message_id, {
       scanStatus: 'flagged',
@@ -192,16 +221,6 @@ export async function scanThreadMessage(
       );
     }
 
-    // High severity pages the on-call (approved Q5). PHI-free by design.
-    // No session link: thread messages have no therapy session, and the
-    // sandbox short-circuit above already covers suppression for this path.
-    if (severity === 'high') {
-      await pageOnCall(
-        `CRISIS MESSAGE ALERT: high-severity risk flagged in a client message ` +
-          `(score ${risk.riskScore}/100). Review the crisis dashboard.`
-      );
-    }
-
     emitScanned(thread, message.message_id, true);
     log.info(
       `[scan] message ${message.message_id} (thread ${thread.thread_id}) flagged ${severity} ` +
@@ -210,9 +229,59 @@ export async function scanThreadMessage(
   } catch (err) {
     log.error({ err }, `[scan] scan failed for message ${message.message_id}; marking scan_failed`);
     try {
-      await updateThreadMessageScan(message.message_id, { scanStatus: 'scan_failed' });
+      // Never downgrade a row that already reached 'flagged' (ai-therapist-141
+      // #5): a late error must not erase a good crisis flag or null its score.
+      await updateThreadMessageScan(message.message_id, {
+        scanStatus: 'scan_failed',
+        onlyIfNotFlagged: true,
+      });
     } catch (updateErr) {
       log.error({ err: updateErr }, '[scan] failed to record scan_failed status');
     }
   }
+}
+
+// ============================================
+// STALE-SCAN SWEEPER (ai-therapist-141 #2)
+// ============================================
+// The scan is fire-and-forget in memory, so a deploy/crash/error between
+// message insert and terminal scan status strands the row ('pending' forever)
+// or leaves it 'scan_failed' with no retry. This backstop re-scans both so no
+// participant message goes permanently unscreened. Idempotent: scanThreadMessage
+// reuses an existing crisis_event_id and skips re-paging already-recorded rows.
+
+const SWEEP_INTERVAL_MS = 3 * 60 * 1000;
+const SWEEP_BATCH = 50;
+let sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Re-scan one batch of stranded participant messages. Never throws. */
+export async function sweepStaleScans(): Promise<number> {
+  try {
+    const stale = await claimStaleScanMessages(SWEEP_BATCH);
+    if (stale.length === 0) return 0;
+    log.warn(`[scan-sweep] re-scanning ${stale.length} stranded message(s)`);
+    for (const message of stale) {
+      const thread = await getThreadById(message.thread_id);
+      if (!thread) {
+        // Thread gone (retention wipe): mark terminal so it stops being swept.
+        await updateThreadMessageScan(message.message_id, { scanStatus: 'not_applicable' }).catch(() => {});
+        continue;
+      }
+      await scanThreadMessage(message, thread);
+    }
+    return stale.length;
+  } catch (err) {
+    log.error({ err }, '[scan-sweep] sweep pass failed');
+    return 0;
+  }
+}
+
+/** Start the periodic stale-scan sweeper (boot pass after a short delay, then
+ *  every few minutes). Idempotent; safe to call once at startup. */
+export function startMessageScanSweeper(): void {
+  if (sweepTimer) return;
+  // Boot pass, slightly delayed so migrations/warmup settle.
+  setTimeout(() => { void sweepStaleScans(); }, 15_000);
+  sweepTimer = setInterval(() => { void sweepStaleScans(); }, SWEEP_INTERVAL_MS);
+  if (typeof sweepTimer.unref === 'function') sweepTimer.unref();
 }

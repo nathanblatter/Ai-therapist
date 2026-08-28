@@ -7,6 +7,12 @@ import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 import { requireSessionClientAccess, careTeamScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
 import {
+  scrubRows,
+  CRISIS_EVENT_VERBATIM_FIELDS,
+  RISK_HISTORY_VERBATIM_FIELDS,
+  INTERVENTION_VERBATIM_FIELDS,
+} from '../../utils/tierScrub.js';
+import {
   sessionExists,
   getSessionCrisisFlag,
   getAllCrisisData,
@@ -24,25 +30,6 @@ function careTeamMayAccessSession(req: Request, sessionId: string): Promise<bool
   });
 }
 
-// Summaries-tier scrub (spec section 2): strip the fields that can quote
-// verbatim participant messages before a caseworker sees crisis payloads.
-// crisis_events: risk_factors (matched keywords/snippets), intervention
-// details, and free-text notes; risk_score_history: score_factors (stage-2
-// LLM reasoning). Scores, severities, timestamps, and actors pass through.
-const CRISIS_EVENT_VERBATIM_FIELDS = ['risk_factors', 'intervention_details', 'notes'] as const;
-const RISK_HISTORY_VERBATIM_FIELDS = ['score_factors'] as const;
-const INTERVENTION_VERBATIM_FIELDS = ['action_details', 'notes'] as const;
-
-function scrubRows<T extends Record<string, unknown>>(
-  rows: T[],
-  fields: readonly string[]
-): Record<string, unknown>[] {
-  return rows.map((row) => {
-    const copy: Record<string, unknown> = { ...row };
-    for (const field of fields) delete copy[field];
-    return copy;
-  });
-}
 
 export default function crisisRoutes(): Router {
   const router = Router();

@@ -72,6 +72,7 @@ import { startScheduler as startContentWipeScheduler } from "./services/contentW
 import { startScheduler as startDataRetentionScheduler } from "./services/dataRetention.service.js";
 import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
 import { startWorkQueueScheduler } from "./services/workQueue.service.js";
+import { startMessageScanSweeper } from "./services/messageSafety.service.js";
 import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
 
 // ---------- local type helpers ----------
@@ -913,6 +914,10 @@ if (isEntrypoint) {
     // redteam child sweeping the shared DB would spam real queues.
     if (process.env.SOCKET_PG_ADAPTER !== 'off') {
       startWorkQueueScheduler();
+      // Backstop re-scan of participant messages stranded by a crash/deploy
+      // between insert and terminal scan status (ai-therapist-141). Harness
+      // children skip it (shared-DB guard), same as the work-queue sweeper.
+      startMessageScanSweeper();
     }
 
     // Nightly simulation-eval runs (config-gated via evals.harness_schedule;

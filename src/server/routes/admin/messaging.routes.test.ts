@@ -297,4 +297,35 @@ describe('GET /api/admin/messaging/flagged', () => {
   it('participants are blocked', async () => {
     expect((await request(appAs('participant')).get('/api/admin/messaging/flagged')).status).toBe(403);
   });
+
+  // ai-therapist-143: message-origin crisis_events carry risk_factors/notes that
+  // can quote verbatim participant keywords on the LLM-fallback path. Caseworkers
+  // (summary tier) must never receive those fields; therapists (full tier) do.
+  it('strips verbatim crisis fields (risk_factors/notes) for caseworkers', async () => {
+    dbMocks.listMessageOriginCrisisEvents.mockResolvedValue([
+      { event_id: 900, client_user_id: CLIENT_ID, severity: 'high', thread_id: 5,
+        risk_factors: ['kill myself'], notes: 'Message risk score: 90 - Factors: kill myself',
+        intervention_details: 'x' },
+    ]);
+    const res = await request(appAs('caseworker')).get('/api/admin/messaging/flagged');
+    expect(res.status).toBe(200);
+    const event = res.body.events[0];
+    expect(event).not.toHaveProperty('risk_factors');
+    expect(event).not.toHaveProperty('notes');
+    expect(event).not.toHaveProperty('intervention_details');
+    // Summary fields still pass through.
+    expect(event).toMatchObject({ event_id: 900, severity: 'high' });
+    expect(JSON.stringify(res.body)).not.toContain('kill myself');
+  });
+
+  it('keeps the full crisis fields for full-tier therapists', async () => {
+    dbMocks.listMessageOriginCrisisEvents.mockResolvedValue([
+      { event_id: 900, client_user_id: CLIENT_ID, severity: 'high', thread_id: 5,
+        risk_factors: ['kill myself'], notes: 'detail' },
+    ]);
+    const res = await request(appAs('therapist')).get('/api/admin/messaging/flagged');
+    expect(res.status).toBe(200);
+    expect(res.body.events[0]).toHaveProperty('risk_factors', ['kill myself']);
+    expect(res.body.events[0]).toHaveProperty('notes', 'detail');
+  });
 });

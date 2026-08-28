@@ -244,8 +244,14 @@ export interface StandaloneRiskResult {
   riskScore: number;
   severity: 'none' | 'low' | 'medium' | 'high';
   factors: string[];
-  /** How the score was produced (mirrors analyzeMessageRisk's method field). */
-  method: 'keyword_only' | 'llm_assessed' | 'keyword_fallback';
+  /** How the score was produced (mirrors analyzeMessageRisk's method field).
+   *  'llm_unavailable' = the LLM could not be reached AND there was no keyword
+   *  floor to fall back on, so the verdict is INDETERMINATE, not "clear" — the
+   *  caller must retry rather than treat it as safe (ai-therapist-142). */
+  method: 'keyword_only' | 'llm_assessed' | 'keyword_fallback' | 'llm_unavailable';
+  /** True when the scan could not reach a real verdict (LLM down, no keyword
+   *  floor). Callers must NOT record this as clear — retry instead. */
+  indeterminate?: boolean;
 }
 
 /**
@@ -268,10 +274,13 @@ export async function analyzeStandaloneRisk(
   historyLines: HistoryMessage[] = [],
 ): Promise<StandaloneRiskResult> {
   const keywordAnalysis = detectCrisisKeywords(content);
-  if (keywordAnalysis.keywordScore === 0) {
-    return { riskScore: 0, severity: 'none', factors: [], method: 'keyword_only' };
-  }
 
+  // Always run the LLM — do NOT short-circuit on a zero keyword score
+  // (ai-therapist-142). Async messages have no periodic sweep like live
+  // sessions do, so a message whose risk is phrased without lexicon words
+  // ("bought a gun", "wrote goodbye letters") would otherwise be scored 0 and
+  // marked clear, never seeing the LLM. Message volume is low, so an LLM call
+  // per message is affordable and the safe default.
   try {
     const llm = await assessRiskWithLLM(content, historyLines);
     log.info(
@@ -285,7 +294,15 @@ export async function analyzeStandaloneRisk(
       method: 'llm_assessed',
     };
   } catch (err) {
-    // LLM unavailable — the keyword tier score stands as the provisional score.
+    // LLM unavailable. If keywords hit, the keyword tier score stands (fail
+    // toward detection). If there were NO keywords, we have no signal at all —
+    // return INDETERMINATE so the caller retries rather than recording "clear"
+    // (ai-therapist-142): a means/farewell message the LLM would have caught
+    // must not be dismissed just because the model was briefly down.
+    if (keywordAnalysis.keywordScore === 0) {
+      log.error({ err }, '[risk] standalone LLM unavailable with no keyword floor; verdict indeterminate');
+      return { riskScore: 0, severity: 'none', factors: [], method: 'llm_unavailable', indeterminate: true };
+    }
     const riskScore = Math.min(keywordAnalysis.keywordScore, 100);
     log.error({ err }, `[risk] standalone LLM assessment failed; using keyword tier score ${riskScore}`);
     return {
