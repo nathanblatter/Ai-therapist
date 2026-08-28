@@ -17,6 +17,10 @@ services:
       # Stage is the public demo: keep the demo pill/overlay + [DEMO] titles.
       # Prod (docker-compose.prod.yml) leaves this unset and serves clean HTML.
       DEMO_SITE: "true"
+      # Automatic evals (nightly harness scheduler + session-end auto-eval)
+      # run ONLY on stage. Prod leaves this unset — no judge spend, no eval
+      # load competing with live sessions; manual evals still work there.
+      EVALS_ENABLED: "true"
       # OpenAI Realtime API key
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       FLIGHTDECK_URL: ${FLIGHTDECK_URL:-http://flightdeck:8080}

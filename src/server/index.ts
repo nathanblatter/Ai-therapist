@@ -850,10 +850,15 @@ if (isEntrypoint) {
     // Nightly simulation-eval runs (config-gated via evals.harness_schedule;
     // the admin Simulation Runs panel controls it). Never runs in the harness
     // child itself (it sets SOCKET_PG_ADAPTER=off, used here as the marker).
-    if (process.env.SOCKET_PG_ADAPTER !== 'off') {
+    // EVALS_ENABLED gates all automatic eval work to stage: prod must never
+    // burn judge spend or compete with live sessions, even if an admin flips
+    // the schedule on. Manual evals (admin POST /eval, CLI) work everywhere.
+    if (process.env.SOCKET_PG_ADAPTER !== 'off' && process.env.EVALS_ENABLED === 'true') {
       import('./services/harnessRunner.service.js')
         .then(m => m.startHarnessScheduler())
         .catch(err => console.error('Failed to start harness scheduler:', err));
+    } else if (process.env.SOCKET_PG_ADAPTER !== 'off') {
+      console.log('Automatic evals disabled (EVALS_ENABLED not set) — stage-only feature');
     }
 
     // Backstop sweep for sessions abandoned without a clean /end (dropped

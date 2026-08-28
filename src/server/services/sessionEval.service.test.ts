@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const {
   createMock,
@@ -10,6 +10,8 @@ const {
   upsertSessionEvalMock,
   getUnevaluatedMock,
   getSystemConfigMock,
+  getSessionIsDemoMock,
+  isSandboxAccountSessionMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
   getSessionMock: vi.fn(),
@@ -20,6 +22,8 @@ const {
   upsertSessionEvalMock: vi.fn(),
   getUnevaluatedMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
+  getSessionIsDemoMock: vi.fn(),
+  isSandboxAccountSessionMock: vi.fn(),
 }));
 
 vi.mock('openai', () => ({
@@ -35,7 +39,9 @@ vi.mock('../db/index.js', () => ({
   getSessionMessages: getSessionMessagesMock,
   getSessionConfig: getSessionConfigMock,
   getSessionEval: getSessionEvalMock,
+  getSessionIsDemo: getSessionIsDemoMock,
   hasSessionEval: hasSessionEvalMock,
+  isSandboxAccountSession: isSandboxAccountSessionMock,
   upsertSessionEval: upsertSessionEvalMock,
   getUnevaluatedEndedSessions: getUnevaluatedMock,
 }));
@@ -68,6 +74,8 @@ beforeEach(() => {
   getSystemConfigMock.mockResolvedValue({});
   getSessionMock.mockResolvedValue({ session_id: 's1', status: 'ended', user_id: 7 });
   hasSessionEvalMock.mockResolvedValue(false);
+  getSessionIsDemoMock.mockResolvedValue(false);
+  isSandboxAccountSessionMock.mockResolvedValue(false);
   getSessionConfigMock.mockResolvedValue({ modality: 'cbt' });
   getSessionMessagesMock.mockResolvedValue([
     { role: 'user', content: 'I feel anxious', content_redacted: null },
@@ -176,6 +184,20 @@ describe('validateRubric', () => {
 });
 
 describe('maybeAutoEvalSession', () => {
+  // The stage-only env gate sits in front of the config checks; enable it here
+  // so the tests below exercise the config logic.
+  beforeEach(() => { process.env.EVALS_ENABLED = 'true'; });
+  afterEach(() => { delete process.env.EVALS_ENABLED; });
+
+  it('does nothing when EVALS_ENABLED is not set (prod posture), even with auto-run on', async () => {
+    delete process.env.EVALS_ENABLED;
+    getSystemConfigMock.mockResolvedValue({ evals: { auto_run_enabled: true } });
+    maybeAutoEvalSession('s1');
+    await new Promise(r => setTimeout(r, 0));
+    expect(getSessionMock).not.toHaveBeenCalled();
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
   it('does nothing when auto-run is not enabled (default)', async () => {
     getSystemConfigMock.mockResolvedValue({ evals: {} });
     maybeAutoEvalSession('s1');
@@ -190,5 +212,25 @@ describe('maybeAutoEvalSession', () => {
 
     maybeAutoEvalSession('s1');
     await vi.waitFor(() => expect(upsertSessionEvalMock).toHaveBeenCalled());
+  });
+
+  it('skips the auto-enqueue for is_demo sessions (demo/harness/sandbox)', async () => {
+    getSystemConfigMock.mockResolvedValue({ evals: { auto_run_enabled: true } });
+    getSessionIsDemoMock.mockResolvedValue(true);
+
+    maybeAutoEvalSession('s1');
+    await new Promise(r => setTimeout(r, 0));
+    expect(getSessionMock).not.toHaveBeenCalled();
+    expect(createMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('sandbox exclusion (caseworker portal spec section 7)', () => {
+  it('evaluateSession skips sandbox-account sessions even under force', async () => {
+    isSandboxAccountSessionMock.mockResolvedValue(true);
+    const row = await evaluateSession('sbx-1-0-0', { force: true });
+    expect(row).toBeNull();
+    expect(createMock).not.toHaveBeenCalled();
+    expect(upsertSessionEvalMock).not.toHaveBeenCalled();
   });
 });
