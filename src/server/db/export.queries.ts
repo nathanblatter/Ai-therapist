@@ -66,7 +66,8 @@ export async function getAnonymizedExport(f: ExportFilters, contentColumn: Expor
       m.message_id as id,
       m.session_id,
       ts.session_name,
-      'RID_' || LPAD(ROW_NUMBER() OVER (ORDER BY u.userid)::TEXT, 3, '0') as research_id,
+      CASE WHEN u.userid IS NULL THEN 'ANON'
+           ELSE 'RID_' || LPAD(DENSE_RANK() OVER (ORDER BY u.userid)::TEXT, 3, '0') END as research_id,
       m.role,
       m.message_type,
       m.${contentColumn} as message,
@@ -124,6 +125,9 @@ export async function getAggregatedExport(
 /** Full message export. A single session skips the session/user joins. */
 export async function getFullExport(f: ExportFilters, contentColumn: ExportContentColumn, orgId?: number | null): Promise<ExportRow[]> {
   if (f.sessionId) {
+    // Org scoping must hold on the single-session fast path too: without the
+    // EXISTS guard an org-scoped researcher could export any org's session by
+    // naming its id. Anonymous sessions stay included, matching orgClause.
     const result = await pool.query(`
       SELECT
         m.message_id as id,
@@ -135,8 +139,13 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
         m.created_at
       FROM messages m
       WHERE m.session_id = $1
+        AND ($2::int IS NULL OR EXISTS (
+          SELECT 1 FROM therapy_sessions ts
+          WHERE ts.session_id = m.session_id
+            AND (ts.user_id IS NULL OR EXISTS (
+              SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $2))))
       ORDER BY m.created_at ASC
-    `, [f.sessionId]);
+    `, [f.sessionId, orgId ?? null]);
     return result.rows;
   }
 
