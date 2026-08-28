@@ -37,8 +37,10 @@ const INVITE_ROW = {
   token_hash: 'deadbeef',
   therapist_id: 1,
   label: 'JB',
-  created_at: '2026-08-21T00:00:00.000Z',
-  expires_at: '2026-08-28T00:00:00.000Z',
+  // Relative dates: a hardcoded expires_at became a time bomb — the suite
+  // started failing the day it passed.
+  created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+  expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
   used_at: null,
   used_by: null,
 };
