@@ -11,6 +11,7 @@ const {
   getActiveConsentDocumentMock,
   getActiveConsentMock,
   invalidateConsentCacheMock,
+  resolveConsentAudienceMock,
 } = vi.hoisted(() => ({
   listConsentDocumentsMock: vi.fn(),
   getConsentDocumentByVersionMock: vi.fn(),
@@ -18,6 +19,7 @@ const {
   getActiveConsentDocumentMock: vi.fn(),
   getActiveConsentMock: vi.fn(),
   invalidateConsentCacheMock: vi.fn(),
+  resolveConsentAudienceMock: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => ({
@@ -29,6 +31,7 @@ vi.mock('../../db/index.js', () => ({
 vi.mock('../../utils/consent.js', () => ({
   getActiveConsent: getActiveConsentMock,
   invalidateConsentCache: invalidateConsentCacheMock,
+  resolveConsentAudience: resolveConsentAudienceMock,
   sha256Hex: (s: string) => `hash(${s})`,
 }));
 
@@ -49,8 +52,9 @@ function appAs(role: string | null, username = 'nathan') {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getActiveConsentMock.mockResolvedValue({ version: 'v1', body: 'b', bodyHash: 'h' });
+  getActiveConsentMock.mockResolvedValue({ version: 'v1', body: 'b', bodyHash: 'h', audience: 'research' });
   getActiveConsentDocumentMock.mockResolvedValue({ version: 'v2' });
+  resolveConsentAudienceMock.mockResolvedValue('research');
 });
 
 describe('POST /admin/api/consent/versions', () => {
@@ -90,6 +94,29 @@ describe('POST /admin/api/consent/versions', () => {
       .send({ version: 'v2', body: '   ' });
     expect(res.status).toBe(400);
   });
+
+  it('publishes an audience-targeted clinical version (078)', async () => {
+    insertConsentDocumentMock.mockResolvedValueOnce({ document_id: 3, version: 'c2', audience: 'clinical' });
+    const res = await request(appAs('researcher'))
+      .post('/admin/api/consent/versions')
+      .send({ version: 'c2', body: 'clinical copy', audience: 'clinical' });
+    expect(res.status).toBe(201);
+    expect(insertConsentDocumentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 'c2', audience: 'clinical' })
+    );
+    expect(getActiveConsentDocumentMock).toHaveBeenCalledWith('clinical');
+  });
+
+  it('defaults audience to research and rejects an invalid one', async () => {
+    insertConsentDocumentMock.mockResolvedValueOnce({ document_id: 4, version: 'v3' });
+    await request(appAs('researcher')).post('/admin/api/consent/versions').send({ version: 'v3', body: 'copy' });
+    expect(insertConsentDocumentMock).toHaveBeenCalledWith(expect.objectContaining({ audience: 'research' }));
+
+    const bad = await request(appAs('researcher'))
+      .post('/admin/api/consent/versions')
+      .send({ version: 'v4', body: 'copy', audience: 'participant' });
+    expect(bad.status).toBe(400);
+  });
 });
 
 describe('GET /admin/api/consent/versions', () => {
@@ -99,6 +126,18 @@ describe('GET /admin/api/consent/versions', () => {
     expect(res.status).toBe(200);
     expect(res.body.activeVersion).toBe('v1');
     expect(res.body.versions).toHaveLength(1);
+  });
+
+  it('reports the per-audience active versions and the audience in effect', async () => {
+    listConsentDocumentsMock.mockResolvedValueOnce([]);
+    getActiveConsentDocumentMock
+      .mockResolvedValueOnce({ version: 'r9' })   // research
+      .mockResolvedValueOnce({ version: '2026-08-27.c1' }); // clinical
+    resolveConsentAudienceMock.mockResolvedValue('clinical');
+    const res = await request(appAs('researcher')).get('/admin/api/consent/versions');
+    expect(res.status).toBe(200);
+    expect(res.body.audienceInEffect).toBe('clinical');
+    expect(res.body.activeVersions).toEqual({ research: 'r9', clinical: '2026-08-27.c1' });
   });
 
   it('403s a participant', async () => {

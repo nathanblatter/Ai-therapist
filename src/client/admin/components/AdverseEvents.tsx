@@ -1,8 +1,13 @@
 // Admin view for IRB adverse-event reports (ai-therapist-95). Lists reports
 // with overdue/due-soon reminders pinned on top, and a detail drawer to edit
 // (draft only), sign off, reopen, close, and print/export a report.
+// Caseworker mode (caseworker portal spec s10 item 6): the server filters the
+// list to the member's own filed reports; the UI adds a "Report adverse
+// event" filing form and renders the drawer read-only (review/sign-off stays
+// therapist+researcher).
 import { useState, useEffect, useCallback } from 'react';
-import { AlertTriangle, Clock, FileText, X, Printer } from 'react-feather';
+import { AlertTriangle, Clock, FileText, Plus, X, Printer } from 'react-feather';
+import AdverseEventFileForm from './AdverseEventFileForm';
 
 interface TimelineEntry { at: string | null; kind: string; detail: string; }
 interface ActionEntry { at: string | null; action: string; by: string | null; }
@@ -55,7 +60,14 @@ function CategoryBadge({ category }: { category: 'crisis' | 'eligibility_violati
   );
 }
 
-export default function AdverseEvents() {
+interface AdverseEventsProps {
+  /** Viewer role (from AdminApp). 'caseworker' switches to the slim filing
+   *  mode; anything else keeps the full review surface. */
+  role?: string | null;
+}
+
+export default function AdverseEvents({ role }: AdverseEventsProps = {}) {
+  const isCaseworker = role === 'caseworker';
   const [reports, setReports] = useState<Report[]>([]);
   const [counts, setCounts] = useState<Counts>({ draft: 0, submitted: 0, overdue: 0, due_soon: 0 });
   const [tab, setTab] = useState<Tab>('draft');
@@ -64,6 +76,7 @@ export default function AdverseEvents() {
   const [selected, setSelected] = useState<Report | null>(null);
   const [saving, setSaving] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'crisis' | 'eligibility_violation'>('all');
+  const [showFileForm, setShowFileForm] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,11 +141,23 @@ export default function AdverseEvents() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Adverse Events</h2>
-        <p className="text-sm text-gray-600 mt-1">
-          IRB adverse-event reports auto-drafted from high-severity crisis flags. Review, sign off, and export.
-        </p>
+      <div className="mb-6 flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Adverse Events</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            {isCaseworker
+              ? 'Reports you have filed for clients on your caseload. Review and sign-off are handled by the study team.'
+              : 'IRB adverse-event reports auto-drafted from high-severity crisis flags. Review, sign off, and export.'}
+          </p>
+        </div>
+        {isCaseworker && (
+          <button
+            onClick={() => setShowFileForm(true)}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 inline-flex items-center gap-1"
+          >
+            <Plus size={14} /> Report adverse event
+          </button>
+        )}
       </div>
 
       {/* Counts strip */}
@@ -147,7 +172,7 @@ export default function AdverseEvents() {
       {reminders.length > 0 && (
         <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 flex items-center gap-2">
           <AlertTriangle size={16} />
-          {reminders.length} draft{reminders.length === 1 ? '' : 's'} overdue or due within 48h — please review and sign off.
+          {reminders.length} draft{reminders.length === 1 ? '' : 's'} overdue or due within 48h{isCaseworker ? ' — awaiting study-team review.' : ' — please review and sign off.'}
         </div>
       )}
 
@@ -217,10 +242,18 @@ export default function AdverseEvents() {
         <DetailDrawer
           report={selected}
           saving={saving}
+          readOnly={isCaseworker}
           onClose={() => setSelected(null)}
           onSave={saveDraft}
           onTransition={transition}
           onRefresh={() => refreshSelected(selected.report_id)}
+        />
+      )}
+
+      {showFileForm && (
+        <AdverseEventFileForm
+          onClose={() => setShowFileForm(false)}
+          onFiled={() => { setShowFileForm(false); load(); }}
         />
       )}
     </div>
@@ -230,6 +263,9 @@ export default function AdverseEvents() {
 interface DrawerProps {
   report: Report;
   saving: boolean;
+  /** Caseworker mode: view own filed report only — no edits, transitions, or
+   *  print (those endpoints are therapist/researcher). */
+  readOnly?: boolean;
   onClose: () => void;
   onSave: (summary: string, dueAt: string) => void;
   onTransition: (id: number, action: 'submit' | 'reopen' | 'close') => void;
@@ -243,10 +279,10 @@ function toLocalInput(s: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function DetailDrawer({ report, saving, onClose, onSave, onTransition }: DrawerProps) {
+function DetailDrawer({ report, saving, readOnly = false, onClose, onSave, onTransition }: DrawerProps) {
   const [summary, setSummary] = useState(report.summary);
   const [dueAt, setDueAt] = useState(toLocalInput(report.due_at));
-  const isDraft = report.status === 'draft';
+  const isDraft = report.status === 'draft' && !readOnly;
 
   useEffect(() => {
     setSummary(report.summary);
@@ -317,8 +353,12 @@ function DetailDrawer({ report, saving, onClose, onSave, onTransition }: DrawerP
           </table>
         </div>
 
-        <h4 className="text-sm font-semibold text-gray-800 mb-1">Transcript excerpt (redacted)</h4>
-        <pre className="p-3 bg-gray-50 border border-gray-200 rounded text-xs text-gray-700 whitespace-pre-wrap mb-4 max-h-48 overflow-y-auto">{report.transcript_excerpt || 'No excerpt captured.'}</pre>
+        {!readOnly && (
+          <>
+            <h4 className="text-sm font-semibold text-gray-800 mb-1">Transcript excerpt (redacted)</h4>
+            <pre className="p-3 bg-gray-50 border border-gray-200 rounded text-xs text-gray-700 whitespace-pre-wrap mb-4 max-h-48 overflow-y-auto">{report.transcript_excerpt || 'No excerpt captured.'}</pre>
+          </>
+        )}
 
         <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
           {isDraft && (
@@ -327,13 +367,17 @@ function DetailDrawer({ report, saving, onClose, onSave, onTransition }: DrawerP
               <button onClick={() => onTransition(report.report_id, 'submit')} disabled={saving} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-40">Submit (sign off)</button>
             </>
           )}
-          {report.status === 'submitted' && (
+          {report.status === 'submitted' && !readOnly && (
             <>
               <button onClick={() => onTransition(report.report_id, 'reopen')} disabled={saving} className="px-4 py-2 border border-amber-300 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 disabled:opacity-40">Reopen</button>
               <button onClick={() => onTransition(report.report_id, 'close')} disabled={saving} className="px-4 py-2 bg-gray-700 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-40">Close</button>
             </>
           )}
-          <a href={`/admin/api/adverse-events/${report.report_id}/print`} target="_blank" rel="noreferrer" className="ml-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 inline-flex items-center gap-1"><Printer size={14} /> Print / Export PDF</a>
+          {readOnly ? (
+            <span className="text-xs text-gray-500 py-2">Read-only: review, sign-off, and export are handled by the study team.</span>
+          ) : (
+            <a href={`/admin/api/adverse-events/${report.report_id}/print`} target="_blank" rel="noreferrer" className="ml-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 inline-flex items-center gap-1"><Printer size={14} /> Print / Export PDF</a>
+          )}
         </div>
       </div>
     </div>

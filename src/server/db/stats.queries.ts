@@ -33,7 +33,9 @@ interface SystemConfigRow {
   config_value: Record<string, unknown> & { model?: string };
 }
 
-/** Session counts + average duration across all sessions. */
+/** Session counts + average duration across all sessions. Sandbox-account
+ *  sessions are excluded (belt-and-suspenders on top of is_demo=TRUE;
+ *  docs/caseworker-portal.md section 7). */
 export async function getSessionStats(): Promise<SessionStatsRow> {
   const result = await pool.query<SessionStatsRow>(
     `SELECT
@@ -42,7 +44,10 @@ export async function getSessionStats(): Promise<SessionStatsRow> {
       COUNT(*) FILTER (WHERE status = 'active') as active_sessions,
       COUNT(*) FILTER (WHERE status = 'ended') as ended_sessions,
       AVG(EXTRACT(EPOCH FROM (ended_at - created_at))/60) FILTER (WHERE ended_at IS NOT NULL) as avg_duration_minutes
-     FROM therapy_sessions`
+     FROM therapy_sessions ts
+     WHERE ts.user_id IS NULL OR NOT EXISTS (
+       SELECT 1 FROM users u WHERE u.userid = ts.user_id AND u.is_sandbox IS TRUE
+     )`
   );
   return result.rows[0];
 }

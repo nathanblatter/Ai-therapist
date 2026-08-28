@@ -269,9 +269,34 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
     });
 
     // Page a human — the dashboard socket alert only works if someone is
-    // looking at the dashboard.
+    // looking at the dashboard. Sandbox sessions (synthetic demo caseloads,
+    // spec s7 #3) NEVER page the on-call: the suppression is logged, but the
+    // dashboard emits + sideband safety protocol below stay ON — that is the
+    // product being demoed. ('crisis_sms_suppressed_sandbox' is not in the
+    // intervention_actions CHECK (054), so the suppression rides
+    // 'external_api_called' with a detail payload.)
+    //
+    // FAIL TOWARD PAGING: the page is only suppressed on an affirmative
+    // sandbox=true. A transient throw from the sandbox lookup (or from any
+    // suppression logging) must never swallow a REAL page, so the check is
+    // isolated in its own try/catch and the suppression log is kept out of
+    // the paging critical path entirely (fire-and-forget).
     import('./crisisAlert.service.js')
       .then(async m => {
+        let isSandbox = false;
+        try {
+          const { isSandboxAccountSession } = await import('../db/index.js');
+          isSandbox = (await isSandboxAccountSession(sessionId)) === true;
+        } catch (err) {
+          console.error('[Crisis] sandbox check failed; paging anyway (fail toward paging):', err);
+        }
+        if (isSandbox) {
+          console.log(`[Crisis] SMS page suppressed for sandbox session ${sessionId}`);
+          logInterventionAction(sessionId, 'external_api_called', {
+            suppressed: 'crisis_sms_alert', reason: 'sandbox', riskScore,
+          }).catch(err => console.error('[Crisis] failed to log sandbox SMS suppression:', err));
+          return;
+        }
         await m.sendCrisisAlert(
           `🚨 AI-Therapist HIGH crisis flag\nSession ${sessionId.substring(0, 16)}… — risk ${riskScore}/100\nhttps://ai-therapist.nathanblatter.com/admin`,
         );

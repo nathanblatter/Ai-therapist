@@ -2,18 +2,23 @@
 import React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, X, ChevronUp, ChevronDown } from 'react-feather';
+import { Menu, X, ChevronUp, ChevronDown, MessageSquare } from 'react-feather';
 import CopyButton from '../../shared/components/CopyButton';
 
 interface HeaderProps {
   sessionId: string | null;
   timeRemaining: number | null;
+  /** Toggle the async-messaging view (present only for logged-in users
+   *  between sessions — caseworker portal). */
+  onOpenMessages?: () => void;
+  messagesOpen?: boolean;
+  messagesUnread?: number;
 }
 
 // localStorage key for the header collapse preference (persists across sessions).
 const HEADER_COLLAPSED_KEY = 'aithx.headerCollapsed';
 
-const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
+const Header = ({ sessionId, timeRemaining, onOpenMessages, messagesOpen = false, messagesUnread = 0 }: HeaderProps) => {
   const [username, setUsername] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -235,6 +240,21 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
                 Admin Portal
               </a>
             )}
+            {onOpenMessages && (
+              <button
+                onClick={onOpenMessages}
+                className="relative bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center gap-1.5"
+                aria-label={messagesOpen ? 'Back to home' : `Open messages${messagesUnread > 0 ? `, ${messagesUnread} unread` : ''}`}
+              >
+                <MessageSquare size={16} aria-hidden="true" />
+                {messagesOpen ? 'Home' : 'Messages'}
+                {!messagesOpen && messagesUnread > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+                    {messagesUnread > 99 ? '99+' : messagesUnread}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               onClick={() => navigate('/profile')}
               className="bg-royal hover:bg-blue-700 px-4 py-2 rounded-full text-sm font-semibold text-center min-h-[44px] flex items-center justify-center"
@@ -280,6 +300,15 @@ const Header = ({ sessionId, timeRemaining }: HeaderProps) => {
                   >
                     Admin Portal
                   </a>
+                )}
+                {onOpenMessages && (
+                  <button
+                    onClick={() => { setIsMenuOpen(false); onOpenMessages(); }}
+                    className="block w-full text-left px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                    role="menuitem"
+                  >
+                    {messagesOpen ? 'Home' : `Messages${messagesUnread > 0 ? ` (${messagesUnread})` : ''}`}
+                  </button>
                 )}
                 <button
                   onClick={() => { setIsMenuOpen(false); navigate('/profile'); }}

@@ -12,8 +12,13 @@ const dbMocks = vi.hoisted(() => ({
   listUserWorksheetInstances: vi.fn(),
   listUserAssignments: vi.fn(),
   completeAssignment: vi.fn(),
+  getMessageHistoryForClient: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
+
+// The route imports getMessageHistoryForClient through the barrel now; keep a
+// single mock object aliased so existing assertions keep working.
+const messagingMocks = dbMocks;
 
 import progressRoutes from './progress.routes.js';
 
@@ -78,10 +83,22 @@ beforeEach(() => {
       completed_at: new Date('2026-08-05T00:10:00Z'),
     },
   ]);
+  messagingMocks.getMessageHistoryForClient.mockResolvedValue([
+    {
+      thread_id: 1,
+      clinician_role: 'caseworker',
+      status: 'active',
+      created_at: '2026-08-01T00:00:00Z',
+      last_message_at: '2026-08-02T00:00:00Z',
+      messages: [
+        { message_id: 5, sender_role: 'participant', body: 'checking in', created_at: '2026-08-02T00:00:00Z', flagged: false },
+      ],
+    },
+  ]);
 });
 
 describe('auth is required on every /api/me/* endpoint', () => {
-  it.each(['/api/me/progress', '/api/me/safety-plan', '/api/me/worksheets', '/api/me/assignments'])(
+  it.each(['/api/me/progress', '/api/me/safety-plan', '/api/me/worksheets', '/api/me/assignments', '/api/me/export'])(
     'GET %s without a session returns 401 and touches no db function',
     async (path) => {
       const res = await request(appAs(null)).get(path);
@@ -90,6 +107,7 @@ describe('auth is required on every /api/me/* endpoint', () => {
       expect(dbMocks.getUserLatestSafetyPlan).not.toHaveBeenCalled();
       expect(dbMocks.listUserWorksheetInstances).not.toHaveBeenCalled();
       expect(dbMocks.listUserAssignments).not.toHaveBeenCalled();
+      expect(messagingMocks.getMessageHistoryForClient).not.toHaveBeenCalled();
     }
   );
 
@@ -221,6 +239,38 @@ describe('response shapes', () => {
     const res = await request(appAs(7)).post('/api/me/assignments/abc/complete').send({});
     expect(res.status).toBe(400);
     expect(dbMocks.completeAssignment).not.toHaveBeenCalled();
+  });
+
+  // Participant data export (caseworker portal spec section 10 item 8):
+  // message history is included, self-scoped, participant-tier fields only.
+  it('GET /api/me/export includes the full message history alongside the self-surface data', async () => {
+    const res = await request(appAs(7)).get('/api/me/export?userId=999');
+    expect(res.status).toBe(200);
+    // Self-scoping: every source resolves the SESSION user.
+    expect(messagingMocks.getMessageHistoryForClient).toHaveBeenCalledWith(7);
+    expect(dbMocks.getOwnProgress).toHaveBeenCalledWith(7);
+    expect(res.headers['content-disposition']).toContain('my-data-export.json');
+    expect(res.body.exported_at).toBeTruthy();
+    expect(res.body.message_threads).toHaveLength(1);
+    expect(res.body.message_threads[0].messages[0]).toMatchObject({
+      sender_role: 'participant',
+      body: 'checking in',
+      flagged: false,
+    });
+    // Participant tier: no risk scores anywhere in the export payload.
+    expect(JSON.stringify(res.body)).not.toContain('risk_score');
+    expect(res.body).toMatchObject({
+      progress: { session_count: 3 },
+      worksheets: expect.any(Array),
+      assignments: expect.any(Array),
+    });
+  });
+
+  it('GET /api/me/export returns a generic 500 when the message-history query fails', async () => {
+    messagingMocks.getMessageHistoryForClient.mockRejectedValue(new Error('pg exploded'));
+    const res = await request(appAs(7)).get('/api/me/export');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Failed to build data export' });
   });
 
   it('db failures return 500 with a generic error (no internals leaked)', async () => {

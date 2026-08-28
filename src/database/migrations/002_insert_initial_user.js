@@ -18,9 +18,13 @@ async function createInitialUser() {
     // Hash the password
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // Insert the user
+    // Insert the user. organization_id is NOT NULL since 069; this script runs
+    // AFTER the full migration range (see scripts/redteam-db-setup.sh), so the
+    // irb-study org row always exists by now.
     await pool.query(
-      'INSERT INTO users (username, password, role) VALUES ($1, $2, $3) ON CONFLICT (username) DO NOTHING',
+      `INSERT INTO users (username, password, role, organization_id)
+       VALUES ($1, $2, $3, (SELECT org_id FROM organizations WHERE slug = 'irb-study'))
+       ON CONFLICT (username) DO NOTHING`,
       [username, hashedPassword, role]
     );
 

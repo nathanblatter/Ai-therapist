@@ -9,6 +9,7 @@ export interface ClientInviteRow {
   invite_id: number;
   token_hash: string;
   therapist_id: number;
+  organization_id: number | null;
   label: string | null;
   created_at: string;
   expires_at: string;
@@ -17,16 +18,18 @@ export interface ClientInviteRow {
 }
 
 const INVITE_COLUMNS =
-  'invite_id, token_hash, therapist_id, label, created_at, expires_at, used_at, used_by';
+  'invite_id, token_hash, therapist_id, organization_id, label, created_at, expires_at, used_at, used_by';
 
 function hashToken(rawToken: string): string {
   return createHash('sha256').update(rawToken).digest('hex');
 }
 
 /**
- * Mint a new invite for a therapist. Returns the raw token (32 random bytes,
- * base64url — shown exactly once) alongside the stored row, which holds only
- * the sha256 hex of the token.
+ * Mint a new invite for a care-team member (therapist or caseworker; the
+ * therapist_id column historically holds either). Returns the raw token
+ * (32 random bytes, base64url — shown exactly once) alongside the stored row,
+ * which holds only the sha256 hex of the token. The invite inherits the
+ * inviter's organization (069: client_invites.organization_id NOT NULL).
  */
 export async function createInvite(
   therapistId: number,
@@ -35,8 +38,10 @@ export async function createInvite(
 ): Promise<{ rawToken: string; invite: ClientInviteRow }> {
   const rawToken = randomBytes(32).toString('base64url');
   const result = await pool.query<ClientInviteRow>(
-    `INSERT INTO client_invites (token_hash, therapist_id, label, expires_at)
-     VALUES ($1, $2, $3, now() + ($4 * INTERVAL '1 hour'))
+    `INSERT INTO client_invites (token_hash, therapist_id, organization_id, label, expires_at)
+     VALUES ($1, $2,
+             (SELECT organization_id FROM users WHERE userid = $2),
+             $3, now() + ($4 * INTERVAL '1 hour'))
      RETURNING ${INVITE_COLUMNS}`,
     [hashToken(rawToken), therapistId, label, ttlHours]
   );

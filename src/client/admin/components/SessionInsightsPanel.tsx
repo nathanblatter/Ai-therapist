@@ -1,9 +1,13 @@
-// Therapist-only panel inside SessionDetail: the participant's pre-session
+// Care-team panel inside SessionDetail: the participant's pre-session
 // check-in, the AI memory summary, and the draft SOAP note with a review
 // workflow. Backed by routes/admin/insights.routes.ts (403 for researchers —
-// both artifacts derive from unredacted content).
+// both artifacts derive from unredacted content). Caseworkers get the
+// summaries-tier projection: the server omits the SOAP clinical-note draft
+// from their GET (docs/caseworker-portal.md C6), so the SOAP/notes sections
+// simply do not render. Therapists can additionally seed an authored progress
+// note from the AI SOAP draft (slice B).
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, RefreshCw, CheckCircle } from 'react-feather';
+import { ChevronDown, ChevronRight, RefreshCw, CheckCircle, FileText } from 'react-feather';
 import PrepBrief from './PrepBrief';
 
 interface SessionSummary {
@@ -22,9 +26,18 @@ interface SoapNote {
   plan?: string;
 }
 
+// The therapist's authored progress note for this session (careNotes slice B).
+interface AuthoredNote {
+  note_id: number;
+  status: 'draft' | 'signed' | 'amended';
+  author_name: string;
+  signed_at: string | null;
+  seed_source: 'ai_soap' | null;
+}
+
 interface Insights {
   summary: SessionSummary | null;
-  soap_note: SoapNote | null;
+  soap_note?: SoapNote | null;
   soap_status?: 'draft' | 'reviewed';
   soap_reviewed_by?: string | null;
   soap_reviewed_at?: string | null;
@@ -34,6 +47,7 @@ interface Insights {
   notes_for_next_session?: string | null;
   notes_author?: string | null;
   notes_created_at?: string | null;
+  authored_note?: AuthoredNote | null;
 }
 
 interface Checkin {
@@ -59,8 +73,11 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
   const [busy, setBusy] = useState(false);
   const [notesDraft, setNotesDraft] = useState('');
   const [notesSaved, setNotesSaved] = useState(false);
+  const [seedError, setSeedError] = useState<string | null>(null);
 
   const isTherapist = userRole === 'therapist';
+  const isCaseworker = userRole === 'caseworker';
+  const canView = isTherapist || isCaseworker;
 
   const fetchInsights = useCallback(async () => {
     setLoading(true);
@@ -82,10 +99,10 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
   }, [sessionId]);
 
   useEffect(() => {
-    if (isTherapist && expanded && !insights) void fetchInsights();
-  }, [isTherapist, expanded, insights, fetchInsights]);
+    if (canView && expanded && !insights) void fetchInsights();
+  }, [canView, expanded, insights, fetchInsights]);
 
-  if (!isTherapist) return null;
+  if (!canView) return null;
   if (sessionStatus !== 'ended' && !checkin) return null;
 
   const handleReview = async () => {
@@ -129,8 +146,26 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
     }
   };
 
+  // Seed an authored progress note from the AI SOAP draft (idempotent server
+  // side: an existing live note for the session is returned instead).
+  const handleSeedNote = async () => {
+    setBusy(true);
+    setSeedError(null);
+    try {
+      const res = await fetch(`/admin/api/sessions/${sessionId}/notes/from-insights`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to start the progress note');
+      setInsights(prev => (prev ? { ...prev, authored_note: (data as { note: AuthoredNote }).note } : prev));
+    } catch (err: unknown) {
+      setSeedError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const summary = insights?.summary;
   const soap = insights?.soap_note;
+  const authoredNote = insights?.authored_note ?? null;
 
   return (
     <div className="mb-4 border border-indigo-200 bg-indigo-50 rounded-lg">
@@ -148,14 +183,15 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
             </span>
           )}
         </span>
-        <span className="text-xs text-indigo-400">therapist only</span>
+        <span className="text-xs text-indigo-400">{isCaseworker ? 'summary view' : 'therapist only'}</span>
       </button>
 
       {expanded && (
         <div className="px-4 pb-4 space-y-4 text-sm">
           {/* Structured pre-session prep digest (ai-therapist-123), keyed by
-              participant — only for logged-in participants. */}
-          {typeof participantUserId === 'number' && <PrepBrief userId={participantUserId} />}
+              participant — only for logged-in participants. Therapist-only:
+              the digest quotes clinician notes and crisis history. */}
+          {isTherapist && typeof participantUserId === 'number' && <PrepBrief userId={participantUserId} />}
 
           {checkin && (
             <div>
@@ -173,7 +209,7 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
           {notFound && !loading && (
             <div className="flex items-center gap-3">
               <p className="text-gray-500">No insights generated for this session yet.</p>
-              {sessionStatus === 'ended' && (
+              {isTherapist && sessionStatus === 'ended' && (
                 <button
                   onClick={handleRegenerate}
                   disabled={busy}
@@ -282,11 +318,34 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                 <p className="text-xs text-gray-400">
                   AI-drafted ({insights?.model}) — verify before any clinical use.
                 </p>
+
+                {/* Progress-note seeding (slice B): one live authored note per
+                    session; the server is idempotent about it. */}
+                <div className="pt-2 border-t border-gray-100">
+                  {authoredNote ? (
+                    <p className="text-xs text-gray-600 flex items-center gap-1.5">
+                      <FileText size={12} aria-hidden="true" />
+                      Progress note {authoredNote.status === 'signed' ? 'signed' : `in ${authoredNote.status}`} by{' '}
+                      {authoredNote.author_name}
+                      {authoredNote.signed_at ? ` on ${new Date(authoredNote.signed_at).toLocaleString()}` : ''} — see
+                      the client&apos;s Notes panel.
+                    </p>
+                  ) : (
+                    <button
+                      onClick={handleSeedNote}
+                      disabled={busy}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded text-xs font-medium flex items-center gap-1.5"
+                    >
+                      <FileText size={12} aria-hidden="true" /> Start progress note from this draft
+                    </button>
+                  )}
+                  {seedError && <p className="text-xs text-red-600 mt-1" role="alert">{seedError}</p>}
+                </div>
               </div>
             </div>
           )}
 
-          {insights && (
+          {isTherapist && insights && (
             <div>
               <h4 className="font-semibold text-gray-700 mb-1">Notes for next session</h4>
               <div className="bg-white rounded p-3 space-y-2">

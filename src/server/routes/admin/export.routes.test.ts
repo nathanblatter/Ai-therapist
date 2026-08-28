@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   getAggregateExport: vi.fn(),
   isAssigned: vi.fn(),
   getSessionAccessInfo: vi.fn(),
+  // orgIdFor contract (middleware/org.ts): researcher org must resolve, else
+  // the route fails closed with a 500.
+  getOrganizationIdForUser: vi.fn().mockResolvedValue(1),
+  getIrbStudyOrgId: vi.fn().mockResolvedValue(1),
 }));
 
 vi.mock('../../db/index.js', () => mocks);

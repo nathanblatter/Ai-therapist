@@ -73,8 +73,11 @@ export async function ensureHarnessUser(): Promise<void> {
   const bcrypt = (await import('bcrypt')).default;
   const password = process.env.REDTEAM_PARTICIPANT_PASS || 'redteam-Passw0rd!';
   const hash = await bcrypt.hash(password, 10);
+  // organization_id is NOT NULL since migration 069; the harness account
+  // lives in the irb-study org (its sessions are excluded via is_demo).
   await pool.query(
-    `INSERT INTO users (username, password, role) VALUES ($1, $2, 'participant')
+    `INSERT INTO users (username, password, role, organization_id)
+     VALUES ($1, $2, 'participant', (SELECT org_id FROM organizations WHERE slug = 'irb-study'))
      ON CONFLICT (username) DO NOTHING`,
     [HARNESS_USERNAME, hash],
   );

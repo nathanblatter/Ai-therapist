@@ -2,6 +2,7 @@
 // Researcher-gated where noted; preferences/self routes only need auth.
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { orgIdFor } from '../../middleware/org.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import {
   getAllUsers,
@@ -49,10 +50,11 @@ export default function usersRoutes(): Router {
     return res.json({ success: true, demo: true, message: 'Demo mode — changes are not saved.' });
   });
 
-  // GET /api/users - all users (researcher only)
-  router.get('/api/users', requireRole('researcher'), async (_req, res) => {
+  // GET /api/users - all users (researcher only, org-scoped per C13; at
+  // cutover every user is in irb-study so results are byte-identical)
+  router.get('/api/users', requireRole('researcher'), async (req, res) => {
     try {
-      const users = await getAllUsers();
+      const users = await getAllUsers(null, await orgIdFor(req));
       res.json({ users });
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -253,7 +255,7 @@ export default function usersRoutes(): Router {
     if (!username || !password || !role) {
       return res.status(400).json({ error: 'Username, password, and role are required' });
     }
-    if (!['therapist', 'researcher', 'participant'].includes(role)) {
+    if (!['therapist', 'researcher', 'participant', 'caseworker'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 

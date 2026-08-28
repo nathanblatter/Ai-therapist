@@ -136,7 +136,7 @@ export async function serverEndSession(
     });
     void broadcastAdminEventForSession(global.io, 'session:ended', {
       sessionId, endedAt: new Date(), endedBy: opts.endedBy, reason: opts.reason,
-    }, sessionId);
+    }, sessionId, 'summary');
   }
   return true;
 }
@@ -159,7 +159,7 @@ async function finalizeAbandonedSession(sessionId: string): Promise<void> {
   finalize(sessionId).catch(err => log.error({ err }, `[Recorder] abandon-finalize failed for ${sessionId}`));
 
   if (global.io) {
-    void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'system', reason: 'abandoned' }, sessionId);
+    void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'system', reason: 'abandoned' }, sessionId, 'summary');
     global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'system', reason: 'abandoned' });
   }
 }

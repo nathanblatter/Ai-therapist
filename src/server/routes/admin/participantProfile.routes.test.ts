@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   // Caseload middleware deps (ai-therapist-119).
   isAssigned: vi.fn(),
   getSessionAccessInfo: vi.fn(),
+  // Org resolution (middleware/org.ts, C13 researcher scoping).
+  getOrganizationIdForUser: vi.fn(),
+  getIrbStudyOrgId: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => ({
@@ -28,6 +31,8 @@ vi.mock('../../db/index.js', () => ({
   recordLlmUsage: mocks.recordLlmUsage,
   isAssigned: mocks.isAssigned,
   getSessionAccessInfo: mocks.getSessionAccessInfo,
+  getOrganizationIdForUser: mocks.getOrganizationIdForUser,
+  getIrbStudyOrgId: mocks.getIrbStudyOrgId,
 }));
 
 vi.mock('../../config/secrets.js', () => ({
@@ -83,6 +88,8 @@ beforeEach(() => {
   mocks.recordLlmUsage.mockReset().mockResolvedValue(undefined);
   mocks.isAssigned.mockReset().mockResolvedValue(true);
   mocks.getSessionAccessInfo.mockReset().mockResolvedValue(null);
+  mocks.getOrganizationIdForUser.mockReset().mockResolvedValue(5);
+  mocks.getIrbStudyOrgId.mockReset().mockResolvedValue(1);
   mocks.openaiCreate.mockReset().mockResolvedValue({
     choices: [{ message: { content: 'Doing steadily better since the last review.' } }],
     usage: { prompt_tokens: 120, completion_tokens: 60 },
@@ -133,8 +140,8 @@ describe('GET /admin/api/users/:userId/sessions', () => {
     const res = await request(appAs('researcher')).get('/admin/api/users/42/sessions');
 
     expect(res.status).toBe(200);
-    expect(mocks.listSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), null);
-    expect(mocks.countSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), null);
+    expect(mocks.listSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), null, 5);
+    expect(mocks.countSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), null, 5);
     expect(res.body.sessions[0]).toMatchObject({ session_id: 's1', eval_score: 4.2, feedback_rating: 5 });
     expect(res.body.sessions[1]).toMatchObject({ session_id: 's2', eval_score: null, feedback_rating: null });
     expect(res.body.pagination.totalCount).toBe(2);
@@ -145,10 +152,26 @@ describe('GET /admin/api/users/:userId/sessions', () => {
     expect((await request(appAs('participant')).get('/admin/api/users/42/sessions')).status).toBe(403);
   });
 
-  it('threads the therapist scope id into the scoped list queries', async () => {
+  it('threads the therapist scope id into the scoped list queries (no org filter)', async () => {
     await request(appAs('therapist')).get('/admin/api/users/42/sessions');
-    expect(mocks.listSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), 1);
-    expect(mocks.countSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), 1);
+    expect(mocks.listSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), 1, null);
+    expect(mocks.countSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), 1, null);
+    expect(mocks.getOrganizationIdForUser).not.toHaveBeenCalled();
+  });
+
+  it('org-scopes the researcher view like the main session browser (C13)', async () => {
+    mocks.getOrganizationIdForUser.mockResolvedValue(9);
+    const res = await request(appAs('researcher')).get('/admin/api/users/42/sessions');
+    expect(res.status).toBe(200);
+    expect(mocks.listSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), null, 9);
+    expect(mocks.countSessions).toHaveBeenCalledWith(expect.objectContaining({ userId: 42 }), null, 9);
+  });
+
+  it('500s (fail closed) when the researcher org cannot be resolved', async () => {
+    mocks.getOrganizationIdForUser.mockRejectedValue(new Error('db down'));
+    const res = await request(appAs('researcher')).get('/admin/api/users/42/sessions');
+    expect(res.status).toBe(500);
+    expect(mocks.listSessions).not.toHaveBeenCalled();
   });
 });
 

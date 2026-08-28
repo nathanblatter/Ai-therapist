@@ -18,7 +18,9 @@ import {
   getSessionMessages,
   getSessionConfig,
   getSessionEval,
+  getSessionIsDemo,
   hasSessionEval,
+  isSandboxAccountSession,
   upsertSessionEval,
   getUnevaluatedEndedSessions,
   type EvalRubric,
@@ -155,6 +157,14 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
     log.warn(`Session ${sessionId} is not ended (status=${session.status}); skipping eval`);
     return null;
   }
+  // Sandbox sessions are canned fixture transcripts (caseworker portal spec
+  // section 7): judging them wastes model spend and pollutes drift trends, so
+  // they are skipped even under force. Demo/harness is_demo sessions are NOT
+  // blocked here — the red-team harness judges them via force explicitly.
+  if (await isSandboxAccountSession(sessionId)) {
+    log.info(`Session ${sessionId} belongs to a sandbox account; skipping eval`);
+    return null;
+  }
   if (!options.force && (await hasSessionEval(sessionId, EVAL_PROMPT_VERSION))) {
     log.info(`Eval ${EVAL_PROMPT_VERSION} already exists for ${sessionId}; skipping (use force to re-run)`);
     return getSessionEval(sessionId);
@@ -262,9 +272,17 @@ export function maybeAutoEvalSession(sessionId: string): void {
   // an admin enables auto_run in config. Explicit paths still work everywhere.
   if (process.env.EVALS_ENABLED !== 'true') return;
   getEvalsConfig()
-    .then(cfg => {
+    .then(async cfg => {
       if (cfg.auto_run_enabled !== true) return;
-      return evaluateSession(sessionId).then(() => undefined);
+      // Skip the auto-enqueue for is_demo sessions (demo accounts, eval
+      // harness, sandbox seeds — caseworker portal spec section 7 item 5):
+      // none of them should burn judge spend on session end. Explicit paths
+      // (admin POST /eval, CLI, redteam judge) still work for demo/harness.
+      if (await getSessionIsDemo(sessionId)) {
+        log.info(`Session ${sessionId} is is_demo; skipping auto-eval enqueue`);
+        return;
+      }
+      await evaluateSession(sessionId);
     })
     .catch(err => log.error({ err }, `Auto-eval failed for ${sessionId}`));
 }

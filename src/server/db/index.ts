@@ -44,3 +44,13 @@ export * from './practiceAssignments.queries.js';
 export * from './harnessRuns.queries.js';
 export * from './caseload.queries.js';
 export * from './invites.queries.js';
+// Caseworker portal foundation modules (docs/caseworker-portal.md, slice F).
+export * from './organizations.queries.js';
+export * from './careNotes.queries.js';
+export * from './escalations.queries.js';
+export * from './workQueue.queries.js';
+export * from './notifications.queries.js';
+export * from './messaging.queries.js';
+export * from './messagingRetention.queries.js';
+export * from './sandboxInvites.queries.js';
+export * from './caseworkerDashboard.queries.js';

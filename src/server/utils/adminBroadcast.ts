@@ -7,7 +7,12 @@
 // participants on their caseload. Unattributable events (no participant
 // userId resolvable) fail closed: researchers only.
 import type { Server as SocketIOServer } from 'socket.io';
-import { getSessionAccessInfo, getTherapistIdsForClient } from '../db/index.js';
+import {
+  getSessionAccessInfo,
+  getTherapistIdsForClient,
+  getCaseworkerIdsForClient,
+  isSandboxAccount,
+} from '../db/index.js';
 
 /** The slice of a socket.io Server we need (keeps tests trivial to mock). */
 export type AdminBroadcastIo = Pick<SocketIOServer, 'to'>;
@@ -20,35 +25,111 @@ export function therapistRoom(therapistId: number): string {
   return `therapist:${therapistId}`;
 }
 
+/** Per-caseworker room a caseworker socket joins on connect (summary tier). */
+export function caseworkerRoom(caseworkerId: number): string {
+  return `caseworker:${caseworkerId}`;
+}
+
+/**
+ * Data tier of an emitted event (docs/caseworker-portal.md section 5).
+ * 'full' (the default — fail closed) reaches researcher + therapist rooms
+ * only; 'summary' additionally fans out to the client's caseworkers'
+ * `caseworker:<id>` rooms. Only call sites whose payloads are transcript-free
+ * by construction may pass 'summary'.
+ */
+export type BroadcastTier = 'full' | 'summary';
+
+// Participant -> is_sandbox cache. users.is_sandbox is stamped at account
+// creation and never toggled (spec C3), so resolved values never go stale.
+// Bounded FIFO like the session->user cache below.
+const sandboxUserCache = new Map<number, boolean>();
+const SANDBOX_USER_CACHE_MAX = 1000;
+
+/** Test hook: clear the participant->is_sandbox cache. */
+export function clearSandboxUserCache(): void {
+  sandboxUserCache.clear();
+}
+
+/**
+ * Is this participant a sandbox account? On lookup failure returns false
+ * (the event stays visible to the researcher room): suppressing study
+ * events on a transient db error would hide real-participant crisis alerts
+ * from on-call researchers, which is worse than briefly leaking sandbox
+ * METADATA (these payloads carry no transcript content for researchers who
+ * cannot open the underlying resources — the org-scoped queries 404 them).
+ */
+async function isSandboxParticipant(participantUserId: number): Promise<boolean> {
+  const cached = sandboxUserCache.get(participantUserId);
+  if (cached !== undefined) return cached;
+  try {
+    const sandbox = await isSandboxAccount(participantUserId);
+    if (sandboxUserCache.size >= SANDBOX_USER_CACHE_MAX) {
+      const oldest = sandboxUserCache.keys().next().value;
+      if (oldest !== undefined) sandboxUserCache.delete(oldest);
+    }
+    sandboxUserCache.set(participantUserId, sandbox);
+    return sandbox;
+  } catch (err) {
+    console.error(`[AdminBroadcast] Sandbox lookup failed for user ${participantUserId}; treating as non-sandbox:`, err);
+    return false; // do not cache failures
+  }
+}
+
 /**
  * Emit an admin monitoring event.
  *
- * - Always emits to 'admin-broadcast' (researchers).
+ * - Emits to 'admin-broadcast' (researchers) UNLESS the event is attributed
+ *   to a sandbox participant (C13: sandbox orgs' live events must never
+ *   stream to study researchers; the sandbox org's own care-team members
+ *   still receive them via their therapist:/caseworker: rooms below).
+ *   Unattributable events keep going to the researcher room (they carry no
+ *   participant linkage), as does an event whose sandbox lookup fails — see
+ *   isSandboxParticipant for the safety rationale.
  * - When `participantUserId` is a finite number, also emits to
- *   `therapist:<id>` for every therapist with that participant on caseload.
- * - When `participantUserId` is null/undefined, or the caseload lookup fails,
- *   emits to 'admin-broadcast' only (fail closed for therapists). Lookup
- *   failures are logged, never thrown — an emit must not crash a service.
+ *   `therapist:<id>` for every therapist with that participant on caseload,
+ *   and — only when tier='summary' — to `caseworker:<id>` for the client's
+ *   caseworkers.
+ * - When `participantUserId` is null/undefined, or a caseload lookup fails,
+ *   the affected rooms are skipped (fail closed). Lookup failures are
+ *   logged, never thrown — an emit must not crash a service.
  */
 export async function broadcastAdminEvent(
   io: AdminBroadcastIo,
   event: string,
   payload: unknown,
-  participantUserId: number | null | undefined
+  participantUserId: number | null | undefined,
+  tier: BroadcastTier = 'full'
 ): Promise<void> {
-  io.to(ADMIN_BROADCAST_ROOM).emit(event, payload);
+  if (typeof participantUserId !== 'number' || !Number.isFinite(participantUserId)) {
+    io.to(ADMIN_BROADCAST_ROOM).emit(event, payload);
+    return;
+  }
 
-  if (typeof participantUserId !== 'number' || !Number.isFinite(participantUserId)) return;
+  if (!(await isSandboxParticipant(participantUserId))) {
+    io.to(ADMIN_BROADCAST_ROOM).emit(event, payload);
+  }
 
   let therapistIds: number[];
   try {
     therapistIds = await getTherapistIdsForClient(participantUserId);
   } catch (err) {
     console.error(`[AdminBroadcast] Caseload lookup failed for user ${participantUserId} (event ${event}); therapists skipped:`, err);
-    return;
+    therapistIds = [];
   }
   for (const therapistId of therapistIds) {
     io.to(therapistRoom(therapistId)).emit(event, payload);
+  }
+
+  if (tier !== 'summary') return;
+  let caseworkerIds: number[];
+  try {
+    caseworkerIds = await getCaseworkerIdsForClient(participantUserId);
+  } catch (err) {
+    console.error(`[AdminBroadcast] Caseworker lookup failed for user ${participantUserId} (event ${event}); caseworkers skipped:`, err);
+    return;
+  }
+  for (const caseworkerId of caseworkerIds) {
+    io.to(caseworkerRoom(caseworkerId)).emit(event, payload);
   }
 }
 
@@ -74,7 +155,8 @@ export async function broadcastAdminEventForSession(
   io: AdminBroadcastIo,
   event: string,
   payload: unknown,
-  sessionId: string
+  sessionId: string,
+  tier: BroadcastTier = 'full'
 ): Promise<void> {
   let userId: number | null;
   if (sessionUserCache.has(sessionId)) {
@@ -101,7 +183,7 @@ export async function broadcastAdminEventForSession(
       userId = null; // fail closed, do not cache failures
     }
   }
-  await broadcastAdminEvent(io, event, payload, userId);
+  await broadcastAdminEvent(io, event, payload, userId, tier);
 }
 
 

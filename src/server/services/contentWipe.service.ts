@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import { wipeAgedThreadMessageBodies } from '../db/messagingRetention.queries.js';
 
 // Scheduler state
 let wipeInterval: ReturnType<typeof setTimeout> | null = null;
@@ -86,6 +87,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
   wipeId: unknown;
   messagesWiped?: number | null;
   messagesSkipped?: number;
+  threadBodiesWiped?: number;
   error?: string;
 }> {
   const settings = await getRetentionSettings();
@@ -112,6 +114,18 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
     // are IRB regulatory records and are exempt from the content-retention
     // wipe. They contain redacted-only text (no raw PHI), so retaining them is
     // safe; do not add adverse_event_reports to this sweep.
+    //
+    // Sandbox exemption (caseworker portal spec section 7 / decision 10):
+    // sandbox-org transcripts are synthetic fixtures with no PHI, seeded once
+    // and retained until researcher-triggered batch teardown — a wiped
+    // sandbox is a broken demo. Everything owned by an is_sandbox account is
+    // excluded from the wipe.
+    const notSandboxClause = `
+          AND NOT EXISTS (
+            SELECT 1 FROM therapy_sessions sbx
+            JOIN users sbxu ON sbxu.userid = sbx.user_id
+            WHERE sbx.session_id = messages.session_id AND sbxu.is_sandbox
+          )`;
     let wipeQuery: string;
     let queryParams: unknown[];
 
@@ -123,7 +137,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
         WHERE content IS NOT NULL
           AND content_redacted IS NOT NULL
           AND created_at < $1
-          AND metadata->>'redaction_error' IS NULL
+          AND metadata->>'redaction_error' IS NULL${notSandboxClause}
         RETURNING message_id
       `;
       queryParams = [cutoffTime];
@@ -133,7 +147,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
         UPDATE messages
         SET content = NULL
         WHERE content IS NOT NULL
-          AND created_at < $1
+          AND created_at < $1${notSandboxClause}
         RETURNING message_id
       `;
       queryParams = [cutoffTime];
@@ -142,6 +156,18 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
     // Execute the wipe
     const wipeResult = await pool.query(wipeQuery, queryParams);
     const messagesWiped = wipeResult.rowCount;
+
+    // Thread-message inclusion (caseworker portal spec section 10 item 8:
+    // messages retain like sessions). Same cutoff clock: async thread message
+    // BODIES are blanked; the row and its scan signals survive until the
+    // dataRetention sweep hard-deletes them at the end of the retention
+    // window. require_redaction_complete's analog here is "scan settled":
+    // scan_status='pending' messages are left for the next run. Sandbox
+    // threads are exempt inside the query (spec section 10 item 10).
+    const threadBodiesWiped = await wipeAgedThreadMessageBodies(
+      cutoffTime,
+      settings.require_redaction_complete
+    );
 
     // Count skipped messages (those with content but not wiped)
     const skippedResult = await pool.query(
@@ -177,7 +203,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
       [JSON.stringify(updatedSettings)]
     );
 
-    console.log(`✅ Content wipe completed: ${messagesWiped} messages wiped, ${messagesSkipped} skipped`);
+    console.log(`✅ Content wipe completed: ${messagesWiped} messages wiped, ${messagesSkipped} skipped, ${threadBodiesWiped} thread message bodies wiped`);
 
     // Emit socket event to notify admins
     if (global.io) {
@@ -185,6 +211,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
         wipeId,
         messagesWiped,
         messagesSkipped,
+        threadBodiesWiped,
         triggeredBy,
         completedAt: new Date().toISOString()
       });
@@ -194,7 +221,8 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
       success: true,
       wipeId,
       messagesWiped,
-      messagesSkipped
+      messagesSkipped,
+      threadBodiesWiped
     };
 
   } catch (error: unknown) {
@@ -230,12 +258,19 @@ export async function getWipeStats(): Promise<Record<string, unknown>> {
   const cutoffTime = new Date();
   cutoffTime.setHours(cutoffTime.getHours() - settings.retention_hours);
 
+  // Mirrors the wipe query's sandbox exemption so the "pending" stat never
+  // counts messages the wipe will deliberately skip forever.
   const pendingResult = await pool.query(
     `SELECT COUNT(*) as count FROM messages
      WHERE content IS NOT NULL
        AND content_redacted IS NOT NULL
        AND created_at < $1
-       AND metadata->>'redaction_error' IS NULL`,
+       AND metadata->>'redaction_error' IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM therapy_sessions sbx
+         JOIN users sbxu ON sbxu.userid = sbx.user_id
+         WHERE sbx.session_id = messages.session_id AND sbxu.is_sandbox
+       )`,
     [cutoffTime]
   );
 
@@ -341,14 +376,19 @@ async function scheduleNextWipe(): Promise<void> {
  * without mocking the redaction service.
  */
 export async function findEndedSessionsWithRedactionGaps(limit = 200): Promise<string[]> {
+  // Sandbox sessions are excluded belt-and-suspenders: the seeder always
+  // stamps content_redacted, and the LLM redactor must never run over
+  // synthetic fixture transcripts (cost + retained-forever demo data).
   const result = await pool.query<{ session_id: string }>(
     `SELECT DISTINCT ts.session_id
        FROM therapy_sessions ts
        JOIN messages m ON m.session_id = ts.session_id
+       LEFT JOIN users u ON u.userid = ts.user_id
       WHERE ts.status = 'ended'
         AND m.content IS NOT NULL
         AND m.content_redacted IS NULL
         AND m.role IN ('user', 'assistant')
+        AND u.is_sandbox IS NOT TRUE
       LIMIT $1`,
     [limit]
   );

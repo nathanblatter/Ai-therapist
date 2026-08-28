@@ -30,8 +30,14 @@ export async function getStudyProtocol(): Promise<StudyProtocol> {
 }
 
 // study window params, shared by every windowed query. $1 = start, $2 = end.
+// Sandbox-account sessions are additionally excluded (belt-and-suspenders on
+// top of is_demo=TRUE; docs/caseworker-portal.md section 7 — sandbox users
+// must never appear in study enrollment/participant counts).
 const WINDOW = `($1::timestamptz IS NULL OR ts.created_at >= $1)
-             AND ($2::timestamptz IS NULL OR ts.created_at <= $2)`;
+             AND ($2::timestamptz IS NULL OR ts.created_at <= $2)
+             AND (ts.user_id IS NULL OR NOT EXISTS (
+               SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE
+             ))`;
 
 export interface StudyOpsSummary {
   protocol: StudyProtocol;

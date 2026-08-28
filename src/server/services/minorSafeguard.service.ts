@@ -238,7 +238,7 @@ async function endSessionNow(sessionId: string, channel: 'realtime' | 'chat'): P
 
   const endedAt = new Date();
   if (global.io) {
-    void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'system', endedAt }, sessionId);
+    void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'system', endedAt }, sessionId, 'summary');
     global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt });
   }
 

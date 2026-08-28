@@ -3,9 +3,10 @@
 // edit/delete sessions and messages. Read queries live in
 // db/adminSessions.queries.ts; mutations reuse the db/ session helpers.
 import { Router } from 'express';
-import { requireRole } from '../../middleware/auth.js';
+import { requireRole, requireFullContent } from '../../middleware/auth.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
-import { requireSessionClientAccess, therapistScopeId, requireMessageClientAccess } from '../../middleware/caseload.js';
+import { requireSessionClientAccess, careTeamScopeId, requireMessageClientAccess } from '../../middleware/caseload.js';
+import { orgIdFor } from '../../middleware/org.js';
 import {
   getActiveSessions,
   listSessions,
@@ -33,10 +34,14 @@ function parseList(value: unknown): string[] | null {
 export default function adminSessionsRoutes(): Router {
   const router = Router();
 
-  // GET /admin/api/sessions/active - all active sessions (crisis-first)
-  router.get('/admin/api/sessions/active', requireRole('therapist', 'researcher'), async (req, res) => {
+  // GET /admin/api/sessions/active - all active sessions (crisis-first).
+  // Caseworker-allowed: the payload is metadata + crisis signals only (no
+  // message content), i.e. summaries tier by construction.
+  router.get('/admin/api/sessions/active', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     try {
-      const sessions = await getActiveSessions(await therapistScopeId(req));
+      const scope = await careTeamScopeId(req);
+      const orgId = scope === null ? await orgIdFor(req) : null;
+      const sessions = await getActiveSessions(scope, orgId);
       res.json({ sessions });
     } catch (err) {
       console.error('Failed to fetch active sessions:', err);
@@ -45,7 +50,7 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // POST /admin/api/sessions/:sessionId/end - remotely terminate a session
-  router.post('/admin/api/sessions/:sessionId/end', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/end', requireFullContent, requireSessionClientAccess(), async (req, res) => {
     try {
       const { sessionId } = req.params;
 
@@ -94,7 +99,7 @@ export default function adminSessionsRoutes(): Router {
         sessionId,
         endedAt: new Date(),
         endedBy: req.session.username,
-      }, sessionId);
+      }, sessionId, 'summary');
       global.io.to(`session:${sessionId}`).emit('session:status', {
         status: 'ended',
         endedBy: req.session.username,
@@ -110,8 +115,12 @@ export default function adminSessionsRoutes(): Router {
     }
   });
 
-  // GET /admin/api/sessions - filtered, paginated session list
-  router.get('/admin/api/sessions', requireRole('therapist', 'researcher'), async (req, res) => {
+  // GET /admin/api/sessions - filtered, paginated session list.
+  // Caseworker-allowed: rows are per-session metadata/aggregates only.
+  // listSessions `search` audit (spec section 2): it matches session_id,
+  // session_name, and username only — never message content — so the filter
+  // is safe for the summaries tier unmodified.
+  router.get('/admin/api/sessions', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     const {
       search, startDate, endDate, minMessages, maxMessages,
       page = 1, limit = 50,
@@ -140,10 +149,11 @@ export default function adminSessionsRoutes(): Router {
         crisisSeverity: crisisSeverity ? String(crisisSeverity) : null,
       };
 
-      const scope = await therapistScopeId(req);
+      const scope = await careTeamScopeId(req);
+      const orgId = scope === null ? await orgIdFor(req) : null;
       const [sessions, totalCount] = await Promise.all([
-        listSessions(filters, scope),
-        countSessions(filters, scope),
+        listSessions(filters, scope, orgId),
+        countSessions(filters, scope, orgId),
       ]);
 
       res.json({
@@ -159,7 +169,7 @@ export default function adminSessionsRoutes(): Router {
   // GET /admin/api/sessions/:sessionId/redaction-status - redaction progress:
   // complete/partial/pending/no_content, plus raw counts (ai-therapist-22).
   // Registered before /:sessionId for clarity (paths don't actually overlap).
-  router.get('/admin/api/sessions/:sessionId/redaction-status', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/redaction-status', requireFullContent, requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     try {
       const breakdown = await getRedactionStatusBreakdown(sessionId);
@@ -177,7 +187,7 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // GET /admin/api/sessions/:sessionId/recording-info - playback availability
-  router.get('/admin/api/sessions/:sessionId/recording-info', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/recording-info', requireFullContent, requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     try {
       const rec = await getSessionRecording(sessionId);
@@ -199,7 +209,7 @@ export default function adminSessionsRoutes(): Router {
 
   // GET /admin/api/sessions/:sessionId/recording - stream the WAV (Range-aware,
   // proxied from object storage so the browser never talks to MinIO directly).
-  router.get('/admin/api/sessions/:sessionId/recording', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/recording', requireFullContent, requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     try {
       const rec = await getSessionRecording(sessionId);
@@ -242,7 +252,7 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // GET /admin/api/sessions/:sessionId - full session transcript
-  router.get('/admin/api/sessions/:sessionId', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId', requireFullContent, requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     try {
       const session = await getSessionWithUser(sessionId);
@@ -290,7 +300,7 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // DELETE /admin/api/sessions/:sessionId - delete a session and its data
-  router.delete('/admin/api/sessions/:sessionId', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
+  router.delete('/admin/api/sessions/:sessionId', requireFullContent, requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     try {
       const deletedSession = await deleteSession(sessionId);
@@ -308,7 +318,7 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // PUT /admin/api/messages/:messageId - edit a message's content
-  router.put('/admin/api/messages/:messageId', requireRole('therapist', 'researcher'), requireMessageClientAccess(), async (req, res) => {
+  router.put('/admin/api/messages/:messageId', requireFullContent, requireMessageClientAccess(), async (req, res) => {
     const { messageId } = req.params;
     const { content } = req.body;
 
@@ -349,7 +359,7 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // DELETE /admin/api/messages/:messageId - delete a message
-  router.delete('/admin/api/messages/:messageId', requireRole('therapist', 'researcher'), requireMessageClientAccess(), async (req, res) => {
+  router.delete('/admin/api/messages/:messageId', requireFullContent, requireMessageClientAccess(), async (req, res) => {
     const { messageId } = req.params;
     try {
       const deletedMessage = await deleteMessage(messageId);

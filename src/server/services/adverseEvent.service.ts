@@ -11,11 +11,13 @@ import {
   getSessionAeSnapshot,
   getRecentSessionMessages,
   insertAdverseEventDraft,
+  isSandboxAccountSession,
   type AdverseEventTimelineEntry,
   type AdverseEventActionEntry,
 } from '../db/index.js';
 import { getSessionCrisisEvents } from './crisisDetection.service.js';
 import { redactPHIBatch } from './redaction.service.js';
+import { enqueueWorkItem } from './workQueue.service.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('adverseEvent');
@@ -73,9 +75,16 @@ export async function draftAdverseEventFromCrisis(sessionId: string, opts: Draft
     }
     // Non-study sessions (demo accounts, eval-harness runs) are not IRB
     // adverse events — auto-drafting from them would pollute the report queue.
-    // Manual drafts stay allowed for any session.
+    // Manual drafts stay allowed for demo-role/harness sessions, but NOT for
+    // sandbox-owned sessions (which also ride is_demo=TRUE): sandbox clients
+    // are synthetic, so a manually filed AE from one is never a real IRB
+    // report — only queue noise.
     if (snapshot.is_demo && triggerSource !== 'manual') {
       log.info({ sessionId }, 'AE draft skipped: non-study (demo/harness) session');
+      return null;
+    }
+    if (triggerSource === 'manual' && (await isSandboxAccountSession(sessionId))) {
+      log.info({ sessionId }, 'AE draft skipped: sandbox-owned session (manual drafts excluded)');
       return null;
     }
 
@@ -150,6 +159,19 @@ export async function draftAdverseEventFromCrisis(sessionId: string, opts: Draft
       log.info({ sessionId, crisisEventId }, 'AE draft already exists for this crisis event (idempotent no-op)');
     } else {
       log.info({ sessionId, reportId, triggerSource }, 'AE draft created');
+      // Work-queue hook (caseworker portal): pool item so the care team sees
+      // the draft awaiting review. enqueueWorkItem never throws; sandbox
+      // drafts (if any slip past the is_demo guard) are stamped is_sandbox
+      // and never email.
+      void enqueueWorkItem({
+        itemType: 'adverse_event',
+        severity: 'warning',
+        title: `Adverse event draft #${reportId} awaiting review`,
+        detail: { report_id: reportId, trigger_source: triggerSource },
+        sourceTable: 'adverse_event_reports',
+        sourceId: String(reportId),
+        sessionId,
+      });
     }
     return reportId;
   } catch (err) {
@@ -176,6 +198,12 @@ export async function draftAdverseEventFromEligibility(
     const snapshot = await getSessionAeSnapshot(sessionId);
     if (!snapshot) {
       log.warn({ sessionId }, 'Eligibility AE draft skipped: session not found');
+      return null;
+    }
+    // Same non-study guard as the crisis assembler: demo/harness/sandbox
+    // sessions (all is_demo=TRUE) are not IRB adverse events (spec s7 #4).
+    if (snapshot.is_demo) {
+      log.info({ sessionId }, 'Eligibility AE draft skipped: non-study (demo/harness/sandbox) session');
       return null;
     }
 
@@ -225,6 +253,16 @@ export async function draftAdverseEventFromEligibility(
       log.info({ sessionId }, 'Eligibility AE draft already exists for this session (idempotent no-op)');
     } else {
       log.info({ sessionId, reportId }, 'Eligibility AE draft created');
+      // Work-queue hook (caseworker portal): mirror of the crisis-draft hook.
+      void enqueueWorkItem({
+        itemType: 'adverse_event',
+        severity: 'warning',
+        title: `Adverse event draft #${reportId} awaiting review`,
+        detail: { report_id: reportId, trigger_source: 'auto_eligibility' },
+        sourceTable: 'adverse_event_reports',
+        sourceId: String(reportId),
+        sessionId,
+      });
     }
     return reportId;
   } catch (err) {

@@ -4,7 +4,9 @@
 //     the DB keeps just its sha256 hash.
 //   - GET  /admin/api/caseload/invites — the therapist's own invites with a
 //     derived pending/used/expired state.
-// Therapist-only: invites bind a new participant to the calling therapist.
+// Care-team only (therapist or caseworker — caseworker intake minting per
+// docs/caseworker-portal.md section 2): invites bind a new participant to the
+// calling member with the member's role and organization.
 // Demo requests never reach this router (intercepted earlier).
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
@@ -27,7 +29,7 @@ export default function invitesRoutes(): Router {
   const router = Router();
 
   // POST /admin/api/caseload/invites — body: { label?, ttlHours? }
-  router.post('/admin/api/caseload/invites', requireRole('therapist'), async (req, res) => {
+  router.post('/admin/api/caseload/invites', requireRole('therapist', 'caseworker'), async (req, res) => {
     try {
       const rawLabel = req.body?.label;
       const label =
@@ -60,7 +62,7 @@ export default function invitesRoutes(): Router {
   });
 
   // GET /admin/api/caseload/invites — the caller's own invites, newest first.
-  router.get('/admin/api/caseload/invites', requireRole('therapist'), async (req, res) => {
+  router.get('/admin/api/caseload/invites', requireRole('therapist', 'caseworker'), async (req, res) => {
     try {
       const invites = await listInvites(req.session.userId as number);
       res.json({ invites: invites.map(toApiInvite) });

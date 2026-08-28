@@ -59,10 +59,19 @@ import adminConsentRoutes from "./routes/admin/consent.routes.js";
 import caseloadRoutes from "./routes/admin/caseload.routes.js";
 import invitesRoutes from "./routes/admin/invites.routes.js";
 import joinRoutes from "./routes/join.routes.js";
+import caseworkerDashboardRoutes from "./routes/admin/caseworkerDashboard.routes.js";
+import workQueueRoutes from "./routes/admin/workQueue.routes.js";
+import notificationsRoutes from "./routes/admin/notifications.routes.js";
+import escalationsRoutes from "./routes/admin/escalations.routes.js";
+import notesRoutes from "./routes/admin/notes.routes.js";
+import adminMessagingRoutes from "./routes/admin/messaging.routes.js";
+import publicMessagingRoutes from "./routes/public/messaging.routes.js";
+import sandboxInvitesRoutes from "./routes/admin/sandboxInvites.routes.js";
 import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
 import { startScheduler as startDataRetentionScheduler } from "./services/dataRetention.service.js";
 import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
+import { startWorkQueueScheduler } from "./services/workQueue.service.js";
 import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
 
 // ---------- local type helpers ----------
@@ -306,19 +315,34 @@ io.use((socket: AuthSocket, next) => {
 
 // Connection handler
 io.on('connection', (socket: AuthSocket) => {
-  const isAdmin = socket.userRole === 'therapist' || socket.userRole === 'researcher';
+  const isAdmin = socket.userRole === 'therapist' || socket.userRole === 'researcher'
+    || socket.userRole === 'caseworker';
+
+  // Every authenticated socket (any role, incl. participants) joins its
+  // user:<id> room. The room carries ONLY messaging:* events (spec C7) —
+  // correspondence channel, separate from admin monitoring fan-out.
+  if (typeof socket.userId === 'number') {
+    socket.join(`user:${socket.userId}`);
+  }
 
   if (isAdmin) {
     console.log(`[Socket.io] Admin connected: ${socket.username} (${socket.id})`);
 
     // Caseload RBAC (docs/caseload-rbac.md): 'admin-broadcast' is
     // researchers-only. Therapists join their own therapist:<id> room and
-    // receive participant-linked events only via broadcastAdminEvent, which
-    // fans out per-caseload.
+    // caseworkers their caseworker:<id> room (summary-tier events only);
+    // both receive participant-linked events only via broadcastAdminEvent,
+    // which fans out per-caseload.
     if (socket.userRole === 'therapist') {
       // Fail closed: a therapist socket never joins admin-broadcast.
       if (typeof socket.userId === 'number') {
         socket.join(`therapist:${socket.userId}`);
+      }
+    } else if (socket.userRole === 'caseworker') {
+      // Fail closed: a caseworker socket never joins admin-broadcast and
+      // never joins full-tier therapist rooms.
+      if (typeof socket.userId === 'number') {
+        socket.join(`caseworker:${socket.userId}`);
       }
     } else {
       socket.join('admin-broadcast');
@@ -345,15 +369,17 @@ io.on('connection', (socket: AuthSocket) => {
 
     if (isAdmin) {
       // Caseload RBAC (docs/caseload-rbac.md): researchers join anything;
-      // therapists only assigned clients' sessions. Same 404-style silence
-      // as the HTTP layer — deny without confirming existence.
-      if (socket.userRole === 'therapist') {
+      // therapists only assigned clients' sessions; caseworkers never
+      // (summaries tier — canAdminAccessSessionLive returns false). Same
+      // 404-style silence as the HTTP layer — deny without confirming
+      // existence.
+      if (socket.userRole !== 'researcher') {
         try {
           const info = await getSessionAccessInfo(sessionId);
           const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
           const ok = await canAdminAccessSessionLive(socket.userRole, socket.userId, Number.isInteger(ownerId) ? ownerId : null);
           if (!ok) {
-            console.warn(`[Socket.io] Denied therapist session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not in caseload)`);
+            console.warn(`[Socket.io] Denied ${socket.userRole} session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not permitted)`);
             return;
           }
         } catch (err) {
@@ -402,6 +428,14 @@ io.on('connection', (socket: AuthSocket) => {
       return;
     }
 
+    // Caseworkers never reach live-monitoring surfaces (docs/caseworker-portal.md
+    // section 2: sideband routes + live session streams are Blocked for the
+    // summaries tier). Mirrors canAdminAccessSessionLive's caseworker deny.
+    if (socket.userRole === 'caseworker') {
+      console.warn(`[Socket.io] Caseworker denied admin:get-sideband-connections (${socket.id})`);
+      return;
+    }
+
     try {
       const { sidebandManager } = await import('./services/sidebandManager.service.js');
       const activeSessions = sidebandManager.getActiveConnections();
@@ -438,8 +472,9 @@ io.on('connection', (socket: AuthSocket) => {
     }
 
     // Caseload RBAC (docs/caseload-rbac.md): therapists may only steer/message
-    // assigned clients' sessions. Same silent-deny semantics as session:join.
-    if (socket.userRole === 'therapist') {
+    // assigned clients' sessions; caseworkers never (summaries tier). Same
+    // silent-deny semantics as session:join.
+    if (socket.userRole !== 'researcher') {
       try {
         const info = await getSessionAccessInfo(sessionId);
         const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
@@ -587,6 +622,10 @@ app.use(sessionsRoutes());
 
 
 
+// Participant async secure messaging -> routes/public/messaging.routes.ts.
+app.use(publicMessagingRoutes());
+
+
 // ===================== Logs batch route with redaction =====================
 // Batch message logging + crisis detection -> routes/public/logs.routes.ts.
 app.use(logsRoutes());
@@ -659,6 +698,27 @@ app.use(caseloadRoutes());
 // Client invite links (therapist-generated, single-use) -> routes/admin/invites.routes.ts
 app.use(invitesRoutes());
 
+// Caseworker triage dashboard (roster + detail) -> routes/admin/caseworkerDashboard.routes.ts
+app.use(caseworkerDashboardRoutes());
+
+// Work queue (ack/resolve lifecycle) -> routes/admin/workQueue.routes.ts
+app.use(workQueueRoutes());
+
+// In-app notifications + preferences -> routes/admin/notifications.routes.ts
+app.use(notificationsRoutes());
+
+// Caseworker->therapist escalations -> routes/admin/escalations.routes.ts
+app.use(escalationsRoutes());
+
+// Care notes (therapist progress + caseworker case notes) -> routes/admin/notes.routes.ts
+app.use(notesRoutes());
+
+// Clinician messaging inbox/threads -> routes/admin/messaging.routes.ts
+app.use(adminMessagingRoutes());
+
+// Sandbox invite minting (researcher-only) -> routes/admin/sandboxInvites.routes.ts
+app.use(sandboxInvitesRoutes());
+
 // Public invite acceptance / client self-registration -> routes/join.routes.ts
 app.use(joinRoutes());
 
@@ -710,7 +770,7 @@ async function startProdServer() {
   const { render } = await import('../../dist/server/entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
 
   // Admin panel route (demo accounts see a synthetic-data version — see demo.routes.ts)
-  app.get('/admin', requireRole('therapist', 'researcher', 'demo'), (_req, res) => {
+  app.get('/admin', requireRole('therapist', 'caseworker', 'researcher', 'demo'), (_req, res) => {
     try {
       const html = applyDemoBranding(fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8'));
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
@@ -751,7 +811,7 @@ async function startDevServer() {
   // demo.routes.ts). Admin is a plain SPA — no SSR pass, just the transformed
   // template with the entry script pointed at its real location (Vite's root
   // is src/client/main, so the relative src in admin.html won't resolve).
-  app.get("/admin", requireRole('therapist', 'researcher', 'demo'), async (req, res, next) => {
+  app.get("/admin", requireRole('therapist', 'caseworker', 'researcher', 'demo'), async (req, res, next) => {
     try {
       let template = fs.readFileSync(path.resolve(__dirname, "../client/admin/admin.html"), "utf-8");
       template = template.replace(
@@ -846,6 +906,14 @@ if (isEntrypoint) {
 
     // Daily sweep of expired magic-link demo accounts and their data
     startDemoCleanupScheduler();
+
+    // Work-queue scheduler: hourly digest sweep + daily 06:00 America/Denver
+    // work-item sweep (inactivity / screener_worsening / message_unread_stale).
+    // Never runs in harness children (SOCKET_PG_ADAPTER=off marker) — a
+    // redteam child sweeping the shared DB would spam real queues.
+    if (process.env.SOCKET_PG_ADAPTER !== 'off') {
+      startWorkQueueScheduler();
+    }
 
     // Nightly simulation-eval runs (config-gated via evals.harness_schedule;
     // the admin Simulation Runs panel controls it). Never runs in the harness

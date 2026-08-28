@@ -40,6 +40,9 @@ export async function recordConsent(input: RecordConsentInput): Promise<ConsentR
 // A published version with a future effective_at is "scheduled" and ignored
 // until it takes effect.
 
+/** Which deployment the consent copy addresses (migration 078). */
+export type ConsentAudience = 'research' | 'clinical';
+
 export interface ConsentDocumentRow {
   document_id: number;
   version: string;
@@ -48,16 +51,24 @@ export interface ConsentDocumentRow {
   effective_at: Date;
   published_by: string;
   created_at: Date;
+  /** 'research' (IRB study copy) or 'clinical' (care-team copy); absent
+   *  pre-078. */
+  audience?: ConsentAudience;
 }
 
-/** Newest document with effective_at <= now(), or null if the table is empty. */
-export async function getActiveConsentDocument(): Promise<ConsentDocumentRow | null> {
+/** Newest document for the audience with effective_at <= now(), or null.
+ *  Defaults to 'research' — the pre-078 behavior exactly (every pre-078 row
+ *  is backfilled audience='research'). */
+export async function getActiveConsentDocument(
+  audience: ConsentAudience = 'research'
+): Promise<ConsentDocumentRow | null> {
   const result = await pool.query<ConsentDocumentRow>(
-    `SELECT document_id, version, body, body_hash, effective_at, published_by, created_at
+    `SELECT document_id, version, body, body_hash, effective_at, published_by, created_at, audience
      FROM consent_documents
-     WHERE effective_at <= CURRENT_TIMESTAMP
+     WHERE effective_at <= CURRENT_TIMESTAMP AND audience = $1
      ORDER BY effective_at DESC
-     LIMIT 1`
+     LIMIT 1`,
+    [audience]
   );
   return result.rows[0] ?? null;
 }
@@ -80,7 +91,7 @@ export interface ConsentDocumentListRow extends ConsentDocumentRow {
 export async function listConsentDocuments(): Promise<ConsentDocumentListRow[]> {
   const result = await pool.query<ConsentDocumentListRow>(
     `SELECT cd.document_id, cd.version, cd.body, cd.body_hash, cd.effective_at,
-            cd.published_by, cd.created_at,
+            cd.published_by, cd.created_at, cd.audience,
             COUNT(pc.consent_id)::int AS acceptance_count
      FROM consent_documents cd
      LEFT JOIN participant_consents pc ON pc.consent_version = cd.version
@@ -90,14 +101,27 @@ export async function listConsentDocuments(): Promise<ConsentDocumentListRow[]> 
   return result.rows;
 }
 
-/** Publish a new consent document. Throws on duplicate version (PG 23505). */
+/** Publish a new consent document. Throws on duplicate version (PG 23505).
+ *  audience defaults at the DB layer to 'research' (078); when given, it is
+ *  written explicitly. The audience-less SQL shape is kept for the default
+ *  path so pre-078 call sites behave byte-identically. */
 export async function insertConsentDocument(input: {
   version: string;
   body: string;
   bodyHash: string;
   effectiveAt: Date | null;
   publishedBy: string;
+  audience?: ConsentAudience;
 }): Promise<ConsentDocumentRow> {
+  if (input.audience !== undefined) {
+    const result = await pool.query<ConsentDocumentRow>(
+      `INSERT INTO consent_documents (version, body, body_hash, effective_at, published_by, audience)
+       VALUES ($1, $2, $3, COALESCE($4, CURRENT_TIMESTAMP), $5, $6)
+       RETURNING document_id, version, body, body_hash, effective_at, published_by, created_at, audience`,
+      [input.version, input.body, input.bodyHash, input.effectiveAt, input.publishedBy, input.audience]
+    );
+    return result.rows[0];
+  }
   const result = await pool.query<ConsentDocumentRow>(
     `INSERT INTO consent_documents (version, body, body_hash, effective_at, published_by)
      VALUES ($1, $2, $3, COALESCE($4, CURRENT_TIMESTAMP), $5)

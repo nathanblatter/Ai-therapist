@@ -3,6 +3,7 @@
 // SQL lives in db/export.queries.ts.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { orgIdFor } from '../../middleware/org.js';
 import { isAssigned, getSessionAccessInfo } from '../../db/index.js';
 import {
   getMetadataExport,
@@ -76,15 +77,20 @@ export default function exportRoutes(): Router {
         crisisOnly: crisisFlaggedOnly === 'true',
       };
 
+      // Researcher org scoping (caseworker portal C13 — the highest-stakes
+      // org filter): bulk exports never cross the researcher's organization.
+      // Therapists are already row-scoped to a single assigned session above.
+      const orgId = req.session.userRole === 'researcher' ? await orgIdFor(req) : null;
+
       let rows: ExportRow[];
       if (exportType === 'metadata') {
-        rows = await getMetadataExport(filters);
+        rows = await getMetadataExport(filters, orgId);
       } else if (exportType === 'anonymized') {
-        rows = await getAnonymizedExport(filters, contentColumn);
+        rows = await getAnonymizedExport(filters, contentColumn, orgId);
       } else if (exportType === 'aggregated') {
-        rows = await getAggregatedExport(filters, String(aggregationPeriod));
+        rows = await getAggregatedExport(filters, String(aggregationPeriod), orgId);
       } else {
-        rows = await getFullExport(filters, contentColumn);
+        rows = await getFullExport(filters, contentColumn, orgId);
       }
 
       const dateStamp = new Date().toISOString().split('T')[0];

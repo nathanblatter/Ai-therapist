@@ -238,6 +238,67 @@ async function assessRiskWithLLM(
 }
 
 // ============================================
+// STANDALONE RISK ANALYSIS (no session context)
+// ============================================
+
+export interface StandaloneRiskResult {
+  riskScore: number;
+  severity: 'none' | 'low' | 'medium' | 'high';
+  factors: string[];
+  /** How the score was produced (mirrors analyzeMessageRisk's method field). */
+  method: 'keyword_only' | 'llm_assessed' | 'keyword_fallback';
+}
+
+/**
+ * Two-stage risk analysis for content that is NOT part of a live therapy
+ * session (caseworker portal: async thread messages, docs/caseworker-portal.md
+ * section 3). Same stage-1 keyword screen and stage-2 LLM context assessment
+ * as analyzeMessageRisk, but with NO session machinery: no trajectory bonus,
+ * no risk_score_history insert, no periodic sweep counter, no LLM cost row
+ * (those are all keyed on a therapy session id, which does not exist here).
+ *
+ * `historyLines` is optional surrounding conversation (e.g. recent thread
+ * messages) for the LLM's context judgment; participant turns should use
+ * role 'user' and the counterpart's turns role 'assistant'.
+ *
+ * Fail-toward-detection: if the LLM call fails after a keyword hit, the
+ * keyword tier score stands. Never throws.
+ */
+export async function analyzeStandaloneRisk(
+  content: string,
+  historyLines: HistoryMessage[] = [],
+): Promise<StandaloneRiskResult> {
+  const keywordAnalysis = detectCrisisKeywords(content);
+  if (keywordAnalysis.keywordScore === 0) {
+    return { riskScore: 0, severity: 'none', factors: [], method: 'keyword_only' };
+  }
+
+  try {
+    const llm = await assessRiskWithLLM(content, historyLines);
+    log.info(
+      `[risk] standalone: keywords [${keywordAnalysis.keywords.join(', ')}] ` +
+        `→ LLM ${llm.risk_score}/100 (${llm.context}): ${llm.reasoning}`,
+    );
+    return {
+      riskScore: llm.risk_score,
+      severity: llm.severity,
+      factors: llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords,
+      method: 'llm_assessed',
+    };
+  } catch (err) {
+    // LLM unavailable — the keyword tier score stands as the provisional score.
+    const riskScore = Math.min(keywordAnalysis.keywordScore, 100);
+    log.error({ err }, `[risk] standalone LLM assessment failed; using keyword tier score ${riskScore}`);
+    return {
+      riskScore,
+      severity: riskScore >= 75 ? 'high' : riskScore >= 50 ? 'medium' : riskScore >= 25 ? 'low' : 'none',
+      factors: keywordAnalysis.keywords,
+      method: 'keyword_fallback',
+    };
+  }
+}
+
+// ============================================
 // EMOTIONAL TRAJECTORY TRACKING (passive history logging)
 // ============================================
 

@@ -12,7 +12,8 @@
 import { Router } from 'express';
 import OpenAI from 'openai';
 import { requireRole } from '../../middleware/auth.js';
-import { requireClientAccess, therapistScopeId } from '../../middleware/caseload.js';
+import { requireClientAccess, careTeamScopeId } from '../../middleware/caseload.js';
+import { orgIdFor } from '../../middleware/org.js';
 import { getOpenAIKey } from '../../config/secrets.js';
 import {
   getUserById,
@@ -183,8 +184,10 @@ export default function participantProfileRoutes(): Router {
     }
   });
 
-  // GET /admin/api/users/:userId/sessions - per-user session history
-  router.get('/admin/api/users/:userId/sessions', requireRole('therapist', 'researcher'), requireClientAccess(), async (req, res) => {
+  // GET /admin/api/users/:userId/sessions - per-user session history.
+  // Caseworker-allowed (summaries tier): rows are session metadata/aggregates
+  // only, and requireClientAccess row-scopes to the member's caseload.
+  router.get('/admin/api/users/:userId/sessions', requireRole('therapist', 'researcher', 'caseworker'), requireClientAccess(), async (req, res) => {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
@@ -210,10 +213,14 @@ export default function participantProfileRoutes(): Router {
         userId,
       };
 
-      const scope = await therapistScopeId(req);
+      // Same scoping as the main session browser (sessions.routes.ts):
+      // care-team members are caseload-scoped; researchers are org-scoped
+      // (C13) so another org's participant history reads as empty.
+      const scope = await careTeamScopeId(req);
+      const orgId = scope === null ? await orgIdFor(req) : null;
       const [sessions, totalCount] = await Promise.all([
-        listSessions(filters, scope),
-        countSessions(filters, scope),
+        listSessions(filters, scope, orgId),
+        countSessions(filters, scope, orgId),
       ]);
 
       const extras = await getSessionScoreExtras(sessions.map(s => String(s.session_id)));

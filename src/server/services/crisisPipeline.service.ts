@@ -29,10 +29,12 @@ import {
 } from './crisisIntervention.service.js';
 import {
   getRecentSessionMessages,
+  getSessionAccessInfo,
   getSessionCrisisState,
   isDemoAccountSession,
 } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { enqueueWorkItem } from './workQueue.service.js';
 
 export interface ParticipantTurn {
   sessionId: string;
@@ -93,6 +95,18 @@ export async function runCrisisPipeline(
     let flagged = false;
 
     if (risk.riskScore > 0) {
+      // Summary-tier live signal (caseworker portal spec section 5): score +
+      // severity only — caseworker sockets get risk trends without any
+      // transcript content. Fire-and-forget; never blocks the pipeline.
+      if (global.io) {
+        void broadcastAdminEventForSession(global.io, 'session:risk-score-updated', {
+          sessionId: turn.sessionId,
+          riskScore: risk.riskScore,
+          severity,
+          at: new Date(),
+        }, turn.sessionId, 'summary');
+      }
+
       // ---- Steering ----
       if (channel === 'realtime') {
         // Sideband injection happens inside; realtime ignores the return value.
@@ -161,10 +175,50 @@ export async function runCrisisPipeline(
             message: `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})`,
             ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
           }, turn.sessionId);
+
+          // Summary-tier mirror for caseworker sockets (spec section 5:
+          // crisis-event-created is summary-safe). Severity/score/category
+          // factors only — no message ids, no transcript-adjacent text.
+          void broadcastAdminEventForSession(global.io, 'session:crisis-event-created', {
+            sessionId: turn.sessionId,
+            severity,
+            riskScore: risk.riskScore,
+            factors: risk.factors,
+            detectedAt: new Date(),
+          }, turn.sessionId, 'summary');
         }
 
         await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
         flagged = true;
+
+        // Work-queue hook (caseworker portal): pool item for the client's care
+        // team. Only sessions with a logged-in participant enqueue — anonymous
+        // sessions have no care team (a null-client item would fall back to
+        // the IRB org as pure noise), and demo-account sessions never reach
+        // this code (guarded at the top of the pipeline). `reopen` reactivates
+        // a resolved/expired item on a re-flag at the same severity, so a
+        // recurrence after resolution notifies the care team again instead of
+        // dying on the idempotency key; while the item is open/acked a
+        // same-severity re-flag stays a silent no-op (no duplicate spam).
+        // enqueueWorkItem never throws and resolves client/org/sandbox from
+        // the session; detail carries category tags only, never transcript.
+        try {
+          const sessionInfo = await getSessionAccessInfo(turn.sessionId);
+          if (sessionInfo?.user_id != null) {
+            void enqueueWorkItem({
+              itemType: 'crisis_flag',
+              severity: 'urgent',
+              title: `Crisis flag: ${severity} risk (score ${risk.riskScore})`,
+              detail: { severity, risk_score: risk.riskScore, factors: risk.factors },
+              sourceTable: 'therapy_sessions',
+              sourceId: `${turn.sessionId}:${severity}`,
+              sessionId: turn.sessionId,
+              reopen: true,
+            });
+          }
+        } catch (err) {
+          console.error('[CrisisPipeline] work-item enqueue guard failed (non-fatal):', err);
+        }
 
         console.log(`Session ${turn.sessionId} flagged as ${severity} risk (score: ${risk.riskScore}, ${channel})`);
       }

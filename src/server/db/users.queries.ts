@@ -10,6 +10,8 @@ export interface UserRow {
   userid: number;
   username: string;
   role: string;
+  organization_id?: number;
+  is_sandbox?: boolean;
   password?: string;
   preferred_voice?: string | null;
   preferred_language?: string | null;
@@ -83,13 +85,15 @@ export interface VerifiedUser {
   mfa_enabled: boolean;
   mfa_secret: string | null;
   mfa_backup_codes: string[] | null;
+  organization_id: number | null;
+  is_sandbox: boolean;
 }
 
 /** Verify a username/password; returns the user (sans password) or null. */
 export async function verifyCredentials(username: string, password: string): Promise<VerifiedUser | null> {
   try {
     const result = await pool.query<UserRow & { password: string }>(
-      'SELECT userid, username, password, role, mfa_enabled, mfa_secret, mfa_backup_codes FROM users WHERE username = $1',
+      'SELECT userid, username, password, role, mfa_enabled, mfa_secret, mfa_backup_codes, organization_id, is_sandbox FROM users WHERE username = $1',
       [username]
     );
 
@@ -111,6 +115,8 @@ export async function verifyCredentials(username: string, password: string): Pro
       mfa_enabled: user.mfa_enabled ?? false,
       mfa_secret: user.mfa_secret ?? null,
       mfa_backup_codes: user.mfa_backup_codes ?? null,
+      organization_id: user.organization_id ?? null,
+      is_sandbox: user.is_sandbox ?? false,
     };
   } catch (error) {
     console.error('Error verifying credentials:', error);
@@ -131,21 +137,41 @@ export async function createDemoUser(): Promise<{ userid: number; username: stri
   const hashedPassword = await bcrypt.hash(throwawayPassword, SALT_ROUNDS);
 
   const result = await pool.query<UserRow>(
-    `INSERT INTO users (username, password, role) VALUES ($1, $2, 'demo')
+    `INSERT INTO users (username, password, role, organization_id)
+     VALUES ($1, $2, 'demo',
+             (SELECT org_id FROM organizations WHERE slug = 'irb-study'))
      RETURNING userid, username, role`,
     [username, hashedPassword]
   );
   return result.rows[0];
 }
 
+export interface CreateUserOptions {
+  /** Organization the account belongs to; defaults to the irb-study org
+   *  (069 backfill semantics — pre-portal behavior is unchanged). */
+  orgId?: number | null;
+  /** Denormalized organizations.kind='sandbox' flag; set at creation, never
+   *  toggled (077). */
+  isSandbox?: boolean;
+}
+
 /** Create a user with a hashed password (for registration). */
-export async function createUser(username: string, password: string, role: string): Promise<UserRow> {
+export async function createUser(
+  username: string,
+  password: string,
+  role: string,
+  options: CreateUserOptions = {}
+): Promise<UserRow> {
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
     const result = await pool.query<UserRow>(
-      'INSERT INTO users (username, password, role) VALUES ($1, $2, $3) RETURNING userid, username, role',
-      [username, hashedPassword, role]
+      `INSERT INTO users (username, password, role, organization_id, is_sandbox)
+       VALUES ($1, $2, $3,
+               COALESCE($4, (SELECT org_id FROM organizations WHERE slug = 'irb-study')),
+               $5)
+       RETURNING userid, username, role, organization_id, is_sandbox`,
+      [username, hashedPassword, role, options.orgId ?? null, options.isSandbox ?? false]
     );
 
     return result.rows[0];
@@ -161,18 +187,35 @@ export async function createUser(username: string, password: string, role: strin
 
 /** All users (admin user-management view), newest first.
  *  scopeTherapistId (caseload RBAC, ai-therapist-119): when set, return only
- *  participants in that therapist's caseload plus the caller's own row (the
- *  scope IS the therapist's userid, matched via tc.therapist_id = scope);
- *  null/undefined = unscoped (researchers), today's SQL exactly. */
-export async function getAllUsers(scopeTherapistId?: number | null): Promise<UserRow[]> {
+ *  participants in that member's caseload plus the caller's own row (the
+ *  scope IS the member's userid, matched via tc.therapist_id = scope);
+ *  null/undefined = caseload-unscoped (researchers), today's SQL exactly.
+ *  orgId (caseworker portal C13): when set, additionally restrict to that
+ *  organization — at cutover every user is in irb-study, so researcher
+ *  results are byte-identical. */
+export async function getAllUsers(
+  scopeTherapistId?: number | null,
+  orgId?: number | null
+): Promise<UserRow[]> {
   try {
     const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
-    const scopeClause = scoped
-      ? ' WHERE (userid = $1 OR EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = userid))'
-      : '';
+    const orgScoped = orgId !== null && orgId !== undefined;
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (scoped) {
+      params.push(scopeTherapistId);
+      clauses.push(
+        `(userid = $${params.length} OR EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $${params.length} AND tc.client_id = userid))`
+      );
+    }
+    if (orgScoped) {
+      params.push(orgId);
+      clauses.push(`organization_id = $${params.length}`);
+    }
+    const scopeClause = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
     const result = await pool.query<UserRow>(
       `SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users${scopeClause} ORDER BY created_at DESC`,
-      scoped ? [scopeTherapistId] : []
+      params
     );
     return result.rows;
   } catch (error) {
@@ -181,11 +224,49 @@ export async function getAllUsers(scopeTherapistId?: number | null): Promise<Use
   }
 }
 
+/** All therapist account ids in an organization. Backs the emergency
+ *  escalation fan-out (docs/caseworker-portal.md 072: urgency='emergency'
+ *  with no assignee notifies all org therapists). */
+export async function getOrgTherapistIds(orgId: number): Promise<number[]> {
+  const result = await pool.query<{ userid: number }>(
+    `SELECT userid FROM users
+     WHERE role = 'therapist' AND organization_id = $1
+     ORDER BY userid`,
+    [orgId]
+  );
+  return result.rows.map((row) => row.userid);
+}
+
+/** Denormalized users.is_sandbox for one account (false when absent). */
+export async function isSandboxAccount(userId: number): Promise<boolean> {
+  const result = await pool.query<{ is_sandbox: boolean }>(
+    'SELECT is_sandbox FROM users WHERE userid = $1',
+    [userId]
+  );
+  return result.rows[0]?.is_sandbox ?? false;
+}
+
+/**
+ * Is a therapy session owned by a sandbox account? Anonymous sessions are
+ * never sandbox. Hot-path guard for crisis paging / AE-draft / email
+ * suppression (docs/caseworker-portal.md section 7).
+ */
+export async function isSandboxAccountSession(sessionId: string): Promise<boolean> {
+  const result = await pool.query<{ is_sandbox: boolean }>(
+    `SELECT u.is_sandbox
+     FROM therapy_sessions ts
+     JOIN users u ON u.userid = ts.user_id
+     WHERE ts.session_id = $1`,
+    [sessionId]
+  );
+  return result.rows[0]?.is_sandbox ?? false;
+}
+
 /** A single user by id, or null. */
 export async function getUserById(userid: number | string): Promise<UserRow | null> {
   try {
     const result = await pool.query<UserRow>(
-      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
+      'SELECT userid, username, role, organization_id, is_sandbox, preferred_voice, preferred_language, mfa_enabled, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
       [userid]
     );
 

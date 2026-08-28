@@ -9,14 +9,26 @@ export type AdminSessionRow = Record<string, unknown>;
 export type MessageContentColumn = 'content' | 'content_redacted';
 
 /** All currently-active sessions with message counts, crisis-first ordering.
- *  scopeTherapistId (caseload RBAC): when set, restrict to the therapist's
- *  assigned clients; null/undefined = unscoped (researchers), today's SQL. */
-export async function getActiveSessions(scopeTherapistId?: number | null): Promise<AdminSessionRow[]> {
+ *  scopeTherapistId (caseload RBAC): when set, restrict to the care-team
+ *  member's assigned clients; null/undefined = unscoped, today's SQL.
+ *  orgId (caseworker portal C13): when set (researchers), restrict to
+ *  sessions owned by that organization's users; anonymous sessions stay
+ *  visible, exactly as before org scoping existed. */
+export async function getActiveSessions(
+  scopeTherapistId?: number | null,
+  orgId?: number | null
+): Promise<AdminSessionRow[]> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
-  const scopeClause = scoped
+  const params: unknown[] = scoped ? [scopeTherapistId] : [];
+  let scopeClause = scoped
     ? `
       AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = ts.user_id)`
     : '';
+  if (orgId !== null && orgId !== undefined) {
+    params.push(orgId);
+    scopeClause += `
+      AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${params.length}))`;
+  }
   const result = await pool.query(`
     SELECT
       ts.session_id,
@@ -37,10 +49,10 @@ export async function getActiveSessions(scopeTherapistId?: number | null): Promi
     LEFT JOIN users u ON ts.user_id = u.userid
     LEFT JOIN messages m ON ts.session_id = m.session_id
     WHERE ts.status = 'active'
-      AND ts.is_demo IS NOT TRUE${scopeClause}
+      AND (ts.is_demo IS NOT TRUE OR u.is_sandbox IS TRUE)${scopeClause}
     GROUP BY ts.session_id, u.username
     ORDER BY ts.crisis_flagged DESC, ts.created_at DESC
-  `, scoped ? [scopeTherapistId] : []);
+  `, params);
   return result.rows;
 }
 
@@ -66,14 +78,26 @@ export interface SessionListFilters {
 }
 
 /** One page of sessions matching the filters, with per-session message stats.
- *  scopeTherapistId (caseload RBAC): when set, restrict to the therapist's
- *  assigned clients; null/undefined = unscoped (researchers), today's SQL. */
-export async function listSessions(f: SessionListFilters, scopeTherapistId?: number | null): Promise<AdminSessionRow[]> {
+ *  scopeTherapistId (caseload RBAC): when set, restrict to the care-team
+ *  member's assigned clients; null/undefined = unscoped, today's SQL.
+ *  orgId (caseworker portal C13): researcher org restriction; anonymous
+ *  sessions stay visible. */
+export async function listSessions(
+  f: SessionListFilters,
+  scopeTherapistId?: number | null,
+  orgId?: number | null
+): Promise<AdminSessionRow[]> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
-  const scopeClause = scoped
+  const extraParams: unknown[] = scoped ? [scopeTherapistId] : [];
+  let scopeClause = scoped
     ? `
         AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $17 AND tc.client_id = ts.user_id)`
     : '';
+  if (orgId !== null && orgId !== undefined) {
+    extraParams.push(orgId);
+    scopeClause += `
+        AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${16 + extraParams.length}))`;
+  }
   const result = await pool.query(`
     WITH session_stats AS (
       SELECT
@@ -106,7 +130,7 @@ export async function listSessions(f: SessionListFilters, scopeTherapistId?: num
       LEFT JOIN session_configurations sc ON ts.session_id = sc.session_id
       LEFT JOIN messages m ON ts.session_id = m.session_id
       WHERE
-        ts.is_demo IS NOT TRUE
+        (ts.is_demo IS NOT TRUE OR u.is_sandbox IS TRUE)
         AND ($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')
         AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
         AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
@@ -144,27 +168,39 @@ export async function listSessions(f: SessionListFilters, scopeTherapistId?: num
     f.crisisSeverity, // $14
     f.durations,      // $15
     f.userId ?? null, // $16
-    ...(scoped ? [scopeTherapistId] : []), // $17 (only when scoped)
+    ...extraParams,   // $17+ (caseload scope and/or org scope, when present)
   ]);
   return result.rows;
 }
 
 /** Total sessions matching the list filters (ignores pagination/message/duration).
- *  scopeTherapistId (caseload RBAC): when set, restrict to the therapist's
- *  assigned clients; null/undefined = unscoped (researchers), today's SQL. */
-export async function countSessions(f: SessionListFilters, scopeTherapistId?: number | null): Promise<number> {
+ *  scopeTherapistId (caseload RBAC): when set, restrict to the care-team
+ *  member's assigned clients; null/undefined = unscoped, today's SQL.
+ *  orgId (caseworker portal C13): researcher org restriction; anonymous
+ *  sessions stay visible. */
+export async function countSessions(
+  f: SessionListFilters,
+  scopeTherapistId?: number | null,
+  orgId?: number | null
+): Promise<number> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
-  const scopeClause = scoped
+  const extraParams: unknown[] = scoped ? [scopeTherapistId] : [];
+  let scopeClause = scoped
     ? `
       AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $12 AND tc.client_id = ts.user_id)`
     : '';
+  if (orgId !== null && orgId !== undefined) {
+    extraParams.push(orgId);
+    scopeClause += `
+      AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${11 + extraParams.length}))`;
+  }
   const result = await pool.query<{ total: string }>(`
     SELECT COUNT(DISTINCT ts.session_id) as total
     FROM therapy_sessions ts
     LEFT JOIN users u ON ts.user_id = u.userid
     LEFT JOIN session_configurations sc ON ts.session_id = sc.session_id
     WHERE
-      ts.is_demo IS NOT TRUE
+      (ts.is_demo IS NOT TRUE OR u.is_sandbox IS TRUE)
       AND ($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')
       AND ($2::TIMESTAMP IS NULL OR ts.created_at >= $2)
       AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
@@ -188,7 +224,7 @@ export async function countSessions(f: SessionListFilters, scopeTherapistId?: nu
     f.crisisFlagged,
     f.crisisSeverity,
     f.userId ?? null,
-    ...(scoped ? [scopeTherapistId] : []), // $12 (only when scoped)
+    ...extraParams, // $12+ (caseload scope and/or org scope, when present)
   ]);
   return parseInt(result.rows[0].total);
 }

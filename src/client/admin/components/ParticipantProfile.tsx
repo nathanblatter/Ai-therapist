@@ -11,6 +11,9 @@ import {
 import Panel from './ui/Panel';
 import StatCard from './ui/StatCard';
 import useAdminFetch from '../hooks/useAdminFetch';
+import NotesPanel from './notes/NotesPanel';
+import MyEscalations from './escalations/MyEscalations';
+import MessageThreadView from './MessageThreadView';
 
 interface ProfileUser {
   userid: number;
@@ -78,6 +81,8 @@ interface ParticipantProfileProps {
   userRole: string | null;
   onClose: () => void;
   onViewSession: (sessionId: string) => void;
+  /** Navigate the admin shell (e.g. 'escalations'); closes the profile. */
+  onNavigate?: (view: string) => void;
 }
 
 // ---------- helpers ----------
@@ -343,7 +348,7 @@ function TimelineEntry({ event, onViewSession }: { event: TimelineEvent; onViewS
 
 // ---------- main component ----------
 
-export default function ParticipantProfile({ user, userRole, onClose, onViewSession }: ParticipantProfileProps) {
+export default function ParticipantProfile({ user, userRole, onClose, onViewSession, onNavigate }: ParticipantProfileProps) {
   const profileFetch = useAdminFetch<ProfileBundle>(`/admin/api/users/${user.userid}/profile`);
   const sessionsFetch = useAdminFetch<{ sessions: UserSessionRow[] }>(`/admin/api/users/${user.userid}/sessions?limit=50`);
   // Fail-soft brief: any error (403, LLM down) simply hides the paragraph.
@@ -518,6 +523,40 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
                 </ol>
               )}
             </Panel>
+          </section>
+        )}
+
+        {/* ============ 3b. Care notes + escalations + messaging (caseworker portal) ============ */}
+        {(userRole === 'therapist' || userRole === 'caseworker') && (
+          <section aria-label="Care notes">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <FileText size={15} className="text-gray-500" /> Care notes
+            </h3>
+            <NotesPanel clientId={user.userid} userRole={userRole} />
+          </section>
+        )}
+
+        {(userRole === 'therapist' || userRole === 'caseworker' || userRole === 'researcher') && (
+          <section aria-label="Escalations">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <AlertTriangle size={15} className="text-gray-500" /> Escalations
+            </h3>
+            <MyEscalations
+              clientId={user.userid}
+              mineOnly={false}
+              onOpenEscalations={onNavigate ? () => onNavigate('escalations') : undefined}
+            />
+          </section>
+        )}
+
+        {(userRole === 'therapist' || userRole === 'caseworker') && (
+          <section aria-label="Messages">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <MessageCircle size={15} className="text-gray-500" /> Messages
+            </h3>
+            {/* Resolves/creates only the viewing clinician's own thread with
+                this client (one thread per client-clinician pair). */}
+            <MessageThreadView clientId={user.userid} clientName={user.username} />
           </section>
         )}
 

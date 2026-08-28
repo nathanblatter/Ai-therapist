@@ -226,7 +226,11 @@ export default function tokenRoutes(): Router {
 
       try {
         const { isNonStudyUser } = await import('../../utils/harness.js');
-        await createActiveRealtimeSession(sessionId, userId, isNonStudyUser(userRole, req.session?.username));
+        // Sandbox accounts' sessions are stamped is_demo too (C3/s7).
+        await createActiveRealtimeSession(
+          sessionId, userId,
+          isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true,
+        );
         console.log(`Therapy session created with user_id: ${userId}`);
 
         if (checkin) {
@@ -246,13 +250,14 @@ export default function tokenRoutes(): Router {
           }))
           .catch(err => console.error('[Consent] Failed to record per-session consent:', err));
 
+        // id/status-only payload — safe for the caseworker summary tier.
         void broadcastAdminEvent(global.io, 'session:created', {
           sessionId,
           userId,
           username,
           status: 'active',
           created_at: new Date(),
-        }, userId);
+        }, userId, 'summary');
 
         // Schedule auto-termination when a max duration applies (not researchers).
         // Two phases, because the participant's Socket.io channel is unreliable
@@ -312,7 +317,7 @@ export default function tokenRoutes(): Router {
               endedAt: new Date(),
               endedBy: 'system',
               reason: 'duration_limit',
-            }, sessionId);
+            }, sessionId, 'summary');
           };
 
           // T-60s pacing nudge (ai-therapist-112): the model used to learn

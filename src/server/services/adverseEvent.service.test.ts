@@ -8,6 +8,7 @@ const {
   getSessionAeSnapshotMock,
   getRecentSessionMessagesMock,
   insertAdverseEventDraftMock,
+  isSandboxAccountSessionMock,
   getSessionCrisisEventsMock,
   redactPHIBatchMock,
 } = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const {
   getSessionAeSnapshotMock: vi.fn(),
   getRecentSessionMessagesMock: vi.fn(),
   insertAdverseEventDraftMock: vi.fn(),
+  isSandboxAccountSessionMock: vi.fn(),
   getSessionCrisisEventsMock: vi.fn(),
   redactPHIBatchMock: vi.fn(),
 }));
@@ -28,6 +30,7 @@ vi.mock('../db/index.js', () => ({
   getSessionAeSnapshot: getSessionAeSnapshotMock,
   getRecentSessionMessages: getRecentSessionMessagesMock,
   insertAdverseEventDraft: insertAdverseEventDraftMock,
+  isSandboxAccountSession: isSandboxAccountSessionMock,
 }));
 vi.mock('./crisisDetection.service.js', () => ({ getSessionCrisisEvents: getSessionCrisisEventsMock }));
 vi.mock('./redaction.service.js', () => ({ redactPHIBatch: redactPHIBatchMock }));
@@ -58,6 +61,7 @@ beforeEach(() => {
   ]);
   redactPHIBatchMock.mockResolvedValue(new Map([[1, 'how can I help [clean]']]));
   insertAdverseEventDraftMock.mockResolvedValue(101);
+  isSandboxAccountSessionMock.mockResolvedValue(false);
 });
 
 describe('draftAdverseEventFromCrisis', () => {
@@ -114,6 +118,27 @@ describe('draftAdverseEventFromCrisis', () => {
     expect(input.createdBy).toBe('nathan');
     // Manual path does not consult the auto crisis-event linkage.
     expect(getLatestCrisisEventIdMock).not.toHaveBeenCalled();
+  });
+
+  it('still allows manual drafts from demo-role/harness (is_demo) sessions', async () => {
+    getSessionAeSnapshotMock.mockResolvedValueOnce({
+      session_id: 'sess-1', user_id: 42, crisis_severity: 'high', crisis_risk_score: 88, crisis_flagged_at: OCCURRED,
+      is_demo: true,
+    });
+    const id = await draftAdverseEventFromCrisis('sess-1', { triggerSource: 'manual', createdBy: 'nathan' });
+    expect(id).toBe(101);
+  });
+
+  it('blocks manual drafts from sandbox-owned sessions (synthetic clients are never IRB reports)', async () => {
+    isSandboxAccountSessionMock.mockResolvedValue(true);
+    const id = await draftAdverseEventFromCrisis('sbx-sess', { triggerSource: 'manual', createdBy: 'nathan' });
+    expect(id).toBeNull();
+    expect(insertAdverseEventDraftMock).not.toHaveBeenCalled();
+  });
+
+  it('does not run the sandbox lookup for auto drafts (is_demo already gates them)', async () => {
+    await draftAdverseEventFromCrisis('sess-1');
+    expect(isSandboxAccountSessionMock).not.toHaveBeenCalled();
   });
 
   it('never throws — swallows collaborator errors and returns null', async () => {

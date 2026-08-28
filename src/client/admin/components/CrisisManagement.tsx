@@ -1,9 +1,19 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Activity, Users, FileText, TrendingUp, Clock, RefreshCw, ChevronDown, ChevronUp } from 'react-feather';
+import { AlertTriangle, Activity, Users, FileText, TrendingUp, Clock, RefreshCw, ChevronDown, ChevronUp, ArrowUpCircle, MessageSquare } from 'react-feather';
+import EscalationComposer from './escalations/EscalationComposer';
+import FlaggedMessageRow, { useFlaggedMessageEvents } from './FlaggedMessageRow';
 
 interface CrisisEvent {
   event_id: string;
-  session_id: string;
+  session_id: string | null;
+  // Owning client: user_id/username come from the session join; message-origin
+  // events (076) carry client_user_id directly.
+  user_id?: number | null;
+  username?: string | null;
+  client_user_id?: number | null;
+  // 076: message-origin crisis events carry origin='thread_message' and a
+  // NULL session_id; they render via FlaggedMessageRow, not session grouping.
+  origin?: 'session' | 'thread_message';
   severity?: string;
   event_type: string;
   risk_score?: number;
@@ -52,7 +62,12 @@ interface CrisisData {
   riskScoreHistory: RiskScoreHistory[];
 }
 
-export default function CrisisManagement() {
+interface CrisisManagementProps {
+  /** Navigate to the messaging inbox (flagged-message "View thread"). */
+  onOpenMessages?: () => void;
+}
+
+export default function CrisisManagement({ onOpenMessages }: CrisisManagementProps = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CrisisData>({
@@ -67,6 +82,16 @@ export default function CrisisManagement() {
   const [filterSeverity, setFilterSeverity] = useState('all');
   // Adverse-event drafts pending review (ai-therapist-95) — crisis staff live here.
   const [aeDrafts, setAeDrafts] = useState(0);
+  // "Escalate to therapist" composer, pre-linked to a crisis event AND its
+  // client (never default to an unrelated caseload client).
+  const [escalateFor, setEscalateFor] = useState<{
+    crisisEventId: number;
+    sessionId: string | null;
+    clientId: number | null;
+    clientName: string | null;
+  } | null>(null);
+  // Message-origin crisis events (076): rendered as flagged-message rows.
+  const flaggedMessages = useFlaggedMessageEvents();
 
   useEffect(() => {
     fetch('/admin/api/adverse-events?status=draft', { credentials: 'include' })
@@ -155,8 +180,11 @@ export default function CrisisManagement() {
     return 'text-green-600';
   };
 
-  // Filter crisis events
+  // Filter crisis events. Message-origin events (origin='thread_message',
+  // session_id NULL) are excluded from the session grouping — they render in
+  // the dedicated Flagged Messages section below.
   const filteredEvents = data.crisisEvents.filter(event => {
+    if (event.origin === 'thread_message' || event.session_id === null) return false;
     if (filterSeverity !== 'all' && event.severity !== filterSeverity) return false;
     return true;
   });
@@ -169,10 +197,11 @@ export default function CrisisManagement() {
 
   // Group events by session
   const eventsBySession = filteredEvents.reduce<Record<string, CrisisEvent[]>>((acc, event) => {
-    if (!acc[event.session_id]) {
-      acc[event.session_id] = [];
+    const sid = event.session_id ?? 'unknown';
+    if (!acc[sid]) {
+      acc[sid] = [];
     }
-    acc[event.session_id].push(event);
+    acc[sid].push(event);
     return acc;
   }, {});
 
@@ -325,10 +354,28 @@ export default function CrisisManagement() {
           {/* Overview Tab */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
+              {/* Flagged messages (076 thread-origin crisis events). */}
+              {flaggedMessages.events.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <MessageSquare size={18} className="text-amber-600" />
+                    Flagged Messages
+                  </h3>
+                  <div className="space-y-2">
+                    {flaggedMessages.events.map(event => (
+                      <FlaggedMessageRow
+                        key={event.event_id}
+                        event={event}
+                        onOpenThread={onOpenMessages ? () => onOpenMessages() : undefined}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <h3 className="text-lg font-semibold mb-4">Recent Crisis Activity</h3>
                 <div className="space-y-3">
-                  {data.crisisEvents.slice(0, 10).map(event => (
+                  {data.crisisEvents.filter(e => e.origin !== 'thread_message').slice(0, 10).map(event => (
                     <div key={event.event_id} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -449,6 +496,21 @@ export default function CrisisManagement() {
                               {event.notes && (
                                 <p className="mt-2 text-sm italic text-gray-700">{event.notes}</p>
                               )}
+
+                              <div className="mt-3">
+                                <button
+                                  onClick={() => setEscalateFor({
+                                    crisisEventId: Number(event.event_id),
+                                    sessionId: event.session_id,
+                                    clientId: event.client_user_id ?? event.user_id ?? null,
+                                    clientName: event.username ?? null,
+                                  })}
+                                  className="inline-flex items-center gap-1.5 text-sm font-medium text-royal hover:text-navy"
+                                >
+                                  <ArrowUpCircle size={15} />
+                                  Escalate to therapist
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -665,6 +727,18 @@ export default function CrisisManagement() {
           )}
         </div>
       </div>
+
+      {/* Escalation composer, pre-linked to the crisis event/session. */}
+      {escalateFor && (
+        <EscalationComposer
+          crisisEventId={escalateFor.crisisEventId}
+          sessionId={escalateFor.sessionId}
+          clientId={escalateFor.clientId ?? undefined}
+          clientName={escalateFor.clientName ?? undefined}
+          onClose={() => setEscalateFor(null)}
+          onCreated={() => setEscalateFor(null)}
+        />
+      )}
     </div>
   );
 }

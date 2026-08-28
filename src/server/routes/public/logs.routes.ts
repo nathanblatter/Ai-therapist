@@ -80,9 +80,10 @@ export default function logsRoutes(): Router {
           }
         } else {
           const { isNonStudyUser } = await import('../../utils/harness.js');
+          // Sandbox accounts' sessions are stamped is_demo too (C3/s7).
           await createActiveRealtimeSession(
             sessionId, userId,
-            isNonStudyUser(req.session?.userRole, req.session?.username),
+            isNonStudyUser(req.session?.userRole, req.session?.username) || req.session?.isSandbox === true,
           );
           recordSessionOwnership(req, sessionId);
           console.log(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);

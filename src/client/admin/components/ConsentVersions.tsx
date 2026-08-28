@@ -1,9 +1,14 @@
-// Admin view for versioned IRB consent copy (ai-therapist-94). Researchers can
-// review every published version (with acceptance counts) and publish a new one.
-// Publishing with an immediate effective date re-consents every participant.
+// Admin view for versioned consent copy (ai-therapist-94; 078 added
+// per-audience documents). Researchers can review every published version
+// (with acceptance counts) per audience — 'research' (the IRB study copy) or
+// 'clinical' (the care-team copy shown when deployment_mode=clinical) — and
+// publish a new one into either audience. Publishing with an immediate
+// effective date re-consents every participant that audience serves.
 import { useState, useEffect, useCallback } from 'react';
 import { CheckCircle, Clock, ChevronDown, ChevronUp } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
+
+type Audience = 'research' | 'clinical';
 
 interface Version {
   document_id: number;
@@ -14,17 +19,36 @@ interface Version {
   published_by: string;
   created_at: string;
   acceptance_count: number;
+  audience?: Audience;
 }
 
-function suggestVersion(): string {
+function suggestVersion(audience: Audience): string {
   const d = new Date();
   const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return `${iso}.1`;
+  return audience === 'clinical' ? `${iso}.c1` : `${iso}.1`;
 }
+
+const AUDIENCE_TABS: Array<{ id: Audience; label: string; blurb: string }> = [
+  {
+    id: 'research',
+    label: 'Research (IRB study)',
+    blurb: 'Shown to participants while deployment_mode is research.',
+  },
+  {
+    id: 'clinical',
+    label: 'Clinical (care team)',
+    blurb: 'Shown to participants while deployment_mode is clinical. Falls back to the research copy if none exists.',
+  },
+];
 
 export default function ConsentVersions() {
   const [versions, setVersions] = useState<Version[]>([]);
-  const [activeVersion, setActiveVersion] = useState<string | null>(null);
+  const [activeVersions, setActiveVersions] = useState<Record<Audience, string | null>>({
+    research: null,
+    clinical: null,
+  });
+  const [audienceInEffect, setAudienceInEffect] = useState<Audience>('research');
+  const [tab, setTab] = useState<Audience>('research');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -43,7 +67,11 @@ export default function ConsentVersions() {
       if (!res.ok) throw new Error(`Failed to load (${res.status})`);
       const data = await res.json();
       setVersions(data.versions ?? []);
-      setActiveVersion(data.activeVersion ?? null);
+      setActiveVersions({
+        research: data.activeVersions?.research ?? data.activeVersion ?? null,
+        clinical: data.activeVersions?.clinical ?? null,
+      });
+      setAudienceInEffect(data.audienceInEffect === 'clinical' ? 'clinical' : 'research');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -53,10 +81,13 @@ export default function ConsentVersions() {
 
   useEffect(() => { load(); }, [load]);
 
+  const tabVersions = versions.filter(v => (v.audience ?? 'research') === tab);
+  const activeVersion = activeVersions[tab];
+
   const openForm = () => {
     // Prefill the version suggestion and the active body (for editing).
-    setNewVersion(suggestVersion());
-    const active = versions.find(v => v.version === activeVersion);
+    setNewVersion(suggestVersion(tab));
+    const active = tabVersions.find(v => v.version === activeVersion);
     setNewBody(active?.body ?? '');
     setEffectiveAt('');
     setShowForm(true);
@@ -77,6 +108,7 @@ export default function ConsentVersions() {
         body: JSON.stringify({
           version: newVersion.trim(),
           body: newBody,
+          audience: tab,
           ...(effectiveAt ? { effectiveAt: new Date(effectiveAt).toISOString() } : {}),
         }),
       });
@@ -100,8 +132,9 @@ export default function ConsentVersions() {
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Consent Versions</h2>
           <p className="text-sm text-gray-600 mt-1">
-            The versioned IRB consent copy participants accept. The active version is the newest one
-            whose effective date has passed. Each acceptance is stored with a hash of the exact text.
+            The versioned consent copy participants accept, per audience. The active version is the
+            newest one whose effective date has passed. Each acceptance is stored with a hash of the
+            exact text.
           </p>
         </div>
         <button
@@ -112,14 +145,40 @@ export default function ConsentVersions() {
         </button>
       </div>
 
+      <div className="mb-4 border-b border-gray-200 flex gap-1" role="tablist" aria-label="Consent audience">
+        {AUDIENCE_TABS.map(t => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => { setTab(t.id); setShowForm(false); setExpanded(null); }}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px inline-flex items-center gap-2 ${
+              tab === t.id
+                ? 'border-royal text-royal'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t.label}
+            {audienceInEffect === t.id && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase bg-blue-100 text-blue-700">
+                In effect
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <p className="mb-4 text-xs text-gray-500">{AUDIENCE_TABS.find(t => t.id === tab)?.blurb}</p>
+
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
 
       {showForm && (
         <div className="mb-6 bg-white rounded-lg shadow p-5 space-y-4">
-          <h3 className="font-semibold text-gray-900">Publish new consent version</h3>
+          <h3 className="font-semibold text-gray-900">
+            Publish new {tab === 'clinical' ? 'clinical' : 'research'} consent version
+          </h3>
           <div className="p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
-            Publishing immediately blocks all participants from starting sessions until they re-accept.
-            Set a future effective date to schedule instead.
+            Publishing immediately blocks participants served by this audience from starting sessions
+            until they re-accept. Set a future effective date to schedule instead.
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Version</label>
@@ -165,11 +224,15 @@ export default function ConsentVersions() {
 
       {loading ? (
         <div className="text-gray-500 p-8 text-center">Loading…</div>
-      ) : versions.length === 0 ? (
-        <div className="text-gray-500 p-8 text-center bg-white rounded-lg shadow">No consent versions yet.</div>
+      ) : tabVersions.length === 0 ? (
+        <div className="text-gray-500 p-8 text-center bg-white rounded-lg shadow">
+          {tab === 'clinical'
+            ? 'No clinical consent versions yet. The research copy is served as a fallback.'
+            : 'No consent versions yet.'}
+        </div>
       ) : (
         <div className="space-y-3">
-          {versions.map(v => {
+          {tabVersions.map(v => {
             const isActive = v.version === activeVersion;
             const scheduled = new Date(v.effective_at).getTime() > Date.now();
             return (

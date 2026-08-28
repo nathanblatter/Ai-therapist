@@ -3,10 +3,15 @@
 // setTimeout scheduler fires at run_time, every deletion writes a
 // data_deletion_log row, and there is a manual trigger. Ships DISABLED.
 //
-// Two enforcement rules per pass (one run_id):
+// Three enforcement rules per pass (one run_id):
 //   1. recording age-out   — recordings older than recordings_retention_days
 //   2. wiped-user grace     — orphaned (user_id IS NULL) ended sessions past
 //                             wiped_user_grace_days get their recording deleted
+//   3. message age-out      — thread messages (and their message-origin
+//                             crisis_events) older than the SAME
+//                             recordings_retention_days window are hard-deleted
+//                             (caseworker portal spec section 10 item 8:
+//                             messages retain like sessions; sandbox exempt)
 // MinIO delete is best-effort-first (same ordering as demoCleanup.service): the
 // object is removed before the DB columns are nulled, and a MinIO failure logs
 // success=false and leaves the columns intact for retry next run.
@@ -20,6 +25,7 @@ import {
   insertDeletionLog,
   type RecordingRow,
 } from '../db/dataRetention.queries.js';
+import { deleteAgedThreadMessages } from '../db/messagingRetention.queries.js';
 
 export interface DataRetentionSettings {
   enabled: boolean;
@@ -34,6 +40,7 @@ export interface RetentionRunResult {
   runId: string;
   recordingsDeleted: number;
   graceDeleted: number;
+  threadMessagesDeleted: number;
   failures: number;
   skipped: boolean; // true when the job is disabled
 }
@@ -112,7 +119,19 @@ async function deleteRecording(
   }
 }
 
-/** Enforce all retention rules in one pass (one run_id). */
+/**
+ * Enforce all retention rules in one pass (one run_id).
+ *
+ * Sandbox exemption (caseworker portal spec section 7 / decision 10) is
+ * structural here — verified, no extra filter needed: both selection queries
+ * in dataRetention.queries.ts already exclude `is_demo` sessions, and every
+ * sandbox-seeded session is created with is_demo=TRUE (and never has a
+ * recording in the first place). If a non-is_demo sandbox artifact ever
+ * appears, add a users.is_sandbox guard alongside the is_demo one there.
+ * The message age-out (rule 3) carries its own explicit sandbox filters in
+ * messagingRetention.queries.ts (threads are not sessions, so is_demo does
+ * not cover them).
+ */
 export async function enforceRetention(
   triggeredBy: 'scheduler' | 'manual',
   triggeredByUser?: string
@@ -121,11 +140,12 @@ export async function enforceRetention(
   const runId = randomUUID();
 
   if (!settings.enabled && triggeredBy === 'scheduler') {
-    return { runId, recordingsDeleted: 0, graceDeleted: 0, failures: 0, skipped: true };
+    return { runId, recordingsDeleted: 0, graceDeleted: 0, threadMessagesDeleted: 0, failures: 0, skipped: true };
   }
 
   let recordingsDeleted = 0;
   let graceDeleted = 0;
+  let threadMessagesDeleted = 0;
   let failures = 0;
 
   // 1. Recording age-out.
@@ -145,7 +165,28 @@ export async function enforceRetention(
     if (ok) graceDeleted++; else failures++;
   }
 
-  const totalDeletions = recordingsDeleted + graceDeleted;
+  // 3. Message age-out (caseworker portal spec section 10 item 8: messages
+  // retain like sessions). Thread messages older than the SAME
+  // recordings_retention_days window are hard-deleted, message-origin
+  // crisis_events first (FK order), sandbox threads exempt (item 10). The
+  // data_deletion_log audit row shares the deletion transaction, so a failed
+  // audit insert (e.g. data_deletion_log CHECKs not yet widened by migration)
+  // rolls the whole deletion back — messages are never deleted unaudited.
+  try {
+    const messageResult = await deleteAgedThreadMessages({
+      days: settings.recordings_retention_days,
+      runId,
+      policySnapshot: settings,
+      triggeredBy,
+      triggeredByUser: triggeredByUser ?? null,
+    });
+    threadMessagesDeleted = messageResult.messagesDeleted;
+  } catch (err) {
+    failures++;
+    console.error('[Retention] thread-message age-out failed (rolled back, retried next run):', err);
+  }
+
+  const totalDeletions = recordingsDeleted + graceDeleted + threadMessagesDeleted;
   const updated: DataRetentionSettings = {
     ...settings,
     last_run_at: new Date().toISOString(),
@@ -157,8 +198,8 @@ export async function enforceRetention(
     [JSON.stringify(updated)]
   ).catch(err => console.error('[Retention] failed to stamp last_run:', err));
 
-  console.log(`[Retention] run ${runId}: ${recordingsDeleted} aged-out, ${graceDeleted} grace, ${failures} failures`);
-  return { runId, recordingsDeleted, graceDeleted, failures, skipped: false };
+  console.log(`[Retention] run ${runId}: ${recordingsDeleted} aged-out, ${graceDeleted} grace, ${threadMessagesDeleted} thread messages, ${failures} failures`);
+  return { runId, recordingsDeleted, graceDeleted, threadMessagesDeleted, failures, skipped: false };
 }
 
 function getNextRunTime(runTime: string): Date {

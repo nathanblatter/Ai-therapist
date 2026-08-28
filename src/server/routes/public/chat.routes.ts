@@ -11,6 +11,7 @@ import {
   getActiveSessionForUser,
   getSessionAccessInfo,
   isDemoAccountSession,
+  isSandboxAccountSession,
   getRecentSessionMessages,
   getUserPreferredLanguage,
   setUserPreferredLanguage,
@@ -22,6 +23,17 @@ import { generateSessionNameAsync } from '../../services/sessionName.service.js'
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
+
+/**
+ * Synthetic-account gate (caseworker portal, spec section 7 item 6): demo-role
+ * magic-link accounts AND sandbox-org accounts both get behavioral safety
+ * skips (no minor-gate LLM confirm / auto-end for invented dialogue). Keyed on
+ * account identity, not the session's is_demo analytics flag — eval-harness
+ * sessions are is_demo but must exercise the REAL pipelines.
+ */
+async function isSyntheticAccountSession(sessionId: string): Promise<boolean> {
+  return (await isDemoAccountSession(sessionId)) || (await isSandboxAccountSession(sessionId));
+}
 
 export default function chatRoutes(): Router {
   const router = Router();
@@ -88,9 +100,10 @@ export default function chatRoutes(): Router {
         sessionName: null, // generated from the conversation when the session ends
         status: 'active',
         sessionType: 'chat',
-        // Demo viewers AND the eval-harness participant: non-study data,
+        // Demo viewers, the eval-harness participant AND sandbox accounts
+        // (C3/s7: sandbox owners' sessions are is_demo): non-study data,
         // excluded from every real analytics/export surface.
-        isDemo: isNonStudyUser(userRole, username),
+        isDemo: isNonStudyUser(userRole, username) || req.session?.isSandbox === true,
       });
 
       if (checkin) {
@@ -172,7 +185,7 @@ export default function chatRoutes(): Router {
       // on a confirmed turn, so the copy can't be paraphrased away. Fail-open:
       // any confirmation error degrades to normal handling.
       const { detectMinorDisclosurePatterns } = await import('../../services/minorSafeguard.service.js');
-      if (detectMinorDisclosurePatterns(message).matched && !(await isDemoAccountSession(sessionId))) {
+      if (detectMinorDisclosurePatterns(message).matched && !(await isSyntheticAccountSession(sessionId))) {
         try {
           const { confirmMinorDisclosure, handleConfirmedMinor, MINOR_ELIGIBILITY_MESSAGE } =
             await import('../../services/minorSafeguard.service.js');
@@ -309,7 +322,7 @@ export default function chatRoutes(): Router {
         .then(m => m.generateSessionInsightsAsync(sessionId))
         .catch(e => console.error('[Insights] generation failed:', e));
 
-      void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'user', endedAt: new Date() }, sessionId);
+      void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'user', endedAt: new Date() }, sessionId, 'summary');
       global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt: new Date() });
 
       console.log(`Chat session ${sessionId.substring(0, 12)}... ended by user`);

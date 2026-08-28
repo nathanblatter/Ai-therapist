@@ -16,8 +16,11 @@ const pool = new pg.Pool({
 
 try {
   const hash = await bcrypt.hash(PASSWORD, 10);
+  // organization_id is NOT NULL since migration 069; the harness account lives
+  // in the irb-study org (its sessions are excluded via is_demo, not org).
   await pool.query(
-    `INSERT INTO users (username, password, role) VALUES ($1, $2, 'participant')
+    `INSERT INTO users (username, password, role, organization_id)
+     VALUES ($1, $2, 'participant', (SELECT org_id FROM organizations WHERE slug = 'irb-study'))
      ON CONFLICT (username) DO NOTHING`,
     [USERNAME, hash],
   );

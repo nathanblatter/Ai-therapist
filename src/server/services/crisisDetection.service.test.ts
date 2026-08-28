@@ -29,7 +29,7 @@ vi.mock('openai', () => ({
   },
 }));
 
-const { detectCrisisKeywords, analyzeMessageRisk, flagSessionCrisis } = await import('./crisisDetection.service.js');
+const { detectCrisisKeywords, analyzeMessageRisk, analyzeStandaloneRisk, flagSessionCrisis } = await import('./crisisDetection.service.js');
 
 function llmResponse(payload: Record<string, unknown>) {
   return { choices: [{ message: { content: JSON.stringify(payload) } }] };
@@ -221,6 +221,55 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
     expect(factorsJson.keyword_score).toBe(75);
     expect(factorsJson.llm_score).toBe(5);
     expect(factorsJson.llm_context).toBe('bystander');
+  });
+});
+
+describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => {
+  beforeEach(() => {
+    queryMock.mockReset().mockResolvedValue({ rows: [] });
+    createMock.mockReset();
+  });
+
+  it('returns zero without an LLM call — and without any DB write — when no keywords match', async () => {
+    const r = await analyzeStandaloneRisk('thanks, see you at our appointment');
+    expect(r).toEqual({ riskScore: 0, severity: 'none', factors: [], method: 'keyword_only' });
+    expect(createMock).not.toHaveBeenCalled();
+    // No risk_score_history insert, no trajectory read: standalone content
+    // has no session to log against.
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('runs the stage-2 LLM on a keyword hit and returns its contextual verdict', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 55, severity: 'medium', context: 'genuine',
+      factors: ['passive ideation'], reasoning: 'Expressed wish to not be here.',
+    }));
+    const r = await analyzeStandaloneRisk(
+      "lately I don't want to be here anymore",
+      [{ role: 'assistant', content: 'How have things been since we spoke?' }],
+    );
+    expect(r.riskScore).toBe(55);
+    expect(r.severity).toBe('medium');
+    expect(r.factors).toEqual(['passive ideation']);
+    expect(r.method).toBe('llm_assessed');
+    expect(createMock).toHaveBeenCalledOnce();
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the keyword tier score when the LLM fails (fail toward detection)', async () => {
+    createMock.mockRejectedValue(new Error('LLM unavailable'));
+    const r = await analyzeStandaloneRisk('I keep thinking about suicide');
+    expect(r.riskScore).toBe(75);
+    expect(r.severity).toBe('high');
+    expect(r.method).toBe('keyword_fallback');
+    expect(r.factors).toContain('suicide');
+  });
+
+  it('never runs a periodic sweep: keyword-free messages stay LLM-free forever', async () => {
+    for (let i = 0; i < 12; i++) {
+      await analyzeStandaloneRisk('another completely neutral check-in message');
+    }
+    expect(createMock).not.toHaveBeenCalled();
   });
 });
 

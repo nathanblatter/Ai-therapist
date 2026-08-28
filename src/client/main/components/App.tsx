@@ -10,6 +10,7 @@ import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
 import PostSessionScreen, { type PostSessionData, type SessionRecapData, type SharedWriteup } from "./PostSessionScreen";
 import Header from './Header';
 import Home from './Home';
+import Messages from './Messages';
 import VoiceOrb from './VoiceOrb';
 import { initializeLogger } from '../utils/logger';
 import ToastContainer, { toast } from '../../shared/components/Toast';
@@ -18,6 +19,8 @@ import DemoSwitcher from '../../shared/components/DemoSwitcher';
 import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
 import { createParticipantSocket } from '../lib/participantSocket';
+import { getUserSocket, closeUserSocket } from '../lib/userSocket';
+import { useMessagingUnread } from '../hooks/useMessaging';
 import { getStoredTheme, setTheme } from '../../shared/theme';
 import { reportClientEvent } from '../utils/telemetry';
 
@@ -144,6 +147,26 @@ export default function App() {
   });
   // Debounce for WebRTC 'disconnected' (it can self-heal); 'failed' acts immediately.
   const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Async secure messaging (caseworker portal): between-sessions view switch
+  // + persistent user socket for logged-in participants. The socket is
+  // latency sugar only; useMessaging HTTP-polls regardless.
+  const [activeView, setActiveView] = useState<'home' | 'messages'>('home');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const messagesUnread = useMessagingUnread(isAuthenticated);
+
+  useEffect(() => {
+    fetch('/api/auth/status', { credentials: 'include' })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => setIsAuthenticated(Boolean(data?.authenticated)))
+      .catch(() => { /* stay anonymous */ });
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getUserSocket();
+    return () => closeUserSocket();
+  }, [isAuthenticated]);
 
   // Consent (ai-therapist-24): must be accepted before a session can start.
   const [isConsentOpen, setIsConsentOpen] = useState(false);
@@ -1385,7 +1408,15 @@ export default function App() {
           Recording
         </div>
       )}
-      <Header sessionId={sessionId} timeRemaining={timeRemaining} />
+      <Header
+        sessionId={sessionId}
+        timeRemaining={timeRemaining}
+        messagesUnread={messagesUnread}
+        onOpenMessages={isAuthenticated && !isSessionActive
+          ? () => setActiveView(v => (v === 'messages' ? 'home' : 'messages'))
+          : undefined}
+        messagesOpen={activeView === 'messages'}
+      />
       <main className="flex-1 flex flex-col items-center overflow-hidden">
         {/* Themed voice indicator (voice sessions only) */}
         {isSessionActive && sessionType === 'realtime' && (
@@ -1394,6 +1425,10 @@ export default function App() {
         <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
           {isSessionActive ? (
             <ChatLog messages={messages} assistantStream={assistantStream} />
+          ) : activeView === 'messages' && isAuthenticated ? (
+            /* Async secure messaging (caseworker portal): not real-time —
+               the component carries its own crisis-resources banner. */
+            <Messages />
           ) : postSessionData ? (
             <PostSessionScreen
               data={postSessionData}
@@ -1404,7 +1439,7 @@ export default function App() {
                safety plan for logged-in participants; anonymous users still get
                the plain start prompt. The Start controls below stay outside the
                scroll area, so they are always visible and never blocked. */
-            <Home />
+            <Home onOpenMessages={() => setActiveView('messages')} messagesUnread={messagesUnread} />
           )}
         </div>
         <div className="w-full max-w-4xl p-2 sm:p-4">

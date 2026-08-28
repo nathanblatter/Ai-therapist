@@ -16,6 +16,11 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../db/dataRetention.queries.js', () => mocks);
 
+const messagingMocks = vi.hoisted(() => ({
+  deleteAgedThreadMessages: vi.fn(),
+}));
+vi.mock('../db/messagingRetention.queries.js', () => messagingMocks);
+
 import {
   getDataRetentionSettings,
   enforceRetention,
@@ -37,6 +42,7 @@ beforeEach(() => {
   mocks.getOrphanedRecordingsPastGrace.mockReset().mockResolvedValue([]);
   mocks.clearRecordingColumns.mockReset().mockResolvedValue(undefined);
   mocks.insertDeletionLog.mockReset().mockResolvedValue(undefined);
+  messagingMocks.deleteAgedThreadMessages.mockReset().mockResolvedValue({ messagesDeleted: 0, crisisEventsDeleted: 0 });
   // Default: settings SELECT returns enabled settings; any UPDATE resolves.
   queryMock.mockImplementation((sql: string) => {
     if (sql.includes('SELECT config_value')) return Promise.resolve({ rows: [{ config_value: SETTINGS }] });
@@ -139,5 +145,49 @@ describe('enforceRetention', () => {
     const payload = JSON.parse(updateCall![1][0]);
     expect(payload.last_run_deletions).toBe(1);
     expect(payload.last_run_at).toBeTruthy();
+  });
+
+  // Message age-out (caseworker portal spec section 10 item 8): thread
+  // messages are swept in the same pass, on the same retention window.
+  it('ages out thread messages in the same pass on the recordings retention window', async () => {
+    messagingMocks.deleteAgedThreadMessages.mockResolvedValue({ messagesDeleted: 3, crisisEventsDeleted: 1 });
+    const result = await enforceRetention('manual', 'cli');
+    expect(messagingMocks.deleteAgedThreadMessages).toHaveBeenCalledWith(expect.objectContaining({
+      days: 90, // SAME window as recordings — one consistent records policy
+      runId: result.runId,
+      triggeredBy: 'manual',
+      triggeredByUser: 'cli',
+      policySnapshot: expect.objectContaining({ recordings_retention_days: 90 }),
+    }));
+    expect(result.threadMessagesDeleted).toBe(3);
+    expect(result.failures).toBe(0);
+  });
+
+  it('counts message deletions into last_run_deletions', async () => {
+    messagingMocks.deleteAgedThreadMessages.mockResolvedValue({ messagesDeleted: 2, crisisEventsDeleted: 0 });
+    await enforceRetention('manual', 'cli');
+    const updateCall = queryMock.mock.calls.find(c => String(c[0]).includes('UPDATE system_config'));
+    expect(JSON.parse(updateCall![1][0]).last_run_deletions).toBe(2);
+  });
+
+  it('a failed (rolled-back) message age-out is a failure but does not break recording deletion', async () => {
+    mocks.getRecordingsToAgeOut.mockResolvedValue([
+      { session_id: 's1', recording_object_key: 'rec/s1.wav', user_id: 7 },
+    ]);
+    deleteObjectMock.mockResolvedValue(undefined);
+    messagingMocks.deleteAgedThreadMessages.mockRejectedValue(new Error('audit CHECK rejected'));
+    const result = await enforceRetention('manual', 'cli');
+    expect(result.recordingsDeleted).toBe(1);
+    expect(result.threadMessagesDeleted).toBe(0);
+    expect(result.failures).toBe(1);
+  });
+
+  it('does not touch thread messages when a scheduled run is disabled', async () => {
+    queryMock.mockImplementation((sql: string) =>
+      sql.includes('SELECT config_value')
+        ? Promise.resolve({ rows: [{ config_value: { ...SETTINGS, enabled: false } }] })
+        : Promise.resolve({ rows: [] }));
+    await enforceRetention('scheduler');
+    expect(messagingMocks.deleteAgedThreadMessages).not.toHaveBeenCalled();
   });
 });

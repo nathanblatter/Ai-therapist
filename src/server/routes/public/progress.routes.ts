@@ -15,6 +15,7 @@ import {
   listUserWorksheetInstances,
   listUserAssignments,
   completeAssignment,
+  getMessageHistoryForClient,
 } from '../../db/index.js';
 
 export default function progressRoutes(): Router {
@@ -64,6 +65,38 @@ export default function progressRoutes(): Router {
     } catch (error) {
       console.error('Error fetching own assignments:', error);
       res.status(500).json({ error: 'Failed to fetch assignments' });
+    }
+  });
+
+  // GET /api/me/export - the participant's own data export as a JSON download
+  // (caseworker portal spec section 10 item 8: participant data exports
+  // include their async message history). Self-scoped like everything else on
+  // /api/me/*: the user id only ever comes from the session. Message payloads
+  // follow the participant tier — no risk scores, just a boolean flag.
+  // Session transcript content is governed by the content-retention wipe and
+  // is not duplicated here.
+  router.get('/api/me/export', progressLimiter, requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const [progress, safetyPlan, worksheets, assignments, messageThreads] = await Promise.all([
+        getOwnProgress(userId),
+        getUserLatestSafetyPlan(userId),
+        listUserWorksheetInstances(userId),
+        listUserAssignments(userId, { limit: 1000 }),
+        getMessageHistoryForClient(userId),
+      ]);
+      res.setHeader('Content-Disposition', 'attachment; filename="my-data-export.json"');
+      res.json({
+        exported_at: new Date().toISOString(),
+        progress,
+        safety_plan: safetyPlan,
+        worksheets,
+        assignments,
+        message_threads: messageThreads,
+      });
+    } catch (error) {
+      console.error('Error building participant data export:', error);
+      res.status(500).json({ error: 'Failed to build data export' });
     }
   });
 

@@ -1,6 +1,7 @@
-import { useState, useEffect, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck } from "react-feather";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, Box, Info } from "react-feather";
 import AdminHeader from "./AdminHeader";
+import SandboxBanner from "./SandboxBanner";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
 import ErrorBoundary from "../../shared/components/ErrorBoundary";
@@ -28,6 +29,12 @@ const EvalsView = lazy(() => import("./EvalsView"));
 const ParticipantProfile = lazy(() => import("./ParticipantProfile"));
 const RedactionReview = lazy(() => import("./RedactionReview"));
 const CaseloadView = lazy(() => import("./CaseloadView"));
+const CaseworkerDashboard = lazy(() => import("./CaseworkerDashboard"));
+const WorkQueue = lazy(() => import("./WorkQueue"));
+const NotificationPreferences = lazy(() => import("./NotificationPreferences"));
+const EscalationInbox = lazy(() => import("./escalations/EscalationInbox"));
+const MessagingInbox = lazy(() => import("./MessagingInbox"));
+const SandboxInvites = lazy(() => import("./SandboxInvites"));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -50,14 +57,30 @@ function ViewLoading() {
   );
 }
 
+// Role-dependent landing view (caseworker portal): caseworker lands on
+// triage, therapist on caseload, everyone else on sessions.
+function landingViewFor(role: string | null): string {
+  if (role === 'caseworker') return 'triage';
+  if (role === 'therapist') return 'caseload';
+  return 'sessions';
+}
+
 export default function AdminApp() {
-  const [currentView, setCurrentView] = useState('sessions');
+  // null until the auth-status fetch resolves — the shell shows ViewLoading
+  // so the landing view can depend on the role without a sessions flash.
+  const [currentView, setCurrentViewState] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   // Participant profile drill-down from the Users table (ai-therapist-110);
   // mirrors the selectedSessionId/SessionDetail pattern.
   const [selectedUser, setSelectedUser] = useState<ProfileUserSummary | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  // Sandbox account (join-sandbox signup): persistent banner + one-time
+  // onboarding callout; all client data in the account is synthetic.
+  const [isSandbox, setIsSandbox] = useState(false);
+  const [sandboxCalloutDismissed, setSandboxCalloutDismissed] = useState(() => {
+    try { return localStorage.getItem('sandbox-onboarding-dismissed') === '1'; } catch { return false; }
+  });
   // Deployment posture (migration 060): 'research' shows every study surface;
   // 'clinical' (therapist pilot) hides the research-only nav items. UI framing
   // only — server-side authorization is unchanged.
@@ -66,10 +89,18 @@ export default function AdminApp() {
   // Adverse-event deadline reminder: count of overdue + due-soon drafts, shown
   // as a red badge on the Adverse Events nav item (ai-therapist-95).
   const [aeReminderCount, setAeReminderCount] = useState(0);
+  // Open-escalations + unread-messages nav badges (care-team roles only).
+  const [escalationCount, setEscalationCount] = useState(0);
+  const [messagingUnread, setMessagingUnread] = useState(0);
 
-  // Fetch user role to determine navigation items
+  const setCurrentView = useCallback((view: string) => setCurrentViewState(view), []);
+
+  // Fetch user role to determine navigation items + the role-dependent
+  // landing view. On any failure fall back to the sessions landing so the
+  // shell never wedges on ViewLoading.
   useEffect(() => {
     const fetchUserRole = async () => {
+      let role: string | null = null;
       try {
         const response = await fetch('/api/auth/status', {
           credentials: 'include'
@@ -77,12 +108,15 @@ export default function AdminApp() {
         if (response.ok) {
           const data = await response.json();
           if (data.authenticated && data.user) {
+            role = data.user.role;
             setUserRole(data.user.role);
+            setIsSandbox(data.user.is_sandbox === true);
           }
         }
       } catch (error) {
         console.error('Failed to fetch user role:', error);
       }
+      setCurrentViewState(prev => prev ?? landingViewFor(role));
     };
 
     fetchUserRole();
@@ -109,6 +143,47 @@ export default function AdminApp() {
       .catch(() => { /* nav badge is best-effort */ });
   }, []);
 
+  // Open-escalations + unread-messages badges for care-team roles. Refreshed
+  // on view changes so acting on items updates the counts without a reload.
+  const isCareTeam = userRole === 'therapist' || userRole === 'caseworker';
+  useEffect(() => {
+    if (!isCareTeam) return;
+    fetch('/admin/api/escalations?count_only=1', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => { if (typeof data?.count === 'number') setEscalationCount(data.count); })
+      .catch(() => { /* nav badge is best-effort */ });
+    fetch('/api/admin/messaging/inbox', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => { if (typeof data?.unread_total === 'number') setMessagingUnread(data.unread_total); })
+      .catch(() => { /* nav badge is best-effort */ });
+  }, [isCareTeam, currentView]);
+
+  // Open a participant profile from views that only know the client id
+  // (triage roster, work queue). Username is resolved best-effort from the
+  // caller's caseload; the profile page itself is id-driven.
+  const usernameCacheRef = useRef(new Map<number, string>());
+  const openParticipantProfile = useCallback(async (clientId: number) => {
+    const cache = usernameCacheRef.current;
+    if (!cache.has(clientId)) {
+      try {
+        const r = await fetch('/admin/api/caseload', { credentials: 'include' });
+        if (r.ok) {
+          const data = await r.json();
+          for (const row of [...(data.clients ?? []), ...(data.assignments ?? [])]) {
+            const id = Number(row.userid ?? row.client_id);
+            const name = row.username ?? row.client_username;
+            if (Number.isInteger(id) && typeof name === 'string') cache.set(id, name);
+          }
+        }
+      } catch { /* fall through to the id-only label */ }
+    }
+    setSelectedUser({
+      userid: clientId,
+      username: cache.get(clientId) ?? `client #${clientId}`,
+      role: 'participant',
+    });
+  }, []);
+
   const handleViewSession = (sessionId: string, editMode = false) => {
     setSelectedSessionId(sessionId);
     setIsEditMode(editMode);
@@ -124,22 +199,28 @@ export default function AdminApp() {
   // pilot framing). demoVisible opens a researcher-gated item to magic-link
   // demo accounts, whose entire admin API is served synthetic fixtures
   // (demo.routes.ts). MFA Security lives in the header account area, not here.
-  type NavItem = { id: string; label: string; icon: typeof Activity; researcherOnly?: boolean; researchOnly?: boolean; demoVisible?: boolean };
+  type NavItem = { id: string; label: string; icon: typeof Activity; researcherOnly?: boolean; researchOnly?: boolean; demoVisible?: boolean; roles?: string[] };
   const navGroups: Array<{ label: string; items: NavItem[] }> = [
     {
       label: 'Operations',
       items: [
-        { id: 'live', label: 'Live Monitoring', icon: Activity },
-        { id: 'sessions', label: 'Sessions', icon: List },
+        // Caseworker portal: attention-ranked triage roster + care-team work
+        // queue. Caseworkers are summaries-tier — Live Monitoring, Sessions
+        // and Analytics stay hidden for them (roles allowlists below).
+        { id: 'triage', label: 'Triage', icon: Target, roles: ['caseworker', 'therapist', 'researcher'] },
+        { id: 'work-queue', label: 'Work Queue', icon: Inbox, roles: ['caseworker', 'therapist'] },
+        { id: 'live', label: 'Live Monitoring', icon: Activity, roles: ['therapist', 'researcher', 'demo'] },
+        { id: 'sessions', label: 'Sessions', icon: List, roles: ['therapist', 'researcher', 'demo'] },
         // Historic id: 'dashboard' renders the Analytics view.
-        { id: 'dashboard', label: 'Analytics', icon: BarChart2 },
+        { id: 'dashboard', label: 'Analytics', icon: BarChart2, roles: ['therapist', 'researcher', 'demo'] },
       ],
     },
     {
       label: 'Safety',
       items: [
         { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle },
-        { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus },
+        { id: 'escalations', label: 'Escalations', icon: ArrowUpCircle, roles: ['therapist', 'caseworker'] },
+        { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus, roles: ['therapist', 'caseworker', 'researcher', 'demo'] },
       ],
     },
     {
@@ -150,8 +231,9 @@ export default function AdminApp() {
         // invites; researcher sees the assignment matrix. Hidden from demo
         // accounts for MVP (demoVisible: false).
         { id: 'caseload', label: 'Caseload', icon: UserCheck, demoVisible: false },
+        { id: 'messages', label: 'Messages', icon: MessageSquare, roles: ['therapist', 'caseworker'] },
         { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
-        { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle },
+        { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle, roles: ['therapist', 'researcher', 'demo'] },
       ],
     },
     {
@@ -163,6 +245,7 @@ export default function AdminApp() {
         { id: 'redaction', label: 'Redaction Review', icon: EyeOff, researcherOnly: true },
         { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true, researchOnly: true },
+        { id: 'sandbox', label: 'Sandbox Invites', icon: Box, researcherOnly: true, researchOnly: true },
         { id: 'export', label: 'Export', icon: Download, researchOnly: true },
       ],
     },
@@ -187,6 +270,11 @@ export default function AdminApp() {
         if (item.researcherOnly) {
           return userRole === 'researcher' || (item.demoVisible === true && userRole === 'demo');
         }
+        // Explicit role allowlist (caseworker portal): hidden unless the
+        // resolved role is listed.
+        if (item.roles && (!userRole || !item.roles.includes(userRole))) {
+          return false;
+        }
         // Non-researcherOnly items may still opt out of demo accounts
         // (e.g. Caseload: demoVisible: false — no synthetic fixtures for MVP).
         if (item.demoVisible === false && userRole === 'demo') {
@@ -199,7 +287,12 @@ export default function AdminApp() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      <AdminHeader onMenuClick={() => setIsSidebarOpen(true)} onMfaClick={() => setCurrentView('mfa')} />
+      <AdminHeader
+        onMenuClick={() => setIsSidebarOpen(true)}
+        onMfaClick={() => setCurrentView('mfa')}
+        onNotificationNavigate={() => setCurrentView('work-queue')}
+      />
+      {isSandbox && <SandboxBanner />}
       <DemoSwitcher context="admin" role={userRole} />
 
       <main className="flex-1 overflow-hidden flex relative">
@@ -256,6 +349,16 @@ export default function AdminApp() {
                             {aeReminderCount}
                           </span>
                         )}
+                        {item.id === 'escalations' && escalationCount > 0 && (
+                          <span className="ml-auto bg-red-600 text-white rounded-full px-2 py-0.5 text-xs font-bold">
+                            {escalationCount}
+                          </span>
+                        )}
+                        {item.id === 'messages' && messagingUnread > 0 && (
+                          <span className="ml-auto bg-royal text-white rounded-full px-2 py-0.5 text-xs font-bold">
+                            {messagingUnread}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -266,13 +369,52 @@ export default function AdminApp() {
         </aside>
 
         <div className="flex-1 overflow-auto">
-          <ErrorBoundary resetKey={currentView}>
+          {isSandbox && !sandboxCalloutDismissed && (
+            <div className="mx-4 mt-4 bg-sky-50 border border-sky-200 rounded-lg p-4 flex gap-3 items-start">
+              <Info size={18} className="text-sky-600 shrink-0 mt-0.5" />
+              <div className="text-sm text-sky-900 flex-1">
+                <p className="font-semibold">Welcome to your sandbox</p>
+                <p className="mt-1">
+                  A synthetic caseload has been assembled for you: browse the triage roster, work the
+                  queue, review notes and escalations, and try messaging. Everything here is fake data —
+                  nothing you do reaches real participants or the on-call pager.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setSandboxCalloutDismissed(true);
+                  try { localStorage.setItem('sandbox-onboarding-dismissed', '1'); } catch { /* best-effort */ }
+                }}
+                className="p-1 text-sky-500 hover:text-sky-800"
+                aria-label="Dismiss sandbox welcome"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
+          <ErrorBoundary resetKey={currentView ?? 'loading'}>
             <Suspense fallback={<ViewLoading />}>
+              {currentView === null && <ViewLoading />}
+              {currentView === 'triage' && <CaseworkerDashboard onSelectClient={openParticipantProfile} />}
+              {currentView === 'work-queue' && (
+                <div>
+                  <WorkQueue
+                    role={userRole === 'caseworker' ? 'caseworker' : 'therapist'}
+                    onSelectClient={openParticipantProfile}
+                  />
+                  <div className="px-6 pb-6">
+                    <NotificationPreferences />
+                  </div>
+                </div>
+              )}
+              {currentView === 'escalations' && <EscalationInbox userRole={userRole} />}
+              {currentView === 'messages' && <MessagingInbox />}
+              {currentView === 'sandbox' && <SandboxInvites />}
               {currentView === 'dashboard' && <Analytics />}
               {currentView === 'sessions' && <SessionList onViewSession={handleViewSession} />}
               {currentView === 'live' && <LiveMonitoring onViewSession={handleViewSession} />}
-              {currentView === 'crisis' && <CrisisManagement />}
-              {currentView === 'adverse-events' && <AdverseEvents />}
+              {currentView === 'crisis' && <CrisisManagement onOpenMessages={() => setCurrentView('messages')} />}
+              {currentView === 'adverse-events' && <AdverseEvents role={userRole} />}
               {currentView === 'rate-limits' && <RateLimitedUsers />}
               {currentView === 'mfa' && <MFASetup />}
               {currentView === 'users' && <UserManagement onViewUser={setSelectedUser} />}
@@ -299,6 +441,10 @@ export default function AdminApp() {
             userRole={userRole}
             onClose={() => setSelectedUser(null)}
             onViewSession={(sessionId) => handleViewSession(sessionId)}
+            onNavigate={(view) => {
+              setSelectedUser(null);
+              setCurrentView(view);
+            }}
           />
         </Suspense>
       )}

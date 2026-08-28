@@ -446,7 +446,7 @@ export default function sessionsRoutes(): Router {
         .then(m => m.maybeAutoEvalSession(sessionId))
         .catch(e => console.error('[Evals] auto-eval failed:', e));
 
-      void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' }, sessionId);
+      void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' }, sessionId, 'summary');
       global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'user' });
 
       res.json({ ...updatedSession, message: 'Session ended successfully' });

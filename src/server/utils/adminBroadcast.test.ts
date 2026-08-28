@@ -7,17 +7,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getTherapistIdsForClient: vi.fn(),
   getSessionAccessInfo: vi.fn(),
+  isSandboxAccount: vi.fn(),
 }));
 
 vi.mock('../db/index.js', () => ({
   getTherapistIdsForClient: mocks.getTherapistIdsForClient,
   getSessionAccessInfo: mocks.getSessionAccessInfo,
+  isSandboxAccount: mocks.isSandboxAccount,
 }));
 
 import {
   broadcastAdminEvent,
   broadcastAdminEventForSession,
   clearSessionUserCache,
+  clearSandboxUserCache,
   type AdminBroadcastIo,
 } from './adminBroadcast.js';
 
@@ -30,6 +33,8 @@ function makeIo() {
 beforeEach(() => {
   vi.clearAllMocks();
   clearSessionUserCache();
+  clearSandboxUserCache();
+  mocks.isSandboxAccount.mockResolvedValue(false);
 });
 
 describe('broadcastAdminEvent', () => {
@@ -81,6 +86,47 @@ describe('broadcastAdminEvent', () => {
 
     expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
     expect(consoleErr).toHaveBeenCalled();
+    consoleErr.mockRestore();
+  });
+
+  it('never emits sandbox-participant events to admin-broadcast (C13), but still reaches their care team', async () => {
+    const { io, to } = makeIo();
+    mocks.isSandboxAccount.mockResolvedValue(true);
+    mocks.getTherapistIdsForClient.mockResolvedValue([7]);
+
+    await broadcastAdminEvent(io, 'session:crisis-detected', {}, 42);
+
+    expect(to.mock.calls.map(c => c[0])).toEqual(['therapist:7']);
+    expect(mocks.isSandboxAccount).toHaveBeenCalledWith(42);
+  });
+
+  it('caches the sandbox resolution across events', async () => {
+    const { io } = makeIo();
+    mocks.isSandboxAccount.mockResolvedValue(true);
+    mocks.getTherapistIdsForClient.mockResolvedValue([]);
+
+    await broadcastAdminEvent(io, 'session:activity', {}, 42);
+    await broadcastAdminEvent(io, 'session:activity', {}, 42);
+
+    expect(mocks.isSandboxAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the researcher-room emit when the sandbox lookup fails (crisis alerting outweighs a metadata leak)', async () => {
+    const { io, to } = makeIo();
+    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.isSandboxAccount.mockRejectedValue(new Error('db down'));
+    mocks.getTherapistIdsForClient.mockResolvedValue([7]);
+
+    await broadcastAdminEvent(io, 'session:crisis-detected', {}, 42);
+
+    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
+    expect(consoleErr).toHaveBeenCalled();
+
+    // Failures are not cached: the next event retries the lookup.
+    mocks.isSandboxAccount.mockResolvedValue(true);
+    to.mockClear();
+    await broadcastAdminEvent(io, 'session:crisis-detected', {}, 42);
+    expect(to.mock.calls.map(c => c[0])).toEqual(['therapist:7']);
     consoleErr.mockRestore();
   });
 });

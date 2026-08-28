@@ -1,6 +1,9 @@
 // Session insights admin API: memory summary + AI-drafted SOAP note review.
-// Therapist-only — both artifacts are derived from unredacted content, which
-// researchers must not see.
+// Write routes (review/regenerate/notes) are therapist-only — clinical
+// workflow over unredacted-derived content. The GET is additionally open to
+// caseworkers with the summaries-tier scrubbed projection (C6 + addendum 1):
+// AI summary / safety plan / screeners as-is, soap_note (a clinical progress-
+// note draft) excluded.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { requireClientAccess, requireSessionClientAccess } from '../../middleware/caseload.js';
@@ -11,23 +14,58 @@ import {
   getSessionScaleResponses,
   setSessionNotesForNextSession,
   setUserRiskContextEnabled,
+  getLiveProgressNoteForSession,
+  type CareNoteRow,
 } from '../../db/index.js';
 
 export default function insightsRoutes(): Router {
   const router = Router();
 
   // GET /admin/api/sessions/:sessionId/insights
-  router.get('/admin/api/sessions/:sessionId/insights', requireRole('therapist'), requireSessionClientAccess(), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/insights', requireRole('therapist', 'caseworker'), requireSessionClientAccess(), async (req, res) => {
     try {
-      const [insights, safetyPlan, scaleResponses] = await Promise.all([
+      const [insights, safetyPlan, scaleResponses, authoredNote] = await Promise.all([
         getSessionInsights(req.params.sessionId),
         getSessionSafetyPlan(req.params.sessionId),
         getSessionScaleResponses(req.params.sessionId),
+        getLiveProgressNoteForSession(req.params.sessionId),
       ]);
       if (!insights && !safetyPlan && scaleResponses.length === 0) {
         return res.status(404).json({ error: 'No insights for this session (yet)' });
       }
-      res.json({ ...(insights ?? {}), safety_plan: safetyPlan, scale_responses: scaleResponses });
+
+      const isCaseworker = req.session.userRole === 'caseworker';
+
+      // The therapist's live progress note for this session (seeded or
+      // hand-written). Caseworkers only see it when it is a shared progress
+      // note or their own — same rule as requireNoteAccess.
+      let authored_note: CareNoteRow | null = authoredNote;
+      if (isCaseworker && authored_note &&
+          !authored_note.shared_with_care_team && authored_note.author_id !== req.session.userId) {
+        authored_note = null;
+      }
+
+      const payload: Record<string, unknown> = {
+        ...(insights ?? {}),
+        safety_plan: safetyPlan,
+        scale_responses: scaleResponses,
+        authored_note,
+      };
+      if (isCaseworker) {
+        // Summaries-tier projection: never the SOAP clinical-note draft.
+        delete payload.soap_note;
+        delete payload.soap_status;
+        delete payload.soap_reviewed_by;
+        delete payload.soap_reviewed_at;
+        // Nor the therapist's free-text next-session guidance (038): it is
+        // clinician-authored clinical documentation, same tier as soap_note.
+        // (SELECT * returns these columns even though SessionInsightsRow
+        // doesn't declare them.)
+        delete payload.notes_for_next_session;
+        delete payload.notes_author;
+        delete payload.notes_created_at;
+      }
+      res.json(payload);
     } catch (err) {
       console.error('Failed to fetch session insights:', err);
       res.status(500).json({ error: 'Failed to fetch session insights' });
@@ -87,7 +125,7 @@ export default function insightsRoutes(): Router {
   // (default off). Widened to therapist+researcher (ai-therapist-91): the Users
   // tab and /api/users are researcher-only, so a therapist-only write route
   // makes the toggle unusable from the only screen that lists participants.
-  router.post('/admin/api/users/:userId/risk-context', requireRole('therapist', 'researcher'), requireClientAccess(), async (req, res) => {
+  router.post('/admin/api/users/:userId/risk-context', requireRole('therapist', 'researcher', 'caseworker'), requireClientAccess(), async (req, res) => {
     try {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });

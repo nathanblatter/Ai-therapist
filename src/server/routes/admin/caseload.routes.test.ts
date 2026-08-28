@@ -16,6 +16,10 @@ const dbMocks = vi.hoisted(() => {
     listCaseload: vi.fn(),
     listAllAssignments: vi.fn(),
     getAllUsers: vi.fn(),
+    freezeThreadsForPair: vi.fn(),
+    // Transitive import of middleware/org.ts (researcher org scoping, C13).
+    getOrganizationIdForUser: vi.fn().mockResolvedValue(1),
+    getIrbStudyOrgId: vi.fn().mockResolvedValue(1),
   };
 });
 vi.mock('../../db/index.js', () => dbMocks);
@@ -44,11 +48,15 @@ beforeEach(() => {
   dbMocks.listAllAssignments.mockReset().mockResolvedValue([
     { therapist_id: 1, therapist_username: 't1', client_id: 42, client_username: 'p42', assigned_at: '2026-08-01' },
   ]);
+  dbMocks.freezeThreadsForPair.mockReset().mockResolvedValue([]);
   dbMocks.getAllUsers.mockReset().mockResolvedValue([
     { userid: 1, username: 't1', role: 'therapist', created_at: '2026-01-01' },
     { userid: 42, username: 'p42', role: 'participant', created_at: '2026-01-02' },
     { userid: 7, username: 'r1', role: 'researcher', created_at: '2026-01-03' },
   ]);
+  // Everyone in org 1 by default; cross-org tests override per-user.
+  dbMocks.getOrganizationIdForUser.mockReset().mockResolvedValue(1);
+  dbMocks.getIrbStudyOrgId.mockReset().mockResolvedValue(1);
 });
 
 describe('GET /admin/api/caseload', () => {
@@ -121,6 +129,29 @@ describe('POST /admin/api/caseload/:therapistId/:clientId', () => {
     const res = await request(appAs('researcher')).post('/admin/api/caseload/1/42');
     expect(res.status).toBe(500);
   });
+
+  it('404s (never assigns) when the target member is in another org', async () => {
+    // Caller (userId 7) resolves org 1; member 1 resolves org 9.
+    dbMocks.getOrganizationIdForUser.mockImplementation(async (id: number) => (id === 1 ? 9 : 1));
+    const res = await request(appAs('researcher', 7)).post('/admin/api/caseload/1/42');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Not found');
+    expect(dbMocks.assignClient).not.toHaveBeenCalled();
+  });
+
+  it('404s when the target client is in another org', async () => {
+    dbMocks.getOrganizationIdForUser.mockImplementation(async (id: number) => (id === 42 ? 9 : 1));
+    const res = await request(appAs('researcher', 7)).post('/admin/api/caseload/1/42');
+    expect(res.status).toBe(404);
+    expect(dbMocks.assignClient).not.toHaveBeenCalled();
+  });
+
+  it('404s when the member does not exist (org unresolvable, 404-over-403)', async () => {
+    dbMocks.getOrganizationIdForUser.mockImplementation(async (id: number) => (id === 1 ? null : 1));
+    const res = await request(appAs('researcher', 7)).post('/admin/api/caseload/1/42');
+    expect(res.status).toBe(404);
+    expect(dbMocks.assignClient).not.toHaveBeenCalled();
+  });
 });
 
 describe('DELETE /admin/api/caseload/:therapistId/:clientId', () => {
@@ -135,6 +166,26 @@ describe('DELETE /admin/api/caseload/:therapistId/:clientId', () => {
     expect(noop.body.removed).toBe(false);
   });
 
+  it('freezes the pair message thread on unassign (messaging slice)', async () => {
+    dbMocks.freezeThreadsForPair.mockResolvedValueOnce([7]);
+    const res = await request(appAs('researcher')).delete('/admin/api/caseload/1/42');
+    expect(res.status).toBe(200);
+    expect(dbMocks.freezeThreadsForPair).toHaveBeenCalledWith(1, 42, 'unassigned');
+  });
+
+  it('does not freeze threads when no assignment row was removed', async () => {
+    dbMocks.unassignClient.mockResolvedValueOnce(false);
+    await request(appAs('researcher')).delete('/admin/api/caseload/1/42');
+    expect(dbMocks.freezeThreadsForPair).not.toHaveBeenCalled();
+  });
+
+  it('still unassigns successfully when the thread freeze fails', async () => {
+    dbMocks.freezeThreadsForPair.mockRejectedValueOnce(new Error('db down'));
+    const res = await request(appAs('researcher')).delete('/admin/api/caseload/1/42');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ success: true, removed: true });
+  });
+
   it('is researcher-only', async () => {
     expect((await request(appAs('therapist')).delete('/admin/api/caseload/1/42')).status).toBe(403);
     expect((await request(appAs(null)).delete('/admin/api/caseload/1/42')).status).toBe(401);
@@ -144,5 +195,13 @@ describe('DELETE /admin/api/caseload/:therapistId/:clientId', () => {
   it('400s on non-numeric ids', async () => {
     expect((await request(appAs('researcher')).delete('/admin/api/caseload/1/xyz')).status).toBe(400);
     expect(dbMocks.unassignClient).not.toHaveBeenCalled();
+  });
+
+  it('404s (never unassigns) a cross-org pair', async () => {
+    dbMocks.getOrganizationIdForUser.mockImplementation(async (id: number) => (id === 1 ? 9 : 1));
+    const res = await request(appAs('researcher', 7)).delete('/admin/api/caseload/1/42');
+    expect(res.status).toBe(404);
+    expect(dbMocks.unassignClient).not.toHaveBeenCalled();
+    expect(dbMocks.freezeThreadsForPair).not.toHaveBeenCalled();
   });
 });

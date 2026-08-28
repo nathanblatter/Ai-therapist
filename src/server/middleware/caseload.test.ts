@@ -10,18 +10,28 @@ const mocks = vi.hoisted(() => ({
   isAssigned: vi.fn(),
   getSessionAccessInfo: vi.fn(),
   getMessageOwner: vi.fn(),
+  getCareNoteById: vi.fn(),
+  getEscalationById: vi.fn(),
+  getOrganizationIdForUser: vi.fn(),
+  getIrbStudyOrgId: vi.fn(),
 }));
 
 vi.mock('../db/index.js', () => ({
   isAssigned: mocks.isAssigned,
   getSessionAccessInfo: mocks.getSessionAccessInfo,
   getMessageOwner: mocks.getMessageOwner,
+  getCareNoteById: mocks.getCareNoteById,
+  getEscalationById: mocks.getEscalationById,
+  getOrganizationIdForUser: mocks.getOrganizationIdForUser,
+  getIrbStudyOrgId: mocks.getIrbStudyOrgId,
 }));
 
 import {
   requireClientAccess,
   requireSessionClientAccess,
   requireMessageClientAccess,
+  requireEscalationAccess,
+  careNoteBelongsToClient,
   therapistScopeId,
   canAdminAccessSessionLive,
 } from './caseload.js';
@@ -48,6 +58,9 @@ function appAs(role: string | null, userId = 1) {
     res.json({ ok: true });
   });
   app.get('/s/:sid', requireSessionClientAccess('sid'), (_req, res) => {
+    res.json({ ok: true });
+  });
+  app.get('/escalations/:escalationId', requireEscalationAccess(), (_req, res) => {
     res.json({ ok: true });
   });
   return app;
@@ -266,5 +279,48 @@ describe('requireMessageClientAccess', () => {
   it('400s a non-numeric message id for therapists', async () => {
     const res = await request(appAs('therapist')).get('/messages/abc');
     expect(res.status).toBe(400);
+  });
+});
+
+describe('requireEscalationAccess researcher org gate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getEscalationById.mockResolvedValue({
+      escalation_id: 11, org_id: 5, client_id: 42, raised_by: 8, assigned_to: null,
+    });
+  });
+
+  it('passes a researcher whose org matches the escalation org', async () => {
+    mocks.getOrganizationIdForUser.mockResolvedValue(5);
+    const res = await request(appAs('researcher', 3)).get('/escalations/11');
+    expect(res.status).toBe(200);
+  });
+
+  it('404s a researcher from another org', async () => {
+    mocks.getOrganizationIdForUser.mockResolvedValue(6);
+    const res = await request(appAs('researcher', 3)).get('/escalations/11');
+    expect(res.status).toBe(404);
+  });
+
+  it('fails closed (500 via error handler) when the org lookup fails', async () => {
+    mocks.getOrganizationIdForUser.mockRejectedValue(new Error('db down'));
+    const res = await request(appAs('researcher', 3)).get('/escalations/11');
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('careNoteBelongsToClient (escalation link check)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('true only when the note exists and matches the client', async () => {
+    mocks.getCareNoteById.mockResolvedValue({ note_id: 3, client_id: 42, org_id: 5 });
+    await expect(careNoteBelongsToClient(3, 42)).resolves.toBe(true);
+    await expect(careNoteBelongsToClient(3, 43)).resolves.toBe(false);
+    expect(mocks.getCareNoteById).toHaveBeenCalledWith(3);
+  });
+
+  it('false for a missing note', async () => {
+    mocks.getCareNoteById.mockResolvedValue(null);
+    await expect(careNoteBelongsToClient(999, 42)).resolves.toBe(false);
   });
 });

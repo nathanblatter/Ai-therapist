@@ -4,6 +4,66 @@ Status: SHIPPED 2026-08-21 (migrations 064-067 applied; live-verified E2E in
 prod, 12/12 checks; two adversarial review rounds — 5 pre-ship + 5 post-ship
 findings, all fixed). Owner: Nathan (review); built by agent fleet.
 
+> **2026-08-28 update — care-team / data-tier model (caseworker portal,
+> migrations 069-078).** The sections below describe the original
+> therapist-only model and remain accurate for therapists; this update layers
+> the care-team model on top. Full spec: `docs/caseworker-portal.md`.
+
+## 2026-08-28: care-team edges, caseworker tier, org scoping
+
+- **`therapist_clients` is now the care-team table** (070). Each row is a
+  member -> client edge with `member_role IN ('therapist','caseworker')`;
+  the `therapist_id` column holds ANY care-team member's userid (legacy name
+  kept for deploy compatibility). No new table, no backfill: existing rows
+  default to `member_role='therapist'`.
+- **New first-class role `caseworker`** (070 widens the users role CHECK).
+  Data tiers:
+  - *Full* (therapist, researcher): message-level/transcript content.
+  - *Summaries* (caseworker): AI session summaries (as-is, per Nathan's
+    2026-08-28 decision 1), risk/crisis signals, screeners/mood, engagement
+    metadata, safety plans, check-ins — **never verbatim therapy-session
+    content**. Enforced at the `requireRole` allowlist wherever possible;
+    response-level scrubbing where a summaries payload embeds verbatim text
+    (crisis `risk_factors`/`intervention_details`/`notes`, risk-history
+    `score_factors`, insights `soap_note` projection). Participant profile
+    bundle (`/admin/api/users/:id/profile`, `/brief`) stays therapist-only —
+    the 2026-08-28 embedded-verbatim audit found remembered facts, thought
+    records, and clinician notes above the tier; caseworker drill-down uses
+    the roster-detail endpoint + notes/escalations/messaging panels instead.
+  - Live transcript streams / session-watch rooms: caseworker is an explicit
+    `false` branch in `canAdminAccessSessionLive`.
+- **Organizations + researcher scoping** (069, conflict decision C13).
+  `organizations(org_id, slug, kind IN ('research','practice','sandbox'))`;
+  every user has `organization_id` (all pre-069 users backfilled into the
+  `irb-study` org). **Researchers are org-scoped like everyone else** — no
+  globally-unscoped role. Same-org member<->client integrity is enforced at
+  write time in `assignClient`.
+- **Middleware**: `requireClientAccess` / `requireSessionClientAccess` /
+  `requireMessageClientAccess` now gate on `isCareTeamRole(role)` (caseworker
+  gets the identical assignment lookup + 404-over-403). `therapistScopeId`
+  is deprecated in favor of `careTeamScopeId`. New foundation gates:
+  `requireBodyClientAccess(field)`, `requireNoteAccess()`,
+  `requireEscalationAccess()`, plus `middleware/org.ts` (`orgIdFor`) and
+  `middleware/messaging.ts` (`requireThreadParticipant`,
+  `requireThreadClinician`, `messagingRateLimit`).
+- **Sockets**: caseworker sockets join `caseworker:<id>` (summary-tier
+  events only; never `admin-broadcast`, never `therapist:<id>`).
+  `broadcastAdminEvent` gained a `tier: 'full'|'summary'='full'` param —
+  default fail-closed; `'summary'` additionally fans out to caseworker
+  rooms. Every authenticated socket (incl. participants) also joins
+  `user:<id>`, which carries ONLY `messaging:*` events.
+- **Escalation claim** (approved decision 4): an org therapist claiming an
+  unassigned escalation is auto-assigned to the client via `assignClient` +
+  a `caseload_audit_log` 'assign' row (`{via:'escalation_claim'}`).
+- **Invites**: a consumed client invite now grants the inviter's
+  `member_role` and organization; caseworkers may mint invites (intake).
+- **Sandbox** (077): per-signup `kind='sandbox'` orgs with `users.is_sandbox`
+  denormalized; sandbox data is excluded from research exports, crisis
+  paging, AE drafting, retention/wipe sweeps, and email — see
+  `docs/caseworker-portal.md` section 7.
+- **404-over-403 semantics are unchanged** and apply to every new surface
+  (notes, escalations, work items, messaging threads).
+
 ## Problem
 
 Every `therapist`-role account can see every participant's sessions, crisis

@@ -61,11 +61,14 @@ export default function authRoutes(): Router {
         await updateMFAVerificationTime(user.userid);
       }
 
-      // Establish the session.
+      // Establish the session. orgId/isSandbox (caseworker portal, 069/077)
+      // are stamped here so org scoping never needs a per-request lookup.
       req.session.userId = user.userid;
       req.session.username = user.username;
       req.session.userRole = user.role;
       req.session.mfaVerified = true;
+      if (typeof user.organization_id === 'number') req.session.orgId = user.organization_id;
+      req.session.isSandbox = user.is_sandbox === true;
 
       req.session.save((err) => {
         if (err) console.error('Session save error:', err);
@@ -88,7 +91,7 @@ export default function authRoutes(): Router {
     if (!username || !password || !role) {
       return res.status(400).json({ error: 'Username, password, and role are required' });
     }
-    if (!['therapist', 'researcher', 'participant'].includes(role)) {
+    if (!['therapist', 'researcher', 'participant', 'caseworker'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
@@ -127,6 +130,9 @@ export default function authRoutes(): Router {
           userid: req.session.userId,
           username: req.session.username,
           role: req.session.userRole,
+          // Sandbox flag (caseworker portal): drives the persistent sandbox
+          // banner. False for every session established before 077 shipped.
+          is_sandbox: req.session.isSandbox === true,
         },
       });
     } else {

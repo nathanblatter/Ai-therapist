@@ -29,14 +29,25 @@ export function requireRole(...allowedRoles: string[]) {
   };
 }
 
+/**
+ * Full-content tier gate (caseworker portal, docs/caseworker-portal.md
+ * section 2): every transcript/message/recording route is allowlisted to the
+ * full-tier roles. Behaviorally identical to the previous inline
+ * requireRole('therapist', 'researcher') calls — this named export documents
+ * intent and keeps caseworkers structurally excluded from verbatim content.
+ */
+export const requireFullContent = requireRole('therapist', 'researcher');
+
 // Check if user can view redacted data
 export function canViewRedactedData(role: string): boolean {
   return role === 'therapist' || role === 'researcher';
 }
 
 // Check if user can access admin features
+// (caseworkers get the admin SPA at the summaries tier; content access is
+// gated per-route by requireRole / requireFullContent.)
 export function canAccessAdmin(role: string): boolean {
-  return role === 'therapist' || role === 'researcher';
+  return role === 'therapist' || role === 'researcher' || role === 'caseworker';
 }
 
 // Check if user can view unredacted data

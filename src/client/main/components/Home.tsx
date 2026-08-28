@@ -8,7 +8,7 @@
 // the main participant bundle doesn't ship Recharts today (only the admin
 // client does), and these tiny labeled small-multiples don't justify adding it.
 import { useEffect, useState } from 'react';
-import { TrendingUp, FileText, Shield, ChevronRight, Phone, Target, CheckCircle } from 'react-feather';
+import { TrendingUp, FileText, Shield, ChevronRight, Phone, Target, CheckCircle, MessageSquare } from 'react-feather';
 import { Shell, SafetyPlanCard, type SafetyPlanData, type CustomWorksheetSection } from './ToolOverlays';
 
 // ---------- server payload shapes (dates arrive as ISO strings) ----------
@@ -286,9 +286,18 @@ function WorksheetReadOnly({ worksheet, onClose }: { worksheet: WorksheetItem; o
 
 // ---------- the home view ----------
 
-export default function Home() {
+interface HomeProps {
+  /** Open the async-messaging view (caseworker portal). */
+  onOpenMessages?: () => void;
+  messagesUnread?: number;
+}
+
+export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps = {}) {
   // null = still checking; false = anonymous (keep the plain start prompt).
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  // Messages card data: hidden for anonymous users and when there are no
+  // threads yet (threads are created by the care team, not the participant).
+  const [threadCount, setThreadCount] = useState(0);
   const [progress, setProgress] = useState<OwnProgress | null>(null);
   const [worksheets, setWorksheets] = useState<WorksheetItem[] | null>(null);
   const [assignments, setAssignments] = useState<AssignmentItem[] | null>(null);
@@ -325,6 +334,13 @@ export default function Home() {
           .then(res => (res.ok ? res.json() : null))
           .then((d: { worksheets: WorksheetItem[] } | null) => {
             if (!cancelled && d && Array.isArray(d.worksheets)) setWorksheets(d.worksheets);
+          })
+          .catch(() => { /* card stays hidden */ });
+
+        fetch('/api/messaging/threads', { credentials: 'include' })
+          .then(res => (res.ok ? res.json() : null))
+          .then((d: { threads: unknown[] } | null) => {
+            if (!cancelled && d && Array.isArray(d.threads)) setThreadCount(d.threads.length);
           })
           .catch(() => { /* card stays hidden */ });
 
@@ -384,6 +400,32 @@ export default function Home() {
           Your practice companion between sessions — press Start Session below whenever you&apos;re ready.
         </p>
       </div>
+
+      {/* Messages card (caseworker portal): shown only when the care team has
+          opened at least one thread with this participant. */}
+      {onOpenMessages && threadCount > 0 && (
+        <button
+          onClick={onOpenMessages}
+          className="w-full bg-white rounded-2xl shadow p-5 sm:p-6 text-left hover:shadow-md transition flex items-center gap-3"
+          aria-label={`Open messages${messagesUnread > 0 ? `, ${messagesUnread} unread` : ''}`}
+        >
+          <MessageSquare size={20} className="text-blue-600 shrink-0" aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-semibold text-gray-800">Messages</p>
+            <p className="text-sm text-gray-500">
+              {messagesUnread > 0
+                ? `${messagesUnread} unread message${messagesUnread === 1 ? '' : 's'} from your care team`
+                : 'Check in with your care team between sessions'}
+            </p>
+          </div>
+          {messagesUnread > 0 && (
+            <span className="bg-red-500 text-white text-xs font-bold rounded-full min-w-[22px] h-[22px] px-1.5 flex items-center justify-center shrink-0">
+              {messagesUnread > 99 ? '99+' : messagesUnread}
+            </span>
+          )}
+          <ChevronRight size={18} className="text-gray-400 shrink-0" aria-hidden="true" />
+        </button>
+      )}
 
       {/* First-time empty state: warm explainer, no fake content */}
       {isFirstTime && (

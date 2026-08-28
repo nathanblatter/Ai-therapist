@@ -4,7 +4,9 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
-import { requireSessionClientAccess, therapistScopeId } from '../../middleware/caseload.js';
+import { requireSessionClientAccess, careTeamScopeId } from '../../middleware/caseload.js';
+import { orgIdFor } from '../../middleware/org.js';
+import { isCareTeamRole } from '../../../shared/roles.js';
 import {
   sessionExists,
   getSessionCrisisFlag,
@@ -17,20 +19,40 @@ import {
 
 // Caseload guard for session ids arriving via query string (the
 // requireSessionClientAccess middleware only covers :sessionId path params).
-// Non-therapists always pass; a therapist passes only when the session exists,
-// has an owner, and that owner is in their caseload.
-async function therapistMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
-  if (req.session.userRole !== 'therapist') return true;
+// Non-care-team roles always pass; a therapist or caseworker passes only when
+// the session exists, has an owner, and that owner is in their caseload.
+async function careTeamMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
+  if (!isCareTeamRole(req.session.userRole)) return true;
   const info = await getSessionAccessInfo(sessionId);
   if (!info || info.user_id === null || info.user_id === undefined) return false;
   return isAssigned(req.session.userId!, Number(info.user_id));
+}
+
+// Summaries-tier scrub (spec section 2): strip the fields that can quote
+// verbatim participant messages before a caseworker sees crisis payloads.
+// crisis_events: risk_factors (matched keywords/snippets), intervention
+// details, and free-text notes; risk_score_history: score_factors (stage-2
+// LLM reasoning). Scores, severities, timestamps, and actors pass through.
+const CRISIS_EVENT_VERBATIM_FIELDS = ['risk_factors', 'intervention_details', 'notes'] as const;
+const RISK_HISTORY_VERBATIM_FIELDS = ['score_factors'] as const;
+const INTERVENTION_VERBATIM_FIELDS = ['action_details', 'notes'] as const;
+
+function scrubRows<T extends Record<string, unknown>>(
+  rows: T[],
+  fields: readonly string[]
+): Record<string, unknown>[] {
+  return rows.map((row) => {
+    const copy: Record<string, unknown> = { ...row };
+    for (const field of fields) delete copy[field];
+    return copy;
+  });
 }
 
 export default function crisisRoutes(): Router {
   const router = Router();
 
   // POST /admin/api/sessions/:sessionId/crisis/flag - manually flag a session
-  router.post('/admin/api/sessions/:sessionId/crisis/flag', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
+  router.post('/admin/api/sessions/:sessionId/crisis/flag', requireRole('therapist', 'researcher', 'caseworker'), requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     const { severity, notes } = req.body;
 
@@ -175,9 +197,16 @@ export default function crisisRoutes(): Router {
   });
 
   // GET /admin/api/crisis/all - comprehensive crisis dashboard data
-  router.get('/admin/api/crisis/all', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.get('/admin/api/crisis/all', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     try {
-      const data = await getAllCrisisData(await therapistScopeId(req));
+      const scope = await careTeamScopeId(req);
+      const orgId = scope === null ? await orgIdFor(req) : null;
+      const data = await getAllCrisisData(scope, orgId);
+      if (req.session.userRole === 'caseworker') {
+        data.crisisEvents = scrubRows(data.crisisEvents, CRISIS_EVENT_VERBATIM_FIELDS);
+        data.riskScoreHistory = scrubRows(data.riskScoreHistory, RISK_HISTORY_VERBATIM_FIELDS);
+        data.interventionActions = scrubRows(data.interventionActions, INTERVENTION_VERBATIM_FIELDS);
+      }
       res.json(data);
     } catch (err: unknown) {
       console.error('[Crisis API] Failed to fetch comprehensive crisis data:', err);
@@ -187,22 +216,26 @@ export default function crisisRoutes(): Router {
   });
 
   // GET /admin/api/crisis/events - crisis events (all, or for one session)
-  router.get('/admin/api/crisis/events', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.get('/admin/api/crisis/events', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     const { sessionId } = req.query;
+    const isCaseworker = req.session.userRole === 'caseworker';
 
     try {
       if (sessionId) {
         // Session id arrives via query string, so the path-param caseload
-        // middleware cannot cover it; enforce the same 404 semantics here.
-        if (!(await therapistMayAccessSession(req, String(sessionId)))) {
+        // middleware cannot cover it; enforce the same 404 semantics here
+        // (extended to caseworkers per spec section 2).
+        if (!(await careTeamMayAccessSession(req, String(sessionId)))) {
           return res.status(404).json({ error: 'Not found' });
         }
         const { getSessionCrisisEvents } = await import('../../services/crisisDetection.service.js');
         const events = await getSessionCrisisEvents(String(sessionId));
-        res.json({ events });
+        res.json({ events: isCaseworker ? scrubRows(events as Record<string, unknown>[], CRISIS_EVENT_VERBATIM_FIELDS) : events });
       } else {
-        const events = await getAllCrisisEvents(await therapistScopeId(req));
-        res.json({ events });
+        const scope = await careTeamScopeId(req);
+        const orgId = scope === null ? await orgIdFor(req) : null;
+        const events = await getAllCrisisEvents(scope, orgId);
+        res.json({ events: isCaseworker ? scrubRows(events, CRISIS_EVENT_VERBATIM_FIELDS) : events });
       }
     } catch (err) {
       console.error('Failed to fetch crisis events:', err);
@@ -213,10 +246,16 @@ export default function crisisRoutes(): Router {
   // GET /admin/api/sessions/:sessionId/risk-history - the per-message risk
   // timeline for one session (scores, severity, and the stage-2 LLM's context
   // judgment + reasoning from score_factors). Drives SessionDetail's timeline.
-  router.get('/admin/api/sessions/:sessionId/risk-history', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
+  router.get('/admin/api/sessions/:sessionId/risk-history', requireRole('therapist', 'researcher', 'caseworker'), requireSessionClientAccess(), async (req, res) => {
     try {
       const { getSessionRiskHistory } = await import('../../services/crisisDetection.service.js');
       const history = await getSessionRiskHistory(req.params.sessionId);
+      // Caseworker scrub (spec section 2): scores/severity/timestamps only —
+      // score_factors carries the stage-2 LLM's reasoning, which can quote
+      // participant messages.
+      if (req.session.userRole === 'caseworker') {
+        return res.json({ history: scrubRows(history as Record<string, unknown>[], RISK_HISTORY_VERBATIM_FIELDS) });
+      }
       res.json({ history });
     } catch (err) {
       console.error('Failed to fetch session risk history:', err);
@@ -225,13 +264,14 @@ export default function crisisRoutes(): Router {
   });
 
   // GET /admin/api/crisis/active - active crisis sessions
-  router.get('/admin/api/crisis/active', requireRole('therapist', 'researcher'), async (req, res) => {
+  router.get('/admin/api/crisis/active', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     try {
       const { getActiveCrisisSessions } = await import('../../services/crisisDetection.service.js');
       let sessions = await getActiveCrisisSessions();
       // getActiveCrisisSessions lives in the crisis-detection service, not a
-      // scoped db module, so the caseload filter is applied here.
-      const scope = await therapistScopeId(req);
+      // scoped db module, so the caseload filter is applied here. Its payload
+      // is flag metadata only (no message content) — summaries-tier safe.
+      const scope = await careTeamScopeId(req);
       if (scope !== null) {
         const clientIds = new Set(await getCaseloadClientIds(scope));
         sessions = sessions.filter((s) => {

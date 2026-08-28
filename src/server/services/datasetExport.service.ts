@@ -109,7 +109,7 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'gad2_first', type: 'int', source: 'scale_responses(scale=gad2).score', values: '0-6', notes: 'Earliest; empty if no GAD-2 response.' },
       { name: 'gad2_last', type: 'int', source: 'scale_responses(scale=gad2).score', values: '0-6', notes: 'Latest; empty if no GAD-2 response.' },
       { name: 'gad2_delta', type: 'int', source: 'gad2_last - gad2_first', notes: 'Empty if fewer than 2 GAD-2 responses.' },
-      { name: 'n_crisis_events', type: 'int', source: 'crisis_events (via sessions)' },
+      { name: 'n_crisis_events', type: 'int', source: 'crisis_events (via sessions + thread-origin via client_user_id)' },
       { name: 'any_crisis_flagged', type: 'bool', source: 'therapy_sessions.crisis_flagged' },
     ],
   },
@@ -213,10 +213,12 @@ export const DATASET_FILES: DatasetFileSpec[] = [
   },
   {
     file: 'crisis_events.csv',
-    description: 'One row per crisis event (no notes/risk_factors/intervention_details JSON, which can quote content).',
+    description: 'One row per crisis event, both session-origin and thread-origin (message-scan) rows (no notes/risk_factors/intervention_details JSON, which can quote content).',
     fetch: getCrisisEventsExport,
     columns: [
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
+      { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Via session owner, or crisis_events.client_user_id for thread-origin rows; empty when no pseudonym (e.g. anonymous session).' },
+      { name: 'thread_origin', type: 'bool', source: 'crisis_events.session_id IS NULL', notes: "Message-scan events (origin='thread_message'); session_pseudo_id empty. Included in participants.csv n_crisis_events; excluded from sessions.csv per-session counts." },
       { name: 'event_type', type: 'string', source: 'crisis_events.event_type' },
       { name: 'severity', type: 'string', source: 'crisis_events.severity', values: 'low, medium, high' },
       { name: 'risk_score', type: 'int', source: 'crisis_events.risk_score', values: '0-100' },
@@ -307,6 +309,8 @@ function renderCodebook(
   lines.push('  (research_pseudonyms) that is NEVER included in any export. Re-identification requires');
   lines.push('  database access. Pseudonyms are assigned once and are stable across exports.');
   lines.push('- Demo traffic is excluded everywhere (therapy_sessions.is_demo IS NOT TRUE; demo-role users omitted).');
+  lines.push('- Sandbox data is excluded everywhere: sandbox-owned sessions carry is_demo=TRUE, and users.is_sandbox');
+  lines.push('  / sandbox organizations are additionally filtered from user enumeration and pseudonym assignment.');
   lines.push('- Anonymous participants (user_id IS NULL) cannot be linked across sessions: the att_pid');
   lines.push('  browser cookie is deliberately not persisted server-side. Screener deltas and');
   lines.push('  sessions-per-participant therefore under-count anonymous traffic.');

@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Menu, Moon, Shield, Sun } from 'react-feather';
 import { getStoredTheme, setTheme, ADMIN_THEME_STORAGE_KEY } from '../../shared/theme';
+import NotificationBell from './NotificationBell';
 
 interface AdminHeaderProps {
   onMenuClick?: () => void;
   // Opens the MFA Security (MFASetup) view; account-level, so it lives here
   // next to Logout instead of in the main nav (ai-therapist-120).
   onMfaClick?: () => void;
+  // Navigate when a notification is clicked (opens the work queue view).
+  onNotificationNavigate?: () => void;
 }
 
-export default function AdminHeader({ onMenuClick, onMfaClick }: AdminHeaderProps) {
+export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNavigate }: AdminHeaderProps) {
   const [username, setUsername] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
@@ -86,6 +89,12 @@ export default function AdminHeader({ onMenuClick, onMfaClick }: AdminHeaderProp
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* In-app notification bell (caseworker portal). Hidden for demo
+              accounts — their /admin/api/* is fixture-intercepted and has no
+              notifications surface. */}
+          {userRole && userRole !== 'demo' && (
+            <NotificationBell onNavigate={() => onNotificationNavigate?.()} />
+          )}
           {onMfaClick && (
             <button
               onClick={onMfaClick}

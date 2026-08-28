@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, AlertTriangle } from "react-feather";
+import { X, AlertTriangle, Eye, FileText } from "react-feather";
 import ConversationBubble from "./ConversationBubble";
 import SessionInsightsPanel from "./SessionInsightsPanel";
 import SessionEvalPanel from "./SessionEvalPanel";
@@ -35,6 +35,29 @@ interface Session {
   crisis_flagged_at?: string | null;
   crisis_flagged_by?: string | null;
   checkin?: { mood?: number; topic?: string; goal?: string } | null;
+  is_demo?: boolean;
+}
+
+// One card, two uses (caseworker portal, spec section 4): the caseworker
+// "summary view" notice (session detail is transcript-tier, so caseworkers
+// see profile-side summaries instead) and the sandbox empty-transcript state
+// (only showcase sessions are seeded with transcripts).
+function TranscriptNoticeCard({ variant }: { variant: 'caseworker-summary' | 'sandbox-empty' }) {
+  const isCaseworker = variant === 'caseworker-summary';
+  const Icon = isCaseworker ? Eye : FileText;
+  return (
+    <div className="my-6 mx-auto max-w-lg rounded-lg border border-blue-200 bg-blue-50 p-5 text-center">
+      <Icon size={22} className="mx-auto mb-2 text-blue-500" aria-hidden="true" />
+      <h3 className="text-sm font-semibold text-blue-900">
+        {isCaseworker ? 'Summary view' : 'No transcript for this session'}
+      </h3>
+      <p className="mt-1 text-sm text-blue-800">
+        {isCaseworker
+          ? 'Your role sees AI summaries and safety signals for this client. The full transcript is available to the treating therapist.'
+          : 'This synthetic sandbox session was seeded without a transcript. Open one of the client’s showcase sessions to see a full conversation; summaries and signals above are populated for every session.'}
+      </p>
+    </div>
+  );
 }
 
 // Post-session feedback (ai-therapist-25b) shown in Session Detail.
@@ -95,6 +118,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState('');
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [viewerIsSandbox, setViewerIsSandbox] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [adminMessage, setAdminMessage] = useState('');
   const [messageType, setMessageType] = useState('visible'); // 'visible' or 'invisible'
@@ -192,6 +216,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         if (response.ok) {
           const data = await response.json();
           setUserRole(data.role);
+          setViewerIsSandbox(data.is_sandbox === true);
         }
       } catch (err: unknown) {
         console.error('Failed to fetch user role:', err);
@@ -877,16 +902,26 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
             </div>
           )}
 
-          {error && (
+          {/* Caseworker tier: the session-detail transcript endpoint 404s for
+              caseworkers by design — show the summary-view card, not an error. */}
+          {!loading && userRole === 'caseworker' && (
+            <TranscriptNoticeCard variant="caseworker-summary" />
+          )}
+
+          {error && userRole !== 'caseworker' && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
               Error: {error}
             </div>
           )}
 
-          {!loading && !error && messages.length === 0 && (
-            <div className="text-center py-8">
-              <p className="text-gray-500">No messages found</p>
-            </div>
+          {!loading && !error && messages.length === 0 && userRole !== 'caseworker' && (
+            session?.is_demo && viewerIsSandbox ? (
+              <TranscriptNoticeCard variant="sandbox-empty" />
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No messages found</p>
+              </div>
+            )
           )}
 
           {!loading && !error && displayMessages.length === 0 && filterToolCalls && (

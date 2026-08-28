@@ -67,21 +67,40 @@ export interface AllCrisisData {
  * ai-therapist-23); their keys remain as empty arrays for API-shape
  * compatibility with the admin client.
  * scopeTherapistId (caseload RBAC): when set, restrict every list to sessions
- * of that therapist's assigned clients; null/undefined = unscoped
- * (researchers), today's SQL. */
-export async function getAllCrisisData(scopeTherapistId?: number | null): Promise<AllCrisisData> {
+ * of that care-team member's assigned clients; null/undefined = unscoped,
+ * today's SQL. orgId (caseworker portal C13): researcher org restriction;
+ * anonymous sessions stay visible. For crisis_events the org check resolves
+ * the owning user via COALESCE(ts.user_id, ce.client_user_id) so
+ * thread-origin events (076: session_id NULL, client_user_id set) are
+ * org-restricted too instead of leaking cross-org as "anonymous".
+ * Demo/harness sessions are excluded UNLESS owned by a sandbox account (s7:
+ * sandbox dashboards must show the seeded arc; real staff never reach sandbox
+ * sessions because caseload/org scoping already excludes them). */
+export async function getAllCrisisData(
+  scopeTherapistId?: number | null,
+  orgId?: number | null
+): Promise<AllCrisisData> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
-  const scopeClause = scoped
+  const params: unknown[] = scoped ? [scopeTherapistId] : [];
+  let sessionScopeClause = scoped
     ? `
         AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = ts.user_id)`
     : '';
-  const params: unknown[] = scoped ? [scopeTherapistId] : [];
+  let crisisScopeClause = sessionScopeClause;
+  if (orgId !== null && orgId !== undefined) {
+    params.push(orgId);
+    sessionScopeClause += `
+        AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${params.length}))`;
+    crisisScopeClause += `
+        AND (COALESCE(ts.user_id, ce.client_user_id) IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = COALESCE(ts.user_id, ce.client_user_id) AND ou.organization_id = $${params.length}))`;
+  }
   const [crisisEvents, interventionActions, riskScoreHistory] = await Promise.all([
     pool.query(`
-      SELECT ce.*, ts.session_name
+      SELECT ce.*, ts.session_name, ts.user_id, u.username
       FROM crisis_events ce
       LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE${scopeClause}
+      LEFT JOIN users u ON u.userid = ts.user_id
+      WHERE (ts.is_demo IS NOT TRUE OR EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))${crisisScopeClause}
       ORDER BY ce.created_at DESC
       LIMIT 500
     `, params),
@@ -89,7 +108,7 @@ export async function getAllCrisisData(scopeTherapistId?: number | null): Promis
       SELECT ia.*, ts.session_name
       FROM intervention_actions ia
       LEFT JOIN therapy_sessions ts ON ia.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE${scopeClause}
+      WHERE (ts.is_demo IS NOT TRUE OR EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))${sessionScopeClause}
       ORDER BY ia.performed_at DESC
       LIMIT 500
     `, params),
@@ -97,7 +116,7 @@ export async function getAllCrisisData(scopeTherapistId?: number | null): Promis
       SELECT rsh.*, ts.session_name
       FROM risk_score_history rsh
       LEFT JOIN therapy_sessions ts ON rsh.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE${scopeClause}
+      WHERE (ts.is_demo IS NOT TRUE OR EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))${sessionScopeClause}
       ORDER BY rsh.calculated_at DESC
       LIMIT 1000
     `, params),
@@ -214,24 +233,61 @@ export async function hasInterventionAction(sessionId: string, actionType: strin
 }
 
 /** All crisis events (with session name + username), newest first.
- *  scopeTherapistId (caseload RBAC): when set, restrict to the therapist's
- *  assigned clients; null/undefined = unscoped (researchers), today's SQL. */
-export async function getAllCrisisEvents(scopeTherapistId?: number | null): Promise<Record<string, unknown>[]> {
+ *  scopeTherapistId (caseload RBAC): when set, restrict to the care-team
+ *  member's assigned clients; null/undefined = unscoped, today's SQL.
+ *  orgId (caseworker portal C13): researcher org restriction; anonymous
+ *  sessions stay visible. Thread-origin events (076: session_id NULL) are
+ *  org-scoped via ce.client_user_id — COALESCE(ts.user_id, ce.client_user_id)
+ *  — so they never leak cross-org as "anonymous". Demo sessions are excluded
+ *  unless sandbox-owned (s7 — see getAllCrisisData). */
+export async function getAllCrisisEvents(
+  scopeTherapistId?: number | null,
+  orgId?: number | null
+): Promise<Record<string, unknown>[]> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
-  const scopeClause = scoped
+  const params: unknown[] = scoped ? [scopeTherapistId] : [];
+  let scopeClause = scoped
     ? `
       AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = ts.user_id)`
     : '';
+  if (orgId !== null && orgId !== undefined) {
+    params.push(orgId);
+    scopeClause += `
+      AND (COALESCE(ts.user_id, ce.client_user_id) IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = COALESCE(ts.user_id, ce.client_user_id) AND ou.organization_id = $${params.length}))`;
+  }
   const result = await pool.query(`
     SELECT ce.*, ts.session_name, u.username
     FROM crisis_events ce
     LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
     LEFT JOIN users u ON ts.user_id = u.userid
-    WHERE ts.is_demo IS NOT TRUE${scopeClause}
+    WHERE (ts.is_demo IS NOT TRUE OR EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))${scopeClause}
     ORDER BY ce.created_at DESC
     LIMIT 100
-  `, scoped ? [scopeTherapistId] : []);
+  `, params);
   return result.rows;
+}
+
+export interface CrisisEventClientInfo {
+  event_id: number;
+  session_id: string | null;
+  client_user_id: number | null;
+  session_user_id: number | null;
+}
+
+/** The client a crisis event belongs to: client_user_id for message-origin
+ *  events (076), the owning session's user for session-origin events. Backs
+ *  the escalation-create link check (an escalation's crisis_event_id must
+ *  belong to its client). Null if the event doesn't exist. */
+export async function getCrisisEventClientInfo(eventId: number): Promise<CrisisEventClientInfo | null> {
+  const result = await pool.query<CrisisEventClientInfo>(
+    `SELECT ce.event_id, ce.session_id, ce.client_user_id,
+            ts.user_id AS session_user_id
+     FROM crisis_events ce
+     LEFT JOIN therapy_sessions ts ON ts.session_id = ce.session_id
+     WHERE ce.event_id = $1`,
+    [eventId]
+  );
+  return result.rows[0] ?? null;
 }
 
 /** All currently crisis-flagged sessions (the active-crisis view), highest

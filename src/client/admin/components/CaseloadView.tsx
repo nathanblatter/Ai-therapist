@@ -10,12 +10,16 @@ import {
   Clock,
   XCircle,
   Plus,
+  AlertTriangle,
 } from "react-feather";
 import useAdminFetch from "../hooks/useAdminFetch";
+import EscalationComposer from "./escalations/EscalationComposer";
 
-// Caseload view (caseload RBAC MVP, ai-therapist-119).
-// - Therapist mode: their own assigned-client list plus the client invite
-//   panel (create invite link, copy it, see pending/used/expired invites).
+// Caseload view (caseload RBAC MVP, ai-therapist-119; caseworker portal).
+// - Care-team mode (therapist OR caseworker): their own assigned-client list
+//   plus the client invite panel (create invite link, copy it, see
+//   pending/used/expired invites). Caseworkers additionally get a per-client
+//   "Escalate" action (docs/caseworker-portal.md slice B).
 // - Researcher mode: the assignment matrix — pick a therapist, then
 //   assign/unassign participant clients via the caseload routes.
 
@@ -110,7 +114,7 @@ function InviteStatusBadge({ status }: { status: "pending" | "used" | "expired" 
 // Therapist mode
 // ---------------------------------------------------------------------------
 
-function TherapistCaseload() {
+function TherapistCaseload({ userRole }: { userRole: string | null }) {
   const {
     data: caseloadData,
     loading: caseloadLoading,
@@ -128,6 +132,9 @@ function TherapistCaseload() {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
+  // Per-client escalation composer target (caseworker portal slice B).
+  const [escalateClient, setEscalateClient] = useState<CaseloadClient | null>(null);
+  const isCaseworker = userRole === "caseworker";
 
   const clients = useMemo(
     () => pickArray<CaseloadClient>(caseloadData, ["caseload", "clients", "users"]),
@@ -219,6 +226,11 @@ function TherapistCaseload() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
                     Assigned
                   </th>
+                  {isCaseworker && (
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                      Actions
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -232,6 +244,19 @@ function TherapistCaseload() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(client.assigned_at).toLocaleDateString()}
                     </td>
+                    {isCaseworker && (
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <button
+                          type="button"
+                          onClick={() => setEscalateClient(client)}
+                          className="text-amber-700 hover:text-amber-900 flex items-center gap-1 min-h-[36px]"
+                          aria-label={`Escalate about ${client.username}`}
+                        >
+                          <AlertTriangle size={15} aria-hidden="true" />
+                          Escalate
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -368,6 +393,15 @@ function TherapistCaseload() {
           </>
         )}
       </div>
+
+      {escalateClient && (
+        <EscalationComposer
+          clientId={escalateClient.userid}
+          clientName={escalateClient.username}
+          onClose={() => setEscalateClient(null)}
+          onCreated={() => setEscalateClient(null)}
+        />
+      )}
     </div>
   );
 }
@@ -592,12 +626,12 @@ export default function CaseloadView({ userRole }: CaseloadViewProps) {
   if (userRole === "researcher") {
     return <ResearcherMatrix />;
   }
-  if (userRole === "therapist") {
-    return <TherapistCaseload />;
+  if (userRole === "therapist" || userRole === "caseworker") {
+    return <TherapistCaseload userRole={userRole} />;
   }
   return (
     <div className="flex items-center justify-center h-full p-8 text-gray-500">
-      <p>Caseload is available to therapist and researcher accounts.</p>
+      <p>Caseload is available to care-team and researcher accounts.</p>
     </div>
   );
 }

@@ -46,6 +46,7 @@ export async function ensurePseudonyms(asOf: string): Promise<void> {
          FROM research_pseudonyms WHERE entity_type = 'participant'
        ) base
        WHERE u.role = 'participant'
+         AND u.is_sandbox IS NOT TRUE
          AND EXISTS (
            SELECT 1 FROM therapy_sessions ts
            WHERE ts.user_id = u.userid AND ts.is_demo IS NOT TRUE AND ts.created_at <= $1
@@ -93,7 +94,7 @@ export async function getParticipantsExport(asOf: string): Promise<DatasetRow[]>
        SELECT u.userid, u.created_at, u.memory_enabled, rp.pseudonym
        FROM research_pseudonyms rp
        JOIN users u ON u.userid::text = rp.entity_key
-       WHERE rp.entity_type = 'participant'
+       WHERE rp.entity_type = 'participant' AND u.is_sandbox IS NOT TRUE
      ),
      sess AS (
        SELECT ts.user_id, ts.session_id, ts.created_at, ts.ended_at, ts.status, ts.crisis_flagged
@@ -126,9 +127,22 @@ export async function getParticipantsExport(asOf: string): Promise<DatasetRow[]>
        FROM scales GROUP BY user_id, scale
      ),
      crisis AS (
-       SELECT ts.user_id, COUNT(ce.event_id) AS n_crisis_events
-       FROM sess ts JOIN crisis_events ce ON ce.session_id = ts.session_id
-       GROUP BY ts.user_id
+       -- Session-origin events attribute via the owning session; thread-origin
+       -- events (076: session_id NULL) attribute via ce.client_user_id so
+       -- message-scan crises are not silently dropped from the rollup. The
+       -- outer join to parts (pseudonymized, non-sandbox participants) keeps
+       -- sandbox/off-study clients excluded.
+       SELECT user_id, COUNT(*) AS n_crisis_events
+       FROM (
+         SELECT ts.user_id
+         FROM sess ts JOIN crisis_events ce ON ce.session_id = ts.session_id
+         UNION ALL
+         SELECT ce.client_user_id AS user_id
+         FROM crisis_events ce
+         WHERE ce.session_id IS NULL AND ce.client_user_id IS NOT NULL
+           AND ce.created_at <= $1
+       ) all_events
+       GROUP BY user_id
      ),
      consents AS (
        SELECT user_id,
@@ -366,25 +380,46 @@ export async function getEvalsExport(asOf: string): Promise<DatasetRow[]> {
   return rows;
 }
 
-/** crisis_events.csv — one row per crisis_events row (no free-text/JSON). */
+/**
+ * crisis_events.csv — one row per crisis_events row (no free-text/JSON).
+ * Session-origin rows join through the in-scope session (as before);
+ * thread-origin rows (076: origin='thread_message', session_id NULL) are
+ * included via ce.client_user_id — non-sandbox clients only, event-time
+ * bounded by asOf — with thread_origin=true and an empty session_pseudo_id.
+ * participant_id resolves through the participant pseudonym for both shapes
+ * (empty when the client has no research pseudonym, e.g. anonymous sessions).
+ * Rollup semantics: sessions.csv per-session crisis counts remain
+ * session-origin only (thread events have no session); participants.csv
+ * n_crisis_events includes both origins — documented in the codebook
+ * (datasetExport.service.ts).
+ */
 export async function getCrisisEventsExport(asOf: string): Promise<DatasetRow[]> {
   const { rows } = await pool.query(
     `WITH sess AS (
-       SELECT ts.session_id, rp.pseudonym AS session_pseudo_id
+       SELECT ts.session_id, ts.user_id, rp.pseudonym AS session_pseudo_id
        FROM therapy_sessions ts
        JOIN research_pseudonyms rp ON rp.entity_type = 'session' AND rp.entity_key = ts.session_id
        WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1
      )
      SELECT
-       sess.session_pseudo_id AS session_pseudo_id,
+       COALESCE(sess.session_pseudo_id, '') AS session_pseudo_id,
+       COALESCE(pp.pseudonym, '') AS participant_id,
+       (ce.session_id IS NULL) AS thread_origin,
        ce.event_type AS event_type,
        ce.severity AS severity,
        ce.risk_score AS risk_score,
        ce.trigger_method AS trigger_method,
        ${tsUtc('ce.created_at')} AS occurred_at
      FROM crisis_events ce
-     JOIN sess ON sess.session_id = ce.session_id
-     ORDER BY sess.session_pseudo_id, ce.created_at, ce.event_id`,
+     LEFT JOIN sess ON sess.session_id = ce.session_id
+     LEFT JOIN users cu ON cu.userid = ce.client_user_id
+     LEFT JOIN research_pseudonyms pp
+       ON pp.entity_type = 'participant'
+      AND pp.entity_key = COALESCE(sess.user_id, ce.client_user_id)::text
+     WHERE (ce.session_id IS NOT NULL AND sess.session_id IS NOT NULL)
+        OR (ce.session_id IS NULL AND ce.client_user_id IS NOT NULL
+            AND cu.is_sandbox IS NOT TRUE AND ce.created_at <= $1)
+     ORDER BY COALESCE(sess.session_pseudo_id, ''), ce.created_at, ce.event_id`,
     [asOf]
   );
   return rows;

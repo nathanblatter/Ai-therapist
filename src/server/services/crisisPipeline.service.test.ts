@@ -8,6 +8,7 @@ const {
   maybeSteerSessionMock, shouldSteerMock, buildChatSteeringGuidanceMock,
   executeGraduatedResponseMock,
   getRecentSessionMessagesMock, getSessionCrisisStateMock, isDemoAccountSessionMock,
+  getSessionAccessInfoMock, enqueueWorkItemMock,
 } = vi.hoisted(() => ({
   analyzeMessageRiskMock: vi.fn(),
   flagSessionCrisisMock: vi.fn(),
@@ -19,6 +20,8 @@ const {
   getRecentSessionMessagesMock: vi.fn(),
   getSessionCrisisStateMock: vi.fn(),
   isDemoAccountSessionMock: vi.fn(),
+  getSessionAccessInfoMock: vi.fn(),
+  enqueueWorkItemMock: vi.fn(),
 }));
 
 vi.mock('./crisisDetection.service.js', () => ({
@@ -37,7 +40,12 @@ vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,
   getSessionCrisisState: getSessionCrisisStateMock,
   isDemoAccountSession: isDemoAccountSessionMock,
+  getSessionAccessInfo: getSessionAccessInfoMock,
+  // Transitive imports of utils/adminBroadcast.js:
+  getTherapistIdsForClient: vi.fn(async () => []),
+  getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
+vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: enqueueWorkItemMock }));
 
 const { runCrisisPipeline } = await import('./crisisPipeline.service.js');
 
@@ -50,6 +58,8 @@ beforeEach(() => {
   isDemoAccountSessionMock.mockResolvedValue(false);
   getRecentSessionMessagesMock.mockResolvedValue([]);
   getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: false, crisis_severity: null, crisis_risk_score: null });
+  getSessionAccessInfoMock.mockResolvedValue({ status: 'active', user_id: 42, session_type: 'voice' });
+  enqueueWorkItemMock.mockResolvedValue(null);
   buildChatSteeringGuidanceMock.mockImplementation((s: number) => `CHAT_STEER_${s}`);
   shouldSteerMock.mockReturnValue(true);
 });
@@ -155,6 +165,85 @@ describe('runCrisisPipeline — steering delivery per channel', () => {
     risk(40, 'medium');
     const r = await runCrisisPipeline(TURN, 'chat');
     expect(r.steeringGuidance).toBeNull();
+  });
+});
+
+describe('runCrisisPipeline — crisis_flag work item', () => {
+  it('enqueues a reopen-able pool item for a logged-in participant session', async () => {
+    risk(90, 'high', ['suicidal_ideation']);
+    const turn = { ...TURN, content: 'a distinctive participant utterance' };
+    await runCrisisPipeline(turn, 'realtime');
+    expect(enqueueWorkItemMock).toHaveBeenCalledWith(expect.objectContaining({
+      itemType: 'crisis_flag',
+      severity: 'urgent',
+      sourceId: 'chat_1:high',
+      sessionId: 'chat_1',
+      // Reopen: a re-flag after the item was resolved must re-notify the care
+      // team instead of dying on the (item_type, source, id) idempotency key.
+      reopen: true,
+    }));
+    // Detail carries category tags only, never transcript text.
+    const detail = enqueueWorkItemMock.mock.calls[0][0].detail as Record<string, unknown>;
+    expect(JSON.stringify(detail)).not.toContain(turn.content);
+  });
+
+  it('does NOT enqueue for anonymous sessions (no care team; avoids IRB-org fallback noise)', async () => {
+    getSessionAccessInfoMock.mockResolvedValue({ status: 'active', user_id: null, session_type: 'voice' });
+    risk(90, 'high');
+    const r = await runCrisisPipeline(TURN, 'realtime');
+    expect(r.flagged).toBe(true); // flagging/paging still happen
+    expect(enqueueWorkItemMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT enqueue when the session row is missing', async () => {
+    getSessionAccessInfoMock.mockResolvedValue(null);
+    risk(90, 'high');
+    await runCrisisPipeline(TURN, 'realtime');
+    expect(enqueueWorkItemMock).not.toHaveBeenCalled();
+  });
+
+  it('a failing owner lookup skips the enqueue but never breaks the flag path', async () => {
+    getSessionAccessInfoMock.mockRejectedValue(new Error('db down'));
+    risk(90, 'high');
+    const r = await runCrisisPipeline(TURN, 'realtime');
+    expect(r.flagged).toBe(true);
+    expect(enqueueWorkItemMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('runCrisisPipeline — summary-tier broadcasts', () => {
+  // The broadcasts are fire-and-forget; flush pending microtasks/timers so
+  // the emit assertions are deterministic.
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  it('emits session:risk-score-updated (score+severity only) whenever risk is scored', async () => {
+    risk(40, 'medium');
+    await runCrisisPipeline(TURN, 'chat');
+    await flush();
+    const call = emitMock.mock.calls.find(([event]) => event === 'session:risk-score-updated');
+    expect(call).toBeDefined();
+    const payload = call![1] as Record<string, unknown>;
+    expect(payload).toMatchObject({ sessionId: 'chat_1', riskScore: 40, severity: 'medium' });
+    expect(JSON.stringify(payload)).not.toContain(TURN.content);
+  });
+
+  it('emits a scrubbed session:crisis-event-created mirror on flag (no messageId, no message text)', async () => {
+    risk(90, 'high', ['suicidal_ideation']);
+    await runCrisisPipeline(TURN, 'realtime');
+    await flush();
+    const call = emitMock.mock.calls.find(([event]) => event === 'session:crisis-event-created');
+    expect(call).toBeDefined();
+    const payload = call![1] as Record<string, unknown>;
+    expect(payload).toMatchObject({ sessionId: 'chat_1', severity: 'high', riskScore: 90 });
+    expect(payload).not.toHaveProperty('messageId');
+    expect(payload).not.toHaveProperty('message');
+  });
+
+  it('does not emit crisis-event-created when nothing was flagged', async () => {
+    risk(30, 'low');
+    await runCrisisPipeline(TURN, 'realtime');
+    await flush();
+    expect(emitMock.mock.calls.some(([event]) => event === 'session:crisis-event-created')).toBe(false);
   });
 });
 
