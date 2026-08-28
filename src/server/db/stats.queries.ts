@@ -1,6 +1,7 @@
 // Data-access for aggregate statistics and the AI-model system setting. (The
 // rich analytics dashboard query lives separately in analytics.queries.ts.)
 import { pool } from '../config/db.js';
+import type { SystemConfigRow } from './config.queries.js';
 
 export interface SessionStatsRow {
   total_sessions: string;
@@ -27,10 +28,6 @@ export interface VoiceStatRow {
   voice: string;
   session_count: string;
   percentage: string;
-}
-
-interface SystemConfigRow {
-  config_value: Record<string, unknown> & { model?: string };
 }
 
 /** Session counts + average duration across all sessions. Sandbox-account
@@ -107,13 +104,13 @@ export async function getConfigStats(): Promise<{ languages: LanguageStatRow[]; 
 /** The configured AI model, defaulting to 'gpt-realtime-2.1-mini'. */
 export async function getAiModel(): Promise<string> {
   try {
-    const result = await pool.query<SystemConfigRow>(
+    const result = await pool.query<Pick<SystemConfigRow, 'config_value'>>(
       `SELECT config_value FROM system_config WHERE config_key = 'ai_model'`
     );
 
     if (result.rows.length > 0) {
-      const config = result.rows[0].config_value;
-      return config.model || 'gpt-realtime-2.1-mini';
+      const config = result.rows[0].config_value as { model?: string } | null;
+      return config?.model || 'gpt-realtime-2.1-mini';
     }
 
     return 'gpt-realtime-2.1-mini';
@@ -131,13 +128,13 @@ export async function getAiModel(): Promise<string> {
  */
 export async function getTranscriptionModel(): Promise<string> {
   try {
-    const result = await pool.query<SystemConfigRow>(
+    const result = await pool.query<Pick<SystemConfigRow, 'config_value'>>(
       `SELECT config_value FROM system_config WHERE config_key = 'transcription_model'`
     );
 
     if (result.rows.length > 0) {
-      const config = result.rows[0].config_value;
-      return config.model || 'gpt-4o-mini-transcribe';
+      const config = result.rows[0].config_value as { model?: string } | null;
+      return config?.model || 'gpt-4o-mini-transcribe';
     }
 
     return 'gpt-4o-mini-transcribe';

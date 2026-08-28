@@ -14,7 +14,9 @@ import {
 } from 'react-feather';
 import type { FC } from 'react';
 import type { IconProps } from 'react-feather';
-import { timeAgo, type AttentionWorkItem } from '../hooks/useWorkQueue';
+import { type AttentionWorkItem } from '../hooks/useWorkQueue';
+import { timeAgo } from '../../shared/format';
+import { workItemSeverityClass } from '../../shared/severity';
 
 // One work-queue row: type icon, severity badge, title, age, and the
 // ack / resolve lifecycle actions (resolve expands an optional-note form).
@@ -43,12 +45,6 @@ const TYPE_LABELS: Record<string, string> = {
   message_unread_stale: 'Stale unread',
 };
 
-const SEVERITY_CLASSES: Record<string, string> = {
-  urgent: 'bg-red-100 text-red-800',
-  warning: 'bg-amber-100 text-amber-800',
-  info: 'bg-blue-100 text-blue-800',
-};
-
 interface WorkItemRowProps {
   item: AttentionWorkItem;
   onAck: (itemId: number) => Promise<boolean> | void;
@@ -73,13 +69,13 @@ export default function WorkItemRow({ item, onAck, onResolve, onSelectClient }: 
   return (
     <div className={`border-b border-gray-100 py-3 px-1 ${closed ? 'opacity-60' : ''}`}>
       <div className="flex items-start gap-3">
-        <div className={`p-2 rounded-full shrink-0 ${SEVERITY_CLASSES[item.severity] ?? SEVERITY_CLASSES.info}`}>
+        <div className={`p-2 rounded-full shrink-0 ${workItemSeverityClass(item.severity)}`}>
           <Icon size={16} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-ink truncate">{item.title}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${SEVERITY_CLASSES[item.severity] ?? SEVERITY_CLASSES.info}`}>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${workItemSeverityClass(item.severity)}`}>
               {item.severity}
             </span>
             {item.is_sandbox && (

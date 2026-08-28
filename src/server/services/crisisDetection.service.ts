@@ -1,7 +1,9 @@
 import OpenAI from 'openai';
 import { pool } from '../config/db.js';
 import { getOpenAIKey } from '../config/secrets.js';
+import { recordCrisisEvent } from '../db/crisis.queries.js';
 import { createLogger } from '../utils/logger.js';
+import type { HistoryMessage } from './minorSafeguard.service.js';
 
 const log = createLogger('crisisDetection');
 
@@ -153,11 +155,8 @@ interface LlmRiskAssessment {
   reasoning: string;
 }
 
-interface HistoryMessage {
-  role: string;
-  content?: string | null;
-  content_redacted?: string | null;
-}
+// HistoryMessage (role + content/content_redacted) is shared with the minor
+// safeguard, which exports the canonical declaration.
 
 // Periodic sweep: the keyword screen only wakes the LLM when specific phrases
 // appear, so someone spiraling in unusual language would sail past it. Every
@@ -520,12 +519,20 @@ export async function flagSessionCrisis(
       [sessionId, severity, riskScore, triggeredBy]
     );
 
-    // Create crisis event
-    await client.query(
-      `INSERT INTO crisis_events
-       (session_id, event_type, severity, risk_score, triggered_by, trigger_method, message_id, risk_factors, notes)
-       VALUES ($1, 'flagged', $2, $3, $4, $5, $6, $7, $8)`,
-      [sessionId, severity, riskScore, triggeredBy, triggerMethod, messageId, JSON.stringify(factors), notes]
+    // Create crisis event (single writer: db/crisis.queries recordCrisisEvent)
+    await recordCrisisEvent(
+      {
+        sessionId,
+        eventType: 'flagged',
+        severity,
+        riskScore,
+        triggeredBy,
+        triggerMethod,
+        messageId,
+        riskFactors: factors,
+        notes,
+      },
+      client
     );
 
     await client.query('COMMIT');
@@ -567,11 +574,9 @@ export async function unflagSessionCrisis(sessionId: string, unflaggedBy: string
     );
 
     // Create crisis event
-    await client.query(
-      `INSERT INTO crisis_events
-       (session_id, event_type, triggered_by, trigger_method, notes)
-       VALUES ($1, 'unflagged', $2, 'manual', $3)`,
-      [sessionId, unflaggedBy, notes]
+    await recordCrisisEvent(
+      { sessionId, eventType: 'unflagged', triggeredBy: unflaggedBy, triggerMethod: 'manual', notes },
+      client
     );
 
     await client.query('COMMIT');
@@ -614,11 +619,19 @@ export async function updateRiskScore(
     );
 
     // Create crisis event
-    await client.query(
-      `INSERT INTO crisis_events
-       (session_id, event_type, severity, previous_severity, risk_score, previous_risk_score, triggered_by, trigger_method, notes)
-       VALUES ($1, 'risk_score_updated', $2, $3, $4, $5, $6, 'manual', $7)`,
-      [sessionId, newSeverity, prev.crisis_severity, newScore, prev.crisis_risk_score, changedBy, notes]
+    await recordCrisisEvent(
+      {
+        sessionId,
+        eventType: 'risk_score_updated',
+        severity: newSeverity,
+        previousSeverity: prev.crisis_severity,
+        riskScore: newScore,
+        previousRiskScore: prev.crisis_risk_score,
+        triggeredBy: changedBy,
+        triggerMethod: 'manual',
+        notes,
+      },
+      client
     );
 
     await client.query('COMMIT');

@@ -6,25 +6,24 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
-import { requireSessionClientAccess, therapistScopeId } from '../../middleware/caseload.js';
+import { requireSessionClientAccess, therapistScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
 import {
   getActiveSidebandSessions,
   logSidebandAction,
-  getSessionAccessInfo,
-  isAssigned,
   getCaseloadClientIds,
 } from '../../db/index.js';
 
 // Caseload guard for session ids arriving in the request BODY (most sideband
 // control endpoints), where the :sessionId path-param middleware cannot apply.
-// Non-therapists always pass; a therapist passes only when the session exists,
-// has an owner, and that owner is in their caseload. Mirrors the middleware's
-// 404-never-403 semantics.
-async function therapistMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
-  if (req.session.userRole !== 'therapist') return true;
-  const info = await getSessionAccessInfo(sessionId);
-  if (!info || info.user_id === null || info.user_id === undefined) return false;
-  return isAssigned(req.session.userId!, Number(info.user_id));
+// Live sideband control is full-tier: a therapist must be assigned, a
+// researcher passes, and a caseworker is denied outright (the old local
+// helper passed ANY non-therapist, a latent bypass masked only by
+// requireRole('therapist','researcher') on every route). Mirrors the
+// middleware's 404-never-403 semantics.
+function therapistMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
+  return mayCareTeamAccessSession(req.session.userRole, req.session.userId, sessionId, {
+    caseworkerPolicy: 'deny',
+  });
 }
 
 export default function sidebandRoutes(): Router {

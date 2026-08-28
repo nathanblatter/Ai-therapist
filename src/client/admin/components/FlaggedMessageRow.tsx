@@ -12,6 +12,8 @@
 //     "View thread" action via onOpenThread)
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, MessageSquare } from 'react-feather';
+import { severityBadgeClass } from '../../shared/severity';
+import Badge from '../../shared/components/Badge';
 
 export interface FlaggedMessageEvent {
   event_id: number;
@@ -79,12 +81,6 @@ interface FlaggedMessageRowProps {
 }
 
 export default function FlaggedMessageRow({ event, onOpenThread }: FlaggedMessageRowProps) {
-  const severityTone =
-    event.severity === 'high'
-      ? 'bg-red-100 text-red-800'
-      : event.severity === 'medium'
-        ? 'bg-amber-100 text-amber-800'
-        : 'bg-gray-100 text-gray-600';
   const factors = factorLabels(event.risk_factors);
 
   return (
@@ -99,10 +95,10 @@ export default function FlaggedMessageRow({ event, onOpenThread }: FlaggedMessag
           <p className="text-sm font-medium text-gray-800 truncate">
             {event.username || (event.client_user_id !== null ? `Client ${event.client_user_id}` : 'Unknown client')}
           </p>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${severityTone}`}>
+          <Badge toneClass={severityBadgeClass(event.severity)} weight="normal">
             {event.severity ? `${event.severity} risk` : 'flagged'}
             {event.risk_score !== null ? ` (${event.risk_score})` : ''}
-          </span>
+          </Badge>
           <span className="inline-flex items-center gap-1 text-xs text-gray-400">
             <MessageSquare size={12} aria-hidden="true" /> Flagged message
           </span>

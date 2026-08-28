@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Clock, User, Calendar, RefreshCw, Trash2 } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
+import { formatDateTime } from '../../shared/format';
 
 interface SessionCookie {
   expires?: string;
@@ -73,17 +74,7 @@ export default function UserSessions() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatDate = formatDateTime;
 
   const formatTimeRemaining = (expireDate: string) => {
     const now = new Date();

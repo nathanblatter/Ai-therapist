@@ -31,8 +31,8 @@ import {
   getRecentSessionMessages,
   getSessionAccessInfo,
   getSessionCrisisState,
-  isDemoAccountSession,
 } from '../db/index.js';
+import { sessionSuppressesSafetyPipeline } from './suppression.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { enqueueWorkItem } from './workQueue.service.js';
 
@@ -81,7 +81,7 @@ export async function runCrisisPipeline(
     // on-call. Keyed on the owner's role, NOT the session is_demo flag — the
     // eval harness's sessions carry is_demo for analytics exclusion but must
     // still exercise the real pipeline (its runner neuters paging/broadcast).
-    if (await isDemoAccountSession(turn.sessionId)) return NONE_RESULT;
+    if (await sessionSuppressesSafetyPipeline(turn.sessionId)) return NONE_RESULT;
 
     const history = await getRecentSessionMessages(turn.sessionId, 10);
 

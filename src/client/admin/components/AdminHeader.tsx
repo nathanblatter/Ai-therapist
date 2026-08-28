@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Menu, Moon, Shield, Sun } from 'react-feather';
 import { getStoredTheme, setTheme, ADMIN_THEME_STORAGE_KEY } from '../../shared/theme';
 import NotificationBell from './NotificationBell';
+import useAuth from '../hooks/useAuth';
 
 interface AdminHeaderProps {
   onMenuClick?: () => void;
@@ -13,8 +14,7 @@ interface AdminHeaderProps {
 }
 
 export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNavigate }: AdminHeaderProps) {
-  const [username, setUsername] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
+  const { username, role: userRole } = useAuth();
   const [isDark, setIsDark] = useState(false);
 
   // Theme was already applied pre-paint by admin.html's bootstrap; sync the toggle.
@@ -27,25 +27,6 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
     setIsDark(next);
     setTheme(next ? 'dark' : 'default', ADMIN_THEME_STORAGE_KEY);
   };
-
-  useEffect(() => {
-    const fetchAuthStatus = async () => {
-      try {
-        const response = await fetch('/api/auth/status');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.authenticated && data.user) {
-            setUsername(data.user.username);
-            setUserRole(data.user.role);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch auth status:', error);
-      }
-    };
-
-    fetchAuthStatus();
-  }, []);
 
   const handleLogout = async () => {
     try {

@@ -3,7 +3,8 @@
 // schedules auto-termination when a max duration is configured. Anonymous users
 // are allowed; rate limits are enforced via checkSessionLimits.
 import { Router, type Request, type Response } from 'express';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { hashToken } from '../../utils/crypto.js';
 import { getOpenAIKey } from '../../config/secrets.js';
 import {
   getActiveSessionForUser,
@@ -71,7 +72,7 @@ function getSafetyIdentifier(req: Request, res: Response, userId: number | strin
     }
     seed = `participant:${pid}`;
   }
-  return createHash('sha256').update(seed).digest('hex');
+  return hashToken(seed);
 }
 
 export default function tokenRoutes(): Router {

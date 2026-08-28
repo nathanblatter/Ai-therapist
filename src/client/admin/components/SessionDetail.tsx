@@ -5,7 +5,10 @@ import SessionInsightsPanel from "./SessionInsightsPanel";
 import SessionEvalPanel from "./SessionEvalPanel";
 import RiskTimeline from "./RiskTimeline";
 import { useSocket } from '../hooks/useSocket';
+import useAuth from '../hooks/useAuth';
 import { toast } from "../../shared/components/Toast";
+import { formatDateTime } from "../../shared/format";
+import { severityBadgeClass } from "../../shared/severity";
 
 interface Message {
   message_id: string;
@@ -117,8 +120,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [error, setError] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState('');
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [viewerIsSandbox, setViewerIsSandbox] = useState(false);
+  const { role: userRole, isSandbox: viewerIsSandbox } = useAuth();
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [adminMessage, setAdminMessage] = useState('');
   const [messageType, setMessageType] = useState('visible'); // 'visible' or 'invisible'
@@ -208,23 +210,6 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     fetchRecording();
     return () => { cancelled = true; };
   }, [sessionId, session?.status]);
-
-  useEffect(() => {
-    const fetchUserRole = async () => {
-      try {
-        const response = await fetch('/api/auth/status');
-        if (response.ok) {
-          const data = await response.json();
-          setUserRole(data.role);
-          setViewerIsSandbox(data.is_sandbox === true);
-        }
-      } catch (err: unknown) {
-        console.error('Failed to fetch user role:', err);
-      }
-    };
-
-    fetchUserRole();
-  }, []);
 
   // Track scroll position for smart scroll
   useEffect(() => {
@@ -468,10 +453,6 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     setEditedContent('');
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
-  };
-
   const handleSendAdminMessage = () => {
     if (!adminMessage.trim()) {
       toast.error('Please enter a message');
@@ -653,15 +634,6 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     }
   };
 
-  const getCrisisBadgeClasses = (severity: string | undefined): string => {
-    const badges: Record<string, string> = {
-      high: 'bg-red-600 text-white animate-pulse',
-      medium: 'bg-yellow-500 text-yellow-900',
-      low: 'bg-orange-400 text-orange-900'
-    };
-    return (severity && badges[severity]) || 'bg-gray-400 text-gray-900';
-  };
-
   // Filter messages for display
   const displayMessages = filterToolCalls
     ? messages.filter(msg => msg.message_type === 'tool_call' || msg.message_type === 'tool_response')
@@ -682,7 +654,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                 {session?.session_name || 'Session Details'}
               </h2>
               {session?.crisis_flagged && (
-                <span className={`px-3 py-1 rounded text-sm font-semibold uppercase flex items-center gap-1 ${getCrisisBadgeClasses(session.crisis_severity)}`}>
+                <span className={`px-3 py-1 rounded text-sm font-semibold uppercase flex items-center gap-1 ${severityBadgeClass(session.crisis_severity, { solid: true, pulseHigh: true })}`}>
                   <AlertTriangle size={16} />
                   {session.crisis_severity} RISK
                 </span>
@@ -717,9 +689,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                     </span>
                   )}
                 </div>
-                <div>Started: {session.created_at ? formatDate(session.created_at) : ''}</div>
+                <div>Started: {session.created_at ? formatDateTime(session.created_at) : ''}</div>
                 {session.ended_at && (
-                  <div>Ended: {formatDate(session.ended_at)}</div>
+                  <div>Ended: {formatDateTime(session.ended_at)}</div>
                 )}
                 {session.status === 'ended' && redactionStatus && redactionStatus.status !== 'no_content' && (
                   <div className="flex items-center gap-2">

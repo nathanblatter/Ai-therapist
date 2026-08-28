@@ -276,8 +276,9 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
 describe('flagSessionCrisis → adverse-event auto-draft hook', () => {
   beforeEach(() => {
     draftAeMock.mockReset().mockResolvedValue(1);
-    // A fake pooled client whose BEGIN/UPDATE/INSERT/COMMIT all succeed.
-    const client = { query: vi.fn().mockResolvedValue({ rows: [] }), release: vi.fn() };
+    // A fake pooled client whose BEGIN/UPDATE/INSERT/COMMIT all succeed
+    // (recordCrisisEvent reads back the RETURNING event_id row).
+    const client = { query: vi.fn().mockResolvedValue({ rows: [{ event_id: 1 }] }), release: vi.fn() };
     connectMock.mockReset().mockResolvedValue(client);
   });
 

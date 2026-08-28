@@ -18,14 +18,14 @@
 //
 // Message risk lives on thread_messages (risk_score/risk_severity), NOT in
 // risk_score_history — that table's trajectory logic is session-local.
-import { pool } from '../config/db.js';
 import { createLogger } from '../utils/logger.js';
 import { analyzeStandaloneRisk } from './crisisDetection.service.js';
-import { sendCrisisAlert } from './crisisAlert.service.js';
+import { pageOnCall } from './crisisIntervention.service.js';
 import { broadcastAdminEvent } from '../utils/adminBroadcast.js';
 import {
   listThreadMessages,
   updateThreadMessageScan,
+  recordCrisisEvent,
   type MessageThreadRow,
   type ThreadMessageRow,
 } from '../db/index.js';
@@ -61,29 +61,25 @@ async function threadHistoryLines(
  * event_type='flagged' per the migration note. Notes carry score + factor
  * labels only — never the message body.
  */
-async function insertMessageCrisisEvent(input: {
+function insertMessageCrisisEvent(input: {
   messageId: number;
   clientUserId: number;
   severity: 'medium' | 'high';
   riskScore: number;
   factors: string[];
 }): Promise<number> {
-  const result = await pool.query<{ event_id: number }>(
-    `INSERT INTO crisis_events
-       (origin, thread_message_id, client_user_id, event_type, severity,
-        risk_score, triggered_by, trigger_method, risk_factors, notes)
-     VALUES ('thread_message', $1, $2, 'flagged', $3, $4, 'system', 'auto', $5, $6)
-     RETURNING event_id`,
-    [
-      input.messageId,
-      input.clientUserId,
-      input.severity,
-      input.riskScore,
-      JSON.stringify(input.factors),
-      `Message risk score: ${input.riskScore} - Factors: ${input.factors.join(', ')}`,
-    ]
-  );
-  return result.rows[0].event_id;
+  return recordCrisisEvent({
+    origin: 'thread_message',
+    threadMessageId: input.messageId,
+    clientUserId: input.clientUserId,
+    eventType: 'flagged',
+    severity: input.severity,
+    riskScore: input.riskScore,
+    triggeredBy: 'system',
+    triggerMethod: 'auto',
+    riskFactors: input.factors,
+    notes: `Message risk score: ${input.riskScore} - Factors: ${input.factors.join(', ')}`,
+  });
 }
 
 function emitScanned(thread: MessageThreadRow, messageId: number, flagged: boolean): void {
@@ -197,8 +193,10 @@ export async function scanThreadMessage(
     }
 
     // High severity pages the on-call (approved Q5). PHI-free by design.
+    // No session link: thread messages have no therapy session, and the
+    // sandbox short-circuit above already covers suppression for this path.
     if (severity === 'high') {
-      await sendCrisisAlert(
+      await pageOnCall(
         `CRISIS MESSAGE ALERT: high-severity risk flagged in a client message ` +
           `(score ${risk.riskScore}/100). Review the crisis dashboard.`
       );

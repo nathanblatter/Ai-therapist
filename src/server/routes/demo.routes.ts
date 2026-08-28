@@ -10,6 +10,7 @@
 // /api/sessions, /logs/batch, /api/users/preferences, ...) because those paths
 // are intentionally not matched here.
 import { Router } from 'express';
+import { parsePagination } from '../utils/pagination.js';
 import {
   demoActiveSessions,
   demoSessionsList,
@@ -54,8 +55,7 @@ export default function demoRoutes(): Router {
   });
 
   router.get('/admin/api/sessions', (req, res) => {
-    const limit = parseInt(String(req.query.limit ?? '50')) || 50;
-    const page = parseInt(String(req.query.page ?? '1')) || 1;
+    const { limit, page } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
     res.json(demoSessionsList(limit, page));
   });
 
@@ -145,7 +145,7 @@ export default function demoRoutes(): Router {
     res.json(brief);
   });
   router.get('/admin/api/users/:userId/sessions', (req, res) => {
-    const limit = parseInt(String(req.query.limit ?? '50')) || 50;
+    const { limit } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
     res.json(demoUserSessions(parseInt(req.params.userId, 10), limit));
   });
 

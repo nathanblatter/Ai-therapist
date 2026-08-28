@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react"
 import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, Box, Info } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
+import useAuth from "../hooks/useAuth";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
 import ErrorBoundary from "../../shared/components/ErrorBoundary";
@@ -74,10 +75,10 @@ export default function AdminApp() {
   // mirrors the selectedSessionId/SessionDetail pattern.
   const [selectedUser, setSelectedUser] = useState<ProfileUserSummary | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [userRole, setUserRole] = useState<string | null>(null);
-  // Sandbox account (join-sandbox signup): persistent banner + one-time
-  // onboarding callout; all client data in the account is synthetic.
-  const [isSandbox, setIsSandbox] = useState(false);
+  // Shared cached auth status: role for nav/landing, sandbox flag for the
+  // persistent banner + one-time onboarding callout (all client data in a
+  // sandbox account is synthetic).
+  const { role: userRole, isSandbox, isCareTeam, loading: authLoading } = useAuth();
   const [sandboxCalloutDismissed, setSandboxCalloutDismissed] = useState(() => {
     try { return localStorage.getItem('sandbox-onboarding-dismissed') === '1'; } catch { return false; }
   });
@@ -95,32 +96,13 @@ export default function AdminApp() {
 
   const setCurrentView = useCallback((view: string) => setCurrentViewState(view), []);
 
-  // Fetch user role to determine navigation items + the role-dependent
-  // landing view. On any failure fall back to the sessions landing so the
+  // Once the shared auth-status fetch resolves, pick the role-dependent
+  // landing view. useAuth falls back to a null role on any failure, so the
   // shell never wedges on ViewLoading.
   useEffect(() => {
-    const fetchUserRole = async () => {
-      let role: string | null = null;
-      try {
-        const response = await fetch('/api/auth/status', {
-          credentials: 'include'
-        });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.authenticated && data.user) {
-            role = data.user.role;
-            setUserRole(data.user.role);
-            setIsSandbox(data.user.is_sandbox === true);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch user role:', error);
-      }
-      setCurrentViewState(prev => prev ?? landingViewFor(role));
-    };
-
-    fetchUserRole();
-  }, []);
+    if (authLoading) return;
+    setCurrentViewState(prev => prev ?? landingViewFor(userRole));
+  }, [authLoading, userRole]);
 
   // Fetch the deployment mode once; anything but an explicit 'clinical' keeps
   // the research default (missing row, demo fixtures, fetch failure).
@@ -145,7 +127,6 @@ export default function AdminApp() {
 
   // Open-escalations + unread-messages badges for care-team roles. Refreshed
   // on view changes so acting on items updates the counts without a reload.
-  const isCareTeam = userRole === 'therapist' || userRole === 'caseworker';
   useEffect(() => {
     if (!isCareTeam) return;
     fetch('/admin/api/escalations?count_only=1', { credentials: 'include' })

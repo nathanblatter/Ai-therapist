@@ -3,14 +3,19 @@
 // assigned, or that concern their caseload (plus the org unassigned queue for
 // therapists); researchers see org-wide metadata. Row click opens
 // EscalationDetail (timeline + lifecycle actions).
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowUpRight, CheckCircle, Clock, Inbox, Plus } from "react-feather";
 import useAdminFetch from "../../hooks/useAdminFetch";
+import useAuth from "../../hooks/useAuth";
+import Badge from "../../../shared/components/Badge";
+import { isCareTeamRole } from "../../../../shared/roles";
 import EscalationDetail from "./EscalationDetail";
 import EscalationComposer from "./EscalationComposer";
+// Canonical escalation vocabulary lives in the server data layer (type-only
+// import, erased at build time).
+import type { EscalationStatus, EscalationUrgency } from "../../../../server/db/escalations.queries";
 
-export type EscalationStatus = "open" | "acknowledged" | "resolved";
-export type EscalationUrgency = "routine" | "urgent" | "emergency";
+export type { EscalationStatus, EscalationUrgency };
 
 export interface EscalationListRow {
   escalation_id: number;
@@ -37,45 +42,37 @@ export interface EscalationListRow {
 export function UrgencyBadge({ urgency }: { urgency: EscalationUrgency }) {
   if (urgency === "emergency") {
     return (
-      <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+      <Badge tone="red">
         <AlertTriangle size={12} aria-hidden="true" /> Emergency
-      </span>
+      </Badge>
     );
   }
   if (urgency === "urgent") {
     return (
-      <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">
+      <Badge tone="amber">
         <ArrowUpRight size={12} aria-hidden="true" /> Urgent
-      </span>
+      </Badge>
     );
   }
-  return (
-    <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
-      Routine
-    </span>
-  );
+  return <Badge tone="gray">Routine</Badge>;
 }
 
 export function StatusBadge({ status }: { status: EscalationStatus }) {
   if (status === "resolved") {
     return (
-      <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+      <Badge tone="green">
         <CheckCircle size={12} aria-hidden="true" /> Resolved
-      </span>
+      </Badge>
     );
   }
   if (status === "acknowledged") {
     return (
-      <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+      <Badge tone="blue">
         <Clock size={12} aria-hidden="true" /> Acknowledged
-      </span>
+      </Badge>
     );
   }
-  return (
-    <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-      Open
-    </span>
-  );
+  return <Badge tone="yellow">Open</Badge>;
 }
 
 type Filter = "active" | "mine" | "resolved" | "all";
@@ -88,22 +85,9 @@ export default function EscalationInbox({ userRole }: EscalationInboxProps) {
   const [filter, setFilter] = useState<Filter>("active");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-
-  // The SPA shell only tracks the role; lifecycle actions (ack/resolve are
-  // assignee-only) need my userid, so resolve it once here.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/auth/status", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled && data?.authenticated && data.user) setCurrentUserId(data.user.userid);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Lifecycle actions (ack/resolve are assignee-only) need my userid; the
+  // shared auth hook resolves it once per page load.
+  const { userId: currentUserId } = useAuth();
 
   const query =
     filter === "mine" ? "?mine=1" : filter === "resolved" ? "?status=resolved" : filter === "active" ? "?open_only=1" : "";
@@ -112,7 +96,7 @@ export default function EscalationInbox({ userRole }: EscalationInboxProps) {
   );
   const escalations = useMemo(() => data?.escalations ?? [], [data]);
 
-  const isCareTeam = userRole === "therapist" || userRole === "caseworker";
+  const isCareTeam = isCareTeamRole(userRole);
 
   if (selectedId !== null) {
     return (

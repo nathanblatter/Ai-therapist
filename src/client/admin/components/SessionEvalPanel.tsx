@@ -4,11 +4,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
-
-interface EvalDimension {
-  score: number;
-  rationale: string;
-}
+// Canonical eval shapes live in the server data layer (type-only import,
+// erased at build time).
+import type { EvalDimension } from '../../../server/db/evals.queries';
 
 interface HumanRatingDimension {
   score: number;

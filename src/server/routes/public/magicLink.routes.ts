@@ -8,16 +8,8 @@
 // disabled and the route 404s like any unknown path.
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { createHash, timingSafeEqual } from 'crypto';
+import { tokensMatch } from '../../utils/crypto.js';
 import { createDemoUser } from '../../db/index.js';
-
-// Constant-time token comparison that also tolerates differing lengths (hashing
-// both sides to a fixed 32 bytes first, so timingSafeEqual never throws).
-function tokensMatch(provided: string, expected: string): boolean {
-  const a = createHash('sha256').update(provided).digest();
-  const b = createHash('sha256').update(expected).digest();
-  return timingSafeEqual(a, b);
-}
 
 export default function magicLinkRoutes(): Router {
   const router = Router();

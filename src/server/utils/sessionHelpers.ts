@@ -1,47 +1,16 @@
 import { pool } from '../config/db.js';
 import { fetchSystemConfigRows } from '../db/index.js';
+import { getStartOfTodaySLC } from './timezoneHelpers.js';
 import { createLogger } from './logger.js';
+import type {
+  CrisisContact,
+  SessionLimits,
+  VoicesConfig,
+  LanguageOption,
+  LanguagesConfig,
+} from '../../shared/systemConfig.js';
 
 const log = createLogger('sessionHelpers');
-
-interface CrisisContact {
-  hotline: string;
-  phone: string;
-  text?: string;
-  enabled?: boolean;
-}
-
-interface SessionLimits {
-  enabled: boolean;
-  max_duration_minutes?: number;
-  max_sessions_per_day?: number;
-  cooldown_minutes?: number;
-}
-
-interface VoiceConfig {
-  value: string;
-  label: string;
-  description?: string;
-  enabled: boolean;
-}
-
-interface VoicesConfig {
-  voices?: VoiceConfig[];
-  default_voice?: string;
-}
-
-interface LanguageConfig {
-  value: string;
-  label: string;
-  description?: string;
-  enabled: boolean;
-  systemPromptAddition?: string;
-}
-
-interface LanguagesConfig {
-  languages?: LanguageConfig[];
-  default_language?: string;
-}
 
 interface SystemPromptEntry {
   prompt: string;
@@ -236,8 +205,7 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
 
   // Demo (magic-link) accounts: always capped, independent of global config.
   if (userRole === 'demo') {
-    const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = getStartOfTodaySLC();
 
     const demoToday = await pool.query<{ session_count: string }>(
       `SELECT COUNT(*) as session_count
@@ -281,8 +249,7 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
   }
 
   // Check daily session count (using Salt Lake City timezone)
-  const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
-  todayStart.setHours(0, 0, 0, 0);
+  const todayStart = getStartOfTodaySLC();
 
   const todaySessionsResult = await pool.query<{ session_count: string }>(
     `SELECT COUNT(*) as session_count
@@ -456,7 +423,7 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime',
   // Get language-specific addition from database config
   const languagesConfig = (config.languages as LanguagesConfig | undefined) || { languages: [], default_language: 'en' };
   const languageObj = languagesConfig.languages
-    ? languagesConfig.languages.find((l: LanguageConfig) => l.value === language)
+    ? languagesConfig.languages.find((l: LanguageOption) => l.value === language)
     : null;
   const languageAddition = languageObj?.systemPromptAddition || '';
 

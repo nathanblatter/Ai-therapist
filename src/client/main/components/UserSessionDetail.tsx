@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { X } from "react-feather";
+import { formatDateTime, timeLabel } from "../../shared/format";
 
 interface SessionMessage {
   role: string;
@@ -47,26 +48,8 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
     fetchSession();
   }, [sessionId]);
 
-  const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      month: 'numeric',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-      timeZoneName: 'short'
-    });
-  };
-
-  const formatTime = (timestamp: string): string => {
-    return new Date(timestamp).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatDate = formatDateTime;
+  const formatTime = timeLabel;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

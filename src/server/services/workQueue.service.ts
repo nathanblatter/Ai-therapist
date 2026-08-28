@@ -26,6 +26,7 @@ import {
 } from '../db/index.js';
 import type { CareTeamRole } from '../../shared/roles.js';
 import { therapistRoom, caseworkerRoom } from '../utils/adminBroadcast.js';
+import { denverDateStamp } from '../utils/timezoneHelpers.js';
 import {
   notifyWorkItem,
   runDigestSweep,
@@ -181,11 +182,6 @@ export const DEFAULT_SWEEP_THRESHOLDS: SweepThresholds = {
   screener_worsen_delta: 5,
   stale_unread_days: 3,
 };
-
-function denverDateStamp(now: Date = new Date()): string {
-  // en-CA gives YYYY-MM-DD.
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(now);
-}
 
 /**
  * Daily producer + reconciliation sweep (spec section 5):

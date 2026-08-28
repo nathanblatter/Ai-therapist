@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getNextMidnightSLC, getHoursUntilReset } from './timezoneHelpers.js';
+import { getNextMidnightSLC, getHoursUntilReset, getStartOfTodaySLC, denverDateStamp } from './timezoneHelpers.js';
 
 describe('timezoneHelpers', () => {
   it('getNextMidnightSLC returns a time in the future', () => {
@@ -29,5 +29,34 @@ describe('timezoneHelpers', () => {
     const hours = getHoursUntilReset();
     expect(hours).toBeGreaterThan(0);
     expect(hours).toBeLessThanOrEqual(24);
+  });
+
+  it('getStartOfTodaySLC lands on midnight of the current Denver date, in the past', () => {
+    const start = getStartOfTodaySLC();
+    expect(start.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(Date.now() - start.getTime()).toBeLessThanOrEqual(25 * 3_600_000); // <= one (DST-long) day
+    const denver = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Denver',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(start);
+    expect(denver.replace('24:', '00:')).toBe('00:00:00');
+    expect(denverDateStamp(start)).toBe(denverDateStamp());
+  });
+
+  it('getStartOfTodaySLC and getNextMidnightSLC bound the current Denver day', () => {
+    const start = getStartOfTodaySLC().getTime();
+    const next = getNextMidnightSLC().getTime();
+    const now = Date.now();
+    expect(start).toBeLessThanOrEqual(now);
+    expect(next).toBeGreaterThan(now);
+    const dayHours = (next - start) / 3_600_000;
+    expect([23, 24, 25]).toContain(Math.round(dayHours)); // DST days are 23/25h
+  });
+
+  it('denverDateStamp formats YYYY-MM-DD', () => {
+    expect(denverDateStamp(new Date('2026-08-28T18:00:00Z'))).toBe('2026-08-28');
   });
 });

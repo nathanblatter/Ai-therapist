@@ -2,32 +2,20 @@
 // Part of the db/ layer: this is the only place the system_config table is read.
 import { pool } from '../config/db.js';
 
-interface SystemConfigRow {
+export interface SystemConfigRow {
   config_key: string;
   config_value: unknown;
 }
 
-// Shape of the voices/languages config blobs, shared by the routes that read them.
-export interface VoiceOption {
-  value: string;
-  label: string;
-  description: string;
-  enabled: boolean;
-}
-export interface VoicesConfig {
-  voices?: VoiceOption[];
-  default_voice?: string;
-}
-export interface LanguageOption {
-  value: string;
-  label: string;
-  description: string;
-  enabled: boolean;
-}
-export interface LanguagesConfig {
-  languages?: LanguageOption[];
-  default_language?: string;
-}
+// The voices/languages config blob shapes live in src/shared/systemConfig.ts
+// (single source of truth for server + UIs); re-exported here so existing
+// importers of config.queries / the db barrel keep working.
+export type {
+  VoiceOption,
+  VoicesConfig,
+  LanguageOption,
+  LanguagesConfig,
+} from '../../shared/systemConfig.js';
 
 /** Fetch every row from the system_config key/value table. */
 export async function fetchSystemConfigRows(): Promise<SystemConfigRow[]> {

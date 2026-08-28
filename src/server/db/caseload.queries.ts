@@ -119,35 +119,37 @@ export async function getCaseloadClientIds(therapistId: number): Promise<number[
   return result.rows.map((row: { client_id: number }) => row.client_id);
 }
 
+/** Care-team member ids for a client, optionally restricted to one
+ *  member_role. Shared implementation behind the three role-specific exports
+ *  below (kept as distinct names because the tiers they back differ). */
+async function getCareTeamMemberIds(
+  clientId: number,
+  role?: 'therapist' | 'caseworker'
+): Promise<number[]> {
+  const result = await pool.query(
+    `SELECT therapist_id FROM therapist_clients
+     WHERE client_id = $1 AND ($2::text IS NULL OR member_role = $2)
+     ORDER BY therapist_id`,
+    [clientId, role ?? null]
+  );
+  return result.rows.map((row: { therapist_id: number }) => row.therapist_id);
+}
+
 /** All therapist ids (member_role='therapist' — the full data tier) that have
  *  this client on their caseload. Backs full-tier admin event fan-out; must
  *  never include caseworker member ids. */
-export async function getTherapistIdsForClient(clientId: number): Promise<number[]> {
-  const result = await pool.query(
-    `SELECT therapist_id FROM therapist_clients
-     WHERE client_id = $1 AND member_role = 'therapist' ORDER BY therapist_id`,
-    [clientId]
-  );
-  return result.rows.map((row: { therapist_id: number }) => row.therapist_id);
+export function getTherapistIdsForClient(clientId: number): Promise<number[]> {
+  return getCareTeamMemberIds(clientId, 'therapist');
 }
 
 /** All caseworker member ids for a client (summary-tier fan-out). */
-export async function getCaseworkerIdsForClient(clientId: number): Promise<number[]> {
-  const result = await pool.query(
-    `SELECT therapist_id FROM therapist_clients
-     WHERE client_id = $1 AND member_role = 'caseworker' ORDER BY therapist_id`,
-    [clientId]
-  );
-  return result.rows.map((row: { therapist_id: number }) => row.therapist_id);
+export function getCaseworkerIdsForClient(clientId: number): Promise<number[]> {
+  return getCareTeamMemberIds(clientId, 'caseworker');
 }
 
 /** Every care-team member id for a client, regardless of role. */
-export async function getCareTeamMemberIdsForClient(clientId: number): Promise<number[]> {
-  const result = await pool.query(
-    'SELECT therapist_id FROM therapist_clients WHERE client_id = $1 ORDER BY therapist_id',
-    [clientId]
-  );
-  return result.rows.map((row: { therapist_id: number }) => row.therapist_id);
+export function getCareTeamMemberIdsForClient(clientId: number): Promise<number[]> {
+  return getCareTeamMemberIds(clientId);
 }
 
 /** A client's care team with member usernames and roles. */

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import FilterBar from "./FilterBar";
+import { formatDateTime } from "../../shared/format";
 
 interface Session {
   session_id: string;
@@ -91,17 +92,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   };
 
-  const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      month: 'numeric',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatDate = formatDateTime;
 
   const handlePageChange = (newPage: number) => {
     setPagination(prev => ({ ...prev, page: newPage }));

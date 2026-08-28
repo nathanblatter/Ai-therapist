@@ -13,6 +13,7 @@ import {
   type NotificationPreferencesRow,
 } from '../../db/index.js';
 import { createLogger } from '../../utils/logger.js';
+import { parsePagination } from '../../utils/pagination.js';
 
 const log = createLogger('notificationsRoutes');
 
@@ -60,8 +61,7 @@ export default function notificationsRoutes(): Router {
     try {
       const userId = req.session.userId!;
       const unreadOnly = req.query.unread_only === '1' || req.query.unread_only === 'true';
-      const rawLimit = Number(req.query.limit ?? 50);
-      const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 50;
+      const { limit } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
       const [notifications, unreadCount] = await Promise.all([
         listNotifications(userId, { unreadOnly, limit }),
         countUnreadNotifications(userId),

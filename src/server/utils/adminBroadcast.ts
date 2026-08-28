@@ -133,6 +133,19 @@ export async function broadcastAdminEvent(
   }
 }
 
+/**
+ * Fire-and-forget summary-tier emit for a client-linked event, using the
+ * process-global io (no-op before socket setup). The wrapper exists so
+ * summary-surface emitters (escalations, signed notes) cannot forget the
+ * 'summary' tier and silently drop the client's caseworkers — or, worse,
+ * be "fixed" later into a full-tier emit that leaks full-tier payload shapes
+ * to caseworker rooms.
+ */
+export function emitSummaryEvent(event: string, clientId: number, payload: unknown): void {
+  if (!global.io) return;
+  void broadcastAdminEvent(global.io, event, payload, clientId, 'summary');
+}
+
 // Session -> participant user_id cache. A session's user_id is fixed at
 // creation, so resolved values never go stale. Bounded FIFO to keep the map
 // from growing forever on a long-lived process.

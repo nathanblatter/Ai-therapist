@@ -69,14 +69,6 @@ export const EMPTY_FORM: ChunkFormValues = {
   modality: '',
 };
 
-export function formatDate(iso: string | null): string {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-export function formatDateTime(iso: string | null): string {
-  if (!iso) return '';
-  return new Date(iso).toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-}
+// Re-exported from the shared formatters (src/client/shared/format) so the
+// knowledge views keep their existing import path.
+export { formatDate, formatDateTime } from '../../../shared/format';

@@ -7,6 +7,7 @@ import { requireRole, requireFullContent } from '../../middleware/auth.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 import { requireSessionClientAccess, careTeamScopeId, requireMessageClientAccess } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
+import { parsePagination } from '../../utils/pagination.js';
 import {
   getActiveSessions,
   listSessions,
@@ -123,14 +124,14 @@ export default function adminSessionsRoutes(): Router {
   router.get('/admin/api/sessions', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     const {
       search, startDate, endDate, minMessages, maxMessages,
-      page = 1, limit = 50,
       voices, languages, durations, sessionTypes, statuses, endedBy,
       crisisFlagged, crisisSeverity,
     } = req.query;
 
     try {
-      const pageNum = parseInt(String(page));
-      const limitNum = parseInt(String(limit));
+      // A malformed ?page/?limit used to produce NaN (offset NaN); fall back
+      // to the historical defaults instead.
+      const { page: pageNum, limit: limitNum } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 500 });
       const filters = {
         search: search ? String(search) : null,
         startDate: startDate ? String(startDate) : null,

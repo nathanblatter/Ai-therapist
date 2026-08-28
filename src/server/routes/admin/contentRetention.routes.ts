@@ -1,6 +1,7 @@
 // Admin content-retention / data-wipe endpoints (researcher only).
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { parsePagination } from '../../utils/pagination.js';
 import {
   updateRetentionSettings,
   executeContentWipe,
@@ -83,8 +84,7 @@ export default function contentRetentionRoutes(): Router {
 
   // GET /admin/api/content-retention/log - wipe history
   router.get('/admin/api/content-retention/log', requireRole('researcher'), async (req, res) => {
-    const limit = parseInt(String(req.query.limit ?? '')) || 50;
-    const offset = parseInt(String(req.query.offset ?? '')) || 0;
+    const { limit, offset } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 500 });
 
     try {
       const { wipes, total } = await getContentWipeLog(limit, offset);
@@ -144,8 +144,7 @@ export default function contentRetentionRoutes(): Router {
 
   // GET /admin/api/data-retention/log - data_deletion_log page
   router.get('/admin/api/data-retention/log', requireRole('researcher'), async (req, res) => {
-    const limit = parseInt(String(req.query.limit ?? '')) || 50;
-    const offset = parseInt(String(req.query.offset ?? '')) || 0;
+    const { limit, offset } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 500 });
     try {
       const { entries, total } = await getDataDeletionLog(limit, offset);
       res.json({ entries, total, limit, offset });

@@ -3,14 +3,9 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
 } from 'recharts';
 import { RefreshCw, Play, Plus, AlertTriangle, CheckCircle, AlertCircle, Save } from 'react-feather';
-
-interface StudyProtocol {
-  enrollment_target: number;
-  expected_sessions_per_participant: number;
-  study_start: string | null;
-  study_end: string | null;
-  arm_imbalance_threshold: number;
-}
+// Canonical protocol shape lives in the server data layer (type-only import,
+// erased at build time).
+import type { StudyProtocol } from '../../../server/db/studyOps.queries';
 
 interface Summary {
   protocol: StudyProtocol;

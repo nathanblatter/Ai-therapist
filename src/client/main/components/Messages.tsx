@@ -8,27 +8,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronRight, Clock, Info, Lock, MessageSquare, Phone, Send } from 'react-feather';
 import { useMessaging, type ParticipantMessage, type ParticipantThread } from '../hooks/useMessaging';
+import { timeLabel } from '../../shared/format';
+import type { CrisisContact } from '../../../shared/systemConfig';
 
-interface CrisisContact {
-  hotline: string;
-  phone: string;
-  text: string;
-}
+// Rendered contact always has defaults filled in, so no optional fields.
+// CrisisContact.enabled is intentionally unread here: the safety banners
+// always show a hotline regardless of the admin toggle.
+type DisplayCrisisContact = { hotline: string; phone: string; text: string };
 
-const DEFAULT_CRISIS: CrisisContact = {
+const DEFAULT_CRISIS: DisplayCrisisContact = {
   hotline: '988 Suicide & Crisis Lifeline',
   phone: '988',
   text: 'Text HOME to 741741',
 };
-
-function timeLabel(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
 
 function clinicianLabel(thread: ParticipantThread): string {
   const name = thread.counterpart_username || 'Your care team';
@@ -37,7 +29,7 @@ function clinicianLabel(thread: ParticipantThread): string {
 }
 
 /** Permanent disclaimer: messaging is asynchronous, never a crisis channel. */
-function NotForEmergenciesBanner({ crisis }: { crisis: CrisisContact }) {
+function NotForEmergenciesBanner({ crisis }: { crisis: DisplayCrisisContact }) {
   return (
     <div className="bg-blue-50 rounded-2xl p-4 flex items-start gap-3">
       <Info size={16} className="text-blue-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
@@ -56,7 +48,7 @@ function NotForEmergenciesBanner({ crisis }: { crisis: CrisisContact }) {
 }
 
 /** Supportive-resources note shown under a message the safety scan flagged. */
-function FlaggedSupportNote({ crisis }: { crisis: CrisisContact }) {
+function FlaggedSupportNote({ crisis }: { crisis: DisplayCrisisContact }) {
   return (
     <div className="mt-1 bg-red-50 rounded-xl px-3 py-2 flex items-start gap-2 max-w-[85%]">
       <Phone size={14} className="text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
@@ -70,7 +62,7 @@ function FlaggedSupportNote({ crisis }: { crisis: CrisisContact }) {
   );
 }
 
-function MessageBubble({ message, crisis }: { message: ParticipantMessage; crisis: CrisisContact }) {
+function MessageBubble({ message, crisis }: { message: ParticipantMessage; crisis: DisplayCrisisContact }) {
   const mine = message.sender_role === 'participant';
   return (
     <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -89,7 +81,7 @@ function MessageBubble({ message, crisis }: { message: ParticipantMessage; crisi
 
 export default function Messages() {
   const messaging = useMessaging({ active: true });
-  const [crisis, setCrisis] = useState<CrisisContact>(DEFAULT_CRISIS);
+  const [crisis, setCrisis] = useState<DisplayCrisisContact>(DEFAULT_CRISIS);
   const [draft, setDraft] = useState('');
   const bottomRef = useRef<HTMLDivElement | null>(null);
 

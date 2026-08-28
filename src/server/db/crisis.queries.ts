@@ -1,6 +1,73 @@
 // Data-access for crisis-management views and session crisis flags.
 import { pool } from '../config/db.js';
 
+/** Anything that can run a parameterized query (the pool, or a transaction's
+ *  PoolClient so callers can write the event atomically with other rows). */
+type Queryable = Pick<typeof pool, 'query'>;
+
+export interface RecordCrisisEventInput {
+  /** Omitted fields are left to the column defaults (076: origin defaults to
+   *  'session'; thread_message_id/client_user_id default NULL). */
+  origin?: 'thread_message';
+  threadMessageId?: number;
+  clientUserId?: number;
+  sessionId?: string | null;
+  eventType: string;
+  severity?: string | null;
+  previousSeverity?: string | null;
+  riskScore?: number | null;
+  previousRiskScore?: number | null;
+  triggeredBy: string;
+  triggerMethod: string;
+  messageId?: string | number | null;
+  /** JSON-stringified into risk_factors when present. */
+  riskFactors?: string[];
+  notes?: string | null;
+}
+
+/**
+ * SINGLE WRITER for crisis_events rows. Every fan-out path (session flag /
+ * unflag / risk update in crisisDetection.service, thread-message flags in
+ * messageSafety.service) inserts through here; only fields the caller passes
+ * become columns, so each path writes exactly what it wrote when the inserts
+ * were hand-rolled per service. Returns the new event_id.
+ */
+export async function recordCrisisEvent(
+  input: RecordCrisisEventInput,
+  db: Queryable = pool
+): Promise<number> {
+  const columns: string[] = [];
+  const values: unknown[] = [];
+  const add = (column: string, value: unknown): void => {
+    columns.push(column);
+    values.push(value);
+  };
+
+  if (input.origin !== undefined) add('origin', input.origin);
+  if (input.threadMessageId !== undefined) add('thread_message_id', input.threadMessageId);
+  if (input.clientUserId !== undefined) add('client_user_id', input.clientUserId);
+  if (input.sessionId !== undefined) add('session_id', input.sessionId);
+  add('event_type', input.eventType);
+  if (input.severity !== undefined) add('severity', input.severity);
+  if (input.previousSeverity !== undefined) add('previous_severity', input.previousSeverity);
+  if (input.riskScore !== undefined) add('risk_score', input.riskScore);
+  if (input.previousRiskScore !== undefined) add('previous_risk_score', input.previousRiskScore);
+  add('triggered_by', input.triggeredBy);
+  add('trigger_method', input.triggerMethod);
+  if (input.messageId !== undefined) add('message_id', input.messageId);
+  if (input.riskFactors !== undefined) add('risk_factors', JSON.stringify(input.riskFactors));
+  if (input.notes !== undefined) add('notes', input.notes);
+
+  const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+  const result = await db.query<{ event_id: number }>(
+    `INSERT INTO crisis_events (${columns.join(', ')})
+     VALUES (${placeholders})
+     RETURNING event_id`,
+    values
+  );
+  return result.rows[0].event_id;
+}
+
 /** Does a therapy session exist? */
 export async function sessionExists(sessionId: string): Promise<boolean> {
   const result = await pool.query('SELECT session_id FROM therapy_sessions WHERE session_id = $1', [sessionId]);

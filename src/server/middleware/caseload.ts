@@ -132,6 +132,33 @@ export async function canAdminAccessSessionLive(
   return isAssigned(adminUserId, sessionUserId);
 }
 
+/**
+ * Caseload guard for session ids arriving outside a :sessionId path param
+ * (query string / request body), where requireSessionClientAccess cannot
+ * apply. Single choke point for the per-route policies:
+ *   - non-care-team roles (researcher, demo, ...) always pass — org scoping
+ *     and requireRole gate them separately;
+ *   - a therapist passes only when the session exists, has an owner, and
+ *     that owner is on their caseload (404-never-403 semantics at the caller);
+ *   - a caseworker follows `caseworkerPolicy`: 'assigned' = same caseload
+ *     check as a therapist (summaries-tier surfaces, e.g. crisis metadata);
+ *     'deny' = never, regardless of assignment (full-tier surfaces such as
+ *     live sideband control — mirrors canAdminAccessSessionLive).
+ */
+export async function mayCareTeamAccessSession(
+  role: string | undefined,
+  userId: number | undefined,
+  sessionId: string,
+  opts: { caseworkerPolicy: 'deny' | 'assigned' }
+): Promise<boolean> {
+  if (!isCareTeamRole(role)) return true;
+  if (role === 'caseworker' && opts.caseworkerPolicy === 'deny') return false;
+  if (userId === undefined) return false;
+  const info = await getSessionAccessInfo(String(sessionId));
+  if (!info || info.user_id === null || info.user_id === undefined) return false;
+  return isAssigned(userId, Number(info.user_id));
+}
+
 
 /**
  * Gate a `:messageId`-addressed route (message edit/delete). researcher/demo

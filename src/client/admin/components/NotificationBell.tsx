@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell, Check } from 'react-feather';
 import useNotifications from '../hooks/useNotifications';
-import { timeAgo } from '../hooks/useWorkQueue';
+import { timeAgo } from '../../shared/format';
 
 // Header bell: unread badge + dropdown of recent in-app notifications.
 // Designed to sit in AdminHeader's dark toolbar (integration slice mounts it).

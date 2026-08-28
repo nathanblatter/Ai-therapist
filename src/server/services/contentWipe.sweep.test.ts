@@ -132,6 +132,24 @@ describe('executeContentWipe thread-message inclusion', () => {
     expect(wipeAgedThreadMessageBodiesMock).toHaveBeenCalledWith(expect.any(Date), false);
   });
 
+  it('emits content:wiped to the researcher admin-broadcast room (not the dead "admin" room)', async () => {
+    mockWipeRun();
+    wipeAgedThreadMessageBodiesMock.mockResolvedValue(0);
+    const emitMock = vi.fn();
+    const toMock = vi.fn(() => ({ emit: emitMock }));
+    (global as unknown as { io: unknown }).io = { to: toMock };
+    try {
+      await executeContentWipe('manual', 'admin');
+      expect(toMock).toHaveBeenCalledWith('admin-broadcast');
+      expect(emitMock).toHaveBeenCalledWith(
+        'content:wiped',
+        expect.objectContaining({ wipeId: 'w1', messagesWiped: 5, triggeredBy: 'manual' })
+      );
+    } finally {
+      (global as unknown as { io: unknown }).io = undefined;
+    }
+  });
+
   it('marks the wipe failed (not silently partial) when the thread wipe throws', async () => {
     mockWipeRun();
     wipeAgedThreadMessageBodiesMock.mockRejectedValue(new Error('db down'));

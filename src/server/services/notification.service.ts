@@ -18,10 +18,14 @@ import {
   markNotificationsEmailed,
   listUnemailedNotifications,
   listUserIdsWithUnemailedNotifications,
-  getSandboxWorkItemIds,
   type WorkItemRow,
   type NotificationRow,
 } from '../db/index.js';
+import {
+  workItemSuppressesEmail,
+  recipientSuppressesEmail,
+  emailSuppressedWorkItemIds,
+} from './suppression.js';
 import { therapistRoom, caseworkerRoom } from '../utils/adminBroadcast.js';
 import { immediateEmail, digestEmail } from './emailTemplates.js';
 import { sendEmail } from './emailer.service.js';
@@ -114,7 +118,7 @@ export async function notifyWorkItem(
 
       // HARD RULE: sandbox never emails — neither sandbox-origin items nor
       // sandbox recipient accounts (docs/caseworker-portal.md section 5).
-      if (item.is_sandbox || user.is_sandbox) continue;
+      if (workItemSuppressesEmail(item) || recipientSuppressesEmail(user)) continue;
 
       const policy = emailPolicyFor(item.item_type, item.severity);
       const sendNow =
@@ -177,7 +181,7 @@ export async function runDigestSweep(now: Date = new Date()): Promise<void> {
       if (!user) continue;
       const prefs = await getNotificationPreferences(userId);
 
-      const suppress = user.is_sandbox === true || prefs.email_mode === 'off';
+      const suppress = recipientSuppressesEmail(user) || prefs.email_mode === 'off';
       if (!suppress && prefs.digest_hour_local !== hour) continue;
 
       const pending = await listUnemailedNotifications(userId);
@@ -190,7 +194,7 @@ export async function runDigestSweep(now: Date = new Date()): Promise<void> {
         const workItemIds = pending
           .map((row) => (row.work_item_id == null ? null : Number(row.work_item_id)))
           .filter((id): id is number => id !== null && Number.isFinite(id));
-        const sandboxItemIds = new Set(await getSandboxWorkItemIds(workItemIds));
+        const sandboxItemIds = new Set(await emailSuppressedWorkItemIds(workItemIds));
         const emailable = pending.filter(
           (row) => row.work_item_id == null || !sandboxItemIds.has(Number(row.work_item_id))
         );

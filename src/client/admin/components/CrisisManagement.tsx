@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { AlertTriangle, Activity, Users, FileText, TrendingUp, Clock, RefreshCw, ChevronDown, ChevronUp, ArrowUpCircle, MessageSquare } from 'react-feather';
 import EscalationComposer from './escalations/EscalationComposer';
 import FlaggedMessageRow, { useFlaggedMessageEvents } from './FlaggedMessageRow';
+import { formatDateTime } from '../../shared/format';
+import { severityBadgeClass, statusBadgeClass, riskScoreTextClass } from '../../shared/severity';
 
 interface CrisisEvent {
   event_id: string;
@@ -143,42 +145,12 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
     setExpandedSessions(newExpanded);
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
-
-  const getSeverityColor = (severity: string | undefined) => {
-    switch (severity?.toLowerCase()) {
-      case 'high': return 'bg-red-100 text-red-800 border-red-300';
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-      case 'low': return 'bg-green-100 text-green-800 border-green-300';
-      default: return 'bg-gray-100 text-gray-800 border-gray-300';
-    }
-  };
-
-  const getStatusColor = (status: string | undefined) => {
-    switch (status?.toLowerCase()) {
-      case 'completed': return 'bg-green-100 text-green-800';
-      case 'in_progress': return 'bg-blue-100 text-blue-800';
-      case 'pending': return 'bg-yellow-100 text-yellow-800';
-      case 'cancelled': return 'bg-gray-100 text-gray-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const getRiskScoreColor = (score: number) => {
-    if (score >= 70) return 'text-red-600 font-bold';
-    if (score >= 40) return 'text-yellow-600 font-semibold';
-    return 'text-green-600';
-  };
+  // Shared display vocabulary (src/client/shared/severity): medium is amber
+  // and score bands mirror the server's 75/50/25 thresholds.
+  const formatDate = formatDateTime;
+  const getSeverityColor = (severity: string | undefined) => severityBadgeClass(severity?.toLowerCase());
+  const getStatusColor = (status: string | undefined) => statusBadgeClass(status);
+  const getRiskScoreColor = (score: number) => riskScoreTextClass(score);
 
   // Filter crisis events. Message-origin events (origin='thread_message',
   // session_id NULL) are excluded from the session grouping — they render in
@@ -453,7 +425,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                             <div key={event.event_id} className="bg-white p-4 rounded-lg border">
                               <div className="flex items-start justify-between mb-2">
                                 <div className="flex items-center gap-2">
-                                  <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getSeverityColor(event.severity)}`}>
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(event.severity)}`}>
                                     {event.severity || 'N/A'}
                                   </span>
                                   <span className="text-sm font-semibold">
@@ -683,7 +655,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getSeverityColor(history.severity)}`}>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(history.severity)}`}>
                             {history.severity || 'N/A'}
                           </span>
                         </td>

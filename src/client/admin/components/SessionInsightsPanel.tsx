@@ -9,22 +9,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw, CheckCircle, FileText } from 'react-feather';
 import PrepBrief from './PrepBrief';
-
-interface SessionSummary {
-  headline?: string;
-  topics?: string[];
-  mood_trajectory?: string;
-  techniques_discussed?: string[];
-  techniques_helped?: string[];
-  follow_up?: string;
-}
-
-interface SoapNote {
-  subjective?: string;
-  objective?: string;
-  assessment?: string;
-  plan?: string;
-}
+import { isCareTeamRole } from '../../../shared/roles';
+// Canonical insight shapes live in the server data layer (type-only import,
+// erased at build time).
+import type { SessionSummary, SoapNote } from '../../../server/db/insights.queries';
 
 // The therapist's authored progress note for this session (careNotes slice B).
 interface AuthoredNote {
@@ -77,7 +65,7 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
 
   const isTherapist = userRole === 'therapist';
   const isCaseworker = userRole === 'caseworker';
-  const canView = isTherapist || isCaseworker;
+  const canView = isCareTeamRole(userRole);
 
   const fetchInsights = useCallback(async () => {
     setLoading(true);

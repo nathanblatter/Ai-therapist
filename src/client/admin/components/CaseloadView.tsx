@@ -14,6 +14,10 @@ import {
 } from "react-feather";
 import useAdminFetch from "../hooks/useAdminFetch";
 import EscalationComposer from "./escalations/EscalationComposer";
+import { isCareTeamRole } from "../../../shared/roles";
+// Canonical caseload row shape lives in the server data layer (type-only
+// import, erased at build time).
+import type { CaseloadClient } from "../../../server/db/caseload.queries";
 
 // Caseload view (caseload RBAC MVP, ai-therapist-119; caseworker portal).
 // - Care-team mode (therapist OR caseworker): their own assigned-client list
@@ -22,13 +26,6 @@ import EscalationComposer from "./escalations/EscalationComposer";
 //   "Escalate" action (docs/caseworker-portal.md slice B).
 // - Researcher mode: the assignment matrix — pick a therapist, then
 //   assign/unassign participant clients via the caseload routes.
-
-interface CaseloadClient {
-  userid: number;
-  username: string;
-  created_at: string;
-  assigned_at: string;
-}
 
 interface Assignment {
   therapist_id: number;
@@ -626,7 +623,7 @@ export default function CaseloadView({ userRole }: CaseloadViewProps) {
   if (userRole === "researcher") {
     return <ResearcherMatrix />;
   }
-  if (userRole === "therapist" || userRole === "caseworker") {
+  if (isCareTeamRole(userRole)) {
     return <TherapistCaseload userRole={userRole} />;
   }
   return (

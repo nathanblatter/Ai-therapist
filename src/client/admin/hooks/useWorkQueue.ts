@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSocket } from './useSocket';
+import useAdminFetch from './useAdminFetch';
+import { postJson } from '../../shared/http';
 
 // Work-queue data hook (caseworker portal): list + ack/resolve actions with
 // live refresh on work_item socket events. The server enforces visibility
 // (assignee or caseload pool); this hook is presentation plumbing only.
+// GET plumbing is composed from useAdminFetch; actions go through postJson.
 
 export interface AttentionWorkItem {
   item_id: number;
@@ -25,46 +28,15 @@ export interface AttentionWorkItem {
   created_at: string;
 }
 
-/** Compact relative timestamp for queue/notification rows. */
-export function timeAgo(iso: string | null): string {
-  if (!iso) return '—';
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return '—';
-  const minutes = Math.floor((Date.now() - then) / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
 export default function useWorkQueue(statuses: string[] = ['open', 'acked']) {
-  const [items, setItems] = useState<AttentionWorkItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { socket } = useSocket();
 
   const statusKey = statuses.join(',');
-
-  const refetch = useCallback(() => {
-    setError(null);
-    fetch(`/admin/api/work-items?status=${encodeURIComponent(statusKey)}`, { credentials: 'include' })
-      .then((r) => {
-        if (!r.ok) throw new Error(`Request failed (${r.status})`);
-        return r.json() as Promise<{ items: AttentionWorkItem[] }>;
-      })
-      .then((data) => setItems(data.items))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
-      .finally(() => setLoading(false));
-  }, [statusKey]);
-
-  useEffect(() => {
-    setLoading(true);
-    refetch();
-  }, [refetch]);
+  const { data, loading, error, refetch } = useAdminFetch<{ items: AttentionWorkItem[] }>(
+    `/admin/api/work-items?status=${encodeURIComponent(statusKey)}`
+  );
+  const items = data?.items ?? [];
 
   useEffect(() => {
     if (!socket) return;
@@ -81,16 +53,7 @@ export default function useWorkQueue(statuses: string[] = ['open', 'acked']) {
     async (itemId: number, action: 'ack' | 'resolve', body?: Record<string, unknown>) => {
       setActionError(null);
       try {
-        const res = await fetch(`/admin/api/work-items/${itemId}/${action}`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body ?? {}),
-        });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => null)) as { error?: string } | null;
-          throw new Error(data?.error ?? `Request failed (${res.status})`);
-        }
+        await postJson(`/admin/api/work-items/${itemId}/${action}`, body);
         refetch();
         return true;
       } catch (err: unknown) {
@@ -108,5 +71,7 @@ export default function useWorkQueue(statuses: string[] = ['open', 'acked']) {
     [post]
   );
 
-  return { items, loading, error, actionError, refetch, ack, resolve };
+  // Only surface loading before the first payload lands: socket-triggered
+  // refetches must not flash the queue back to a spinner.
+  return { items, loading: loading && data === null, error, actionError, refetch, ack, resolve };
 }

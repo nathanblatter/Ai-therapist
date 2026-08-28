@@ -1,5 +1,6 @@
 import { TrendingUp, TrendingDown, Minus, MessageSquare, Shield, ChevronRight } from 'react-feather';
-import { timeAgo } from '../hooks/useWorkQueue';
+import { timeAgo } from '../../shared/format';
+import { severityBadgeClass } from '../../shared/severity';
 
 // One triage-roster row (summaries tier by construction: everything shown
 // here comes from the transcript-free dashboard endpoint).
@@ -31,12 +32,6 @@ export interface RosterClient {
   unread_count: number;
   attention: { score: number; reasons: RosterAttentionReason[] };
 }
-
-const RISK_CLASSES: Record<string, string> = {
-  high: 'bg-red-100 text-red-800',
-  medium: 'bg-amber-100 text-amber-800',
-  low: 'bg-green-100 text-green-800',
-};
 
 function riskTrendIcon(severity: string | null) {
   if (severity === 'high') return <TrendingUp size={14} className="text-red-600" />;
@@ -75,9 +70,7 @@ export default function ClientStatusRow({ client, onSelect }: ClientStatusRowPro
           <span className="font-medium text-ink">{client.username}</span>
           {client.latest_risk_severity && (
             <span
-              className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                RISK_CLASSES[client.latest_risk_severity] ?? 'bg-gray-100 text-gray-700'
-              }`}
+              className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${severityBadgeClass(client.latest_risk_severity)}`}
             >
               {riskTrendIcon(client.latest_risk_severity)}
               risk {client.latest_risk_severity}

@@ -1,12 +1,23 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle } from 'react-feather';
+// Canonical config-blob shapes are shared with the server (src/shared).
+// Fields the stored blob may omit are optional there; the form state below
+// keeps every field present and default-fills on read.
+import type {
+  CrisisContact,
+  SessionLimits,
+  VoiceOption,
+  LanguageOption,
+  VoicesConfig,
+  LanguagesConfig,
+} from '../../../shared/systemConfig';
 
-interface CrisisContact {
-  hotline: string;
-  phone: string;
-  text: string;
-  enabled: boolean;
-}
+type CrisisContactForm = Required<CrisisContact>;
+type SessionLimitsForm = Required<SessionLimits>;
+type VoicesForm = Required<VoicesConfig>;
+type LanguagesForm = Required<LanguagesConfig>;
+type VoiceEntry = VoiceOption;
+type LanguageEntry = LanguageOption;
 
 /** On-call crisis paging (ai-therapist-25a): who gets an SMS when a session
  *  is flagged high-severity, and whether that's on at all. Distinct from
@@ -14,13 +25,6 @@ interface CrisisContact {
 interface CrisisAlert {
   enabled: boolean;
   phone: string | null;
-}
-
-interface SessionLimits {
-  max_duration_minutes: number;
-  max_sessions_per_day: number;
-  cooldown_minutes: number;
-  enabled: boolean;
 }
 
 interface Features {
@@ -48,31 +52,6 @@ interface AiModel {
 
 interface ClientLogging {
   enabled: boolean;
-}
-
-interface VoiceEntry {
-  value: string;
-  label: string;
-  description?: string;
-  enabled: boolean;
-}
-
-interface LanguageEntry {
-  value: string;
-  label: string;
-  description?: string;
-  systemPromptAddition?: string;
-  enabled: boolean;
-}
-
-interface VoicesConfig {
-  voices: VoiceEntry[];
-  default_voice: string;
-}
-
-interface LanguagesConfig {
-  languages: LanguageEntry[];
-  default_language: string;
 }
 
 interface ConfigEntry<T> {
@@ -166,7 +145,7 @@ export default function SystemConfig() {
   const [hasChanges, setHasChanges] = useState(false);
 
   // Local state for form fields
-  const [crisisContact, setCrisisContact] = useState<CrisisContact>({
+  const [crisisContact, setCrisisContact] = useState<CrisisContactForm>({
     hotline: '',
     phone: '',
     text: '',
@@ -178,7 +157,7 @@ export default function SystemConfig() {
     phone: null
   });
 
-  const [sessionLimits, setSessionLimits] = useState<SessionLimits>({
+  const [sessionLimits, setSessionLimits] = useState<SessionLimitsForm>({
     max_duration_minutes: 30,
     max_sessions_per_day: 3,
     cooldown_minutes: 30,
@@ -206,12 +185,12 @@ export default function SystemConfig() {
     enabled: false
   });
 
-  const [voices, setVoices] = useState<VoicesConfig>({
+  const [voices, setVoices] = useState<VoicesForm>({
     voices: [],
     default_voice: 'cedar'
   });
 
-  const [languages, setLanguages] = useState<LanguagesConfig>({
+  const [languages, setLanguages] = useState<LanguagesForm>({
     languages: [],
     default_language: 'en'
   });
@@ -247,15 +226,21 @@ export default function SystemConfig() {
         .then((t: { tools: AiToolInfo[] } | null) => { if (t) setAiTools(t.tools); })
         .catch(() => { /* tools panel just stays empty */ });
 
-      // Populate form fields
+      // Populate form fields (default-fill the optional blob fields so the
+      // form state always has every input's value present).
       if (data.crisis_contact) {
-        setCrisisContact(data.crisis_contact.value);
+        setCrisisContact({ text: '', enabled: true, ...data.crisis_contact.value });
       }
       if (data.crisis_alert) {
         setCrisisAlert(data.crisis_alert.value);
       }
       if (data.session_limits) {
-        setSessionLimits(data.session_limits.value);
+        setSessionLimits({
+          max_duration_minutes: 30,
+          max_sessions_per_day: 3,
+          cooldown_minutes: 30,
+          ...data.session_limits.value,
+        });
       }
       if (data.features) {
         setFeatures(data.features.value);
@@ -270,10 +255,10 @@ export default function SystemConfig() {
         setClientLogging(data.client_logging.value);
       }
       if (data.voices) {
-        setVoices(data.voices.value);
+        setVoices({ voices: [], default_voice: 'cedar', ...data.voices.value });
       }
       if (data.languages) {
-        setLanguages(data.languages.value);
+        setLanguages({ languages: [], default_language: 'en', ...data.languages.value });
       }
 
       setHasChanges(false);

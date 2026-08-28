@@ -15,6 +15,7 @@ import { requireRole } from '../../middleware/auth.js';
 import { requireClientAccess, careTeamScopeId } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
 import { getOpenAIKey } from '../../config/secrets.js';
+import { parsePagination } from '../../utils/pagination.js';
 import {
   getUserById,
   getUserProfileBundle,
@@ -192,8 +193,7 @@ export default function participantProfileRoutes(): Router {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
 
-      const pageNum = Math.max(1, parseInt(String(req.query.page ?? '1')) || 1);
-      const limitNum = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '25')) || 25));
+      const { page: pageNum, limit: limitNum } = parsePagination(req.query, { defaultLimit: 25, maxLimit: 100 });
       const filters = {
         search: null,
         startDate: null,

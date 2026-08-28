@@ -22,6 +22,7 @@ import {
 } from '../../db/index.js';
 import { scanThreadMessage, userRoom } from '../../services/messageSafety.service.js';
 import { createLogger } from '../../utils/logger.js';
+import { parsePagination } from '../../utils/pagination.js';
 
 const log = createLogger('messagingPublic');
 
@@ -84,10 +85,10 @@ export default function publicMessagingRoutes(): Router {
       try {
         const thread = res.locals.thread as MessageThreadRow;
         const before = Number(req.query.before);
-        const limit = Number(req.query.limit);
+        const { limit } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
         const messages = await listThreadMessages(thread.thread_id, {
           beforeMessageId: Number.isInteger(before) ? before : null,
-          limit: Number.isInteger(limit) && limit > 0 && limit <= 200 ? limit : 50,
+          limit,
         });
         res.json({
           thread: participantThreadView(thread),

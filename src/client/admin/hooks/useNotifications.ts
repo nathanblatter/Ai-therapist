@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSocket } from './useSocket';
+import useAdminFetch from './useAdminFetch';
+import { postJson } from '../../shared/http';
 
 // In-app notification hook (caseworker portal): bell list + unread badge with
 // live refresh on notification:new, plus read/mark-all actions and the
 // notification-preferences load/save pair used by NotificationPreferences.
+// GET plumbing is composed from useAdminFetch; the list is mirrored into
+// local state so markRead/markAllRead can update it optimistically.
 
 export interface AppNotification {
   notification_id: number;
@@ -27,28 +31,19 @@ export interface NotificationPreferences {
 export default function useNotifications(limit = 30) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const { socket } = useSocket();
 
-  const refetch = useCallback(() => {
-    setError(null);
-    fetch(`/admin/api/notifications?limit=${limit}`, { credentials: 'include' })
-      .then((r) => {
-        if (!r.ok) throw new Error(`Request failed (${r.status})`);
-        return r.json() as Promise<{ notifications: AppNotification[]; unread_count: number }>;
-      })
-      .then((data) => {
-        setNotifications(data.notifications);
-        setUnreadCount(data.unread_count);
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
-      .finally(() => setLoading(false));
-  }, [limit]);
+  const { data, loading, error, refetch } = useAdminFetch<{
+    notifications: AppNotification[];
+    unread_count: number;
+  }>(`/admin/api/notifications?limit=${limit}`);
 
   useEffect(() => {
-    refetch();
-  }, [refetch]);
+    if (data) {
+      setNotifications(data.notifications);
+      setUnreadCount(data.unread_count);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (!socket) return;
@@ -62,10 +57,7 @@ export default function useNotifications(limit = 30) {
   const markRead = useCallback(
     async (notificationId: number) => {
       try {
-        await fetch(`/admin/api/notifications/${notificationId}/read`, {
-          method: 'POST',
-          credentials: 'include',
-        });
+        await postJson(`/admin/api/notifications/${notificationId}/read`);
         setNotifications((prev) =>
           prev.map((n) =>
             n.notification_id === notificationId && !n.read_at
@@ -83,7 +75,7 @@ export default function useNotifications(limit = 30) {
 
   const markAllRead = useCallback(async () => {
     try {
-      await fetch('/admin/api/notifications/read-all', { method: 'POST', credentials: 'include' });
+      await postJson('/admin/api/notifications/read-all');
       setNotifications((prev) =>
         prev.map((n) => (n.read_at ? n : { ...n, read_at: new Date().toISOString() }))
       );
@@ -93,7 +85,15 @@ export default function useNotifications(limit = 30) {
     }
   }, []);
 
-  return { notifications, unreadCount, loading, error, refetch, markRead, markAllRead };
+  return {
+    notifications,
+    unreadCount,
+    loading: loading && data === null,
+    error,
+    refetch,
+    markRead,
+    markAllRead,
+  };
 }
 
 export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
@@ -106,16 +106,10 @@ export async function fetchNotificationPreferences(): Promise<NotificationPrefer
 export async function saveNotificationPreferences(
   prefs: Partial<NotificationPreferences>
 ): Promise<NotificationPreferences> {
-  const res = await fetch('/admin/api/notifications/preferences', {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(prefs),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(data?.error ?? `Request failed (${res.status})`);
-  }
-  const data = (await res.json()) as { preferences: NotificationPreferences };
+  const data = await postJson<{ preferences: NotificationPreferences }>(
+    '/admin/api/notifications/preferences',
+    prefs,
+    { method: 'PUT' }
+  );
   return data.preferences;
 }

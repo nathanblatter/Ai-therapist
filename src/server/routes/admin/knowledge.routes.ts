@@ -22,6 +22,7 @@ import {
 } from '../../db/index.js';
 import { embedText } from '../../services/embeddings.service.js';
 import { rerankChunks } from '../../services/rerank.service.js';
+import { parsePagination } from '../../utils/pagination.js';
 
 const KINDS = ['psychoeducation', 'worksheet', 'technique'];
 const MAX_CONTENT_CHARS = 20_000;
@@ -101,8 +102,8 @@ export default function knowledgeRoutes(): Router {
     const status = req.query.status;
     const active = status === 'active' ? true : status === 'pending' ? false : null;
     const q = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : null;
-    const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
-    const offsetRaw = typeof req.query.offset === 'string' ? parseInt(req.query.offset, 10) : NaN;
+    // Same defaults/clamp listKnowledgeChunks applies internally (50/0, max 200).
+    const { limit, offset } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
     try {
       const [counts, list] = await Promise.all([
         getKnowledgeStatusCounts(),
@@ -110,8 +111,8 @@ export default function knowledgeRoutes(): Router {
           kind,
           active,
           q,
-          limit: Number.isInteger(limitRaw) ? limitRaw : undefined,
-          offset: Number.isInteger(offsetRaw) ? offsetRaw : undefined,
+          limit,
+          offset,
         }),
       ]);
       res.json({ counts, chunks: list.chunks, total: list.total });

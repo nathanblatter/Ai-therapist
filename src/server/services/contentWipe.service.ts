@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { wipeAgedThreadMessageBodies } from '../db/messagingRetention.queries.js';
+import { broadcastAdminEvent } from '../utils/adminBroadcast.js';
 
 // Scheduler state
 let wipeInterval: ReturnType<typeof setTimeout> | null = null;
@@ -205,16 +206,18 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
 
     console.log(`✅ Content wipe completed: ${messagesWiped} messages wiped, ${messagesSkipped} skipped, ${threadBodiesWiped} thread message bodies wiped`);
 
-    // Emit socket event to notify admins
+    // Notify admin dashboards. Through broadcastAdminEvent with no participant
+    // linkage -> researcher room only (the old hand-rolled emit targeted a
+    // room named 'admin' that no socket ever joins, so it was never delivered).
     if (global.io) {
-      global.io.to('admin').emit('content:wiped', {
+      void broadcastAdminEvent(global.io, 'content:wiped', {
         wipeId,
         messagesWiped,
         messagesSkipped,
         threadBodiesWiped,
         triggeredBy,
         completedAt: new Date().toISOString()
-      });
+      }, null);
     }
 
     return {

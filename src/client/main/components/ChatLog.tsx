@@ -1,6 +1,8 @@
 import React from "react";
 
-interface ChatMessage {
+// Single source of truth for the client-side chat message shape (App.tsx
+// imports this type instead of re-declaring it).
+export interface ChatMessage {
   id: string;
   role: string;
   text: string;

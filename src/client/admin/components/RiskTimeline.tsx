@@ -4,6 +4,7 @@
 // was (or wasn't) flagged. Backed by /admin/api/sessions/:id/risk-history.
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, Activity } from 'react-feather';
+import { riskScoreTextClass } from '../../shared/severity';
 
 interface RiskEntry {
   history_id: string;
@@ -23,12 +24,9 @@ interface RiskTimelineProps {
   sessionId: string;
 }
 
-function scoreColor(score: number): string {
-  if (score >= 75) return 'text-red-600';
-  if (score >= 50) return 'text-orange-600';
-  if (score >= 25) return 'text-amber-600';
-  return 'text-gray-400';
-}
+// Shared score bands (src/client/shared/severity) mirror the server's
+// crisisDetection thresholds; medium renders amber, sub-25 muted.
+const scoreColor = riskScoreTextClass;
 
 function Sparkline({ scores }: { scores: number[] }) {
   const w = 220;

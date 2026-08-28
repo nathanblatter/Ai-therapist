@@ -6,10 +6,12 @@ import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import { getNextMidnightSLC, getHoursUntilReset, getStartOfTodaySLC } from '../../utils/timezoneHelpers.js';
 import { getSessionsToday } from '../../db/index.js';
 
-interface SessionLimits {
-  enabled: boolean;
-  max_sessions_per_day: number;
-}
+import type { SessionLimits } from '../../../shared/systemConfig.js';
+
+// This surface only makes sense with a configured cap, so narrow the shared
+// (optional-field) blob type to require max_sessions_per_day, as the old
+// local declaration did.
+type RateLimitConfig = SessionLimits & { max_sessions_per_day: number };
 
 export default function rateLimitsRoutes(): Router {
   const router = Router();
@@ -26,7 +28,7 @@ export default function rateLimitsRoutes(): Router {
       }
 
       const config = await getSystemConfig();
-      const limits = (config.session_limits as SessionLimits | undefined) ?? { enabled: false, max_sessions_per_day: 0 };
+      const limits = (config.session_limits as RateLimitConfig | undefined) ?? { enabled: false, max_sessions_per_day: 0 };
 
       if (!limits.enabled) {
         return res.json({ is_rate_limited: false, is_exempt: true, exemption_reason: 'limits_disabled' });

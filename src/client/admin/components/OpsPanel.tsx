@@ -6,6 +6,9 @@ import { Server, AlertTriangle, Clock, Cpu, Activity } from "react-feather";
 import useAdminFetch from "../hooks/useAdminFetch";
 import Panel from "./ui/Panel";
 import StatCard from "./ui/StatCard";
+// Canonical funnel shape lives in the server data layer (type-only import,
+// erased at build time).
+import type { FunnelCounts } from "../../../server/db/funnel.queries";
 
 interface GroupErrorRates {
   count_4xx: number;
@@ -33,15 +36,6 @@ interface OpsData {
   uptime: number;
   memory: { rss: number; heap_used: number };
   clientErrors: ClientErrorStat[];
-}
-
-interface FunnelCounts {
-  created: number;
-  with_checkin: number;
-  connected: number;
-  with_user_turn: number;
-  with_tool_use: number;
-  ended_gracefully: number;
 }
 
 interface FunnelData {

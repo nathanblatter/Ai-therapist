@@ -13,6 +13,7 @@ import {
   scanForDeviations,
 } from '../../db/index.js';
 import { updateSystemConfig } from '../../db/config.queries.js';
+import { parsePagination } from '../../utils/pagination.js';
 
 const MANUAL_CATEGORIES = ['technical_failure', 'enrollment', 'procedure', 'other'];
 const ALL_CATEGORIES = [
@@ -38,7 +39,7 @@ export default function studyOpsRoutes(): Router {
   // GET deviations.
   router.get('/admin/api/study-ops/deviations', requireRole('researcher'), async (req, res) => {
     const status = req.query.status === 'all' ? 'all' : 'open';
-    const limit = Math.min(parseInt(String(req.query.limit ?? '')) || 100, 500);
+    const { limit } = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
     try {
       res.json({ deviations: await listDeviations(status, limit) });
     } catch (err) {

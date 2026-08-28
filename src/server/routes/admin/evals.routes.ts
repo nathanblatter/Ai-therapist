@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { requireSessionClientAccess } from '../../middleware/caseload.js';
+import { parsePagination } from '../../utils/pagination.js';
 import {
   getSessionEval,
   getSession,
@@ -68,7 +69,7 @@ export default function evalsRoutes(): Router {
   // panel, ai-therapist-124 phase 3). Newest first.
   router.get('/admin/api/harness/runs', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
-      const limit = Number(req.query.limit) || 50;
+      const { limit } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 500 });
       res.json({ runs: await listHarnessRuns(limit) });
     } catch (err) {
       console.error('Failed to list harness runs:', err);

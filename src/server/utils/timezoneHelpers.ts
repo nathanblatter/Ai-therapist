@@ -23,10 +23,34 @@ export function getHoursUntilReset(): number {
   return (resetTime.getTime() - now.getTime()) / (1000 * 60 * 60); // hours
 }
 
+/** Today's calendar date in Denver as YYYY-MM-DD (en-CA formats exactly that). */
+export function denverDateStamp(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(now);
+}
+
+/** Denver's UTC offset (ms, negative) in effect at the given instant. */
+function denverOffsetMs(at: Date): number {
+  const name = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', timeZoneName: 'longOffset' })
+    .formatToParts(at)
+    .find((p) => p.type === 'timeZoneName')?.value ?? '';
+  const match = /GMT([+-])(\d{2}):(\d{2})/.exec(name);
+  if (!match) return -7 * 3_600_000; // MST fallback; Denver is always GMT-6/-7
+  const sign = match[1] === '-' ? -1 : 1;
+  return sign * (Number(match[2]) * 60 + Number(match[3])) * 60_000;
+}
+
 // Start of the current day in Salt Lake City time, as a Date for created_at
-// comparisons. Used to count "sessions today" for rate limiting.
+// comparisons. Used to count "sessions today" for rate limiting. Built from
+// the Denver calendar date + Denver UTC offset (never the host's local parse
+// of a wall-clock string, which is wrong off-Denver hosts and across DST —
+// see getNextMidnightSLC's offset note).
 export function getStartOfTodaySLC(): Date {
-  const todayStart = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
-  todayStart.setHours(0, 0, 0, 0);
-  return todayStart;
+  const [y, m, d] = denverDateStamp().split('-').map(Number);
+  const wallMidnightUtcMs = Date.UTC(y, m - 1, d);
+  // Two passes: the offset at "now" positions a candidate instant, then the
+  // offset AT that candidate corrects the DST-transition-day case (midnight's
+  // offset can differ from the current one).
+  let instant = new Date(wallMidnightUtcMs - denverOffsetMs(new Date()));
+  instant = new Date(wallMidnightUtcMs - denverOffsetMs(instant));
+  return instant;
 }

@@ -4,28 +4,24 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
-import { requireSessionClientAccess, careTeamScopeId } from '../../middleware/caseload.js';
+import { requireSessionClientAccess, careTeamScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
-import { isCareTeamRole } from '../../../shared/roles.js';
 import {
   sessionExists,
   getSessionCrisisFlag,
   getAllCrisisData,
   getAllCrisisEvents,
-  getSessionAccessInfo,
-  isAssigned,
   getCaseloadClientIds,
 } from '../../db/index.js';
 
 // Caseload guard for session ids arriving via query string (the
 // requireSessionClientAccess middleware only covers :sessionId path params).
-// Non-care-team roles always pass; a therapist or caseworker passes only when
-// the session exists, has an owner, and that owner is in their caseload.
-async function careTeamMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
-  if (!isCareTeamRole(req.session.userRole)) return true;
-  const info = await getSessionAccessInfo(sessionId);
-  if (!info || info.user_id === null || info.user_id === undefined) return false;
-  return isAssigned(req.session.userId!, Number(info.user_id));
+// Caseworkers pass when assigned — this surface is summaries-tier (payloads
+// are scrubbed below), so assignment is enough.
+function careTeamMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
+  return mayCareTeamAccessSession(req.session.userRole, req.session.userId, sessionId, {
+    caseworkerPolicy: 'assigned',
+  });
 }
 
 // Summaries-tier scrub (spec section 2): strip the fields that can quote

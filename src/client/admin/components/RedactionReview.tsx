@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare } from "react-feather";
+import { formatDateTime } from "../../shared/format";
 
 interface RedactMessage {
   message_id: string;
@@ -88,9 +89,7 @@ export default function RedactionReview() {
     }
   };
 
-  const formatDate = (dateString: string): string => {
-    return new Date(dateString).toLocaleString();
-  };
+  const formatDate = formatDateTime;
 
   return (
     <div className="h-full overflow-auto">

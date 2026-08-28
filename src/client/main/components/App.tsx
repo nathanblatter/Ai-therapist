@@ -23,13 +23,9 @@ import { getUserSocket, closeUserSocket } from '../lib/userSocket';
 import { useMessagingUnread } from '../hooks/useMessaging';
 import { getStoredTheme, setTheme } from '../../shared/theme';
 import { reportClientEvent } from '../utils/telemetry';
-
-interface CrisisContact {
-  hotline: string;
-  phone: string;
-  text: string;
-  enabled: boolean;
-}
+import type { ChatMessage } from './ChatLog';
+// Canonical crisis-contact blob shape is shared with the server (src/shared).
+import type { CrisisContact } from '../../../shared/systemConfig';
 
 interface Features {
   output_modalities: string[];
@@ -41,13 +37,6 @@ interface Features {
 interface SessionSettings {
   voice: string;
   language: string;
-}
-
-interface ChatMessage {
-  id: string;
-  role: string;
-  text: string;
-  isAdminMessage?: boolean;
 }
 
 interface LogRecord {

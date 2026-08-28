@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle, Trash2, Clock, Shield, RefreshCw, AlertTriangle } from 'react-feather';
+import { formatDateTime } from '../../shared/format';
 
 interface RetentionSettings {
   enabled: boolean;
@@ -149,17 +150,9 @@ export default function DataRetention() {
     setHasChanges(true);
   };
 
-  const formatDate = (dateStr: string | null | undefined) => {
-    if (!dateStr) return 'Never';
-    return new Date(dateStr).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  // Semantic empty value: "never wiped" reads better than the shared em dash.
+  const formatDate = (dateStr: string | null | undefined) =>
+    dateStr ? formatDateTime(dateStr) : 'Never';
 
   if (loading) {
     return (

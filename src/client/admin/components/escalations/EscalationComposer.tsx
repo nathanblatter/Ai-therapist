@@ -5,11 +5,10 @@
 // crisis event (integration wiring).
 import { useEffect, useState } from "react";
 import { AlertTriangle, X } from "react-feather";
+// Subset of the canonical caseload row (server data layer, type-only import).
+import type { CaseloadClient as CaseloadClientRow } from "../../../../server/db/caseload.queries";
 
-interface CaseloadClient {
-  userid: number;
-  username: string;
-}
+type CaseloadClient = Pick<CaseloadClientRow, "userid" | "username">;
 
 interface EscalationComposerProps {
   /** Preselected client (CaseloadView / CrisisManagement entry points). */

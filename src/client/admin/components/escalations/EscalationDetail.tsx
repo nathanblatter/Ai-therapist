@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, CheckCircle, CornerUpLeft, MessageSquare, UserCheck } from "react-feather";
 import { StatusBadge, UrgencyBadge, type EscalationListRow } from "./EscalationInbox";
+import { postJson } from "../../../shared/http";
 
 interface EscalationEvent {
   event_id: number;
@@ -70,16 +71,7 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
     setBusy(true);
     setActionError(null);
     try {
-      const res = await fetch(`/admin/api/escalations/${escalationId}/${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Action failed (${res.status})`);
-      }
+      await postJson(`/admin/api/escalations/${escalationId}/${path}`, body);
       await fetchDetail();
       return true;
     } catch (err: unknown) {

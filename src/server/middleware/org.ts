@@ -45,3 +45,17 @@ export async function orgIdFor(req: Request): Promise<number | null> {
       'no organization_id on the user row and no irb-study org (pre-069 schema?)'
   );
 }
+
+/**
+ * The organization a client-scoped write should land in: the client's own
+ * organization_id when set, otherwise (legacy pre-069 client rows) the
+ * caller's org via orgIdFor — with orgIdFor's fail-closed contract (throws on
+ * lookup failure; null only for unauthenticated callers). Shared by the
+ * escalation/note create paths.
+ */
+export async function resolveClientOrgId(
+  client: { organization_id?: number | null },
+  req: Request
+): Promise<number | null> {
+  return client.organization_id ?? (await orgIdFor(req));
+}

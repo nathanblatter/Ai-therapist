@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle, Eye, Code } from 'react-feather';
+// Canonical modality-preset shape lives in the server helpers (type-only
+// import, erased at build time).
+import type { ModalityPreset } from '../../../server/utils/sessionHelpers';
 
 interface PromptEntry {
   prompt: string;
@@ -9,11 +12,6 @@ interface PromptEntry {
 
 interface PromptsMap {
   [sessionType: string]: PromptEntry;
-}
-
-interface ModalityPreset {
-  label: string;
-  addition: string;
 }
 
 interface Language {

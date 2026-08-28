@@ -13,7 +13,7 @@
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { requireBodyClientAccess, requireEscalationAccess, careNoteBelongsToClient } from '../../middleware/caseload.js';
-import { orgIdFor } from '../../middleware/org.js';
+import { orgIdFor, resolveClientOrgId } from '../../middleware/org.js';
 import {
   createEscalation,
   listEscalations,
@@ -37,7 +37,7 @@ import {
   type EscalationUrgency,
   type WorkItemSeverity,
 } from '../../db/index.js';
-import { broadcastAdminEvent } from '../../utils/adminBroadcast.js';
+import { emitSummaryEvent } from '../../utils/adminBroadcast.js';
 import { enqueueWorkItem } from '../../services/workQueue.service.js';
 import { isCareTeamRole, type CareTeamRole } from '../../../shared/roles.js';
 
@@ -64,10 +64,9 @@ function socketPayload(escalation: EscalationRow): Record<string, unknown> {
 }
 
 function emitEscalationEvent(event: string, escalation: EscalationRow): void {
-  if (!global.io) return;
   // Summary tier: reaches researchers + the client's therapists + caseworkers.
   // Payload is ids/status/urgency only — no clinical content.
-  void broadcastAdminEvent(global.io, event, socketPayload(escalation), escalation.client_id, 'summary');
+  emitSummaryEvent(event, escalation.client_id, socketPayload(escalation));
 }
 
 /** Best-effort escalation_response work item for the raising member.
@@ -117,7 +116,7 @@ export default function escalationsRoutes(): Router {
 
         const client = await getUserById(clientId);
         if (!client) return res.status(404).json({ error: 'Not found' });
-        const orgId = client.organization_id ?? (await orgIdFor(req));
+        const orgId = await resolveClientOrgId(client, req);
         if (typeof orgId !== 'number') {
           return res.status(500).json({ error: 'Could not resolve organization' });
         }

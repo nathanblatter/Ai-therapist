@@ -11,7 +11,7 @@
 // NOTE: cache invalidation is single-process. With one server that's exact;
 // if multiple processes ever serve /token, a newly published version can take
 // up to CACHE_TTL_MS to gate everywhere. Acceptable for the current topology.
-import { createHash } from 'node:crypto';
+import { sha256Hex } from './crypto.js';
 import { getActiveConsentDocument, type ConsentAudience } from '../db/consent.queries.js';
 import { getSystemConfigByKey } from '../db/config.queries.js';
 import { createLogger } from './logger.js';
@@ -47,10 +47,8 @@ const CACHE_TTL_MS = 30_000;
 const caches = new Map<ConsentAudience, { value: ActiveConsent; at: number }>();
 let audienceCache: { value: ConsentAudience; at: number } | null = null;
 
-/** hex sha256 of a UTF-8 string (matches PG encode(sha256(convert_to(...,'UTF8')),'hex')). */
-export function sha256Hex(input: string): string {
-  return createHash('sha256').update(input, 'utf8').digest('hex');
-}
+// Re-export for existing importers; the implementation moved to utils/crypto.
+export { sha256Hex };
 
 /** Bust every cached consent lookup (call after publishing a new version or
  *  changing deployment_mode). */

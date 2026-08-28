@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { ArrowLeft, Cpu, Edit3, FileText, Lock, Share2 } from "react-feather";
 import { NoteStatusBadge, type CareNote } from "./NotesPanel";
+import { postJson } from "../../../shared/http";
 
 interface NoteDetailProps {
   note: CareNote;
@@ -34,18 +35,8 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/admin/api/notes/${note.note_id}/${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Action failed (${res.status})`);
-      }
-      const data = await res.json();
-      return data.note as CareNote;
+      const data = await postJson<{ note: CareNote }>(`/admin/api/notes/${note.note_id}/${path}`, body);
+      return data.note;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
       return null;
@@ -116,14 +107,16 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
       )}
 
       <div className="space-y-3">
-        {order.map((key) =>
-          note.content[key] ? (
+        {order.map((key) => {
+          // content is Record<string, unknown> server-side; only render string fields.
+          const value = note.content[key];
+          return typeof value === "string" && value ? (
             <div key={key}>
               <h5 className="text-sm font-semibold text-gray-700">{fieldLabel(key)}</h5>
-              <p className="text-sm text-gray-800 whitespace-pre-wrap">{note.content[key]}</p>
+              <p className="text-sm text-gray-800 whitespace-pre-wrap">{value}</p>
             </div>
-          ) : null
-        )}
+          ) : null;
+        })}
       </div>
 
       {note.sign_hash && (

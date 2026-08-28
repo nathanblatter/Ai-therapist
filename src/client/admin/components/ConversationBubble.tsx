@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../shared/format';
+
 interface MessageData {
   message_id?: string;
   role: string;
@@ -40,9 +42,7 @@ export default function ConversationBubble({
   onContentChange,
   userRole
 }: ConversationBubbleProps) {
-  const formatTime = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString();
-  };
+  const formatTime = formatDateTime;
 
   const getBubbleClass = () => {
     // Tool calls get special styling

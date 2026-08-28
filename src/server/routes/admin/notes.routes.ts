@@ -15,7 +15,7 @@ import {
   requireNoteAccess,
   requireSessionClientAccess,
 } from '../../middleware/caseload.js';
-import { orgIdFor } from '../../middleware/org.js';
+import { resolveClientOrgId } from '../../middleware/org.js';
 import {
   createCareNote,
   listCareNotesForClient,
@@ -34,7 +34,7 @@ import {
   type CareNoteType,
   type CaseNoteKind,
 } from '../../db/index.js';
-import { broadcastAdminEvent } from '../../utils/adminBroadcast.js';
+import { emitSummaryEvent } from '../../utils/adminBroadcast.js';
 import { enqueueWorkItem } from '../../services/workQueue.service.js';
 import type { CareTeamRole } from '../../../shared/roles.js';
 
@@ -84,20 +84,13 @@ function sanitizeContent(noteType: CareNoteType, raw: unknown): Record<string, u
 /** Emit note:signed to the care-team rooms only when the note is visible to
  *  the whole team (case notes always; progress notes when shared). */
 function emitNoteSigned(note: CareNoteRow): void {
-  if (!global.io) return;
   if (note.note_type === 'progress' && !note.shared_with_care_team) return;
-  void broadcastAdminEvent(
-    global.io,
-    'note:signed',
-    {
-      note_id: note.note_id,
-      client_id: note.client_id,
-      note_type: note.note_type,
-      shared: note.shared_with_care_team,
-    },
-    note.client_id,
-    'summary'
-  );
+  emitSummaryEvent('note:signed', note.client_id, {
+    note_id: note.note_id,
+    client_id: note.client_id,
+    note_type: note.note_type,
+    shared: note.shared_with_care_team,
+  });
 }
 
 export default function notesRoutes(): Router {
@@ -135,7 +128,7 @@ export default function notesRoutes(): Router {
 
         const client = await getUserById(clientId);
         if (!client) return res.status(404).json({ error: 'Not found' });
-        const orgId = client.organization_id ?? (await orgIdFor(req));
+        const orgId = await resolveClientOrgId(client, req);
         if (typeof orgId !== 'number') {
           return res.status(500).json({ error: 'Could not resolve organization' });
         }
@@ -368,7 +361,7 @@ export default function notesRoutes(): Router {
         }
         const client = await getUserById(clientId);
         if (!client) return res.status(404).json({ error: 'Not found' });
-        const orgId = client.organization_id ?? (await orgIdFor(req));
+        const orgId = await resolveClientOrgId(client, req);
         if (typeof orgId !== 'number') {
           return res.status(500).json({ error: 'Could not resolve organization' });
         }

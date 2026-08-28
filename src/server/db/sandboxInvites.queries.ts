@@ -3,8 +3,9 @@
 // fresh kind='sandbox' org with a seeded synthetic caseload. Only the sha256
 // hex of the raw token is stored (065 pattern); raw tokens appear once in the
 // mint response.
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { pool } from '../config/db.js';
+import { hashToken } from '../utils/crypto.js';
 
 export type SandboxInviteRole = 'therapist' | 'caseworker';
 
@@ -26,10 +27,6 @@ export interface SandboxInviteRow {
 const INVITE_COLUMNS = `invite_id, token_hash, batch_id, invite_role, seed_profile, label,
        created_by, created_at::text AS created_at, expires_at::text AS expires_at,
        used_at::text AS used_at, used_by, org_id`;
-
-function hashToken(rawToken: string): string {
-  return createHash('sha256').update(rawToken).digest('hex');
-}
 
 /**
  * Mint a batch of sandbox invites (count 1..500). Returns each raw token

@@ -7,54 +7,33 @@
 //     404s anyone else's threads.
 // Clinicians see scan verdicts (flagged chip with severity) on participant
 // messages; sends are disabled with an explanation on frozen threads.
-// Polling (60s + focus) keeps the view correct without a socket; the shared
-// admin socket just refreshes sooner.
-import { useCallback, useEffect, useRef, useState } from 'react';
+// Messaging state (60s poll + focus refresh + hidden-tab pause, 409/429 send
+// handling, socket nudges) lives in the shared useThreadMessaging hook.
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Lock, MessageSquare, Send } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
+import { useThreadMessaging, type ThreadBase, type ThreadMessageBase } from '../../shared/messaging/useThreadMessaging';
+import { timeLabel } from '../../shared/format';
+import { severityBadgeClass } from '../../shared/severity';
+import Badge from '../../shared/components/Badge';
 
-export interface AdminThread {
-  thread_id: number;
+export interface AdminThread extends ThreadBase {
   client_id: number;
-  clinician_id: number;
-  clinician_role: 'therapist' | 'caseworker';
-  status: 'active' | 'frozen';
-  frozen_reason: string | null;
-  last_message_at: string | null;
-  counterpart_username?: string | null;
 }
 
-export interface AdminThreadMessage {
-  message_id: number;
-  thread_id: number;
-  sender_id: number;
-  sender_role: 'participant' | 'therapist' | 'caseworker';
-  body: string;
-  created_at: string;
+export interface AdminThreadMessage extends ThreadMessageBase {
   risk_score: number | null;
   risk_severity: 'low' | 'medium' | 'high' | null;
   scan_status: 'not_applicable' | 'pending' | 'clear' | 'flagged' | 'scan_failed';
   crisis_event_id: number | null;
 }
 
-const POLL_INTERVAL_MS = 60_000;
-
-function timeLabel(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const sameDay = d.toDateString() === new Date().toDateString();
-  return sameDay
-    ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
 function FlaggedChip({ severity }: { severity: 'low' | 'medium' | 'high' | null }) {
-  const tone = severity === 'high' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800';
   return (
-    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${tone}`}>
+    <Badge toneClass={severityBadgeClass(severity ?? 'medium')} weight="normal">
       <AlertTriangle size={12} aria-hidden="true" />
       Flagged{severity ? ` (${severity} risk)` : ''}
-    </span>
+    </Badge>
   );
 }
 
@@ -70,51 +49,35 @@ interface MessageThreadViewProps {
 }
 
 export default function MessageThreadView({ threadId, clientId, clientName, onBack }: MessageThreadViewProps) {
-  const [thread, setThread] = useState<AdminThread | null>(null);
   const [resolved, setResolved] = useState(threadId !== undefined); // profile mode resolves first
-  const [messages, setMessages] = useState<AdminThreadMessage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
   const { socket } = useSocket();
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const threadIdRef = useRef<number | null>(threadId ?? null);
 
-  const loadMessages = useCallback(async (id: number) => {
-    try {
-      const res = await fetch(`/api/admin/messaging/threads/${id}/messages`, { credentials: 'include' });
-      if (!res.ok) {
-        setError('Could not load this conversation.');
-        return;
-      }
-      const data = await res.json() as { thread: AdminThread; messages: AdminThreadMessage[] };
-      setThread(data.thread);
-      setMessages(data.messages);
-      setError(null);
-      const newest = data.messages[data.messages.length - 1];
-      if (newest) {
-        void fetch(`/api/admin/messaging/threads/${id}/read`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ last_read_message_id: newest.message_id }),
-        }).catch(() => { /* retried on next load */ });
-      }
-    } catch {
-      setError('Could not load this conversation.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const {
+    selectedThread: thread,
+    selectThread,
+    upsertThread,
+    messages,
+    loadingMessages,
+    sendMessage,
+    sending,
+    error: messagingError,
+  } = useThreadMessaging<AdminThread, AdminThreadMessage>({
+    basePath: '/api/admin/messaging',
+    threadsUrl: null, // single-thread view: no inbox list to poll
+    socket,
+    reloadOnAnyScanVerdict: true,
+  });
 
-  // Profile mode: resolve the caller's own thread with the client.
+  // Inbox mode opens the known thread; profile mode resolves the caller's own
+  // thread with the client first.
   useEffect(() => {
     if (threadId !== undefined) {
-      threadIdRef.current = threadId;
       setResolved(true);
-      void loadMessages(threadId);
+      selectThread(threadId);
       return;
     }
     if (clientId === undefined) return;
@@ -126,55 +89,18 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
         const own = data?.threads?.[0] ?? null;
         setResolved(true);
         if (own) {
-          setThread(own);
-          threadIdRef.current = own.thread_id;
-          void loadMessages(own.thread_id);
-        } else {
-          setLoading(false);
+          upsertThread(own);
+          selectThread(own.thread_id);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setResolved(true);
-          setLoading(false);
-          setError('Could not load messaging for this client.');
+          setResolveError('Could not load messaging for this client.');
         }
       });
     return () => { cancelled = true; };
-  }, [threadId, clientId, loadMessages]);
-
-  // Poll + focus refresh (sockets are latency sugar only).
-  useEffect(() => {
-    const tick = () => {
-      const id = threadIdRef.current;
-      if (id !== null) void loadMessages(id);
-    };
-    const interval = window.setInterval(tick, POLL_INTERVAL_MS);
-    window.addEventListener('focus', tick);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', tick);
-    };
-  }, [loadMessages]);
-
-  // Socket nudges.
-  useEffect(() => {
-    if (!socket) return;
-    const onEvent = (payload: { threadId?: number }) => {
-      const id = threadIdRef.current;
-      if (id !== null && payload?.threadId === id) void loadMessages(id);
-    };
-    socket.on('messaging:new-message', onEvent);
-    socket.on('messaging:read', onEvent);
-    socket.on('messaging:thread-frozen', onEvent);
-    socket.on('messaging:message-scanned', onEvent);
-    return () => {
-      socket.off('messaging:new-message', onEvent);
-      socket.off('messaging:read', onEvent);
-      socket.off('messaging:thread-frozen', onEvent);
-      socket.off('messaging:message-scanned', onEvent);
-    };
-  }, [socket, loadMessages]);
+  }, [threadId, clientId, selectThread, upsertThread]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
@@ -183,7 +109,7 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
   const startConversation = async () => {
     if (clientId === undefined || creating) return;
     setCreating(true);
-    setError(null);
+    setResolveError(null);
     try {
       const res = await fetch('/api/admin/messaging/threads', {
         method: 'POST',
@@ -192,54 +118,33 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
         body: JSON.stringify({ client_id: clientId }),
       });
       if (!res.ok) {
-        setError('Could not start a conversation with this client.');
+        setResolveError('Could not start a conversation with this client.');
         return;
       }
       const data = await res.json() as { thread: AdminThread };
-      setThread(data.thread);
-      threadIdRef.current = data.thread.thread_id;
-      setMessages([]);
-      setLoading(false);
+      upsertThread(data.thread);
+      // A brand-new thread has no messages yet; skip the initial load.
+      selectThread(data.thread.thread_id, { skipLoad: true });
     } catch {
-      setError('Could not start a conversation with this client.');
+      setResolveError('Could not start a conversation with this client.');
     } finally {
       setCreating(false);
     }
   };
 
   const send = async () => {
-    const id = threadIdRef.current;
-    if (id === null || !draft.trim() || sending) return;
-    setSending(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/admin/messaging/threads/${id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ body: draft.trim() }),
-      });
-      if (res.status === 409) {
-        setError('This thread is frozen (the assignment ended); no new messages can be sent.');
-        void loadMessages(id);
-        return;
-      }
-      if (!res.ok) {
-        setError('Message could not be sent.');
-        return;
-      }
-      const data = await res.json() as { message: AdminThreadMessage };
-      setMessages(prev => [...prev, data.message]);
-      setDraft('');
-    } catch {
-      setError('Message could not be sent.');
-    } finally {
-      setSending(false);
-    }
+    if (!draft.trim() || sending) return;
+    const ok = await sendMessage(draft);
+    if (ok) setDraft('');
   };
 
+  const error = messagingError ?? resolveError;
+  // Inbox mode counts as loading until the known thread's first load lands.
+  const awaitingThread = threadId !== undefined && thread === null && error === null;
+  const loading = !resolved || loadingMessages || awaitingThread;
+
   // Profile mode, no thread yet: offer to start one.
-  if (resolved && thread === null && !loading) {
+  if (threadId === undefined && resolved && thread === null && !loadingMessages) {
     return (
       <div className="text-center py-8">
         <MessageSquare size={24} className="mx-auto text-gray-300 mb-2" aria-hidden="true" />
@@ -278,9 +183,9 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
         <MessageSquare size={16} className="text-blue-600" aria-hidden="true" />
         <h3 className="text-sm font-semibold text-gray-800 truncate">{title}</h3>
         {frozen && (
-          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+          <Badge tone="gray" weight="normal">
             <Lock size={12} aria-hidden="true" /> Frozen
-          </span>
+          </Badge>
         )}
       </div>
 

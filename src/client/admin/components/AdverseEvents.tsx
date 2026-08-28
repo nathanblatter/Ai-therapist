@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, Clock, FileText, Plus, X, Printer } from 'react-feather';
 import AdverseEventFileForm from './AdverseEventFileForm';
+import { formatDateTime } from '../../shared/format';
 
 interface TimelineEntry { at: string | null; kind: string; detail: string; }
 interface ActionEntry { at: string | null; action: string; by: string | null; }
@@ -37,11 +38,7 @@ interface Counts { draft: number; submitted: number; overdue: number; due_soon: 
 const STATUS_TABS = ['draft', 'submitted', 'closed', 'all'] as const;
 type Tab = typeof STATUS_TABS[number];
 
-function fmtDate(s: string | null): string {
-  if (!s) return '—';
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
-}
+const fmtDate = formatDateTime;
 
 function dueRelative(due: string): { text: string; cls: string } {
   const ms = new Date(due).getTime() - Date.now();

@@ -2,13 +2,15 @@
 // section 4): the caller's own threads (therapist or caseworker tier alike —
 // each clinician only ever sees their own correspondence), newest activity
 // first, with unread badges and flagged-thread markers. Selecting a thread
-// opens MessageThreadView. Polling + focus refresh keep it correct without a
-// socket; the shared admin socket nudges it sooner.
-import { useEffect, useState } from 'react';
+// opens MessageThreadView. Inbox state (60s poll + focus refresh + hidden-tab
+// pause, socket nudges) lives in the shared useThreadMessaging hook.
+import { useState } from 'react';
 import { AlertTriangle, MessageSquare } from 'react-feather';
 import Panel from './ui/Panel';
 import MessageThreadView, { type AdminThread } from './MessageThreadView';
 import { useSocket } from '../hooks/useSocket';
+import { useThreadMessaging } from '../../shared/messaging/useThreadMessaging';
+import { timeLabel } from '../../shared/format';
 
 interface InboxThread extends AdminThread {
   unread_count: number;
@@ -16,70 +18,25 @@ interface InboxThread extends AdminThread {
   is_sandbox?: boolean;
 }
 
-interface InboxPayload {
-  threads: InboxThread[];
-  unread_total: number;
-}
-
-const POLL_INTERVAL_MS = 60_000;
-
-function timeLabel(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const sameDay = d.toDateString() === new Date().toDateString();
-  return sameDay
-    ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
 export default function MessagingInbox() {
-  const [data, setData] = useState<InboxPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const { socket } = useSocket();
 
-  const refresh = async () => {
-    try {
-      const res = await fetch('/api/admin/messaging/inbox', { credentials: 'include' });
-      if (!res.ok) {
-        setError(`Failed to load inbox (${res.status})`);
-        return;
-      }
-      setData(await res.json() as InboxPayload);
-      setError(null);
-    } catch {
-      setError('Failed to load inbox');
-    }
-  };
+  const { threads, threadsLoaded, threadsError, refreshThreads } = useThreadMessaging<InboxThread>({
+    basePath: '/api/admin/messaging',
+    threadsUrl: '/api/admin/messaging/inbox',
+    socket,
+  });
 
-  useEffect(() => {
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    const onFocus = () => void refresh();
-    window.addEventListener('focus', onFocus);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!socket) return;
-    const nudge = () => void refresh();
-    socket.on('messaging:new-message', nudge);
-    socket.on('messaging:read', nudge);
-    socket.on('messaging:thread-frozen', nudge);
-    return () => {
-      socket.off('messaging:new-message', nudge);
-      socket.off('messaging:read', nudge);
-      socket.off('messaging:thread-frozen', nudge);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket]);
+  const error = threadsError
+    ? threadsError.status !== null
+      ? `Failed to load inbox (${threadsError.status})`
+      : 'Failed to load inbox'
+    : null;
+  const loaded = threadsLoaded;
 
   if (selectedThreadId !== null) {
-    const thread = data?.threads.find(t => t.thread_id === selectedThreadId);
+    const thread = threads.find(t => t.thread_id === selectedThreadId);
     return (
       <Panel className="h-[70vh] flex flex-col">
         <MessageThreadView
@@ -87,7 +44,7 @@ export default function MessagingInbox() {
           clientName={thread?.counterpart_username ?? undefined}
           onBack={() => {
             setSelectedThreadId(null);
-            void refresh();
+            void refreshThreads();
           }}
         />
       </Panel>
@@ -102,15 +59,15 @@ export default function MessagingInbox() {
           replies take 1&ndash;2 business days; every participant message is safety-scanned.
         </p>
         {error && <p className="text-sm text-red-600 mb-3" role="alert">{error}</p>}
-        {data === null && !error ? (
+        {!loaded && !error ? (
           <p className="text-sm text-gray-400 py-4 text-center">Loading&hellip;</p>
-        ) : data !== null && data.threads.length === 0 ? (
+        ) : loaded && threads.length === 0 ? (
           <p className="text-sm text-gray-500 py-4 text-center">
             No conversations yet. Start one from a client&apos;s profile (Messages tab).
           </p>
-        ) : data !== null ? (
+        ) : loaded ? (
           <ul className="divide-y divide-gray-100">
-            {data.threads.map(t => (
+            {threads.map(t => (
               <li key={t.thread_id}>
                 <button
                   onClick={() => setSelectedThreadId(t.thread_id)}

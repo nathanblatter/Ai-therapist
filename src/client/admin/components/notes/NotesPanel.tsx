@@ -4,67 +4,60 @@
 // care-team notes; caseworkers see case notes, shared progress notes, and
 // their own drafts), with drill-down to NoteDetail and drafting via
 // NoteEditor. Caseworkers author case notes only.
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Edit3, FileText, Lock, Plus, Share2 } from "react-feather";
 import useAdminFetch from "../../hooks/useAdminFetch";
+import useAuth from "../../hooks/useAuth";
+import Badge from "../../../shared/components/Badge";
 import NoteEditor from "./NoteEditor";
 import NoteDetail from "./NoteDetail";
+// Canonical note shapes live in the server data layer (type-only import,
+// erased at build time). content is Record<string, unknown> there; narrow
+// locally where specific keys are read.
+import type {
+  CareNoteRow,
+  CareNoteType,
+  CaseNoteKind,
+  CareNoteStatus,
+} from "../../../../server/db/careNotes.queries";
 
-export type CareNoteStatus = "draft" | "signed" | "amended";
-export type CareNoteType = "progress" | "case";
-export type CaseNoteKind = "contact" | "referral" | "coordination" | "safety_check" | "other";
+export type { CareNoteType, CaseNoteKind, CareNoteStatus };
+export type CareNote = CareNoteRow;
 
-export interface CareNote {
-  note_id: number;
-  org_id: number;
-  client_id: number;
-  author_id: number | null;
-  author_name: string;
-  author_role: "therapist" | "caseworker";
-  note_type: CareNoteType;
-  case_note_kind: CaseNoteKind | null;
-  session_id: string | null;
-  seed_source: "ai_soap" | null;
-  seed_model: string | null;
-  content: Record<string, string | undefined>;
-  status: CareNoteStatus;
-  shared_with_care_team: boolean;
-  signed_at: string | null;
-  sign_hash: string | null;
-  amends_note_id: number | null;
-  created_at: string;
-  updated_at: string;
+/** Narrow a content field to a display string (server types it unknown). */
+function contentText(content: CareNote["content"], key: string): string {
+  const value = content[key];
+  return typeof value === "string" ? value : "";
 }
 
 export function noteHeadline(note: CareNote): string {
   if (note.note_type === "case") {
     const kind = note.case_note_kind ? note.case_note_kind.replace(/_/g, " ") : "case";
-    const narrative = note.content.narrative ?? "";
+    const narrative = contentText(note.content, "narrative");
     return `${kind[0].toUpperCase()}${kind.slice(1)} note${narrative ? ` — ${narrative}` : ""}`;
   }
-  const lead = note.content.assessment || note.content.subjective || note.content.plan || "";
+  const lead =
+    contentText(note.content, "assessment") ||
+    contentText(note.content, "subjective") ||
+    contentText(note.content, "plan");
   return `Progress note${lead ? ` — ${lead}` : ""}`;
 }
 
 export function NoteStatusBadge({ status }: { status: CareNoteStatus }) {
   if (status === "signed") {
     return (
-      <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+      <Badge tone="green">
         <Lock size={11} aria-hidden="true" /> Signed
-      </span>
+      </Badge>
     );
   }
   if (status === "amended") {
-    return (
-      <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
-        Amended
-      </span>
-    );
+    return <Badge tone="gray">Amended</Badge>;
   }
   return (
-    <span className="px-2 py-0.5 inline-flex items-center gap-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+    <Badge tone="yellow">
       <Edit3 size={11} aria-hidden="true" /> Draft
-    </span>
+    </Badge>
   );
 }
 
@@ -78,7 +71,7 @@ type PanelMode = { kind: "list" } | { kind: "edit"; note: CareNote | null } | { 
 export default function NotesPanel({ clientId, userRole }: NotesPanelProps) {
   const [mode, setMode] = useState<PanelMode>({ kind: "list" });
   const [typeFilter, setTypeFilter] = useState<"all" | CareNoteType>("all");
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const { userId: currentUserId } = useAuth();
 
   const { data, loading, error, refetch } = useAdminFetch<{ notes: CareNote[] }>(
     `/admin/api/users/${clientId}/notes`
@@ -87,19 +80,6 @@ export default function NotesPanel({ clientId, userRole }: NotesPanelProps) {
     const all = data?.notes ?? [];
     return typeFilter === "all" ? all : all.filter((n) => n.note_type === typeFilter);
   }, [data, typeFilter]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/auth/status", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!cancelled && d?.authenticated && d.user) setCurrentUserId(d.user.userid);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   if (mode.kind === "edit") {
     return (

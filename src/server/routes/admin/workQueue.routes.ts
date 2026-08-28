@@ -19,6 +19,7 @@ import {
 import { emitWorkItemUpdated } from '../../services/workQueue.service.js';
 import { isCareTeamRole } from '../../../shared/roles.js';
 import { createLogger } from '../../utils/logger.js';
+import { parsePagination } from '../../utils/pagination.js';
 
 const log = createLogger('workQueueRoutes');
 
@@ -80,8 +81,7 @@ export default function workQueueRoutes(): Router {
     async (req, res) => {
       const statuses = parseStatuses(req.query.status);
       if (!statuses) return res.status(400).json({ error: 'Invalid status filter' });
-      const rawLimit = Number(req.query.limit ?? 200);
-      const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 200;
+      const { limit } = parsePagination(req.query, { defaultLimit: 200, maxLimit: 500 });
 
       try {
         if (isCareTeamRole(req.session.userRole)) {

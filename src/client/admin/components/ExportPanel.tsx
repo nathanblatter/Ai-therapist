@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Download } from "react-feather";
+import useAuth from "../hooks/useAuth";
 
 interface ExportSession {
   session_id: string;
@@ -19,7 +20,7 @@ export default function ExportPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportWarning, setExportWarning] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
+  const { role: userRole } = useAuth();
 
   useEffect(() => {
     const fetchSessions = async () => {
@@ -36,20 +37,7 @@ export default function ExportPanel() {
       }
     };
 
-    const fetchUserRole = async () => {
-      try {
-        const response = await fetch('/api/auth/status', { credentials: 'include' });
-        if (response.ok) {
-          const data = await response.json();
-          setUserRole(data.role);
-        }
-      } catch (err: unknown) {
-        console.error('Failed to fetch user role:', err);
-      }
-    };
-
     fetchSessions();
-    fetchUserRole();
   }, []);
 
   const checkRedactionStatus = async (sid: string): Promise<number> => {

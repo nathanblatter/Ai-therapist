@@ -3,6 +3,9 @@ import { DollarSign, Activity, Clock, MessageSquare } from 'react-feather';
 import useAdminFetch from '../../hooks/useAdminFetch';
 import Panel from '../ui/Panel';
 import StatCard from '../ui/StatCard';
+// Canonical aggregate shape lives in the server data layer (type-only import,
+// erased at build time).
+import type { FeedbackAggregate } from '../../../../server/db/feedback.queries';
 
 // Cost / token tracking (ai-therapist-25c), extracted from Analytics.tsx into
 // the Cost tab (ai-therapist-120). Fetches lazily: mounting only happens when
@@ -25,13 +28,6 @@ interface DailySpendRow {
   tokens_out: number;
   estimated_cost_usd: number;
   realtime_cost_usd: number;
-}
-
-interface FeedbackAggregate {
-  responses: number;
-  avg_helpfulness: number | null;
-  avg_ease: number | null;
-  avg_would_return: number | null;
 }
 
 interface CostAnalyticsData {

@@ -14,6 +14,12 @@ import useAdminFetch from '../hooks/useAdminFetch';
 import NotesPanel from './notes/NotesPanel';
 import MyEscalations from './escalations/MyEscalations';
 import MessageThreadView from './MessageThreadView';
+import { formatDate, timeAgo } from '../../shared/format';
+import { severityBadgeClass } from '../../shared/severity';
+import { isCareTeamRole } from '../../../shared/roles';
+// Type-only imports from the server tree (erased at build time).
+import type { SessionSummary } from '../../../server/db/insights.queries';
+import type { CaseProfile } from '../../../server/db/caseProfile.queries';
 
 interface ProfileUser {
   userid: number;
@@ -25,24 +31,6 @@ interface ProfileUser {
   memory_enabled?: boolean;
   risk_context_share_enabled?: boolean;
   created_at?: string | null;
-}
-
-interface SessionSummary {
-  headline?: string;
-  topics?: string[];
-  mood_trajectory?: string;
-  techniques_helped?: string[];
-  follow_up?: string;
-}
-
-interface CaseProfile {
-  presenting_concerns?: string[];
-  recurring_themes?: string[];
-  stressors?: string[];
-  support_system?: string[];
-  coping_repertoire?: { technique: string; helpfulness: string }[];
-  values?: string[];
-  screener_trend?: string;
 }
 
 interface ProfileBundle {
@@ -86,19 +74,6 @@ interface ParticipantProfileProps {
 }
 
 // ---------- helpers ----------
-
-function formatDate(value: string | null | undefined): string {
-  return value ? new Date(value).toLocaleDateString() : '—';
-}
-
-function relativeDate(value: string | null | undefined): string {
-  if (!value) return '—';
-  const days = Math.floor((Date.now() - new Date(value).getTime()) / 86_400_000);
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 30) return `${days}d ago`;
-  return new Date(value).toLocaleDateString();
-}
 
 function formatDuration(seconds: number | null): string {
   if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return '—';
@@ -265,9 +240,9 @@ function TimelineEntry({ event, onViewSession }: { event: TimelineEvent; onViewS
               </button>
               <span className="text-xs text-gray-400">{formatDate(event.date)}</span>
               {event.session.crisis_flagged && (
-                <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                  event.session.crisis_severity === 'high' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
-                }`}>crisis: {event.session.crisis_severity ?? 'flagged'}</span>
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${severityBadgeClass(event.session.crisis_severity)}`}>
+                  crisis: {event.session.crisis_severity ?? 'flagged'}
+                </span>
               )}
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -294,9 +269,9 @@ function TimelineEntry({ event, onViewSession }: { event: TimelineEvent; onViewS
           <>
             <div className="flex items-center gap-2 flex-wrap text-sm">
               <span className="font-semibold text-red-700">Crisis flag</span>
-              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                event.severity === 'high' ? 'bg-red-100 text-red-800' : event.severity === 'medium' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'
-              }`}>{event.severity ?? 'unknown'}</span>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${severityBadgeClass(event.severity)}`}>
+                {event.severity ?? 'unknown'}
+              </span>
               <span className="text-xs text-gray-400">{formatDate(event.date)}</span>
             </div>
             <p className="text-xs mt-0.5">
@@ -477,7 +452,7 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
             <StatCard
               label="Sessions"
               value={profile.ended_session_count}
-              sub={lastSession ? `Last ${relativeDate(lastSession.start_time)}` : 'No sessions yet'}
+              sub={lastSession ? `Last ${timeAgo(lastSession.start_time)}` : 'No sessions yet'}
               icon={MessageCircle}
             />
             <Panel className={`!p-4 ${unresolvedFlags.length > 0 ? '!bg-red-50 border border-red-200' : ''}`}>
@@ -527,7 +502,7 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
         )}
 
         {/* ============ 3b. Care notes + escalations + messaging (caseworker portal) ============ */}
-        {(userRole === 'therapist' || userRole === 'caseworker') && (
+        {isCareTeamRole(userRole) && (
           <section aria-label="Care notes">
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
               <FileText size={15} className="text-gray-500" /> Care notes
@@ -536,7 +511,7 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
           </section>
         )}
 
-        {(userRole === 'therapist' || userRole === 'caseworker' || userRole === 'researcher') && (
+        {(isCareTeamRole(userRole) || userRole === 'researcher') && (
           <section aria-label="Escalations">
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
               <AlertTriangle size={15} className="text-gray-500" /> Escalations
@@ -549,7 +524,7 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
           </section>
         )}
 
-        {(userRole === 'therapist' || userRole === 'caseworker') && (
+        {isCareTeamRole(userRole) && (
           <section aria-label="Messages">
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
               <MessageCircle size={15} className="text-gray-500" /> Messages

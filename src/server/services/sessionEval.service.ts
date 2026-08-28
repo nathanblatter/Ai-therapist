@@ -93,7 +93,8 @@ async function getClient(): Promise<OpenAI> {
   return openaiClient;
 }
 
-interface EvalsConfig {
+/** system_config.evals blob (shared with pairwiseEval.service). */
+export interface EvalsConfig {
   auto_run_enabled?: boolean;
   judge_model?: string;
 }

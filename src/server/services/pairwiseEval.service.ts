@@ -17,6 +17,7 @@ import {
   DEFAULT_JUDGE_MODEL,
   buildJudgeTranscript,
   describeModality,
+  type EvalsConfig,
 } from './sessionEval.service.js';
 import { getSystemConfig } from '../utils/sessionHelpers.js';
 import { createLogger } from '../utils/logger.js';
@@ -61,10 +62,6 @@ async function getClient(): Promise<OpenAI> {
 export interface PairwiseRunOptions {
   judgeModel?: string;
   limit?: number;
-}
-
-interface EvalsConfig {
-  judge_model?: string;
 }
 
 async function resolveJudgeModel(override?: string): Promise<string> {

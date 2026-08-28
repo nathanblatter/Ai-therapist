@@ -2,8 +2,9 @@
 // A therapist mints a one-time link; a new client registers through it and is
 // auto-assigned to that therapist. Only the sha256 hex of the raw token is
 // ever stored — the raw token exists solely in the create response / link.
-import { createHash, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { pool } from '../config/db.js';
+import { hashToken } from '../utils/crypto.js';
 
 export interface ClientInviteRow {
   invite_id: number;
@@ -19,10 +20,6 @@ export interface ClientInviteRow {
 
 const INVITE_COLUMNS =
   'invite_id, token_hash, therapist_id, organization_id, label, created_at, expires_at, used_at, used_by';
-
-function hashToken(rawToken: string): string {
-  return createHash('sha256').update(rawToken).digest('hex');
-}
 
 /**
  * Mint a new invite for a care-team member (therapist or caseworker; the

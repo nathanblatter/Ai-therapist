@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AlertCircle, RefreshCw, Clock, User } from 'react-feather';
+import { timeAgo } from '../../shared/format';
 
 interface RateLimitConfig {
   max_sessions_per_day: number;
@@ -60,22 +61,9 @@ export default function RateLimitedUsers() {
     return `${hours} hour${hours !== 1 ? 's' : ''}, ${minutes} minute${minutes !== 1 ? 's' : ''}`;
   };
 
-  const formatTimeAgo = (timestamp: string | null): string => {
-    if (!timestamp) return 'Never';
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins} min ago`;
-
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
-
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
-  };
+  // Semantic empty value: "Never" reads better than the shared em dash.
+  const formatTimeAgo = (timestamp: string | null): string =>
+    timestamp ? timeAgo(timestamp) : 'Never';
 
   if (loading && !rateLimitedUsers.length) {
     return (

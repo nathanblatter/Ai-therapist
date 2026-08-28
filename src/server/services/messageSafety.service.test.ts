@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const dbMocks = vi.hoisted(() => ({
   listThreadMessages: vi.fn(),
   updateThreadMessageScan: vi.fn(),
+  recordCrisisEvent: vi.fn(),
 }));
 vi.mock('../db/index.js', () => dbMocks);
 
@@ -72,6 +73,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   dbMocks.listThreadMessages.mockResolvedValue([]);
   dbMocks.updateThreadMessageScan.mockResolvedValue(undefined);
+  dbMocks.recordCrisisEvent.mockResolvedValue(900);
   enqueueWorkItemMock.mockResolvedValue({ item_id: 77 });
   poolQueryMock.mockResolvedValue({ rows: [{ event_id: 900 }] });
   sendCrisisAlertMock.mockResolvedValue(undefined);
@@ -91,7 +93,7 @@ describe('scanThreadMessage', () => {
     await scanThreadMessage(message(), thread({ is_sandbox: true }));
     expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, { scanStatus: 'not_applicable' });
     expect(analyzeStandaloneRiskMock).not.toHaveBeenCalled();
-    expect(poolQueryMock).not.toHaveBeenCalled();
+    expect(dbMocks.recordCrisisEvent).not.toHaveBeenCalled();
     expect(enqueueWorkItemMock).not.toHaveBeenCalled();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
     // Participant still gets the scanned echo (flagged: false).
@@ -109,7 +111,7 @@ describe('scanThreadMessage', () => {
     expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, {
       scanStatus: 'clear', riskScore: 0, riskSeverity: null,
     });
-    expect(poolQueryMock).not.toHaveBeenCalled();
+    expect(dbMocks.recordCrisisEvent).not.toHaveBeenCalled();
     expect(enqueueWorkItemMock).not.toHaveBeenCalled();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
   });
@@ -122,7 +124,7 @@ describe('scanThreadMessage', () => {
     expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, {
       scanStatus: 'clear', riskScore: 20, riskSeverity: 'low',
     });
-    expect(poolQueryMock).not.toHaveBeenCalled();
+    expect(dbMocks.recordCrisisEvent).not.toHaveBeenCalled();
   });
 
   it('medium severity: crisis event + flagged scan + warning work item + notifications, no page', async () => {
@@ -131,14 +133,20 @@ describe('scanThreadMessage', () => {
     });
     await scanThreadMessage(message(), thread());
 
-    // Crisis event insert: origin='thread_message', session_id absent.
-    const [sql, params] = poolQueryMock.mock.calls[0];
-    expect(sql).toContain(`'thread_message'`);
-    expect(sql).toContain('crisis_events');
-    expect(params).toEqual([
-      101, 42, 'medium', 55, JSON.stringify(['passive ideation']),
-      'Message risk score: 55 - Factors: passive ideation',
-    ]);
+    // Crisis event write: origin='thread_message', session_id absent — via
+    // the single writer, db/crisis.queries recordCrisisEvent.
+    expect(dbMocks.recordCrisisEvent).toHaveBeenCalledWith({
+      origin: 'thread_message',
+      threadMessageId: 101,
+      clientUserId: 42,
+      eventType: 'flagged',
+      severity: 'medium',
+      riskScore: 55,
+      triggeredBy: 'system',
+      triggerMethod: 'auto',
+      riskFactors: ['passive ideation'],
+      notes: 'Message risk score: 55 - Factors: passive ideation',
+    });
 
     expect(dbMocks.updateThreadMessageScan).toHaveBeenCalledWith(101, {
       scanStatus: 'flagged', riskScore: 55, riskSeverity: 'medium', crisisEventId: 900,

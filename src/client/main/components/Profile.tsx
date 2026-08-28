@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, AlertCircle } from 'react-feather';
 import UserSessionDetail from './UserSessionDetail';
 import { toast } from '../../shared/components/Toast';
+import { formatDateTime } from '../../shared/format';
 
 interface UserData {
   username: string;
@@ -205,17 +206,7 @@ export default function Profile() {
     return `${minutes}m`;
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      month: 'numeric',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-  };
+  const formatDate = formatDateTime;
 
   const formatResetTime = (hoursUntilReset: number) => {
     if (!hoursUntilReset) return 'less than 1 hour';
