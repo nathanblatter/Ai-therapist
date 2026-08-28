@@ -697,8 +697,10 @@ async function startProdServer() {
     }
   };
 
-  // Serve static files from the client build directory.
-  app.use(express.static(path.resolve(__dirname, '../../dist/client'), { setHeaders: staticCache }));
+  // Serve static files from the client build directory. index: false — the
+  // raw index.html must never be served directly, or requests to / bypass the
+  // SSR catch-all (and its applyDemoBranding pass) entirely.
+  app.use(express.static(path.resolve(__dirname, '../../dist/client'), { index: false, setHeaders: staticCache }));
 
   // Serve admin static assets (CSS, JS) - admin assets are prefixed with "admin-" so no conflicts
   app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets'), { setHeaders: staticCache }));
