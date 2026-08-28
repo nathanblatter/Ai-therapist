@@ -1,0 +1,151 @@
+name: Deploy Prod
+# Promotion model: main auto-deploys STAGE (deploy.yml, home box). Prod ships
+# only when main is promoted:  git push origin main:prod   (or Run workflow).
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/nathanblatter/ai-therapist
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  redteam-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_therapist_redteam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam
+      DATABASE_SSL: 'false'
+      SESSION_SECRET: ci-redteam-secret
+      NODE_ENV: test
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: bash scripts/redteam-db-setup.sh
+      - run: npm run redteam:smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: redteam-smoke-results-prod
+          path: redteam-results/
+
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:prod
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: [verify, redteam-smoke, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/prod && chmod 600 ~/.ssh/prod
+          echo "${{ secrets.PROD_SSH_HOST_KEY }}" >> ~/.ssh/known_hosts
+      - name: Ship compose + Caddyfile
+        run: |
+          scp -i ~/.ssh/prod docker-compose.prod.yml ubuntu@${{ secrets.PROD_HOST }}:/opt/ai-therapist/docker-compose.yml
+          scp -i ~/.ssh/prod Caddyfile.prod ubuntu@${{ secrets.PROD_HOST }}:/opt/ai-therapist/Caddyfile
+      - name: Zero-downtime deploy
+        run: |
+          ssh -i ~/.ssh/prod ubuntu@${{ secrets.PROD_HOST }} \
+            GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}' GITHUB_ACTOR='${{ github.actor }}' IMAGE_TAG='${{ github.sha }}' 'bash -s' <<'EOF'
+          set -euo pipefail
+          cd /opt/ai-therapist
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          export IMAGE_TAG
+          echo "IMAGE_TAG=$IMAGE_TAG" > .deploy-env
+          docker compose pull app caddy
+
+          # Caddy: create/refresh (config is bind-mounted; restart picks it up)
+          docker compose up -d caddy
+
+          OLD_CONTAINER=$(docker compose ps -q app 2>/dev/null | head -1)
+          if [ -z "$OLD_CONTAINER" ]; then
+            echo "No existing app container, starting fresh..."
+            docker compose up -d app
+            exit 0
+          fi
+
+          echo "Scaling up to 2 replicas..."
+          docker compose up -d --scale app=2 --no-recreate app
+          NEW_CONTAINER=$(docker compose ps -q app | grep -v "^${OLD_CONTAINER}$" | head -1)
+          if [ -z "$NEW_CONTAINER" ]; then
+            echo "ERROR: Could not identify new container"; exit 1
+          fi
+          echo "Old: $OLD_CONTAINER | New: $NEW_CONTAINER"
+
+          HEALTHY=false
+          for i in $(seq 1 40); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' "$NEW_CONTAINER" 2>/dev/null)
+            if [ "$STATUS" = "healthy" ]; then
+              HEALTHY=true; echo "New container is healthy!"; break
+            elif [ "$STATUS" = "unhealthy" ]; then
+              echo "ERROR: New container is unhealthy, rolling back..."
+              docker stop "$NEW_CONTAINER" && docker rm "$NEW_CONTAINER"
+              exit 1
+            fi
+            echo "  Status: ${STATUS:-starting} ($i/40)..."; sleep 5
+          done
+          if [ "$HEALTHY" != "true" ]; then
+            echo "ERROR: Health check timed out, rolling back..."
+            docker stop "$NEW_CONTAINER" && docker rm "$NEW_CONTAINER"
+            exit 1
+          fi
+
+          docker stop "$OLD_CONTAINER" && docker rm "$OLD_CONTAINER"
+          docker image prune -f >/dev/null
+          echo "Zero-downtime deploy complete!"
+          EOF

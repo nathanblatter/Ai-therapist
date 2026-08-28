@@ -1,0 +1,8 @@
+# Deployed to /opt/ai-therapist/Caddyfile by the prod workflow.
+# Caddy owns TLS (Let's Encrypt) — no certbot, no manual renewal.
+# During a zero-downtime swap two app replicas exist; Docker's DNS for "app"
+# covers both, and the deploy script only stops the old one after the new
+# passes its healthcheck.
+ai.byuisresearch.com {
+	reverse_proxy app:3067
+}

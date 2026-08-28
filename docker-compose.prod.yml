@@ -1,0 +1,36 @@
+# Prod (AWS EC2, ai.byuisresearch.com). Stage keeps docker-compose.yml.
+# The image is built in CI and pulled from GHCR — this file never builds.
+# Secrets come from /opt/ai-therapist/.env on the box (chmod 600); no values here.
+services:
+  app:
+    image: ghcr.io/nathanblatter/ai-therapist:${IMAGE_TAG:-prod}
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3067/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 40s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  web:
