@@ -668,6 +668,19 @@ app.use(knowledgeRoutes());
 // Session eval harness (LLM-judge quality scores) -> routes/admin/evals.routes.ts
 app.use(evalsRoutes());
 
+// The demo pill/overlay and "[DEMO] " title prefix are baked into the HTML
+// templates, but stage and prod now ship the same image — so demo branding is
+// a runtime decision. Only the stage box sets DEMO_SITE=true; everywhere else
+// the notice block (fenced by the DEMO NOTICE marker comments) and title
+// prefix are stripped at serve time.
+const IS_DEMO_SITE = process.env.DEMO_SITE === 'true';
+function applyDemoBranding(html: string): string {
+  if (IS_DEMO_SITE) return html;
+  return html
+    .replace(/<!-- ===== DEMO NOTICE[\s\S]*?END DEMO NOTICE ===== -->/g, '')
+    .replace('<title>[DEMO] ', '<title>');
+}
+
 async function startProdServer() {
   console.log("Starting in production mode...");
 
@@ -697,7 +710,7 @@ async function startProdServer() {
   // Admin panel route (demo accounts see a synthetic-data version — see demo.routes.ts)
   app.get('/admin', requireRole('therapist', 'researcher', 'demo'), (_req, res) => {
     try {
-      const html = fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8');
+      const html = applyDemoBranding(fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8'));
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
       console.error(e instanceof Error ? e.stack : String(e));
@@ -712,7 +725,7 @@ async function startProdServer() {
   // Handle all other requests with main app SSR.
   app.use('*', async (req, res) => {
     try {
-      const template = fs.readFileSync(path.resolve(__dirname, '../../dist/client/index.html'), 'utf-8');
+      const template = applyDemoBranding(fs.readFileSync(path.resolve(__dirname, '../../dist/client/index.html'), 'utf-8'));
       const appHtml = await render(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
@@ -743,7 +756,7 @@ async function startDevServer() {
         'src="./admin-entry-client.tsx"',
         'src="/@fs' + path.resolve(__dirname, "../client/admin/admin-entry-client.tsx") + '"'
       );
-      const html = await vite.transformIndexHtml(req.originalUrl, template);
+      const html = applyDemoBranding(await vite.transformIndexHtml(req.originalUrl, template));
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
     } catch (e: unknown) {
       vite.ssrFixStacktrace(e as Error);
@@ -767,7 +780,7 @@ async function startDevServer() {
       const appHtml = await render(req.originalUrl);
 
       // This line is the critical fix
-      const html = template.replace(`<!--ssr-outlet-->`, appHtml?.html);
+      const html = applyDemoBranding(template.replace(`<!--ssr-outlet-->`, appHtml?.html));
 
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
     } catch (e: unknown) {

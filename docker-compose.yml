@@ -14,6 +14,9 @@ services:
       CORS_ORIGIN: https://ai-therapist.nathanblatter.com
       # Magic-link demo access. Unset => /demo/:token 404s (feature disabled).
       DEMO_MAGIC_TOKEN: ${DEMO_MAGIC_TOKEN}
+      # Stage is the public demo: keep the demo pill/overlay + [DEMO] titles.
+      # Prod (docker-compose.prod.yml) leaves this unset and serves clean HTML.
+      DEMO_SITE: "true"
       # OpenAI Realtime API key
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       FLIGHTDECK_URL: ${FLIGHTDECK_URL:-http://flightdeck:8080}
