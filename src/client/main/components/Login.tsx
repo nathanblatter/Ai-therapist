@@ -9,6 +9,12 @@ interface LoginBody {
   mfaToken?: string;
 }
 
+// Staff roles live in the admin SPA; landing them on the participant home
+// after login strands them (most visibly sandbox demo accounts that log out).
+function destinationFor(role?: string): string {
+  return role === 'therapist' || role === 'caseworker' || role === 'researcher' ? '/admin' : '/';
+}
+
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -54,7 +60,7 @@ export default function Login() {
 
       if (response.ok && data.success) {
         // Use full page navigation to ensure proper SSR hydration with authenticated session
-        window.location.href = '/';
+        window.location.href = destinationFor(data.user?.role);
       } else {
         setError(data.error || 'Login failed');
       }
@@ -92,7 +98,7 @@ export default function Login() {
 
       if (response.ok && data.success) {
         // Use full page navigation to ensure proper SSR hydration with authenticated session
-        window.location.href = '/';
+        window.location.href = destinationFor(data.user?.role);
       } else {
         setError(data.error || 'Invalid verification code');
       }
