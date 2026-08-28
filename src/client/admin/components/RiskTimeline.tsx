@@ -66,6 +66,13 @@ export default function RiskTimeline({ sessionId }: RiskTimelineProps) {
     }
   }, [sessionId]);
 
+  // SessionDetail can be re-pointed at another session without remounting
+  // (AdminApp reuses the mounted instance); drop the previous session's
+  // history so the timeline never renders stale data under the new session.
+  useEffect(() => {
+    setHistory(null);
+  }, [sessionId]);
+
   useEffect(() => {
     if (expanded && history === null) void fetchHistory();
   }, [expanded, history, fetchHistory]);

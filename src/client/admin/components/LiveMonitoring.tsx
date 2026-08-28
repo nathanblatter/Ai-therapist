@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
-import { Activity, Users, MessageSquare, AlertTriangle, X, Radio, Tool } from 'react-feather';
+import { Activity, Users, MessageSquare, AlertTriangle, X, Radio, Tool, Volume2, Square, Play } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../../shared/components/Toast';
+import { severityBadgeClass } from '../../shared/severity';
 import { AudioStreamPlayer } from '../lib/audioStreamPlayer';
 
 // ---- Local types ----
@@ -78,7 +79,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   const [error, setError] = useState<string | null>(null);
   const [showCrisisOnly, setShowCrisisOnly] = useState(false);
   const [crisisAlert, setCrisisAlert] = useState<CrisisAlert | null>(null);
-  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
+  // Auto-dismiss timer for the crisis banner: kept in a ref so a NEW alert
+  // cancels the previous alert's timer instead of being dismissed early by it.
+  const crisisAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { socket: rawSocket, connected } = useSocket();
   const socket = rawSocket as Socket | null;
 
@@ -152,14 +155,13 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     return () => clearInterval(id);
   }, []);
 
-  // Request browser notification permission
+  // Request browser notification permission. The granted/denied outcome is
+  // read live from Notification.permission inside handleCrisisDetected —
+  // mirroring it into state was a stale-closure trap (the socket handler is
+  // registered once, before the permission prompt resolves).
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().then(permission => {
-        setBrowserNotificationsEnabled(permission === 'granted');
-      });
-    } else if ('Notification' in window && Notification.permission === 'granted') {
-      setBrowserNotificationsEnabled(true);
+      void Notification.requestPermission();
     }
   }, []);
 
@@ -254,8 +256,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     setListeningSessionId(null);
   };
 
-  // Tear down audio on unmount.
-  useEffect(() => () => { stopListening(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Tear down audio and the crisis-banner timer on unmount.
+  useEffect(() => () => {
+    stopListening();
+    if (crisisAlertTimerRef.current) clearTimeout(crisisAlertTimerRef.current);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the transcript pinned to the newest turn as it streams in.
   useEffect(() => {
@@ -461,10 +466,13 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       message: data.message,
       type: 'auto'
     });
-    setTimeout(() => setCrisisAlert(null), 30000);
+    if (crisisAlertTimerRef.current) clearTimeout(crisisAlertTimerRef.current);
+    crisisAlertTimerRef.current = setTimeout(() => setCrisisAlert(null), 30000);
 
-    // Browser notification
-    if (browserNotificationsEnabled) {
+    // Browser notification. Permission is read live (not from state): this
+    // handler is registered once on socket setup, so a state flag captured
+    // then would still be false after the user grants permission.
+    if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(`${data.severity.toUpperCase()} Crisis Detected`, {
         body: `Session: ${data.sessionId.substring(0, 12)}...\nRisk Score: ${data.riskScore}`,
         icon: '/favicon.ico',
@@ -498,7 +506,8 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       message: data.message,
       type: 'manual'
     });
-    setTimeout(() => setCrisisAlert(null), 15000);
+    if (crisisAlertTimerRef.current) clearTimeout(crisisAlertTimerRef.current);
+    crisisAlertTimerRef.current = setTimeout(() => setCrisisAlert(null), 15000);
   };
 
   const handleCrisisUnflagged = (data: { sessionId: string }) => {
@@ -767,20 +776,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     return `${Math.floor(mins / 60)}h ago`;
   };
 
-  const getCrisisBadgeClasses = (severity: string): string => {
-    const badges: Record<string, string> = {
-      high: 'bg-red-600 text-white animate-pulse',
-      medium: 'bg-yellow-500 text-yellow-900',
-      low: 'bg-orange-400 text-orange-900'
-    };
-    return badges[severity] || 'bg-gray-400 text-gray-900';
-  };
+  // Shared severity vocabulary (src/client/shared/severity): medium is ALWAYS
+  // amber and low is green. The old local map rendered medium yellow and low
+  // ORANGE — a low-severity client looked more alarming than a medium one.
+  const getCrisisBadgeClasses = (severity: string): string =>
+    severityBadgeClass(severity, { solid: true, pulseHigh: true });
 
   const getAlertBannerClasses = (severity: string): string => {
     const classes: Record<string, string> = {
       high: 'bg-red-100 border-red-500 text-red-900',
-      medium: 'bg-yellow-100 border-yellow-500 text-yellow-900',
-      low: 'bg-orange-100 border-orange-500 text-orange-900'
+      medium: 'bg-amber-100 border-amber-500 text-amber-900',
+      low: 'bg-green-100 border-green-500 text-green-900'
     };
     return classes[severity] || 'bg-gray-100 border-gray-500 text-gray-900';
   };
@@ -1174,34 +1180,38 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                           ? stopListening()
                           : startListening(selectedSidebandSession.sessionId)}
                         title="Listen to the assistant's audio live"
-                        className={`px-3 py-1.5 text-white rounded transition text-sm min-h-[44px] ${
+                        className={`px-3 py-1.5 text-white rounded transition text-sm min-h-[44px] inline-flex items-center gap-1 ${
                           listeningSessionId === selectedSidebandSession.sessionId
                             ? 'bg-emerald-600 hover:bg-emerald-700 animate-pulse'
                             : 'bg-gray-600 hover:bg-gray-700'
                         }`}
                       >
-                        {listeningSessionId === selectedSidebandSession.sessionId ? '🔊 Listening' : '🔊 Listen'}
+                        <Volume2 size={14} aria-hidden="true" />
+                        {listeningSessionId === selectedSidebandSession.sessionId ? 'Listening' : 'Listen'}
                       </button>
                       <button
                         onClick={handleInterrupt}
                         title="Cancel the in-progress response and clear buffered audio"
-                        className="px-3 py-1.5 bg-orange-500 text-white rounded hover:bg-orange-600 transition text-sm min-h-[44px]"
+                        className="px-3 py-1.5 bg-orange-500 text-white rounded hover:bg-orange-600 transition text-sm min-h-[44px] inline-flex items-center gap-1"
                       >
-                        ⏹ Interrupt
+                        <Square size={14} aria-hidden="true" />
+                        Interrupt
                       </button>
                       <button
                         onClick={() => setShowInjectModal(true)}
                         title="Inject a system or user message into the live conversation"
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm min-h-[44px]"
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm min-h-[44px] inline-flex items-center gap-1"
                       >
-                        💬 Inject
+                        <MessageSquare size={14} aria-hidden="true" />
+                        Inject
                       </button>
                       <button
                         onClick={handleForceResponse}
                         title="Force the AI to respond now"
-                        className="px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition text-sm min-h-[44px]"
+                        className="px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition text-sm min-h-[44px] inline-flex items-center gap-1"
                       >
-                        ▶ Respond
+                        <Play size={14} aria-hidden="true" />
+                        Respond
                       </button>
                       <div className="flex items-center gap-1">
                         <select
@@ -1341,7 +1351,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                             return (
                               <div key={idx} className={`p-2 rounded text-xs border-l-2 ${style}`}>
                                 <div className="flex justify-between items-center mb-1">
-                                  <span className="font-semibold text-gray-900">🔧 {td.toolName} · {status}</span>
+                                  <span className="font-semibold text-gray-900 inline-flex items-center gap-1"><Tool size={12} aria-hidden="true" /> {td.toolName} · {status}</span>
                                   <span className="text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
                                 </div>
                                 {td.args !== undefined && (

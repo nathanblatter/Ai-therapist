@@ -1,3 +1,4 @@
+import { Tool, Inbox } from 'react-feather';
 import { formatDateTime } from '../../shared/format';
 
 interface MessageData {
@@ -88,10 +89,10 @@ export default function ConversationBubble({
         ) : (
           <div>
             {message.message_type === 'tool_call' && (
-              <div className="font-semibold text-purple-900 mb-2">🔧 Tool Call</div>
+              <div className="font-semibold text-purple-900 mb-2 flex items-center gap-1.5"><Tool size={14} aria-hidden="true" /> Tool Call</div>
             )}
             {message.message_type === 'tool_response' && (
-              <div className="font-semibold text-purple-800 mb-2">📥 Tool Response</div>
+              <div className="font-semibold text-purple-800 mb-2 flex items-center gap-1.5"><Inbox size={14} aria-hidden="true" /> Tool Response</div>
             )}
             {userRole === 'researcher' && !message.message ? (
               <div className="text-gray-400 italic flex items-center">

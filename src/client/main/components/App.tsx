@@ -437,7 +437,11 @@ export default function App() {
         console.log('Received session:status event:', data);
         if (data.status === 'ended' && data.remoteTermination) {
           toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
-          stopSession();
+          // Via the latest-ref (ai-therapist-113 pattern): this handler closes
+          // over the render where sessionId/sessionType state were still null,
+          // so a direct stopSession() would take the wrong teardown path and
+          // skip the post-session snapshot.
+          void stopSessionRef.current();
         }
       });
 
@@ -535,7 +539,11 @@ export default function App() {
         } else {
           toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
         }
-        stopSession();
+        // Via the latest-ref (ai-therapist-113): this handler was created in
+        // the render where sessionId state is still null; a direct
+        // stopSession() call skipped the POST /end, the session_end log and
+        // the post-session snapshot.
+        void stopSessionRef.current();
       }
     });
 
@@ -545,7 +553,8 @@ export default function App() {
     // end-session flow (same family as the remote-termination notice above).
     socket.on('session:eligibility-end', () => {
       toast.warning('This study is only open to adults 18 and older, so this session is ending. Take good care.');
-      stopSession();
+      // Latest-ref for the same stale-closure reason as session:status above.
+      void stopSessionRef.current();
     });
 
     // Listen for crisis intervention messages

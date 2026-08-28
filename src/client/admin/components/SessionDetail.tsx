@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, AlertTriangle, Eye, FileText } from "react-feather";
+import { X, AlertTriangle, Eye, FileText, Link2, Check, Clock } from "react-feather";
 import ConversationBubble from "./ConversationBubble";
 import SessionInsightsPanel from "./SessionInsightsPanel";
 import SessionEvalPanel from "./SessionEvalPanel";
@@ -679,13 +679,13 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                 <div className="flex items-center gap-2">
                   <span>Status: <span className={`font-semibold ${session.status === 'ended' ? 'text-gray-300' : 'text-green-300'}`}>{session.status}</span></span>
                   {session.status === 'active' && (session.sideband_connected || sidebandConnected) && (
-                    <span className="px-2 py-0.5 text-xs font-medium rounded bg-green-500 text-white">
-                      🔗 Sideband Active
+                    <span className="px-2 py-0.5 text-xs font-medium rounded bg-green-500 text-white inline-flex items-center gap-1">
+                      <Link2 size={12} aria-hidden="true" /> Sideband Active
                     </span>
                   )}
                   {session.status === 'active' && session.openai_call_id && !(session.sideband_connected || sidebandConnected) && (
-                    <span className="px-2 py-0.5 text-xs font-medium rounded bg-yellow-500 text-yellow-900">
-                      ⚠️ Sideband Disconnected
+                    <span className="px-2 py-0.5 text-xs font-medium rounded bg-yellow-500 text-yellow-900 inline-flex items-center gap-1">
+                      <AlertTriangle size={12} aria-hidden="true" /> Sideband Disconnected
                     </span>
                   )}
                 </div>
@@ -706,11 +706,13 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                       }`}
                       title={`${redactionStatus.redacted}/${redactionStatus.total} messages redacted`}
                     >
-                      {redactionStatus.status === 'complete'
-                        ? '✅ Complete'
-                        : redactionStatus.status === 'partial'
-                        ? `⚠️ Partial (${redactionStatus.redacted}/${redactionStatus.total})`
-                        : '⏳ Pending'}
+                      {redactionStatus.status === 'complete' ? (
+                        <span className="inline-flex items-center gap-1"><Check size={12} aria-hidden="true" /> Complete</span>
+                      ) : redactionStatus.status === 'partial' ? (
+                        <span className="inline-flex items-center gap-1"><AlertTriangle size={12} aria-hidden="true" /> Partial ({redactionStatus.redacted}/{redactionStatus.total})</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1"><Clock size={12} aria-hidden="true" /> Pending</span>
+                      )}
                     </span>
                   </div>
                 )}

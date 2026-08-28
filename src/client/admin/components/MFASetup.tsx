@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, Key, Copy, CheckCircle } from 'react-feather';
+import { Shield, Key, Copy, CheckCircle, AlertTriangle } from 'react-feather';
 
 interface MFAStatus {
   enabled: boolean;
@@ -359,7 +359,7 @@ export default function MFASetup() {
           </div>
 
           <div className="bg-yellow-50 border border-yellow-200 p-4 rounded">
-            <p className="font-semibold text-yellow-800 mb-2">⚠️ Save Your Backup Codes</p>
+            <p className="font-semibold text-yellow-800 mb-2 flex items-center gap-1.5"><AlertTriangle size={14} aria-hidden="true" /> Save Your Backup Codes</p>
             <p className="text-sm text-yellow-700">
               These backup codes can be used to access your account if you lose your authenticator device.
               Each code can only be used once. Store them in a secure location.
