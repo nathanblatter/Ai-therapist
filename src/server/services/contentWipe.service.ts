@@ -91,19 +91,24 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
   threadBodiesWiped?: number;
   error?: string;
 }> {
-  const settings = await getRetentionSettings();
-
-  // Create log entry
-  const logResult = await pool.query(
-    `INSERT INTO content_wipe_log (status, triggered_by, triggered_by_user, retention_hours)
-     VALUES ('running', $1, $2, $3)
-     RETURNING wipe_id`,
-    [triggeredBy, triggeredByUser, settings.retention_hours]
-  );
-  const wipeId = logResult.rows[0].wipe_id;
-
+  // Everything — including the settings fetch and the 'running' log insert —
+  // lives inside the try: this function must NEVER throw. The scheduler calls
+  // it from a setTimeout, so a throw here was an unhandled rejection AND
+  // skipped the reschedule, silently killing the nightly wipe until restart.
+  let wipeId: unknown = null;
   try {
-    console.log(`🗑️ Starting content wipe (${triggeredBy})...`);
+    const settings = await getRetentionSettings();
+
+    // Create log entry
+    const logResult = await pool.query(
+      `INSERT INTO content_wipe_log (status, triggered_by, triggered_by_user, retention_hours)
+       VALUES ('running', $1, $2, $3)
+       RETURNING wipe_id`,
+      [triggeredBy, triggeredByUser, settings.retention_hours]
+    );
+    wipeId = logResult.rows[0].wipe_id;
+
+    console.log(`[ContentWipe] Starting content wipe (${triggeredBy})...`);
 
     // Calculate cutoff time based on retention hours
     const cutoffTime = new Date();
@@ -204,7 +209,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
       [JSON.stringify(updatedSettings)]
     );
 
-    console.log(`✅ Content wipe completed: ${messagesWiped} messages wiped, ${messagesSkipped} skipped, ${threadBodiesWiped} thread message bodies wiped`);
+    console.log(`[ContentWipe] Content wipe completed: ${messagesWiped} messages wiped, ${messagesSkipped} skipped, ${threadBodiesWiped} thread message bodies wiped`);
 
     // Notify admin dashboards. Through broadcastAdminEvent with no participant
     // linkage -> researcher room only (the old hand-rolled emit targeted a
@@ -233,15 +238,18 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
 
     const errorMessage = error instanceof Error ? error.message : String(error);
 
-    // Update log entry with error
-    await pool.query(
-      `UPDATE content_wipe_log
-       SET completed_at = CURRENT_TIMESTAMP,
-           status = 'failed',
-           error_message = $1
-       WHERE wipe_id = $2`,
-      [errorMessage, wipeId]
-    );
+    // Update log entry with error (best-effort: if the DB is the thing that is
+    // down, this UPDATE would rethrow out of the catch and kill the scheduler).
+    if (wipeId != null) {
+      await pool.query(
+        `UPDATE content_wipe_log
+         SET completed_at = CURRENT_TIMESTAMP,
+             status = 'failed',
+             error_message = $1
+         WHERE wipe_id = $2`,
+        [errorMessage, wipeId]
+      ).catch(logErr => console.error('[ContentWipe] failed to record wipe failure:', logErr));
+    }
 
     return {
       success: false,
@@ -349,7 +357,7 @@ async function scheduleNextWipe(): Promise<void> {
   const settings = await getRetentionSettings();
 
   if (!settings.enabled) {
-    console.log('📅 Content wipe scheduler disabled');
+    console.log('[ContentWipe] Scheduler disabled');
     nextScheduledWipe = null;
     return;
   }
@@ -357,19 +365,23 @@ async function scheduleNextWipe(): Promise<void> {
   const msUntilWipe = getMillisecondsUntilWipe(settings.wipe_time);
   nextScheduledWipe = getNextWipeTime(settings.wipe_time);
 
-  console.log(`📅 Next content wipe scheduled for ${nextScheduledWipe.toISOString()}`);
+  console.log(`[ContentWipe] Next content wipe scheduled for ${nextScheduledWipe.toISOString()}`);
 
   // Clear any existing timeout
   if (wipeInterval) {
     clearTimeout(wipeInterval);
   }
 
-  // Schedule the wipe
+  // Schedule the wipe. Belt-and-suspenders catch (executeContentWipe never
+  // throws anymore) so a failure can neither become an unhandled rejection
+  // nor skip the reschedule.
   wipeInterval = setTimeout(async () => {
-    await executeContentWipe('scheduler');
+    await executeContentWipe('scheduler')
+      .catch(err => console.error('[ContentWipe] scheduled wipe failed:', err));
     // Schedule the next one
-    scheduleNextWipe();
+    scheduleNextWipe().catch(err => console.error('[ContentWipe] reschedule failed:', err));
   }, msUntilWipe);
+  wipeInterval.unref?.();
 }
 
 /**
@@ -407,7 +419,7 @@ export async function sweepRedactionGaps(): Promise<{ sweptSessions: number }> {
   const sessionIds = await findEndedSessionsWithRedactionGaps();
   if (sessionIds.length === 0) return { sweptSessions: 0 };
 
-  console.log(`🔁 Redaction sweep: re-running redactSession for ${sessionIds.length} ended session(s) with gaps`);
+  console.log(`[Redaction sweep] re-running redactSession for ${sessionIds.length} ended session(s) with gaps`);
   const { redactSession } = await import('./sessionRedaction.service.js');
   for (const sessionId of sessionIds) {
     await redactSession(sessionId).catch(err =>
@@ -421,7 +433,7 @@ export async function sweepRedactionGaps(): Promise<{ sweptSessions: number }> {
  * Start the content wipe scheduler
  */
 export async function startScheduler(): Promise<void> {
-  console.log('🚀 Starting content wipe scheduler...');
+  console.log('[ContentWipe] Starting scheduler...');
   await scheduleNextWipe();
 
   if (!redactionSweepInterval) {

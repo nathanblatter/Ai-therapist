@@ -25,6 +25,7 @@ import {
   noteSessionActivity,
   scheduleAbandonCheck,
   sweepAbandonedSessions,
+  _lastActivitySizeForTests,
 } from './sessionLifecycle.service.js';
 
 beforeEach(() => {
@@ -84,6 +85,18 @@ describe('noteSessionActivity / scheduleAbandonCheck', () => {
 
     // getSession would only be called if the check actually ran.
     expect(getSessionMock).not.toHaveBeenCalled();
+  });
+
+  // Leak regression: nothing ever deleted last-activity entries, so the map
+  // grew one entry per session for the life of the process.
+  it('prunes dead sessions from the last-activity map instead of growing forever', () => {
+    for (let i = 0; i < 549; i++) noteSessionActivity(`leak-${i}`);
+    // All fresh: nothing to prune yet.
+    expect(_lastActivitySizeForTests()).toBeGreaterThanOrEqual(549);
+    // Everything above is now older than the inactivity timeout — dead.
+    vi.advanceTimersByTime(21 * 60 * 1000);
+    noteSessionActivity('fresh-1');
+    expect(_lastActivitySizeForTests()).toBeLessThan(10);
   });
 
   it('re-checks the DB and leaves an already-ended session alone', async () => {

@@ -1351,6 +1351,17 @@ export class SidebandManager {
     // Mark ended FIRST so any in-flight attach/reconnect (e.g. a pending 404
     // retry or a post-1006 close handler) bails out instead of spamming attaches.
     this.endedSessions.add(sessionId);
+    // Bounded: nothing ever removed entries, so the set grew one id per ended
+    // session for the life of the process. Evict oldest-inserted (Set preserves
+    // insertion order); the flag only matters for the brief post-end retry
+    // window, so old entries are safe to drop.
+    if (this.endedSessions.size > 1000) {
+      for (const id of this.endedSessions) {
+        if (this.endedSessions.size <= 500) break;
+        if (id === sessionId) continue;
+        this.endedSessions.delete(id);
+      }
+    }
     // Defensive hold_floor cleanup: if a hold is pending, restore VAD while
     // the socket is still open (best-effort), so a session that survives this
     // disconnect (e.g. WebRTC still live) isn't left uninterruptible.
@@ -1435,6 +1446,11 @@ export class SidebandManager {
    *  (response.created observed without a terminal response.done yet). */
   hasActiveResponse(sessionId: string): boolean {
     return this.activeResponses.has(sessionId);
+  }
+
+  /** Test hook: current ended-sessions set size (leak regression guard). */
+  _endedSessionsSizeForTests(): number {
+    return this.endedSessions.size;
   }
 
   /**

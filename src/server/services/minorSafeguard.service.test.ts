@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const {
   createMock, recordLlmUsageMock, hasInterventionActionMock, updateSessionStatusMock,
   logInterventionActionMock, draftEligibilityAeMock, endChatSessionMock, clearSteeringMock,
-  redactSessionMock, nameSessionMock, insightsMock,
+  redactSessionMock, nameSessionMock, insightsMock, serverEndSessionMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
   recordLlmUsageMock: vi.fn().mockResolvedValue(undefined),
@@ -18,6 +18,7 @@ const {
   redactSessionMock: vi.fn().mockResolvedValue(undefined),
   nameSessionMock: vi.fn().mockResolvedValue(undefined),
   insightsMock: vi.fn().mockResolvedValue(undefined),
+  serverEndSessionMock: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue('test-key') }));
@@ -38,6 +39,7 @@ vi.mock('./crisisIntervention.service.js', () => ({ clearSteeringState: clearSte
 vi.mock('./sessionRedaction.service.js', () => ({ redactSession: redactSessionMock }));
 vi.mock('./sessionName.service.js', () => ({ generateSessionNameAsync: nameSessionMock }));
 vi.mock('./sessionInsights.service.js', () => ({ generateSessionInsightsAsync: insightsMock }));
+vi.mock('./sessionLifecycle.service.js', () => ({ serverEndSession: serverEndSessionMock }));
 
 const {
   detectMinorDisclosurePatterns, confirmMinorDisclosure, handleConfirmedMinor,
@@ -139,15 +141,21 @@ describe('handleConfirmedMinor — shared actions', () => {
     expect(updateSessionStatusMock).not.toHaveBeenCalled();
   });
 
-  it('realtime: defers the status end past the grace window', async () => {
+  it('realtime: defers the end past the grace window, then runs the FULL server end (sideband teardown + recorder finalize)', async () => {
     vi.useFakeTimers();
     try {
       await handleConfirmedMinor({ sessionId: 'sess-1', messageId: 5, channel: 'realtime', statedAge: 15 });
-      // Intervention + AE fire immediately; the status end is deferred.
+      // Intervention + AE fire immediately; the end is deferred.
       expect(logInterventionActionMock).toHaveBeenCalled();
-      expect(updateSessionStatusMock).not.toHaveBeenCalled();
+      expect(serverEndSessionMock).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(60 * 1000);
-      expect(updateSessionStatusMock).toHaveBeenCalledWith('sess-1', 'ended', 'system');
+      // Must go through serverEndSession — the bare status flip used before
+      // left the sideband WS attached and the recording unfinalized forever
+      // (an ended session is invisible to the abandoned-session sweep).
+      expect(serverEndSessionMock).toHaveBeenCalledWith('sess-1', expect.objectContaining({
+        endedBy: 'system', reason: 'eligibility_minor_end',
+      }));
+      expect(updateSessionStatusMock).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

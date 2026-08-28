@@ -168,15 +168,25 @@ const sweepCounters = new Map<string, number>();
 
 function sweepDue(sessionId: string): boolean {
   const count = (sweepCounters.get(sessionId) ?? 0) + 1;
-  sweepCounters.set(sessionId, count);
-  // Opportunistic cleanup so ended sessions don't accumulate.
+  // Opportunistic cleanup so ended sessions don't accumulate. Evict the
+  // oldest-inserted entries (Map preserves insertion order); the previous
+  // `c === 0` filter deleted only just-reset counters — which active sessions
+  // recreate anyway — while stale mid-count sessions accumulated forever.
+  // The current session's count is captured above and re-set below, so it
+  // survives even if its old entry is evicted.
   if (sweepCounters.size > 500) {
-    for (const [id, c] of sweepCounters) {
-      if (c === 0) sweepCounters.delete(id);
+    for (const id of sweepCounters.keys()) {
       if (sweepCounters.size <= 250) break;
+      sweepCounters.delete(id);
     }
   }
+  sweepCounters.set(sessionId, count);
   return count >= SWEEP_EVERY;
+}
+
+/** Test hook: current sweep-counter map size (leak regression guard). */
+export function _sweepCounterSizeForTests(): number {
+  return sweepCounters.size;
 }
 
 function resetSweep(sessionId: string): void {
@@ -450,32 +460,40 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
 
     // Passive logging — insert unconditionally regardless of flagging.
     // severity column has CHECK (severity IN ('low','medium','high')), so use NULL when no keyword matched.
-    await pool.query(
-      `INSERT INTO risk_score_history
-       (session_id, message_id, risk_score, severity, score_factors, calculated_at)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-      [
-        message.session_id,
-        message.message_id,
-        riskScore,
-        severity === 'none' ? null : severity,
-        JSON.stringify({
-          method,
-          keyword_score: keywordAnalysis.keywordScore,
-          keywords: keywordAnalysis.keywords,
-          ...(trajectory.trajectoryScore > 0 ? {
-            trajectory_score: trajectory.trajectoryScore,
-            trajectory_trend: trajectory.trend,
-          } : {}),
-          ...(llm ? {
-            llm_score: llm.risk_score,
-            llm_context: llm.context,
-            llm_factors: llm.factors,
-            llm_reasoning: llm.reasoning,
-          } : {}),
-        })
-      ]
-    );
+    // Best-effort: a failed history insert must never zero an already-computed
+    // verdict — before this was isolated, an insert error fell into the outer
+    // catch and returned riskScore 0 / severity 'none', silently dropping a
+    // crisis the LLM had already scored high (fail toward detection).
+    try {
+      await pool.query(
+        `INSERT INTO risk_score_history
+         (session_id, message_id, risk_score, severity, score_factors, calculated_at)
+         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+        [
+          message.session_id,
+          message.message_id,
+          riskScore,
+          severity === 'none' ? null : severity,
+          JSON.stringify({
+            method,
+            keyword_score: keywordAnalysis.keywordScore,
+            keywords: keywordAnalysis.keywords,
+            ...(trajectory.trajectoryScore > 0 ? {
+              trajectory_score: trajectory.trajectoryScore,
+              trajectory_trend: trajectory.trend,
+            } : {}),
+            ...(llm ? {
+              llm_score: llm.risk_score,
+              llm_context: llm.context,
+              llm_factors: llm.factors,
+              llm_reasoning: llm.reasoning,
+            } : {}),
+          })
+        ]
+      );
+    } catch (insertError) {
+      console.error('Error logging risk_score_history (non-fatal, verdict stands):', insertError);
+    }
 
     return {
       riskScore,
@@ -702,7 +720,10 @@ export async function getSessionCrisisEvents(sessionId: string): Promise<unknown
 /**
  * Get active crisis sessions
  */
-export async function getActiveCrisisSessions(): Promise<unknown[]> {
+export async function getActiveCrisisSessions(orgId?: number | null): Promise<unknown[]> {
+  // orgId scopes the read to one organization (org-bound researchers, C13);
+  // null returns byte-identical rows to the pre-scoping query (care-team
+  // callers, who are further caseload-filtered by the route).
   const result = await pool.query(
     `SELECT
        ts.session_id,
@@ -715,7 +736,9 @@ export async function getActiveCrisisSessions(): Promise<unknown[]> {
      FROM therapy_sessions ts
      LEFT JOIN users u ON ts.user_id = u.userid
      WHERE ts.crisis_flagged = TRUE
-     ORDER BY ts.crisis_risk_score DESC, ts.crisis_flagged_at DESC`
+       AND ($1::int IS NULL OR u.organization_id = $1)
+     ORDER BY ts.crisis_risk_score DESC, ts.crisis_flagged_at DESC`,
+    [orgId ?? null]
   );
   return result.rows;
 }

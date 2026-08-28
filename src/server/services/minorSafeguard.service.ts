@@ -206,16 +206,26 @@ export async function handleConfirmedMinor(opts: HandleConfirmedMinorOpts): Prom
     }
 
     if (channel === 'chat') {
-      await endSessionNow(sessionId, 'chat');
+      await endSessionNow(sessionId);
     } else {
       // Realtime: notify the client to run its end-session flow, then force the
-      // status after a grace window so the model can deliver the goodbye first.
+      // end after a grace window so the model can deliver the goodbye first.
+      // The backstop goes through serverEndSession (the shared finalize chain):
+      // the plain status flip used before left the sideband WS attached and the
+      // audio recording unfinalized forever — an ended-status session is
+      // invisible to the abandoned-session sweep, so nothing else ever
+      // finalized it. serverEndSession also no-ops when the client already
+      // ended cleanly during the grace window.
       if (global.io) {
         global.io.to(`session:${sessionId}`).emit('session:eligibility-end', { sessionId });
       }
       setTimeout(() => {
-        void endSessionNow(sessionId, 'realtime').catch(err =>
-          console.error('[MinorSafeguard] realtime end failed:', err));
+        void import('./sessionLifecycle.service.js')
+          .then(m => m.serverEndSession(sessionId, {
+            endedBy: 'system',
+            reason: 'eligibility_minor_end',
+          }))
+          .catch(err => console.error('[MinorSafeguard] realtime end failed:', err));
       }, REALTIME_END_GRACE_MS);
     }
   } catch (err) {
@@ -223,18 +233,18 @@ export async function handleConfirmedMinor(opts: HandleConfirmedMinorOpts): Prom
   }
 }
 
-/** End a session the same way /api/chat/end does, so an eligibility-ended
- *  session is not a special case downstream (redaction → naming, insights). */
-async function endSessionNow(sessionId: string, channel: 'realtime' | 'chat'): Promise<void> {
+/** End a CHAT session the same way /api/chat/end does, so an eligibility-ended
+ *  session is not a special case downstream (redaction → naming, insights).
+ *  Realtime sessions go through serverEndSession instead (sideband teardown +
+ *  recorder finalize live there). */
+async function endSessionNow(sessionId: string): Promise<void> {
   const { updateSessionStatus } = await import('../db/index.js');
   await updateSessionStatus(sessionId, 'ended', 'system');
 
-  if (channel === 'chat') {
-    const { endChatSession } = await import('./chatTherapy.service.js');
-    endChatSession(sessionId);
-    const { clearSteeringState } = await import('./crisisIntervention.service.js');
-    clearSteeringState(sessionId);
-  }
+  const { endChatSession } = await import('./chatTherapy.service.js');
+  endChatSession(sessionId);
+  const { clearSteeringState } = await import('./crisisIntervention.service.js');
+  clearSteeringState(sessionId);
 
   const endedAt = new Date();
   if (global.io) {

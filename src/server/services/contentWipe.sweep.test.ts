@@ -150,6 +150,41 @@ describe('executeContentWipe thread-message inclusion', () => {
     }
   });
 
+  // The scheduler runs executeContentWipe from a bare setTimeout: a throw here
+  // used to be an unhandled rejection AND skipped the reschedule, silently
+  // killing the nightly wipe until the next deploy. It must never reject.
+  it('resolves failure (never throws) when the running-log INSERT fails', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      const s = String(sql);
+      if (s.includes('SELECT config_value')) return Promise.resolve({ rows: [{ config_value: SETTINGS }] });
+      if (s.includes('INSERT INTO content_wipe_log')) return Promise.reject(new Error('db down'));
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await executeContentWipe('scheduler');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('db down');
+  });
+
+  it('resolves failure (never throws) even when recording the failure also fails', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      const s = String(sql);
+      if (s.includes('SELECT config_value')) return Promise.resolve({ rows: [{ config_value: SETTINGS }] });
+      if (s.includes('INSERT INTO content_wipe_log')) return Promise.resolve({ rows: [{ wipe_id: 'w1' }] });
+      if (s.includes(`status = 'failed'`)) return Promise.reject(new Error('db still down'));
+      if (s.includes('UPDATE messages')) return Promise.resolve({ rows: [], rowCount: 0 });
+      if (s.includes('SELECT COUNT(*)')) return Promise.resolve({ rows: [{ count: '0' }] });
+      return Promise.resolve({ rows: [] });
+    });
+    wipeAgedThreadMessageBodiesMock.mockRejectedValue(new Error('db down'));
+
+    const result = await executeContentWipe('scheduler');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('db down');
+  });
+
   it('marks the wipe failed (not silently partial) when the thread wipe throws', async () => {
     mockWipeRun();
     wipeAgedThreadMessageBodiesMock.mockRejectedValue(new Error('db down'));

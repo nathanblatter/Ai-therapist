@@ -217,13 +217,13 @@ async function scheduleNextRun(): Promise<void> {
     retentionTimeout = null;
   }
   if (!settings.enabled) {
-    console.log('📅 Data retention scheduler disabled');
+    console.log('[Retention] Scheduler disabled');
     nextScheduledRun = null;
     return;
   }
   nextScheduledRun = getNextRunTime(settings.run_time);
   const ms = nextScheduledRun.getTime() - Date.now();
-  console.log(`📅 Next data retention run scheduled for ${nextScheduledRun.toISOString()}`);
+  console.log(`[Retention] Next run scheduled for ${nextScheduledRun.toISOString()}`);
   retentionTimeout = setTimeout(async () => {
     await enforceRetention('scheduler').catch(err => console.error('[Retention] scheduled run failed:', err));
     // Daily, idempotent study-ops anomaly scan piggybacks on this tick.
@@ -240,7 +240,7 @@ async function scheduleNextRun(): Promise<void> {
 
 /** Start the retention scheduler. Wire in index.ts next to startContentWipeScheduler(). */
 export async function startScheduler(): Promise<void> {
-  console.log('🚀 Starting data retention scheduler...');
+  console.log('[Retention] Starting scheduler...');
   await scheduleNextRun();
 }
 

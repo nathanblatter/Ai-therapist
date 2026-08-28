@@ -29,7 +29,10 @@ vi.mock('openai', () => ({
   },
 }));
 
-const { detectCrisisKeywords, analyzeMessageRisk, analyzeStandaloneRisk, flagSessionCrisis } = await import('./crisisDetection.service.js');
+const {
+  detectCrisisKeywords, analyzeMessageRisk, analyzeStandaloneRisk, flagSessionCrisis,
+  _sweepCounterSizeForTests,
+} = await import('./crisisDetection.service.js');
 
 function llmResponse(payload: Record<string, unknown>) {
   return { choices: [{ message: { content: JSON.stringify(payload) } }] };
@@ -206,6 +209,49 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
     });
     const r = await analyzeMessageRisk({ content: 'the weather is nice today', session_id: 'sess-traj-zero', message_id: 2 }, []);
     expect(r.riskScore).toBe(0);
+  });
+
+  // Fail-open regression: a failed history INSERT used to fall into the outer
+  // catch and return riskScore 0 / severity 'none' — an LLM-assessed HIGH
+  // crisis was silently dropped (no flag, no page) on a transient DB error.
+  it('keeps the LLM-assessed verdict when the risk_score_history insert fails', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 82, severity: 'high', context: 'genuine',
+      factors: ['active ideation', 'expressed plan'], reasoning: 'Active ideation with plan.',
+    }));
+    queryMock.mockImplementation((sql: string) => {
+      if (String(sql).includes('INSERT INTO risk_score_history')) {
+        return Promise.reject(new Error('db down'));
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await analyzeMessageRisk(msg('I want to die and I know how I would do it'), []);
+    expect(r.riskScore).toBe(82);
+    expect(r.severity).toBe('high');
+  });
+
+  it('keeps the keyword-fallback verdict when both the LLM and the insert fail', async () => {
+    createMock.mockRejectedValue(new Error('openai down'));
+    queryMock.mockImplementation((sql: string) => {
+      if (String(sql).includes('INSERT INTO risk_score_history')) {
+        return Promise.reject(new Error('db down'));
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    const r = await analyzeMessageRisk(msg('I want to end my life'), []);
+    expect(r.riskScore).toBe(75);
+    expect(r.severity).toBe('high');
+  });
+
+  // Leak regression: the old cleanup only deleted counters that were exactly 0
+  // (just-reset, i.e. ACTIVE sessions), so stale mid-count sessions accumulated
+  // forever on a long-lived process.
+  it('bounds the sweep-counter map instead of growing per session forever', async () => {
+    const before = _sweepCounterSizeForTests();
+    for (let i = 0; i < 600; i++) {
+      await analyzeMessageRisk({ content: 'a quiet neutral message', session_id: `leak-${i}`, message_id: 1 }, []);
+    }
+    expect(_sweepCounterSizeForTests()).toBeLessThan(400 + before);
   });
 
   it('logs the assessment to risk_score_history with both stage breakdowns', async () => {

@@ -319,6 +319,18 @@ describe('reconnect guard after session end (wave1 bug 4)', () => {
     ).rejects.toThrow(/ended/i);
     expect(sb.connections.has(sessionId)).toBe(false);
   });
+
+  // Leak regression: nothing ever removed ended-session ids, so the set grew
+  // one entry per ended session for the life of the process. The most recent
+  // end (the one whose retry window is live) must survive eviction.
+  it('bounds the ended-sessions set instead of growing per session forever', async () => {
+    for (let i = 0; i < 1200; i++) {
+      await sidebandManager.disconnect(`leak-${i}`);
+    }
+    expect(sidebandManager._endedSessionsSizeForTests()).toBeLessThanOrEqual(1000);
+    const sb = sidebandManager as Internal;
+    expect(sb.endedSessions.has('leak-1199')).toBe(true);
+  });
 });
 
 describe('tryInject (ai-therapist-112)', () => {

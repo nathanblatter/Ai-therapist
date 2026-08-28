@@ -43,11 +43,26 @@ let sweepTimer: ReturnType<typeof setInterval> | null = null;
 /** Record that a session showed a sign of life (audio chunk, socket rejoin). */
 export function noteSessionActivity(sessionId: string): void {
   lastActivity.set(sessionId, Date.now());
+  // Opportunistic prune: nothing ever deleted entries, so the map grew one
+  // entry per session for the life of the process. Entries older than the
+  // inactivity timeout belong to dead sessions — every reader only looks at
+  // much shorter windows (DISCONNECT_GRACE_MS), so pruning them is invisible.
+  if (lastActivity.size > 500) {
+    const cutoff = Date.now() - INACTIVITY_TIMEOUT_MS;
+    for (const [id, ts] of lastActivity) {
+      if (ts < cutoff) lastActivity.delete(id);
+    }
+  }
   const pending = pendingChecks.get(sessionId);
   if (pending) {
     clearTimeout(pending);
     pendingChecks.delete(sessionId);
   }
+}
+
+/** Test hook: current last-activity map size (leak regression guard). */
+export function _lastActivitySizeForTests(): number {
+  return lastActivity.size;
 }
 
 /** Schedule a grace-window abandon check after a participant socket disconnects. */
