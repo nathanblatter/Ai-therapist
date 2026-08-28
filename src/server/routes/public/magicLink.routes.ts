@@ -42,18 +42,27 @@ export default function magicLinkRoutes(): Router {
 
       const demoUser = await createDemoUser();
 
-      req.session.userId = demoUser.userid;
-      req.session.username = demoUser.username;
-      req.session.userRole = 'demo';
-      req.session.mfaVerified = true;
-
-      req.session.save((err) => {
-        if (err) {
-          console.error('[MagicLink] Session save error:', err);
+      // Fresh session id for the demo login (fixation) — and, critically, no
+      // leftover fields from a previous real login on this browser (a stale
+      // orgId would scope org-gated lookups for the demo user to a real org).
+      req.session.regenerate((regenErr) => {
+        if (regenErr) {
+          console.error('[MagicLink] Session regenerate error:', regenErr);
           return res.status(500).send('Could not start demo session.');
         }
-        console.log(`[MagicLink] Provisioned demo account ${demoUser.username} (id ${demoUser.userid})`);
-        res.redirect('/demo');
+        req.session.userId = demoUser.userid;
+        req.session.username = demoUser.username;
+        req.session.userRole = 'demo';
+        req.session.mfaVerified = true;
+
+        req.session.save((err) => {
+          if (err) {
+            console.error('[MagicLink] Session save error:', err);
+            return res.status(500).send('Could not start demo session.');
+          }
+          console.log(`[MagicLink] Provisioned demo account ${demoUser.username} (id ${demoUser.userid})`);
+          res.redirect('/demo');
+        });
       });
     } catch (error) {
       console.error('[MagicLink] Failed to provision demo account:', error);

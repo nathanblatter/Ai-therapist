@@ -61,22 +61,44 @@ export default function authRoutes(): Router {
         await updateMFAVerificationTime(user.userid);
       }
 
-      // Establish the session. orgId/isSandbox (caseworker portal, 069/077)
-      // are stamped here so org scoping never needs a per-request lookup.
-      req.session.userId = user.userid;
-      req.session.username = user.username;
-      req.session.userRole = user.role;
-      req.session.mfaVerified = true;
-      if (typeof user.organization_id === 'number') req.session.orgId = user.organization_id;
-      req.session.isSandbox = user.is_sandbox === true;
+      // Establish the session on a FRESH session id: regenerating on login
+      // both blocks session fixation and guarantees no field stamped for a
+      // previous account survives — orgIdFor short-circuits on a session
+      // orgId, so a stale value from an earlier login on this browser would
+      // scope the new user's org-gated queries to the WRONG organization.
+      // State that belongs to the browser/human rather than the account
+      // (consent acceptance, anonymous session ownership) is carried over.
+      const carried = {
+        ownedSessions: req.session.ownedSessions,
+        consentAccepted: req.session.consentAccepted,
+        consentVersion: req.session.consentVersion,
+        consentAcceptedAt: req.session.consentAcceptedAt,
+      };
+      req.session.regenerate((regenErr) => {
+        if (regenErr) {
+          console.error('Session regenerate error:', regenErr);
+          return res.status(500).json({ error: 'Login failed' });
+        }
+        Object.assign(req.session, carried);
+        // orgId/isSandbox (caseworker portal, 069/077) are stamped here so
+        // org scoping never needs a per-request lookup.
+        req.session.userId = user.userid;
+        req.session.username = user.username;
+        req.session.userRole = user.role;
+        req.session.mfaVerified = true;
+        if (typeof user.organization_id === 'number') req.session.orgId = user.organization_id;
+        req.session.isSandbox = user.is_sandbox === true;
 
-      req.session.save((err) => {
-        if (err) console.error('Session save error:', err);
-      });
-
-      res.json({
-        success: true,
-        user: { userid: user.userid, username: user.username, role: user.role },
+        req.session.save((err) => {
+          if (err) {
+            console.error('Session save error:', err);
+            return res.status(500).json({ error: 'Login failed' });
+          }
+          res.json({
+            success: true,
+            user: { userid: user.userid, username: user.username, role: user.role },
+          });
+        });
       });
     } catch (error) {
       console.error('Login error:', error);

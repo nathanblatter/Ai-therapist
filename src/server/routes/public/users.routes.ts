@@ -35,6 +35,11 @@ const DEFAULT_LANGUAGES: LanguagesConfig = {
 // Must match THEMES in src/client/shared/theme.ts.
 const VALID_THEMES = ['default', 'sage', 'ocean', 'dusk', 'dark'];
 
+// Assignable roles (same list POST /api/users and /api/auth/register enforce).
+// 'demo' is deliberately absent — demo accounts are only minted by the magic
+// link, and an arbitrary role string would corrupt every role-keyed gate.
+const VALID_ROLES = ['therapist', 'researcher', 'participant', 'caseworker'];
+
 export default function usersRoutes(): Router {
   const router = Router();
 
@@ -202,6 +207,9 @@ export default function usersRoutes(): Router {
     if (!isResearcher && role !== undefined) {
       return res.status(403).json({ error: 'Only researchers can change user roles' });
     }
+    if (role !== undefined && !VALID_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
 
     try {
       const updates: UserUpdates = {};
@@ -255,7 +263,7 @@ export default function usersRoutes(): Router {
     if (!username || !password || !role) {
       return res.status(400).json({ error: 'Username, password, and role are required' });
     }
-    if (!['therapist', 'researcher', 'participant', 'caseworker'].includes(role)) {
+    if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 

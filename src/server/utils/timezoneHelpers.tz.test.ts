@@ -6,8 +6,8 @@
 // its own test file (vitest runs each file in a fresh worker).
 process.env.TZ = 'Asia/Tokyo';
 
-import { describe, it, expect } from 'vitest';
-import { getStartOfTodaySLC, denverDateStamp } from './timezoneHelpers.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { getStartOfTodaySLC, getNextMidnightSLC, denverDateStamp } from './timezoneHelpers.js';
 
 describe('getStartOfTodaySLC on a non-Denver host (TZ=Asia/Tokyo)', () => {
   it('host timezone is actually Tokyo (guard for the test setup itself)', () => {
@@ -27,5 +27,34 @@ describe('getStartOfTodaySLC on a non-Denver host (TZ=Asia/Tokyo)', () => {
     expect(denverDateStamp(start)).toBe(denverDateStamp());
     expect(start.getTime()).toBeLessThanOrEqual(Date.now());
     expect(Date.now() - start.getTime()).toBeLessThanOrEqual(25 * 3_600_000);
+  });
+});
+
+// getNextMidnightSLC's failure window is a "now" inside 00:00-02:00 Denver on
+// a DST transition day: the upcoming midnight sits across the transition, so
+// deriving it from the offset at "now" (the old implementation) lands an hour
+// off. These pin the exact instants on both 2026 transitions, on a non-Denver
+// host so the host-TZ parse can't mask the bug.
+describe('getNextMidnightSLC across DST transitions (TZ=Asia/Tokyo)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('spring forward: 01:30 MST on 2026-03-08 -> next midnight is Mar 9 00:00 MDT (06:00Z)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-08T08:30:00Z')); // 01:30 MST, before the 02:00 jump
+    expect(getNextMidnightSLC().toISOString()).toBe('2026-03-09T06:00:00.000Z');
+  });
+
+  it('fall back: 01:30 MDT on 2026-11-01 -> next midnight is Nov 2 00:00 MST (07:00Z)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-01T07:30:00Z')); // 01:30 MDT, first pass through the repeated hour
+    expect(getNextMidnightSLC().toISOString()).toBe('2026-11-02T07:00:00.000Z');
+  });
+
+  it('ordinary day: next midnight is exactly the following Denver midnight', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-28T18:00:00Z')); // 12:00 MDT
+    expect(getNextMidnightSLC().toISOString()).toBe('2026-08-29T06:00:00.000Z');
   });
 });

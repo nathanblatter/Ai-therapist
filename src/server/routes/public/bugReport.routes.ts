@@ -1,6 +1,7 @@
 // Bug report -> flightdeck. Public (no auth/session); mounted before the
 // session + IP-geo middleware so reports work from anywhere.
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import busboy from 'busboy';
 
 const MAX_FILES = 4;
@@ -22,10 +23,21 @@ function flightdeckBase(): string {
   return (process.env.FLIGHTDECK_URL || 'http://flightdeck:8080').replace(/\/$/, '');
 }
 
+// Forwarded meta blobs are debugging context, not payload storage; anything
+// bigger than this is replaced with a size marker instead of being relayed.
+const MAX_META_BYTES = 8 * 1024;
+
 export default function bugReportRoutes(): Router {
   const router = Router();
 
-  router.post('/api/bug-report', async (req, res) => {
+  // Per-IP backstop: these are unauthenticated write endpoints that forward
+  // into flightdeck (and buffer multi-MB uploads), so like every other public
+  // write route they need a limiter — a stuck client or hostile script must
+  // not be able to flood the tracker.
+  const reportLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  const screenshotLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+
+  router.post('/api/bug-report', reportLimiter, async (req, res) => {
     const key = process.env.FLIGHTDECK_INGEST_KEY;
     if (!key) return res.status(503).json({ error: 'Bug reporting is not configured.' });
 
@@ -34,16 +46,26 @@ export default function bugReportRoutes(): Router {
       return res.status(400).json({ error: 'A description is required.' });
     }
 
+    let cappedMeta: Record<string, unknown> = {};
+    if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+      try {
+        const bytes = Buffer.byteLength(JSON.stringify(meta), 'utf8');
+        cappedMeta = bytes <= MAX_META_BYTES ? meta : { truncated: true, original_bytes: bytes };
+      } catch {
+        cappedMeta = {};
+      }
+    }
+
     try {
       const r = await fetch(flightdeckBase() + '/api/ingest/bug', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': key },
         body: JSON.stringify({
           site: 'ai-therapist',
-          url: url || '',
+          url: typeof url === 'string' ? url.slice(0, 2048) : '',
           message: message.trim().slice(0, 5000),
           severity: ['low', 'med', 'high', 'urgent'].includes(severity) ? severity : 'med',
-          meta: meta || {},
+          meta: cappedMeta,
         }),
       });
       if (!r.ok) throw new Error('ingest ' + r.status);
@@ -61,7 +83,7 @@ export default function bugReportRoutes(): Router {
   // upload here (enforcing 4 files x 8MB, images only) and re-posts it to
   // flightdeck with the server-held ingest key — the key never leaves the
   // server. No DB involved.
-  router.post('/api/bug-report/:id/screenshots', (req, res) => {
+  router.post('/api/bug-report/:id/screenshots', screenshotLimiter, (req, res) => {
     const key = process.env.FLIGHTDECK_INGEST_KEY;
     if (!key) return res.status(503).json({ error: 'Bug reporting is not configured.' });
 

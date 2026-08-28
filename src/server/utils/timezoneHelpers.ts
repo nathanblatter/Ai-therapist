@@ -1,20 +1,15 @@
+// Upcoming Denver midnight (start of TOMORROW's Denver date) as a real UTC
+// instant. Built like getStartOfTodaySLC below: Denver calendar date + Denver
+// UTC offset, two passes so a DST transition between now and that midnight
+// (i.e. "now" is in the 00:00-02:00 window of a transition day) doesn't land
+// the result an hour off — the previous wall-clock-parse implementation used
+// the offset at "now" and did exactly that.
 export function getNextMidnightSLC(): Date {
-  const now = new Date();
-  // Denver wall-clock "now", parsed in the host's local timezone.
-  const denverWallNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Denver' }));
-  // Offset between the real instant and the Denver wall-clock reading. Using the
-  // offset at "now" keeps this correct regardless of the host timezone (and across
-  // DST), which a bare setHours on the wall-clock value does not.
-  // toLocaleString has no sub-second precision, so floor `now` to whole seconds
-  // before differencing — the host↔Denver offset is whole minutes, giving a clean
-  // instant (and avoiding a spurious ±1s).
-  const nowFloorMs = Math.floor(now.getTime() / 1000) * 1000;
-  const offsetMs = nowFloorMs - denverWallNow.getTime();
-  // Next Denver midnight, expressed in Denver wall-clock terms…
-  const nextMidnightWall = new Date(denverWallNow);
-  nextMidnightWall.setHours(24, 0, 0, 0);
-  // …converted back to a real UTC instant.
-  return new Date(nextMidnightWall.getTime() + offsetMs);
+  const [y, m, d] = denverDateStamp().split('-').map(Number);
+  const wallMidnightUtcMs = Date.UTC(y, m - 1, d + 1); // Date.UTC normalizes the day overflow
+  let instant = new Date(wallMidnightUtcMs - denverOffsetMs(new Date()));
+  instant = new Date(wallMidnightUtcMs - denverOffsetMs(instant));
+  return instant;
 }
 
 export function getHoursUntilReset(): number {

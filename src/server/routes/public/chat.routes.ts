@@ -4,6 +4,7 @@
 // services/chatTherapy.service.ts; persistence/redaction go through the db
 // layer and the redaction queue.
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import {
   createSession,
   insertMessagesBatch,
@@ -38,16 +39,26 @@ async function isSyntheticAccountSession(sessionId: string): Promise<boolean> {
 export default function chatRoutes(): Router {
   const router = Router();
 
+  // Per-IP backstops. checkSessionLimits only constrains logged-in users, and
+  // every /api/chat/message turn is a paid model call, so without these an
+  // anonymous script could mint sessions and burn OpenAI spend without bound.
+  // Generous enough that a real participant never sees them.
+  const chatStartLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });
+  const chatMessageLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
+
   // POST /api/chat/start - start a chat-only therapy session. Blocked until
   // the participant has accepted the current consent screen.
-  router.post('/api/chat/start', requireConsent, async (req, res) => {
+  router.post('/api/chat/start', chatStartLimiter, requireConsent, async (req, res) => {
     const userId: number | string = req.session?.userId ?? req.sessionID;
     const numericUserId: number | null = typeof userId === 'number' ? userId : null;
 
     try {
-      // Enforce session limits (mirrors the /token endpoint).
+      // Enforce session limits (mirrors the /token endpoint). MUST use the
+      // numeric id: therapy_sessions.user_id is INTEGER, and passing an
+      // anonymous express-session id string made the limit/idempotency
+      // queries throw a pg cast error and 500 every anonymous chat start.
       const userRole = req.session?.userRole || 'participant';
-      const limitCheck = await checkSessionLimits(userId, userRole);
+      const limitCheck = await checkSessionLimits(numericUserId, userRole);
       if (!limitCheck.allowed) {
         return res.status(429).json({
           error: 'Session limit exceeded',
@@ -56,8 +67,9 @@ export default function chatRoutes(): Router {
         });
       }
 
-      // One active session per user at a time.
-      const existingSession = await getActiveSessionForUser(userId);
+      // One active session per user at a time (logged-in users only — the
+      // integer user_id column cannot key anonymous browsers).
+      const existingSession = numericUserId ? await getActiveSessionForUser(numericUserId) : null;
       if (existingSession) {
         return res.status(200).json({
           message: 'Active session already exists',
@@ -145,7 +157,7 @@ export default function chatRoutes(): Router {
   });
 
   // POST /api/chat/message - send a message and get the AI response
-  router.post('/api/chat/message', async (req, res) => {
+  router.post('/api/chat/message', chatMessageLimiter, async (req, res) => {
     const { sessionId, message } = req.body;
 
     if (!sessionId || !message) {

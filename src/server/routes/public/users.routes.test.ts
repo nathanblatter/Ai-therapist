@@ -93,3 +93,25 @@ describe('demo write guard on /api/users (defense-in-depth)', () => {
     expect(dbMocks.updateUser).toHaveBeenCalledWith('4242', { username: 'renamed' });
   });
 });
+
+describe('PUT /api/users/:userid role validation', () => {
+  it('rejects a role outside the assignable allowlist (same list as POST)', async () => {
+    for (const bad of ['demo', 'admin', 'superuser', '']) {
+      const res = await request(appAs('researcher', 1))
+        .put('/api/users/4242')
+        .send({ role: bad });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Invalid role');
+    }
+    expect(dbMocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid role change from a researcher', async () => {
+    dbMocks.updateUser.mockResolvedValue({ userid: 4242, username: 'u', role: 'caseworker' });
+    const res = await request(appAs('researcher', 1))
+      .put('/api/users/4242')
+      .send({ role: 'caseworker' });
+    expect(res.status).toBe(200);
+    expect(dbMocks.updateUser).toHaveBeenCalledWith('4242', { role: 'caseworker' });
+  });
+});
