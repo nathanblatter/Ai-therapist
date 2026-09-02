@@ -1,3 +1,4 @@
+/* eslint-disable -- paste-into-Qualtrics snippet: runs in the survey runtime (Qualtrics global, its API conventions), not bundled with the app. */
 /* Qualtrics custom JS — attach to the WID (study ID) question of the weekly
  * check-in survey (Question behavior -> JavaScript). Pairs with a
  * "Set Embedded Data: sid (from URL)" element in the survey flow.

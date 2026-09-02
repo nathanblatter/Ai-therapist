@@ -1,3 +1,4 @@
+/* eslint-disable -- paste-into-Qualtrics snippet: runs in the survey runtime (Qualtrics global, its API conventions), not bundled with the app. */
 /* Qualtrics custom JS — attach to W7 ("Did anything about your conversations
  * ... bother you, upset you, or feel wrong this week?") on the weekly check-in
  * survey (Question behavior -> JavaScript). Same snippet works for the
@@ -10,7 +11,7 @@
  * amber notice pattern.
  */
 Qualtrics.SurveyEngine.addOnload(function () {
-  var q = this;
+  var q = this; // eslint-disable-line @typescript-eslint/no-this-alias -- Qualtrics API convention
   var container = q.getQuestionContainer();
 
   var notice = document.createElement('div');
