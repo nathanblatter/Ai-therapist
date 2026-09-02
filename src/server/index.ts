@@ -45,6 +45,7 @@ import sidebandRoutes from "./routes/admin/sideband.routes.js";
 import insightsRoutes from "./routes/admin/insights.routes.js";
 import participantProfileRoutes from "./routes/admin/participantProfile.routes.js";
 import knowledgeRoutes from "./routes/admin/knowledge.routes.js";
+import qualtricsSyncRoutes from "./routes/admin/qualtricsSync.routes.js";
 import prepRoutes from "./routes/admin/prep.routes.js";
 import evalsRoutes from "./routes/admin/evals.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
@@ -729,6 +730,9 @@ app.use(joinStudyRoutes());
 
 // RAG knowledge-base curation (Knowledge Base tab) -> routes/admin/knowledge.routes.ts.
 app.use(knowledgeRoutes());
+
+// Qualtrics response sync (researcher-only, env-gated) -> routes/admin/qualtricsSync.routes.ts
+app.use(qualtricsSyncRoutes());
 
 // Session eval harness (LLM-judge quality scores) -> routes/admin/evals.routes.ts
 app.use(evalsRoutes());

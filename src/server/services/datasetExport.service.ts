@@ -25,6 +25,7 @@ import {
   getFeedbackCommentsExport,
   type DatasetRow,
 } from '../db/datasetExport.queries.js';
+import { getSurveyResponsesExport } from '../db/qualtricsResponses.queries.js';
 
 export interface DatasetColumn {
   name: string;
@@ -224,6 +225,18 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'risk_score', type: 'int', source: 'crisis_events.risk_score', values: '0-100' },
       { name: 'trigger_method', type: 'string', source: 'crisis_events.trigger_method', values: 'auto, manual, system' },
       { name: 'occurred_at', type: 'timestamp', source: 'crisis_events.created_at' },
+    ],
+  },
+  {
+    file: 'surveys.csv',
+    description:
+      'One row per finished, participant-linked Qualtrics survey response (baseline/weekly/exit/week12), synced via the Qualtrics API (qualtrics_responses). Linkage/timing/completeness only; answer content stays out of the default bundle.',
+    fetch: getSurveyResponsesExport,
+    columns: [
+      { name: 'participant_id', type: 'string', source: 'research_pseudonyms', values: 'P001, P002, ...' },
+      { name: 'survey_role', type: 'string', source: 'qualtrics_responses.survey_role', values: 'baseline, weekly, exit, week12' },
+      { name: 'finished', type: 'bool', source: 'qualtrics_responses.finished' },
+      { name: 'recorded_at', type: 'timestamp', source: 'qualtrics_responses.recorded_at' },
     ],
   },
 ];
