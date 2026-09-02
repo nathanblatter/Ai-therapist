@@ -77,7 +77,7 @@ export async function getQualtricsLinkageStats(): Promise<SurveyLinkageStats[]> 
             count(*) FILTER (WHERE finished)::int AS finished,
             count(*) FILTER (WHERE user_id IS NOT NULL)::int AS linked,
             count(*) FILTER (WHERE finished AND user_id IS NULL)::int AS unlinked_finished,
-            to_char(max(recorded_at), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_recorded_at
+            to_char(max(recorded_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_recorded_at
      FROM qualtrics_responses
      GROUP BY survey_role
      ORDER BY survey_role`
@@ -99,7 +99,7 @@ export async function getQualtricsLinkageStats(): Promise<SurveyLinkageStats[]> 
 export async function getUnlinkedFinishedResponses(limit = 50): Promise<UnlinkedResponse[]> {
   const { rows } = await pool.query(
     `SELECT response_id, survey_role, study_sid,
-            to_char(recorded_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS recorded_at
+            to_char(recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS recorded_at
      FROM qualtrics_responses
      WHERE finished AND user_id IS NULL
      ORDER BY recorded_at DESC NULLS LAST
@@ -130,7 +130,7 @@ export async function getSurveyResponsesExport(asOf: string): Promise<SurveyExpo
     `SELECT rp.pseudonym AS participant_id,
             qr.survey_role,
             qr.finished,
-            to_char(qr.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS recorded_at
+            to_char(qr.recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS recorded_at
      FROM qualtrics_responses qr
      JOIN research_pseudonyms rp
        ON rp.entity_type = 'participant' AND rp.entity_key = qr.user_id::text

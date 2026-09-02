@@ -46,12 +46,16 @@ export async function redactSession(sessionId: string): Promise<void> {
       ]))
       .catch(err => console.error('Failed to record redaction LLM usage (non-fatal):', err));
 
-    // Persist each redacted message.
+    // Persist each redacted message. A stale redaction_error from an earlier
+    // failed attempt is cleared on success — leaving it would permanently
+    // exclude the message from the content wipe (the wipe requires
+    // redaction_error IS NULL) and inflate the ops error count forever.
     for (const [messageId, content] of redacted) {
       await pool.query(
         `UPDATE messages
             SET content_redacted = $1,
-                metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('redacted_at', $2::text)
+                metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error')
+                           || jsonb_build_object('redacted_at', $2::text)
           WHERE message_id = $3`,
         [content, redactedAt, messageId]
       );

@@ -95,10 +95,18 @@ describe('requireOutsideQuietHours middleware', () => {
     expect(run({ userRole: 'participant' }).nexted).toBe(true);
   });
 
-  it('blocks participants (and role-less sessions) during active quiet hours', () => {
+  /** Force a window that provably contains the CURRENT Denver hour — the
+   *  middleware reads the real clock, and a fixed 0-23 window is false at
+   *  23:xx (hourInWindow(23, 0, 23) === false), i.e. a nightly CI flake. */
+  function forceActiveWindow() {
+    const h = denverHour();
     process.env.QUIET_HOURS_ENABLED = 'true';
-    process.env.QUIET_HOURS_START_HOUR = '0';
-    process.env.QUIET_HOURS_END_HOUR = '23'; // force-active for the test
+    process.env.QUIET_HOURS_START_HOUR = String(h);
+    process.env.QUIET_HOURS_END_HOUR = String((h + 1) % 24);
+  }
+
+  it('blocks participants (and role-less sessions) during active quiet hours', () => {
+    forceActiveWindow();
     const blocked = run({ userRole: 'participant' });
     expect(blocked.nexted).toBe(false);
     expect(blocked.statusCode).toBe(403);
@@ -107,9 +115,7 @@ describe('requireOutsideQuietHours middleware', () => {
   });
 
   it('never blocks staff, demo, or sandbox users', () => {
-    process.env.QUIET_HOURS_ENABLED = 'true';
-    process.env.QUIET_HOURS_START_HOUR = '0';
-    process.env.QUIET_HOURS_END_HOUR = '23';
+    forceActiveWindow();
     expect(run({ userRole: 'researcher' }).nexted).toBe(true);
     expect(run({ userRole: 'therapist' }).nexted).toBe(true);
     expect(run({ userRole: 'caseworker' }).nexted).toBe(true);

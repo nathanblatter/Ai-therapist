@@ -165,6 +165,14 @@ async function redactItemsIndividually(inputs: string[]): Promise<string[]> {
     async function worker() {
         while (next < inputs.length && errors.length === 0) {
             const idx = next++;
+            if (inputs[idx] === '') {
+                // The batch prompt handles empty text explicitly; the base
+                // prompt doesn't, and a model may answer with prose ("There is
+                // no text to redact") that would then be STORED as redacted
+                // content. Empty in, empty out.
+                out[idx] = '';
+                continue;
+            }
             try {
                 out[idx] = await redactPHISinglePass(inputs[idx]);
             } catch (err) {
@@ -186,23 +194,32 @@ async function redactBatchPassResilient(inputs: string[]): Promise<string[]> {
         try {
             return await redactBatchSinglePass(inputs);
         } catch (err) {
-            console.warn(`[Redaction] batch pass attempt ${attempt} invalid (${err instanceof Error ? err.message : err}); ${attempt === 1 ? 'retrying batch' : 'falling back to per-item redaction'}`);
+            console.warn(`[Redaction] batch pass attempt ${attempt} failed (${err instanceof Error ? err.message : err}); ${attempt === 1 ? 'retrying batch' : 'falling back to per-item redaction'}`);
         }
     }
     return redactItemsIndividually(inputs);
 }
 
+/** Max items per model call. A whole-session batch must reproduce the entire
+ *  transcript in its output; very long sessions risk output truncation, which
+ *  reads as a parse failure and (deterministically, since the retry resends
+ *  the identical input) escalates straight to 2N per-item calls. Chunking
+ *  keeps each call comfortably inside output limits. */
+const BATCH_CHUNK_SIZE = 50;
+
 /**
- * Double-pass redact a batch of messages (two model calls in the happy path,
- * degrading to per-item calls when the model mangles the batch shape).
- * Returns a map of message id → redacted text.
+ * Double-pass redact a batch of messages (two model calls per <=50-message
+ * chunk in the happy path, degrading to per-item calls when the model mangles
+ * the batch shape). Returns a map of message id → redacted text.
  */
 export async function redactPHIBatch(items: Array<{ id: number; content: string | null }>): Promise<Map<number, string>> {
-    const inputs = items.map(i => i.content ?? '');
-    const firstPass = await redactBatchPassResilient(inputs);
-    const secondPass = await redactBatchPassResilient(firstPass);
-
     const result = new Map<number, string>();
-    items.forEach((item, idx) => result.set(item.id, secondPass[idx]));
+    for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
+        const chunk = items.slice(start, start + BATCH_CHUNK_SIZE);
+        const inputs = chunk.map(i => i.content ?? '');
+        const firstPass = await redactBatchPassResilient(inputs);
+        const secondPass = await redactBatchPassResilient(firstPass);
+        chunk.forEach((item, idx) => result.set(item.id, secondPass[idx]));
+    }
     return result;
 }

@@ -72,13 +72,12 @@ def t_crit_975(df: int) -> float:
 def t_two_sided_p(t: float, df: int) -> float:
     """Two-sided p from a t statistic via the normal approx blended toward the
     t tail for small df (adequate at the df this study produces, >= 50)."""
-    z = abs(t)
-    # normal survival function
-    p_norm = math.erfc(z / math.sqrt(2))
-    if df >= 100:
-        return p_norm
-    # crude widening for smaller df: scale z by the t/normal critical ratio
-    z_adj = z * 1.960 / t_crit_975(df)
+    # Scale z by the normal/t critical ratio at this df, then use the normal
+    # tail. Exact at the alpha=.05 decision boundary for every df (reviewed:
+    # the old df>=100 shortcut returned the raw normal p, which rejected at
+    # |t|>1.96 instead of ~1.98 — mildly anticonservative — and jumped
+    # discontinuously at df=100).
+    z_adj = abs(t) * 1.960 / t_crit_975(df)
     return math.erfc(z_adj / math.sqrt(2))
 
 
@@ -121,9 +120,19 @@ def random_intercept_fgls(pid: np.ndarray, wk: np.ndarray, y: np.ndarray):
     XtX_inv = np.linalg.inv(Xs.T @ Xs)
     beta = XtX_inv @ (Xs.T @ ys_)
     r2 = ys_ - Xs @ beta
+    # CR2 (Bell-McCaffrey) sandwich: adjust each cluster's residuals by
+    # (I - H_gg)^{-1/2} before forming the meat. Plain CR0 ran liberal here
+    # (empirical size ~0.057 at G=120 over 6000 null replicates) because
+    # cluster sizes vary 1-9 and high-leverage clusters get shrunken
+    # residuals; CR2 undoes exactly that shrinkage.
     meat = np.zeros((2, 2))
     for m in masks:
-        s = Xs[m].T @ r2[m]
+        Xg = Xs[m]
+        Hgg = Xg @ XtX_inv @ Xg.T
+        w, Q = np.linalg.eigh(np.eye(len(Xg)) - Hgg)
+        w = np.clip(w, 1e-10, None)
+        adj = Q @ np.diag(1.0 / np.sqrt(w)) @ Q.T
+        s = Xg.T @ (adj @ r2[m])
         meat += np.outer(s, s)
     V = XtX_inv @ meat @ XtX_inv
     se = float(np.sqrt(V[1, 1]))
@@ -215,13 +224,31 @@ def secondary(data_dir: str) -> None:
         pids = [r["participant_id"] for r in sessions if r.get("participant_id")]
         print(f"  [S1] engagement: {len(sessions)} sessions across "
               f"{len(set(pids))} participants.")
-        # time-to-disengagement from last session week per participant
-        by_pid: dict[str, float] = {}
+        # Time-to-disengagement: weeks from each participant's FIRST session to
+        # their LAST session (all treated as events — by analysis time the
+        # access period has ended for everyone, so there is no censoring).
+        firsts: dict[str, float] = {}
+        lasts: dict[str, float] = {}
         for r in sessions:
-            p = r.get("participant_id")
+            pid = r.get("participant_id")
             started = r.get("started_at") or ""
-            if p and started:
-                by_pid.setdefault(p, 0.0)
+            if not pid or not started:
+                continue
+            try:
+                from datetime import datetime
+                ts = datetime.fromisoformat(started.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+            firsts[pid] = min(firsts.get(pid, ts), ts)
+            lasts[pid] = max(lasts.get(pid, ts), ts)
+        if firsts:
+            weeks_active = np.array(
+                [(lasts[pid] - firsts[pid]) / (7 * 86400) for pid in firsts]
+            )
+            med = km_median_weeks(weeks_active)
+            print(f"  [S1] Kaplan-Meier median weeks active: "
+                  f"{med:.1f}" if med is not None else
+                  "  [S1] Kaplan-Meier median weeks active: not reached (>50% span full period)")
         flags = [r.get("crisis_flagged", "").lower() in ("true", "t", "1") for r in sessions]
         if flags:
             print(f"  [S3] safety: crisis-flagged session rate {np.mean(flags):.3%}")

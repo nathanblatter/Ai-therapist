@@ -79,6 +79,18 @@ export default function logsRoutes(): Router {
             return res.status(403).json({ error: 'Access denied' });
           }
         } else {
+          // Quiet hours defense-in-depth (ai-therapist-152): the lazy-create
+          // path would otherwise let a participant mint a NEW session row
+          // overnight by logging against a fresh id. Existing sessions (the
+          // one legitimately spanning 10pm) keep logging untouched.
+          {
+            const { isQuietHoursActive } = await import('../../utils/quietHours.js');
+            const role = req.session?.userRole ?? 'participant';
+            if (role === 'participant' && req.session?.isSandbox !== true && isQuietHoursActive()) {
+              console.warn(`[Logs] Rejected overnight lazy session creation ${sessionId.substring(0, 12)}...`);
+              return res.status(403).json({ error: 'quiet_hours' });
+            }
+          }
           const { isNonStudyUser } = await import('../../utils/harness.js');
           // Sandbox accounts' sessions are stamped is_demo too (C3/s7).
           await createActiveRealtimeSession(

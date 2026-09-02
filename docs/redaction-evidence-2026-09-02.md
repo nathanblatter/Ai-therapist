@@ -5,9 +5,14 @@
 production per-session batch redactor, dual-pass, index-anchored with retry
 and per-item fallback (ai-therapist-150 fix).  
 **Method:** 17 synthetic messages (no real participant data), each
-seeded with substrings from the 18 HIPAA Safe Harbor identifier categories,
-run through the redactor in one batch. A case passes if none of its planted
-identifiers survive in the output.
+seeded with substrings from the HIPAA Safe Harbor identifier categories
+(categories 16 biometric and 17 photographic are not expressible as text
+substrings and are exercised only via the category-18 catch-all), run
+through the redactor in one batch. Pass criterion: none of the planted
+identifier substrings appear VERBATIM in the output (a substring check —
+it cannot detect a paraphrased leak; the verbatim outputs below are
+included so a human reviewer can confirm none occurred), and the no-PHI
+control sentence survives un-redacted (over-redaction check).
 
 ## Summary
 
@@ -52,11 +57,11 @@ that non-PHI clinical content is preserved:
 
 **2. Geographic**  
 - in:  I live at 448 Oak Street, Provo, Utah 84604.  
-- out: I live at [REDACTED: LOCATION].
+- out: I live at [REDACTED: LOCATION], [REDACTED: LOCATION], Utah [REDACTED: LOCATION].
 
 **3. Dates**  
 - in:  I was born on March 14, 1998 and admitted on 06/02/2026.  
-- out: I was born on [REDACTED: DATE] and admitted on [REDACTED: DATE].
+- out: I was born on [REDACTED: DATE] 1998 and admitted on [REDACTED: DATE] 2026.
 
 **4. Telephone**  
 - in:  You can call me at (801) 555-0148 any time.  
@@ -108,11 +113,11 @@ that non-PHI clinical content is preserved:
 
 **16-18. Other unique ID**  
 - in:  My student ID at BYU is 09-338-2214 and everyone calls me by it.  
-- out: My student ID at BYU is [REDACTED: UNIQUE IDENTIFIER] and everyone calls me by it.
+- out: My student ID at BYU is [REDACTED: OTHER UNIQUE IDENTIFIER] and everyone calls me by it.
 
 **Control (no PHI)**  
 - in:  I felt really anxious before my exam this week and could not sleep.  
 - out: I felt really anxious before my exam this week and could not sleep.
 
 ---
-Reproduce: `OPENAI_API_KEY=... node scripts/redaction-evidence.mjs`
+Reproduce: `OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-evidence.mjs`

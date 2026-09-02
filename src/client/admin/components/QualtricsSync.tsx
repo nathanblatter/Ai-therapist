@@ -64,10 +64,20 @@ export default function QualtricsSync() {
       const body = (await res.json().catch(() => null)) as
         | { success?: boolean; results?: SurveySyncResult[]; error?: string }
         | null;
+      if (res.status === 409) {
+        toast.info(body?.error || 'A sync is already running.');
+        return;
+      }
       if (!res.ok) throw new Error(body?.error || `Sync failed (HTTP ${res.status})`);
       const fetched = (body?.results ?? []).reduce((n, r) => n + r.fetched, 0);
       const linked = (body?.results ?? []).reduce((n, r) => n + r.linked, 0);
-      toast.success(`Sync complete: ${fetched} response(s) fetched, ${linked} linked.`);
+      if (body?.success === false) {
+        // partial failure: some surveys synced, some errored — never show a
+        // clean success toast for that
+        toast.warning(`Sync finished with errors — ${body?.error ?? 'see last run results'}. ${fetched} fetched, ${linked} linked.`);
+      } else {
+        toast.success(`Sync complete: ${fetched} response(s) fetched, ${linked} linked.`);
+      }
       refetch();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sync failed");
@@ -79,16 +89,24 @@ export default function QualtricsSync() {
   if (loading) return <p className="text-gray-500">Loading Qualtrics status...</p>;
 
   // The status route 503s when QUALTRICS_API_TOKEN / survey ids are unset —
-  // that's an expected pre-launch state, not a failure.
+  // that's an expected pre-launch state, not a failure. Any OTHER error (500,
+  // auth, network) is a real problem and must not masquerade as "not
+  // configured".
   if (error) {
+    const notConfigured = error.includes('503');
     return (
       <Panel title="Qualtrics Sync" icon={RefreshCw}>
-        <p className="text-gray-600">
-          The Qualtrics integration is not configured on this deployment
-          (QUALTRICS_API_TOKEN + survey ids). Survey responses will sync here
-          once BYU enables API access and the token is set.
-        </p>
-        <p className="text-xs text-gray-500 mt-2">({error})</p>
+        {notConfigured ? (
+          <p className="text-gray-600">
+            The Qualtrics integration is not configured on this deployment
+            (QUALTRICS_API_TOKEN + survey ids). Survey responses will sync here
+            once BYU enables API access and the token is set.
+          </p>
+        ) : (
+          <p className="text-red-600">
+            Failed to load Qualtrics sync status: {error}
+          </p>
+        )}
       </Panel>
     );
   }
@@ -190,7 +208,7 @@ export default function QualtricsSync() {
             </thead>
             <tbody>
               {sync.lastResults.map((r) => (
-                <tr key={r.surveyId} className="border-b last:border-0">
+                <tr key={r.surveyRole} className="border-b last:border-0">
                   <td className="py-2 pr-4 font-medium">{r.surveyRole}</td>
                   <td className="py-2 pr-4">{r.fetched}</td>
                   <td className="py-2 pr-4">{r.upserted}</td>

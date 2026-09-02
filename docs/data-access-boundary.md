@@ -24,7 +24,7 @@ and — for the care team — a per-participant row scope on top of it
 | **Therapist** | Yes — raw transcripts, for clinical care | Yes | Only participants assigned to them |
 | **Researcher** | No (redacted only, except live-monitoring — see §3) | Yes | Study/organization scope |
 | **Caseworker** | No — never verbatim therapy content | Summary tier only | Only participants on their caseload |
-| **Demo** | No real data — synthetic fixtures only | n/a | Isolated; writes discarded |
+| **Demo** | Admin surfaces show synthetic fixtures only | n/a | Demo therapy sessions are real rows flagged `is_demo` and excluded from research export/paging |
 
 "Sandbox" accounts (internal testers) are flagged in the database and are
 **structurally excluded** from research export, crisis paging, adverse-event
@@ -85,10 +85,13 @@ researcher-only route) emits a **de-identified** bundle keyed by pseudonym:
 - Participants and sessions are pseudonyms (`P001…`, `S0001…`) minted from
   `research_pseudonyms`. **The pseudonym→identity mapping table is never
   exported** — re-identification requires direct database access.
-- Demo, sandbox, and anonymous traffic are excluded from the default bundle.
+- Demo and sandbox traffic are excluded from the default bundle. Anonymous
+  sessions ARE included (flagged `is_anonymous`) but are deliberately not
+  linkable to a person or across sessions — no account exists and the
+  ownership cookie is never persisted server-side.
 
-**Two identifiable egress paths, both gated:** raw transcripts leave only via an
-opt-in `includeTranscripts=true` flag and even then only as `content_redacted`;
+**Two gated egress paths beyond the default bundle:** transcripts leave only via
+an opt-in `includeTranscripts=true` flag and even then only the redacted column;
 verbatim participant feedback comments leave only via a separate opt-in file the
 codebook labels "treat as identifiable data." Neither is in the default export.
 
@@ -98,9 +101,10 @@ codebook labels "treat as identifiable data." Neither is in the default export.
 
 - **Raw content is short-lived.** A nightly sweep
   (`src/server/services/contentWipe.service.ts`, default 24-hour retention)
-  nulls the raw `content` column **only after** redaction is confirmed complete;
-  messages with redaction errors are skipped, not blindly wiped. Every wipe is
-  logged (`content_wipe_log`).
+  nulls the raw `content` column. By default (`require_redaction_complete:
+  true`, a documented admin config toggle) it wipes **only after** redaction is
+  confirmed complete, and messages with redaction errors are skipped, not
+  blindly wiped. Every wipe is logged (`content_wipe_log`).
 - **De-identified data is retained** indefinitely for analysis (disclosed in
   consent).
 - **Audio recordings**: a separate retention job
@@ -117,10 +121,14 @@ codebook labels "treat as identifiable data." Neither is in the default export.
 - **Operational data** lives in PostgreSQL (encrypted at rest at the volume
   level) and audio in S3-compatible object storage; de-identified analysis
   exports are shared via BYU Box with least-privilege access.
-- **Access grants are audited**: every caseload assignment, invite, and
-  escalation is written append-only to `caseload_audit_log` (survives account
-  deletion). Content-destruction jobs write their own logs (`content_wipe_log`,
-  `data_deletion_log`).
+- **Access grants are audited**: caseload assignments, invites, and
+  escalation claims are recorded in the append-only `caseload_audit_log`
+  (no FK cascades — rows survive account deletion). Audit inserts are
+  best-effort (a failed insert is logged, not rolled back), so the log is an
+  investigative record rather than a transactional guarantee.
+  Content-destruction jobs write their own logs (`content_wipe_log`,
+  `data_deletion_log`), and those ARE written in the same transaction as the
+  deletion.
 - **Caseworker isolation is structural, not just cosmetic**: caseworker
   websocket connections join only their own summary-tier channels, never the
   admin broadcast, therapist, or per-session rooms — a caseworker cannot receive

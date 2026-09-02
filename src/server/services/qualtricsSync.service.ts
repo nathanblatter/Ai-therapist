@@ -104,14 +104,19 @@ export async function fetchAllResponses(
   return file.responses ?? [];
 }
 
-/** Pull the first plausible study-ID-looking text answer out of the values
- *  payload (the WID/XID/FID text-entry questions export as QIDx_TEXT). */
+/** Pull the plausible study-ID text answer out of the values payload (the
+ *  WID/XID/FID text-entry questions export as QIDx_TEXT). If MORE THAN ONE
+ *  distinct numeric text answer exists the response is ambiguous — another
+ *  question ("how many days...?") could be the number we grabbed — so return
+ *  null rather than risk mislinking a research record; those land in the
+ *  unlinked queue for human review. */
 export function extractTypedStudyId(values: Record<string, unknown>): string | null {
+  const candidates = new Set<string>();
   for (const [key, value] of Object.entries(values)) {
     if (!/_TEXT$/.test(key)) continue;
-    if (typeof value === 'string' && /^\d{1,6}$/.test(value.trim())) return value.trim();
+    if (typeof value === 'string' && /^\d{1,6}$/.test(value.trim())) candidates.add(value.trim());
   }
-  return null;
+  return candidates.size === 1 ? [...candidates][0] : null;
 }
 
 export interface SurveySyncResult {
@@ -189,13 +194,16 @@ export function getSyncRunStatus(): SyncRunStatus {
 
 /**
  * Run one sync and record the outcome for the status endpoint. Concurrent
- * calls (manual click during a scheduled run) collapse into a no-op so two
- * export jobs never race on the same surveys.
+ * calls (manual click during a scheduled run) return 'busy' so callers can
+ * say "a sync is already running" instead of passing off the PREVIOUS run's
+ * results as fresh. Returns null when the integration is unconfigured.
  */
-export async function runSync(trigger: 'manual' | 'scheduled'): Promise<SurveySyncResult[] | null> {
+export async function runSync(
+  trigger: 'manual' | 'scheduled'
+): Promise<SurveySyncResult[] | null | 'busy'> {
   const config = getQualtricsSyncConfig();
   if (!config) return null;
-  if (running) return runStatus.lastResults;
+  if (running) return 'busy';
   running = true;
   try {
     const results = await syncAllSurveys(config);
@@ -226,6 +234,7 @@ export async function runSync(trigger: 'manual' | 'scheduled'): Promise<SurveySy
  * itself is unconfigured — the manual admin endpoint still works either way.
  */
 export function startQualtricsSyncScheduler(): void {
+  if (syncTimer) return; // idempotent — a second call must not orphan a timer
   const raw = Number(process.env.QUALTRICS_SYNC_INTERVAL_MINUTES || 0);
   if (!Number.isFinite(raw) || raw <= 0) return;
   if (!getQualtricsSyncConfig()) return;

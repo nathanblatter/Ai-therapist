@@ -12,10 +12,11 @@ estimator the real analysis uses (scripts/phase2-analysis-plan.py):
 This uses every observed wave, weights clusters near-optimally (recovering the
 efficiency of a mixed model), keeps inference valid under the true
 random-slope heterogeneity via the sandwich, and needs only numpy. Two
-alternatives were evaluated and rejected: a naive unweighted two-stage
-(per-person slope then t-test) loses roughly half the power because early
-dropouts contribute extremely noisy slopes, and plain pooled OLS + sandwich
-gives ~0.68 power where this gives ~0.85 (N=120, d=0.30).
+alternatives were evaluated and rejected (reproduce with --estimator
+pooled / twostage): at N=120, d=0.30 the naive unweighted two-stage
+(per-person slope then t-test) gives 0.45 power because early dropouts
+contribute extremely noisy slopes, plain pooled OLS + sandwich gives 0.86,
+and this FGLS gives 0.97.
 
 Design assumptions (documented in docs/phase2-power-analysis.md):
   - Waves: Week 0 (baseline) through Week 8, 9 measurement occasions.
@@ -25,9 +26,12 @@ Design assumptions (documented in docs/phase2-power-analysis.md):
   - Occasion-level missingness: 20% of remaining waves skipped at random.
   - PHQ-2 ~ continuous (0-6): baseline mean 2.2, between-person intercept SD
     1.2, between-person slope SD 0.04/wk, residual SD 0.9, truncated 0-6.
-  - Effect: standardized total change by Week 8 d = 0.20 / 0.30 / 0.45
-    (change relative to baseline between-person SD).
-  - Test: one-sample t on per-participant slopes, two-sided alpha = .05.
+  - Effect: standardized total change by Week 8 d = 0.20 / 0.30 / 0.45,
+    where d = (change in points by Week 8) / TOTAL baseline SD
+    (sqrt(intercept_sd^2 + residual_sd^2) ~= 1.5). This is the same scale the
+    analysis script reports (empirical SD of week-0 scores), so the power
+    table's d and the analysis's printed d are directly comparable.
+  - Test: FGLS slope with cluster-robust SE, t(G-1), two-sided alpha = .05.
 
 Run:  python3 scripts/phase2-power-sim.py   (seed fixed; ~1 min, pure numpy)
 """
@@ -35,6 +39,8 @@ import sys
 import time
 
 import numpy as np
+
+import argparse
 
 RNG_SEED = 20260902
 WEEKS = np.arange(0, 9)
@@ -44,6 +50,9 @@ SLOPE_SD = 0.04
 RESIDUAL_SD = 0.9
 WEEKLY_DROPOUT = 1 - (1 - 0.30) ** (1 / 8)
 OCCASION_MISS = 0.20
+# d is defined against the TOTAL baseline SD — the same quantity the analysis
+# script estimates from week-0 scores — not the latent between-person SD.
+TOTAL_BASELINE_SD = float(np.sqrt(INTERCEPT_SD ** 2 + RESIDUAL_SD ** 2))
 N_REPS = 2000
 ALPHA = 0.05
 
@@ -71,7 +80,7 @@ def t_crit_975(df: int) -> float:
 
 def simulate_long(rng: np.random.Generator, n: int, d: float):
     """Simulate the long-format dataset: (participant, week, score) triples."""
-    slope_mean = -(d * INTERCEPT_SD) / 8.0   # improvement => negative slope
+    slope_mean = -(d * TOTAL_BASELINE_SD) / 8.0   # improvement => negative slope
     intercepts = rng.normal(BASELINE_MEAN, INTERCEPT_SD, n)
     slopes = rng.normal(slope_mean, SLOPE_SD, n)
     dropout_week = rng.geometric(WEEKLY_DROPOUT, n)
@@ -136,9 +145,19 @@ def random_intercept_fgls_reject(pid: np.ndarray, wk: np.ndarray, sc: np.ndarray
     XtX_inv = np.linalg.inv(Xs.T @ Xs)
     beta = XtX_inv @ (Xs.T @ ys)
     r2 = ys - Xs @ beta
+    # CR2 (Bell-McCaffrey) sandwich: adjust each cluster's residuals by
+    # (I - H_gg)^{-1/2} before forming the meat. Plain CR0 ran liberal here
+    # (empirical size ~0.057 at G=120 over 6000 null replicates) because
+    # cluster sizes vary 1-9 and high-leverage clusters get shrunken
+    # residuals; CR2 undoes exactly that shrinkage.
     meat = np.zeros((2, 2))
     for m in cluster_masks:
-        s = Xs[m].T @ r2[m]
+        Xg = Xs[m]
+        Hgg = Xg @ XtX_inv @ Xg.T
+        w, Q = np.linalg.eigh(np.eye(len(Xg)) - Hgg)
+        w = np.clip(w, 1e-10, None)
+        adj = Q @ np.diag(1.0 / np.sqrt(w)) @ Q.T
+        s = Xg.T @ (adj @ r2[m])
         meat += np.outer(s, s)
     V = XtX_inv @ meat @ XtX_inv
     se = np.sqrt(V[1, 1])
@@ -148,10 +167,71 @@ def random_intercept_fgls_reject(pid: np.ndarray, wk: np.ndarray, sc: np.ndarray
     return abs(t) > t_crit_975(G - 1)
 
 
+def twostage_reject(pid: np.ndarray, wk: np.ndarray, sc: np.ndarray) -> bool:
+    """Naive two-stage comparison estimator: per-person OLS slope, one-sample
+    t. Kept ONLY so the estimator-selection numbers in
+    docs/phase2-power-analysis.md are reproducible (--estimator twostage)."""
+    slopes = []
+    for g in np.unique(pid):
+        m = pid == g
+        if m.sum() >= 2 and len(set(wk[m])) >= 2:
+            slopes.append(np.polyfit(wk[m], sc[m], 1)[0])
+    slopes = np.array(slopes)
+    n = len(slopes)
+    if n < 3:
+        return False
+    sd = slopes.std(ddof=1)
+    if sd == 0:
+        return slopes.mean() != 0
+    t = slopes.mean() / (sd / np.sqrt(n))
+    return abs(t) > t_crit_975(n - 1)
+
+
+def pooled_ols_reject(pid: np.ndarray, wk: np.ndarray, sc: np.ndarray) -> bool:
+    """Pooled OLS + CR0 sandwich comparison estimator (--estimator pooled)."""
+    if len(sc) < 10:
+        return False
+    clusters = np.unique(pid)
+    G = len(clusters)
+    if G < 3:
+        return False
+    X = np.column_stack([np.ones_like(wk), wk])
+    XtX_inv = np.linalg.inv(X.T @ X)
+    beta = XtX_inv @ (X.T @ sc)
+    resid = sc - X @ beta
+    meat = np.zeros((2, 2))
+    for g in clusters:
+        m = pid == g
+        srow = X[m].T @ resid[m]
+        meat += np.outer(srow, srow)
+    # CR1 small-sample correction (G/(G-1), the Stata default): the plain
+    # CR0 sandwich ran mildly liberal here (empirical size ~0.055-0.058 at
+    # G=120 over 6000 null replicates); CR1 pulls it back toward nominal.
+    V = (G / (G - 1)) * (XtX_inv @ meat @ XtX_inv)
+    se = np.sqrt(V[1, 1])
+    if se == 0:
+        return beta[1] != 0
+    return abs(beta[1] / se) > t_crit_975(G - 1)
+
+
+ESTIMATORS = {
+    "fgls": random_intercept_fgls_reject,
+    "pooled": pooled_ols_reject,
+    "twostage": twostage_reject,
+}
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--estimator", choices=sorted(ESTIMATORS), default="fgls",
+                    help="fgls is the pre-registered estimator; pooled/twostage "
+                         "reproduce the estimator-selection comparison")
+    args = ap.parse_args()
+    reject = ESTIMATORS[args.estimator]
     rng = np.random.default_rng(RNG_SEED)
-    print(f"Phase 2 power sim (random-intercept FGLS + cluster-robust SE) — seed {RNG_SEED}, "
-          f"{N_REPS} reps/cell, pure numpy")
+    print(f"Phase 2 power sim (estimator={args.estimator}) — seed {RNG_SEED}, "
+          f"{N_REPS} reps/cell, pure numpy, d scaled to total baseline SD "
+          f"{TOTAL_BASELINE_SD:.3f}")
     print(f"weekly dropout {WEEKLY_DROPOUT:.4f} (~30% by wk8), "
           f"occasion missingness {OCCASION_MISS:.0%}")
     results = []
@@ -162,20 +242,24 @@ def main() -> None:
             completers = []
             for _ in range(N_REPS):
                 pid, wk, sc = simulate_long(rng, n, d)
-                completers.append(len(np.unique(pid)))
-                if random_intercept_fgls_reject(pid, wk, sc):
+                # participants contributing a usable trajectory (>= 2 waves) —
+                # everyone has a week-0 row, so a raw count is tautologically N
+                upid, counts = np.unique(pid, return_counts=True)
+                completers.append(int((counts >= 2).sum()))
+                if reject(pid, wk, sc):
                     hits += 1
             power = hits / N_REPS
             results.append({
                 "enrolled": n, "effect_d": d, "power": round(power, 3),
                 "reps": N_REPS,
-                "mean_analyzable": round(float(np.mean(completers)), 1),
+                "mean_ge2_waves": round(float(np.mean(completers)), 1),
                 "secs": round(time.time() - t0, 1),
             })
             print(f"  N={n:3d} d={d:.2f}  power={power:.3f} "
-                  f"(~{np.mean(completers):.0f} analyzable, {time.time()-t0:.0f}s)")
+                  f"(~{np.mean(completers):.0f} with >=2 waves, {time.time()-t0:.0f}s)")
     import csv
-    out_path = "docs/phase2-power-sim-results.csv"
+    out_path = ("docs/phase2-power-sim-results.csv" if args.estimator == "fgls"
+                else f"docs/phase2-power-sim-results-{args.estimator}.csv")
     with open(out_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(results[0].keys()))
         w.writeheader()

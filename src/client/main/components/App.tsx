@@ -433,7 +433,9 @@ export default function App() {
         return;
       }
 
-      // Quiet hours (server-enforced): swap to the overnight screen.
+      // Quiet hours (server-enforced): swap to the overnight screen. This
+      // branch is terminal for ANY 403 — the body is consumed here, so
+      // falling through to the response.json() below would double-read it.
       if (response.status === 403) {
         const errorData = await response.json().catch(() => null);
         if (errorData?.error === 'quiet_hours') {
@@ -441,6 +443,7 @@ export default function App() {
           setIsConnecting(false);
           return;
         }
+        throw new Error(errorData?.message || 'Chat session start was forbidden (403)');
       }
 
       const data = await response.json();
@@ -1583,8 +1586,11 @@ export default function App() {
       />
 
       {/* Quiet hours (ai-therapist-152): overnight blocking screen with crisis
-          resources. z-[60] so it sits above the consent overlay (z-50). */}
-      {quietHours?.blocksYou && !isSessionActive && (
+          resources. z-[60] so it sits above the consent overlay (z-50).
+          Suppressed while a session is active AND while the post-session
+          screen is up — a session that spans 10pm must still get its
+          ratings/feedback collected before the overnight screen takes over. */}
+      {quietHours?.blocksYou && !isSessionActive && !postSessionData && (
         <QuietHoursScreen startHour={quietHours.startHour} endHour={quietHours.endHour} />
       )}
 

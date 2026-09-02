@@ -25,10 +25,20 @@ export default function qualtricsSyncRoutes(): Router {
     }
     try {
       const results = await runSync('manual');
+      if (results === 'busy') {
+        return res.status(409).json({
+          error: 'A sync is already running — try again in a moment.',
+        });
+      }
       const failed = (results ?? []).filter((r) => r.error);
-      res.status(failed.length === results?.length && failed.length > 0 ? 502 : 200).json({
+      const allFailed = results !== null && results.length > 0 && failed.length === results.length;
+      res.status(allFailed ? 502 : 200).json({
         success: failed.length === 0,
         results,
+        // surfaced so the client toast can say WHICH survey failed and why
+        error: failed.length > 0
+          ? failed.map((f) => `${f.surveyRole}: ${f.error}`).join('; ')
+          : undefined,
       });
     } catch (error) {
       console.error('[QualtricsSync] sync run failed:', error);
