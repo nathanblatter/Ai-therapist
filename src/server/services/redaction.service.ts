@@ -99,18 +99,47 @@ export default async function redactPHI(input: string): Promise<string> {
 
 // ---- Batched (per-session) redaction ----
 // Redact every message in a session in a single model call instead of one call
-// per message. The model receives a JSON array of strings and must return a
-// JSON array of the same length/order with each element redacted.
+// per message. Items are index-anchored ({i, text} pairs, ai-therapist-150):
+// a plain string array let the model merge two adjacent messages into one
+// element ("returned 5 items, expected 6" in the 2026-09-02 red-team run),
+// and the only defense was an all-or-nothing length check that failed the
+// whole session. Anchoring makes merges/drops detectable per index, and a
+// retry + per-item fallback means one bad batch can no longer strand every
+// message unredacted.
 
 const batchInstructions = prompt + `
 
-BATCH MODE: The input is a JSON array of message strings. Apply the redaction rules above INDEPENDENTLY to each element. Return ONLY a JSON array of strings with the EXACT same length and order as the input, where each element is the redacted version of the corresponding input element. Do not merge, split, reorder, add, or drop elements. Output valid JSON only — no markdown fences, no commentary.`;
+BATCH MODE: The input is a JSON array of objects, each {"i": <index>, "text": <message>}. Apply the redaction rules above INDEPENDENTLY to each object's "text". Return ONLY a JSON array of objects {"i": <same index>, "text": <redacted message>} — one object per input object, same "i" values, no index missing, duplicated, added, merged, or split. "text" must always be a JSON string (use "" for empty input text, never null). Output valid JSON only — no markdown fences, no commentary.`;
 
 /** Strip ```json ... ``` fences a model may wrap JSON output in. */
 function stripCodeFences(text: string): string {
     const t = text.trim();
     const fenced = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
     return fenced ? fenced[1].trim() : t;
+}
+
+/** Validate an anchored batch reply: every input index exactly once, all
+ *  strings (a model-emitted null must never become the literal "null"). */
+function parseAnchoredBatch(outputText: string, expected: number): string[] {
+    const parsed = JSON.parse(stripCodeFences(outputText)) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== expected) {
+        throw new Error(`Batch redaction returned ${Array.isArray(parsed) ? `${parsed.length} items` : 'a non-array'}, expected ${expected}`);
+    }
+    const out = new Array<string | undefined>(expected);
+    for (const el of parsed) {
+        const item = el as { i?: unknown; text?: unknown };
+        if (typeof item?.i !== 'number' || !Number.isInteger(item.i) || item.i < 0 || item.i >= expected) {
+            throw new Error('Batch redaction returned an element with a missing/invalid index');
+        }
+        if (typeof item.text !== 'string') {
+            throw new Error(`Batch redaction returned a non-string text for index ${item.i}`);
+        }
+        if (out[item.i] !== undefined) {
+            throw new Error(`Batch redaction returned index ${item.i} more than once`);
+        }
+        out[item.i] = item.text;
+    }
+    return out as string[];
 }
 
 async function redactBatchSinglePass(inputs: string[]): Promise<string[]> {
@@ -120,24 +149,58 @@ async function redactBatchSinglePass(inputs: string[]): Promise<string[]> {
         model: "gpt-5",
         reasoning: { effort: "low" },
         instructions: batchInstructions,
-        input: JSON.stringify(inputs),
+        input: JSON.stringify(inputs.map((text, i) => ({ i, text }))),
     });
 
-    const parsed = JSON.parse(stripCodeFences(response.output_text)) as unknown;
-    if (!Array.isArray(parsed) || parsed.length !== inputs.length) {
-        throw new Error(`Batch redaction returned ${Array.isArray(parsed) ? `${parsed.length} items` : 'a non-array'}, expected ${inputs.length}`);
+    return parseAnchoredBatch(response.output_text, inputs.length);
+}
+
+/** Per-item fallback pass with bounded concurrency — slower (one call per
+ *  message) but immune to batch-shape failures. */
+async function redactItemsIndividually(inputs: string[]): Promise<string[]> {
+    const out = new Array<string>(inputs.length);
+    const errors: unknown[] = [];
+    const CONCURRENCY = 4;
+    let next = 0;
+    async function worker() {
+        while (next < inputs.length && errors.length === 0) {
+            const idx = next++;
+            try {
+                out[idx] = await redactPHISinglePass(inputs[idx]);
+            } catch (err) {
+                errors.push(err); // collected, not thrown — a rejecting worker
+                return;           // must not leave sibling rejections unhandled
+            }
+        }
     }
-    return parsed.map(x => String(x));
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, inputs.length) }, worker));
+    if (errors.length > 0) throw errors[0];
+    return out;
+}
+
+/** One redaction pass over the batch: anchored batch call, one retry on a
+ *  malformed reply, then the per-item fallback. Only infrastructure errors
+ *  (network/auth) propagate — shape failures never sink the session. */
+async function redactBatchPassResilient(inputs: string[]): Promise<string[]> {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            return await redactBatchSinglePass(inputs);
+        } catch (err) {
+            console.warn(`[Redaction] batch pass attempt ${attempt} invalid (${err instanceof Error ? err.message : err}); ${attempt === 1 ? 'retrying batch' : 'falling back to per-item redaction'}`);
+        }
+    }
+    return redactItemsIndividually(inputs);
 }
 
 /**
- * Double-pass redact a batch of messages in two model calls total (regardless of
- * message count). Returns a map of message id → redacted text.
+ * Double-pass redact a batch of messages (two model calls in the happy path,
+ * degrading to per-item calls when the model mangles the batch shape).
+ * Returns a map of message id → redacted text.
  */
 export async function redactPHIBatch(items: Array<{ id: number; content: string | null }>): Promise<Map<number, string>> {
     const inputs = items.map(i => i.content ?? '');
-    const firstPass = await redactBatchSinglePass(inputs);
-    const secondPass = await redactBatchSinglePass(firstPass);
+    const firstPass = await redactBatchPassResilient(inputs);
+    const secondPass = await redactBatchPassResilient(firstPass);
 
     const result = new Map<number, string>();
     items.forEach((item, idx) => result.set(item.id, secondPass[idx]));

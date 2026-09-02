@@ -73,6 +73,7 @@ import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
 import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
 import { startScheduler as startDataRetentionScheduler } from "./services/dataRetention.service.js";
 import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
+import { startQualtricsSyncScheduler } from "./services/qualtricsSync.service.js";
 import { startWorkQueueScheduler } from "./services/workQueue.service.js";
 import { startMessageScanSweeper } from "./services/messageSafety.service.js";
 import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
@@ -915,6 +916,13 @@ if (isEntrypoint) {
 
     // Daily sweep of expired magic-link demo accounts and their data
     startDemoCleanupScheduler();
+
+    // Background Qualtrics response sync (env-gated via
+    // QUALTRICS_SYNC_INTERVAL_MINUTES; no-op when the integration or the
+    // interval is unconfigured). Harness children skip it — shared-DB guard.
+    if (process.env.SOCKET_PG_ADAPTER !== 'off') {
+      startQualtricsSyncScheduler();
+    }
 
     // Work-queue scheduler: hourly digest sweep + daily 06:00 America/Denver
     // work-item sweep (inactivity / screener_worsening / message_unread_stale).

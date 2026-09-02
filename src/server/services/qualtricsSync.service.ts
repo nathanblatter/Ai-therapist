@@ -163,6 +163,90 @@ async function syncSurvey(
   return result;
 }
 
+export interface SyncRunStatus {
+  lastRunAt: string | null;
+  lastRunTrigger: 'manual' | 'scheduled' | null;
+  lastResults: SurveySyncResult[] | null;
+  lastError: string | null;
+  schedulerActive: boolean;
+  intervalMinutes: number | null;
+}
+
+let syncTimer: ReturnType<typeof setInterval> | null = null;
+let running = false;
+const runStatus: SyncRunStatus = {
+  lastRunAt: null,
+  lastRunTrigger: null,
+  lastResults: null,
+  lastError: null,
+  schedulerActive: false,
+  intervalMinutes: null,
+};
+
+export function getSyncRunStatus(): SyncRunStatus {
+  return { ...runStatus, lastResults: runStatus.lastResults ? [...runStatus.lastResults] : null };
+}
+
+/**
+ * Run one sync and record the outcome for the status endpoint. Concurrent
+ * calls (manual click during a scheduled run) collapse into a no-op so two
+ * export jobs never race on the same surveys.
+ */
+export async function runSync(trigger: 'manual' | 'scheduled'): Promise<SurveySyncResult[] | null> {
+  const config = getQualtricsSyncConfig();
+  if (!config) return null;
+  if (running) return runStatus.lastResults;
+  running = true;
+  try {
+    const results = await syncAllSurveys(config);
+    runStatus.lastRunAt = new Date().toISOString();
+    runStatus.lastRunTrigger = trigger;
+    runStatus.lastResults = results;
+    runStatus.lastError = results.every((r) => r.error)
+      ? 'all surveys failed'
+      : null;
+    const unlinked = results.reduce((n, r) => n + (r.fetched - r.linked), 0);
+    if (unlinked > 0) {
+      console.warn(`[QualtricsSync] ${trigger} run: ${unlinked} response(s) not linked to a participant`);
+    }
+    return results;
+  } catch (error) {
+    runStatus.lastRunAt = new Date().toISOString();
+    runStatus.lastRunTrigger = trigger;
+    runStatus.lastError = error instanceof Error ? error.message : 'sync failed';
+    throw error;
+  } finally {
+    running = false;
+  }
+}
+
+/**
+ * Env-gated background sync (QUALTRICS_SYNC_INTERVAL_MINUTES, min 5): run once
+ * at boot, then on the interval. Off when unset/0 or when the integration
+ * itself is unconfigured — the manual admin endpoint still works either way.
+ */
+export function startQualtricsSyncScheduler(): void {
+  const raw = Number(process.env.QUALTRICS_SYNC_INTERVAL_MINUTES || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return;
+  if (!getQualtricsSyncConfig()) return;
+  const minutes = Math.max(5, Math.floor(raw));
+  runStatus.schedulerActive = true;
+  runStatus.intervalMinutes = minutes;
+  const tick = () =>
+    runSync('scheduled').catch((err) => console.error('[QualtricsSync] scheduled run failed:', err));
+  tick();
+  syncTimer = setInterval(tick, minutes * 60_000);
+  syncTimer.unref?.();
+}
+
+export function stopQualtricsSyncScheduler(): void {
+  if (syncTimer) {
+    clearInterval(syncTimer);
+    syncTimer = null;
+  }
+  runStatus.schedulerActive = false;
+}
+
 /** Sync every configured survey; per-survey failures don't abort the rest. */
 export async function syncAllSurveys(config: QualtricsSyncConfig): Promise<SurveySyncResult[]> {
   const results: SurveySyncResult[] = [];

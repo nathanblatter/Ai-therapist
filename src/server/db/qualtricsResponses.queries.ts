@@ -53,6 +53,67 @@ export async function findUserIdForBaselineResponse(responseId: string): Promise
   return rows[0]?.user_id ?? null;
 }
 
+export interface SurveyLinkageStats {
+  surveyRole: QualtricsSurveyRole;
+  total: number;
+  finished: number;
+  linked: number;
+  unlinkedFinished: number;
+  lastRecordedAt: string | null;
+}
+
+export interface UnlinkedResponse {
+  responseId: string;
+  surveyRole: QualtricsSurveyRole;
+  studySid: string | null;
+  recordedAt: string | null;
+}
+
+/** Per-survey linkage health for the admin status endpoint. */
+export async function getQualtricsLinkageStats(): Promise<SurveyLinkageStats[]> {
+  const { rows } = await pool.query(
+    `SELECT survey_role,
+            count(*)::int AS total,
+            count(*) FILTER (WHERE finished)::int AS finished,
+            count(*) FILTER (WHERE user_id IS NOT NULL)::int AS linked,
+            count(*) FILTER (WHERE finished AND user_id IS NULL)::int AS unlinked_finished,
+            to_char(max(recorded_at), 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_recorded_at
+     FROM qualtrics_responses
+     GROUP BY survey_role
+     ORDER BY survey_role`
+  );
+  return rows.map((r) => ({
+    surveyRole: r.survey_role,
+    total: r.total,
+    finished: r.finished,
+    linked: r.linked,
+    unlinkedFinished: r.unlinked_finished,
+    lastRecordedAt: r.last_recorded_at,
+  }));
+}
+
+/**
+ * Finished responses that could not be resolved to a participant — each one is
+ * unusable for analysis until linked, so they must be visible, not silent.
+ */
+export async function getUnlinkedFinishedResponses(limit = 50): Promise<UnlinkedResponse[]> {
+  const { rows } = await pool.query(
+    `SELECT response_id, survey_role, study_sid,
+            to_char(recorded_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS recorded_at
+     FROM qualtrics_responses
+     WHERE finished AND user_id IS NULL
+     ORDER BY recorded_at DESC NULLS LAST
+     LIMIT $1`,
+    [limit]
+  );
+  return rows.map((r) => ({
+    responseId: r.response_id,
+    surveyRole: r.survey_role,
+    studySid: r.study_sid,
+    recordedAt: r.recorded_at,
+  }));
+}
+
 export interface SurveyExportRow {
   [key: string]: unknown;
 }

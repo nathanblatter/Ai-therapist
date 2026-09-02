@@ -1,6 +1,7 @@
 // Public (bot-facing) configuration endpoints. No auth required.
 import { Router } from 'express';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
+import { getQuietHoursStatus } from '../../utils/quietHours.js';
 import { getAiModel, type VoicesConfig, type LanguagesConfig } from '../../db/index.js';
 
 export default function configRoutes(): Router {
@@ -21,6 +22,17 @@ export default function configRoutes(): Router {
       console.error('Failed to fetch crisis contact:', err);
       res.status(500).json({ error: 'Failed to fetch crisis contact' });
     }
+  });
+
+  // GET /api/config/quiet-hours - overnight session-blocking window
+  // (ai-therapist-152). The client pre-checks this on load so participants
+  // see the overnight screen instead of a failed start. blocksYou mirrors the
+  // middleware's role logic: only (non-sandbox) participants are gated.
+  router.get('/api/config/quiet-hours', (req, res) => {
+    const status = getQuietHoursStatus();
+    const role = req.session?.userRole ?? 'participant';
+    const gated = role === 'participant' && req.session?.isSandbox !== true;
+    res.json({ ...status, blocksYou: status.active && gated });
   });
 
   // GET /api/config/features - feature flags

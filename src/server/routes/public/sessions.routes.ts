@@ -19,6 +19,7 @@ import {
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
+import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 export default function sessionsRoutes(): Router {
@@ -338,8 +339,9 @@ export default function sessionsRoutes(): Router {
     }
   });
 
-  // POST /api/sessions/create - create a new therapy session
-  router.post('/api/sessions/create', async (req, res) => {
+  // POST /api/sessions/create - create a new therapy session. Quiet-hours
+  // gated as defense in depth alongside /token and /api/chat/start.
+  router.post('/api/sessions/create', requireOutsideQuietHours, async (req, res) => {
     try {
       const userId = req.session?.userId || null;
       const { sessionName } = req.body;

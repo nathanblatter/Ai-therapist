@@ -145,6 +145,10 @@ export async function generateSessionName(sessionId: string): Promise<string | n
 export function generateSessionNameAsync(sessionId: string): void {
   // Fire and forget - don't wait for completion
   generateSessionName(sessionId)
-    .then(name => console.log(`Generated name for session ${sessionId}: "${name}"`))
+    .then(name => console.log(
+      name === null
+        ? `No name generated for session ${sessionId} (blank/unredacted transcript)`
+        : `Generated name for session ${sessionId}: "${name}"`
+    ))
     .catch(err => console.error(`Failed to generate name for session ${sessionId}:`, err));
 }

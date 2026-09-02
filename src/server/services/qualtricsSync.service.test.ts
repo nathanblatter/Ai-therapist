@@ -16,6 +16,10 @@ import {
   extractTypedStudyId,
   fetchAllResponses,
   syncAllSurveys,
+  runSync,
+  getSyncRunStatus,
+  startQualtricsSyncScheduler,
+  stopQualtricsSyncScheduler,
   type QualtricsSyncConfig,
 } from './qualtricsSync.service.js';
 
@@ -182,5 +186,64 @@ describe('syncAllSurveys', () => {
     const results = await syncAllSurveys(CONFIG);
     expect(results[0].error).toBeDefined();
     expect(results[0].upserted).toBe(0);
+  });
+});
+
+describe('runSync + scheduler', () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockReset();
+    vi.clearAllMocks();
+    dbMocks.resolveStudySidToUserId.mockResolvedValue(null);
+    dbMocks.findUserIdForBaselineResponse.mockResolvedValue(null);
+    dbMocks.upsertQualtricsResponse.mockResolvedValue(undefined);
+    process.env.QUALTRICS_API_TOKEN = 't';
+    process.env.QUALTRICS_WEEKLY_SURVEY_ID = 'SV_w';
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    stopQualtricsSyncScheduler();
+    delete process.env.QUALTRICS_API_TOKEN;
+    delete process.env.QUALTRICS_WEEKLY_SURVEY_ID;
+    delete process.env.QUALTRICS_SYNC_INTERVAL_MINUTES;
+  });
+
+  function mockExportOnce() {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { result: { progressId: 'PG1' } }))
+      .mockResolvedValueOnce(jsonResponse(200, { result: { status: 'complete', fileId: 'F1' } }))
+      .mockResolvedValueOnce(jsonResponse(200, { responses: [{ responseId: 'R_1', values: { finished: 1 } }] }));
+  }
+
+  it('records last-run state on success', async () => {
+    mockExportOnce();
+    const results = await runSync('manual');
+    expect(results?.[0]).toMatchObject({ surveyRole: 'weekly', fetched: 1 });
+    const status = getSyncRunStatus();
+    expect(status.lastRunTrigger).toBe('manual');
+    expect(status.lastRunAt).toBeTruthy();
+    expect(status.lastError).toBeNull();
+  });
+
+  it('returns null (never throws config errors) when unconfigured', async () => {
+    delete process.env.QUALTRICS_API_TOKEN;
+    expect(await runSync('scheduled')).toBeNull();
+  });
+
+  it('scheduler is a no-op without QUALTRICS_SYNC_INTERVAL_MINUTES', () => {
+    startQualtricsSyncScheduler();
+    expect(getSyncRunStatus().schedulerActive).toBe(false);
+  });
+
+  it('scheduler activates with a floored-to-5-minutes interval and runs immediately', async () => {
+    process.env.QUALTRICS_SYNC_INTERVAL_MINUTES = '1';
+    mockExportOnce();
+    startQualtricsSyncScheduler();
+    const status = getSyncRunStatus();
+    expect(status.schedulerActive).toBe(true);
+    expect(status.intervalMinutes).toBe(5);
+    // the boot-time tick ran
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
   });
 });

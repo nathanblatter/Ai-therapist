@@ -5,6 +5,7 @@ import SessionControls from "./SessionControls";
 import SessionSettings from "./SessionSettings";
 import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
 import ConsentScreen from "./ConsentScreen";
+import QuietHoursScreen from "./QuietHoursScreen";
 import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
 import PostSessionScreen, { type PostSessionData, type SessionRecapData, type SharedWriteup } from "./PostSessionScreen";
@@ -136,6 +137,11 @@ export default function App() {
   });
   // Debounce for WebRTC 'disconnected' (it can self-heal); 'failed' acts immediately.
   const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Quiet hours (ai-therapist-152): when the server reports the overnight
+  // window active for this participant, a blocking screen with crisis
+  // resources replaces session start. Re-polled so it lifts at 6:00 AM
+  // without a manual refresh.
+  const [quietHours, setQuietHours] = useState<{ blocksYou: boolean; startHour: number; endHour: number } | null>(null);
 
   // Async secure messaging (caseworker portal): between-sessions view switch
   // + persistent user socket for logged-in participants. The socket is
@@ -175,6 +181,16 @@ export default function App() {
       .then(res => res.json())
       .then(data => setCrisisContact(data))
       .catch(err => console.error('Failed to fetch crisis contact:', err));
+
+    // Quiet hours: pre-check on load, then every 5 minutes so the overnight
+    // screen appears/lifts on its own at the window boundaries.
+    const fetchQuietHours = () =>
+      fetch('/api/config/quiet-hours', { credentials: 'include' })
+        .then(res => (res.ok ? res.json() : null))
+        .then(data => { if (data) setQuietHours(data); })
+        .catch(err => console.error('Failed to fetch quiet hours status:', err));
+    fetchQuietHours();
+    const quietHoursTimer = setInterval(fetchQuietHours, 5 * 60_000);
 
     // Fetch daily-session rate-limit status so a capped participant sees the
     // limit up front instead of after consent + check-in (429 on /token).
@@ -233,6 +249,8 @@ export default function App() {
         console.error('Failed to fetch user preferences:', err);
         // Keep defaults on error
       });
+
+    return () => clearInterval(quietHoursTimer);
   }, []);
 
   // Session countdown timer
@@ -415,6 +433,16 @@ export default function App() {
         return;
       }
 
+      // Quiet hours (server-enforced): swap to the overnight screen.
+      if (response.status === 403) {
+        const errorData = await response.json().catch(() => null);
+        if (errorData?.error === 'quiet_hours') {
+          setQuietHours({ blocksYou: true, ...errorData.quietHours });
+          setIsConnecting(false);
+          return;
+        }
+      }
+
       const data = await response.json();
       console.log("Chat session started:", data);
 
@@ -487,6 +515,16 @@ export default function App() {
       setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
       setIsConnecting(false);
       return;
+    }
+
+    // Quiet hours (server-enforced): swap to the overnight screen.
+    if (tokenResponse.status === 403) {
+      const errorData = await tokenResponse.json().catch(() => null);
+      if (errorData?.error === 'quiet_hours') {
+        setQuietHours({ blocksYou: true, ...errorData.quietHours });
+        setIsConnecting(false);
+        return;
+      }
     }
 
     if (!tokenResponse.ok) {
@@ -1543,6 +1581,12 @@ export default function App() {
         }}
         sessionId={sessionId}
       />
+
+      {/* Quiet hours (ai-therapist-152): overnight blocking screen with crisis
+          resources. z-[60] so it sits above the consent overlay (z-50). */}
+      {quietHours?.blocksYou && !isSessionActive && (
+        <QuietHoursScreen startHour={quietHours.startHour} endHour={quietHours.endHour} />
+      )}
 
       {/* Consent screen (IRB requirement) - must accept before check-in/session start */}
       <ConsentScreen

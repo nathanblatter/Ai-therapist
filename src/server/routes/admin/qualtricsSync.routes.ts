@@ -1,32 +1,66 @@
-// Researcher-triggered Qualtrics response sync (ai-therapist-149).
-//   POST /admin/api/qualtrics/sync — pull all configured study surveys from
-//   the Qualtrics export API into qualtrics_responses and report per-survey
-//   counts. 503 when the integration is not configured (env-gated like the
-//   participant-facing /join-study route).
+// Qualtrics response sync admin surface (ai-therapist-149).
+//   POST /admin/api/qualtrics/sync   — trigger a sync now (also runs on the
+//     background scheduler when QUALTRICS_SYNC_INTERVAL_MINUTES is set).
+//   GET  /admin/api/qualtrics/status — config presence (booleans only, never
+//     the token), scheduler + last-run state, per-survey linkage stats, and
+//     the finished-but-unlinked responses that need human attention.
+// Both 503 when the integration is not configured (env-gated like /join-study).
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { getQualtricsSyncConfig, syncAllSurveys } from '../../services/qualtricsSync.service.js';
+import {
+  getQualtricsSyncConfig,
+  getSyncRunStatus,
+  runSync,
+} from '../../services/qualtricsSync.service.js';
+import { getQualtricsLinkageStats, getUnlinkedFinishedResponses } from '../../db/index.js';
 
 export default function qualtricsSyncRoutes(): Router {
   const router = Router();
 
   router.post('/admin/api/qualtrics/sync', requireRole('researcher'), async (_req, res) => {
-    const config = getQualtricsSyncConfig();
-    if (!config) {
+    if (!getQualtricsSyncConfig()) {
       return res.status(503).json({
         error: 'Qualtrics integration is not configured (QUALTRICS_API_TOKEN + survey ids).',
       });
     }
     try {
-      const results = await syncAllSurveys(config);
-      const failed = results.filter((r) => r.error);
-      res.status(failed.length === results.length && results.length > 0 ? 502 : 200).json({
+      const results = await runSync('manual');
+      const failed = (results ?? []).filter((r) => r.error);
+      res.status(failed.length === results?.length && failed.length > 0 ? 502 : 200).json({
         success: failed.length === 0,
         results,
       });
     } catch (error) {
       console.error('[QualtricsSync] sync run failed:', error);
       res.status(500).json({ error: 'Sync failed' });
+    }
+  });
+
+  router.get('/admin/api/qualtrics/status', requireRole('researcher'), async (_req, res) => {
+    const config = getQualtricsSyncConfig();
+    if (!config) {
+      return res.status(503).json({
+        configured: false,
+        error: 'Qualtrics integration is not configured (QUALTRICS_API_TOKEN + survey ids).',
+      });
+    }
+    try {
+      const [linkage, unlinked] = await Promise.all([
+        getQualtricsLinkageStats(),
+        getUnlinkedFinishedResponses(),
+      ]);
+      res.json({
+        configured: true,
+        surveys: Object.fromEntries(
+          Object.entries(config.surveys).map(([role, id]) => [role, id])
+        ),
+        sync: getSyncRunStatus(),
+        linkage,
+        unlinked,
+      });
+    } catch (error) {
+      console.error('[QualtricsSync] status failed:', error);
+      res.status(500).json({ error: 'Status unavailable' });
     }
   });
 
