@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, Box, Info } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, Box, Info, RefreshCw } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
 import useAuth from "../hooks/useAuth";
@@ -36,6 +36,7 @@ const NotificationPreferences = lazy(() => import("./NotificationPreferences"));
 const EscalationInbox = lazy(() => import("./escalations/EscalationInbox"));
 const MessagingInbox = lazy(() => import("./MessagingInbox"));
 const SandboxInvites = lazy(() => import("./SandboxInvites"));
+const QualtricsSync = lazy(() => import("./QualtricsSync"));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -227,6 +228,7 @@ export default function AdminApp() {
         { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'sandbox', label: 'Sandbox Invites', icon: Box, researcherOnly: true, researchOnly: true },
+        { id: 'qualtrics', label: 'Qualtrics Sync', icon: RefreshCw, researcherOnly: true, researchOnly: true },
         { id: 'export', label: 'Export', icon: Download, researchOnly: true },
       ],
     },
@@ -405,6 +407,7 @@ export default function AdminApp() {
               {currentView === 'knowledge' && <KnowledgeBase />}
               {currentView === 'consent' && <ConsentVersions />}
               {currentView === 'study-ops' && <StudyOps />}
+              {currentView === 'qualtrics' && <QualtricsSync />}
               {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
               {currentView === 'retention' && <DataRetention />}
