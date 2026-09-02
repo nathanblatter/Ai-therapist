@@ -28,7 +28,7 @@ import {
 } from '../../db/index.js';
 import { userRoom } from '../../services/messageSafety.service.js';
 import { isCareTeamRole, dataTierFor, type CareTeamRole } from '../../../shared/roles.js';
-import { scrubRows, CRISIS_EVENT_VERBATIM_FIELDS } from '../../utils/tierScrub.js';
+import { projectRows, FLAGGED_EVENT_SUMMARY_FIELDS } from '../../utils/tierScrub.js';
 import { createLogger } from '../../utils/logger.js';
 import { parsePagination } from '../../utils/pagination.js';
 
@@ -244,11 +244,12 @@ export default function adminMessagingRoutes(): Router {
         }
         // Summary-tier scrub (ai-therapist-143): message-origin crisis_events
         // carry risk_factors/notes that, on the LLM-fallback path, hold the
-        // verbatim crisis keywords the participant typed. Strip them for
-        // caseworkers, exactly as crisis.routes does for every other crisis
-        // surface. Therapists/researchers are full-tier and keep the fields.
+        // verbatim crisis keywords the participant typed. Summary tier gets
+        // the allowlist projection (ai-therapist-146), exactly as
+        // crisis.routes does for every other crisis surface;
+        // therapists/researchers are full-tier and keep the fields.
         if (dataTierFor(req.session.userRole) === 'summary') {
-          events = scrubRows(events, CRISIS_EVENT_VERBATIM_FIELDS);
+          events = projectRows(events, FLAGGED_EVENT_SUMMARY_FIELDS) as typeof events;
         }
         res.json({ events });
       } catch (err) {

@@ -19,11 +19,22 @@ export interface SoapNote {
   plan?: string;
 }
 
+/** One point of the per-session affect trajectory (ai-therapist-86): the
+ *  participant's Nth turn, valence -1..1 (negative..positive), arousal 0..1
+ *  (calm..activated), and a single-word non-verbatim label. */
+export interface AffectPoint {
+  turn: number;
+  valence: number;
+  arousal: number;
+  label?: string;
+}
+
 export interface SessionInsightsRow {
   session_id: string;
   user_id: number | null;
   summary: SessionSummary | null;
   soap_note: SoapNote | null;
+  affect_curve: AffectPoint[] | null;
   soap_status: 'draft' | 'reviewed';
   soap_reviewed_by: string | null;
   soap_reviewed_at: Date | null;
@@ -45,17 +56,20 @@ export async function upsertSessionInsights(
   userId: number | null,
   summary: SessionSummary,
   soapNote: SoapNote,
-  model: string
+  model: string,
+  affectCurve: AffectPoint[] | null = null
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO session_insights (session_id, user_id, summary, soap_note, model)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO session_insights (session_id, user_id, summary, soap_note, model, affect_curve)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (session_id) DO UPDATE
        SET summary = EXCLUDED.summary,
            soap_note = EXCLUDED.soap_note,
            model = EXCLUDED.model,
+           affect_curve = EXCLUDED.affect_curve,
            updated_at = CURRENT_TIMESTAMP`,
-    [sessionId, userId, JSON.stringify(summary), JSON.stringify(soapNote), model]
+    [sessionId, userId, JSON.stringify(summary), JSON.stringify(soapNote), model,
+     affectCurve === null ? null : JSON.stringify(affectCurve)]
   );
 }
 

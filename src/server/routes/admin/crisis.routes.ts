@@ -7,11 +7,12 @@ import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 import { requireSessionClientAccess, careTeamScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
 import {
-  scrubRows,
-  CRISIS_EVENT_VERBATIM_FIELDS,
-  RISK_HISTORY_VERBATIM_FIELDS,
-  INTERVENTION_VERBATIM_FIELDS,
+  projectRows,
+  CRISIS_EVENT_SUMMARY_FIELDS,
+  RISK_HISTORY_SUMMARY_FIELDS,
+  INTERVENTION_SUMMARY_FIELDS,
 } from '../../utils/tierScrub.js';
+import { dataTierFor } from '../../../shared/roles.js';
 import {
   sessionExists,
   getSessionCrisisFlag,
@@ -185,10 +186,12 @@ export default function crisisRoutes(): Router {
       const scope = await careTeamScopeId(req);
       const orgId = scope === null ? await orgIdFor(req) : null;
       const data = await getAllCrisisData(scope, orgId);
-      if (req.session.userRole === 'caseworker') {
-        data.crisisEvents = scrubRows(data.crisisEvents, CRISIS_EVENT_VERBATIM_FIELDS);
-        data.riskScoreHistory = scrubRows(data.riskScoreHistory, RISK_HISTORY_VERBATIM_FIELDS);
-        data.interventionActions = scrubRows(data.interventionActions, INTERVENTION_VERBATIM_FIELDS);
+      if (dataTierFor(req.session.userRole) === 'summary') {
+        // Allowlist projection (ai-therapist-146): a column added to these
+        // SELECT *-shaped queries stays invisible at summary tier by default.
+        data.crisisEvents = projectRows(data.crisisEvents, CRISIS_EVENT_SUMMARY_FIELDS) as typeof data.crisisEvents;
+        data.riskScoreHistory = projectRows(data.riskScoreHistory, RISK_HISTORY_SUMMARY_FIELDS) as typeof data.riskScoreHistory;
+        data.interventionActions = projectRows(data.interventionActions, INTERVENTION_SUMMARY_FIELDS) as typeof data.interventionActions;
       }
       res.json(data);
     } catch (err: unknown) {
@@ -201,7 +204,7 @@ export default function crisisRoutes(): Router {
   // GET /admin/api/crisis/events - crisis events (all, or for one session)
   router.get('/admin/api/crisis/events', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     const { sessionId } = req.query;
-    const isCaseworker = req.session.userRole === 'caseworker';
+    const isSummaryTier = dataTierFor(req.session.userRole) === 'summary';
 
     try {
       if (sessionId) {
@@ -213,12 +216,12 @@ export default function crisisRoutes(): Router {
         }
         const { getSessionCrisisEvents } = await import('../../services/crisisDetection.service.js');
         const events = await getSessionCrisisEvents(String(sessionId));
-        res.json({ events: isCaseworker ? scrubRows(events as Record<string, unknown>[], CRISIS_EVENT_VERBATIM_FIELDS) : events });
+        res.json({ events: isSummaryTier ? projectRows(events as Record<string, unknown>[], CRISIS_EVENT_SUMMARY_FIELDS) : events });
       } else {
         const scope = await careTeamScopeId(req);
         const orgId = scope === null ? await orgIdFor(req) : null;
         const events = await getAllCrisisEvents(scope, orgId);
-        res.json({ events: isCaseworker ? scrubRows(events, CRISIS_EVENT_VERBATIM_FIELDS) : events });
+        res.json({ events: isSummaryTier ? projectRows(events, CRISIS_EVENT_SUMMARY_FIELDS) : events });
       }
     } catch (err) {
       console.error('Failed to fetch crisis events:', err);
@@ -236,8 +239,8 @@ export default function crisisRoutes(): Router {
       // Caseworker scrub (spec section 2): scores/severity/timestamps only —
       // score_factors carries the stage-2 LLM's reasoning, which can quote
       // participant messages.
-      if (req.session.userRole === 'caseworker') {
-        return res.json({ history: scrubRows(history as Record<string, unknown>[], RISK_HISTORY_VERBATIM_FIELDS) });
+      if (dataTierFor(req.session.userRole) === 'summary') {
+        return res.json({ history: projectRows(history as Record<string, unknown>[], RISK_HISTORY_SUMMARY_FIELDS) });
       }
       res.json({ history });
     } catch (err) {

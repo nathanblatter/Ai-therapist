@@ -12,7 +12,10 @@ import PrepBrief from './PrepBrief';
 import { isCareTeamRole } from '../../../shared/roles';
 // Canonical insight shapes live in the server data layer (type-only import,
 // erased at build time).
-import type { SessionSummary, SoapNote } from '../../../server/db/insights.queries';
+import type { SessionSummary, SoapNote, AffectPoint } from '../../../server/db/insights.queries';
+import {
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine,
+} from 'recharts';
 
 // The therapist's authored progress note for this session (careNotes slice B).
 interface AuthoredNote {
@@ -25,6 +28,7 @@ interface AuthoredNote {
 
 interface Insights {
   summary: SessionSummary | null;
+  affect_curve?: AffectPoint[] | null;
   soap_note?: SoapNote | null;
   soap_status?: 'draft' | 'reviewed';
   soap_reviewed_by?: string | null;
@@ -239,6 +243,36 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                   </div>
                 ))}
                 <p className="text-xs text-gray-400 pt-1">Screeners, not diagnoses.</p>
+              </div>
+            </div>
+          )}
+
+          {insights?.affect_curve && insights.affect_curve.length >= 2 && (
+            <div>
+              <h4 className="font-semibold text-gray-700 mb-1">Emotional trajectory (AI-estimated)</h4>
+              <div className="bg-white rounded p-3">
+                <ResponsiveContainer width="100%" height={140}>
+                  <LineChart data={insights.affect_curve} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                    <XAxis dataKey="turn" tick={{ fontSize: 10 }} label={undefined} />
+                    <YAxis domain={[-1, 1]} ticks={[-1, 0, 1]} tick={{ fontSize: 10 }} />
+                    <ReferenceLine y={0} stroke="#d1d5db" />
+                    <Tooltip
+                      formatter={(value, name) => [Number(value ?? 0).toFixed(2), String(name)]}
+                      labelFormatter={(turn) => {
+                        const pt = insights.affect_curve?.find((p) => p.turn === turn);
+                        return `Turn ${turn}${pt?.label ? ` (${pt.label})` : ''}`;
+                      }}
+                      contentStyle={{ fontSize: 11 }}
+                    />
+                    <Line type="monotone" dataKey="valence" name="valence" stroke="#4f46e5" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="arousal" name="arousal" stroke="#d97706" strokeWidth={1.5} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+                <p className="text-xs text-gray-400 mt-1">
+                  Valence (solid, -1 negative to +1 positive) and arousal (dashed, 0 calm to 1
+                  activated) per participant turn — a model estimate for research review, not a
+                  clinical measure.
+                </p>
               </div>
             </div>
           )}

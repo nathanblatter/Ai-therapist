@@ -6,6 +6,7 @@
 // note draft) excluded.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { projectRow, SESSION_INSIGHTS_SUMMARY_FIELDS } from '../../utils/tierScrub.js';
 import { requireClientAccess, requireSessionClientAccess } from '../../middleware/caseload.js';
 import {
   getSessionInsights,
@@ -52,18 +53,13 @@ export default function insightsRoutes(): Router {
         authored_note,
       };
       if (isCaseworker) {
-        // Summaries-tier projection: never the SOAP clinical-note draft.
-        delete payload.soap_note;
-        delete payload.soap_status;
-        delete payload.soap_reviewed_by;
-        delete payload.soap_reviewed_at;
-        // Nor the therapist's free-text next-session guidance (038): it is
-        // clinician-authored clinical documentation, same tier as soap_note.
-        // (SELECT * returns these columns even though SessionInsightsRow
-        // doesn't declare them.)
-        delete payload.notes_for_next_session;
-        delete payload.notes_author;
-        delete payload.notes_created_at;
+        // Summaries-tier ALLOWLIST projection (ai-therapist-146): summary,
+        // affect curve, safety plan, screeners, and the authored-note pointer
+        // only. The old delete-list approach silently forwarded any column a
+        // future migration added to session_insights (SELECT * feeds this
+        // payload); with the allowlist a new column stays therapist-only
+        // until deliberately added to SESSION_INSIGHTS_SUMMARY_FIELDS.
+        return res.json(projectRow(payload, SESSION_INSIGHTS_SUMMARY_FIELDS));
       }
       res.json(payload);
     } catch (err) {

@@ -20,6 +20,7 @@ import {
   type SoapNote,
   type SessionCheckin,
   type CaseProfile,
+  type AffectPoint,
 } from '../db/index.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -56,8 +57,40 @@ If (and only if) a PRIOR CASE PROFILE is supplied in the user message, ALSO prod
   - screener_trend: one sentence on how any screener scores (PHQ-2/GAD-2) are trending, if mentioned; empty string if none
 If no prior case profile is supplied, build a fresh one from this session alone (thin is fine).
 
+"affect" — the participant's emotional trajectory across the session (ai-therapist-86), one entry per PARTICIPANT turn in order (if there are more than 30 participant turns, sample evenly down to about 30 entries):
+  - turn: the 1-based index of that participant turn
+  - valence: -1.0 (very negative) to 1.0 (very positive)
+  - arousal: 0.0 (calm/flat) to 1.0 (highly activated/agitated)
+  - label: ONE lowercase word for the dominant feeling (e.g. "anxious", "hopeful") — never quote the participant
+
 Never include names, places, or other identifying details anywhere in the JSON.
-Return ONLY the JSON object: {"summary": {...}, "soap": {...}, "case_profile": {...}}`;
+Return ONLY the JSON object: {"summary": {...}, "soap": {...}, "affect": [...], "case_profile": {...}}`;
+
+/** Validate/clamp the model's affect array (ai-therapist-86): numbers clamped
+ *  to range, malformed entries dropped, sorted by turn, hard-capped at 60
+ *  points, single-token labels only (a verbatim quote can't sneak through as
+ *  a "label"). Returns null when nothing usable remains — affect is an
+ *  optional enrichment and must never fail the insights write. */
+export function sanitizeAffectCurve(raw: unknown): AffectPoint[] | null {
+  if (!Array.isArray(raw)) return null;
+  const points: AffectPoint[] = [];
+  for (const el of raw) {
+    const p = el as { turn?: unknown; valence?: unknown; arousal?: unknown; label?: unknown };
+    if (typeof p?.turn !== 'number' || !Number.isFinite(p.turn)) continue;
+    if (typeof p.valence !== 'number' || !Number.isFinite(p.valence)) continue;
+    if (typeof p.arousal !== 'number' || !Number.isFinite(p.arousal)) continue;
+    const label = typeof p.label === 'string' ? p.label.trim().toLowerCase() : undefined;
+    points.push({
+      turn: Math.max(1, Math.round(p.turn)),
+      valence: Math.max(-1, Math.min(1, p.valence)),
+      arousal: Math.max(0, Math.min(1, p.arousal)),
+      ...(label && /^[a-z-]{2,24}$/.test(label) ? { label } : {}),
+    });
+  }
+  if (points.length === 0) return null;
+  points.sort((a, b) => a.turn - b.turn);
+  return points.slice(0, 60);
+}
 
 let openaiClient: OpenAI | null = null;
 async function getClient(): Promise<OpenAI> {
@@ -117,7 +150,7 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     model: INSIGHTS_MODEL,
     response_format: { type: 'json_object' },
     temperature: 0.3,
-    max_tokens: 900,
+    max_tokens: 1400, // affect array (ai-therapist-86) adds ~30 compact entries
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: `${checkinLine}${priorProfileLine}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}` },
@@ -135,7 +168,7 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error('Empty insights response from model');
 
-  let parsed: { summary?: SessionSummary; soap?: SoapNote; case_profile?: CaseProfile };
+  let parsed: { summary?: SessionSummary; soap?: SoapNote; affect?: unknown; case_profile?: CaseProfile };
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -145,7 +178,10 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     throw new Error('Insights response missing summary or soap');
   }
 
-  await upsertSessionInsights(sessionId, session.user_id ?? null, parsed.summary, parsed.soap, INSIGHTS_MODEL);
+  const affectCurve = sanitizeAffectCurve(parsed.affect);
+  await upsertSessionInsights(
+    sessionId, session.user_id ?? null, parsed.summary, parsed.soap, INSIGHTS_MODEL, affectCurve
+  );
   log.info(`Insights stored for ${sessionId} ("${parsed.summary.headline ?? ''}")`);
 
   if (caseProfileEnabled && userId && parsed.case_profile) {

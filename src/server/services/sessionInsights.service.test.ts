@@ -88,7 +88,7 @@ describe('generateSessionInsights', () => {
   it('persists summary + soap for an anonymous session, without touching the case profile', async () => {
     createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP }));
     await generateSessionInsights('s1');
-    expect(upsertSessionInsightsMock).toHaveBeenCalledWith('s1', null, BASIC_SUMMARY, BASIC_SOAP, 'gpt-4o-mini');
+    expect(upsertSessionInsightsMock).toHaveBeenCalledWith('s1', null, BASIC_SUMMARY, BASIC_SOAP, 'gpt-4o-mini', null);
     expect(getUserCaseProfileMock).not.toHaveBeenCalled();
     expect(upsertUserCaseProfileMock).not.toHaveBeenCalled();
   });
@@ -170,5 +170,31 @@ describe('generateSessionInsights', () => {
       await generateSessionInsights('s1');
       expect(upsertUserCaseProfileMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('sanitizeAffectCurve (ai-therapist-86)', () => {
+  it('clamps ranges, drops malformed entries, sorts by turn, caps at 60', async () => {
+    const { sanitizeAffectCurve } = await import('./sessionInsights.service.js');
+    const raw = [
+      { turn: 3, valence: 2.5, arousal: -0.2, label: 'ANXIOUS' },
+      { turn: 1, valence: -0.4, arousal: 0.7, label: 'sad' },
+      { turn: 'x', valence: 0.1, arousal: 0.1 },              // bad turn
+      { turn: 2, valence: 'high', arousal: 0.5 },              // bad valence
+      { turn: 4, valence: 0.2, arousal: 0.3, label: 'a quoted sentence from the user' }, // label rejected
+    ];
+    const out = sanitizeAffectCurve(raw)!;
+    expect(out.map((p) => p.turn)).toEqual([1, 3, 4]);
+    expect(out[1]).toEqual({ turn: 3, valence: 1, arousal: 0, label: 'anxious' });
+    expect(out[2].label).toBeUndefined();
+    const long = Array.from({ length: 100 }, (_, i) => ({ turn: i + 1, valence: 0, arousal: 0 }));
+    expect(sanitizeAffectCurve(long)!.length).toBe(60);
+  });
+
+  it('returns null for non-arrays and empty results (affect never blocks insights)', async () => {
+    const { sanitizeAffectCurve } = await import('./sessionInsights.service.js');
+    expect(sanitizeAffectCurve(undefined)).toBeNull();
+    expect(sanitizeAffectCurve('nope')).toBeNull();
+    expect(sanitizeAffectCurve([{ turn: 'bad' }])).toBeNull();
   });
 });
