@@ -29,8 +29,7 @@ import {
   getTherapistIdsForClient,
   getCrisisEventClientInfo,
   getSessionAccessInfo,
-  assignClient,
-  insertCaseloadAudit,
+  assignClientAudited,
   CaseloadRoleError,
   type EscalationRow,
   type EscalationStatus,
@@ -226,7 +225,7 @@ export default function escalationsRoutes(): Router {
 
         if (req.query.count_only === '1') {
           if (careTeam) {
-            const count = await countOpenEscalationsForMember(me);
+            const count = await countOpenEscalationsForMember(me, req.session.userRole as 'therapist' | 'caseworker');
             return res.json({ count });
           }
           const orgId = await orgIdFor(req);
@@ -258,6 +257,7 @@ export default function escalationsRoutes(): Router {
           clientId,
           openOnly: req.query.open_only === '1',
           memberId: careTeam ? me : null,
+          memberRole: careTeam ? (req.session.userRole as 'therapist' | 'caseworker') : null,
           orgId,
         });
         if (req.query.mine === '1') {
@@ -451,13 +451,13 @@ export default function escalationsRoutes(): Router {
         const updated = await claimEscalation(escalation.escalation_id, me);
         if (!updated) return res.status(409).json({ error: 'Escalation is already assigned or resolved' });
 
-        // Grant caseload access so the claimer can act (idempotent; audited).
+        // Grant caseload access so the claimer can act. Grant + audit row are
+        // ONE transaction (ai-therapist-145): this is a therapist gaining
+        // access to a participant they had no prior caseload edge to, so an
+        // unlogged grant must be impossible — if the audit insert fails, the
+        // grant rolls back with it.
         try {
-          await assignClient(me, escalation.client_id, me);
-          void insertCaseloadAudit({
-            action: 'assign',
-            therapistId: me,
-            clientId: escalation.client_id,
+          await assignClientAudited(me, escalation.client_id, me, {
             actorUserId: me,
             actorUsername: req.session.username ?? null,
             detail: { via: 'escalation_claim', escalation_id: escalation.escalation_id },

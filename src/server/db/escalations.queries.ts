@@ -122,10 +122,31 @@ export interface EscalationListFilters {
   clientId?: number | null;
   status?: EscalationStatus | null;
   openOnly?: boolean;
-  /** Visible-to-member scope: assignee, raiser, caseload client, or same-org
-   *  unassigned (the section 2 therapist/caseworker read set). */
+  /** Visible-to-member scope: assignee, raiser, caseload client — plus, for
+   *  THERAPISTS ONLY, same-org unassigned (the claimable pool). Caseworkers
+   *  deliberately do not get the org-unassigned disjunct: it mirrors
+   *  requireEscalationAccess, which 404s a caseworker opening an unassigned
+   *  escalation they aren't a party to — the list must not be broader than
+   *  the detail auth (ai-therapist-144: reason free-text + client identity
+   *  were leaking off-caseload). */
   memberId?: number | null;
+  /** Role of memberId; gates the org-unassigned disjunct (therapist only). */
+  memberRole?: 'therapist' | 'caseworker' | null;
   limit?: number;
+}
+
+/** The member-visibility disjunction shared by list + count (see
+ *  EscalationListFilters.memberId/memberRole docs). $n = member userid. */
+function memberVisibilityClause(n: number, memberRole: 'therapist' | 'caseworker' | null | undefined): string {
+  const parts = [
+    `e.assigned_to = $${n}`,
+    `e.raised_by = $${n}`,
+    `EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $${n} AND tc.client_id = e.client_id)`,
+  ];
+  if (memberRole === 'therapist') {
+    parts.push(`(e.assigned_to IS NULL AND e.org_id = (SELECT organization_id FROM users mu WHERE mu.userid = $${n}))`);
+  }
+  return `(\n        ${parts.join('\n        OR ')}\n      )`;
 }
 
 /** Escalations newest first with client/assignee usernames joined. */
@@ -152,15 +173,7 @@ export async function listEscalations(filters: EscalationListFilters): Promise<
     where.push(`e.status <> 'resolved'`);
   }
   if (filters.memberId !== null && filters.memberId !== undefined) {
-    add(
-      (n) => `(
-        e.assigned_to = $${n}
-        OR e.raised_by = $${n}
-        OR EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $${n} AND tc.client_id = e.client_id)
-        OR (e.assigned_to IS NULL AND e.org_id = (SELECT organization_id FROM users mu WHERE mu.userid = $${n}))
-      )`,
-      filters.memberId
-    );
+    add((n) => memberVisibilityClause(n, filters.memberRole), filters.memberId);
   }
 
   params.push(filters.limit ?? 200);
@@ -178,17 +191,17 @@ export async function listEscalations(filters: EscalationListFilters): Promise<
   return result.rows;
 }
 
-/** Open (not-resolved) escalation count visible to a member (nav badge). */
-export async function countOpenEscalationsForMember(memberId: number): Promise<number> {
+/** Open (not-resolved) escalation count visible to a member (nav badge).
+ *  Same role-gated visibility as listEscalations so the badge never counts
+ *  rows the member can't open. */
+export async function countOpenEscalationsForMember(
+  memberId: number,
+  memberRole: 'therapist' | 'caseworker' | null = null
+): Promise<number> {
   const result = await pool.query<{ total: string }>(
     `SELECT COUNT(*) AS total FROM escalations e
      WHERE e.status <> 'resolved'
-       AND (
-         e.assigned_to = $1
-         OR e.raised_by = $1
-         OR EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = e.client_id)
-         OR (e.assigned_to IS NULL AND e.org_id = (SELECT organization_id FROM users mu WHERE mu.userid = $1))
-       )`,
+       AND ${memberVisibilityClause(1, memberRole)}`,
     [memberId]
   );
   return parseInt(result.rows[0]?.total ?? '0', 10);

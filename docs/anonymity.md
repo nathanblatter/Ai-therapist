@@ -23,7 +23,7 @@ All conversation messages undergo **two sequential passes** through an AI redact
 Original Message → Pass 1 (AI Redaction) → Pass 2 (AI Verification) → Redacted Output
 ```
 
-Each pass uses OpenAI's GPT 5.2 model with explicit HIPAA Safe Harbor instructions, targeting all 18 Safe Harbor identifiers:
+Each pass uses OpenAI's `gpt-5` model (the model id pinned in src/server/services/redaction.service.ts — keep this doc and the IRB application in sync with that file) with explicit HIPAA Safe Harbor instructions, targeting all 18 Safe Harbor identifiers:
 
 | Category | Examples |
 |----------|----------|

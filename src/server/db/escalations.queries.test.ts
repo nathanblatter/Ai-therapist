@@ -100,15 +100,32 @@ describe('guarded transitions', () => {
 });
 
 describe('listEscalations', () => {
-  it('member scope covers assignee, raiser, caseload, and same-org unassigned', async () => {
+  it('therapist member scope covers assignee, raiser, caseload, and same-org unassigned', async () => {
     queryMock.mockResolvedValueOnce({ rows: [] });
-    await listEscalations({ memberId: 7, openOnly: true });
+    await listEscalations({ memberId: 7, memberRole: 'therapist', openOnly: true });
     const sql = String(queryMock.mock.calls[0][0]);
     expect(sql).toContain('e.assigned_to = $1');
     expect(sql).toContain('e.raised_by = $1');
     expect(sql).toContain('therapist_clients');
     expect(sql).toContain('e.assigned_to IS NULL AND e.org_id =');
     expect(sql).toContain(`e.status <> 'resolved'`);
+  });
+
+  it('caseworker member scope EXCLUDES the org-unassigned pool (ai-therapist-144)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await listEscalations({ memberId: 7, memberRole: 'caseworker', openOnly: true });
+    const sql = String(queryMock.mock.calls[0][0]);
+    expect(sql).toContain('e.assigned_to = $1');
+    expect(sql).toContain('therapist_clients');
+    // the leak: reason text + client identity for escalations the caseworker
+    // cannot even open (detail route 404s) must not appear in their list
+    expect(sql).not.toContain('e.assigned_to IS NULL AND e.org_id =');
+  });
+
+  it('memberRole omitted defaults to the restrictive (no org-unassigned) scope', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await listEscalations({ memberId: 7, openOnly: true });
+    expect(String(queryMock.mock.calls[0][0])).not.toContain('e.assigned_to IS NULL AND e.org_id =');
   });
 
   it('org filter applies for researcher reads', async () => {
@@ -122,7 +139,14 @@ describe('listEscalations', () => {
 describe('countOpenEscalationsForMember', () => {
   it('parses the count', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ total: '4' }] });
-    await expect(countOpenEscalationsForMember(7)).resolves.toBe(4);
+    await expect(countOpenEscalationsForMember(7, 'therapist')).resolves.toBe(4);
+    expect(String(queryMock.mock.calls[0][0])).toContain('e.assigned_to IS NULL AND e.org_id =');
+  });
+
+  it('caseworker count excludes the org-unassigned pool (badge matches openable set)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ total: '1' }] });
+    await expect(countOpenEscalationsForMember(7, 'caseworker')).resolves.toBe(1);
+    expect(String(queryMock.mock.calls[0][0])).not.toContain('e.assigned_to IS NULL AND e.org_id =');
   });
 });
 

@@ -88,7 +88,13 @@ export default function prepRoutes(): Router {
             getRecentSignedNotes(userId, { userId: viewerId, role: 'caseworker' }, 1),
             // requireClientAccess already proved caseload membership; memberId
             // re-scopes anyway (defense in depth).
-            listEscalations({ clientId: userId, openOnly: true, memberId: viewerId, limit: 10 }),
+            listEscalations({
+              clientId: userId,
+              openOnly: true,
+              memberId: viewerId,
+              memberRole: req.session.userRole as 'therapist' | 'caseworker',
+              limit: 10,
+            }),
             listCaseworkerRoster(viewerId),
           ]);
 

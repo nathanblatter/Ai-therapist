@@ -182,11 +182,13 @@ export default function caseworkerDashboardRoutes(): Router {
         // organization (same check requireEscalationAccess applies).
         if (!isCareTeamRole(req.session.userRole)) {
           const orgId = await orgIdFor(req);
-          if (orgId !== null) {
-            const target = await getUserById(clientId);
-            if (!target || target.organization_id !== orgId) {
-              return res.status(404).json({ error: 'Not found' });
-            }
+          // Fail closed: a null org must never widen a researcher read to
+          // unscoped (unreachable today under the orgIdFor contract, but this
+          // was the one permissive null-handling branch left in the portal).
+          if (orgId === null) return res.status(404).json({ error: 'Not found' });
+          const target = await getUserById(clientId);
+          if (!target || target.organization_id !== orgId) {
+            return res.status(404).json({ error: 'Not found' });
           }
         }
         const detail = await getRosterClientDetail(clientId);

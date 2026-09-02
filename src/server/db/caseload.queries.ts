@@ -92,6 +92,76 @@ export async function assignClient(
   );
 }
 
+/**
+ * Access-grant + audit row in ONE transaction (ai-therapist-145). For grants
+ * where the audit trail is the point — the escalation-claim auto-grant gives
+ * a therapist access to a participant they had no prior edge to — a
+ * fire-and-forget audit is not acceptable: if the audit INSERT fails, the
+ * grant must fail with it rather than create unlogged access. Role/org
+ * validation reuses assignClient's rules.
+ */
+export async function assignClientAudited(
+  memberId: number,
+  clientId: number,
+  assignedBy: number | null,
+  audit: Omit<CaseloadAuditInput, 'action' | 'therapistId' | 'clientId'> & { detail?: unknown },
+  memberRole: CareTeamRole = 'therapist'
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const roles = await client.query(
+      `SELECT
+         (SELECT role FROM users WHERE userid = $1) AS therapist_role,
+         (SELECT role FROM users WHERE userid = $2) AS client_role,
+         (SELECT organization_id FROM users WHERE userid = $1) AS member_org,
+         (SELECT organization_id FROM users WHERE userid = $2) AS client_org`,
+      [memberId, clientId]
+    );
+    const { therapist_role, client_role, member_org, client_org } = roles.rows[0] as {
+      therapist_role: string | null;
+      client_role: string | null;
+      member_org?: number | null;
+      client_org?: number | null;
+    };
+    if (therapist_role !== memberRole) {
+      throw new CaseloadRoleError(`User ${memberId} is not a ${memberRole} account`);
+    }
+    if (client_role !== 'participant') {
+      throw new CaseloadRoleError(`User ${clientId} is not a participant account`);
+    }
+    if (member_org !== client_org) {
+      throw new CaseloadRoleError(
+        `User ${memberId} and user ${clientId} belong to different organizations`
+      );
+    }
+    await client.query(
+      `INSERT INTO therapist_clients (therapist_id, client_id, assigned_by, member_role)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT DO NOTHING`,
+      [memberId, clientId, assignedBy, memberRole]
+    );
+    await client.query(
+      `INSERT INTO caseload_audit_log
+         (action, therapist_id, client_id, actor_user_id, actor_username, detail)
+       VALUES ('assign', $1, $2, $3, $4, $5)`,
+      [
+        memberId,
+        clientId,
+        audit.actorUserId,
+        audit.actorUsername,
+        audit.detail === undefined ? null : JSON.stringify(audit.detail),
+      ]
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 /** Remove a client from a therapist's caseload. Returns true if a row was deleted. */
 export async function unassignClient(therapistId: number, clientId: number): Promise<boolean> {
   const result = await pool.query(

@@ -30,8 +30,7 @@ const dbMocks = vi.hoisted(() => {
     getOrgTherapistIds: vi.fn(),
     getCrisisEventClientInfo: vi.fn(),
     getCaseworkerIdsForClient: vi.fn(),
-    assignClient: vi.fn(),
-    insertCaseloadAudit: vi.fn(),
+    assignClientAudited: vi.fn(),
     isAssigned: vi.fn(),
     getOrganizationIdForUser: vi.fn(),
     // imported by middleware/caseload.ts + utils/adminBroadcast.ts
@@ -98,8 +97,7 @@ beforeEach(() => {
   dbMocks.expireWorkItemsBySource.mockResolvedValue([]);
   dbMocks.insertEscalationEvent.mockResolvedValue({ event_id: 77, escalation_id: 11, event_type: 'comment' });
   dbMocks.listEscalationEvents.mockResolvedValue([]);
-  dbMocks.insertCaseloadAudit.mockResolvedValue(undefined);
-  dbMocks.assignClient.mockResolvedValue(undefined);
+  dbMocks.assignClientAudited.mockResolvedValue(undefined);
 });
 
 describe('POST /admin/api/escalations', () => {
@@ -216,7 +214,20 @@ describe('GET /admin/api/escalations', () => {
     const res = await request(appAs('caseworker', 2)).get('/admin/api/escalations');
     expect(res.status).toBe(200);
     expect(res.body.escalations).toHaveLength(1);
-    expect(dbMocks.listEscalations).toHaveBeenCalledWith(expect.objectContaining({ memberId: 2, orgId: null }));
+    expect(dbMocks.listEscalations).toHaveBeenCalledWith(
+      // ai-therapist-144: a caseworker's list scope must carry the role so the
+      // query EXCLUDES org-unassigned escalations (they can't open those).
+      expect.objectContaining({ memberId: 2, memberRole: 'caseworker', orgId: null })
+    );
+  });
+
+  it('passes memberRole=therapist so the claimable org-unassigned pool stays visible to therapists', async () => {
+    dbMocks.listEscalations.mockResolvedValue([]);
+    const res = await request(appAs('therapist', 9)).get('/admin/api/escalations');
+    expect(res.status).toBe(200);
+    expect(dbMocks.listEscalations).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: 9, memberRole: 'therapist' })
+    );
   });
 
   it('scopes researchers to their org', async () => {
@@ -231,7 +242,7 @@ describe('GET /admin/api/escalations', () => {
     const res = await request(appAs('therapist', 9)).get('/admin/api/escalations?count_only=1');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ count: 4 });
-    expect(dbMocks.countOpenEscalationsForMember).toHaveBeenCalledWith(9);
+    expect(dbMocks.countOpenEscalationsForMember).toHaveBeenCalledWith(9, 'therapist');
   });
 
   it('filters mine=1 to escalations raised by me', async () => {
@@ -407,9 +418,10 @@ describe('POST /admin/api/escalations/:id/claim', () => {
     const res = await request(appAs('therapist', 8)).post('/admin/api/escalations/11/claim');
     expect(res.status).toBe(200);
     expect(dbMocks.claimEscalation).toHaveBeenCalledWith(11, 8);
-    expect(dbMocks.assignClient).toHaveBeenCalledWith(8, 42, 8);
-    expect(dbMocks.insertCaseloadAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'assign', therapistId: 8, clientId: 42, detail: expect.objectContaining({ via: 'escalation_claim' }) })
+    // ai-therapist-145: grant + audit are one transactional call now.
+    expect(dbMocks.assignClientAudited).toHaveBeenCalledWith(
+      8, 42, 8,
+      expect.objectContaining({ detail: expect.objectContaining({ via: 'escalation_claim' }) })
     );
     expect(dbMocks.insertEscalationEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'claimed' }));
   });

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.nathan.ai-therapist-uptime</string>
+  <key>ProgramArguments</key><array>
+    <string>/Users/nathanblatter/docker-services/prod-uptime-check.sh</string>
+  </array>
+  <!-- Every 5 minutes; pages via the local iMessage bridge after 2 consecutive
+       failures, at most hourly while down, once on recovery (ai-therapist-134). -->
+  <key>StartInterval</key><integer>300</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/nathanblatter/docker-services/ai-therapist-uptime.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/nathanblatter/docker-services/ai-therapist-uptime.log</string>
+</dict></plist>
