@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prod uptime check (ai-therapist-134). Runs on the home box via launchd every
-# 5 minutes: curls prod /health and pages the on-call phone through the local
+# 5 minutes: curls prod /health/deep (DB-touching, ai-therapist-159) and pages the on-call phone through the local
 # iMessage bridge when it's down. Free, no third-party service, reuses the
 # exact alert path crisis paging uses.
 #
@@ -15,7 +15,7 @@
 #   launchctl load ~/Library/LaunchAgents/com.nathan.ai-therapist-uptime.plist
 set -u
 
-PROD_URL="https://ai.byuisresearch.com/health"
+PROD_URL="https://ai.byuisresearch.com/health/deep"
 STATE_FILE="$HOME/docker-services/ai-therapist-uptime.state"
 ENV_FILE="$HOME/docker-services/.env"          # IMESSAGE_API_KEY
 PHONE_ENV_FILE="$HOME/deploy/Ai-therapist/.env" # CRISIS_ALERT_PHONE
