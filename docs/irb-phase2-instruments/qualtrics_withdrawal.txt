@@ -1,0 +1,45 @@
+[[AdvancedFormat]]
+
+[[Block: Study Withdrawal]]
+
+[[Question:DB]]
+[[ID:DINTRO]]
+Stepping away from the AI Support Agent Longitudinal Study. This takes about one minute. Participation is voluntary, and there is no penalty for pausing or withdrawing. Your answers help us understand how to improve the study. Reminder: if you need support, contact BYU CAPS (801-422-3035), the 988 Suicide and Crisis Lifeline (call or text 988), or the Crisis Text Line (text HOME to 741741).
+
+[[Question:TE:SingleLine]]
+[[ID:DID]]
+Enter your study ID in the field below. (Example: "23")
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:D1]]
+What is the main reason you are stepping away? (Choose the one that fits best.)
+[[Choices]]
+It takes too much time
+It was not helpful to me
+It made me feel worse or uncomfortable
+I have privacy concerns
+I had technical problems
+My life circumstances changed
+Other
+
+[[Question:TE:Essay]]
+[[ID:D2]]
+Is there anything you would like the research team to know? (Optional.) A member of the research team reviews these responses within one business day; if you describe distress, we will follow up with support resources.
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:D3]]
+Would you like to fully withdraw from the study, or take a break with the option to return?
+[[Choices]]
+Withdraw fully - I do not plan to return
+Pause - I may return later
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:D4]]
+What should happen to the information collected about you so far? (Per the consent form, data already included in analyses cannot always be removed, but we will honor deletion requests wherever possible.)
+[[Choices]]
+Keep my information for the research
+Please also delete my information where possible

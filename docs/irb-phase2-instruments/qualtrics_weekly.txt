@@ -1,0 +1,108 @@
+[[AdvancedFormat]]
+
+[[Block: Weekly Check-in]]
+
+[[Question:DB]]
+[[ID:WINTRO]]
+Weekly check-in for the AI Support Agent Longitudinal Study. This takes about 5 minutes. Your responses are confidential, and you may skip any question. Reminder: the AI support agent is not a therapist or crisis service. If you need support, contact BYU CAPS (801-422-3035), the 988 Suicide and Crisis Lifeline (call or text 988), or the Crisis Text Line (text HOME to 741741).
+
+[[Question:TE:SingleLine]]
+[[ID:WID]]
+Enter your study ID in the field below. (Example: "23")
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:W1]]
+About how many times did you talk with the AI support agent this week?
+[[Choices]]
+0
+1
+2-3
+4-6
+7 or more
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:W2]]
+Which did you mostly use this week?
+[[Choices]]
+Voice
+Text
+Both about equally
+Did not use it this week
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:W3]]
+This week, how helpful were your conversations with the AI support agent?
+[[Choices]]
+Not at all helpful
+Slightly helpful
+Moderately helpful
+Very helpful
+Extremely helpful
+Not applicable - did not use it this week
+
+[[PageBreak]]
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:W4]]
+Please rate how much you agree with each statement, based on this week. (Shown only if you used the agent this week.)
+[[Choices]]
+The AI support agent understands what matters to me.
+I feel comfortable being open with the AI support agent.
+The AI support agent and I are working toward things I care about.
+The AI support agent and I agree on what to work on in our conversations.
+The way the AI support agent and I work on my concerns feels right for me.
+The AI support agent and I agree on what I want to get out of using it.
+[[Answers]]
+Strongly disagree
+Somewhat disagree
+Neutral (neither agree nor disagree)
+Somewhat agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:W5]]
+How would you rate your overall mood this week?
+[[Choices]]
+Very poor
+Poor
+Fair
+Good
+Very good
+Excellent
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:W6]]
+How stressed did you feel this week?
+[[Choices]]
+Not at all
+Slightly
+Moderately
+Very
+Extremely
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:W7]]
+Did anything about your conversations with the AI support agent bother you, upset you, or feel wrong this week?
+[[Choices]]
+No
+Yes
+
+[[Question:TE:Essay]]
+[[ID:W8]]
+If yes, please describe. A member of the research team reviews these responses within one business day; if you describe distress, we will follow up with support resources.
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:W9]]
+Did you seek support from a person (friend, family, counselor) for something you also discussed with the AI agent this week?
+[[Choices]]
+Yes
+No
+Prefer not to say
+
+[[Question:TE:Essay]]
+[[ID:W10]]
+Anything else you want the research team to know this week? (Optional)

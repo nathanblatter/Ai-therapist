@@ -405,7 +405,7 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime',
   // Build the crisis text for interpolation
   const crisisText = crisisContact.enabled
     ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
-    : '911 or your local emergency services';
+    : '988 (Suicide and Crisis Lifeline), or 911 for immediate danger';
 
   // Get the prompt from database config, or use default fallback
   let basePrompt = DEFAULT_SYSTEM_PROMPT;

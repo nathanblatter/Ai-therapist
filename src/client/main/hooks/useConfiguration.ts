@@ -6,7 +6,7 @@ export function useConfiguration() {
   const [crisisContact, setCrisisContact] = useState({
     hotline: '988 Suicide & Crisis Lifeline',
     phone: '988',
-    text: 'HELLO to 741741',
+    text: 'HOME to 741741',
     enabled: true
   });
   const [features, setFeatures] = useState({

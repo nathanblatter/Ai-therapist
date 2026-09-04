@@ -1,24 +1,17 @@
-// Overnight quiet-hours screen (ai-therapist-152). The Phase 2 IRB
-// application and consent form promise the app blocks NEW sessions from
-// 10:00 PM to 6:00 AM Mountain Time and shows crisis and support resources
-// instead — this is that screen. It renders as a blocking overlay (same
-// layering as ConsentScreen) whenever GET /api/config/quiet-hours reports the
-// window active; the server middleware enforces the same rule on /token and
-// /api/chat/start, so this is presentation, not the security boundary.
-import { Moon, Phone, MessageSquare } from 'react-feather';
+// Blocking screen for withdrawn/paused participants (UX-audit fix). The
+// server middleware (middleware/studyStatus.ts) refuses new sessions with
+// 403 {error:'study_status'}; without this screen the client fell through to
+// a generic "check your connection" toast — telling a person who just
+// withdrew from a mental-health study that the server is broken, with no
+// crisis resources. Mirrors QuietHoursScreen: presentation only, the server
+// remains the security boundary.
+import { PauseCircle, Phone, MessageSquare } from 'react-feather';
 
-interface QuietHoursScreenProps {
-  /** Denver wall-clock hours from the server status payload. */
-  startHour: number;
-  endHour: number;
+interface StudyStatusScreenProps {
+  status: 'paused' | 'withdrawn';
 }
 
-function hourLabel(hour: number): string {
-  const h = ((hour + 11) % 12) + 1;
-  return `${h}:00 ${hour < 12 ? 'AM' : 'PM'}`;
-}
-
-export default function QuietHoursScreen({ startHour, endHour }: QuietHoursScreenProps) {
+export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
   return (
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 z-[60]" aria-hidden="true" />
@@ -26,22 +19,22 @@ export default function QuietHoursScreen({ startHour, endHour }: QuietHoursScree
         className="fixed inset-0 z-[60] flex items-center justify-center p-4"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="quiet-hours-title"
+        aria-labelledby="study-status-title"
       >
         <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
           <div className="flex items-center gap-3 mb-4">
-            <div className="bg-indigo-50 rounded-full p-3">
-              <Moon size={22} className="text-indigo-600" aria-hidden="true" />
+            <div className="bg-amber-50 rounded-full p-3">
+              <PauseCircle size={22} className="text-amber-600" aria-hidden="true" />
             </div>
-            <h2 id="quiet-hours-title" className="text-lg font-semibold text-gray-800">
-              The app is resting overnight
+            <h2 id="study-status-title" className="text-lg font-semibold text-gray-800">
+              {status === 'paused' ? 'Your participation is paused' : 'You have left the study'}
             </h2>
           </div>
 
           <p className="text-sm text-gray-700 mb-4">
-            New sessions are paused between {hourLabel(startHour)} and {hourLabel(endHour)}{' '}
-            Mountain Time as part of the study design. The app will be available again
-            at {hourLabel(endHour)}.
+            {status === 'paused'
+              ? 'New AI sessions are closed while your study participation is paused. When you are ready to resume, contact the research team and they will reopen your access. You can still view your past sessions and download your data from your profile.'
+              : 'You have withdrawn from the study, so new AI sessions are closed. You can still view your past sessions and download your data from your profile. If this was not what you intended, contact the research team.'}
           </p>
 
           <div className="bg-red-50 rounded-xl p-4 mb-3">

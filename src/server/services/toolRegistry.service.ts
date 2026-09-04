@@ -295,7 +295,7 @@ export class ToolRegistry {
           mental_health: {
             name: 'NAMI HelpLine',
             phone: '1-800-950-6264',
-            text: 'Text NAMI to 741741',
+            text: 'Text "HelpLine" to 62640',
             available: 'M-F 10am-10pm ET',
             description: 'National Alliance on Mental Illness - Information, referrals, and support.'
           }

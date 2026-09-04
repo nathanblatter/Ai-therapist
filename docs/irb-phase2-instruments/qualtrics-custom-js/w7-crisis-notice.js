@@ -21,7 +21,7 @@ Qualtrics.SurveyEngine.addOnload(function () {
     'background:#fffbeb;color:#92400e;border-radius:8px;font-size:0.9em;line-height:1.4;';
   notice.textContent =
     'Support is available right now if you need it: call or text 988 (Suicide and ' +
-    'Crisis Lifeline), text HELLO to 741741 (Crisis Text Line), or call BYU CAPS at ' +
+    'Crisis Lifeline), text HOME to 741741 (Crisis Text Line), or call BYU CAPS at ' +
     '801-422-3035. You can also describe what happened on the next question — a member ' +
     'of the research team reviews those responses within one business day.';
   container.appendChild(notice);

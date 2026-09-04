@@ -1,0 +1,107 @@
+[[AdvancedFormat]]
+
+[[Block:Week 12 Follow-up]]
+
+[[Question:DB]]
+[[ID:FINTRO]]
+Thank you for participating in the AI Support Agent Longitudinal Study. This is the final, optional follow-up survey, about 4 weeks after your access to the AI support agent ended. It takes about 5 minutes. Your responses are confidential, and you may skip any question.<br><br>Reminder: if you need support, contact BYU CAPS (801-422-3035), the 988 Suicide and Crisis Lifeline (call or text 988), or the Crisis Text Line (text HOME to 741741).
+
+[[PageBreak]]
+
+[[Question:TE:SingleLine]]
+[[ID:FID]]
+Enter your study ID in the field below. (Example: "23")
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:F1]]
+How would you rate your overall mood over the past two weeks?
+[[Choices]]
+Very poor
+Poor
+Fair
+Good
+Very good
+Excellent
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:F2]]
+How stressed have you felt over the past two weeks?
+[[Choices]]
+Not at all
+Slightly
+Moderately
+Very
+Extremely
+
+[[PageBreak]]
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:F3]]
+Over the last two weeks, how often have you been bothered by the following problems?
+[[Choices]]
+Little interest or pleasure in doing things
+Feeling down, depressed, or hopeless
+Feeling nervous, anxious, or on edge
+Not being able to stop or control worrying
+[[Answers]]
+Not at all
+Several days
+More than half the days
+Nearly every day
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:F4]]
+Since your access to the AI support agent ended, have you missed having it available?
+[[Choices]]
+Not at all
+A little
+Somewhat
+Quite a bit
+Very much
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:F5]]
+Since the study ended, have you sought support from any of the following? (Select the one that best applies.)
+[[Choices]]
+A therapist, counselor, or other mental health professional
+Friends or family
+Another AI tool or app
+More than one of the above
+None of the above
+Prefer not to say
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:F6]]
+Looking back, how much do you feel your conversations with the AI support agent helped you during the study?
+[[Choices]]
+Not at all
+A little
+Somewhat
+Quite a bit
+Very much
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:F7]]
+Have any effects of using the AI support agent - positive or negative - lasted beyond the study period?
+[[Choices]]
+Yes, mostly positive
+Yes, mostly negative
+Yes, both positive and negative
+No lasting effects
+Not sure
+
+[[Question:TE:Essay]]
+[[ID:F8]]
+If yes, please describe. A member of the research team reviews these responses; if you describe distress, we will follow up with support resources.
+
+[[PageBreak]]
+
+[[Question:TE:Essay]]
+[[ID:F9]]
+Anything else you would like the research team to know? (Optional)

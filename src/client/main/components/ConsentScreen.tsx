@@ -150,8 +150,8 @@ export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion
                 <Mic size={16} className="mt-0.5 flex-shrink-0 text-gray-500" aria-hidden="true" />
                 <span>
                   <strong>Audio recording.</strong> This session's audio (your microphone and the
-                  assistant's voice) is recorded and stored securely for the duration of the retention
-                  period below.
+                  assistant's voice) is recorded and stored securely for up to 12 months for safety
+                  review and research analyses, then automatically deleted.
                 </span>
               </li>
             </ul>

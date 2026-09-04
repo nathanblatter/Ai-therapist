@@ -6,6 +6,7 @@ import SessionSettings from "./SessionSettings";
 import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
 import ConsentScreen from "./ConsentScreen";
 import QuietHoursScreen from "./QuietHoursScreen";
+import StudyStatusScreen from "./StudyStatusScreen";
 import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
 import PostSessionScreen, { type PostSessionData, type SessionRecapData, type SharedWriteup } from "./PostSessionScreen";
@@ -105,7 +106,7 @@ export default function App() {
   const [crisisContact, setCrisisContact] = useState<CrisisContact>({
     hotline: '988 Suicide & Crisis Lifeline',
     phone: '988',
-    text: 'HELLO to 741741',
+    text: 'HOME to 741741',
     enabled: true
   });
   const [features, setFeatures] = useState<Features>({
@@ -143,6 +144,10 @@ export default function App() {
   // resources replaces session start. Re-polled so it lifts at 6:00 AM
   // without a manual refresh.
   const [quietHours, setQuietHours] = useState<{ blocksYou: boolean; startHour: number; endHour: number } | null>(null);
+  // Withdrawn/paused study status (server-enforced 403 study_status on
+  // session start; see middleware/studyStatus.ts). Rendered as a blocking
+  // screen with crisis resources — never a generic error toast.
+  const [studyStatusBlock, setStudyStatusBlock] = useState<'paused' | 'withdrawn' | null>(null);
 
   // Async secure messaging (caseworker portal): between-sessions view switch
   // + persistent user socket for logged-in participants. The socket is
@@ -444,6 +449,11 @@ export default function App() {
           setIsConnecting(false);
           return;
         }
+        if (errorData?.error === 'study_status') {
+          setStudyStatusBlock(errorData.studyStatus === 'paused' ? 'paused' : 'withdrawn');
+          setIsConnecting(false);
+          return;
+        }
         throw new Error(errorData?.message || 'Chat session start was forbidden (403)');
       }
 
@@ -526,6 +536,11 @@ export default function App() {
       const errorData = await tokenResponse.json().catch(() => null);
       if (errorData?.error === 'quiet_hours') {
         setQuietHours({ blocksYou: true, ...errorData.quietHours });
+        setIsConnecting(false);
+        return;
+      }
+      if (errorData?.error === 'study_status') {
+        setStudyStatusBlock(errorData.studyStatus === 'paused' ? 'paused' : 'withdrawn');
         setIsConnecting(false);
         return;
       }
@@ -1308,7 +1323,7 @@ export default function App() {
   function getPreambleForLanguage(language: string, includeVoiceInstructions = true) {
     const crisisText = crisisContact.enabled
       ? `call the ${crisisContact.hotline} crisis line at ${crisisContact.phone}${crisisContact.text ? ' or text ' + crisisContact.text : ''}`
-      : 'call 911 or your local emergency services';
+      : 'call or text 988 (Suicide and Crisis Lifeline), or call 911 for immediate danger';
 
     const voiceNote = includeVoiceInstructions
       ? ` Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to press the red mic toggle button to turn it on.`
@@ -1610,6 +1625,9 @@ export default function App() {
           ratings/feedback collected before the overnight screen takes over. */}
       {quietHours?.blocksYou && !isSessionActive && !postSessionData && (
         <QuietHoursScreen startHour={quietHours.startHour} endHour={quietHours.endHour} />
+      )}
+      {studyStatusBlock && !isSessionActive && !postSessionData && (
+        <StudyStatusScreen status={studyStatusBlock} />
       )}
 
       {/* Consent screen (IRB requirement) - must accept before check-in/session start */}

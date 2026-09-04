@@ -596,7 +596,7 @@ export default function SystemConfig() {
               type="text"
               value={crisisContact.text}
               onChange={(e) => updateCrisisContact('text', e.target.value)}
-              placeholder="Text HELLO to 741741"
+              placeholder="Text HOME to 741741"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
           </div>

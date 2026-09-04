@@ -107,5 +107,5 @@ On acknowledging a page:
 | [Dr. Triparna de Vreede] | clinical-protocol support | [confirm] |
 | BYU CAPS | clinical resource | 801-422-3035 (after hours: BYU PD 801-422-2222) |
 | 988 Suicide and Crisis Lifeline | participant resource | call/text 988 |
-| Crisis Text Line | participant resource | text HELLO to 741741 |
+| Crisis Text Line | participant resource | text HOME to 741741 |
 | Emergency | immediate danger | 911 |

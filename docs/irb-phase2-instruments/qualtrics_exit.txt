@@ -1,0 +1,164 @@
+[[AdvancedFormat]]
+
+[[Block: Exit - Continuation]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:X0]]
+Thank you for participating in the AI Support Agent Longitudinal Study. You previously consented to participate in this multi-part study. We are now beginning the exit survey.<br><br>Your participation is completely voluntary. You may continue, or you may withdraw your consent at this point. Withdrawing will not affect compensation you have already earned.<br><br>Would you like to continue?
+[[Choices]]
+I want to continue my participation in this research
+I want to withdraw and no longer participate in any further research
+
+[[Question:TE:SingleLine]]
+[[ID:XID]]
+Enter your study ID in the field below. (Example: "23")
+
+[[Block: Exit - Wellbeing]]
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:XPHQ2]]
+Over the last two weeks, how often have you been bothered by the following? (PHQ-2)
+[[Choices]]
+Little interest or pleasure in doing things
+Feeling down, depressed, or hopeless
+[[Answers]]
+Not at all
+Several days
+More than half the days
+Nearly every day
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:XGAD2]]
+Over the last two weeks, how often have you been bothered by the following? (GAD-2)
+[[Choices]]
+Feeling nervous, anxious, or on edge
+Not being able to stop or control worrying
+[[Answers]]
+Not at all
+Several days
+More than half the days
+Nearly every day
+
+[[Block: Exit - Experience]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:X1]]
+Overall, how valuable was having access to the AI support agent over the past 8 weeks?
+[[Choices]]
+Not at all valuable
+Slightly valuable
+Moderately valuable
+Very valuable
+Extremely valuable
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:X2]]
+Compared with your first week, talking with the AI support agent now feels:
+[[Choices]]
+Much worse
+Somewhat worse
+About the same
+Somewhat better
+Much better
+
+[[Question:MC:MultipleAnswer:Vertical]]
+[[ID:X3]]
+What did you use the AI support agent for most? (Select all that apply)
+[[Choices]]
+Everyday stress
+Relationships
+School pressure
+Sleep
+Mood
+Loneliness
+Practicing difficult conversations
+Curiosity
+Other
+
+[[PageBreak]]
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:X4]]
+Please rate how much you agree with each statement, thinking about the study period as a whole.
+[[Choices]]
+I felt emotionally supported by the AI support agent.
+I felt comfortable being vulnerable with the AI support agent.
+The AI support agent understands what matters to me.
+The AI support agent and I worked toward things I care about.
+I trust the AI support agent to handle sensitive information.
+I could see myself using an AI support agent regularly after this study.
+AI-assisted support could be a helpful supplement to traditional therapy.
+I would recommend the AI support agent to a friend going through a hard time.
+[[Answers]]
+Strongly disagree
+Somewhat disagree
+Neutral (neither agree nor disagree)
+Somewhat agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:X5]]
+Which of the following would you prefer for your own mental health support?
+[[Choices]]
+Only a human therapist
+Only an AI support agent
+A hybrid model (AI + human)
+Neither
+Other
+
+[[Block: Exit - Reflection]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:X6]]
+Did you ever feel too reliant on the AI support agent?
+[[Choices]]
+Not at all
+A little
+Somewhat
+Very much
+
+[[Question:TE:Essay]]
+[[ID:X7]]
+Did you ever choose to talk with the AI agent instead of talking to a person? How do you feel about that?
+
+[[Question:TE:Essay]]
+[[ID:X8]]
+Was there ever a moment the AI support agent said something unhelpful or upsetting? Please describe.
+
+[[Question:TE:Essay]]
+[[ID:X9]]
+If you ever discussed a serious personal difficulty or crisis with the agent, how did it respond? (Optional)
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:X10]]
+How private did your conversations with the AI support agent feel?
+[[Choices]]
+Not at all private
+Slightly private
+Moderately private
+Very private
+Completely private
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:X11]]
+If this tool were available after the study, would you keep using it?
+[[Choices]]
+Definitely not
+Probably not
+Not sure
+Probably yes
+Definitely yes
+
+[[Question:TE:Essay]]
+[[ID:X12]]
+What would you change about the AI support agent?
+
+[[Question:TE:Essay]]
+[[ID:X13]]
+Do you have any other comments you would like to share?
+
+[[Question:DB]]
+[[ID:XEND]]
+Thank you for completing the study. Some participants will be invited to an optional 30-minute exit interview; a research assistant will reach out if you are selected. A short follow-up survey will be sent at Week 12. Support resources remain available: BYU CAPS (801-422-3035), 988 Suicide and Crisis Lifeline, Crisis Text Line (text HOME to 741741).

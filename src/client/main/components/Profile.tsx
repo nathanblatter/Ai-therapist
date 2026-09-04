@@ -362,6 +362,21 @@ export default function Profile() {
               )}
             </div>
 
+            {/* Data export (participant right: full copy of their own data) */}
+            <div className="pt-4 border-t">
+              <p className="text-sm text-gray-600">
+                Want a copy of your data?{' '}
+                <a
+                  href="/api/me/export"
+                  download
+                  className="text-royal underline hover:text-navy"
+                >
+                  Download everything we have about you
+                </a>
+                {' '}as a file — your sessions, progress, and preferences.
+              </p>
+            </div>
+
             {/* Study participation (withdrawal survey link) */}
             {withdrawal && (
               <div className="pt-4 border-t">
