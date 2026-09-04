@@ -38,6 +38,18 @@ services:
       IMESSAGE_API_URL: ${IMESSAGE_API_URL:-http://100.79.61.79:8899}
       IMESSAGE_API_KEY: ${IMESSAGE_API_KEY}
       CRISIS_ALERT_PHONE: ${CRISIS_ALERT_PHONE}
+      # Qualtrics survey-driven enrollment + response sync (ai-therapist-149).
+      # All optional: unset token disables /join-study; unset survey ids
+      # disable sync for that survey. Prod compose uses env_file so it picks
+      # these up from .env automatically — only stage needs the passthrough.
+      QUALTRICS_API_TOKEN: ${QUALTRICS_API_TOKEN}
+      QUALTRICS_BASELINE_SURVEY_ID: ${QUALTRICS_BASELINE_SURVEY_ID}
+      QUALTRICS_WEEKLY_SURVEY_ID: ${QUALTRICS_WEEKLY_SURVEY_ID}
+      QUALTRICS_EXIT_SURVEY_ID: ${QUALTRICS_EXIT_SURVEY_ID}
+      QUALTRICS_WEEK12_SURVEY_ID: ${QUALTRICS_WEEK12_SURVEY_ID}
+      QUALTRICS_DATACENTER: ${QUALTRICS_DATACENTER}
+      QUALTRICS_STUDY_ORG_ID: ${QUALTRICS_STUDY_ORG_ID}
+      QUALTRICS_SYNC_INTERVAL_MINUTES: ${QUALTRICS_SYNC_INTERVAL_MINUTES}
     networks:
       - default
       - flightdeck
