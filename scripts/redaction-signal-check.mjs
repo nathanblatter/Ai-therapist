@@ -16,6 +16,9 @@ import { pool } from '../src/server/config/db.js';
 import { embedTextBatch } from '../src/server/services/embeddings.service.js';
 
 const SAMPLE_LIMIT = Number(process.env.SIGNAL_CHECK_LIMIT || 200);
+// Stage traffic is mostly demo sessions; SIGNAL_CHECK_INCLUDE_DEMO=1 widens
+// the sample to them (fine for measuring redaction behavior — same pipeline).
+const INCLUDE_DEMO = process.env.SIGNAL_CHECK_INCLUDE_DEMO === '1';
 
 // Small affect lexicon — not a validated instrument, just a canary: these
 // words carry the clinical signal analyses depend on and should essentially
@@ -49,10 +52,10 @@ const { rows } = await pool.query(
       AND length(trim(m.content)) > 20
       AND m.role IN ('user', 'assistant')
       AND u.is_sandbox IS NOT TRUE
-      AND ts.is_demo IS NOT TRUE
+      AND (ts.is_demo IS NOT TRUE OR $2)
     ORDER BY m.created_at DESC
     LIMIT $1`,
-  [SAMPLE_LIMIT]
+  [SAMPLE_LIMIT, INCLUDE_DEMO]
 );
 
 if (rows.length === 0) {
