@@ -6,7 +6,9 @@ import { pool } from '../config/db.js';
 
 export interface RecordingRow {
   session_id: string;
-  recording_object_key: string;
+  recording_object_key: string | null;
+  /** Participant-only track (migration 086); aged out alongside the mix. */
+  participant_recording_object_key: string | null;
   user_id: number | null;
 }
 
@@ -16,9 +18,9 @@ export interface RecordingRow {
  */
 export async function getRecordingsToAgeOut(days: number): Promise<RecordingRow[]> {
   const result = await pool.query<RecordingRow>(
-    `SELECT session_id, recording_object_key, user_id
+    `SELECT session_id, recording_object_key, participant_recording_object_key, user_id
        FROM therapy_sessions
-      WHERE recording_object_key IS NOT NULL
+      WHERE (recording_object_key IS NOT NULL OR participant_recording_object_key IS NOT NULL)
         AND is_demo IS NOT TRUE
         AND created_at < now() - ($1 || ' days')::interval
       ORDER BY created_at, session_id`,
@@ -34,9 +36,9 @@ export async function getRecordingsToAgeOut(days: number): Promise<RecordingRow[
  */
 export async function getOrphanedRecordingsPastGrace(graceDays: number): Promise<RecordingRow[]> {
   const result = await pool.query<RecordingRow>(
-    `SELECT session_id, recording_object_key, user_id
+    `SELECT session_id, recording_object_key, participant_recording_object_key, user_id
        FROM therapy_sessions
-      WHERE recording_object_key IS NOT NULL
+      WHERE (recording_object_key IS NOT NULL OR participant_recording_object_key IS NOT NULL)
         AND is_demo IS NOT TRUE
         AND user_id IS NULL
         AND status = 'ended'
@@ -55,7 +57,12 @@ export async function clearRecordingColumns(sessionId: string): Promise<void> {
             recording_status = NULL,
             recording_duration_ms = NULL,
             recording_sample_rate = NULL,
-            recording_size_bytes = NULL
+            recording_size_bytes = NULL,
+            participant_recording_object_key = NULL,
+            participant_recording_status = NULL,
+            participant_recording_duration_ms = NULL,
+            participant_recording_sample_rate = NULL,
+            participant_recording_size_bytes = NULL
       WHERE session_id = $1`,
     [sessionId]
   );

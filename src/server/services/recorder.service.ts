@@ -7,15 +7,24 @@ import {
   putObject,
   RECORDINGS_BUCKET,
 } from "../config/objectStorage.js";
-import { setSessionRecording } from "../db/recording.queries.js";
+import {
+  setSessionRecording,
+  setSessionParticipantRecording,
+} from "../db/recording.queries.js";
 
 const log = createLogger("recorder");
 
-// Live audio arrives as a single pre-mixed PCM16 stream (the participant's
-// browser mixes mic + assistant before teeing). We append raw PCM bytes to a
-// temp file as they arrive, then wrap them in a WAV container and upload to
-// object storage when the session ends. Streaming to disk keeps memory flat
-// even for long sessions (~170MB of PCM for 30 min would be too much for RAM).
+// Live audio arrives as base64 PCM16 batches, tagged by track:
+//   'mixed'       — the browser's mic+assistant mixdown (admin playback, 022)
+//   'participant' — the pre-gain mic-only tap (prosody research, 086)
+// Old clients and the redteam harness send untagged batches, which default to
+// 'mixed'. We append raw PCM bytes to a per-(session, track) temp file as they
+// arrive, then wrap each in a WAV container and upload when the session ends.
+// Streaming to disk keeps memory flat even for long sessions (~170MB of PCM
+// for 30 min would be too much for RAM).
+
+export type RecordingTrack = "mixed" | "participant";
+const TRACKS: RecordingTrack[] = ["mixed", "participant"];
 
 interface ActiveRecording {
   filePath: string;
@@ -26,6 +35,7 @@ interface ActiveRecording {
 }
 
 const recordings = new Map<string, ActiveRecording>();
+const recKey = (sessionId: string, track: RecordingTrack) => `${sessionId}:${track}`;
 
 // Sessions whose recording has already been finalized/aborted. Audio arrives as
 // async HTTP batches and finalize fires from several independent end paths
@@ -37,7 +47,8 @@ const recordings = new Map<string, ActiveRecording>();
 // finalized file (the "2:57 duration, 55s of audio" bug). Sessions are
 // one-shot, so the marker is permanent for the process lifetime: a bare
 // session-id string per ended session is negligible memory, and any TTL would
-// re-open the truncation window for long-lived zombie uploads.
+// re-open the truncation window for long-lived zombie uploads. The set is
+// per-SESSION (not per-track) so one finalize atomically closes both tracks.
 const finalized = new Set<string>();
 
 function markFinalized(sessionId: string): void {
@@ -61,14 +72,16 @@ export function appendChunk(
   sessionId: string,
   base64Pcm16: string,
   sampleRate: number,
+  track: RecordingTrack = "mixed",
 ): void {
   // Drop stragglers that arrive after the recording was closed — re-creating
   // the stream here would truncate the finalized file.
   if (finalized.has(sessionId)) return;
 
-  let rec = recordings.get(sessionId);
+  const key = recKey(sessionId, track);
+  let rec = recordings.get(key);
   if (!rec) {
-    const filePath = path.join(tmpDir(), `${sessionId}.pcm`);
+    const filePath = path.join(tmpDir(), `${sessionId}.${track}.pcm`);
     const stream = fs.createWriteStream(filePath);
     rec = { filePath, stream, sampleRate, byteLength: 0, errored: false };
     // A WriteStream with no 'error' listener throws (and can crash the process)
@@ -77,10 +90,10 @@ export function appendChunk(
     // would over-report the real audio.
     stream.on("error", (err) => {
       rec!.errored = true;
-      log.error({ err }, `[rec] write stream error for ${sessionId}`);
+      log.error({ err }, `[rec] write stream error for ${key}`);
     });
-    recordings.set(sessionId, rec);
-    log.info(`[rec] started recording for ${sessionId} @ ${sampleRate}Hz`);
+    recordings.set(key, rec);
+    log.info(`[rec] started ${track} recording for ${sessionId} @ ${sampleRate}Hz`);
   }
   if (rec.errored) return; // stream is dead; don't count bytes we can't persist
   const buf = Buffer.from(base64Pcm16, "base64");
@@ -88,36 +101,52 @@ export function appendChunk(
   rec.byteLength += buf.length;
 }
 
-/** Whether a session currently has buffered audio. */
+/** Whether a session currently has buffered audio on any track. */
 export function hasRecording(sessionId: string): boolean {
-  return recordings.has(sessionId);
+  return TRACKS.some((track) => recordings.has(recKey(sessionId, track)));
 }
 
 /**
- * Close the buffer, wrap the PCM in a WAV header, upload to object storage and
- * persist the key on the session row. Never throws — recording is best-effort.
+ * Close the buffers, wrap each track's PCM in a WAV header, upload to object
+ * storage and persist the keys on the session row. Never throws — recording is
+ * best-effort, and a participant-track failure never marks the mix failed.
  */
 export async function finalize(sessionId: string): Promise<void> {
-  const rec = recordings.get(sessionId);
-  if (!rec) return;
-  recordings.delete(sessionId);
+  const tracks = TRACKS.map((track) => ({
+    track,
+    rec: recordings.get(recKey(sessionId, track)),
+  })).filter((t): t is { track: RecordingTrack; rec: ActiveRecording } => Boolean(t.rec));
+  if (tracks.length === 0) return;
+  for (const { track } of tracks) recordings.delete(recKey(sessionId, track));
   // Block any straggler audio batches from re-opening this recording.
   markFinalized(sessionId);
 
+  for (const { track, rec } of tracks) {
+    await finalizeTrack(sessionId, track, rec);
+  }
+}
+
+async function finalizeTrack(
+  sessionId: string,
+  track: RecordingTrack,
+  rec: ActiveRecording,
+): Promise<void> {
+  const persist = track === "mixed" ? setSessionRecording : setSessionParticipantRecording;
+  const objectName = track === "mixed" ? "recording.wav" : "participant.wav";
   try {
     await new Promise<void>((resolve, reject) => {
       rec.stream.end((err?: unknown) => (err ? reject(err) : resolve()));
     });
 
     if (rec.byteLength === 0) {
-      log.info(`[rec] ${sessionId} had no audio; skipping upload`);
+      log.info(`[rec] ${sessionId} ${track} had no audio; skipping upload`);
       void cleanupTemp(rec.filePath);
       return;
     }
 
     const pcm = await fs.promises.readFile(rec.filePath);
     const wav = buildWav(pcm, rec.sampleRate);
-    const key = `sessions/${sessionId}/recording.wav`;
+    const key = `sessions/${sessionId}/${objectName}`;
 
     await ensureBucket();
     await putObject(key, wav, "audio/wav");
@@ -127,12 +156,12 @@ export async function finalize(sessionId: string): Promise<void> {
     // duration must reflect the real audio, not what we tried to write.
     if (pcm.length !== rec.byteLength) {
       log.warn(
-        `[rec] ${sessionId} byte mismatch: counted ${rec.byteLength} but ` +
+        `[rec] ${sessionId} ${track} byte mismatch: counted ${rec.byteLength} but ` +
           `${pcm.length} on disk — reporting duration from disk`,
       );
     }
     const durationMs = Math.round((pcm.length / 2 / rec.sampleRate) * 1000);
-    await setSessionRecording(sessionId, {
+    await persist(sessionId, {
       objectKey: key,
       status: "ready",
       durationMs,
@@ -141,13 +170,13 @@ export async function finalize(sessionId: string): Promise<void> {
     });
 
     log.info(
-      `[rec] uploaded ${sessionId} → ${RECORDINGS_BUCKET}/${key} ` +
+      `[rec] uploaded ${sessionId} ${track} → ${RECORDINGS_BUCKET}/${key} ` +
         `(${(wav.length / 1024 / 1024).toFixed(1)}MB, ${(durationMs / 1000).toFixed(0)}s)`,
     );
   } catch (err) {
-    log.error({ err }, `[rec] failed to finalize recording for ${sessionId}`);
+    log.error({ err }, `[rec] failed to finalize ${track} recording for ${sessionId}`);
     try {
-      await setSessionRecording(sessionId, { status: "failed" });
+      await persist(sessionId, { status: "failed" });
     } catch {
       /* swallow — best effort */
     }
@@ -156,14 +185,18 @@ export async function finalize(sessionId: string): Promise<void> {
   }
 }
 
-/** Discard a session's buffer without uploading (e.g. on hard failure). */
+/** Discard a session's buffers without uploading (e.g. on hard failure). */
 export function abort(sessionId: string): void {
-  const rec = recordings.get(sessionId);
-  if (!rec) return;
-  recordings.delete(sessionId);
+  const tracks = TRACKS.map((track) => recordings.get(recKey(sessionId, track))).filter(
+    (rec): rec is ActiveRecording => Boolean(rec),
+  );
+  if (tracks.length === 0) return;
+  for (const track of TRACKS) recordings.delete(recKey(sessionId, track));
   markFinalized(sessionId);
-  rec.stream.destroy();
-  void cleanupTemp(rec.filePath);
+  for (const rec of tracks) {
+    rec.stream.destroy();
+    void cleanupTemp(rec.filePath);
+  }
 }
 
 async function cleanupTemp(filePath: string): Promise<void> {

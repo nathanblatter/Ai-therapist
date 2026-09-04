@@ -24,6 +24,7 @@ import { generateSessionNameAsync } from '../../services/sessionName.service.js'
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
+import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
 import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 /**
@@ -49,7 +50,7 @@ export default function chatRoutes(): Router {
 
   // POST /api/chat/start - start a chat-only therapy session. Blocked until
   // the participant has accepted the current consent screen.
-  router.post('/api/chat/start', chatStartLimiter, requireConsent, requireOutsideQuietHours, async (req, res) => {
+  router.post('/api/chat/start', chatStartLimiter, requireConsent, requireOutsideQuietHours, requireActiveStudyStatus, async (req, res) => {
     const userId: number | string = req.session?.userId ?? req.sessionID;
     const numericUserId: number | null = typeof userId === 'number' ? userId : null;
 

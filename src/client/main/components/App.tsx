@@ -76,6 +76,7 @@ export default function App() {
   // server (HTTP, since the participant socket is unreliable through the tunnel).
   const audioTeeRef = useRef<AudioTeeHandle | null>(null);
   const audioUploaderRef = useRef<AudioUploader | null>(null);
+  const participantUploaderRef = useRef<AudioUploader | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   // Latest-ref for stopSession (ai-therapist-113): the WebRTC data-channel
   // handler is attached once inside startRealtimeSession, closing over THAT
@@ -792,9 +793,22 @@ export default function App() {
       if (!audioTeeRef.current && features.session_recording_enabled) {
         const uploader = createAudioUploader(newSessionId);
         audioUploaderRef.current = uploader;
-        audioTeeRef.current = startMixedTee([ms, e.streams[0]], (pcm, sampleRate) => {
-          uploader.push(pcm, sampleRate);
-        });
+        // Second, mic-only track (pre-gain tap) for prosody research — a
+        // subset of the audio already captured in the mix, same consent gate.
+        const participantUploader = createAudioUploader(newSessionId, 400, 'participant');
+        participantUploaderRef.current = participantUploader;
+        audioTeeRef.current = startMixedTee(
+          [ms, e.streams[0]],
+          (pcm, sampleRate) => {
+            uploader.push(pcm, sampleRate);
+          },
+          {
+            stream: ms,
+            onChunk: (pcm, sampleRate) => {
+              participantUploader.push(pcm, sampleRate);
+            },
+          },
+        );
       }
     };
     // Set up data channel for sending and receiving events
@@ -1065,6 +1079,10 @@ export default function App() {
     if (audioUploaderRef.current) {
       audioUploaderRef.current.stop(); // flush the final batch
       audioUploaderRef.current = null;
+    }
+    if (participantUploaderRef.current) {
+      participantUploaderRef.current.stop();
+      participantUploaderRef.current = null;
     }
 
     if (dataChannelRef.current) {

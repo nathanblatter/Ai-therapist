@@ -17,6 +17,7 @@ vi.mock('../db/datasetExport.queries.js', () => ({
   getCrisisEventsExport: vi.fn(async () => mockRows.crisis ?? []),
   getTranscriptsExport: vi.fn(async () => mockRows.transcripts ?? []),
   getFeedbackCommentsExport: vi.fn(async () => mockRows.comments ?? []),
+  getSemanticMetricsExport: vi.fn(async () => mockRows.semantic_metrics ?? []),
 }));
 vi.mock('../db/qualtricsResponses.queries.js', () => ({
   getSurveyResponsesExport: vi.fn(async () => mockRows.surveys ?? []),
@@ -93,14 +94,14 @@ describe('codebook / CSV registry (drift guard)', () => {
 });
 
 describe('buildDataset', () => {
-  it('assigns pseudonyms before selecting rows and includes all 9 default CSVs + codebook', async () => {
+  it('assigns pseudonyms before selecting rows and includes all 10 default CSVs + codebook', async () => {
     const result = await buildDataset('2026-08-31T23:59:59Z', { generatedAt: 'fixed' });
     expect(ensurePseudonyms).toHaveBeenCalledWith('2026-08-31T23:59:59Z');
     const names = result.main.map(f => f.name).sort();
     expect(names).toEqual([
       'codebook.md', 'crisis_events.csv', 'evals.csv', 'feedback.csv',
-      'moods.csv', 'participants.csv', 'screeners.csv', 'sessions.csv', 'surveys.csv',
-      'surveys_scored.csv',
+      'moods.csv', 'participants.csv', 'screeners.csv', 'semantic_metrics.csv',
+      'sessions.csv', 'surveys.csv', 'surveys_scored.csv',
     ]);
     expect(result.transcripts).toBeNull();
   });

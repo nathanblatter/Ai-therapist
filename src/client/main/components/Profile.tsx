@@ -51,10 +51,19 @@ export default function Profile() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
+  // Study withdrawal/pause link (enrolled participants only)
+  const [withdrawal, setWithdrawal] = useState<{ url: string; studyStatus: string } | null>(null);
+
   useEffect(() => {
     fetchUserData();
     fetchSessions();
     fetchRateLimitStatus();
+    fetch('/api/me/withdrawal-link')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data?.available && data.url) setWithdrawal({ url: data.url, studyStatus: data.studyStatus });
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -352,6 +361,32 @@ export default function Profile() {
                 </div>
               )}
             </div>
+
+            {/* Study participation (withdrawal survey link) */}
+            {withdrawal && (
+              <div className="pt-4 border-t">
+                {withdrawal.studyStatus !== 'active' ? (
+                  <p className="text-sm text-gray-600">
+                    Your study participation is currently{' '}
+                    <strong>{withdrawal.studyStatus === 'paused' ? 'paused' : 'withdrawn'}</strong>.
+                    Contact the research team if this is not what you intended.
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-600">
+                    Leaving the study or need a break?{' '}
+                    <a
+                      href={withdrawal.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-royal underline hover:text-navy"
+                    >
+                      Let us know here
+                    </a>
+                    {' '}— it only takes a minute, and you can pause instead of fully withdrawing.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

@@ -43,6 +43,13 @@ describe('scoreInstruments', () => {
   });
 });
 
+const NULL_ALLIANCE = {
+  allianceTask: null,
+  allianceBond: null,
+  allianceGoal: null,
+  allianceTotal: null,
+};
+
 describe('weeklyMetrics', () => {
   it('extracts mood, stress, helpfulness, and the usage bucket', () => {
     expect(weeklyMetrics({ QID8: 5, QID9: 2, QID6: 4, QID4: 3 })).toEqual({
@@ -50,6 +57,7 @@ describe('weeklyMetrics', () => {
       stress: 2,
       helpfulness: 4,
       usage: '2-3',
+      ...NULL_ALLIANCE,
     });
   });
 
@@ -58,6 +66,34 @@ describe('weeklyMetrics', () => {
   });
 
   it('nulls everything on an empty payload', () => {
-    expect(weeklyMetrics({})).toEqual({ mood: null, stress: null, helpfulness: null, usage: null });
+    expect(weeklyMetrics({})).toEqual({
+      mood: null,
+      stress: null,
+      helpfulness: null,
+      usage: null,
+      ...NULL_ALLIANCE,
+    });
+  });
+
+  it('scores alliance subscales as item means and total as the 6-item mean', () => {
+    const result = weeklyMetrics({
+      QID7_1: 5, // Bond
+      QID7_2: 4, // Bond
+      QID7_3: 3, // Goal
+      QID7_4: 2, // Task
+      QID7_5: 3, // Task
+      QID7_6: 4, // Goal
+    });
+    expect(result.allianceBond).toBe(4.5);
+    expect(result.allianceGoal).toBe(3.5);
+    expect(result.allianceTask).toBe(2.5);
+    expect(result.allianceTotal).toBe(3.5);
+  });
+
+  it('nulls a subscale when either item is missing or out of range, and total when any subscale is null', () => {
+    const partial = weeklyMetrics({ QID7_1: 5, QID7_2: 4, QID7_3: 3, QID7_4: 6, QID7_5: 3, QID7_6: 4 });
+    expect(partial.allianceBond).toBe(4.5);
+    expect(partial.allianceTask).toBeNull(); // QID7_4 out of range
+    expect(partial.allianceTotal).toBeNull();
   });
 });

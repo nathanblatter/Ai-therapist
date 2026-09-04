@@ -35,6 +35,34 @@ export async function setSessionRecording(
   );
 }
 
+/**
+ * Persist (or update) the participant-only track's metadata (migration 086).
+ * Kept as an explicit second function rather than dynamic column names — two
+ * tracks, two audited UPDATE statements.
+ */
+export async function setSessionParticipantRecording(
+  sessionId: string,
+  update: SessionRecordingUpdate,
+): Promise<void> {
+  await pool.query(
+    `UPDATE therapy_sessions
+        SET participant_recording_object_key = COALESCE($2, participant_recording_object_key),
+            participant_recording_status      = $3,
+            participant_recording_duration_ms = COALESCE($4, participant_recording_duration_ms),
+            participant_recording_sample_rate = COALESCE($5, participant_recording_sample_rate),
+            participant_recording_size_bytes  = COALESCE($6, participant_recording_size_bytes)
+      WHERE session_id = $1`,
+    [
+      sessionId,
+      update.objectKey ?? null,
+      update.status,
+      update.durationMs ?? null,
+      update.sampleRate ?? null,
+      update.sizeBytes ?? null,
+    ],
+  );
+}
+
 export interface SessionRecording {
   objectKey: string;
   status: string;

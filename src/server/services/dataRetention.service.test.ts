@@ -101,6 +101,43 @@ describe('enforceRetention', () => {
     expect(result.failures).toBe(0);
   });
 
+  it('deletes both tracks with one log row per object (dual-track, 086)', async () => {
+    mocks.getRecordingsToAgeOut.mockResolvedValue([
+      {
+        session_id: 's1',
+        recording_object_key: 'sessions/s1/recording.wav',
+        participant_recording_object_key: 'sessions/s1/participant.wav',
+        user_id: 7,
+      },
+    ]);
+    deleteObjectMock.mockResolvedValue(undefined);
+    const result = await enforceRetention('manual', 'cli');
+    expect(deleteObjectMock).toHaveBeenCalledWith('sessions/s1/recording.wav');
+    expect(deleteObjectMock).toHaveBeenCalledWith('sessions/s1/participant.wav');
+    expect(mocks.clearRecordingColumns).toHaveBeenCalledWith('s1');
+    const refs = mocks.insertDeletionLog.mock.calls.map((c) => c[0].artifactRef);
+    expect(refs).toContain('sessions/s1/recording.wav');
+    expect(refs).toContain('sessions/s1/participant.wav');
+    expect(result.recordingsDeleted).toBe(1);
+  });
+
+  it('participant-only key (mixed already gone) is selected and cleared', async () => {
+    mocks.getRecordingsToAgeOut.mockResolvedValue([
+      {
+        session_id: 's2',
+        recording_object_key: null,
+        participant_recording_object_key: 'sessions/s2/participant.wav',
+        user_id: null,
+      },
+    ]);
+    deleteObjectMock.mockResolvedValue(undefined);
+    const result = await enforceRetention('manual', 'cli');
+    expect(deleteObjectMock).toHaveBeenCalledTimes(1);
+    expect(deleteObjectMock).toHaveBeenCalledWith('sessions/s2/participant.wav');
+    expect(mocks.clearRecordingColumns).toHaveBeenCalledWith('s2');
+    expect(result.recordingsDeleted).toBe(1);
+  });
+
   it('on MinIO failure leaves DB columns intact and logs success=false', async () => {
     mocks.getRecordingsToAgeOut.mockResolvedValue([
       { session_id: 's1', recording_object_key: 'rec/s1.wav', user_id: null },

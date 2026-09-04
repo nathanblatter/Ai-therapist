@@ -30,6 +30,7 @@ interface ProfileUser {
   mfa_enabled?: boolean;
   memory_enabled?: boolean;
   risk_context_share_enabled?: boolean;
+  study_status?: 'active' | 'paused' | 'withdrawn';
   created_at?: string | null;
 }
 
@@ -399,6 +400,15 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
               <h2 className="text-xl font-bold text-gray-900 truncate">{user.username}</h2>
               <p className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
                 <span className="capitalize">{user.role}</span>
+                {profile?.user.study_status && profile.user.study_status !== 'active' && (
+                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold ${
+                    profile.user.study_status === 'withdrawn'
+                      ? 'bg-red-100 text-red-700'
+                      : 'bg-amber-100 text-amber-700'
+                  }`}>
+                    {profile.user.study_status === 'withdrawn' ? 'withdrawn from study' : 'study paused'}
+                  </span>
+                )}
                 <span className="inline-flex items-center gap-1"><Calendar size={11} /> joined {formatDate(user.created_at)}</span>
                 <span className={`inline-flex items-center gap-1 ${memoryEnabled ? 'text-emerald-700' : 'text-gray-400'}`}>
                   <Cpu size={11} /> memory {memoryEnabled ? 'on' : 'off'}

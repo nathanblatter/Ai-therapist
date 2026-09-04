@@ -22,6 +22,7 @@ import {
   insertAdverseEventDraft,
   type QualtricsSurveyRole,
 } from '../db/index.js';
+import { setStudyStatus, type StudyStatus } from '../db/studyStatus.queries.js';
 import { enqueueWorkItem } from './workQueue.service.js';
 
 export interface QualtricsSyncConfig {
@@ -38,6 +39,7 @@ export function getQualtricsSyncConfig(): QualtricsSyncConfig | null {
   if (process.env.QUALTRICS_WEEKLY_SURVEY_ID) surveys.weekly = process.env.QUALTRICS_WEEKLY_SURVEY_ID;
   if (process.env.QUALTRICS_EXIT_SURVEY_ID) surveys.exit = process.env.QUALTRICS_EXIT_SURVEY_ID;
   if (process.env.QUALTRICS_WEEK12_SURVEY_ID) surveys.week12 = process.env.QUALTRICS_WEEK12_SURVEY_ID;
+  if (process.env.QUALTRICS_WITHDRAWAL_SURVEY_ID) surveys.withdrawal = process.env.QUALTRICS_WITHDRAWAL_SURVEY_ID;
   if (Object.keys(surveys).length === 0) return null;
   return { apiToken, datacenter: process.env.QUALTRICS_DATACENTER || 'byu.pdx1', surveys };
 }
@@ -146,8 +148,59 @@ export function detectAdverseReport(
   } else if (surveyRole === 'week12') {
     if (values.QID10 === 2 || values.QID10 === 3) triggers.push('QID10');
     if (hasText('QID11_TEXT')) triggers.push('QID11_TEXT');
+  } else if (surveyRole === 'withdrawal') {
+    // "Felt worse or uncomfortable" reason, or any free-text elaboration —
+    // withdrawal driven by distress is protocol-reportable.
+    if (values[WITHDRAWAL_KEYS.reason] === WITHDRAWAL_FELT_WORSE_CHOICE) triggers.push(WITHDRAWAL_KEYS.reason);
+    if (hasText(`${WITHDRAWAL_KEYS.details}_TEXT`)) triggers.push(`${WITHDRAWAL_KEYS.details}_TEXT`);
   }
   return triggers.length > 0 ? triggers : null;
+}
+
+// Withdrawal-survey QID map (see docs/irb-phase2-instruments/qualtrics_withdrawal.txt:
+// DID study-ID, D1 reason, D2 free text, D3 withdraw-vs-pause, D4 data use).
+// VERIFY against live survey-definitions once the survey is built in Qualtrics —
+// import renumbers labels to QIDn. Until verified, status application no-ops
+// safely (unknown keys -> null -> conservative default handling below).
+export const WITHDRAWAL_KEYS = {
+  reason: 'QID2', // D1: 1 time / 2 not helpful / 3 felt worse / 4 privacy / 5 technical / 6 life / 7 other
+  details: 'QID3', // D2: optional essay -> QID3_TEXT
+  scope: 'QID4', // D3: 1 = withdraw fully, 2 = pause / take a break
+  dataUse: 'QID5', // D4: 1 = keep collected data, 2 = also requests deletion
+} as const;
+const WITHDRAWAL_FELT_WORSE_CHOICE = 3;
+
+/**
+ * Stamp study status from a finished withdrawal response and cue the
+ * coordinator. Pause (scope=2) -> 'paused', anything else -> 'withdrawn'.
+ * Idempotent: setStudyStatus only fires on change, and the work item is
+ * deduped on (item_type, source_table, source_id).
+ */
+async function applyWithdrawalResponse(
+  responseId: string,
+  userId: number,
+  values: Record<string, unknown>
+): Promise<void> {
+  const status: StudyStatus = values[WITHDRAWAL_KEYS.scope] === 2 ? 'paused' : 'withdrawn';
+  const requestsDeletion = values[WITHDRAWAL_KEYS.dataUse] === 2;
+  const changed = await setStudyStatus(userId, status, `qualtrics:${responseId}`);
+  if (changed) {
+    console.log(`[QualtricsSync] participant ${userId} study_status -> ${status} (withdrawal survey)`);
+  }
+  await enqueueWorkItem({
+    itemType: 'participant_withdrawal',
+    severity: requestsDeletion ? 'warning' : 'info',
+    title: status === 'paused' ? 'Participant paused study participation' : 'Participant withdrew from the study',
+    detail: {
+      responseId,
+      status,
+      reasonChoice: typeof values[WITHDRAWAL_KEYS.reason] === 'number' ? values[WITHDRAWAL_KEYS.reason] : null,
+      requestsDeletion,
+    },
+    sourceTable: 'qualtrics_responses',
+    sourceId: responseId,
+    clientId: userId,
+  });
 }
 
 /** Next business day after `from` — the protocol's review deadline. */
@@ -245,6 +298,17 @@ export async function processExportedResponse(
     recordedAt,
     answers: values,
   });
+
+  // Withdrawal survey: stamp study status + coordinator cue. Only for linked
+  // participants — an unlinked withdrawal lands in the unlinked queue via the
+  // normal sync warning and is resolved by hand.
+  if (surveyRole === 'withdrawal' && finished && values.distributionChannel !== 'preview' && userId !== null) {
+    try {
+      await applyWithdrawalResponse(response.responseId, userId, values);
+    } catch (err) {
+      console.error('[QualtricsSync] withdrawal status application failed:', err);
+    }
+  }
 
   // Adverse-experience triage (1-business-day review promise): finished,
   // non-preview responses with a distress report land in the work queue.

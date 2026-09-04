@@ -2,10 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Mock the storage + db boundaries so the test exercises the real PCM→WAV
 // assembly and temp-file lifecycle without touching MinIO or Postgres.
-const { putObjectMock, ensureBucketMock, setRecordingMock } = vi.hoisted(() => ({
+const { putObjectMock, ensureBucketMock, setRecordingMock, setParticipantRecordingMock } = vi.hoisted(() => ({
   putObjectMock: vi.fn(),
   ensureBucketMock: vi.fn(),
   setRecordingMock: vi.fn(),
+  setParticipantRecordingMock: vi.fn(),
 }));
 
 vi.mock('../config/objectStorage.js', () => ({
@@ -16,6 +17,7 @@ vi.mock('../config/objectStorage.js', () => ({
 
 vi.mock('../db/recording.queries.js', () => ({
   setSessionRecording: setRecordingMock,
+  setSessionParticipantRecording: setParticipantRecordingMock,
 }));
 
 const { appendChunk, finalize, abort, hasRecording } = await import('./recorder.service.js');
@@ -43,6 +45,7 @@ describe('recorder.service', () => {
     putObjectMock.mockReset().mockResolvedValue(undefined);
     ensureBucketMock.mockReset().mockResolvedValue(undefined);
     setRecordingMock.mockReset().mockResolvedValue(undefined);
+    setParticipantRecordingMock.mockReset().mockResolvedValue(undefined);
   });
 
   it('buffers chunks and uploads a valid WAV on finalize', async () => {
@@ -132,6 +135,78 @@ describe('recorder.service', () => {
 
     expect(hasRecording(sessionId)).toBe(false);
     await finalize(sessionId); // nothing left to finalize
+    expect(putObjectMock).not.toHaveBeenCalled();
+  });
+
+  it('finalizes both tracks to their own objects with independent metadata', async () => {
+    const sessionId = `sess-dual-${Date.now()}`;
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'mixed');
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'mixed');
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'participant');
+    expect(hasRecording(sessionId)).toBe(true);
+
+    await finalize(sessionId);
+
+    const keys = putObjectMock.mock.calls.map((c) => c[0]).sort();
+    expect(keys).toEqual([
+      `sessions/${sessionId}/participant.wav`,
+      `sessions/${sessionId}/recording.wav`,
+    ]);
+    // mixed: 8192 samples / 48000 = ~171ms; participant: 4096 / 48000 = ~85ms
+    expect(setRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+      objectKey: `sessions/${sessionId}/recording.wav`,
+      status: 'ready',
+      durationMs: 171,
+    }));
+    expect(setParticipantRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+      objectKey: `sessions/${sessionId}/participant.wav`,
+      status: 'ready',
+      durationMs: 85,
+    }));
+    expect(hasRecording(sessionId)).toBe(false);
+  });
+
+  it('mixed-only session never touches the participant setter', async () => {
+    const sessionId = `sess-mixedonly-${Date.now()}`;
+    appendChunk(sessionId, pcmChunk(2048), 48000);
+    await finalize(sessionId);
+    expect(setParticipantRecordingMock).not.toHaveBeenCalled();
+    expect(setRecordingMock).toHaveBeenCalledOnce();
+  });
+
+  it('drops participant stragglers after finalize (per-session finalized guard)', async () => {
+    const sessionId = `sess-dual-straggler-${Date.now()}`;
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'mixed');
+    await finalize(sessionId);
+
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'participant');
+    expect(hasRecording(sessionId)).toBe(false);
+    await finalize(sessionId);
+    expect(setParticipantRecordingMock).not.toHaveBeenCalled();
+    expect(putObjectMock).toHaveBeenCalledOnce();
+  });
+
+  it('a participant-track upload failure does not mark the mixed track failed', async () => {
+    const sessionId = `sess-dual-fail-${Date.now()}`;
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'mixed');
+    appendChunk(sessionId, pcmChunk(4096), 48000, 'participant');
+    putObjectMock
+      .mockResolvedValueOnce(undefined) // mixed upload succeeds
+      .mockRejectedValueOnce(new Error('minio hiccup')); // participant fails
+
+    await finalize(sessionId);
+
+    expect(setRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({ status: 'ready' }));
+    expect(setParticipantRecordingMock).toHaveBeenCalledWith(sessionId, { status: 'failed' });
+  });
+
+  it('abort cleans up both tracks', async () => {
+    const sessionId = `sess-dual-abort-${Date.now()}`;
+    appendChunk(sessionId, pcmChunk(1024), 48000, 'mixed');
+    appendChunk(sessionId, pcmChunk(1024), 48000, 'participant');
+    abort(sessionId);
+    expect(hasRecording(sessionId)).toBe(false);
+    await finalize(sessionId);
     expect(putObjectMock).not.toHaveBeenCalled();
   });
 });

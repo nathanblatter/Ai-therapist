@@ -77,6 +77,7 @@ import { startScheduler as startDataRetentionScheduler } from "./services/dataRe
 import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
 import { startQualtricsSyncScheduler } from "./services/qualtricsSync.service.js";
 import { startWorkQueueScheduler } from "./services/workQueue.service.js";
+import { startMessageEmbeddingScheduler } from "./services/messageEmbedding.service.js";
 import { startMessageScanSweeper } from "./services/messageSafety.service.js";
 import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
 
@@ -930,6 +931,14 @@ if (isEntrypoint) {
     // interval is unconfigured). Harness children skip it — shared-DB guard.
     if (process.env.SOCKET_PG_ADAPTER !== 'off') {
       startQualtricsSyncScheduler();
+    }
+
+    // Message-embedding sweep (research semantic metrics): embeds redacted
+    // message text every 15 min. Config-gated via system_config
+    // message_embeddings.enabled; harness children skip it (shared-DB guard) —
+    // a redteam child would burn embedding spend on synthetic transcripts.
+    if (process.env.SOCKET_PG_ADAPTER !== 'off') {
+      startMessageEmbeddingScheduler();
     }
 
     // Work-queue scheduler: hourly digest sweep + daily 06:00 America/Denver

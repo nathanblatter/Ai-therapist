@@ -91,7 +91,7 @@ export async function ensurePseudonyms(asOf: string): Promise<void> {
 export async function getParticipantsExport(asOf: string): Promise<DatasetRow[]> {
   const { rows } = await pool.query(
     `WITH parts AS (
-       SELECT u.userid, u.created_at, u.memory_enabled, rp.pseudonym
+       SELECT u.userid, u.created_at, u.memory_enabled, u.study_status, rp.pseudonym
        FROM research_pseudonyms rp
        JOIN users u ON u.userid::text = rp.entity_key
        WHERE rp.entity_type = 'participant' AND u.is_sandbox IS NOT TRUE
@@ -154,6 +154,7 @@ export async function getParticipantsExport(asOf: string): Promise<DatasetRow[]>
        parts.pseudonym AS participant_id,
        to_char(parts.created_at, 'YYYY-MM') AS enrolled_month,
        parts.memory_enabled AS memory_enabled,
+       parts.study_status AS study_status,
        consents.first_v AS consent_version_first,
        consents.last_v AS consent_version_last,
        COALESCE(sess_agg.n_sessions, 0) AS n_sessions,
@@ -477,6 +478,76 @@ export async function getFeedbackCommentsExport(asOf: string): Promise<DatasetRo
      LEFT JOIN research_pseudonyms pp
        ON pp.entity_type = 'participant' AND pp.entity_key = sess.user_id::text
      WHERE sf.comments IS NOT NULL AND length(trim(sf.comments)) > 0
+     ORDER BY sess.session_pseudo_id`,
+    [asOf]
+  );
+  return rows;
+}
+
+/**
+ * semantic_metrics.csv — per-session aggregates over redacted-message
+ * embeddings (messages.embedding, populated by the message-embedding sweep).
+ * Raw vectors never leave the DB: only cosine-similarity aggregates export.
+ * Sessions with fewer than 2 embedded turns emit counts with empty metrics.
+ */
+export async function getSemanticMetricsExport(asOf: string): Promise<DatasetRow[]> {
+  const { rows } = await pool.query(
+    `WITH sess AS (
+       SELECT ts.session_id, ts.user_id, rp.pseudonym AS session_pseudo_id
+       FROM therapy_sessions ts
+       JOIN research_pseudonyms rp ON rp.entity_type = 'session' AND rp.entity_key = ts.session_id
+       WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1
+     ),
+     turns AS (
+       SELECT m.session_id, m.role, m.embedding, m.created_at, m.message_id,
+              LAG(m.embedding) OVER w AS prev_embedding,
+              ROW_NUMBER() OVER w AS rn,
+              COUNT(*) OVER (PARTITION BY m.session_id) AS n_turns
+       FROM messages m
+       JOIN sess ON sess.session_id = m.session_id
+       WHERE m.embedding IS NOT NULL AND m.role IN ('user', 'assistant')
+       WINDOW w AS (PARTITION BY m.session_id ORDER BY m.created_at, m.message_id)
+     ),
+     user_turns AS (
+       SELECT m.session_id, m.embedding,
+              LAG(m.embedding) OVER w AS prev_embedding
+       FROM messages m
+       JOIN sess ON sess.session_id = m.session_id
+       WHERE m.embedding IS NOT NULL AND m.role = 'user'
+       WINDOW w AS (PARTITION BY m.session_id ORDER BY m.created_at, m.message_id)
+     ),
+     adjacency AS (
+       SELECT session_id,
+              MAX(n_turns) AS n_embedded_turns,
+              AVG(CASE WHEN prev_embedding IS NOT NULL THEN 1 - (embedding <=> prev_embedding) END) AS mean_adjacent_similarity
+       FROM turns
+       GROUP BY session_id
+     ),
+     user_adjacency AS (
+       SELECT session_id,
+              AVG(CASE WHEN prev_embedding IS NOT NULL THEN 1 - (embedding <=> prev_embedding) END) AS mean_user_adjacent_similarity
+       FROM user_turns
+       GROUP BY session_id
+     ),
+     endpoints AS (
+       SELECT f.session_id, 1 - (f.embedding <=> l.embedding) AS first_last_similarity
+       FROM (SELECT DISTINCT ON (session_id) session_id, embedding FROM turns ORDER BY session_id, rn ASC) f
+       JOIN (SELECT DISTINCT ON (session_id) session_id, embedding FROM turns ORDER BY session_id, rn DESC) l
+         ON l.session_id = f.session_id
+     )
+     SELECT
+       COALESCE(pp.pseudonym, '') AS participant_id,
+       sess.session_pseudo_id AS session_pseudo_id,
+       adjacency.n_embedded_turns AS n_embedded_turns,
+       CASE WHEN adjacency.n_embedded_turns >= 2 THEN ROUND(adjacency.mean_adjacent_similarity::numeric, 4) END AS mean_adjacent_similarity,
+       CASE WHEN adjacency.n_embedded_turns >= 2 THEN ROUND(user_adjacency.mean_user_adjacent_similarity::numeric, 4) END AS mean_user_adjacent_similarity,
+       CASE WHEN adjacency.n_embedded_turns >= 2 THEN ROUND(endpoints.first_last_similarity::numeric, 4) END AS first_last_similarity
+     FROM adjacency
+     JOIN sess ON sess.session_id = adjacency.session_id
+     LEFT JOIN user_adjacency ON user_adjacency.session_id = adjacency.session_id
+     LEFT JOIN endpoints ON endpoints.session_id = adjacency.session_id
+     LEFT JOIN research_pseudonyms pp
+       ON pp.entity_type = 'participant' AND pp.entity_key = sess.user_id::text
      ORDER BY sess.session_pseudo_id`,
     [asOf]
   );

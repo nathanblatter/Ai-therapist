@@ -12,6 +12,7 @@ export * from './rateLimits.queries.js';
 export * from './adminSessions.queries.js';
 export * from './sideband.queries.js';
 export * from './users.queries.js';
+export * from './studyStatus.queries.js';
 export * from './contentRetention.queries.js';
 export * from './userSessions.queries.js';
 export * from './crisis.queries.js';

@@ -29,6 +29,26 @@ const WEEKLY_KEYS = {
 
 const USAGE_LABELS: Record<number, string> = { 1: '0', 2: '1', 3: '2-3', 4: '4-6', 5: '7 or more' };
 
+// Weekly W4 alliance matrix (6 investigator-developed items adapted from the
+// working-alliance construct; IRB Phase 2 Q10 decision 2026-09-04). Matrix
+// rows export as QIDx_n subfields on a 1-5 agree scale. Row order after the
+// live-survey edit (rows 4-6 appended to the original 3):
+//   _1 "I feel the AI understands me"                       (Bond)
+//   _2 "I feel comfortable being open with the AI"          (Bond)
+//   _3 "The AI and I are working toward things I care about" (Goal)
+//   _4 "The AI and I agree on what to work on"              (Task)
+//   _5 "The way we work on my concerns feels right for me"  (Task)
+//   _6 "The AI and I agree on what I want to get out of it" (Goal)
+// VERIFY the matrix QID + row order against live survey-definitions after ANY
+// Qualtrics edit — alliance metrics return null unless every item is present
+// and in range, so a stale key yields empty columns, never corrupt scores.
+const ALLIANCE_MATRIX_QID = 'QID7';
+const ALLIANCE_KEYS = {
+  bond: [`${ALLIANCE_MATRIX_QID}_1`, `${ALLIANCE_MATRIX_QID}_2`],
+  goal: [`${ALLIANCE_MATRIX_QID}_3`, `${ALLIANCE_MATRIX_QID}_6`],
+  task: [`${ALLIANCE_MATRIX_QID}_4`, `${ALLIANCE_MATRIX_QID}_5`],
+} as const;
+
 export interface InstrumentScores {
   phq2: number | null;
   gad2: number | null;
@@ -75,6 +95,14 @@ export interface WeeklyMetrics {
   helpfulness: number | null;
   /** Display bucket for session count, e.g. "2-3". */
   usage: string | null;
+  /** Mean of the 2 Task items (1-5); null unless both present and in range. */
+  allianceTask: number | null;
+  /** Mean of the 2 Bond items (1-5). */
+  allianceBond: number | null;
+  /** Mean of the 2 Goal items (1-5). */
+  allianceGoal: number | null;
+  /** Mean of all 6 alliance items (1-5); null unless all subscales scored. */
+  allianceTotal: number | null;
 }
 
 function choice(answers: Record<string, unknown>, key: string, max: number): number | null {
@@ -83,14 +111,31 @@ function choice(answers: Record<string, unknown>, key: string, max: number): num
   return raw;
 }
 
-/** Mood/stress/helpfulness/usage from a weekly check-in payload. */
+function subscaleMean(answers: Record<string, unknown>, keys: readonly [string, string]): number | null {
+  const a = choice(answers, keys[0], 5);
+  const b = choice(answers, keys[1], 5);
+  return a === null || b === null ? null : (a + b) / 2;
+}
+
+/** Mood/stress/helpfulness/usage + alliance subscales from a weekly payload. */
 export function weeklyMetrics(answers: Record<string, unknown>): WeeklyMetrics {
   const helpRaw = choice(answers, WEEKLY_KEYS.helpfulness, 6);
   const usageRaw = choice(answers, WEEKLY_KEYS.usage, 5);
+  const allianceTask = subscaleMean(answers, ALLIANCE_KEYS.task);
+  const allianceBond = subscaleMean(answers, ALLIANCE_KEYS.bond);
+  const allianceGoal = subscaleMean(answers, ALLIANCE_KEYS.goal);
+  const allianceTotal =
+    allianceTask === null || allianceBond === null || allianceGoal === null
+      ? null
+      : Math.round(((allianceTask + allianceBond + allianceGoal) / 3) * 100) / 100;
   return {
     mood: choice(answers, WEEKLY_KEYS.mood, 6),
     stress: choice(answers, WEEKLY_KEYS.stress, 5),
     helpfulness: helpRaw === 6 ? null : helpRaw,
     usage: usageRaw === null ? null : USAGE_LABELS[usageRaw],
+    allianceTask,
+    allianceBond,
+    allianceGoal,
+    allianceTotal,
   };
 }

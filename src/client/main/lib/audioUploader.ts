@@ -10,7 +10,14 @@ export interface AudioUploader {
   stop: () => void;
 }
 
-export function createAudioUploader(sessionId: string, flushMs = 400): AudioUploader {
+export function createAudioUploader(
+  sessionId: string,
+  flushMs = 400,
+  // 'mixed' (default, mic+assistant mixdown) or 'participant' (mic-only tap,
+  // migration 086). Old servers ignore the extra field; old clients omit it
+  // and the server defaults to 'mixed'.
+  track: 'mixed' | 'participant' = 'mixed',
+): AudioUploader {
   let buf: string[] = [];
   let sampleRate = 48000;
   let dead = false;
@@ -19,7 +26,7 @@ export function createAudioUploader(sessionId: string, flushMs = 400): AudioUplo
     if (dead || buf.length === 0) return;
     const chunks = buf;
     buf = [];
-    const body = JSON.stringify({ chunks, sampleRate });
+    const body = JSON.stringify({ chunks, sampleRate, track });
     // On teardown prefer sendBeacon so the last batch survives page unload.
     if (useBeacon && navigator.sendBeacon) {
       navigator.sendBeacon(`/api/sessions/${sessionId}/audio`, new Blob([body], { type: 'application/json' }));

@@ -17,7 +17,8 @@ export type WorkItemType =
   | 'screener_worsening'
   | 'message_unread_stale'
   | 'survey_drift'
-  | 'participant_enrolled';
+  | 'participant_enrolled'
+  | 'participant_withdrawal';
 
 export type WorkItemSeverity = 'info' | 'warning' | 'urgent';
 export type WorkItemStatus = 'open' | 'acked' | 'resolved' | 'expired';

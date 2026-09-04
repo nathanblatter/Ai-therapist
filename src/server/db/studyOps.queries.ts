@@ -46,6 +46,9 @@ export interface StudyOpsSummary {
     anonymous_sessions: number;
     target: number;
     weekly: { week: string; new_participants: number }[];
+    /** Participants who paused / withdrew via the withdrawal survey (087). */
+    paused: number;
+    withdrawn: number;
   };
   arm_balance: {
     arm_true: number;
@@ -86,6 +89,12 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
           GROUP BY ts.user_id
        ) g
       GROUP BY 1 ORDER BY 1`, p);
+
+  const statusCounts = await pool.query<{ paused: string; withdrawn: string }>(
+    `SELECT COUNT(*) FILTER (WHERE study_status = 'paused') AS paused,
+            COUNT(*) FILTER (WHERE study_status = 'withdrawn') AS withdrawn
+       FROM users
+      WHERE role = 'participant' AND is_sandbox IS NOT TRUE`);
 
   const arms = await pool.query<{ arm_true: string; arm_false: string; arm_null: string }>(
     `SELECT COUNT(*) FILTER (WHERE sc.proactive_offering IS TRUE) AS arm_true,
@@ -145,6 +154,8 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
       anonymous_sessions: parseInt(enrollment.rows[0]?.anonymous_sessions ?? '0', 10),
       target: protocol.enrollment_target,
       weekly: weekly.rows.map(r => ({ week: r.week, new_participants: parseInt(r.new_participants, 10) })),
+      paused: parseInt(statusCounts.rows[0]?.paused ?? '0', 10),
+      withdrawn: parseInt(statusCounts.rows[0]?.withdrawn ?? '0', 10),
     },
     arm_balance: {
       arm_true: armTrue, arm_false: armFalse, arm_null: armNull,

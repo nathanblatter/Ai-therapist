@@ -86,9 +86,10 @@ export async function updateDataRetentionSettings(
 }
 
 /**
- * Delete one recording object (MinIO first, then DB columns) and append the
- * audit row. On MinIO failure the DB columns are left intact and the row is
- * logged with success=false so the next run retries.
+ * Delete a session's recording objects — mixed and/or participant track
+ * (migration 086) — MinIO first, then DB columns, with one audit row per
+ * object. On any MinIO failure the DB columns are left intact and the failed
+ * object is logged with success=false so the next run retries the session.
  */
 async function deleteRecording(
   row: RecordingRow,
@@ -98,25 +99,31 @@ async function deleteRecording(
   triggeredBy: 'scheduler' | 'manual',
   triggeredByUser: string | null
 ): Promise<boolean> {
-  try {
-    await deleteObject(row.recording_object_key);
-    await clearRecordingColumns(row.session_id);
-    await insertDeletionLog({
-      runId, artifactType: 'recording_object', artifactRef: row.recording_object_key,
-      sessionId: row.session_id, userId: row.user_id, reason, policySnapshot: settings,
-      triggeredBy, triggeredByUser, success: true, errorMessage: null,
-    });
-    return true;
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error(`[Retention] failed to delete recording ${row.recording_object_key}:`, errorMessage);
-    await insertDeletionLog({
-      runId, artifactType: 'recording_object', artifactRef: row.recording_object_key,
-      sessionId: row.session_id, userId: row.user_id, reason, policySnapshot: settings,
-      triggeredBy, triggeredByUser, success: false, errorMessage,
-    }).catch(logErr => console.error('[Retention] failed to write deletion log:', logErr));
-    return false;
+  const keys = [row.recording_object_key, row.participant_recording_object_key]
+    .filter((k): k is string => Boolean(k));
+  let allDeleted = true;
+  for (const key of keys) {
+    try {
+      await deleteObject(key);
+      await insertDeletionLog({
+        runId, artifactType: 'recording_object', artifactRef: key,
+        sessionId: row.session_id, userId: row.user_id, reason, policySnapshot: settings,
+        triggeredBy, triggeredByUser, success: true, errorMessage: null,
+      });
+    } catch (err) {
+      allDeleted = false;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`[Retention] failed to delete recording ${key}:`, errorMessage);
+      await insertDeletionLog({
+        runId, artifactType: 'recording_object', artifactRef: key,
+        sessionId: row.session_id, userId: row.user_id, reason, policySnapshot: settings,
+        triggeredBy, triggeredByUser, success: false, errorMessage,
+      }).catch(logErr => console.error('[Retention] failed to write deletion log:', logErr));
+    }
   }
+  if (!allDeleted) return false;
+  await clearRecordingColumns(row.session_id);
+  return true;
 }
 
 /**

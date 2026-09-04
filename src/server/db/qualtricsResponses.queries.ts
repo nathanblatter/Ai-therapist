@@ -3,7 +3,7 @@
 // reads them joined through research_pseudonyms like every other artifact.
 import { pool } from '../config/db.js';
 
-export type QualtricsSurveyRole = 'baseline' | 'weekly' | 'exit' | 'week12';
+export type QualtricsSurveyRole = 'baseline' | 'weekly' | 'exit' | 'week12' | 'withdrawal';
 
 export interface QualtricsResponseUpsert {
   responseId: string;

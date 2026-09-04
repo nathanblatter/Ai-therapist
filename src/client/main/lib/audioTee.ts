@@ -63,6 +63,14 @@ export function startAudioTee(
 export function startMixedTee(
   streams: MediaStream[],
   onChunk: (base64Pcm16: string, sampleRate: number) => void,
+  // Optional second tap: emit the given stream (the participant's mic) on its
+  // own, PRE-GAIN, alongside the mix. Consent-wise this is a subset of audio
+  // already in the mixed recording; it exists so prosody research gets clean
+  // participant speech (the mix sums mic + assistant irrecoverably).
+  participantTap?: {
+    stream: MediaStream;
+    onChunk: (base64Pcm16: string, sampleRate: number) => void;
+  },
 ): AudioTeeHandle {
   const AudioCtx = window.AudioContext || (window as WebkitWindow).webkitAudioContext!;
   const ctx = new AudioCtx();
@@ -110,6 +118,31 @@ export function startMixedTee(
   processor.connect(mute);
   mute.connect(ctx.destination);
 
+  // Participant-only tap: a second processor on the same context, fed by the
+  // mic's source node directly (pre-gain — no 0.85 attenuation, clean signal).
+  let participantProcessor: ScriptProcessorNode | null = null;
+  let participantMute: GainNode | null = null;
+  let participantSource: MediaStreamAudioSourceNode | null = null;
+  if (participantTap && participantTap.stream.getAudioTracks().length > 0) {
+    const micSource = ctx.createMediaStreamSource(participantTap.stream);
+    participantSource = micSource;
+    participantProcessor = ctx.createScriptProcessor(4096, 1, 1);
+    participantProcessor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      const pcm16 = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      participantTap.onChunk(int16ToBase64(pcm16), ctx.sampleRate);
+    };
+    micSource.connect(participantProcessor);
+    participantMute = ctx.createGain();
+    participantMute.gain.value = 0;
+    participantProcessor.connect(participantMute);
+    participantMute.connect(ctx.destination);
+  }
+
   return {
     stop: () => {
       try {
@@ -117,6 +150,12 @@ export function startMixedTee(
         processor.onaudioprocess = null;
         processor.disconnect();
         mute.disconnect();
+        if (participantProcessor) {
+          participantProcessor.onaudioprocess = null;
+          participantProcessor.disconnect();
+        }
+        participantMute?.disconnect();
+        participantSource?.disconnect();
         for (const { src, gain } of sources) {
           src.disconnect();
           gain.disconnect();

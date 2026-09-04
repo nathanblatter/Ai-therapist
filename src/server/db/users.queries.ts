@@ -21,6 +21,7 @@ export interface UserRow {
   mfa_enabled_at?: Date | null;
   risk_context_share_enabled?: boolean;
   memory_enabled?: boolean;
+  study_status?: 'active' | 'paused' | 'withdrawn';
   created_at?: Date;
   updated_at?: Date;
 }
@@ -266,7 +267,7 @@ export async function isSandboxAccountSession(sessionId: string): Promise<boolea
 export async function getUserById(userid: number | string): Promise<UserRow | null> {
   try {
     const result = await pool.query<UserRow>(
-      'SELECT userid, username, role, organization_id, is_sandbox, preferred_voice, preferred_language, mfa_enabled, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
+      'SELECT userid, username, role, organization_id, is_sandbox, preferred_voice, preferred_language, mfa_enabled, risk_context_share_enabled, memory_enabled, study_status, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
       [userid]
     );
 

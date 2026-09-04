@@ -109,6 +109,9 @@ export function buildSurveyDataOverview(
   const anchors = new Map(enrolled.map((p) => [p.userId, p.enrolledAt]));
 
   for (const row of rows) {
+    // Withdrawal responses carry no scorable instrument; study_status and the
+    // participant_withdrawal work item are their analytic surface.
+    if (row.surveyRole === 'withdrawal') continue;
     const participant = byUser.get(row.userId);
     // Linked responses from accounts not survey-enrolled (e.g. manually
     // created participants who typed their ID) still count in aggregates

@@ -123,6 +123,7 @@ export default function participantProfileRoutes(): Router {
           preferred_voice: user.preferred_voice ?? null,
           preferred_language: user.preferred_language ?? null,
           mfa_enabled: user.mfa_enabled ?? false,
+          study_status: user.study_status ?? 'active',
           created_at: user.created_at ?? null,
         },
         ...bundle,

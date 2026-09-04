@@ -15,12 +15,16 @@ vi.mock('../db/index.js', () => dbMocks);
 const workQueueMocks = vi.hoisted(() => ({ enqueueWorkItem: vi.fn() }));
 vi.mock('./workQueue.service.js', () => workQueueMocks);
 
+const studyStatusMocks = vi.hoisted(() => ({ setStudyStatus: vi.fn() }));
+vi.mock('../db/studyStatus.queries.js', () => studyStatusMocks);
+
 import {
   getQualtricsSyncConfig,
   extractTypedStudyId,
   detectAdverseReport,
   nextBusinessDay,
   fetchAllResponses,
+  processExportedResponse,
   syncAllSurveys,
   handleResponseWebhook,
   runSync,
@@ -49,6 +53,7 @@ describe('getQualtricsSyncConfig', () => {
       'QUALTRICS_WEEKLY_SURVEY_ID',
       'QUALTRICS_EXIT_SURVEY_ID',
       'QUALTRICS_WEEK12_SURVEY_ID',
+      'QUALTRICS_WITHDRAWAL_SURVEY_ID',
     ]) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
@@ -313,6 +318,70 @@ describe('detectAdverseReport', () => {
 
   it('never flags baseline responses', () => {
     expect(detectAdverseReport('baseline', { QID11_TEXT: 'text' })).toBeNull();
+  });
+
+  it('flags withdrawal driven by distress (felt-worse reason or free text)', () => {
+    expect(detectAdverseReport('withdrawal', { QID2: 3 })).toEqual(['QID2']);
+    expect(detectAdverseReport('withdrawal', { QID3_TEXT: 'it made me anxious' })).toEqual(['QID3_TEXT']);
+    expect(detectAdverseReport('withdrawal', { QID2: 1 })).toBeNull();
+  });
+});
+
+describe('withdrawal status application', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMocks.resolveStudySidToUserId.mockResolvedValue(42);
+    dbMocks.upsertQualtricsResponse.mockResolvedValue(undefined);
+    workQueueMocks.enqueueWorkItem.mockResolvedValue(null);
+    studyStatusMocks.setStudyStatus.mockResolvedValue(true);
+  });
+
+  it('stamps withdrawn status and cues the coordinator on a full withdrawal', async () => {
+    await processExportedResponse('withdrawal', 'SV_wd', {
+      responseId: 'R_1',
+      values: { finished: 1, sid: '42', QID2: 2, QID4: 1, QID5: 1 },
+    });
+    expect(studyStatusMocks.setStudyStatus).toHaveBeenCalledWith(42, 'withdrawn', 'qualtrics:R_1');
+    expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemType: 'participant_withdrawal',
+        severity: 'info',
+        sourceId: 'R_1',
+        clientId: 42,
+      })
+    );
+  });
+
+  it('maps the pause choice to paused and deletion requests to warning severity', async () => {
+    await processExportedResponse('withdrawal', 'SV_wd', {
+      responseId: 'R_2',
+      values: { finished: 1, sid: '42', QID2: 6, QID4: 2, QID5: 2 },
+    });
+    expect(studyStatusMocks.setStudyStatus).toHaveBeenCalledWith(42, 'paused', 'qualtrics:R_2');
+    expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemType: 'participant_withdrawal',
+        severity: 'warning',
+        detail: expect.objectContaining({ requestsDeletion: true, status: 'paused' }),
+      })
+    );
+  });
+
+  it('does not stamp status for unfinished, preview, or unlinked responses', async () => {
+    await processExportedResponse('withdrawal', 'SV_wd', {
+      responseId: 'R_3',
+      values: { finished: 0, sid: '42', QID4: 1 },
+    });
+    await processExportedResponse('withdrawal', 'SV_wd', {
+      responseId: 'R_4',
+      values: { finished: 1, sid: '42', distributionChannel: 'preview', QID4: 1 },
+    });
+    dbMocks.resolveStudySidToUserId.mockResolvedValue(null);
+    await processExportedResponse('withdrawal', 'SV_wd', {
+      responseId: 'R_5',
+      values: { finished: 1, sid: '999', QID4: 1 },
+    });
+    expect(studyStatusMocks.setStudyStatus).not.toHaveBeenCalled();
   });
 });
 

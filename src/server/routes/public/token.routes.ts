@@ -24,6 +24,7 @@ import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock, buildToolGuidance
 import { setSessionCheckin } from '../../db/index.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
+import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
 import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 // ---- OpenAI safety identifier (ai-therapist-63) ----
@@ -82,7 +83,7 @@ export default function tokenRoutes(): Router {
   // Accepts GET (legacy) and POST (with voice/language settings). Blocked
   // until the participant has accepted the current consent screen — see
   // routes/public/consent.routes.ts.
-  router.all('/token', requireConsent, requireOutsideQuietHours, async (req, res) => {
+  router.all('/token', requireConsent, requireOutsideQuietHours, requireActiveStudyStatus, async (req, res) => {
     try {
       const userId = req.session?.userId || null;
       const userRole = req.session?.userRole || null;

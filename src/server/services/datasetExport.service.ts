@@ -23,6 +23,7 @@ import {
   getCrisisEventsExport,
   getTranscriptsExport,
   getFeedbackCommentsExport,
+  getSemanticMetricsExport,
   type DatasetRow,
 } from '../db/datasetExport.queries.js';
 import { getSurveyResponsesExport, getSurveyAnswersForExport } from '../db/qualtricsResponses.queries.js';
@@ -98,6 +99,7 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', values: 'P001, P002, ...' },
       { name: 'enrolled_month', type: 'string', source: 'users.created_at', values: 'YYYY-MM', notes: 'Month precision only, to reduce re-identifiability.' },
       { name: 'memory_enabled', type: 'bool', source: 'users.memory_enabled' },
+      { name: 'study_status', type: 'string', source: 'users.study_status', values: 'active, paused, withdrawn', notes: 'Stamped by the withdrawal survey or an admin (migration 087).' },
       { name: 'consent_version_first', type: 'string', source: 'participant_consents.consent_version', notes: 'Earliest by accepted_at.' },
       { name: 'consent_version_last', type: 'string', source: 'participant_consents.consent_version', notes: 'Latest by accepted_at.' },
       { name: 'n_sessions', type: 'int', source: 'therapy_sessions', notes: 'Non-demo sessions with created_at <= as_of.' },
@@ -260,6 +262,10 @@ export const DATASET_FILES: DatasetFileSpec[] = [
           weekly_stress: weekly?.stress ?? null,
           weekly_helpfulness: weekly?.helpfulness ?? null,
           weekly_usage: weekly?.usage ?? null,
+          weekly_alliance_task: weekly?.allianceTask ?? null,
+          weekly_alliance_bond: weekly?.allianceBond ?? null,
+          weekly_alliance_goal: weekly?.allianceGoal ?? null,
+          weekly_alliance_total: weekly?.allianceTotal ?? null,
         };
       }),
     columns: [
@@ -274,6 +280,24 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'weekly_stress', type: 'int', source: 'derived: weekly QID9', values: '1-5, higher = more stressed' },
       { name: 'weekly_helpfulness', type: 'int', source: 'derived: weekly QID6', values: "1-5; empty when unanswered or 'did not use'" },
       { name: 'weekly_usage', type: 'string', source: 'derived: weekly QID4 bucket', values: '0, 1, 2-3, 4-6, 7 or more' },
+      { name: 'weekly_alliance_task', type: 'float', source: 'derived: mean of the 2 Task alliance items', values: '1-5; empty for non-weekly or incomplete matrix' },
+      { name: 'weekly_alliance_bond', type: 'float', source: 'derived: mean of the 2 Bond alliance items', values: '1-5' },
+      { name: 'weekly_alliance_goal', type: 'float', source: 'derived: mean of the 2 Goal alliance items', values: '1-5' },
+      { name: 'weekly_alliance_total', type: 'float', source: 'derived: mean of all 6 alliance items', values: '1-5', notes: 'Investigator-developed items adapted from the working-alliance construct (Task/Bond/Goal).' },
+    ],
+  },
+  {
+    file: 'semantic_metrics.csv',
+    description:
+      'Per-session semantic-trajectory aggregates over redacted-message embeddings (message-embedding sweep). Cosine-similarity aggregates only; raw vectors are never exported.',
+    fetch: getSemanticMetricsExport,
+    columns: [
+      { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Empty for anonymous sessions.' },
+      { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
+      { name: 'n_embedded_turns', type: 'int', source: 'messages.embedding IS NOT NULL', notes: 'User+assistant turns with an embedding; unredacted turns are not yet counted.' },
+      { name: 'mean_adjacent_similarity', type: 'float', source: 'derived: AVG(1 - cosine distance) over consecutive embedded turns', values: '~0-1, higher = more topically coherent; empty when <2 embedded turns' },
+      { name: 'mean_user_adjacent_similarity', type: 'float', source: 'derived: same, user turns only', notes: 'Participant topical coherence, ignoring assistant turns.' },
+      { name: 'first_last_similarity', type: 'float', source: 'derived: 1 - cosine distance between first and last embedded turn', notes: 'Low values suggest within-session topic drift.' },
     ],
   },
 ];

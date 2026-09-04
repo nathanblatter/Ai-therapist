@@ -20,6 +20,7 @@ import { generateSessionNameAsync } from '../../services/sessionName.service.js'
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
+import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
 export default function sessionsRoutes(): Router {
@@ -33,10 +34,20 @@ export default function sessionsRoutes(): Router {
   // larger body limit since batches are bigger than the default 100kb.
   router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), async (req, res) => {
     const { sessionId } = req.params;
-    const { chunks, sampleRate } = req.body as { chunks?: string[]; sampleRate?: number };
+    const { chunks, sampleRate, track } = req.body as {
+      chunks?: string[];
+      sampleRate?: number;
+      track?: string;
+    };
     if (!sessionId || !Array.isArray(chunks) || typeof sampleRate !== 'number') {
       return res.status(400).json({ error: 'chunks[] and sampleRate required' });
     }
+    // Track tag (086): 'participant' = pre-gain mic-only tap for prosody
+    // research; untagged/legacy clients and the redteam harness are 'mixed'.
+    if (track !== undefined && track !== 'mixed' && track !== 'participant') {
+      return res.status(400).json({ error: 'invalid track' });
+    }
+    const recordingTrack = track === 'participant' ? 'participant' as const : 'mixed' as const;
     // Only the session's owner may feed audio into its recording. Cookie
     // ownership avoids a DB hit on this hot path; logged-in owners whose
     // cookie was lost fall back to the user_id check.
@@ -65,11 +76,15 @@ export default function sessionsRoutes(): Router {
     for (const pcm of chunks) {
       if (typeof pcm !== 'string' || !pcm) continue;
       try {
-        appendChunk(sessionId, pcm, sampleRate);
+        appendChunk(sessionId, pcm, sampleRate, recordingTrack);
       } catch {
         /* best-effort recording */
       }
-      global.io?.to(`audio:${sessionId}`).emit('audio:chunk', { sessionId, pcm, sampleRate });
+      // Live admin relay stays mixed-only: admins already hear the full mix,
+      // and relaying the mic tap too would double the participant's audio.
+      if (recordingTrack === 'mixed') {
+        global.io?.to(`audio:${sessionId}`).emit('audio:chunk', { sessionId, pcm, sampleRate });
+      }
     }
     res.sendStatus(204);
   });
@@ -341,7 +356,7 @@ export default function sessionsRoutes(): Router {
 
   // POST /api/sessions/create - create a new therapy session. Quiet-hours
   // gated as defense in depth alongside /token and /api/chat/start.
-  router.post('/api/sessions/create', requireOutsideQuietHours, async (req, res) => {
+  router.post('/api/sessions/create', requireOutsideQuietHours, requireActiveStudyStatus, async (req, res) => {
     try {
       const userId = req.session?.userId || null;
       const { sessionName } = req.body;
