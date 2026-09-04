@@ -785,6 +785,12 @@ async function startProdServer() {
   // Serve admin static assets (CSS, JS) - admin assets are prefixed with "admin-" so no conflicts
   app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets'), { setHeaders: staticCache }));
 
+  // Participant app tutorial (onboarding material): a self-contained static
+  // page + narrated video at /tutorial. Public by design — participants need
+  // it before/without logging in, and it contains no sensitive data. Serving
+  // index.html here is fine (it is not the SPA shell; gotcha #6 concerns /).
+  app.use('/tutorial', express.static(path.resolve(__dirname, '../../public/tutorial'), { index: 'index.html', setHeaders: staticCache }));
+
   // Only the main app is SSR'd; admin is a plain SPA.
   // @ts-ignore – this module is generated at build time and not available during type-check
   const { render } = await import('../../dist/server/entry-server.js') as { render: (url: string) => Promise<{ html: string }> };

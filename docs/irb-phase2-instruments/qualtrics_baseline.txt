@@ -291,4 +291,5 @@ What email address should the research team use to schedule your onboarding sess
 
 [[Question:DB]]
 [[ID:NEXTSTEPS]]
-Thank you! A research assistant will contact you to schedule your onboarding session, where you will set up your study account and have your first short conversation with the AI support agent.
+Thank you! A research assistant will contact you at the email you provided to schedule your onboarding session, where you will set up your study account and have your first short conversation with the AI support agent.
+<br><br>Curious how the app works? You can watch a short narrated tour and read the illustrated guide any time at ai.byuisresearch.com/tutorial — your research assistant will also walk you through it at onboarding.
