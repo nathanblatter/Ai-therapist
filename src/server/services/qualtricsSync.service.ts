@@ -19,6 +19,7 @@ import {
   upsertQualtricsResponse,
   resolveStudySidToUserId,
   findUserIdForBaselineResponse,
+  insertAdverseEventDraft,
   type QualtricsSurveyRole,
 } from '../db/index.js';
 import { enqueueWorkItem } from './workQueue.service.js';
@@ -149,6 +150,58 @@ export function detectAdverseReport(
   return triggers.length > 0 ? triggers : null;
 }
 
+/** Next business day after `from` — the protocol's review deadline. */
+export function nextBusinessDay(from: Date): Date {
+  const due = new Date(from.getTime() + 24 * 60 * 60 * 1000);
+  while (due.getUTCDay() === 0 || due.getUTCDay() === 6) {
+    due.setUTCDate(due.getUTCDate() + 1);
+  }
+  return due;
+}
+
+/**
+ * File the formal IRB adverse-event draft for a flagged survey response —
+ * the reviewed record behind the work-queue ping. The participant's own
+ * description goes in transcript_excerpt so review happens in one place
+ * (mirroring how crisis AEs carry transcript excerpts); idempotent per
+ * response via the ae_auto_survey_response partial unique index.
+ */
+async function draftAdverseEventFromSurvey(
+  surveyRole: QualtricsSurveyRole,
+  responseId: string,
+  userId: number | null,
+  triggers: string[],
+  values: Record<string, unknown>
+): Promise<number | null> {
+  const recordedAt =
+    typeof values.recordedDate === 'string' ? new Date(values.recordedDate) : new Date();
+  const excerpt = triggers
+    .filter((k) => k.endsWith('_TEXT'))
+    .map((k) => (typeof values[k] === 'string' ? (values[k] as string).trim() : ''))
+    .filter(Boolean)
+    .join('\n\n');
+  return insertAdverseEventDraft({
+    sessionId: null,
+    crisisEventId: null,
+    userId,
+    sessionRef: `qualtrics:${responseId}`,
+    participantRef: null,
+    occurredAt: recordedAt,
+    severity: 'medium',
+    triggerSource: 'auto_survey',
+    category: 'survey_report',
+    summary: `Participant reported an adverse experience in the ${surveyRole} survey (${triggers.join(', ')}).`,
+    timeline: [
+      { at: recordedAt.toISOString(), kind: 'survey_response', detail: `${surveyRole} survey response ${responseId} recorded` },
+      { at: new Date().toISOString(), kind: 'auto_flag', detail: `Flagged by sync (triggers: ${triggers.join(', ')})` },
+    ],
+    transcriptExcerpt: excerpt || null,
+    actionsTaken: [],
+    dueAt: nextBusinessDay(new Date()),
+    createdBy: 'qualtrics-sync',
+  });
+}
+
 export interface SurveySyncResult {
   surveyRole: QualtricsSurveyRole;
   surveyId: string;
@@ -156,6 +209,74 @@ export interface SurveySyncResult {
   upserted: number;
   linked: number;
   error?: string;
+}
+
+/**
+ * Upsert + link + adverse-triage one exported response — the shared path for
+ * the bulk sync and the real-time completion webhook. Returns whether the
+ * response resolved to a participant.
+ */
+export async function processExportedResponse(
+  surveyRole: QualtricsSurveyRole,
+  surveyId: string,
+  response: QualtricsExportedResponse
+): Promise<{ linked: boolean }> {
+  const values = response.values ?? {};
+  const finishedRaw = values.finished;
+  const finished = finishedRaw === 1 || finishedRaw === true;
+  const recordedAt = typeof values.recordedDate === 'string' ? values.recordedDate : null;
+
+  const sidRaw = typeof values.sid === 'string' ? values.sid.trim() : '';
+  const studySid = sidRaw || extractTypedStudyId(values);
+
+  let userId: number | null = null;
+  if (studySid) userId = await resolveStudySidToUserId(studySid);
+  if (userId === null && surveyRole === 'baseline') {
+    userId = await findUserIdForBaselineResponse(response.responseId);
+  }
+
+  await upsertQualtricsResponse({
+    responseId: response.responseId,
+    surveyId,
+    surveyRole,
+    userId,
+    studySid: studySid ?? null,
+    finished,
+    recordedAt,
+    answers: values,
+  });
+
+  // Adverse-experience triage (1-business-day review promise): finished,
+  // non-preview responses with a distress report land in the work queue.
+  // enqueueWorkItem is idempotent on (item_type, source_table, source_id),
+  // so re-syncs and webhook+sync overlap never duplicate; the title/detail
+  // carry pointers only — the text itself stays in qualtrics_responses.
+  if (finished && values.distributionChannel !== 'preview') {
+    const triggers = detectAdverseReport(surveyRole, values);
+    if (triggers) {
+      // Formal record first, then the ping: the work item is the triage
+      // surface, the AE draft is what actually gets reviewed and filed.
+      let reportId: number | null = null;
+      try {
+        reportId = await draftAdverseEventFromSurvey(
+          surveyRole, response.responseId, userId, triggers, values
+        );
+      } catch (err) {
+        console.error('[QualtricsSync] AE draft from survey failed:', err);
+      }
+      await enqueueWorkItem({
+        itemType: 'adverse_event',
+        severity: 'warning',
+        title: `Survey adverse-experience report (${surveyRole})`,
+        detail: { surveyRole, responseId: response.responseId, triggers, reportId },
+        sourceTable: 'qualtrics_responses',
+        sourceId: response.responseId,
+        clientId: userId,
+      });
+    }
+  }
+
+  return { linked: userId !== null };
 }
 
 async function syncSurvey(
@@ -168,54 +289,43 @@ async function syncSurvey(
   result.fetched = responses.length;
 
   for (const response of responses) {
-    const values = response.values ?? {};
-    const finishedRaw = values.finished;
-    const finished = finishedRaw === 1 || finishedRaw === true;
-    const recordedAt = typeof values.recordedDate === 'string' ? values.recordedDate : null;
-
-    const sidRaw = typeof values.sid === 'string' ? values.sid.trim() : '';
-    const studySid = sidRaw || extractTypedStudyId(values);
-
-    let userId: number | null = null;
-    if (studySid) userId = await resolveStudySidToUserId(studySid);
-    if (userId === null && surveyRole === 'baseline') {
-      userId = await findUserIdForBaselineResponse(response.responseId);
-    }
-    if (userId !== null) result.linked++;
-
-    await upsertQualtricsResponse({
-      responseId: response.responseId,
-      surveyId,
-      surveyRole,
-      userId,
-      studySid: studySid ?? null,
-      finished,
-      recordedAt,
-      answers: values,
-    });
+    const { linked } = await processExportedResponse(surveyRole, surveyId, response);
+    if (linked) result.linked++;
     result.upserted++;
-
-    // Adverse-experience triage (1-business-day review promise): finished,
-    // non-preview responses with a distress report land in the work queue.
-    // enqueueWorkItem is idempotent on (item_type, source_table, source_id),
-    // so hourly re-syncs never duplicate; the title/detail carry pointers
-    // only — the text itself stays in qualtrics_responses.
-    if (finished && values.distributionChannel !== 'preview') {
-      const triggers = detectAdverseReport(surveyRole, values);
-      if (triggers) {
-        await enqueueWorkItem({
-          itemType: 'adverse_event',
-          severity: 'warning',
-          title: `Survey adverse-experience report (${surveyRole})`,
-          detail: { surveyRole, responseId: response.responseId, triggers },
-          sourceTable: 'qualtrics_responses',
-          sourceId: response.responseId,
-          clientId: userId,
-        });
-      }
-    }
   }
   return result;
+}
+
+/**
+ * Real-time webhook path: fetch ONE response by id and run it through the
+ * shared processing. Returns a status the route maps to an HTTP code. The
+ * single-response GET can 404 briefly right after submission (Qualtrics
+ * indexes asynchronously) — 'not-found' is retryable, and the scheduled bulk
+ * sync remains the catch-all backstop either way.
+ */
+export async function handleResponseWebhook(
+  surveyId: string,
+  responseId: string
+): Promise<'ok' | 'disabled' | 'unknown-survey' | 'not-found'> {
+  const config = getQualtricsSyncConfig();
+  if (!config) return 'disabled';
+  const surveyRole = (Object.entries(config.surveys) as Array<[QualtricsSurveyRole, string]>).find(
+    ([, id]) => id === surveyId
+  )?.[0];
+  if (!surveyRole) return 'unknown-survey';
+
+  const res = await api(config, 'GET', `/surveys/${surveyId}/responses/${responseId}`);
+  if (res.status === 404) return 'not-found';
+  if (!res.ok) throw new Error(`single-response fetch HTTP ${res.status}`);
+  const body = (await res.json()) as {
+    result?: { responseId?: string; values?: Record<string, unknown> };
+  };
+  if (!body.result?.responseId) return 'not-found';
+  await processExportedResponse(surveyRole, surveyId, {
+    responseId: body.result.responseId,
+    values: body.result.values ?? {},
+  });
+  return 'ok';
 }
 
 export interface SyncRunStatus {
@@ -291,8 +401,15 @@ export function startQualtricsSyncScheduler(): void {
   const minutes = Math.max(5, Math.floor(raw));
   runStatus.schedulerActive = true;
   runStatus.intervalMinutes = minutes;
-  const tick = () =>
+  const tick = () => {
     runSync('scheduled').catch((err) => console.error('[QualtricsSync] scheduled run failed:', err));
+    // Daily survey-definition drift check rides the same cadence; the claim
+    // in system_config makes it once-per-day across ticks and containers.
+    // Dynamic import avoids a static cycle (drift guard imports our config).
+    import('./qualtricsDriftGuard.service.js')
+      .then((m) => m.claimAndRunDailyDriftCheck())
+      .catch((err) => console.error('[QualtricsDrift] daily check failed:', err));
+  };
   tick();
   syncTimer = setInterval(tick, minutes * 60_000);
   syncTimer.unref?.();

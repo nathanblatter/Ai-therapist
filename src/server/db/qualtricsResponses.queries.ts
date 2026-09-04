@@ -137,6 +137,35 @@ export async function getEnrollmentFunnel(): Promise<EnrollmentFunnel> {
   };
 }
 
+export interface SurveyAnswersExportRow {
+  participant_id: string;
+  survey_role: QualtricsSurveyRole;
+  recorded_at: string;
+  answers: Record<string, unknown>;
+}
+
+/** Finished, linked, non-sandbox responses WITH answer payloads — input to
+ *  the scored survey export (scores are computed in the export service; raw
+ *  answers never leave the server). */
+export async function getSurveyAnswersForExport(asOf: string): Promise<SurveyAnswersExportRow[]> {
+  const { rows } = await pool.query(
+    `SELECT rp.pseudonym AS participant_id,
+            qr.survey_role,
+            to_char(qr.recorded_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS recorded_at,
+            qr.answers
+     FROM qualtrics_responses qr
+     JOIN research_pseudonyms rp
+       ON rp.entity_type = 'participant' AND rp.entity_key = qr.user_id::text
+     JOIN users u ON u.userid = qr.user_id
+     WHERE qr.finished
+       AND qr.recorded_at <= $1::timestamptz
+       AND u.is_sandbox IS NOT TRUE
+     ORDER BY rp.pseudonym, qr.recorded_at`,
+    [asOf]
+  );
+  return rows;
+}
+
 /** Baseline fallback: the account minted from this ResponseID via /join-study. */
 export async function findUserIdForBaselineResponse(responseId: string): Promise<number | null> {
   const { rows } = await pool.query(

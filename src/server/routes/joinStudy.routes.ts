@@ -25,6 +25,7 @@ import {
   isPlausibleResponseId,
   verifyBaselineResponse,
 } from '../services/qualtrics.service.js';
+import { enqueueWorkItem } from '../services/workQueue.service.js';
 
 const PAGE_STYLE = `
   body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f4; color: #1c1917; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
@@ -236,6 +237,21 @@ export default function joinStudyRoutes(): Router {
       }
 
       await markQualtricsSignupRegistered(claim.signup_id, user.userid);
+
+      // Onboarding cue (fire-and-forget): the baseline survey's closing page
+      // tells participants the research team will contact them to schedule
+      // onboarding — this work item is what actually tells the team. Org
+      // fan-out because a brand-new participant has no care team yet.
+      enqueueWorkItem({
+        itemType: 'participant_enrolled',
+        severity: 'info',
+        title: `New study participant enrolled: ${user.username}`,
+        detail: { responseId: qid, username: user.username },
+        sourceTable: 'qualtrics_signups',
+        sourceId: String(claim.signup_id),
+        clientId: user.userid,
+        notifyOrgTherapists: true,
+      }).catch((err) => console.error('[JoinStudy] enrollment work item failed:', err));
 
       // Establish the session on a fresh id, mirroring login (fixation +
       // no leftover fields from a previous account on this browser).

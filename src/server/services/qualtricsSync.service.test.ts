@@ -8,6 +8,7 @@ const dbMocks = vi.hoisted(() => ({
   upsertQualtricsResponse: vi.fn(),
   resolveStudySidToUserId: vi.fn(),
   findUserIdForBaselineResponse: vi.fn(),
+  insertAdverseEventDraft: vi.fn(),
 }));
 vi.mock('../db/index.js', () => dbMocks);
 
@@ -18,8 +19,10 @@ import {
   getQualtricsSyncConfig,
   extractTypedStudyId,
   detectAdverseReport,
+  nextBusinessDay,
   fetchAllResponses,
   syncAllSurveys,
+  handleResponseWebhook,
   runSync,
   getSyncRunStatus,
   startQualtricsSyncScheduler,
@@ -126,6 +129,7 @@ describe('syncAllSurveys', () => {
     dbMocks.upsertQualtricsResponse.mockResolvedValue(undefined);
     workQueueMocks.enqueueWorkItem.mockReset();
     workQueueMocks.enqueueWorkItem.mockResolvedValue(null);
+    dbMocks.insertAdverseEventDraft.mockResolvedValue(101);
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -209,7 +213,7 @@ describe('syncAllSurveys', () => {
         sourceTable: 'qualtrics_responses',
         sourceId: 'R_adv',
         clientId: 42,
-        detail: { surveyRole: 'weekly', responseId: 'R_adv', triggers: ['QID10', 'QID11_TEXT'] },
+        detail: { surveyRole: 'weekly', responseId: 'R_adv', triggers: ['QID10', 'QID11_TEXT'], reportId: 101 },
       })
     );
     // The distress text itself must never leave qualtrics_responses.
@@ -309,5 +313,87 @@ describe('detectAdverseReport', () => {
 
   it('never flags baseline responses', () => {
     expect(detectAdverseReport('baseline', { QID11_TEXT: 'text' })).toBeNull();
+  });
+});
+
+describe('adverse-event drafting + webhook', () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockReset();
+    vi.clearAllMocks();
+    vi.stubEnv('QUALTRICS_API_TOKEN', 'tok');
+    vi.stubEnv('QUALTRICS_WEEKLY_SURVEY_ID', 'SV_weekly');
+    dbMocks.resolveStudySidToUserId.mockResolvedValue(42);
+    dbMocks.upsertQualtricsResponse.mockResolvedValue(undefined);
+    dbMocks.insertAdverseEventDraft.mockResolvedValue(101);
+    workQueueMocks.enqueueWorkItem.mockResolvedValue(null);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), { status });
+  }
+
+  it('files an AE draft carrying the description text and links it on the work item', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        result: {
+          responseId: 'R_adv',
+          values: { finished: 1, sid: '42', QID10: 2, QID11_TEXT: ' it upset me ' },
+        },
+      })
+    );
+    const outcome = await handleResponseWebhook('SV_weekly', 'R_adv');
+    expect(outcome).toBe('ok');
+    expect(dbMocks.insertAdverseEventDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        triggerSource: 'auto_survey',
+        category: 'survey_report',
+        sessionRef: 'qualtrics:R_adv',
+        userId: 42,
+        transcriptExcerpt: 'it upset me',
+      })
+    );
+    expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.objectContaining({ reportId: 101 }) })
+    );
+  });
+
+  it('still files the work item when the AE draft insert fails', async () => {
+    dbMocks.insertAdverseEventDraft.mockRejectedValue(new Error('db down'));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        result: { responseId: 'R_adv2', values: { finished: 1, sid: '42', QID10: 2 } },
+      })
+    );
+    await handleResponseWebhook('SV_weekly', 'R_adv2');
+    expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.objectContaining({ reportId: null }) })
+    );
+  });
+
+  it('maps webhook edge cases: unknown survey, missing response, disabled env', async () => {
+    expect(await handleResponseWebhook('SV_other', 'R_x')).toBe('unknown-survey');
+    fetchMock.mockResolvedValueOnce(jsonResponse(404, {}));
+    expect(await handleResponseWebhook('SV_weekly', 'R_gone')).toBe('not-found');
+    vi.stubEnv('QUALTRICS_API_TOKEN', '');
+    expect(await handleResponseWebhook('SV_weekly', 'R_x')).toBe('disabled');
+  });
+});
+
+describe('nextBusinessDay', () => {
+  it('skips weekends', () => {
+    // Friday 2026-09-04 UTC -> Monday 2026-09-07
+    expect(nextBusinessDay(new Date('2026-09-04T12:00:00Z')).toISOString()).toBe(
+      '2026-09-07T12:00:00.000Z'
+    );
+    // Wednesday -> Thursday
+    expect(nextBusinessDay(new Date('2026-09-02T12:00:00Z')).toISOString()).toBe(
+      '2026-09-03T12:00:00.000Z'
+    );
   });
 });

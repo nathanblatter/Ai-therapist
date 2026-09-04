@@ -24,8 +24,8 @@ export interface AdverseEventRow {
   participant_ref: string | null;
   occurred_at: Date;
   severity: 'low' | 'medium' | 'high';
-  trigger_source: 'auto_crisis_flag' | 'manual' | 'auto_eligibility';
-  category: 'crisis' | 'eligibility_violation';
+  trigger_source: 'auto_crisis_flag' | 'manual' | 'auto_eligibility' | 'auto_survey';
+  category: 'crisis' | 'eligibility_violation' | 'survey_report';
   summary: string;
   timeline: AdverseEventTimelineEntry[];
   transcript_excerpt: string | null;
@@ -53,9 +53,9 @@ export interface InsertAdverseEventDraftInput {
   participantRef: string | null;
   occurredAt: Date;
   severity: 'low' | 'medium' | 'high';
-  triggerSource: 'auto_crisis_flag' | 'manual' | 'auto_eligibility';
+  triggerSource: 'auto_crisis_flag' | 'manual' | 'auto_eligibility' | 'auto_survey';
   /** Defaults to 'crisis' when omitted (back-compat with the crisis assembler). */
-  category?: 'crisis' | 'eligibility_violation';
+  category?: 'crisis' | 'eligibility_violation' | 'survey_report';
   summary: string;
   timeline: AdverseEventTimelineEntry[];
   transcriptExcerpt: string | null;
@@ -76,7 +76,9 @@ export async function insertAdverseEventDraft(input: InsertAdverseEventDraftInpu
   // ON CONFLICT target must match the row being inserted.
   const conflictClause = input.triggerSource === 'auto_eligibility'
     ? `ON CONFLICT (session_id) WHERE trigger_source = 'auto_eligibility' DO NOTHING`
-    : `ON CONFLICT (crisis_event_id) WHERE crisis_event_id IS NOT NULL DO NOTHING`;
+    : input.triggerSource === 'auto_survey'
+      ? `ON CONFLICT (session_ref) WHERE trigger_source = 'auto_survey' DO NOTHING`
+      : `ON CONFLICT (crisis_event_id) WHERE crisis_event_id IS NOT NULL DO NOTHING`;
   const result = await pool.query<{ report_id: number }>(
     `INSERT INTO adverse_event_reports
        (session_id, crisis_event_id, user_id, session_ref, participant_ref, occurred_at,

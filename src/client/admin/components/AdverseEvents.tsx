@@ -20,7 +20,7 @@ interface Report {
   occurred_at: string;
   severity: 'low' | 'medium' | 'high';
   trigger_source: string;
-  category: 'crisis' | 'eligibility_violation';
+  category: 'crisis' | 'eligibility_violation' | 'survey_report';
   summary: string;
   timeline: TimelineEntry[];
   transcript_excerpt: string | null;
@@ -48,11 +48,18 @@ function dueRelative(due: string): { text: string; cls: string } {
   return { text: `due ${new Date(due).toLocaleDateString()}`, cls: 'text-gray-500' };
 }
 
-function CategoryBadge({ category }: { category: 'crisis' | 'eligibility_violation' }) {
-  const isEligibility = category === 'eligibility_violation';
+function CategoryBadge({ category }: { category: 'crisis' | 'eligibility_violation' | 'survey_report' }) {
+  const style =
+    category === 'eligibility_violation' ? 'bg-purple-100 text-purple-700'
+    : category === 'survey_report' ? 'bg-amber-100 text-amber-700'
+    : 'bg-red-100 text-red-700';
+  const label =
+    category === 'eligibility_violation' ? 'Eligibility'
+    : category === 'survey_report' ? 'Survey report'
+    : 'Crisis';
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${isEligibility ? 'bg-purple-100 text-purple-700' : 'bg-red-100 text-red-700'}`}>
-      {isEligibility ? 'Eligibility' : 'Crisis'}
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${style}`}>
+      {label}
     </span>
   );
 }
@@ -72,7 +79,7 @@ export default function AdverseEvents({ role }: AdverseEventsProps = {}) {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Report | null>(null);
   const [saving, setSaving] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'crisis' | 'eligibility_violation'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'crisis' | 'eligibility_violation' | 'survey_report'>('all');
   const [showFileForm, setShowFileForm] = useState(false);
 
   const load = useCallback(async () => {
@@ -193,6 +200,7 @@ export default function AdverseEvents({ role }: AdverseEventsProps = {}) {
           <option value="all">All types</option>
           <option value="crisis">Crisis</option>
           <option value="eligibility_violation">Eligibility</option>
+          <option value="survey_report">Survey report</option>
         </select>
       </div>
 

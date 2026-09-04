@@ -25,7 +25,8 @@ import {
   getFeedbackCommentsExport,
   type DatasetRow,
 } from '../db/datasetExport.queries.js';
-import { getSurveyResponsesExport } from '../db/qualtricsResponses.queries.js';
+import { getSurveyResponsesExport, getSurveyAnswersForExport } from '../db/qualtricsResponses.queries.js';
+import { scoreInstruments, weeklyMetrics } from './qualtricsScoring.service.js';
 
 export interface DatasetColumn {
   name: string;
@@ -237,6 +238,42 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'survey_role', type: 'string', source: 'qualtrics_responses.survey_role', values: 'baseline, weekly, exit, week12' },
       { name: 'finished', type: 'bool', source: 'qualtrics_responses.finished' },
       { name: 'recorded_at', type: 'timestamp', source: 'qualtrics_responses.recorded_at' },
+    ],
+  },
+  {
+    file: 'surveys_scored.csv',
+    description:
+      'One row per finished, participant-linked survey response with derived instrument scores and weekly metrics (computed server-side from verified QID maps; see qualtricsScoring.service.ts). Raw answer payloads stay out of the bundle.',
+    fetch: async (asOf) =>
+      (await getSurveyAnswersForExport(asOf)).map((row) => {
+        const scores = scoreInstruments(row.survey_role, row.answers);
+        const weekly = row.survey_role === 'weekly' ? weeklyMetrics(row.answers) : null;
+        return {
+          participant_id: row.participant_id,
+          survey_role: row.survey_role,
+          recorded_at: row.recorded_at,
+          phq2: scores.phq2,
+          gad2: scores.gad2,
+          phq2_positive: scores.phq2Positive,
+          gad2_positive: scores.gad2Positive,
+          weekly_mood: weekly?.mood ?? null,
+          weekly_stress: weekly?.stress ?? null,
+          weekly_helpfulness: weekly?.helpfulness ?? null,
+          weekly_usage: weekly?.usage ?? null,
+        };
+      }),
+    columns: [
+      { name: 'participant_id', type: 'string', source: 'research_pseudonyms', values: 'P001, P002, ...' },
+      { name: 'survey_role', type: 'string', source: 'qualtrics_responses.survey_role', values: 'baseline, weekly, exit, week12' },
+      { name: 'recorded_at', type: 'timestamp', source: 'qualtrics_responses.recorded_at' },
+      { name: 'phq2', type: 'int', source: 'derived: PHQ-2 item sum (raw-1 each)', values: '0-6; empty for weekly/unscorable' },
+      { name: 'gad2', type: 'int', source: 'derived: GAD-2 item sum (raw-1 each)', values: '0-6; empty for weekly/unscorable' },
+      { name: 'phq2_positive', type: 'bool', source: 'derived: phq2 >= 3' },
+      { name: 'gad2_positive', type: 'bool', source: 'derived: gad2 >= 3' },
+      { name: 'weekly_mood', type: 'int', source: 'derived: weekly QID8', values: '1-6, higher = better; empty for non-weekly' },
+      { name: 'weekly_stress', type: 'int', source: 'derived: weekly QID9', values: '1-5, higher = more stressed' },
+      { name: 'weekly_helpfulness', type: 'int', source: 'derived: weekly QID6', values: "1-5; empty when unanswered or 'did not use'" },
+      { name: 'weekly_usage', type: 'string', source: 'derived: weekly QID4 bucket', values: '0, 1, 2-3, 4-6, 7 or more' },
     ],
   },
 ];

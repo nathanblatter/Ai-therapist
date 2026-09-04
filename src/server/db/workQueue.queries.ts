@@ -15,7 +15,9 @@ export type WorkItemType =
   | 'note_awaiting_signature'
   | 'inactivity'
   | 'screener_worsening'
-  | 'message_unread_stale';
+  | 'message_unread_stale'
+  | 'survey_drift'
+  | 'participant_enrolled';
 
 export type WorkItemSeverity = 'info' | 'warning' | 'urgent';
 export type WorkItemStatus = 'open' | 'acked' | 'resolved' | 'expired';
