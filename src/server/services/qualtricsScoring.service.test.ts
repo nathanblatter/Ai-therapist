@@ -2,7 +2,7 @@
 // cutoff, refusal to score partial/out-of-range payloads, and the weekly
 // metric extraction (incl. the helpfulness "did not use" sentinel).
 import { describe, it, expect } from 'vitest';
-import { scoreInstruments, weeklyMetrics } from './qualtricsScoring.service.js';
+import { scoreInstruments, weeklyMetrics, surveyParadata } from './qualtricsScoring.service.js';
 
 describe('scoreInstruments', () => {
   it('scores baseline PHQ-2/GAD-2 with the raw-1 offset and cutoff', () => {
@@ -95,5 +95,21 @@ describe('weeklyMetrics', () => {
     expect(partial.allianceBond).toBe(4.5);
     expect(partial.allianceTask).toBeNull(); // QID7_4 out of range
     expect(partial.allianceTotal).toBeNull();
+  });
+});
+
+describe('surveyParadata', () => {
+  it('extracts duration and flags speeders per role floor', () => {
+    expect(surveyParadata('weekly', { duration: 15 })).toEqual({ completionSeconds: 15, speeder: true });
+    expect(surveyParadata('weekly', { duration: 90 })).toEqual({ completionSeconds: 90, speeder: false });
+    expect(surveyParadata('baseline', { duration: 119 }).speeder).toBe(true);
+    expect(surveyParadata('baseline', { duration: 300 }).speeder).toBe(false);
+  });
+
+  it('accepts numeric strings and nulls anything unusable', () => {
+    expect(surveyParadata('exit', { duration: '52' })).toEqual({ completionSeconds: 52, speeder: true });
+    expect(surveyParadata('exit', {})).toEqual({ completionSeconds: null, speeder: null });
+    expect(surveyParadata('exit', { duration: -5 })).toEqual({ completionSeconds: null, speeder: null });
+    expect(surveyParadata('exit', { duration: 'fast' })).toEqual({ completionSeconds: null, speeder: null });
   });
 });

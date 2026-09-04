@@ -56,6 +56,42 @@ export interface InstrumentScores {
   gad2Positive: boolean | null;
 }
 
+// Paradata (ai-therapist Qualtrics ops): every exported response carries a
+// `duration` field (seconds spent in the survey). Responses faster than a
+// role's plausible floor are flagged as speeders — a principled exclusion
+// rule for analysis, not an automatic exclusion.
+const SPEEDER_FLOOR_SECONDS: Record<QualtricsSurveyRole, number> = {
+  baseline: 120,
+  weekly: 20,
+  exit: 90,
+  week12: 45,
+  withdrawal: 10,
+};
+
+export interface SurveyParadata {
+  /** Seconds spent in the survey; null when the payload lacks a usable duration. */
+  completionSeconds: number | null;
+  /** True when completionSeconds is below the role's plausibility floor. */
+  speeder: boolean | null;
+}
+
+export function surveyParadata(
+  role: QualtricsSurveyRole,
+  answers: Record<string, unknown>
+): SurveyParadata {
+  const raw = answers.duration;
+  const seconds =
+    typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
+      ? Math.round(raw)
+      : typeof raw === 'string' && /^\d+$/.test(raw)
+        ? parseInt(raw, 10)
+        : null;
+  return {
+    completionSeconds: seconds,
+    speeder: seconds === null ? null : seconds < SPEEDER_FLOOR_SECONDS[role],
+  };
+}
+
 function itemScore(answers: Record<string, unknown>, key: string): number | null {
   const raw = answers[key];
   if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1 || raw > 4) return null;

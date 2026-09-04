@@ -77,6 +77,38 @@ export default function qualtricsSyncRoutes(): Router {
     }
   });
 
+  // Withdrawal D4 deletion requests: researcher-confirmed execution of a
+  // participant's "please also delete my information" preference. Deletes the
+  // participant's Qualtrics responses remotely and blanks local answers, one
+  // data_deletion_log row per artifact. Idempotent — re-run to retry remote
+  // failures. Triggered from the participant_withdrawal work item.
+  router.post(
+    '/admin/api/qualtrics/participants/:userId/delete-survey-data',
+    requireRole('researcher'),
+    async (req, res) => {
+      if (!getQualtricsSyncConfig()) {
+        return res.status(503).json({
+          error: 'Qualtrics integration is not configured (QUALTRICS_API_TOKEN + survey ids).',
+        });
+      }
+      const userId = parseInt(req.params.userId, 10);
+      if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
+      try {
+        const { deleteParticipantSurveyData } = await import(
+          '../../services/qualtricsDeletion.service.js'
+        );
+        const result = await deleteParticipantSurveyData(
+          userId,
+          req.session.username ?? 'unknown-researcher'
+        );
+        res.status(result.remoteFailed > 0 ? 207 : 200).json(result);
+      } catch (error) {
+        console.error('[QualtricsDeletion] request failed:', error);
+        res.status(500).json({ error: 'Deletion failed' });
+      }
+    }
+  );
+
   router.get('/admin/api/qualtrics/data', requireRole('researcher'), async (_req, res) => {
     if (!getQualtricsSyncConfig()) {
       return res.status(503).json({

@@ -1,0 +1,294 @@
+[[AdvancedFormat]]
+
+[[Block: Screening]]
+
+[[Question:DB]]
+[[ID:INTRO]]
+Welcome, and thank you for your interest in the AI Support Agent Longitudinal Study (Phase 2 of "Human + AI Therapy: Better For Everyone").<br><br>This study involves using a voice-enabled AI mental health support app from your own device for 8 weeks, brief weekly surveys, and start and end surveys. Before we begin, we need to ask a few questions to confirm you are eligible.
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:SCR1]]
+Are you 18 years of age or older?
+[[Choices]]
+Yes, I am 18 years old or older
+No, I am under 18 years old
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:SCR2]]
+Are you currently located in the United States, and do you expect to remain in the US for the next 10 weeks?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:SCR3]]
+Are you currently a BYU student?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:SCR4]]
+Do you have your own smartphone or computer with internet access that you can use for this study?
+[[Choices]]
+Yes
+No
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:SCR5]]
+Are you currently experiencing a mental health crisis?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:SCR6]]
+In the past 6 months, have you been hospitalized for a mental health concern?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:SCR7]]
+In the past month, have you had thoughts of killing yourself with a specific plan or intent to act on them?
+[[Choices]]
+Yes
+No
+
+[[Question:DB]]
+[[ID:REFER]]
+If you are struggling right now, please reach out to people who can help: BYU Counseling and Psychological Services (801-422-3035; after-hours crisis support via BYU Police 801-422-2222), the 988 Suicide and Crisis Lifeline (call or text 988), or the Crisis Text Line (text HELLO to 741741). If you are in immediate danger, call 911.
+
+[[Block: Consent]]
+
+[[Question:DB]]
+[[ID:CONSENTTEXT]]
+<b>Consent to Be a Research Subject</b><br><br><b>Title:</b> Human + AI Therapy: Better For Everyone (Phase 2: Longitudinal Use)<br><b>Principal Investigator:</b> James Gaskin, PhD, Department of Information Systems, Brigham Young University<br><br><b>Introduction</b><br>This research study is being conducted by Professor James Gaskin and a research team at Brigham Young University to understand what it is like to use an AI mental health support agent over an extended period. You were invited to participate because you are a BYU student, at least 18 years old, located in the United States.<br><br><b>What is the AI support agent, and what is it not?</b><br>The AI support agent is a research tool that offers supportive, evidence-informed self-help conversation by voice or text. It is not a therapist, doctor, or crisis service, and this study is not therapy. It cannot diagnose or treat any condition and is not a substitute for professional mental health care.<br><br><b>Procedures</b><br>If you agree to participate: (1) complete this baseline survey (about 15 minutes); (2) attend a 30-45 minute onboarding session with a research assistant (SONA lab or Zoom); (3) use the AI support agent from your own device as much or as little as you wish for 8 weeks (we suggest about two short conversations per week); (4) complete a 5-minute weekly check-in survey; (5) complete an exit survey (about 20 minutes) at Week 8; and (6) complete one short follow-up survey at Week 12. Some participants will be invited to an optional 30-minute recorded exit interview. In the app, the agent will occasionally ask two brief wellbeing questionnaires (PHQ-2 and GAD-2), no more than once per week each.<br><br><b>Recording and data collection</b><br>Your conversations with the agent (text, and transcriptions of voice conversations) are collected for research. Voice sessions are recorded as audio and stored encrypted; recordings are used for safety review and transcription verification and are deleted once transcription is verified. Before any researcher can read your conversations, an automated system removes identifying information, and a trained research assistant double-checks the removal; researchers see only the de-identified version. Original unredacted content is automatically deleted after a short retention period. The app also records when and how long you use it.<br><br><b>Risks and discomforts</b><br>Talking or writing about your mood and personal difficulties may bring up uncomfortable feelings. Although unlikely, it is possible that the chatbot interactions may worsen your condition, or may trigger a crisis episode. There is a small risk of over-relying on a tool that is not a clinical service; the agent will remind you of its limits. As with any digital system, a breach of confidentiality is possible; extensive safeguards make this very unlikely.<br><br><b>Safety monitoring and mandatory reporting</b><br>The system automatically monitors conversations for signs of a mental health crisis. If it detects that you may be in danger, it will show you crisis resources immediately and alert a trained on-call researcher. If you share information regarding ongoing abuse, neglect, sexual exploitation, or risk of harm toward yourself or others, we are required to report this to legal authorities, along with information about your identity. This could result in the arrest and prosecution of the perpetrators.<br><br><b>Benefits</b><br>There are no guaranteed direct benefits to you. Society may benefit from evidence about whether AI support tools can safely complement human mental health care.<br><br><b>Confidentiality</b><br>Research data are stored encrypted in access-controlled systems available only to the approved research team. De-identified data will be kept for future research and may be shared for publication or meta-analysis; your identity will not be shared. Your NetID, if collected for SONA credit, is handled by the SONA lab separately from research data. Conversations are processed by our AI service provider under contractual privacy protections; no conversation data is used to train commercial AI models.<br><br><b>Compensation</b><br>Compensation is prorated by what you complete: $10 (or 1 SONA credit) for baseline and onboarding; $3 (or SONA equivalent) per weekly check-in; $15 for the exit survey; $10 for the optional exit interview; $5 for the Week 12 follow-up (maximum about $64). If you withdraw early, you keep everything already earned.<br><br><b>Participation</b><br>Participation is voluntary. You may skip questions, pause, or withdraw at any time without penalty and without any effect on your standing at BYU or in any course. To withdraw, stop using the app and notify the research team; you may also request removal of your stored conversation data.<br><br><b>Questions about the Research</b><br>Contact Principal Investigator James Gaskin at james.gaskin@byu.edu or Nathan Blatter at nzb22@byu.edu.<br><br><b>Questions about Your Rights as a Research Participant</b><br>Contact the BYU Human Research Protection Program at (801) 422-1461 or BYU.HRPP@byu.edu.
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:CONSENT]]
+<b>Statement of Consent</b><br>I am 18 years of age or older. I have read and understood this consent form, have had the opportunity to ask questions, and desire of my own free will to participate in this study.
+[[Choices]]
+Yes, I agree to participate
+No, I do not agree, and do not want to continue
+
+[[Question:TE:SingleLine]]
+[[ID:CONSENTNAME]]
+Please type your full name to document your consent:
+
+[[Block: Baseline - Therapy Background]]
+
+[[Question:DB]]
+[[ID:MAININTRO]]
+Thank you for choosing to participate! We will now ask about your experiences and views related to mental health, therapy, and AI. Your responses are confidential; you may skip any question you prefer not to answer.
+
+[[PageBreak]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:B1]]
+How long have you participated in mental health therapy?
+[[Choices]]
+I have not participated in therapy
+Less than 1 month
+1-3 months
+4-6 months
+7-12 months
+1-2 years
+2-5 years
+More than 5 years
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:B2]]
+Are you currently seeing a therapist or counselor?
+[[Choices]]
+Yes
+No
+Prefer not to say
+
+[[Question:TE:Essay]]
+[[ID:B3]]
+What does "effective" support for your mental well-being mean or look like to you?
+
+[[PageBreak]]
+
+[[Question:MC:MultipleAnswer:Vertical]]
+[[ID:B4]]
+Where do you currently turn for emotional support? (Select all that apply)
+[[Choices]]
+Friends
+Family
+Therapist or counselor
+Clergy or religious leader
+Apps or online tools
+Journaling or self-help
+No one
+Other
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:B5]]
+How easy is it for you to confide in or open up to others?
+[[Choices]]
+Very Easy
+Easy
+Neutral
+Difficult
+Very Difficult
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:B6]]
+Please rate the following barriers for you personally to effective mental health support.
+[[Choices]]
+Costs
+Scheduling
+Fit with needs/personality
+Trust
+Cultural understanding
+Privacy concerns
+[[Answers]]
+Not a Barrier
+Slight Barrier
+Moderate Barrier
+Significant Barrier
+Very Significant Barrier
+
+[[Block: Baseline - Wellbeing]]
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:PHQ2]]
+Over the last two weeks, how often have you been bothered by the following? (PHQ-2)
+[[Choices]]
+Little interest or pleasure in doing things
+Feeling down, depressed, or hopeless
+[[Answers]]
+Not at all
+Several days
+More than half the days
+Nearly every day
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:GAD2]]
+Over the last two weeks, how often have you been bothered by the following? (GAD-2)
+[[Choices]]
+Feeling nervous, anxious, or on edge
+Not being able to stop or control worrying
+[[Answers]]
+Not at all
+Several days
+More than half the days
+Nearly every day
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:B7]]
+How would you rate your overall mental well-being over the past month?
+[[Choices]]
+Very poor
+Poor
+Fair
+Good
+Very good
+Excellent
+
+[[Block: Baseline - Technology and AI]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:T1]]
+Please select the statement that best describes your overall use or familiarity with AI.
+[[Choices]]
+AI is a part of my daily activities (at least once per day)
+I am pretty familiar with AI and use it on a regular basis (at least once per week)
+I am somewhat familiar with AI and have used it before (at least in the last year)
+I am not familiar with AI and have not used it before or it's been several years since last use
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:T2]]
+Have you ever used an AI tool to talk about feelings, stress, or personal problems?
+[[Choices]]
+Yes, regularly
+Yes, once or a few times
+No
+
+[[Question:Matrix:SingleAnswer]]
+[[ID:T3]]
+Please rate how much you agree or disagree with the following statements.
+[[Choices]]
+I would feel comfortable discussing personal problems with an AI support agent.
+I would trust an AI support agent to protect my personal data.
+I believe an AI support agent could offer helpful support for everyday stress.
+I would be open to using an AI support agent regularly over several weeks.
+I would feel comfortable speaking out loud with an AI agent (voice conversation).
+[[Answers]]
+Strongly Disagree
+Disagree
+Neutral
+Agree
+Strongly Agree
+
+[[Question:TE:Essay]]
+[[ID:T4]]
+What do you hope an AI support agent could help you with, if anything?
+
+[[Question:TE:Essay]]
+[[ID:T5]]
+What concerns, if any, do you have about talking with an AI support agent?
+
+[[Block: Baseline - Demographics]]
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:D1]]
+What is your sex?
+[[Choices]]
+Male
+Female
+Other
+Prefer not to say
+
+[[Question:TE:SingleLine]]
+[[ID:D2]]
+What is your age (in years)?
+
+[[Question:MC:MultipleAnswer:Vertical]]
+[[ID:D3]]
+Please enter your ethnicity (select all that apply to you):
+[[Choices]]
+White
+Hispanic or Latino
+Black or African American
+Asian
+Native American
+Pacific Islander
+Other
+Prefer not to say
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:D4]]
+What is your year in school?
+[[Choices]]
+Freshman
+Sophomore
+Junior
+Senior
+Graduate student
+
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:D5]]
+How would you rate your proficiency in the English language?
+[[Choices]]
+Native (English is my first language)
+Fluent (Near-native ability in speaking, reading, and writing)
+Advanced (Comfortable in most situations, occasional errors)
+Intermediate (Can handle basic conversations and tasks, but with limitations)
+Beginner (Limited ability, understand/use basic phrases)
+
+[[Question:TE:SingleLine]]
+[[ID:BEMAIL]]
+What email address should the research team use to schedule your onboarding session and send survey reminders? (Used only for study communication; never shared.)
+
+[[Question:DB]]
+[[ID:NEXTSTEPS]]
+Thank you! A research assistant will contact you to schedule your onboarding session, where you will set up your study account and have your first short conversation with the AI support agent.

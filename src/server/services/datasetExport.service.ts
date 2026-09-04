@@ -27,7 +27,7 @@ import {
   type DatasetRow,
 } from '../db/datasetExport.queries.js';
 import { getSurveyResponsesExport, getSurveyAnswersForExport } from '../db/qualtricsResponses.queries.js';
-import { scoreInstruments, weeklyMetrics } from './qualtricsScoring.service.js';
+import { scoreInstruments, weeklyMetrics, surveyParadata } from './qualtricsScoring.service.js';
 
 export interface DatasetColumn {
   name: string;
@@ -250,10 +250,13 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       (await getSurveyAnswersForExport(asOf)).map((row) => {
         const scores = scoreInstruments(row.survey_role, row.answers);
         const weekly = row.survey_role === 'weekly' ? weeklyMetrics(row.answers) : null;
+        const paradata = surveyParadata(row.survey_role, row.answers);
         return {
           participant_id: row.participant_id,
           survey_role: row.survey_role,
           recorded_at: row.recorded_at,
+          completion_seconds: paradata.completionSeconds,
+          speeder: paradata.speeder,
           phq2: scores.phq2,
           gad2: scores.gad2,
           phq2_positive: scores.phq2Positive,
@@ -272,6 +275,8 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', values: 'P001, P002, ...' },
       { name: 'survey_role', type: 'string', source: 'qualtrics_responses.survey_role', values: 'baseline, weekly, exit, week12' },
       { name: 'recorded_at', type: 'timestamp', source: 'qualtrics_responses.recorded_at' },
+      { name: 'completion_seconds', type: 'int', source: "answers->>'duration'", notes: 'Qualtrics-reported time spent in the survey.' },
+      { name: 'speeder', type: 'bool', source: 'derived: completion_seconds below the per-role plausibility floor', notes: 'Flag for analysis-time exclusion decisions (baseline<120s, weekly<20s, exit<90s, week12<45s, withdrawal<10s); never auto-excluded.' },
       { name: 'phq2', type: 'int', source: 'derived: PHQ-2 item sum (raw-1 each)', values: '0-6; empty for weekly/unscorable' },
       { name: 'gad2', type: 'int', source: 'derived: GAD-2 item sum (raw-1 each)', values: '0-6; empty for weekly/unscorable' },
       { name: 'phq2_positive', type: 'bool', source: 'derived: phq2 >= 3' },

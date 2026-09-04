@@ -70,11 +70,11 @@ export async function clearRecordingColumns(sessionId: string): Promise<void> {
 
 export interface DeletionLogInput {
   runId: string;
-  artifactType: 'recording_object' | 'session_content' | 'user_account';
+  artifactType: 'recording_object' | 'session_content' | 'user_account' | 'survey_response';
   artifactRef: string;
   sessionId: string | null;
   userId: number | null;
-  reason: 'recording_retention' | 'wiped_user_grace' | 'manual_admin';
+  reason: 'recording_retention' | 'wiped_user_grace' | 'manual_admin' | 'participant_request';
   policySnapshot: unknown;
   triggeredBy: 'scheduler' | 'manual';
   triggeredByUser: string | null;

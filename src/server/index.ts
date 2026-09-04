@@ -78,6 +78,7 @@ import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
 import { startQualtricsSyncScheduler } from "./services/qualtricsSync.service.js";
 import { startWorkQueueScheduler } from "./services/workQueue.service.js";
 import { startMessageEmbeddingScheduler } from "./services/messageEmbedding.service.js";
+import { startSurveyReminderScheduler } from "./services/qualtricsReminders.service.js";
 import { startMessageScanSweeper } from "./services/messageSafety.service.js";
 import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
 
@@ -939,6 +940,13 @@ if (isEntrypoint) {
     // a redteam child would burn embedding spend on synthetic transcripts.
     if (process.env.SOCKET_PG_ADAPTER !== 'off') {
       startMessageEmbeddingScheduler();
+    }
+
+    // Survey reminder emails through Qualtrics (ships dark until the
+    // QUALTRICS_DIRECTORY/MAILING_LIST/LIBRARY/REMINDER_MESSAGE ids are set).
+    // Harness children skip it — a redteam child must never email anyone.
+    if (process.env.SOCKET_PG_ADAPTER !== 'off') {
+      startSurveyReminderScheduler();
     }
 
     // Work-queue scheduler: hourly digest sweep + daily 06:00 America/Denver
