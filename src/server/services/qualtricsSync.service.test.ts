@@ -321,9 +321,9 @@ describe('detectAdverseReport', () => {
   });
 
   it('flags withdrawal driven by distress (felt-worse reason or free text)', () => {
-    expect(detectAdverseReport('withdrawal', { QID2: 3 })).toEqual(['QID2']);
-    expect(detectAdverseReport('withdrawal', { QID3_TEXT: 'it made me anxious' })).toEqual(['QID3_TEXT']);
-    expect(detectAdverseReport('withdrawal', { QID2: 1 })).toBeNull();
+    expect(detectAdverseReport('withdrawal', { QID3: 3 })).toEqual(['QID3']);
+    expect(detectAdverseReport('withdrawal', { QID4_TEXT: 'it made me anxious' })).toEqual(['QID4_TEXT']);
+    expect(detectAdverseReport('withdrawal', { QID3: 1 })).toBeNull();
   });
 });
 
@@ -339,7 +339,7 @@ describe('withdrawal status application', () => {
   it('stamps withdrawn status and cues the coordinator on a full withdrawal', async () => {
     await processExportedResponse('withdrawal', 'SV_wd', {
       responseId: 'R_1',
-      values: { finished: 1, sid: '42', QID2: 2, QID4: 1, QID5: 1 },
+      values: { finished: 1, sid: '42', QID3: 2, QID5: 1, QID6: 1 },
     });
     expect(studyStatusMocks.setStudyStatus).toHaveBeenCalledWith(42, 'withdrawn', 'qualtrics:R_1');
     expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
@@ -355,7 +355,7 @@ describe('withdrawal status application', () => {
   it('maps the pause choice to paused and deletion requests to warning severity', async () => {
     await processExportedResponse('withdrawal', 'SV_wd', {
       responseId: 'R_2',
-      values: { finished: 1, sid: '42', QID2: 6, QID4: 2, QID5: 2 },
+      values: { finished: 1, sid: '42', QID3: 6, QID5: 2, QID6: 2 },
     });
     expect(studyStatusMocks.setStudyStatus).toHaveBeenCalledWith(42, 'paused', 'qualtrics:R_2');
     expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
@@ -370,16 +370,16 @@ describe('withdrawal status application', () => {
   it('does not stamp status for unfinished, preview, or unlinked responses', async () => {
     await processExportedResponse('withdrawal', 'SV_wd', {
       responseId: 'R_3',
-      values: { finished: 0, sid: '42', QID4: 1 },
+      values: { finished: 0, sid: '42', QID5: 1 },
     });
     await processExportedResponse('withdrawal', 'SV_wd', {
       responseId: 'R_4',
-      values: { finished: 1, sid: '42', distributionChannel: 'preview', QID4: 1 },
+      values: { finished: 1, sid: '42', distributionChannel: 'preview', QID5: 1 },
     });
     dbMocks.resolveStudySidToUserId.mockResolvedValue(null);
     await processExportedResponse('withdrawal', 'SV_wd', {
       responseId: 'R_5',
-      values: { finished: 1, sid: '999', QID4: 1 },
+      values: { finished: 1, sid: '999', QID5: 1 },
     });
     expect(studyStatusMocks.setStudyStatus).not.toHaveBeenCalled();
   });

@@ -157,16 +157,17 @@ export function detectAdverseReport(
   return triggers.length > 0 ? triggers : null;
 }
 
-// Withdrawal-survey QID map (see docs/irb-phase2-instruments/qualtrics_withdrawal.txt:
+// Withdrawal-survey QID map (docs/irb-phase2-instruments/qualtrics_withdrawal.txt:
 // DID study-ID, D1 reason, D2 free text, D3 withdraw-vs-pause, D4 data use).
-// VERIFY against live survey-definitions once the survey is built in Qualtrics —
-// import renumbers labels to QIDn. Until verified, status application no-ops
-// safely (unknown keys -> null -> conservative default handling below).
+// VERIFIED against the live survey SV_esmJYmrhsHOayWy on 2026-09-04 (built via
+// the survey-definitions API: DINTRO=QID1, DID=QID2, D1..D4=QID3..QID6).
+// Re-verify after ANY Qualtrics edit — a stale key no-ops conservatively
+// (missing scope -> 'withdrawn', never a corrupt status).
 export const WITHDRAWAL_KEYS = {
-  reason: 'QID2', // D1: 1 time / 2 not helpful / 3 felt worse / 4 privacy / 5 technical / 6 life / 7 other
-  details: 'QID3', // D2: optional essay -> QID3_TEXT
-  scope: 'QID4', // D3: 1 = withdraw fully, 2 = pause / take a break
-  dataUse: 'QID5', // D4: 1 = keep collected data, 2 = also requests deletion
+  reason: 'QID3', // D1: 1 time / 2 not helpful / 3 felt worse / 4 privacy / 5 technical / 6 life / 7 other
+  details: 'QID4', // D2: optional essay -> QID4_TEXT
+  scope: 'QID5', // D3: 1 = withdraw fully, 2 = pause / take a break
+  dataUse: 'QID6', // D4: 1 = keep collected data, 2 = also requests deletion
 } as const;
 const WITHDRAWAL_FELT_WORSE_CHOICE = 3;
 
