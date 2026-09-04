@@ -26,3 +26,4 @@ pnpm-debug.log*
 #conversation logs
 conversation.log
 
+__pycache__/
