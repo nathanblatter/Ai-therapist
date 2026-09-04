@@ -11,9 +11,13 @@ const dbMocks = vi.hoisted(() => ({
 }));
 vi.mock('../db/index.js', () => dbMocks);
 
+const workQueueMocks = vi.hoisted(() => ({ enqueueWorkItem: vi.fn() }));
+vi.mock('./workQueue.service.js', () => workQueueMocks);
+
 import {
   getQualtricsSyncConfig,
   extractTypedStudyId,
+  detectAdverseReport,
   fetchAllResponses,
   syncAllSurveys,
   runSync,
@@ -120,6 +124,8 @@ describe('syncAllSurveys', () => {
     dbMocks.resolveStudySidToUserId.mockResolvedValue(null);
     dbMocks.findUserIdForBaselineResponse.mockResolvedValue(null);
     dbMocks.upsertQualtricsResponse.mockResolvedValue(undefined);
+    workQueueMocks.enqueueWorkItem.mockReset();
+    workQueueMocks.enqueueWorkItem.mockResolvedValue(null);
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -187,6 +193,39 @@ describe('syncAllSurveys', () => {
     expect(results[0].error).toBeDefined();
     expect(results[0].upserted).toBe(0);
   });
+
+  it('enqueues an adverse_event work item for a distress report', async () => {
+    dbMocks.resolveStudySidToUserId.mockResolvedValue(42);
+    mockExport([
+      {
+        responseId: 'R_adv',
+        values: { finished: 1, sid: '42', QID10: 2, QID11_TEXT: 'it upset me' },
+      },
+    ]);
+    await syncAllSurveys(CONFIG);
+    expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemType: 'adverse_event',
+        sourceTable: 'qualtrics_responses',
+        sourceId: 'R_adv',
+        clientId: 42,
+        detail: { surveyRole: 'weekly', responseId: 'R_adv', triggers: ['QID10', 'QID11_TEXT'] },
+      })
+    );
+    // The distress text itself must never leave qualtrics_responses.
+    const call = workQueueMocks.enqueueWorkItem.mock.calls[0][0];
+    expect(JSON.stringify(call)).not.toContain('it upset me');
+  });
+
+  it('does not enqueue for clean, unfinished, or preview responses', async () => {
+    mockExport([
+      { responseId: 'R_clean', values: { finished: 1, QID10: 1 } },
+      { responseId: 'R_unfin', values: { finished: 0, QID10: 2 } },
+      { responseId: 'R_prev', values: { finished: 1, QID10: 2, distributionChannel: 'preview' } },
+    ]);
+    await syncAllSurveys(CONFIG);
+    expect(workQueueMocks.enqueueWorkItem).not.toHaveBeenCalled();
+  });
 });
 
 describe('runSync + scheduler', () => {
@@ -245,5 +284,30 @@ describe('runSync + scheduler', () => {
     expect(status.intervalMinutes).toBe(5);
     // the boot-time tick ran
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  });
+});
+
+describe('detectAdverseReport', () => {
+  it('flags weekly bother=Yes and description text separately', () => {
+    expect(detectAdverseReport('weekly', { QID10: 2 })).toEqual(['QID10']);
+    expect(detectAdverseReport('weekly', { QID11_TEXT: 'something' })).toEqual(['QID11_TEXT']);
+    expect(detectAdverseReport('weekly', { QID10: 1, QID11_TEXT: '  ' })).toBeNull();
+  });
+
+  it('flags exit free-text reports on either question', () => {
+    expect(detectAdverseReport('exit', { QID13_TEXT: 'unhelpful moment' })).toEqual(['QID13_TEXT']);
+    expect(detectAdverseReport('exit', { QID14_TEXT: 'crisis handling' })).toEqual(['QID14_TEXT']);
+    expect(detectAdverseReport('exit', {})).toBeNull();
+  });
+
+  it('flags week12 negative/mixed lasting effects but not positive ones', () => {
+    expect(detectAdverseReport('week12', { QID10: 2 })).toEqual(['QID10']);
+    expect(detectAdverseReport('week12', { QID10: 3 })).toEqual(['QID10']);
+    expect(detectAdverseReport('week12', { QID10: 1 })).toBeNull();
+    expect(detectAdverseReport('week12', { QID10: 4 })).toBeNull();
+  });
+
+  it('never flags baseline responses', () => {
+    expect(detectAdverseReport('baseline', { QID11_TEXT: 'text' })).toBeNull();
   });
 });

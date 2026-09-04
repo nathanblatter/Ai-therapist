@@ -4,7 +4,9 @@
 //   GET  /admin/api/qualtrics/status — config presence (booleans only, never
 //     the token), scheduler + last-run state, per-survey linkage stats, and
 //     the finished-but-unlinked responses that need human attention.
-// Both 503 when the integration is not configured (env-gated like /join-study).
+//   GET  /admin/api/qualtrics/data   — the aggregation view: per-participant
+//     completion matrix, PHQ-2/GAD-2 scores, weekly aggregates.
+// All 503 when the integration is not configured (env-gated like /join-study).
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import {
@@ -12,6 +14,7 @@ import {
   getSyncRunStatus,
   runSync,
 } from '../../services/qualtricsSync.service.js';
+import { getSurveyDataOverview } from '../../services/surveyData.service.js';
 import { getQualtricsLinkageStats, getUnlinkedFinishedResponses } from '../../db/index.js';
 
 export default function qualtricsSyncRoutes(): Router {
@@ -71,6 +74,20 @@ export default function qualtricsSyncRoutes(): Router {
     } catch (error) {
       console.error('[QualtricsSync] status failed:', error);
       res.status(500).json({ error: 'Status unavailable' });
+    }
+  });
+
+  router.get('/admin/api/qualtrics/data', requireRole('researcher'), async (_req, res) => {
+    if (!getQualtricsSyncConfig()) {
+      return res.status(503).json({
+        error: 'Qualtrics integration is not configured (QUALTRICS_API_TOKEN + survey ids).',
+      });
+    }
+    try {
+      res.json(await getSurveyDataOverview());
+    } catch (error) {
+      console.error('[QualtricsSync] data overview failed:', error);
+      res.status(500).json({ error: 'Survey data unavailable' });
     }
   });
 

@@ -44,6 +44,99 @@ export async function resolveStudySidToUserId(studySid: string): Promise<number 
   return rows[0]?.userid ?? null;
 }
 
+/** Enrollment anchor for the survey schedule: when the participant's account
+ *  was created from their baseline survey (earliest, if somehow several). */
+export async function getEnrollmentAnchor(userId: number): Promise<Date | null> {
+  const { rows } = await pool.query(
+    'SELECT min(registered_at) AS anchor FROM qualtrics_signups WHERE user_id = $1',
+    [userId]
+  );
+  return rows[0]?.anchor ?? null;
+}
+
+export interface FinishedResponse {
+  surveyRole: QualtricsSurveyRole;
+  recordedAt: Date | null;
+}
+
+/** Finished, linked responses for one participant (schedule + admin views). */
+export async function getFinishedResponsesForUser(userId: number): Promise<FinishedResponse[]> {
+  const { rows } = await pool.query(
+    `SELECT survey_role AS "surveyRole", recorded_at AS "recordedAt"
+     FROM qualtrics_responses WHERE user_id = $1 AND finished`,
+    [userId]
+  );
+  return rows;
+}
+
+export interface LinkedSurveyRow {
+  userId: number;
+  username: string;
+  surveyRole: QualtricsSurveyRole;
+  responseId: string;
+  recordedAt: Date | null;
+  answers: Record<string, unknown>;
+}
+
+/** Every finished, participant-linked response with its payload — the input
+ *  to the admin aggregation view. Participant set stays small (target ~40),
+ *  so shipping answers jsonb for all rows is fine. */
+export async function getLinkedSurveyRows(): Promise<LinkedSurveyRow[]> {
+  const { rows } = await pool.query(
+    `SELECT qr.user_id AS "userId", u.username, qr.survey_role AS "surveyRole",
+            qr.response_id AS "responseId", qr.recorded_at AS "recordedAt", qr.answers
+     FROM qualtrics_responses qr
+     JOIN users u ON u.userid = qr.user_id
+     WHERE qr.finished AND qr.user_id IS NOT NULL
+     ORDER BY qr.recorded_at ASC`
+  );
+  return rows;
+}
+
+export interface EnrollmentRow {
+  userId: number;
+  username: string;
+  enrolledAt: Date;
+}
+
+/** All survey-enrolled participants (account minted via /join-study). */
+export async function getEnrolledParticipants(): Promise<EnrollmentRow[]> {
+  const { rows } = await pool.query(
+    `SELECT qs.user_id AS "userId", u.username, min(qs.registered_at) AS "enrolledAt"
+     FROM qualtrics_signups qs
+     JOIN users u ON u.userid = qs.user_id
+     WHERE qs.user_id IS NOT NULL
+     GROUP BY qs.user_id, u.username
+     ORDER BY min(qs.registered_at) ASC`
+  );
+  return rows;
+}
+
+export interface EnrollmentFunnel {
+  /** Finished baseline responses (consented or screened out at the crisis branch). */
+  baselineFinished: number;
+  /** Accounts actually created via /join-study. */
+  accountsCreated: number;
+  /** Finished non-baseline responses that resolved to no participant. */
+  unlinkedFinished: number;
+}
+
+/** Recruitment drop-off between finishing the baseline and creating an account. */
+export async function getEnrollmentFunnel(): Promise<EnrollmentFunnel> {
+  const { rows } = await pool.query(
+    `SELECT
+       (SELECT count(*) FROM qualtrics_responses WHERE survey_role = 'baseline' AND finished) AS baseline,
+       (SELECT count(*) FROM qualtrics_signups WHERE registered_at IS NOT NULL) AS accounts,
+       (SELECT count(*) FROM qualtrics_responses
+        WHERE finished AND user_id IS NULL AND survey_role <> 'baseline') AS unlinked`
+  );
+  return {
+    baselineFinished: Number(rows[0].baseline),
+    accountsCreated: Number(rows[0].accounts),
+    unlinkedFinished: Number(rows[0].unlinked),
+  };
+}
+
 /** Baseline fallback: the account minted from this ResponseID via /join-study. */
 export async function findUserIdForBaselineResponse(responseId: string): Promise<number | null> {
   const { rows } = await pool.query(

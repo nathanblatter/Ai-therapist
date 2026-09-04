@@ -8,7 +8,7 @@
 // the main participant bundle doesn't ship Recharts today (only the admin
 // client does), and these tiny labeled small-multiples don't justify adding it.
 import { useEffect, useState } from 'react';
-import { TrendingUp, FileText, Shield, ChevronRight, Phone, Target, CheckCircle, MessageSquare } from 'react-feather';
+import { TrendingUp, FileText, Shield, ChevronRight, Phone, Target, CheckCircle, MessageSquare, Clipboard, ExternalLink, X } from 'react-feather';
 import { Shell, SafetyPlanCard, type SafetyPlanData, type CustomWorksheetSection } from './ToolOverlays';
 
 // ---------- server payload shapes (dates arrive as ISO strings) ----------
@@ -286,6 +286,13 @@ function WorksheetReadOnly({ worksheet, onClose }: { worksheet: WorksheetItem; o
 
 // ---------- the home view ----------
 
+interface DueSurvey {
+  role: string;
+  week?: number;
+  label: string;
+  url: string;
+}
+
 interface HomeProps {
   /** Open the async-messaging view (caseworker portal). */
   onOpenMessages?: () => void;
@@ -304,6 +311,10 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
   const [safetyPlan, setSafetyPlan] = useState<SafetyPlanData | null>(null);
   const [openWorksheet, setOpenWorksheet] = useState<WorksheetItem | null>(null);
   const [showSafetyPlan, setShowSafetyPlan] = useState(false);
+  const [dueSurveys, setDueSurveys] = useState<DueSurvey[]>([]);
+  // Dismissal is session-local on purpose: completion truth comes from the
+  // hourly Qualtrics sync, so we only need to hide the card until then.
+  const [dismissedSurveys, setDismissedSurveys] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -341,6 +352,13 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
           .then(res => (res.ok ? res.json() : null))
           .then((d: { threads: unknown[] } | null) => {
             if (!cancelled && d && Array.isArray(d.threads)) setThreadCount(d.threads.length);
+          })
+          .catch(() => { /* card stays hidden */ });
+
+        fetch('/api/surveys/due', { credentials: 'include' })
+          .then(res => (res.ok ? res.json() : null))
+          .then((d: { due: DueSurvey[] } | null) => {
+            if (!cancelled && d && Array.isArray(d.due)) setDueSurveys(d.due);
           })
           .catch(() => { /* card stays hidden */ });
 
@@ -400,6 +418,41 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
           Your practice companion between sessions — press Start Session below whenever you&apos;re ready.
         </p>
       </div>
+
+      {/* Due study surveys: personalized Qualtrics links from the protocol
+          calendar (/api/surveys/due). Dismissal hides a card until the next
+          page load; completing the survey clears it for good after the next
+          response sync. */}
+      {dueSurveys.filter(s => !dismissedSurveys.includes(s.role)).map(survey => (
+        <div
+          key={survey.role}
+          className="w-full bg-amber-50 border border-amber-200 rounded-2xl shadow p-5 sm:p-6 flex items-center gap-3"
+        >
+          <Clipboard size={20} className="text-amber-600 shrink-0" aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-semibold text-gray-800">{survey.label} is ready</p>
+            <p className="text-sm text-gray-600">
+              A short study survey is due — it opens in a new tab and takes just a few minutes.
+            </p>
+          </div>
+          <a
+            href={survey.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-2 rounded-lg flex items-center gap-2 shrink-0"
+          >
+            Take survey
+            <ExternalLink size={14} aria-hidden="true" />
+          </a>
+          <button
+            onClick={() => setDismissedSurveys(prev => [...prev, survey.role])}
+            className="text-gray-400 hover:text-gray-600 shrink-0 p-1"
+            aria-label={`Dismiss ${survey.label} reminder`}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      ))}
 
       {/* Messages card (caseworker portal): shown only when the care team has
           opened at least one thread with this participant. */}

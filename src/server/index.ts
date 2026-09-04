@@ -61,6 +61,7 @@ import caseloadRoutes from "./routes/admin/caseload.routes.js";
 import invitesRoutes from "./routes/admin/invites.routes.js";
 import joinRoutes from "./routes/join.routes.js";
 import joinStudyRoutes from "./routes/joinStudy.routes.js";
+import surveysRoutes from "./routes/public/surveys.routes.js";
 import caseworkerDashboardRoutes from "./routes/admin/caseworkerDashboard.routes.js";
 import workQueueRoutes from "./routes/admin/workQueue.routes.js";
 import notificationsRoutes from "./routes/admin/notifications.routes.js";
@@ -728,6 +729,9 @@ app.use(joinRoutes());
 
 // Qualtrics baseline-survey enrollment (env-gated) -> routes/joinStudy.routes.ts
 app.use(joinStudyRoutes());
+
+// Participant survey schedule (due weekly/exit/week12 prompts) -> routes/public/surveys.routes.ts
+app.use(surveysRoutes());
 
 // RAG knowledge-base curation (Knowledge Base tab) -> routes/admin/knowledge.routes.ts.
 app.use(knowledgeRoutes());

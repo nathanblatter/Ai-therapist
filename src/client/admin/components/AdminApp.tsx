@@ -37,6 +37,7 @@ const EscalationInbox = lazy(() => import("./escalations/EscalationInbox"));
 const MessagingInbox = lazy(() => import("./MessagingInbox"));
 const SandboxInvites = lazy(() => import("./SandboxInvites"));
 const QualtricsSync = lazy(() => import("./QualtricsSync"));
+const SurveyData = lazy(() => import("./SurveyData"));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -229,6 +230,7 @@ export default function AdminApp() {
         { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'sandbox', label: 'Sandbox Invites', icon: Box, researcherOnly: true, researchOnly: true },
         { id: 'qualtrics', label: 'Qualtrics Sync', icon: RefreshCw, researcherOnly: true, researchOnly: true },
+        { id: 'survey-data', label: 'Survey Data', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'export', label: 'Export', icon: Download, researchOnly: true },
       ],
     },
@@ -408,6 +410,7 @@ export default function AdminApp() {
               {currentView === 'consent' && <ConsentVersions />}
               {currentView === 'study-ops' && <StudyOps />}
               {currentView === 'qualtrics' && <QualtricsSync />}
+              {currentView === 'survey-data' && <SurveyData />}
               {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
               {currentView === 'retention' && <DataRetention />}

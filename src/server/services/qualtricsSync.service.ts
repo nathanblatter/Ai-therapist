@@ -21,6 +21,7 @@ import {
   findUserIdForBaselineResponse,
   type QualtricsSurveyRole,
 } from '../db/index.js';
+import { enqueueWorkItem } from './workQueue.service.js';
 
 export interface QualtricsSyncConfig {
   apiToken: string;
@@ -119,6 +120,35 @@ export function extractTypedStudyId(values: Record<string, unknown>): string | n
   return candidates.size === 1 ? [...candidates][0] : null;
 }
 
+/**
+ * Adverse-experience detection (protocol: distress descriptions are reviewed
+ * within 1 business day). Question keys verified against the live surveys on
+ * 2026-09-03:
+ *   weekly  QID10 ("did anything bother you", 2 = Yes) + QID11_TEXT describe
+ *   exit    QID13_TEXT (unhelpful/upsetting moment), QID14_TEXT (crisis handling)
+ *   week12  QID10 (lasting effects, 2 = mostly negative / 3 = both) + QID11_TEXT
+ * Returns the triggering keys (never the text itself) or null when clean.
+ */
+export function detectAdverseReport(
+  surveyRole: QualtricsSurveyRole,
+  values: Record<string, unknown>
+): string[] | null {
+  const triggers: string[] = [];
+  const hasText = (key: string) =>
+    typeof values[key] === 'string' && (values[key] as string).trim().length > 0;
+  if (surveyRole === 'weekly') {
+    if (values.QID10 === 2) triggers.push('QID10');
+    if (hasText('QID11_TEXT')) triggers.push('QID11_TEXT');
+  } else if (surveyRole === 'exit') {
+    if (hasText('QID13_TEXT')) triggers.push('QID13_TEXT');
+    if (hasText('QID14_TEXT')) triggers.push('QID14_TEXT');
+  } else if (surveyRole === 'week12') {
+    if (values.QID10 === 2 || values.QID10 === 3) triggers.push('QID10');
+    if (hasText('QID11_TEXT')) triggers.push('QID11_TEXT');
+  }
+  return triggers.length > 0 ? triggers : null;
+}
+
 export interface SurveySyncResult {
   surveyRole: QualtricsSurveyRole;
   surveyId: string;
@@ -164,6 +194,26 @@ async function syncSurvey(
       answers: values,
     });
     result.upserted++;
+
+    // Adverse-experience triage (1-business-day review promise): finished,
+    // non-preview responses with a distress report land in the work queue.
+    // enqueueWorkItem is idempotent on (item_type, source_table, source_id),
+    // so hourly re-syncs never duplicate; the title/detail carry pointers
+    // only — the text itself stays in qualtrics_responses.
+    if (finished && values.distributionChannel !== 'preview') {
+      const triggers = detectAdverseReport(surveyRole, values);
+      if (triggers) {
+        await enqueueWorkItem({
+          itemType: 'adverse_event',
+          severity: 'warning',
+          title: `Survey adverse-experience report (${surveyRole})`,
+          detail: { surveyRole, responseId: response.responseId, triggers },
+          sourceTable: 'qualtrics_responses',
+          sourceId: response.responseId,
+          clientId: userId,
+        });
+      }
+    }
   }
   return result;
 }
