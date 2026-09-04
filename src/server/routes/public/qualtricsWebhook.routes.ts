@@ -2,21 +2,28 @@
 // a Qualtrics Workflow that POSTs {surveyId, responseId} here the moment a
 // response is submitted, so linkage + adverse-experience triage run in
 // seconds instead of waiting for the scheduled bulk sync (which remains the
-// catch-all backstop). Auth: shared secret in the X-Webhook-Token header,
-// compared constant-time; unset QUALTRICS_WEBHOOK_SECRET disables the route
-// (404 like an unknown path). We re-fetch the response from the Qualtrics
-// API rather than trusting the webhook body — the payload is a pointer, so a
-// forged request can at worst make us re-sync a real response.
+// catch-all backstop). Auth: an API key sent by the Qualtrics WebService
+// credential (X-API-TOKEN; X-Webhook-Token also accepted for manual senders),
+// verified against a bcrypt hash like account passwords — the server env
+// never holds the usable key (QUALTRICS_WEBHOOK_SECRET_HASH; generate with
+//   node -e "require('bcrypt').hash(process.argv[1],10).then(console.log)" <key>
+// and keep the key itself only in the Qualtrics extension credential). Unset
+// hash disables the route (404 like an unknown path). We re-fetch the
+// response from the Qualtrics API rather than trusting the webhook body —
+// the payload is a pointer, so a forged request can at worst make us re-sync
+// a real response.
 import { Router } from 'express';
-import { timingSafeEqual } from 'node:crypto';
+import bcrypt from 'bcrypt';
 import rateLimit from 'express-rate-limit';
 import { handleResponseWebhook } from '../../services/qualtricsSync.service.js';
 
-function secretMatches(provided: unknown, expected: string): boolean {
-  if (typeof provided !== 'string') return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+async function secretMatches(
+  req: { get(name: string): string | undefined },
+  hash: string
+): Promise<boolean> {
+  const provided = req.get('X-API-TOKEN') ?? req.get('X-Webhook-Token');
+  if (typeof provided !== 'string' || provided.length === 0 || provided.length > 512) return false;
+  return bcrypt.compare(provided, hash);
 }
 
 export default function qualtricsWebhookRoutes(): Router {
@@ -30,9 +37,9 @@ export default function qualtricsWebhookRoutes(): Router {
   });
 
   router.post('/api/qualtrics/webhook', limiter, async (req, res, next) => {
-    const secret = process.env.QUALTRICS_WEBHOOK_SECRET;
-    if (!secret) return next(); // feature off: behave like an unknown route
-    if (!secretMatches(req.get('X-Webhook-Token'), secret)) {
+    const secretHash = process.env.QUALTRICS_WEBHOOK_SECRET_HASH;
+    if (!secretHash) return next(); // feature off: behave like an unknown route
+    if (!(await secretMatches(req, secretHash))) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
