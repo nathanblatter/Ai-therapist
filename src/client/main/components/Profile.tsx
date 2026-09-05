@@ -362,6 +362,22 @@ export default function Profile() {
               )}
             </div>
 
+            {/* App tutorial: narrated video tour + written guide */}
+            <div className="pt-4 border-t">
+              <p className="text-sm text-gray-600">
+                New to the app or need a refresher?{' '}
+                <a
+                  href="/tutorial"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-royal underline hover:text-navy"
+                >
+                  Watch the tour or read the guide
+                </a>
+                {' '}— every screen, explained in a few minutes.
+              </p>
+            </div>
+
             {/* Data export (participant right: full copy of their own data) */}
             <div className="pt-4 border-t">
               <p className="text-sm text-gray-600">

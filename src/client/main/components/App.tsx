@@ -86,6 +86,12 @@ export default function App() {
   // (and the session_end log, and the post-session snapshot). Handlers must
   // go through this ref so they always get the current-render closure.
   const stopSessionRef = useRef<() => Promise<void>>(async () => {});
+  // A session the server has created for a start attempt that hasn't finished
+  // connecting yet. If the start path then fails client-side (mic permission,
+  // SDP exchange), the catch in startSession uses this to release the server
+  // session — otherwise it lingers as "active" and blocks every retry until
+  // the duration limit expires.
+  const pendingStartSessionRef = useRef<{ id: string; kind: 'realtime' | 'chat' } | null>(null);
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
     language: 'en'
@@ -416,6 +422,16 @@ export default function App() {
       setSessionType(null);
       setSessionEndTime(null);
       setTimeRemaining(null);
+      // Release the server-side session this failed attempt created, so the
+      // participant can retry immediately instead of hitting "active session
+      // already exists" until the duration limit expires.
+      const orphan = pendingStartSessionRef.current;
+      if (orphan) {
+        pendingStartSessionRef.current = null;
+        const endUrl = orphan.kind === 'chat' ? '/api/chat/end' : `/api/sessions/${orphan.id}/end`;
+        void fetch(endUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+          .catch((endErr) => console.error('Failed to release orphaned session:', endErr));
+      }
     }
   }
 
@@ -471,6 +487,7 @@ export default function App() {
       setSessionId(newSessionId);
       setSessionType('chat');
       setIsSessionActive(true);
+      pendingStartSessionRef.current = { id: newSessionId, kind: 'chat' };
 
       // Connect to Socket.io for remote session management
       const socket = createParticipantSocket(newSessionId, 'chat');
@@ -497,11 +514,17 @@ export default function App() {
       }]);
 
       console.log(`Chat-only session started: ${newSessionId}`);
+      pendingStartSessionRef.current = null; // start succeeded — nothing to release
 
     } catch (error) {
       console.error('Failed to start chat session:', error);
       toast.error('Failed to start chat session. Please try again.');
       reportClientEvent('chat_send_failed', { where: 'start', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) });
+      if (pendingStartSessionRef.current?.kind === 'chat') {
+        pendingStartSessionRef.current = null;
+        void fetch('/api/chat/end', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+          .catch((endErr) => console.error('Failed to release orphaned chat session:', endErr));
+      }
     }
   }
 
@@ -565,6 +588,7 @@ export default function App() {
     const newSessionId = data.session.id;
     setSessionId(newSessionId);
     setSessionType('realtime');
+    pendingStartSessionRef.current = { id: newSessionId, kind: 'realtime' };
 
     // Set up session timer if duration limit exists
     if (data.session_limits && data.session_limits.max_duration_minutes) {
@@ -896,6 +920,7 @@ export default function App() {
 
     dc.addEventListener("open", () => {
       console.log('[DataChannel] Channel opened');
+      pendingStartSessionRef.current = null; // start succeeded — nothing to release
       setIsConnecting(false);
       setIsSessionActive(true);
       setEvents([]);

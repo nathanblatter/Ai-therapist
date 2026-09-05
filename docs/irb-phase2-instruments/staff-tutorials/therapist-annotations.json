@@ -1,0 +1,28 @@
+{
+  "2": [
+    {"phrase": "every client assigned", "rect": [252, 345, 1645, 415], "shape": "box"},
+    {"phrase": "one-time invite links", "rect": [252, 788, 750, 52], "shape": "box"}
+  ],
+  "3": [
+    {"phrase": "ranks your roster", "rect": [230, 305, 1680, 100], "shape": "box"},
+    {"phrase": "surface as chips", "rect": [270, 495, 520, 65], "shape": "box"}
+  ],
+  "4": [
+    {"phrase": "Screener trends", "rect": [520, 95, 880, 120], "shape": "box"},
+    {"phrase": "AI-generated summary", "rect": [520, 235, 880, 140], "shape": "box"},
+    {"phrase": "session timeline", "rect": [520, 425, 880, 410], "shape": "box"}
+  ],
+  "5": [
+    {"phrase": "everything needing a human", "rect": [252, 498, 1660, 112], "shape": "box"},
+    {"phrase": "Ack claims an item", "rect": [1740, 505, 155, 35], "shape": "arrow"},
+    {"phrase": "notification preferences", "rect": [275, 650, 410, 194], "shape": "box"}
+  ],
+  "6": [
+    {"phrase": "structured hand-offs", "rect": [252, 398, 1645, 85], "shape": "box"},
+    {"phrase": "Acknowledge, work it", "rect": [252, 344, 322, 36], "shape": "box"}
+  ],
+  "7": [
+    {"phrase": "secure, asynchronous", "rect": [252, 268, 1200, 58], "shape": "box"},
+    {"phrase": "safety-scanned", "rect": [232, 412, 555, 26], "shape": "box"}
+  ]
+}

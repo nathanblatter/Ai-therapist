@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Menu, Moon, Shield, Sun } from 'react-feather';
+import { HelpCircle, Menu, Moon, Shield, Sun } from 'react-feather';
 import { getStoredTheme, setTheme, ADMIN_THEME_STORAGE_KEY } from '../../shared/theme';
 import NotificationBell from './NotificationBell';
 import useAuth from '../hooks/useAuth';
@@ -87,6 +87,19 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
               <span className="hidden md:inline">MFA</span>
             </button>
           )}
+          {/* Role-appropriate tutorial (narrated video + written guide).
+              Therapists and caseworkers get their own tour; every other admin
+              role (researcher, demo, sandbox variants) gets the researcher one. */}
+          <a
+            href={`/tutorial/staff/${userRole === 'therapist' ? 'therapist' : userRole === 'caseworker' ? 'caseworker' : 'researcher'}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 text-white hover:bg-white/10 rounded-full"
+            title="Portal tutorial"
+            aria-label="Portal tutorial"
+          >
+            <HelpCircle size={20} />
+          </a>
           <button
             onClick={toggleDarkMode}
             className="p-2 text-white hover:bg-white/10 rounded-full"

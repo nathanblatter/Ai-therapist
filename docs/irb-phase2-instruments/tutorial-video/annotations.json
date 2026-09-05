@@ -1,0 +1,54 @@
+{
+  "2": [
+    {"phrase": "Start Session button", "rect": [869, 789, 128, 38], "shape": "arrow"},
+    {"phrase": "gear icon", "rect": [1012, 791, 36, 36], "shape": "box"},
+    {"phrase": "Along the top", "rect": [697, 163, 525, 42], "shape": "box"},
+    {"phrase": "Report a Problem", "rect": [1728, 787, 175, 38], "shape": "box"}
+  ],
+  "3": [
+    {"phrase": "simple progress card", "rect": [112, 115, 580, 190], "shape": "box"}
+  ],
+  "4": [
+    {"phrase": "transcribed", "rect": [745, 190, 428, 430], "shape": "box"},
+    {"phrase": "Tick the box", "rect": [748, 630, 415, 45], "shape": "box"},
+    {"phrase": "press I agree", "rect": [973, 681, 197, 34], "shape": "arrow"}
+  ],
+  "5": [
+    {"phrase": "how you're feeling", "rect": [750, 340, 420, 70], "shape": "box"},
+    {"phrase": "what's on your mind", "rect": [750, 428, 420, 145], "shape": "box"},
+    {"phrase": "you can skip", "rect": [762, 605, 45, 32], "shape": "arrow"}
+  ],
+  "6": [
+    {"phrase": "press the mic button", "rect": [746, 791, 108, 34], "shape": "arrow"},
+    {"phrase": "use the message bar", "rect": [866, 791, 415, 35], "shape": "box"},
+    {"phrase": "timer counting down", "rect": [830, 140, 260, 28], "shape": "box"},
+    {"phrase": "recording badge", "rect": [1824, 6, 92, 25], "shape": "box"},
+    {"phrase": "Disconnect button", "rect": [571, 791, 168, 34], "shape": "arrow"}
+  ],
+  "7": [
+    {"phrase": "three quick ratings", "rect": [722, 310, 475, 270], "shape": "box"},
+    {"phrase": "optional comment", "rect": [722, 590, 475, 95], "shape": "box"},
+    {"phrase": "also skip", "rect": [995, 708, 38, 28], "shape": "arrow"}
+  ],
+  "8": [
+    {"phrase": "ten voices", "rect": [578, 170, 500, 320], "shape": "box"},
+    {"phrase": "small speaker icon", "rect": [788, 184, 22, 20], "shape": "arrow"},
+    {"phrase": "five color themes", "rect": [578, 545, 765, 90], "shape": "box"}
+  ],
+  "9": [
+    {"phrase": "Text size", "rect": [578, 388, 765, 208], "shape": "box"},
+    {"phrase": "session memory", "rect": [578, 623, 765, 95], "shape": "box"}
+  ],
+  "10": [
+    {"phrase": "your account", "rect": [462, 185, 995, 240], "shape": "box"},
+    {"phrase": "session statistics", "rect": [462, 628, 995, 130], "shape": "box"},
+    {"phrase": "pause or leave the study", "rect": [482, 562, 952, 28], "shape": "box"}
+  ],
+  "11": [
+    {"phrase": "private, unhurried", "rect": [672, 438, 578, 142], "shape": "box"},
+    {"phrase": "not monitored in real time", "rect": [672, 320, 578, 105], "shape": "box"}
+  ],
+  "12": [
+    {"phrase": "microphone message", "rect": [1560, 10, 358, 125], "shape": "box"}
+  ]
+}

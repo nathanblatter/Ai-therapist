@@ -27,3 +27,11 @@ pnpm-debug.log*
 conversation.log
 
 __pycache__/
+
+# Tutorial-video build intermediates (TTS .mp3 cache stays tracked)
+docs/irb-phase2-instruments/tutorial-video/work/*
+!docs/irb-phase2-instruments/tutorial-video/work/*.mp3
+docs/irb-phase2-instruments/staff-tutorials/work-*/*
+!docs/irb-phase2-instruments/staff-tutorials/work-*/*.mp3
+docs/irb-phase2-instruments/*-selfcontained.html
+docs/irb-phase2-instruments/staff-tutorials/*-selfcontained.html

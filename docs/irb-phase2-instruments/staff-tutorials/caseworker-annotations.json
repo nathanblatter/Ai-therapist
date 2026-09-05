@@ -1,0 +1,22 @@
+{
+  "2": [
+    {"phrase": "caseload size", "rect": [232, 305, 1675, 100], "shape": "box"},
+    {"phrase": "The chips", "rect": [270, 495, 330, 68], "shape": "box"}
+  ],
+  "3": [
+    {"phrase": "session timeline", "rect": [520, 250, 882, 415], "shape": "box"},
+    {"phrase": "your care notes", "rect": [520, 712, 882, 128], "shape": "box"},
+    {"phrase": "amber notice", "rect": [520, 97, 880, 103], "shape": "box"}
+  ],
+  "4": [
+    {"phrase": "task list", "rect": [252, 502, 1655, 48], "shape": "box"},
+    {"phrase": "Ack claims an item", "rect": [1740, 503, 155, 36], "shape": "arrow"},
+    {"phrase": "urgent-safety email setting", "rect": [268, 700, 372, 26], "shape": "box"}
+  ],
+  "5": [
+    {"phrase": "pick the client", "rect": [748, 306, 424, 45], "shape": "box"},
+    {"phrase": "set the urgency", "rect": [748, 385, 424, 45], "shape": "box"},
+    {"phrase": "describe what changed", "rect": [748, 462, 424, 98], "shape": "box"},
+    {"phrase": "raise it", "rect": [1018, 578, 155, 44], "shape": "arrow"}
+  ]
+}

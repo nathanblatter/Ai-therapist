@@ -1,0 +1,81 @@
+{
+  "2": [
+    {"phrase": "searchable and filterable", "rect": [263, 190, 1620, 42], "shape": "box"},
+    {"phrase": "full transcript drill-down", "rect": [1698, 350, 54, 26], "shape": "arrow"},
+    {"phrase": "Demo and test sessions", "rect": [252, 330, 80, 470], "shape": "box"}
+  ],
+  "3": [
+    {"phrase": "active users, message counts", "rect": [252, 192, 1645, 100], "shape": "box"},
+    {"phrase": "crisis-only filter", "rect": [1694, 139, 113, 40], "shape": "box"}
+  ],
+  "4": [
+    {"phrase": "usage, performance, cost", "rect": [258, 186, 295, 28], "shape": "box"},
+    {"phrase": "any date range", "rect": [265, 251, 737, 44], "shape": "box"},
+    {"phrase": "session activity, voice share", "rect": [252, 340, 1645, 105], "shape": "box"}
+  ],
+  "5": [
+    {"phrase": "crisis event, intervention, and risk assessment", "rect": [258, 252, 1300, 90], "shape": "box"},
+    {"phrase": "what triggered each flag", "rect": [280, 463, 1590, 130], "shape": "box"}
+  ],
+  "6": [
+    {"phrase": "auto-draft reports", "rect": [578, 205, 995, 75], "shape": "box"},
+    {"phrase": "review deadlines", "rect": [578, 375, 995, 42], "shape": "box"},
+    {"phrase": "nav badge turns red", "rect": [14, 383, 200, 34], "shape": "arrow"}
+  ],
+  "7": [
+    {"phrase": "create accounts", "rect": [1780, 139, 118, 40], "shape": "arrow"},
+    {"phrase": "change roles", "rect": [592, 310, 95, 480], "shape": "box"}
+  ],
+  "8": [
+    {"phrase": "enrollment against target", "rect": [252, 205, 237, 92], "shape": "box"},
+    {"phrase": "imbalance alarm", "rect": [505, 205, 237, 92], "shape": "box"},
+    {"phrase": "on-demand scan", "rect": [1130, 141, 116, 35], "shape": "arrow"}
+  ],
+  "9": [
+    {"phrase": "five study surveys", "rect": [1080, 165, 410, 155], "shape": "box"},
+    {"phrase": "linkage health", "rect": [230, 358, 1670, 175], "shape": "box"},
+    {"phrase": "mistyped study ID", "rect": [1013, 405, 190, 125], "shape": "box"}
+  ],
+  "10": [
+    {"phrase": "nightly simulated sessions", "rect": [1081, 252, 795, 125], "shape": "box"},
+    {"phrase": "pass-rate trends", "rect": [275, 395, 1590, 140], "shape": "box"}
+  ],
+  "11": [
+    {"phrase": "de-identified research dataset", "rect": [795, 185, 560, 375], "shape": "box"},
+    {"phrase": "separate opt-in artifact", "rect": [816, 403, 516, 80], "shape": "box"}
+  ],
+  "12": [
+    {"phrase": "one-time links", "rect": [635, 222, 880, 160], "shape": "box"},
+    {"phrase": "never reaches exports", "rect": [636, 166, 880, 38], "shape": "box"}
+  ],
+  "13": [
+    {"phrase": "one prompt for voice sessions", "rect": [255, 303, 622, 32], "shape": "box"},
+    {"phrase": "crisis-text variable", "rect": [252, 208, 995, 85], "shape": "box"},
+    {"phrase": "Every save is versioned", "rect": [1100, 140, 146, 37], "shape": "arrow"}
+  ],
+  "14": [
+    {"phrase": "psychoeducation, techniques, and worksheets", "rect": [578, 275, 995, 122], "shape": "box"},
+    {"phrase": "approval gate", "rect": [829, 277, 242, 65], "shape": "box"},
+    {"phrase": "Test retrieval", "rect": [578, 218, 420, 30], "shape": "box"}
+  ],
+  "15": [
+    {"phrase": "spot-check", "rect": [578, 222, 995, 138], "shape": "box"},
+    {"phrase": "edit it right here", "rect": [593, 285, 955, 40], "shape": "arrow"}
+  ],
+  "16": [
+    {"phrase": "hash of the exact text", "rect": [635, 325, 880, 68], "shape": "box"},
+    {"phrase": "publish a new version", "rect": [1341, 131, 173, 37], "shape": "arrow"}
+  ],
+  "17": [
+    {"phrase": "crisis contact block", "rect": [252, 193, 765, 368], "shape": "box"},
+    {"phrase": "on-call crisis paging", "rect": [252, 580, 765, 255], "shape": "box"}
+  ],
+  "18": [
+    {"phrase": "deleted after the retention period", "rect": [252, 220, 765, 115], "shape": "box"},
+    {"phrase": "errors card", "rect": [833, 220, 185, 115], "shape": "box"},
+    {"phrase": "retention period itself", "rect": [275, 628, 352, 65], "shape": "box"}
+  ],
+  "19": [
+    {"phrase": "attention-ranked view", "rect": [230, 190, 1682, 102], "shape": "box"}
+  ]
+}

@@ -488,6 +488,18 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
             After your first conversation, you&apos;ll see your progress here — how you&apos;ve been
             feeling over time, anything you work on, and tools you can come back to.
           </p>
+          <p className="text-sm text-gray-500 mt-3">
+            New here?{' '}
+            <a
+              href="/tutorial"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-royal underline hover:text-navy inline-flex items-center gap-1"
+            >
+              Watch the short tour of the app
+              <ExternalLink size={13} aria-hidden="true" />
+            </a>
+          </p>
         </div>
       )}
 

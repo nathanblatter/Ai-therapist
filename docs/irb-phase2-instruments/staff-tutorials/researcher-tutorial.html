@@ -43,13 +43,35 @@
 <p><img src="shots/r11-sandbox-invites.png" width="760" alt="Sandbox invite minting with role and batch label"></p>
 <p>Mint one-time links that create an isolated, pre-seeded practice environment (6-9 synthetic clients) for a new therapist or caseworker. Sandbox data never reaches research exports, crisis paging, or email — it is the safe way for new staff to learn the portal before touching real participants. Their tutorial (see the therapist and caseworker guides) assumes they start here.</p>
 
-<h2>11. Also in your nav</h2>
-<ul>
-<li><strong>System Prompts / Knowledge Base</strong> — the agent's instructions and psychoeducation corpus (edits are versioned; prompt changes mid-study are protocol events).</li>
-<li><strong>Redaction Review</strong> — spot-check the PHI redaction pipeline's output.</li>
-<li><strong>Consent Versions</strong> — every consent document version with content hashes.</li>
-<li><strong>System Config / Data Retention</strong> — feature flags, crisis contact config, retention windows, and the deletion audit log. Changes here are study-level decisions; coordinate before touching them.</li>
-<li><strong>Triage / Caseload</strong> — read-only views into the care-team side.</li>
-</ul>
+<h2>11. System Prompts</h2>
+<p><img src="shots/r12-system-prompts.png" width="760" alt="System prompt editor with voice, chat, and modality tabs"></p>
+<p>The instructions the AI runs on, in three tabs: <strong>Realtime (Voice) Sessions</strong>, <strong>Chat-Only Sessions</strong>, and <strong>Therapeutic Modality</strong> (the CBT-informed layer that condition arms toggle). The <code>{{crisis_text}}</code> variable inserts the currently configured crisis contact line wherever it appears, so crisis numbers are edited once in System Config, never hardcoded here. <strong>Show Preview</strong> renders the final assembled prompt; <strong>Save Changes</strong> applies to <em>new</em> sessions only.</p>
+<p><strong>Study rule: during Phase 2 the prompt is a frozen instrument.</strong> The verbatim text is on file with the IRB, so a mid-study edit is a protocol event — it changes the intervention under test. Treat this page as read-and-verify: check the prompt matches the IRB-filed version, and coordinate with the PI (and an IRB amendment if substantive) before any edit. Every save is versioned and attributable.</p>
+
+<h2>12. Knowledge Base</h2>
+<p><img src="shots/r13-knowledge-base.png" width="760" alt="Knowledge base content list with approval status and kinds"></p>
+<p>The corpus the AI can retrieve mid-conversation: <strong>psychoeducation</strong> articles, <strong>techniques</strong>, and <strong>worksheets</strong>, each item tagged by topic and source. Only <em>approved</em> content is ever used in live sessions — new items sit in <em>Pending approval</em> until a researcher reviews them, so the approval gate is your quality control over what the AI can cite. Each card shows its source and license, when it was last retrieved, and Edit/Unapprove/Delete actions.</p>
+<p>Two support tabs: <strong>Test retrieval</strong> lets you type a probe query ("can't sleep, mind racing") and see exactly which items the AI would pull, ranked — use it after adding content to confirm it surfaces. <strong>Retrieval log</strong> shows what was actually retrieved in real sessions, which tells you what participants are asking about and which items pull dead weight. Like the prompt, the corpus is part of the intervention: keep it stable during the study, and log any additions.</p>
+
+<h2>13. Redaction Review</h2>
+<p><img src="shots/r14-redaction-review.png" width="760" alt="Redaction verification list of redacted messages"></p>
+<p>Every message is automatically de-identified (names, places, identifying details) and the original text is deleted after the retention window; the redacted version is what persists and what research exports may include. This page is the human check on that pipeline: it lists redacted messages, oldest-verified-last, and you spot-check that (a) no identifying detail slipped through and (b) the redaction didn't gut the clinical meaning. If something slipped through, edit the text right here — your correction replaces the stored redacted content. A periodic pass (for example weekly, and before any transcript export) is a protocol expectation, not busywork: this is the layer that makes the rest of the data pipeline safe.</p>
+
+<h2>14. Consent Versions</h2>
+<p><img src="shots/r15-consent-versions.png" width="760" alt="Consent version list with active version and acceptance count"></p>
+<p>The versioned consent copy participants accept in-app, in two audiences: <strong>Research (IRB study)</strong> — shown while the deployment runs in research mode — and <strong>Clinical (care team)</strong>. The active version is the newest one whose effective date has passed; each participant's acceptance is stored with a hash of the exact text they saw, so you can always prove which words a given participant agreed to. <strong>Preview</strong> expands the full text; the acceptance count shows uptake.</p>
+<p><strong>Publish new version</strong> is how consent copy changes ship (for example after an IRB-approved amendment): publish with an effective date, and participants see the new text from then on — old acceptances keep pointing at the text they actually accepted. Never edit consent copy anywhere else; this page is the audit trail the IRB will ask for. In-app copy must always match the IRB-approved consent document version.</p>
+
+<h2>15. System Config and Data Retention</h2>
+<p><img src="shots/r16-system-config.png" width="760" alt="System configuration with crisis contact info and on-call paging"></p>
+<p>System Config holds the study-level operational settings. The two that matter most: <strong>Crisis Contact Information</strong> — the hotline name, number, and text line that <code>{{crisis_text}}</code> injects into prompts and that participants see in crisis moments — and <strong>On-Call Crisis Paging</strong>, which SMS-pages the on-call phone whenever a session is flagged high severity (the dashboard toast only reaches someone with the dashboard open; the pager is the net that works at 2 AM). Verify the on-call number at every handoff. Changes here are study-level decisions — coordinate before touching them.</p>
+<p><img src="shots/r17-data-retention.png" width="760" alt="Data retention dashboard with wipe scheduler and retention settings"></p>
+<p>Data Retention runs the IRB data-minimization commitment: original (pre-redaction) message text is automatically deleted after the retention period — but only once redaction of that message is complete, so nothing is lost before its redacted copy exists. The status cards are your morning glance: <em>Ready to wipe</em> and <em>Awaiting redaction</em> are normal flow; <strong><em>With errors</em> counts messages whose redaction failed and therefore cannot be wiped — a nonzero number that persists needs attention, because those originals are outliving the window.</strong> The retention period and daily wipe time are IRB-filed parameters; do not change them without a protocol conversation. Below the settings, the deletion audit log records every wipe.</p>
+
+<h2>16. Triage and Caseload: the care-team side</h2>
+<p><img src="shots/r18-triage-readonly.png" width="760" alt="Triage view with client, attention, crisis-flag, and escalation counts"></p>
+<p>Two nav items connect you to the care-team side. <strong>Triage</strong> is the same attention-ranked view therapists work from — clients, who needs attention, open crisis flags, open escalations. For you it is an oversight surface: see what the care team sees, audit that flags and escalations are being worked, and pull care context when reviewing an adverse event. The counts are scoped to care assignments, so outside a care deployment (as in this staging shot) it sits at zero.</p>
+<p><img src="shots/r18b-caseload.png" width="760" alt="Caseload assignments page for assigning participants to therapists"></p>
+<p><strong>Caseload</strong> is where the researcher's people-management duty meets the care side: it assigns participants to therapists, and therapists only ever see their assigned clients. Create the therapist account in Users first, then make the assignment here. The care workflows themselves (working the queue, escalations, progress notes, participant messaging) belong to the therapist and caseworker roles — the companion guides cover them.</p>
 
 <p><em>Questions or something looks wrong? The Report-a-problem button files directly to the engineering queue. Version 2026-09-04.</em></p>
