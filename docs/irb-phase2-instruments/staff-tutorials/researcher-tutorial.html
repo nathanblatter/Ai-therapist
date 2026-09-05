@@ -1,0 +1,55 @@
+<h1>Research Portal — Researcher Guide</h1>
+<p><em>How to use the AI Support Agent admin portal as a <strong>researcher</strong> — the study-operations role with the widest access. Screenshots come from the staging environment with synthetic data. Sign in at the study admin URL with your researcher account; enable MFA from the shield icon in the header on your first login.</em></p>
+
+<h2>1. Your home: Session History</h2>
+<p><img src="shots/r01-sessions.png" width="760" alt="Session history list with search, filters, and per-session actions"></p>
+<p>Every session in the study, searchable by session ID, name, or username, with date and message-count filters. <strong>View</strong> opens the full transcript and insights; researchers hold the full-content data tier, so you see verbatim (redacted) conversation text. The demo/test rows you see here are excluded from all research exports automatically.</p>
+
+<h2>2. Live Monitoring</h2>
+<p><img src="shots/r02-live-monitoring.png" width="760" alt="Live session monitoring with active session counts"></p>
+<p>Real-time view of active sessions with counts for active users, messages, and crisis sessions. During study hours this is the "is anything happening right now" screen; the Crisis Only toggle filters to flagged sessions. From a live session you can observe and, when warranted, use the sideband controls to inject a message or end a session.</p>
+
+<h2>3. Analytics</h2>
+<p><img src="shots/r03-analytics.png" width="760" alt="Analytics with usage, performance, cost, and tools tabs"></p>
+<p>Four tabs — Usage, Performance, Cost, Tools — over any date range. Session activity, voice-vs-text share, average duration, model spend, and which therapeutic tools the agent actually invokes. This is descriptive operations data; the research dataset proper comes from Export (section 9).</p>
+
+<h2>4. Safety: Crisis Management and Adverse Events</h2>
+<p><img src="shots/r04-crisis-management.png" width="760" alt="Crisis management dashboard with events, reviews, interventions, risk assessments"></p>
+<p>Crisis Management aggregates every crisis event, intervention, and risk assessment, with tabs for the full histories. Flags show what triggered them (auto vs manual) and the risk factors involved.</p>
+<p><img src="shots/r05-adverse-events.png" width="760" alt="Adverse events queue with drafts and due dates"></p>
+<p>Adverse Events is your IRB duty station: high-severity crisis flags and distress survey responses auto-draft AE reports here with review deadlines (the nav badge turns red when something is overdue). Review each draft, complete it, and sign off — this queue is the source for IRB reporting.</p>
+
+<h2>5. Users</h2>
+<p><img src="shots/r06-users.png" width="760" alt="User management directory with roles and actions"></p>
+<p>The account directory. Researchers are the only role that can create accounts and change roles — this is where you add research assistants, therapists, and caseworkers. MFA status, memory setting, and risk-context sharing are all visible per user.</p>
+
+<h2>6. Study Ops</h2>
+<p><img src="shots/r07-study-ops.png" width="760" alt="Study ops with enrollment, arm balance, deviations"></p>
+<p>The protocol's control panel: enrollment against target, condition-arm balance with an imbalance alarm, sessions-per-participant against the expected count, and protocol deviations. <strong>Run scan</strong> checks for new deviations on demand; the same scan runs on a schedule. Demo data is excluded.</p>
+
+<h2>7. Qualtrics: Sync and Survey Data</h2>
+<p><img src="shots/r08-qualtrics-sync.png" width="760" alt="Qualtrics sync status with linkage health and last-run results"></p>
+<p>All five study surveys (baseline, weekly, exit, week-12, withdrawal) sync on a schedule; <strong>Sync now</strong> forces a run. Watch <em>Linkage health</em>: "unlinked finished" responses are ones that could not be matched to a participant (usually a mistyped study ID) and need human attention. Survey Data (next nav item) shows the per-participant completion matrix and scored instruments.</p>
+
+<h2>8. Evals</h2>
+<p><img src="shots/r09-evals.png" width="760" alt="Evals with simulation runs, pass rates, and nightly schedule"></p>
+<p>The safety-evaluation harness: nightly simulated voice sessions run through the real pipeline, judged against gating assertions, with pass-rate trends and per-run cost. Also home to eval calibration (LLM judge vs human ratings) and drift alerts. If a nightly run fails, the drill-down shows exactly which assertion broke.</p>
+
+<h2>9. Export</h2>
+<p><img src="shots/r10-export.png" width="760" alt="Export panel with de-identified dataset download"></p>
+<p>The <strong>de-identified research dataset</strong>: pseudonymized CSVs plus a generated codebook, deterministic for a given as-of date, demo data excluded, no message content or pseudonym mapping ever included. Redacted transcripts are a separate opt-in artifact handled as identifiable data. The lower form does operational JSON/CSV exports.</p>
+
+<h2>10. Onboarding staff: Sandbox Invites</h2>
+<p><img src="shots/r11-sandbox-invites.png" width="760" alt="Sandbox invite minting with role and batch label"></p>
+<p>Mint one-time links that create an isolated, pre-seeded practice environment (6-9 synthetic clients) for a new therapist or caseworker. Sandbox data never reaches research exports, crisis paging, or email — it is the safe way for new staff to learn the portal before touching real participants. Their tutorial (see the therapist and caseworker guides) assumes they start here.</p>
+
+<h2>11. Also in your nav</h2>
+<ul>
+<li><strong>System Prompts / Knowledge Base</strong> — the agent's instructions and psychoeducation corpus (edits are versioned; prompt changes mid-study are protocol events).</li>
+<li><strong>Redaction Review</strong> — spot-check the PHI redaction pipeline's output.</li>
+<li><strong>Consent Versions</strong> — every consent document version with content hashes.</li>
+<li><strong>System Config / Data Retention</strong> — feature flags, crisis contact config, retention windows, and the deletion audit log. Changes here are study-level decisions; coordinate before touching them.</li>
+<li><strong>Triage / Caseload</strong> — read-only views into the care-team side.</li>
+</ul>
+
+<p><em>Questions or something looks wrong? The Report-a-problem button files directly to the engineering queue. Version 2026-09-04.</em></p>
