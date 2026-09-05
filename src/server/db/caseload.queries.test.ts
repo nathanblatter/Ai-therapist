@@ -144,3 +144,53 @@ describe('CaseloadRoleError', () => {
     expect(err.message).toBe('bad role');
   });
 });
+
+describe('assignClient research-org caseworker invariant', () => {
+  it('rejects a caseworker assignment when the member org is a research org', async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [{
+        therapist_role: 'caseworker',
+        client_role: 'participant',
+        member_org: 1,
+        client_org: 1,
+        member_org_kind: 'research',
+      }],
+    });
+    await expect(assignClient(1, 2, null, 'caseworker')).rejects.toThrow(
+      /research organization/
+    );
+    // Fails before any INSERT.
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a caseworker assignment inside a practice org', async () => {
+    queryMock
+      .mockResolvedValueOnce({
+        rows: [{
+          therapist_role: 'caseworker',
+          client_role: 'participant',
+          member_org: 2,
+          client_org: 2,
+          member_org_kind: 'practice',
+        }],
+      })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await expect(assignClient(1, 2, null, 'caseworker')).resolves.toBeUndefined();
+    expect(queryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not block therapist assignments inside the research org', async () => {
+    queryMock
+      .mockResolvedValueOnce({
+        rows: [{
+          therapist_role: 'therapist',
+          client_role: 'participant',
+          member_org: 1,
+          client_org: 1,
+          member_org_kind: 'research',
+        }],
+      })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await expect(assignClient(1, 2, null)).resolves.toBeUndefined();
+  });
+});

@@ -25,7 +25,7 @@ function steeringGuidance(riskScore: number, severity: string): string {
   if (severity === 'high') {
     return base +
       ` Calmly assess their immediate safety, and naturally work the crisis resources from your instructions into the conversation. ` +
-      `Stay with them — a human monitor has been alerted.`;
+      `Stay with them — the research team's monitoring dashboard has been alerted.`;
   }
   return base + ` If anything suggests thoughts of self-harm, follow your crisis protocol.`;
 }
@@ -36,11 +36,14 @@ function steeringGuidance(riskScore: number, severity: string): string {
  * marked consumed. Shared by the realtime sideband path and the chat pipeline
  * so a session steers at most once per cooldown window across channels.
  */
-export function shouldSteer(sessionId: string, riskScore: number): boolean {
+export function shouldSteer(sessionId: string, riskScore: number, force = false): boolean {
   if (riskScore < STEER_MIN_SCORE) return false;
 
   const last = steeringLastSent.get(sessionId) ?? 0;
-  if (Date.now() - last < STEER_COOLDOWN_MS) return false;
+  // `force` (high severity) skips the cooldown check but still consumes the
+  // window: a high-severity safety protocol must never be suppressed by an
+  // earlier low-level steer (IRB audit 2026-09-04).
+  if (!force && Date.now() - last < STEER_COOLDOWN_MS) return false;
 
   steeringLastSent.set(sessionId, Date.now());
 
@@ -83,14 +86,14 @@ export function buildChatSteeringGuidance(riskScore: number, severity: string): 
  *  client tools). */
 export const CHAT_SAFETY_PROTOCOL_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
-  `A high-severity safety concern has been detected and a human monitor has been paged. ` +
+  `A high-severity safety concern has been detected and the research team's monitoring systems have been alerted. ` +
   `Shift fully into safety assessment, gently and without alarm. One question at a time, in this order, adapting to their answers: ` +
   `(1) ask directly whether they are having thoughts of ending their life right now; ` +
   `(2) if yes, ask whether they have thought about how; ` +
   `(3) whether they have access to that method; ` +
   `(4) whether they have a timeframe in mind. ` +
   `Between questions, validate and stay warm — do not interrogate. ` +
-  `Include the crisis resources from your instructions directly in your reply — the 988 Suicide & Crisis Lifeline (call or text 988) and the Crisis Text Line (text HOME to 741741) — ` +
+  `Include the crisis resources from your instructions directly in your reply — the 988 Suicide & Crisis Lifeline (call or text 988), the Crisis Text Line (text HOME to 741741), and the BYU CAPS crisis line (801-422-3035) — ` +
   `and, if they engage, offer to write out a simple safety plan together in the chat. ` +
   `Do not end the session yourself. Stay with them.`;
 
@@ -108,7 +111,7 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
     const { sidebandManager } = await import('./sidebandManager.service.js');
     if (!sidebandManager.getActiveConnections().includes(sessionId)) return;
 
-    if (!shouldSteer(sessionId, riskScore)) return;
+    if (!shouldSteer(sessionId, riskScore, severity === 'high')) return;
 
     await sidebandManager.injectMessage(sessionId, 'system', steeringGuidance(riskScore, severity), false);
     await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity });
@@ -246,7 +249,7 @@ export async function executeGraduatedResponse(sessionId: string, severity: stri
 // means → timeframe), leaning on the client-side tools that already exist.
 const SAFETY_PROTOCOL_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
-  `A high-severity safety concern has been detected and a human monitor has been paged. ` +
+  `A high-severity safety concern has been detected and the research team's monitoring systems have been alerted. ` +
   `Shift fully into safety assessment, gently and without alarm. One question at a time, in this order, adapting to their answers: ` +
   `(1) ask directly whether they are having thoughts of ending their life right now; ` +
   `(2) if yes, ask whether they have thought about how; ` +
@@ -322,8 +325,12 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
     // Page a human — the dashboard socket alert only works if someone is
     // looking at the dashboard. Fire-and-forget; suppression/logging policy
     // lives in pageOnCall.
+    // Deep-link straight to the session (AdminApp reads #session=<id> on
+    // load); APP_BASE_URL keeps the link pointed at the right environment.
+    const adminBase = (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com')
+      .trim().replace(/\/+$/, '');
     pageOnCall(
-      `URGENT: AI-Therapist HIGH crisis flag\nSession ${sessionId.substring(0, 16)}… — risk ${riskScore}/100\nhttps://ai-therapist.nathanblatter.com/admin`,
+      `URGENT: AI-Therapist HIGH crisis flag\nSession ${sessionId.substring(0, 16)}… — risk ${riskScore}/100\n${adminBase}/admin#session=${encodeURIComponent(sessionId)}`,
       { sessionId, riskScore },
     ).catch(err => console.error('Error sending crisis SMS:', err));
 

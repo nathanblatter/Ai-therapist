@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the technical and procedural safeguards implemented to ensure that personally identifiable information (PII) and protected health information (PHI) are removed from AI conversation logs before they are used for research purposes. The system achieves anonymity through a **multi-layered defense-in-depth approach** combining automated AI redaction with mandatory human verification.
+This document describes the technical and procedural safeguards implemented to ensure that personally identifiable information (PII) and protected health information (PHI) are removed from AI conversation logs before they are used for research purposes. The system achieves anonymity through a **multi-layered defense-in-depth approach** combining automated AI redaction with human verification of random samples of the redacted output.
 
 ## Anonymization Architecture
 
@@ -42,25 +42,25 @@ Each pass uses OpenAI's `gpt-5` model (the model id pinned in src/server/service
 **Redaction Format:**
 All identified PII is replaced with standardized placeholders (e.g., `[REDACTED: NAME]`, `[REDACTED: DATE]`, `[REDACTED: PHONE]`) that preserve the semantic structure of the conversation while removing identifying information.
 
-### Layer 2: Human Verification
+### Layer 2: Human Verification of Random Samples
 
-**All redacted messages are subject to mandatory human review** before inclusion in any research dataset. A trained Research Assistant (RA) monitors and verifies redacted content through a dedicated verification interface (`/redact` endpoint).
+Trained Research Assistants (RAs) verify **random samples of redacted output** through a dedicated verification interface (`/redact` endpoint). The interface draws random samples of 20 messages at a time from the redacted corpus; verification is ongoing quality assurance of the automated pipeline, not a per-message gate — de-identified exports use only redacted content regardless.
 
 **Verification Workflow:**
-1. The RA accesses batches of redacted messages through the secure verification interface
+1. The RA requests a random sample of redacted messages through the secure verification interface
 2. Each message displays:
    - The redacted content (never the original)
    - Message metadata (role, type, timestamp)
    - Unique message identifier
-3. The RA reviews each message for any PII that may have escaped automated redaction
+3. The RA reviews each sampled message for any PII that may have escaped automated redaction
 4. If PII is detected, the RA manually edits the redacted content to remove it
-5. All manual corrections are logged with timestamps
+5. All review actions (samples reviewed, corrections made) are logged with timestamps in the `redaction_review_log` audit table
 
 **Key Safeguards:**
-- RAs only see redacted content, never original messages containing PII
+- RAs only see redacted content in this interface, never original messages containing PII
 - The verification interface requires authenticated access with the "researcher" role
 - Manual edits update only the redacted field, preserving audit trails
-- Random sampling ensures comprehensive coverage across all conversation types
+- Random sampling spans all conversation types, providing ongoing statistical assurance of redaction quality (it does not guarantee every individual message is human-reviewed)
 
 ### Layer 3: Data Separation
 
@@ -72,7 +72,7 @@ The database architecture maintains strict separation between original and redac
 | `content_redacted` | Researchers | Anonymized research data |
 
 - Research exports **only include redacted content**
-- Original content is never accessible to researchers
+- Original content is not accessible to researchers for analysis, with two disclosed exceptions: researchers with live safety-monitoring duties can view a session's raw content in real time while it is active (reverting to redacted content when it ends), and authorized staff (therapist/researcher roles) can access session audio recordings for safety and transcription-fidelity review
 - Role-based access controls enforce this separation at the API level
 
 ### Layer 4: Automated Content Deletion
@@ -135,11 +135,12 @@ This layer ensures that **even if unauthorized access to the database occurred**
 │           │                                                              │
 │           ▼                                                              │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │                    HUMAN VERIFICATION                           │    │
-│  │  Research Assistant reviews via /redact interface               │    │
+│  │              HUMAN VERIFICATION (RANDOM SAMPLES)                │    │
+│  │  Research Assistant reviews 20-message random samples           │    │
+│  │  via /redact interface                                          │    │
 │  │  • Identifies any escaped PII                                   │    │
 │  │  • Manually corrects redaction if needed                        │    │
-│  │  • Documents all changes                                        │    │
+│  │  • Review actions logged (redaction_review_log)                 │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │           │                                                              │
 │           ▼                                                              │
@@ -170,7 +171,7 @@ The system does not rely on any single mechanism for anonymization:
 |-------|-----------|------------------------|
 | 1a | First AI redaction pass | Catches standard PII patterns |
 | 1b | Second AI redaction pass | Catches edge cases missed by first pass |
-| 2 | Human verification | Catches any AI failures |
+| 2 | Human verification of random samples | Surfaces systematic AI redaction failures |
 | 3 | Data separation | Prevents accidental exposure even if redaction fails |
 | 4 | Automated content deletion | Eliminates PII from storage entirely after retention period |
 
@@ -182,25 +183,25 @@ The automated redaction system is specifically designed to comply with the **HIP
 - **Comprehensive**: Covers all Safe Harbor categories
 - **Resistant to bypass**: Ignores any embedded instructions in the text being redacted
 
-### Human Oversight Guarantee
+### Human Oversight
 
-The key distinction between "improving privacy" and "maintaining privacy" is addressed through the **mandatory human verification layer**:
+The human verification layer provides ongoing, audited oversight of the automated pipeline:
 
-1. **No data is used for research without human review**
+1. **Random 20-message samples of redacted output are reviewed by trained RAs** on an ongoing basis, with every review action logged in `redaction_review_log`
 2. **RAs are trained** to identify PII that may not be obvious to automated systems
-3. **Any PII that escapes automated redaction will be caught and manually removed** before the data enters any research dataset
-4. **The verification interface provides efficient batch review** to ensure all messages can be reviewed in a timely manner
+3. **Escaped PII found in review is manually removed**, and recurring patterns feed back into redaction-prompt improvements
+4. **The verification interface provides efficient sample review**; it is quality assurance for the automated layers, not a claim that every message receives individual human review
 
 ## Conclusion
 
 Anonymity is achieved through a combination of:
 
 1. **Dual-pass automated redaction** using state-of-the-art AI models with HIPAA Safe Harbor compliance
-2. **Mandatory human verification** by trained Research Assistants with the ability to correct any escaped PII
-3. **Architectural data separation** ensuring researchers never access original content
+2. **Logged human verification of random samples** by trained Research Assistants with the ability to correct escaped PII
+3. **Architectural data separation** ensuring researchers analyze only redacted content (with disclosed exceptions for live safety monitoring and audio safety review)
 4. **Automated content deletion** permanently removing original PII from storage after the clinical retention period
 
-This defense-in-depth approach ensures that **no personally identifiable information will be present in research datasets**, even if any individual layer were to fail. The human verification layer serves as the ultimate safeguard during the retention period, and the automated deletion layer ensures that **PII is not retained in perpetuity** - original content is permanently destroyed after clinical needs are met, leaving only verified anonymized data.
+This defense-in-depth approach is designed so that **research datasets contain no personally identifiable information**, even if any individual layer were to fail. The sampled human verification layer provides audited, ongoing assurance that the automated layers are working, and the automated deletion layer ensures that **PII is not retained in perpetuity** - original content is permanently destroyed after clinical needs are met, leaving only verified anonymized data.
 
 ---
 

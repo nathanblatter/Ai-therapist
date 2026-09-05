@@ -899,7 +899,7 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'administer_scale',
-        description: 'Present a brief 2-question validated check-in form on the participant\'s screen: phq2 (mood) or gad2 (anxiety). These are screeners, not diagnoses. Ask permission first ("mind if I ask two quick standard questions?"). At most one scale per session unless the participant asks.',
+        description: 'Present a brief 2-question validated check-in form on the participant\'s screen: phq2 (mood) or gad2 (anxiety). These are screeners, not diagnoses. Ask permission first ("mind if I ask two quick standard questions?"). At most one scale per session unless the participant asks, and each scale at most once every 7 days per participant (a consent commitment the server enforces — if it was administered more recently, this call returns an error; just move on without mentioning it).',
         parameters: {
           type: 'object',
           properties: {
@@ -908,10 +908,33 @@ export class ToolRegistry {
           required: ['scale']
         }
       },
-      async (args: Record<string, unknown>) => {
-        const { SCALES } = await import('../utils/scales.js');
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        const { SCALES, SCALE_MIN_INTERVAL_DAYS, daysSinceScaleAdministered } = await import('../utils/scales.js');
         const scale = SCALES[args['scale'] as string];
         if (!scale) return { error: 'Unknown scale', available: Object.keys(SCALES) };
+        // Weekly cadence gate (IRB consent form: each screener "no more than
+        // once per week"). Only enforceable when the session is linked to a
+        // user — anonymous/demo sessions have no cross-session identity.
+        if (ctx?.sessionId) {
+          const { getSession, getUserLatestScaleScore } = await import('../db/index.js');
+          const session = await getSession(ctx.sessionId);
+          const userId = session?.user_id;
+          if (userId) {
+            const last = await getUserLatestScaleScore(userId, scale.id);
+            if (last) {
+              const days = daysSinceScaleAdministered(last.created_at);
+              if (days < SCALE_MIN_INTERVAL_DAYS) {
+                return {
+                  error: 'scale_recently_administered',
+                  scale: scale.id,
+                  days_since_last: days,
+                  next_eligible_in_days: SCALE_MIN_INTERVAL_DAYS - days,
+                  guidance: `The ${scale.name} was already administered ${days === 0 ? 'today' : `${days} day(s) ago`} and may be repeated at most once every ${SCALE_MIN_INTERVAL_DAYS} days. Do not mention this check or any error to the participant — continue the conversation naturally without the screener.`,
+                };
+              }
+            }
+          }
+        }
         return {
           success: true,
           scale: scale.id,

@@ -10,7 +10,7 @@
 
 INSERT INTO system_config (config_key, config_value, description) VALUES
   ('crisis_contact',
-   '{"hotline": "988 Suicide & Crisis Lifeline", "phone": "988", "text": "HELLO to 741741", "enabled": true}'::jsonb,
+   '{"hotline": "988 Suicide & Crisis Lifeline", "phone": "988", "text": "HOME to 741741", "enabled": true}'::jsonb,
    'Crisis contact information (redteam seed)'),
   ('features',
    '{"voice_enabled": true, "chat_enabled": true, "file_upload_enabled": false, "session_recording_enabled": false}'::jsonb,

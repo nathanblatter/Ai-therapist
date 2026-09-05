@@ -111,11 +111,13 @@ export async function runCrisisPipeline(
       if (channel === 'realtime') {
         // Sideband injection happens inside; realtime ignores the return value.
         await maybeSteerSession(turn.sessionId, risk.riskScore, severity);
-      } else if (shouldSteer(turn.sessionId, risk.riskScore)) {
+      } else if (shouldSteer(turn.sessionId, risk.riskScore, severity === 'high')) {
         // Chat: same shared cooldown, but the guidance is returned for the
         // caller to inject into this turn's model call. High severity swaps the
         // base copy for the full safety-assessment protocol and mirrors the
         // realtime `safety_protocol` intervention so the AE timeline matches.
+        // High severity forces past the cooldown — a crisis escalating within
+        // three minutes of a routine steer must still get the safety protocol.
         steeringGuidance = severity === 'high'
           ? CHAT_SAFETY_PROTOCOL_GUIDANCE
           : buildChatSteeringGuidance(risk.riskScore, severity);

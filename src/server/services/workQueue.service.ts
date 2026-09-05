@@ -20,12 +20,13 @@ import {
   getCareTeam,
   getIrbStudyOrgId,
   getOrgTherapistIds,
+  getResearcherIds,
   type WorkItemRow,
   type WorkItemType,
   type WorkItemSeverity,
 } from '../db/index.js';
 import type { CareTeamRole } from '../../shared/roles.js';
-import { therapistRoom, caseworkerRoom } from '../utils/adminBroadcast.js';
+import { therapistRoom, caseworkerRoom, ADMIN_BROADCAST_ROOM } from '../utils/adminBroadcast.js';
 import { denverDateStamp } from '../utils/timezoneHelpers.js';
 import {
   notifyWorkItem,
@@ -69,27 +70,48 @@ async function resolveRecipients(
   item: WorkItemRow,
   assigneeRole: CareTeamRole | null | undefined
 ): Promise<NotificationRecipient[]> {
+  const recipients: NotificationRecipient[] = [];
   if (item.assignee_id !== null) {
-    return [{ userId: item.assignee_id, role: assigneeRole ?? item.assignee_role ?? null }];
+    recipients.push({ userId: item.assignee_id, role: assigneeRole ?? item.assignee_role ?? null });
+  } else if (item.client_id !== null) {
+    const team = await getCareTeam(item.client_id);
+    recipients.push(...team.map((member) => ({ userId: member.member_id, role: member.member_role })));
   }
-  if (item.client_id === null) return [];
-  const team = await getCareTeam(item.client_id);
-  return team.map((member) => ({ userId: member.member_id, role: member.member_role }));
+  // Study-team fan-out: participant_withdrawal is a study-coordination item,
+  // and research participants typically have no assignee and no care team —
+  // without this every withdrawal notification silently went to nobody.
+  // Recipient set mirrors the researcher 'admin-broadcast' room (unscoped,
+  // all researcher accounts).
+  if (item.item_type === 'participant_withdrawal') {
+    const seen = new Set(recipients.map((r) => r.userId));
+    for (const researcherId of await getResearcherIds()) {
+      if (!seen.has(researcherId)) {
+        recipients.push({ userId: researcherId, role: 'researcher' });
+      }
+    }
+  }
+  return recipients;
 }
 
 function emitToRecipients(event: string, item: WorkItemRow, recipients: NotificationRecipient[]): void {
   const io = global.io;
   if (!io) return;
   // Payload is the work_items row: transcript-free by construction (spec s5).
+  // Researcher recipients share the one 'admin-broadcast' room (like live
+  // crisis events), so the room set is deduped to avoid double emits.
+  const rooms = new Set<string>();
   for (const recipient of recipients) {
     const room =
       recipient.role === 'caseworker'
         ? caseworkerRoom(recipient.userId)
         : recipient.role === 'therapist'
           ? therapistRoom(recipient.userId)
-          : null;
-    if (room) io.to(room).emit(event, item);
+          : recipient.role === 'researcher'
+            ? ADMIN_BROADCAST_ROOM
+            : null;
+    if (room) rooms.add(room);
   }
+  for (const room of rooms) io.to(room).emit(event, item);
 }
 
 /**

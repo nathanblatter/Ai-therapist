@@ -22,7 +22,7 @@ and — for the care team — a per-participant row scope on top of it
 | --- | --- | --- | --- |
 | **Participant** | Own conversations only | n/a | Only their own account (ownership check) |
 | **Therapist** | Yes — raw transcripts, for clinical care | Yes | Only participants assigned to them |
-| **Researcher** | No (redacted only, except live-monitoring — see §3) | Yes | Study/organization scope |
+| **Researcher** | Yes, in two bounded cases: raw transcripts of *active* sessions during live safety monitoring (see §2), and session audio recordings for safety/transcription-fidelity review. Otherwise redacted only | Yes | Study/organization scope |
 | **Caseworker** | No — never verbatim therapy content | Summary tier only | Only participants on their caseload |
 | **Demo** | Admin surfaces show synthetic fixtures only | n/a | Demo therapy sessions are real rows flagged `is_demo` and excluded from research export/paging |
 
@@ -129,6 +129,10 @@ codebook labels "treat as identifiable data." Neither is in the default export.
   Content-destruction jobs write their own logs (`content_wipe_log`,
   `data_deletion_log`), and those ARE written in the same transaction as the
   deletion.
+- **Participant-data access is audited**: transcript views, recording playback,
+  and dataset exports are recorded in the append-only `data_access_log`
+  (who, what, when, at which identifiability level), alongside the existing
+  grant/deletion logs.
 - **Caseworker isolation is structural, not just cosmetic**: caseworker
   websocket connections join only their own summary-tier channels, never the
   admin broadcast, therapist, or per-session rooms — a caseworker cannot receive
@@ -138,9 +142,6 @@ codebook labels "treat as identifiable data." Neither is in the default export.
 
 ## Known limitations (disclosed for accuracy)
 
-- Viewing a transcript in the admin UI is not itself audit-logged (only access
-  *grants* and *deletions* are). If per-view read auditing is required, it is a
-  known gap.
 - Object storage relies on storage-/transport-level encryption; no additional
   application-layer envelope encryption is applied to recordings.
 - Database TLS is enabled via configuration (`DATABASE_SSL`); the self-hosted

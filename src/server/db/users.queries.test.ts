@@ -8,7 +8,7 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-import { getAllUsers } from './users.queries.js';
+import { getAllUsers, createUser, ResearchOrgCaseworkerError } from './users.queries.js';
 
 beforeEach(() => {
   queryMock.mockReset().mockResolvedValue({ rows: [] });
@@ -41,5 +41,45 @@ describe('getAllUsers caseload scoping', () => {
     );
     expect(sql).toContain('ORDER BY created_at DESC');
     expect(params).toEqual([7]);
+  });
+});
+
+describe('createUser research-org caseworker invariant', () => {
+  it('throws ResearchOrgCaseworkerError when the target org kind is research', async () => {
+    queryMock.mockReset().mockResolvedValueOnce({ rows: [{ kind: 'research' }] });
+    await expect(createUser('cw1', 'twelvechars!', 'caseworker')).rejects.toBeInstanceOf(
+      ResearchOrgCaseworkerError
+    );
+    // Fails closed before the INSERT.
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when the org cannot be resolved at all', async () => {
+    queryMock.mockReset().mockResolvedValueOnce({ rows: [] });
+    await expect(createUser('cw1', 'twelvechars!', 'caseworker', { orgId: 999 })).rejects.toBeInstanceOf(
+      ResearchOrgCaseworkerError
+    );
+  });
+
+  it('creates a caseworker in a non-research org', async () => {
+    queryMock
+      .mockReset()
+      .mockResolvedValueOnce({ rows: [{ kind: 'practice' }] })
+      .mockResolvedValueOnce({
+        rows: [{ userid: 9, username: 'cw1', role: 'caseworker', organization_id: 2, is_sandbox: false }],
+      });
+    const user = await createUser('cw1', 'twelvechars!', 'caseworker', { orgId: 2 });
+    expect(user.userid).toBe(9);
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryMock.mock.calls[1][0]).toMatch(/INSERT INTO users/);
+  });
+
+  it('does not run the org-kind check for non-caseworker roles', async () => {
+    queryMock.mockReset().mockResolvedValueOnce({
+      rows: [{ userid: 10, username: 'p1', role: 'participant', organization_id: 1, is_sandbox: false }],
+    });
+    await createUser('p1', 'twelvechars!', 'participant');
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(queryMock.mock.calls[0][0]).toMatch(/INSERT INTO users/);
   });
 });

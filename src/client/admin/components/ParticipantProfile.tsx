@@ -166,6 +166,99 @@ function DrawerSection({ title, defaultOpen = false, children }: { title: string
   );
 }
 
+// ---------- study participation (researcher-only) ----------
+
+type StudyStatusValue = 'active' | 'paused' | 'withdrawn';
+
+const STUDY_STATUS_OPTIONS: { value: StudyStatusValue; label: string; activeTone: string }[] = [
+  { value: 'active', label: 'Active', activeTone: 'bg-emerald-100 text-emerald-800' },
+  { value: 'paused', label: 'Paused', activeTone: 'bg-amber-100 text-amber-800' },
+  { value: 'withdrawn', label: 'Withdrawn', activeTone: 'bg-red-100 text-red-700' },
+];
+
+/**
+ * Researcher control over users.study_status (the path back to 'active' that
+ * StudyStatusScreen promises paused participants). Own subcomponent so the
+ * researcher-only GET runs only when the panel is rendered.
+ */
+function StudyParticipationPanel({ userId }: { userId: number }) {
+  const statusFetch = useAdminFetch<{
+    study_status: StudyStatusValue;
+    study_status_changed_at: string | null;
+    study_status_source: string | null;
+  }>(`/admin/api/users/${userId}/study-status`);
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const current = statusFetch.data?.study_status ?? null;
+
+  const setStatus = async (status: StudyStatusValue) => {
+    if (status === 'withdrawn' &&
+        !window.confirm('Mark this participant as withdrawn? They will be blocked from starting new sessions.')) {
+      return;
+    }
+    setBusy(true);
+    setSaveError(false);
+    try {
+      const res = await fetch(`/admin/api/users/${userId}/study-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      statusFetch.refetch();
+    } catch {
+      setSaveError(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Panel>
+      {statusFetch.loading ? (
+        <p className="text-sm text-gray-400">Loading study status…</p>
+      ) : statusFetch.error || !statusFetch.data ? (
+        <p className="text-sm text-gray-500">Could not load this participant&rsquo;s study status.</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-sm text-gray-600">
+              Controls whether this participant can start new AI sessions. Pausing or withdrawing
+              blocks new sessions; setting back to active reopens access.
+            </p>
+            <div className="flex items-center gap-1.5" role="group" aria-label="Study status">
+              {STUDY_STATUS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => opt.value !== current && setStatus(opt.value)}
+                  disabled={busy}
+                  aria-pressed={current === opt.value}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-full transition disabled:opacity-50 ${
+                    current === opt.value ? opt.activeTone : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {statusFetch.data.study_status_changed_at && (
+            <p className="text-xs text-gray-400">
+              Last changed {formatDate(statusFetch.data.study_status_changed_at)}
+              {statusFetch.data.study_status_source && <> · via {statusFetch.data.study_status_source}</>}
+            </p>
+          )}
+          {saveError && (
+            <p className="text-xs text-red-600">Failed to update the study status. Try again.</p>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 // ---------- timeline ----------
 
 type TimelineEvent =
@@ -531,6 +624,16 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
               mineOnly={false}
               onOpenEscalations={onNavigate ? () => onNavigate('escalations') : undefined}
             />
+          </section>
+        )}
+
+        {/* Researcher-only study-participation control (pause/resume/withdraw). */}
+        {userRole === 'researcher' && (
+          <section aria-label="Study participation">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <Heart size={15} className="text-gray-500" /> Study participation
+            </h3>
+            <StudyParticipationPanel userId={user.userid} />
           </section>
         )}
 

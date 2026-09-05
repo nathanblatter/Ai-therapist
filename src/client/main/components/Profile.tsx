@@ -400,7 +400,22 @@ export default function Profile() {
                   <p className="text-sm text-gray-600">
                     Your study participation is currently{' '}
                     <strong>{withdrawal.studyStatus === 'paused' ? 'paused' : 'withdrawn'}</strong>.
-                    Contact the research team if this is not what you intended.
+                    If this is not what you intended, or you would like to resume, contact the
+                    research team: James Gaskin, Principal Investigator (
+                    <a
+                      href="mailto:james.gaskin@byu.edu"
+                      className="text-royal underline hover:text-navy"
+                    >
+                      james.gaskin@byu.edu
+                    </a>
+                    ) or Nathan Blatter (
+                    <a
+                      href="mailto:nzb22@byu.edu"
+                      className="text-royal underline hover:text-navy"
+                    >
+                      nzb22@byu.edu
+                    </a>
+                    ).
                   </p>
                 ) : (
                   <p className="text-sm text-gray-600">

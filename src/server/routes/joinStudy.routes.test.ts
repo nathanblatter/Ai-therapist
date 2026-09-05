@@ -107,7 +107,7 @@ describe('GET /join-study', () => {
 });
 
 describe('POST /join-study', () => {
-  const body = { username: 'newpart', password: 'longenough' };
+  const body = { username: 'newpart', password: 'longenough12' };
 
   it('creates a participant, records the linkage, and logs in on a fresh session', async () => {
     const app = makeApp();
@@ -117,7 +117,7 @@ describe('POST /join-study', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(dbMocks.claimQualtricsResponse).toHaveBeenCalledWith(QID, 'SV_test');
-    expect(dbMocks.createUser).toHaveBeenCalledWith('newpart', 'longenough', 'participant', {
+    expect(dbMocks.createUser).toHaveBeenCalledWith('newpart', 'longenough12', 'participant', {
       orgId: null,
     });
     expect(dbMocks.markQualtricsSignupRegistered).toHaveBeenCalledWith(11, USER.userid);
@@ -128,7 +128,7 @@ describe('POST /join-study', () => {
   it('passes QUALTRICS_STUDY_ORG_ID through to account creation', async () => {
     process.env.QUALTRICS_STUDY_ORG_ID = '42';
     await request(makeApp()).post(`/join-study?qid=${QID}`).send(body);
-    expect(dbMocks.createUser).toHaveBeenCalledWith('newpart', 'longenough', 'participant', {
+    expect(dbMocks.createUser).toHaveBeenCalledWith('newpart', 'longenough12', 'participant', {
       orgId: 42,
     });
   });

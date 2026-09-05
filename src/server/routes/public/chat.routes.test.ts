@@ -20,11 +20,13 @@ const dbMocks = vi.hoisted(() => ({
   setUserPreferredLanguage: vi.fn(),
   recordConsent: vi.fn(),
   setSessionCheckin: vi.fn(),
+  upsertSessionConfig: vi.fn(),
 }));
 const helperMocks = vi.hoisted(() => ({
   checkSessionLimits: vi.fn(),
   getSystemPrompt: vi.fn(),
   getSystemConfig: vi.fn(),
+  resolveProactiveOffering: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => dbMocks);
@@ -84,6 +86,8 @@ beforeEach(() => {
   dbMocks.getUserPreferredLanguage.mockResolvedValue('en');
   dbMocks.setUserPreferredLanguage.mockResolvedValue(undefined);
   dbMocks.setSessionCheckin.mockResolvedValue(undefined);
+  dbMocks.upsertSessionConfig.mockResolvedValue({});
+  helperMocks.resolveProactiveOffering.mockResolvedValue(true);
   (globalThis as { io?: unknown }).io = { to: () => ({ emit: () => {} }) };
 });
 
@@ -108,6 +112,32 @@ describe('POST /api/chat/start', () => {
     expect(res.status).toBe(200);
     expect(helperMocks.checkSessionLimits).toHaveBeenCalledWith(12, 'participant');
     expect(dbMocks.getActiveSessionForUser).toHaveBeenCalledWith(12);
+  });
+
+  it('resolves the proactive-offering condition once and persists it (ai-therapist-74)', async () => {
+    helperMocks.resolveProactiveOffering.mockResolvedValue(false);
+    const res = await request(makeApp()).post('/api/chat/start').send({});
+    expect(res.status).toBe(200);
+
+    // Resolved exactly once, passed into the prompt build (no internal
+    // re-roll), and recorded on session_configurations for analysis.
+    expect(helperMocks.resolveProactiveOffering).toHaveBeenCalledTimes(1);
+    expect(helperMocks.getSystemPrompt).toHaveBeenCalledWith('en', 'chat', false);
+    expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
+      res.body.sessionId,
+      expect.objectContaining({ proactive_offering: false, modalities: ['text'], language: 'en' })
+    );
+  });
+
+  it('does not re-roll the condition when an active session already exists', async () => {
+    dbMocks.getActiveSessionForUser.mockResolvedValue({ session_id: 'chat_existing' });
+    const res = await request(makeApp({ userId: 12, userRole: 'participant' }))
+      .post('/api/chat/start')
+      .send({});
+    expect(res.status).toBe(200);
+    expect(res.body.alreadyActive).toBe(true);
+    expect(helperMocks.resolveProactiveOffering).not.toHaveBeenCalled();
+    expect(dbMocks.upsertSessionConfig).not.toHaveBeenCalled();
   });
 
   it('returns 429 when session limits deny the start', async () => {

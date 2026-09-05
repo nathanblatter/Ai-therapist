@@ -1,0 +1,10 @@
+Qualtrics library message MS_V4tNz2KFqgkkLvx (AI Longitudinal Study - survey reminder (app-driven)), exported 2026-09-04 after HELLO->HOME fix.
+Raw HTML preserved below.
+
+[default]
+en
+
+[en]
+<p>Hello,</p><p>This is a reminder from the AI Support Agent Longitudinal Study research team at BYU: your <strong>${e://Field/surveyLabel}</strong> is ready.</p><p><a href="${l://SurveyURL}">Take the survey</a> (about ${e://Field/surveyMinutes} minutes). If the link does not work, copy and paste this address into your browser:
+${l://SurveyURL}</p><p>Your responses are confidential. Completing surveys is voluntary, and you may skip any question. If you no longer wish to receive these reminders or want to pause or leave the study, use the link on your study account page or reply to the research team.</p><p>Reminder: the AI support agent is not a therapist or crisis service. If you need support, contact BYU CAPS (801-422-3035), the 988 Suicide and Crisis Lifeline (call or text 988), or the Crisis Text Line (text HOME to 741741).</p><p>Thank you,
+The research team (PI: Dr. James Gaskin, Brigham Young University)</p>

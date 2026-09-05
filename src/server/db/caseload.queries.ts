@@ -52,14 +52,18 @@ export async function assignClient(
        (SELECT role FROM users WHERE userid = $1) AS therapist_role,
        (SELECT role FROM users WHERE userid = $2) AS client_role,
        (SELECT organization_id FROM users WHERE userid = $1) AS member_org,
-       (SELECT organization_id FROM users WHERE userid = $2) AS client_org`,
+       (SELECT organization_id FROM users WHERE userid = $2) AS client_org,
+       (SELECT o.kind FROM organizations o
+          JOIN users u ON u.organization_id = o.org_id
+         WHERE u.userid = $1) AS member_org_kind`,
     [memberId, clientId]
   );
-  const { therapist_role, client_role, member_org, client_org } = roles.rows[0] as {
+  const { therapist_role, client_role, member_org, client_org, member_org_kind } = roles.rows[0] as {
     therapist_role: string | null;
     client_role: string | null;
     member_org?: number | null;
     client_org?: number | null;
+    member_org_kind?: string | null;
   };
   if (therapist_role !== memberRole) {
     throw new CaseloadRoleError(`User ${memberId} is not a ${memberRole} account`);
@@ -70,6 +74,11 @@ export async function assignClient(
   if (member_org !== client_org) {
     throw new CaseloadRoleError(
       `User ${memberId} and user ${clientId} belong to different organizations`
+    );
+  }
+  if (memberRole === 'caseworker' && member_org_kind === 'research') {
+    throw new CaseloadRoleError(
+      'Caseworker caseload assignments are not allowed in a research organization'
     );
   }
   if (memberRole === 'therapist') {
@@ -115,14 +124,18 @@ export async function assignClientAudited(
          (SELECT role FROM users WHERE userid = $1) AS therapist_role,
          (SELECT role FROM users WHERE userid = $2) AS client_role,
          (SELECT organization_id FROM users WHERE userid = $1) AS member_org,
-         (SELECT organization_id FROM users WHERE userid = $2) AS client_org`,
+         (SELECT organization_id FROM users WHERE userid = $2) AS client_org,
+         (SELECT o.kind FROM organizations o
+            JOIN users u ON u.organization_id = o.org_id
+           WHERE u.userid = $1) AS member_org_kind`,
       [memberId, clientId]
     );
-    const { therapist_role, client_role, member_org, client_org } = roles.rows[0] as {
+    const { therapist_role, client_role, member_org, client_org, member_org_kind } = roles.rows[0] as {
       therapist_role: string | null;
       client_role: string | null;
       member_org?: number | null;
       client_org?: number | null;
+      member_org_kind?: string | null;
     };
     if (therapist_role !== memberRole) {
       throw new CaseloadRoleError(`User ${memberId} is not a ${memberRole} account`);
@@ -133,6 +146,11 @@ export async function assignClientAudited(
     if (member_org !== client_org) {
       throw new CaseloadRoleError(
         `User ${memberId} and user ${clientId} belong to different organizations`
+      );
+    }
+    if (memberRole === 'caseworker' && member_org_kind === 'research') {
+      throw new CaseloadRoleError(
+        'Caseworker caseload assignments are not allowed in a research organization'
       );
     }
     await client.query(

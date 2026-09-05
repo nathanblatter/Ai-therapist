@@ -75,6 +75,7 @@ const {
   buildRiskHistoryBlock,
   buildToolGuidanceBlock,
   buildPracticeBlock,
+  buildScreenerCadenceBlock,
 } = await import('./promptContext.js');
 
 beforeEach(() => {
@@ -150,6 +151,34 @@ describe('buildReturningSignalsBlock (ai-therapist-48)', () => {
     });
     expect(block).toContain('existing safety plan (warning signs on file: isolating)');
     expect(block).toContain('I can handle this one step at a time');
+  });
+});
+
+describe('buildScreenerCadenceBlock (weekly PHQ-2/GAD-2 cap)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const now = new Date('2026-09-04T12:00:00Z');
+
+  it('marks never-administered screeners as due', () => {
+    const block = buildScreenerCadenceBlock([], now);
+    expect(block).toContain('PHQ-2 has never been administered — it is due');
+    expect(block).toContain('GAD-2 has never been administered — it is due');
+    expect(block).toContain('at most once every 7 days');
+  });
+
+  it('forbids re-administering a screener taken within the last 7 days', () => {
+    const block = buildScreenerCadenceBlock([
+      { scale: 'phq2', score: 3, created_at: new Date(now.getTime() - 3 * DAY), session_id: 's1' },
+    ], now);
+    expect(block).toContain('PHQ-2 last administered 3 days ago — do NOT re-administer');
+    expect(block).toContain('GAD-2 has never been administered — it is due');
+  });
+
+  it('marks a screener as due again after 7 days, using the newest response per scale', () => {
+    const block = buildScreenerCadenceBlock([
+      { scale: 'gad2', score: 2, created_at: new Date(now.getTime() - 9 * DAY), session_id: 's2' },
+      { scale: 'gad2', score: 4, created_at: new Date(now.getTime() - 20 * DAY), session_id: 's1' },
+    ], now);
+    expect(block).toContain('GAD-2 last administered 9 days ago — it is due this week');
   });
 });
 

@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   // the route fails closed with a 500.
   getOrganizationIdForUser: vi.fn().mockResolvedValue(1),
   getIrbStudyOrgId: vi.fn().mockResolvedValue(1),
+  // Data-access audit (091): fire-and-forget; must never affect the response.
+  logDataAccess: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../db/index.js', () => mocks);
@@ -47,6 +49,10 @@ describe('GET /admin/api/export caseload gating', () => {
     const res = await request(appAs('researcher')).get('/admin/api/export');
     expect(res.status).toBe(200);
     expect(mocks.getSessionAccessInfo).not.toHaveBeenCalled();
+    // Access audit (091): the export is recorded with actor + export shape.
+    expect(mocks.logDataAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ accessedBy: 1, role: 'researcher', action: 'export' })
+    );
   });
 
   it('403s a therapist bulk export (no sessionId)', async () => {

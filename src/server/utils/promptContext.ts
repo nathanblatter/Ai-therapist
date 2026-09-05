@@ -15,6 +15,7 @@ import {
 import { getUserProfileBundle } from '../db/participantProfile.queries.js';
 // Module import (not the barrel) for the same mockability reason as above.
 import { listUserAssignments, type PracticeAssignment } from '../db/practiceAssignments.queries.js';
+import { SCALE_MIN_INTERVAL_DAYS, daysSinceScaleAdministered } from './scales.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('promptContext');
@@ -178,6 +179,29 @@ export function buildReturningSignalsBlock(input: {
   return `\nSince their last session:\n${lines.join('\n')}`;
 }
 
+/**
+ * Screener cadence block: when each screener (PHQ-2/GAD-2) was last
+ * administered and whether it is due. The consent form promises each no more
+ * than once per week; the server enforces it, and this tells the model up
+ * front so it never even offers a screener that would be rejected.
+ */
+export function buildScreenerCadenceBlock(scaleHistory: ScaleScorePoint[], now: Date = new Date()): string {
+  const labels: Record<string, string> = { phq2: 'PHQ-2', gad2: 'GAD-2' };
+  const lines = Object.entries(labels).map(([scale, label]) => {
+    const latest = scaleHistory.find(p => p.scale === scale);
+    if (!latest) {
+      return `- ${label} has never been administered — it is due; consider administering it at a natural moment.`;
+    }
+    const days = daysSinceScaleAdministered(latest.created_at, now);
+    const when = days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`;
+    if (days < SCALE_MIN_INTERVAL_DAYS) {
+      return `- ${label} last administered ${when} — do NOT re-administer it until at least ${SCALE_MIN_INTERVAL_DAYS} days have passed.`;
+    }
+    return `- ${label} last administered ${when} — it is due this week; consider administering it at a natural moment.`;
+  });
+  return `\nScreener cadence (each screener may be administered at most once every ${SCALE_MIN_INTERVAL_DAYS} days — a consent commitment the server also enforces):\n${lines.join('\n')}`;
+}
+
 /** Private guidance a therapist left for this participant's next session (ai-therapist-50). */
 export function buildClinicianNoteBlock(note: { notes: string } | null): string {
   if (!note?.notes) return '';
@@ -292,11 +316,12 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
       : '';
     const caseProfileBlock = buildCaseProfileBlock(caseProfileRow?.profile ?? null);
     const signalsBlock = buildReturningSignalsBlock({ scaleHistory, moodTrajectory, safetyPlan, thoughtRecord });
+    const screenerCadenceBlock = buildScreenerCadenceBlock(scaleHistory);
     const practiceBlock = buildPracticeBlock(openAssignments, completedSinceLast);
     const clinicianBlock = buildClinicianNoteBlock(clinicianNote);
     const riskBlock = buildRiskHistoryBlock(riskFlags);
 
-    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}${caseProfileBlock}${signalsBlock}${practiceBlock}${clinicianBlock}${riskBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
+    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}${caseProfileBlock}${signalsBlock}${screenerCadenceBlock}${practiceBlock}${clinicianBlock}${riskBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
   } catch (err) {
     // Memory must never block a session from starting.
     log.error({ err }, `Failed to build memory block for user ${userId}`);

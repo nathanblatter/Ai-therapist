@@ -18,6 +18,7 @@ export * from './contentRetention.queries.js';
 export * from './userSessions.queries.js';
 export * from './crisis.queries.js';
 export * from './redaction.queries.js';
+export * from './accessLog.queries.js';
 export * from './insights.queries.js';
 export * from './tools.queries.js';
 export * from './knowledge.queries.js';

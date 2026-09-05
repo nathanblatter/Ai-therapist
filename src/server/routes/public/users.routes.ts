@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { orgIdFor } from '../../middleware/org.js';
+import { passwordPolicyError } from '../../utils/passwordPolicy.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import {
   getAllUsers,
@@ -210,6 +211,12 @@ export default function usersRoutes(): Router {
     if (role !== undefined && !VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
+    if (password !== undefined) {
+      const pwError = passwordPolicyError(password);
+      if (pwError) {
+        return res.status(400).json({ error: pwError });
+      }
+    }
 
     try {
       const updates: UserUpdates = {};
@@ -266,6 +273,10 @@ export default function usersRoutes(): Router {
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
+    const pwError = passwordPolicyError(password);
+    if (pwError) {
+      return res.status(400).json({ error: pwError });
+    }
 
     try {
       const user = await createUser(username, password, role);
@@ -273,6 +284,11 @@ export default function usersRoutes(): Router {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'Username already exists') {
         return res.status(409).json({ error: 'Username already exists' });
+      }
+      // Name check (not instanceof): route tests mock db/index.js wholesale,
+      // which would leave the class binding undefined.
+      if (error instanceof Error && error.name === 'ResearchOrgCaseworkerError') {
+        return res.status(400).json({ error: error.message });
       }
       console.error('User creation error:', error);
       res.status(500).json({ error: 'Failed to create user' });

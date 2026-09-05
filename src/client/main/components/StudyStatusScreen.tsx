@@ -5,7 +5,7 @@
 // withdrew from a mental-health study that the server is broken, with no
 // crisis resources. Mirrors QuietHoursScreen: presentation only, the server
 // remains the security boundary.
-import { PauseCircle, Phone, MessageSquare } from 'react-feather';
+import { PauseCircle, Phone, MessageSquare, Mail } from 'react-feather';
 
 interface StudyStatusScreenProps {
   status: 'paused' | 'withdrawn';
@@ -61,6 +61,37 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
                 <span>
                   BYU CAPS after-hours crisis line via BYU Police:{' '}
                   <a href="tel:8014222222" className="font-semibold underline">801-422-2222</a>
+                </span>
+              </li>
+            </ul>
+          </div>
+
+          {/* IRB commitment: the research team's contact information remains
+              available to withdrawn/paused participants. Secondary to the
+              crisis resources above. */}
+          <div className="bg-gray-50 rounded-xl p-4 mb-3">
+            <p className="text-sm font-semibold text-gray-800 mb-2">
+              {status === 'paused'
+                ? 'To resume, or with any questions, contact the research team:'
+                : 'Questions, or want to talk it over? Contact the research team:'}
+            </p>
+            <ul className="space-y-2 text-sm text-gray-700">
+              <li className="flex items-center gap-2">
+                <Mail size={14} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
+                <span>
+                  James Gaskin, Principal Investigator —{' '}
+                  <a href="mailto:james.gaskin@byu.edu" className="font-semibold underline">
+                    james.gaskin@byu.edu
+                  </a>
+                </span>
+              </li>
+              <li className="flex items-center gap-2">
+                <Mail size={14} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
+                <span>
+                  Nathan Blatter —{' '}
+                  <a href="mailto:nzb22@byu.edu" className="font-semibold underline">
+                    nzb22@byu.edu
+                  </a>
                 </span>
               </li>
             </ul>

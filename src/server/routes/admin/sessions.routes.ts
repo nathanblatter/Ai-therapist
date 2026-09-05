@@ -20,6 +20,7 @@ import {
   deleteSession,
   updateMessage,
   deleteMessage,
+  logDataAccess,
   type MessageContentColumn,
 } from '../../db/index.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
@@ -221,6 +222,17 @@ export default function adminSessionsRoutes(): Router {
       const meta = await headObject(rec.objectKey);
       if (!meta) return res.status(404).json({ error: 'Recording object missing' });
 
+      // Access audit (091, fire-and-forget): who streamed this recording.
+      // Range requests during playback produce multiple rows for one listen;
+      // the range detail lets analysis collapse them.
+      void logDataAccess({
+        accessedBy: req.session.userId ?? null,
+        role: req.session.userRole ?? null,
+        action: 'recording_stream',
+        sessionId,
+        detail: { range: req.headers.range ?? null },
+      });
+
       const total = meta.contentLength;
       const rangeHeader = req.headers.range;
 
@@ -268,6 +280,17 @@ export default function adminSessionsRoutes(): Router {
       const liveExempt = req.session.userRole === 'therapist' || session.status === 'active';
       const contentColumn: MessageContentColumn = liveExempt ? 'content' : 'content_redacted';
       const messages = await getAdminSessionMessages(sessionId, contentColumn);
+
+      // Access audit (091, fire-and-forget): who viewed this transcript and
+      // whether they saw raw or redacted content.
+      void logDataAccess({
+        accessedBy: req.session.userId ?? null,
+        role: req.session.userRole ?? null,
+        action: 'transcript_view',
+        sessionId,
+        userId: session.user_id != null ? Number(session.user_id) : null,
+        detail: { contentColumn },
+      });
 
       // Post-session feedback (ai-therapist-25b) + cost/token summary
       // (ai-therapist-25c) for the Session Detail panel. Best-effort: a

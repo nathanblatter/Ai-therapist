@@ -117,6 +117,18 @@ export default function AdminApp() {
       .catch(() => { /* keep research default */ });
   }, []);
 
+  // Session deep link: crisis SMS pages link to /admin#session=<id> so the
+  // on-call researcher lands directly on the flagged session instead of the
+  // dashboard root. Read once on mount; the hash is cleared so a later reload
+  // doesn't resurrect a stale session view.
+  useEffect(() => {
+    const match = /[#&]session=([^&]+)/.exec(window.location.hash);
+    if (match) {
+      setSelectedSessionId(decodeURIComponent(match[1]));
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
+
   // Fetch AE deadline counts once on mount for the nav badge.
   useEffect(() => {
     fetch('/admin/api/adverse-events?status=draft', { credentials: 'include' })

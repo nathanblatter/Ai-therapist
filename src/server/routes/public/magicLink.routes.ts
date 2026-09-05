@@ -11,8 +11,22 @@ import rateLimit from 'express-rate-limit';
 import { tokensMatch } from '../../utils/crypto.js';
 import { createDemoUser } from '../../db/index.js';
 
+/** Production guard: the demo magic link must never work on a real production
+ *  box. It is only enabled outside production, on the demo/stage site
+ *  (DEMO_SITE=true), or with an explicit ALLOW_DEMO=true override. */
+export function isMagicLinkAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.NODE_ENV !== 'production') return true;
+  return env.DEMO_SITE === 'true' || env.ALLOW_DEMO === 'true';
+}
+
 export default function magicLinkRoutes(): Router {
   const router = Router();
+
+  if (!isMagicLinkAllowed() && process.env.DEMO_MAGIC_TOKEN) {
+    console.warn(
+      '[MagicLink] DEMO_MAGIC_TOKEN is set but NODE_ENV=production and neither DEMO_SITE=true nor ALLOW_DEMO=true — demo magic-link route disabled.'
+    );
+  }
 
   // Cap account creation from a single IP so the link can't be scripted into
   // flooding the users table. Generous enough for real recruiters sharing an IP.
@@ -27,9 +41,10 @@ export default function magicLinkRoutes(): Router {
   router.get('/demo/:token', demoLimiter, async (req, res, next) => {
     const expected = process.env.DEMO_MAGIC_TOKEN;
 
-    // Feature disabled (no token configured) or wrong token: behave like an
-    // unknown route so the link reveals nothing. next() falls through to SSR.
-    if (!expected || !req.params.token || !tokensMatch(req.params.token, expected)) {
+    // Feature disabled (prod guard or no token configured) or wrong token:
+    // behave like an unknown route so the link reveals nothing. next() falls
+    // through to SSR (404).
+    if (!isMagicLinkAllowed() || !expected || !req.params.token || !tokensMatch(req.params.token, expected)) {
       return next();
     }
 

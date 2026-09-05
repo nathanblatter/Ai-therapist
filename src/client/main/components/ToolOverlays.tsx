@@ -93,6 +93,7 @@ export function Shell({ title, onClose, children, wide = false }: {
 const RESOURCES = [
   { key: 'suicide', name: '988 Suicide & Crisis Lifeline', phone: '988', sms: { number: '988', body: '' }, note: 'Free, confidential, 24/7' },
   { key: 'mental_health', name: 'Crisis Text Line', phone: null, sms: { number: '741741', body: 'HOME' }, note: 'Text HOME to 741741, 24/7' },
+  { key: 'caps', name: 'BYU CAPS Crisis Line', phone: '801-422-3035', sms: null, note: 'BYU Counseling and Psychological Services, 24/7' },
   { key: 'domestic_violence', name: 'National Domestic Violence Hotline', phone: '1-800-799-7233', sms: { number: '88788', body: 'START' }, note: '24/7' },
   { key: 'substance_abuse', name: 'SAMHSA National Helpline', phone: '1-800-662-4357', sms: null, note: 'Treatment referrals, 24/7' },
 ];

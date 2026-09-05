@@ -80,3 +80,35 @@ describe('GET /demo/:token', () => {
     expect(state.body.orgId).toBeNull();
   });
 });
+
+describe('production guard', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    delete process.env.DEMO_SITE;
+    delete process.env.ALLOW_DEMO;
+  });
+
+  it('refuses the magic link in production without DEMO_SITE/ALLOW_DEMO (404, no account)', async () => {
+    process.env.NODE_ENV = 'production';
+    const res = await request(makeApp()).get(`/demo/${TOKEN}`);
+    expect(res.status).toBe(404);
+    expect(dbMocks.createDemoUser).not.toHaveBeenCalled();
+  });
+
+  it('stays enabled in production on the demo site (DEMO_SITE=true)', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.DEMO_SITE = 'true';
+    const res = await request(makeApp()).get(`/demo/${TOKEN}`);
+    expect(res.status).toBe(302);
+    expect(dbMocks.createDemoUser).toHaveBeenCalled();
+  });
+
+  it('honors the explicit ALLOW_DEMO=true override in production', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.ALLOW_DEMO = 'true';
+    const res = await request(makeApp()).get(`/demo/${TOKEN}`);
+    expect(res.status).toBe(302);
+  });
+});

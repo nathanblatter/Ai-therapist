@@ -73,6 +73,14 @@ export default function sessionsRoutes(): Router {
     const recordingEnabled = (config.features?.session_recording_enabled as boolean | undefined) ?? false;
     if (!recordingEnabled) return res.sendStatus(204);
 
+    // Per-participant consent (migrations 039/086): the session owner's LATEST
+    // consent snapshot must allow recording, regardless of the global flag.
+    // Applies to BOTH tracks (mixed and participant). Sessions without a
+    // linked user (demo/anonymous) keep current behavior. 204, not an error —
+    // the client uploader should stop caring, not surface a failure.
+    const { isRecordingConsentedForSession } = await import('../../db/index.js');
+    if (!(await isRecordingConsentedForSession(sessionId))) return res.sendStatus(204);
+
     for (const pcm of chunks) {
       if (typeof pcm !== 'string' || !pcm) continue;
       try {
@@ -107,6 +115,26 @@ export default function sessionsRoutes(): Router {
       if (!session) return res.status(404).json({ error: 'Session not found' });
       if (!canAccessSession(req, session, sessionId)) {
         return res.status(403).json({ error: 'Access denied' });
+      }
+
+      // Weekly cadence gate (IRB consent form: each screener "no more than
+      // once per week"). Only enforceable for sessions linked to a user —
+      // anonymous/demo sessions have no cross-session identity to window on.
+      // The administer_scale tool applies the same rule pre-overlay, so a
+      // participant normally never reaches this; it is the hard backstop at
+      // persistence. Structured 409 so callers can distinguish it from errors.
+      if (typeof session.user_id === 'number') {
+        const { getUserLatestScaleScore } = await import('../../db/index.js');
+        const { SCALE_MIN_INTERVAL_DAYS, daysSinceScaleAdministered } = await import('../../utils/scales.js');
+        const last = await getUserLatestScaleScore(session.user_id, def.id);
+        if (last && daysSinceScaleAdministered(last.created_at) < SCALE_MIN_INTERVAL_DAYS) {
+          return res.status(409).json({
+            error: 'scale_recently_administered',
+            scale: def.id,
+            last_administered_at: last.created_at,
+            message: `This check-in was already completed within the last ${SCALE_MIN_INTERVAL_DAYS} days; it can be taken at most once per week.`,
+          });
+        }
       }
 
       const score = answers.reduce((a, b) => a + b, 0);

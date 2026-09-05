@@ -2,7 +2,11 @@
 // auto-redacted message content. Mounted before the /redact SSR catch-all.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { getRandomRedactedMessages, updateRedactedContent } from '../../db/index.js';
+import {
+  getRandomRedactedMessages,
+  updateRedactedContent,
+  recordRedactionApproval,
+} from '../../db/index.js';
 
 export default function redactionRoutes(): Router {
   const router = Router();
@@ -28,7 +32,9 @@ export default function redactionRoutes(): Router {
     }
 
     try {
-      const updated = await updateRedactedContent(id, content_redacted);
+      // Accountability (091): the correction and its redaction_review_log row
+      // are written together, stamped with the reviewing researcher.
+      const updated = await updateRedactedContent(id, content_redacted, req.session.userId ?? null);
       if (!updated) {
         return res.status(404).json({ error: 'Message not found' });
       }
@@ -36,6 +42,22 @@ export default function redactionRoutes(): Router {
     } catch (err) {
       console.error('Failed to update redacted content:', err);
       res.status(500).json({ error: 'Failed to update message' });
+    }
+  });
+
+  // POST /redact/api/messages/:id/approve - record a no-change sign-off
+  // (reviewer inspected the sampled message and the auto-redaction stands).
+  router.post('/redact/api/messages/:id/approve', requireRole('researcher'), async (req, res) => {
+    const { id } = req.params;
+    try {
+      const recorded = await recordRedactionApproval(id, req.session.userId ?? null);
+      if (!recorded) {
+        return res.status(404).json({ error: 'Message not found' });
+      }
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Failed to record redaction approval:', err);
+      res.status(500).json({ error: 'Failed to record approval' });
     }
   });
 

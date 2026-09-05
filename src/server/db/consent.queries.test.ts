@@ -9,6 +9,7 @@ import {
   recordConsent,
   getActiveConsentDocument,
   insertConsentDocument,
+  isRecordingConsentedForSession,
 } from './consent.queries.js';
 
 beforeEach(() => {
@@ -44,6 +45,26 @@ describe('recordConsent', () => {
     await recordConsent({ consentVersion: 'v', recordingEnabled: true });
     const params = queryMock.mock.calls[0][1] as unknown[];
     expect(params[4]).toBeNull();
+  });
+});
+
+describe('isRecordingConsentedForSession (086 enforcement)', () => {
+  it('returns false when the owner\'s latest consent snapshot disables recording', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ recording_enabled: false }] });
+    expect(await isRecordingConsentedForSession('sess1')).toBe(false);
+    const sql = queryMock.mock.calls[0][0] as string;
+    expect(sql).toContain('ORDER BY accepted_at DESC');
+    expect(sql).toContain('ts.user_id IS NOT NULL');
+  });
+
+  it('returns true when the latest consent allows recording', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ recording_enabled: true }] });
+    expect(await isRecordingConsentedForSession('sess1')).toBe(true);
+  });
+
+  it('returns true for sessions with no linked user or no consent rows (demo keeps current behavior)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    expect(await isRecordingConsentedForSession('sess1')).toBe(true);
   });
 });
 

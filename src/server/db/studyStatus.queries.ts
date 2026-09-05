@@ -13,6 +13,23 @@ export async function getStudyStatus(userId: number): Promise<StudyStatus> {
   return rows[0]?.study_status ?? 'active';
 }
 
+export interface StudyStatusDetail {
+  study_status: StudyStatus;
+  study_status_changed_at: string | null;
+  study_status_source: string | null;
+}
+
+/** Status plus provenance for the admin study-status panel. Null when the
+ *  user row does not exist (route 404s). */
+export async function getStudyStatusDetail(userId: number): Promise<StudyStatusDetail | null> {
+  const { rows } = await pool.query<StudyStatusDetail>(
+    `SELECT study_status, study_status_changed_at, study_status_source
+       FROM users WHERE userid = $1`,
+    [userId]
+  );
+  return rows[0] ?? null;
+}
+
 /**
  * Set a participant's study status. Returns true when the row changed —
  * setting the same status twice is a no-op, which keeps the withdrawal-survey

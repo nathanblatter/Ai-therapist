@@ -113,3 +113,54 @@ describe('POST /api/auth/login session handling', () => {
     expect(state.body.orgId).toBe(7);
   });
 });
+
+describe('POST /api/auth/register validation', () => {
+  function makeRegisterApp() {
+    const app = express();
+    app.use(express.json());
+    app.use(session({ secret: 'test', resave: false, saveUninitialized: true }));
+    // Seed a researcher session (register is researcher-only).
+    app.post('/test/seed-researcher', (req, res) => {
+      req.session.userId = 1;
+      req.session.userRole = 'researcher';
+      res.json({ ok: true });
+    });
+    app.use(authRoutes());
+    return app;
+  }
+
+  it('rejects passwords shorter than 12 characters with a 400', async () => {
+    const agent = request.agent(makeRegisterApp());
+    await agent.post('/test/seed-researcher');
+    const res = await agent
+      .post('/api/auth/register')
+      .send({ username: 'newuser', password: 'elevenchars', role: 'participant' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Password must be at least 12 characters');
+    expect(dbMocks.createUser).not.toHaveBeenCalled();
+  });
+
+  it('accepts a 12-character password', async () => {
+    dbMocks.createUser.mockResolvedValue({ userid: 5, username: 'newuser', role: 'participant' });
+    const agent = request.agent(makeRegisterApp());
+    await agent.post('/test/seed-researcher');
+    const res = await agent
+      .post('/api/auth/register')
+      .send({ username: 'newuser', password: 'twelvechars!', role: 'participant' });
+    expect(res.status).toBe(200);
+    expect(dbMocks.createUser).toHaveBeenCalledWith('newuser', 'twelvechars!', 'participant');
+  });
+
+  it('maps the research-org caseworker rejection to a 400 with the db error message', async () => {
+    const err = new Error('Caseworker accounts cannot be created in a research organization');
+    err.name = 'ResearchOrgCaseworkerError';
+    dbMocks.createUser.mockRejectedValue(err);
+    const agent = request.agent(makeRegisterApp());
+    await agent.post('/test/seed-researcher');
+    const res = await agent
+      .post('/api/auth/register')
+      .send({ username: 'cw1', password: 'twelvechars!', role: 'caseworker' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Caseworker accounts cannot be created in a research organization');
+  });
+});

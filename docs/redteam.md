@@ -161,5 +161,9 @@ scenarios are dominated by sequential `gpt-5.2` reply latency (~7-10 s/turn).
 - **R7 — `gpt-5.2` replies vary run-to-run.** Chat-side assertions are regex +
   temp-0 classifier (never exact-match), and `--seed` pins persona + classifier.
   Accept a small flake budget; the JUnit `detail`/evidence makes triage fast.
-- **R6 — `docs/crisis.md` is stale** (describes a keyword-only detector). The
-  harness follows the CODE (bands `>=25/50/75`), not that doc.
+- **R6 — resolved 2026-09-04:** `docs/crisis.md` now describes the real two-stage
+  detector (keyword screen + LLM assessment, bands `>=25/50/75`), matching what the
+  harness asserts. Note the crisis-ladder rows run on the **realtime-text** pipeline
+  (typed participant turns POSTed to `/logs/batch` — the detection path shared with
+  voice; no audio involved) and are assertion-based rather than judge-scored; the
+  opt-in voice suite is separate and never part of the nightly full suite.

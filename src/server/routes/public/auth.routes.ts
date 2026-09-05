@@ -3,6 +3,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireRole } from '../../middleware/auth.js';
 import { verifyCredentials, createUser } from '../../db/index.js';
+import { passwordPolicyError } from '../../utils/passwordPolicy.js';
 
 export default function authRoutes(): Router {
   const router = Router();
@@ -116,6 +117,10 @@ export default function authRoutes(): Router {
     if (!['therapist', 'researcher', 'participant', 'caseworker'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
+    const pwError = passwordPolicyError(password);
+    if (pwError) {
+      return res.status(400).json({ error: pwError });
+    }
 
     try {
       const user = await createUser(username, password, role);
@@ -126,6 +131,11 @@ export default function authRoutes(): Router {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'Username already exists') {
         return res.status(409).json({ error: 'Username already exists' });
+      }
+      // Name check (not instanceof): route tests mock db/index.js wholesale,
+      // which would leave the class binding undefined.
+      if (error instanceof Error && error.name === 'ResearchOrgCaseworkerError') {
+        return res.status(400).json({ error: error.message });
       }
       console.error('Registration error:', error);
       res.status(500).json({ error: 'Registration failed' });

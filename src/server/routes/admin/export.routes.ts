@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { orgIdFor } from '../../middleware/org.js';
-import { isAssigned, getSessionAccessInfo } from '../../db/index.js';
+import { isAssigned, getSessionAccessInfo, logDataAccess } from '../../db/index.js';
 import {
   getMetadataExport,
   getAnonymizedExport,
@@ -93,6 +93,24 @@ export default function exportRoutes(): Router {
         rows = await getFullExport(filters, contentColumn, orgId);
       }
 
+      // Access audit (091, fire-and-forget): who exported what, with which
+      // filters and content column.
+      void logDataAccess({
+        accessedBy: req.session.userId ?? null,
+        role: req.session.userRole ?? null,
+        action: 'export',
+        sessionId: filters.sessionId,
+        detail: {
+          exportType: String(exportType),
+          format: String(format),
+          contentColumn,
+          startDate: filters.startDate,
+          endDate: filters.endDate,
+          crisisOnly: filters.crisisOnly,
+          rowCount: rows.length,
+        },
+      });
+
       const dateStamp = new Date().toISOString().split('T')[0];
 
       if (format === 'csv') {
@@ -135,6 +153,15 @@ export default function exportRoutes(): Router {
 
     try {
       const result = await buildDataset(asOf, { includeTranscripts });
+
+      // Access audit (091, fire-and-forget): who pulled the research dataset.
+      void logDataAccess({
+        accessedBy: req.session.userId ?? null,
+        role: req.session.userRole ?? null,
+        action: 'dataset_export',
+        detail: { asOf, includeTranscripts },
+      });
+
       const dateStamp = asOf.slice(0, 10);
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="ai-therapist-dataset-${dateStamp}.zip"`);

@@ -1,0 +1,5 @@
+Qualtrics library message MS_4bay6k70pI9IZRu (Phase 2 screening referral end message), exported 2026-09-04 after HELLO->HOME fix.
+Raw HTML preserved below.
+
+[en]
+Thank you for your interest in this study. Based on your answers, we are not able to enroll you at this time. This is not a judgment about you - some of our screening questions are there because the AI support app is not a substitute for professional care, and we want you to have the right kind of support. If you are struggling right now, please reach out: call or text 988 (Suicide and Crisis Lifeline), text HOME to 741741 (Crisis Text Line), call BYU Counseling and Psychological Services at 801-422-3035 (after-hours crisis support via BYU Police at 801-422-2222), or call 911 in an emergency. If your circumstances change, you are welcome to contact the research team at nzb22@byu.edu.

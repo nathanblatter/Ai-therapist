@@ -19,7 +19,7 @@ vi.mock('../config/db.js', () => ({
 const SYSTEM_CONFIG_ROWS = [
   {
     config_key: 'crisis_contact',
-    config_value: { hotline: '988 Suicide & Crisis Lifeline', phone: '988', text: 'HELLO to 741741', enabled: true },
+    config_value: { hotline: '988 Suicide & Crisis Lifeline', phone: '988', text: 'HOME to 741741', enabled: true },
   },
   {
     config_key: 'features',

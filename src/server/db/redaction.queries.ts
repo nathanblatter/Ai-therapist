@@ -13,11 +13,56 @@ export async function getRandomRedactedMessages(): Promise<Record<string, unknow
   return result.rows;
 }
 
-/** Overwrite a message's redacted content; returns false if no such message. */
-export async function updateRedactedContent(messageId: string, contentRedacted: string): Promise<boolean> {
+/**
+ * Overwrite a message's redacted content and record WHO corrected it in
+ * redaction_review_log (091), in one transaction — a correction without its
+ * accountability row must not exist. Returns false if no such message.
+ */
+export async function updateRedactedContent(
+  messageId: string,
+  contentRedacted: string,
+  reviewedBy: number | null
+): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      'UPDATE messages SET content_redacted = $1 WHERE message_id = $2 RETURNING message_id',
+      [contentRedacted, messageId]
+    );
+    if ((result.rowCount ?? 0) === 0) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await client.query(
+      `INSERT INTO redaction_review_log (message_id, reviewed_by, action)
+       VALUES ($1, $2, 'corrected')`,
+      [messageId, reviewedBy]
+    );
+    await client.query('COMMIT');
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Record a no-change sign-off from the /redact verification tool: the reviewer
+ * looked at the sampled message and approved the auto-redaction as-is.
+ * Returns false if the message does not exist.
+ */
+export async function recordRedactionApproval(
+  messageId: string,
+  reviewedBy: number | null
+): Promise<boolean> {
   const result = await pool.query(
-    'UPDATE messages SET content_redacted = $1 WHERE message_id = $2 RETURNING message_id',
-    [contentRedacted, messageId]
+    `INSERT INTO redaction_review_log (message_id, reviewed_by, action)
+     SELECT message_id, $2, 'approved' FROM messages WHERE message_id = $1
+     RETURNING review_id`,
+    [messageId, reviewedBy]
   );
   return (result.rowCount ?? 0) > 0;
 }

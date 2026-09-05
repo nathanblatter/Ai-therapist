@@ -535,6 +535,43 @@ describe('assign_practice (ai-therapist-123)', () => {
   });
 });
 
+describe('administer_scale weekly cadence gate', () => {
+  it('blocks a scale administered within the last 7 days for a logged-in user', async () => {
+    getUserLatestScaleScoreMock.mockResolvedValue({
+      score: 2, created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), session_id: 's0',
+    });
+    const r = await toolRegistry.executeTool('administer_scale', { scale: 'phq2' }, { sessionId: 's1' }) as {
+      error?: string; days_since_last?: number; next_eligible_in_days?: number; guidance?: string;
+    };
+    expect(r.error).toBe('scale_recently_administered');
+    expect(r.days_since_last).toBe(3);
+    expect(r.next_eligible_in_days).toBe(4);
+    expect(r.guidance).toMatch(/Do not mention/);
+    expect(getUserLatestScaleScoreMock).toHaveBeenCalledWith(42, 'phq2');
+  });
+
+  it('allows the scale once at least 7 days have passed', async () => {
+    getUserLatestScaleScoreMock.mockResolvedValue({
+      score: 2, created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000), session_id: 's0',
+    });
+    const r = await toolRegistry.executeTool('administer_scale', { scale: 'phq2' }, { sessionId: 's1' }) as { success?: boolean };
+    expect(r.success).toBe(true);
+  });
+
+  it('allows a first-ever administration', async () => {
+    getUserLatestScaleScoreMock.mockResolvedValue(null);
+    const r = await toolRegistry.executeTool('administer_scale', { scale: 'gad2' }, { sessionId: 's1' }) as { success?: boolean };
+    expect(r.success).toBe(true);
+  });
+
+  it('does not gate anonymous sessions (no linked user)', async () => {
+    getSessionMock.mockResolvedValue({ user_id: null });
+    const r = await toolRegistry.executeTool('administer_scale', { scale: 'phq2' }, { sessionId: 's1' }) as { success?: boolean };
+    expect(r.success).toBe(true);
+    expect(getUserLatestScaleScoreMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('compare_screener_trend (ai-therapist-69)', () => {
   it('requires session context', async () => {
     const r = await toolRegistry.executeTool('compare_screener_trend', { scale: 'phq2' }) as { error?: string };

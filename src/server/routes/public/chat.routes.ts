@@ -17,8 +17,9 @@ import {
   getUserPreferredLanguage,
   setUserPreferredLanguage,
   recordConsent,
+  upsertSessionConfig,
 } from '../../db/index.js';
-import { checkSessionLimits, getSystemPrompt, getSystemConfig } from '../../utils/sessionHelpers.js';
+import { checkSessionLimits, getSystemPrompt, getSystemConfig, resolveProactiveOffering } from '../../utils/sessionHelpers.js';
 import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -98,10 +99,15 @@ export default function chatRoutes(): Router {
       recordSessionOwnership(req, sessionId);
 
       // Base prompt + returning-participant memory (opt-in) + today's check-in.
+      // The proactive-offering A/B condition (ai-therapist-74) is resolved ONCE
+      // here and persisted below, mirroring /token — previously the chat path
+      // let getSystemPrompt re-roll internally and never recorded the arm, so
+      // chat sessions could not be assigned to a condition for analysis.
       const checkin = sanitizeCheckin(req.body?.checkin);
       const memoryBlock = await buildMemoryBlock(numericUserId);
+      const proactiveOffering = await resolveProactiveOffering();
       const systemPrompt =
-        (await getSystemPrompt(userLanguage, 'chat')) + memoryBlock + buildCheckinBlock(checkin);
+        (await getSystemPrompt(userLanguage, 'chat', proactiveOffering)) + memoryBlock + buildCheckinBlock(checkin);
 
       const { initializeChatSession } = await import('../../services/chatTherapy.service.js');
       initializeChatSession(sessionId, systemPrompt);
@@ -118,6 +124,18 @@ export default function chatRoutes(): Router {
         // (C3/s7: sandbox owners' sessions are is_demo): non-study data,
         // excluded from every real analytics/export surface.
         isDemo: isNonStudyUser(userRole, username) || req.session?.isSandbox === true,
+      });
+
+      // Persist the resolved research condition + assembled instructions to
+      // session_configurations, same as the voice path — this row is the
+      // analysis source of truth for which arm the session ran under. A fresh
+      // sessionId is minted above, so there is never an existing row to
+      // clobber; the resume path (alreadyActive, earlier) never re-rolls.
+      await upsertSessionConfig(sessionId, {
+        modalities: ['text'],
+        instructions: systemPrompt,
+        language: userLanguage,
+        proactive_offering: proactiveOffering,
       });
 
       if (checkin) {

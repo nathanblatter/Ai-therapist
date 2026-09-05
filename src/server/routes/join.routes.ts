@@ -34,6 +34,7 @@ import {
 } from '../db/index.js';
 import { seedSandboxCaseload } from '../services/sandboxSeed.js';
 import { isCareTeamRole } from '../../shared/roles.js';
+import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
 
 const GONE_MESSAGE = 'This invite link is no longer valid. Ask your therapist for a new one.';
 const SANDBOX_GONE_MESSAGE = 'This sandbox link is no longer valid. Ask whoever sent it for a new one.';
@@ -81,7 +82,7 @@ function registrationPage(opts: RegistrationPageOptions): string {
     <label for="username">Username</label>
     <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="64">
     <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8">
+    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="${MIN_PASSWORD_LENGTH}">
     <button type="submit" id="submit-btn">${opts.buttonLabel}</button>
     <div class="error" id="error"></div>
   </form>
@@ -214,8 +215,9 @@ export default function joinRoutes(): Router {
     if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
     }
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    const pwError = passwordPolicyError(password);
+    if (pwError) {
+      return res.status(400).json({ error: pwError });
     }
 
     try {
@@ -329,8 +331,9 @@ export default function joinRoutes(): Router {
     if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
     }
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    const pwError = passwordPolicyError(password);
+    if (pwError) {
+      return res.status(400).json({ error: pwError });
     }
 
     try {

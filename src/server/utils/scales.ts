@@ -47,3 +47,14 @@ export const SCALES: Record<string, ScaleDefinition> = {
     cutoff: 3,
   },
 };
+
+// Weekly cadence (IRB consent commitment: each screener "no more than once per
+// week"). Enforced server-side at /api/sessions/:id/scale-response, at the
+// administer_scale tool layer, and surfaced to the model via the
+// returning-participant prompt context.
+export const SCALE_MIN_INTERVAL_DAYS = 7;
+
+/** Whole days elapsed since a screener was administered. */
+export function daysSinceScaleAdministered(lastAdministeredAt: Date, now: Date = new Date()): number {
+  return Math.floor((now.getTime() - lastAdministeredAt.getTime()) / (24 * 60 * 60 * 1000));
+}

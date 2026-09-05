@@ -9,6 +9,7 @@ const {
   getUserByIdMock,
   getCareTeamMock,
   getIrbStudyOrgIdMock,
+  getResearcherIdsMock,
   notifyWorkItemMock,
   runDigestSweepMock,
   poolQueryMock,
@@ -18,6 +19,7 @@ const {
   getUserByIdMock: vi.fn(),
   getCareTeamMock: vi.fn(),
   getIrbStudyOrgIdMock: vi.fn(),
+  getResearcherIdsMock: vi.fn(),
   notifyWorkItemMock: vi.fn(),
   runDigestSweepMock: vi.fn(),
   poolQueryMock: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock('../db/index.js', () => ({
   getUserById: getUserByIdMock,
   getCareTeam: getCareTeamMock,
   getIrbStudyOrgId: getIrbStudyOrgIdMock,
+  getResearcherIds: getResearcherIdsMock,
   // Transitive imports of utils/adminBroadcast.js:
   getTherapistIdsForClient: vi.fn(),
   getCaseworkerIdsForClient: vi.fn(),
@@ -65,6 +68,7 @@ beforeEach(() => {
     { member_id: 8, username: 'cw1', member_role: 'caseworker', assigned_at: 'x' },
   ]);
   getIrbStudyOrgIdMock.mockResolvedValue(1);
+  getResearcherIdsMock.mockResolvedValue([]);
   insertWorkItemMock.mockResolvedValue(insertedRow());
   notifyWorkItemMock.mockResolvedValue(undefined);
   poolQueryMock.mockResolvedValue({ rows: [] });
@@ -116,6 +120,41 @@ describe('enqueueWorkItem', () => {
     await enqueueWorkItem({ ...BASE, clientId: 42, assigneeId: 7, assigneeRole: 'therapist' });
     expect(getCareTeamMock).not.toHaveBeenCalled();
     expect(notifyWorkItemMock).toHaveBeenCalledWith(expect.anything(), [{ userId: 7, role: 'therapist' }]);
+  });
+
+  it('fans participant_withdrawal out to all researchers when the participant has no care team', async () => {
+    // Research participants typically have no assignee and no care team —
+    // without the researcher fan-out, withdrawal items notified nobody.
+    getCareTeamMock.mockResolvedValue([]);
+    getResearcherIdsMock.mockResolvedValue([11, 12]);
+    insertWorkItemMock.mockResolvedValue(insertedRow({ item_type: 'participant_withdrawal', severity: 'info' }));
+    await enqueueWorkItem({
+      itemType: 'participant_withdrawal', severity: 'info', title: 'Participant withdrew from the study',
+      sourceTable: 'qualtrics_responses', sourceId: 'R_1', clientId: 42,
+    });
+    expect(notifyWorkItemMock).toHaveBeenCalledWith(expect.anything(), [
+      { userId: 11, role: 'researcher' },
+      { userId: 12, role: 'researcher' },
+    ]);
+  });
+
+  it('appends researchers (deduped) after the care team for participant_withdrawal', async () => {
+    getResearcherIdsMock.mockResolvedValue([7, 11]); // 7 already on the care team
+    insertWorkItemMock.mockResolvedValue(insertedRow({ item_type: 'participant_withdrawal', severity: 'info' }));
+    await enqueueWorkItem({
+      itemType: 'participant_withdrawal', severity: 'info', title: 'Participant withdrew from the study',
+      sourceTable: 'qualtrics_responses', sourceId: 'R_2', clientId: 42,
+    });
+    expect(notifyWorkItemMock).toHaveBeenCalledWith(expect.anything(), [
+      { userId: 7, role: 'therapist' },
+      { userId: 8, role: 'caseworker' },
+      { userId: 11, role: 'researcher' },
+    ]);
+  });
+
+  it('does not consult the researcher roster for non-withdrawal item types', async () => {
+    await enqueueWorkItem({ ...BASE, clientId: 42 });
+    expect(getResearcherIdsMock).not.toHaveBeenCalled();
   });
 
   it('falls back to the IRB org when no client resolves the org', async () => {

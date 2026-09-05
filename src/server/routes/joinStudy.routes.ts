@@ -26,6 +26,7 @@ import {
   verifyBaselineResponse,
 } from '../services/qualtrics.service.js';
 import { enqueueWorkItem } from '../services/workQueue.service.js';
+import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
 
 const PAGE_STYLE = `
   body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f4; color: #1c1917; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
@@ -60,7 +61,7 @@ function registrationPage(): string {
     <label for="username">Username</label>
     <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="64">
     <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8">
+    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="${MIN_PASSWORD_LENGTH}">
     <button type="submit" id="submit-btn">Create account</button>
     <div class="error" id="error"></div>
   </form>
@@ -197,8 +198,9 @@ export default function joinStudyRoutes(): Router {
     if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
     }
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    const pwError = passwordPolicyError(password);
+    if (pwError) {
+      return res.status(400).json({ error: pwError });
     }
 
     try {

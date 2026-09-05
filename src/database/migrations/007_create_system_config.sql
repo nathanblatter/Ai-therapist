@@ -23,7 +23,7 @@ COMMENT ON COLUMN system_config.updated_by IS 'Username of admin who last update
 INSERT INTO system_config (config_key, config_value, description) VALUES
 (
     'crisis_contact',
-    '{"hotline": "BYU Counseling and Psychological Services", "phone": "(801) 422-3035", "text": "HELLO to 741741", "enabled": true}'::jsonb,
+    '{"hotline": "988 Suicide & Crisis Lifeline", "phone": "988", "text": "HOME to 741741", "enabled": true}'::jsonb,
     'Crisis contact information displayed to users'
 ),
 (

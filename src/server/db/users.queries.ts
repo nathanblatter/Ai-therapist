@@ -147,6 +147,16 @@ export async function createDemoUser(): Promise<{ userid: number; username: stri
   return result.rows[0];
 }
 
+/** Thrown by createUser when a caseworker account would land in a research
+ *  organization (IRB invariant: the study has no caseworker role; caseworker
+ *  accounts exist only in clinical/practice and sandbox orgs). */
+export class ResearchOrgCaseworkerError extends Error {
+  constructor(message = 'Caseworker accounts cannot be created in a research organization') {
+    super(message);
+    this.name = 'ResearchOrgCaseworkerError';
+  }
+}
+
 export interface CreateUserOptions {
   /** Organization the account belongs to; defaults to the irb-study org
    *  (069 backfill semantics — pre-portal behavior is unchanged). */
@@ -163,6 +173,21 @@ export async function createUser(
   role: string,
   options: CreateUserOptions = {}
 ): Promise<UserRow> {
+  // IRB invariant (fail closed): never mint a caseworker inside a research
+  // org. The org is resolved exactly as the INSERT below resolves it, so the
+  // check and the write cannot disagree; an unresolvable org also rejects.
+  if (role === 'caseworker') {
+    const orgKind = await pool.query<{ kind: string }>(
+      `SELECT kind FROM organizations
+       WHERE org_id = COALESCE($1, (SELECT org_id FROM organizations WHERE slug = 'irb-study'))`,
+      [options.orgId ?? null]
+    );
+    const kind = orgKind.rows[0]?.kind;
+    if (kind === undefined || kind === 'research') {
+      throw new ResearchOrgCaseworkerError();
+    }
+  }
+
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
@@ -234,6 +259,20 @@ export async function getOrgTherapistIds(orgId: number): Promise<number[]> {
      WHERE role = 'therapist' AND organization_id = $1
      ORDER BY userid`,
     [orgId]
+  );
+  return result.rows.map((row) => row.userid);
+}
+
+/** All researcher account ids (org-unscoped, like the researcher
+ *  'admin-broadcast' socket room). Backs the participant_withdrawal
+ *  work-item fan-out: research participants typically have no assignee and
+ *  no care team, so without a study-team recipient set nobody is told a
+ *  participant withdrew. */
+export async function getResearcherIds(): Promise<number[]> {
+  const result = await pool.query<{ userid: number }>(
+    `SELECT userid FROM users
+     WHERE role = 'researcher'
+     ORDER BY userid`
   );
   return result.rows.map((row) => row.userid);
 }

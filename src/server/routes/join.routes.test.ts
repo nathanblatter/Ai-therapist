@@ -75,7 +75,7 @@ const LIVE_INVITE = {
   used_at: null,
   used_by: null,
 };
-const GOOD_BODY = { username: 'newclient', password: 'longenough1' };
+const GOOD_BODY = { username: 'newclient', password: 'longenough12' };
 
 const LIVE_SANDBOX_INVITE = {
   invite_id: 21,
@@ -166,7 +166,7 @@ describe('POST /join/:token', () => {
     expect(mocks.consumeInvite).toHaveBeenCalledWith('some-raw-token');
     // Spec change (caseworker portal): the new participant inherits the
     // inviter's organization and the edge carries the inviter's role.
-    expect(mocks.createUser).toHaveBeenCalledWith('newclient', 'longenough1', 'participant', { orgId: 1, isSandbox: false });
+    expect(mocks.createUser).toHaveBeenCalledWith('newclient', 'longenough12', 'participant', { orgId: 1, isSandbox: false });
     expect(mocks.assignClient).toHaveBeenCalledWith(3, 42, 3, 'therapist');
     expect(mocks.markInviteUsedBy).toHaveBeenCalledWith(7, 42);
     // Session established like login.
@@ -182,7 +182,7 @@ describe('POST /join/:token', () => {
     });
     const res = await request(makeApp().app).post('/join/tok').send(GOOD_BODY);
     expect(res.status).toBe(200);
-    expect(mocks.createUser).toHaveBeenCalledWith('newclient', 'longenough1', 'participant', { orgId: 2, isSandbox: false });
+    expect(mocks.createUser).toHaveBeenCalledWith('newclient', 'longenough12', 'participant', { orgId: 2, isSandbox: false });
     expect(mocks.assignClient).toHaveBeenCalledWith(3, 42, 3, 'caseworker');
   });
 
@@ -192,7 +192,7 @@ describe('POST /join/:token', () => {
     });
     const res = await request(makeApp().app).post('/join/tok').send(GOOD_BODY);
     expect(res.status).toBe(200);
-    expect(mocks.createUser).toHaveBeenCalledWith('newclient', 'longenough1', 'participant', { orgId: 9, isSandbox: true });
+    expect(mocks.createUser).toHaveBeenCalledWith('newclient', 'longenough12', 'participant', { orgId: 9, isSandbox: true });
   });
 
   it('410s and releases the invite when the inviter is gone or not a care-team member', async () => {
@@ -217,14 +217,14 @@ describe('POST /join/:token', () => {
       .mockResolvedValueOnce(null);
     const { app } = makeApp();
     expect((await request(app).post('/join/tok').send(GOOD_BODY)).status).toBe(200);
-    expect((await request(app).post('/join/tok').send({ username: 'other', password: 'longenough1' })).status).toBe(410);
+    expect((await request(app).post('/join/tok').send({ username: 'other', password: 'longenough12' })).status).toBe(410);
     expect(mocks.createUser).toHaveBeenCalledTimes(1);
   });
 
   it('400s on missing username/password or a too-short password, leaving the invite untouched', async () => {
     const { app } = makeApp();
     expect((await request(app).post('/join/tok').send({ username: 'x' })).status).toBe(400);
-    expect((await request(app).post('/join/tok').send({ password: 'longenough1' })).status).toBe(400);
+    expect((await request(app).post('/join/tok').send({ password: 'longenough12' })).status).toBe(400);
     expect((await request(app).post('/join/tok').send({ username: 'x', password: 'short' })).status).toBe(400);
     expect(mocks.consumeInvite).not.toHaveBeenCalled();
   });
@@ -283,7 +283,7 @@ describe('POST /join-sandbox/:token', () => {
     expect(res.body.sandbox).toEqual({ orgId: 9, clients: 6, sessions: 30 });
     expect(mocks.consumeSandboxInvite).toHaveBeenCalledWith('raw-tok');
     expect(mocks.createOrganization).toHaveBeenCalledWith({ name: "newclient's Sandbox", kind: 'sandbox' });
-    expect(mocks.createUser).toHaveBeenCalledWith('newclient', 'longenough1', 'caseworker', { orgId: 9, isSandbox: true });
+    expect(mocks.createUser).toHaveBeenCalledWith('newclient', 'longenough12', 'caseworker', { orgId: 9, isSandbox: true });
     // Deterministic seed: keyed off the invite's token_hash, in-request.
     expect(mocks.seedSandboxCaseload).toHaveBeenCalledWith({
       ownerId: 42, ownerUsername: 'newclient', ownerRole: 'caseworker', orgId: 9,

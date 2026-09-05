@@ -504,6 +504,13 @@ export default function App() {
         }
       });
 
+      // Deterministic crisis-resource surfacing: a high-severity flag must not
+      // depend on the model choosing to include resources in its reply — the
+      // server's crisis-emergency event opens the resource card directly.
+      socket.on('session:crisis-emergency', () => {
+        setToolUI({ kind: 'resource', resourceType: 'all' });
+      });
+
       socketRef.current = socket;
 
       // Add preamble message to chat (similar to realtime voice therapy)
@@ -636,6 +643,13 @@ export default function App() {
       toast.warning('This study is only open to adults 18 and older, so this session is ending. Take good care.');
       // Latest-ref for the same stale-closure reason as session:status above.
       void stopSessionRef.current();
+    });
+
+    // Deterministic crisis-resource surfacing: a high-severity flag must not
+    // depend on the model choosing to call show_resource_card — the server's
+    // crisis-emergency event opens the resource card directly.
+    socket.on('session:crisis-emergency', () => {
+      setToolUI({ kind: 'resource', resourceType: 'all' });
     });
 
     // Listen for crisis intervention messages

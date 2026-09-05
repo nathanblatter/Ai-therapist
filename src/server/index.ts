@@ -44,6 +44,7 @@ import adminSessionsRoutes from "./routes/admin/sessions.routes.js";
 import sidebandRoutes from "./routes/admin/sideband.routes.js";
 import insightsRoutes from "./routes/admin/insights.routes.js";
 import participantProfileRoutes from "./routes/admin/participantProfile.routes.js";
+import studyStatusRoutes from "./routes/admin/studyStatus.routes.js";
 import knowledgeRoutes from "./routes/admin/knowledge.routes.js";
 import qualtricsSyncRoutes from "./routes/admin/qualtricsSync.routes.js";
 import prepRoutes from "./routes/admin/prep.routes.js";
@@ -696,6 +697,9 @@ app.use(insightsRoutes());
 
 // Participant profile (memory-first clinical view + per-user sessions) -> routes/admin/participantProfile.routes.ts
 app.use(participantProfileRoutes());
+
+// Researcher study-status control (pause/resume/withdraw) -> routes/admin/studyStatus.routes.ts
+app.use(studyStatusRoutes());
 
 // Clinician pre-session prep digest -> routes/admin/prep.routes.ts
 app.use(prepRoutes());

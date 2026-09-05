@@ -140,6 +140,29 @@ export async function getLatestConsentForUser(userId: number): Promise<ConsentRo
   return result.rows[0] ?? null;
 }
 
+/**
+ * Whether audio recording is consented for a session's owner (migration 086
+ * enforcement): false only when the session is linked to a user whose LATEST
+ * consent snapshot has recording_enabled = false. Sessions without a linked
+ * user (demo/anonymous) or with no consent rows keep prior behavior (true) —
+ * the global session_recording_enabled feature flag still gates them upstream.
+ */
+export async function isRecordingConsentedForSession(sessionId: string): Promise<boolean> {
+  const result = await pool.query<{ recording_enabled: boolean }>(
+    `SELECT pc.recording_enabled
+     FROM therapy_sessions ts
+     JOIN LATERAL (
+       SELECT recording_enabled FROM participant_consents
+       WHERE user_id = ts.user_id
+       ORDER BY accepted_at DESC
+       LIMIT 1
+     ) pc ON true
+     WHERE ts.session_id = $1 AND ts.user_id IS NOT NULL`,
+    [sessionId]
+  );
+  return result.rows[0]?.recording_enabled ?? true;
+}
+
 /** The consent record tied to a specific session, or null. */
 export async function getConsentForSession(sessionId: string): Promise<ConsentRow | null> {
   const result = await pool.query<ConsentRow>(

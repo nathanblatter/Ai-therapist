@@ -30,7 +30,7 @@ export async function redactSession(sessionId: string): Promise<void> {
     return;
   }
 
-  console.log(`🔒 Redacting session ${sessionId.substring(0, 12)}... (${rows.length} messages, batched)`);
+  console.log(`Redacting session ${sessionId.substring(0, 12)}... (${rows.length} messages, batched)`);
 
   try {
     const redacted = await redactPHIBatch(rows.map(r => ({ id: r.message_id, content: r.content })));

@@ -1,0 +1,9 @@
+App_Tutorial_09.04.2026.pdf is one edit behind App_Tutorial_09.04.2026.docx.
+
+The docx header was corrected on 2026-09-04: "text HELLO to 741741" changed to
+"text HOME to 741741" (Crisis Text Line keyword). The PDF still shows HELLO.
+
+LibreOffice (soffice) was not available on this machine to regenerate the PDF
+automatically. Please re-export the PDF from the corrected docx (e.g. open in
+Word/Pages and Save as PDF, or: soffice --headless --convert-to pdf
+"App_Tutorial_09.04.2026.docx") and then delete this note.
