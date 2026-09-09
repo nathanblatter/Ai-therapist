@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw, Flag } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
 import useAuth from "../hooks/useAuth";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
 import ErrorBoundary from "../../shared/components/ErrorBoundary";
-import FlightdeckWidget from "./FlightdeckWidget";
+import BugReport from "../../main/components/BugReport";
 
 // Heavy, independently-navigable views are code-split so the initial admin
 // bundle stays small.
@@ -39,7 +39,6 @@ const MessagingInbox = lazy(() => import("./MessagingInbox"));
 const SandboxInvites = lazy(() => import("./SandboxInvites"));
 const QualtricsSync = lazy(() => import("./QualtricsSync"));
 const SurveyData = lazy(() => import("./SurveyData"));
-const Flightdeck = lazy(() => import("./Flightdeck"));
 const Assistant = lazy(() => import("./Assistant"));
 
 // The subset of the users-table row the profile page needs up front.
@@ -83,7 +82,7 @@ export default function AdminApp() {
   // Shared cached auth status: role for nav/landing, sandbox flag for the
   // persistent banner + one-time onboarding callout (all client data in a
   // sandbox account is synthetic).
-  const { role: userRole, isSandbox, isCareTeam, loading: authLoading } = useAuth();
+  const { role: userRole, username, isSandbox, isCareTeam, loading: authLoading } = useAuth();
   const [sandboxCalloutDismissed, setSandboxCalloutDismissed] = useState(() => {
     try { return localStorage.getItem('sandbox-onboarding-dismissed') === '1'; } catch { return false; }
   });
@@ -247,7 +246,6 @@ export default function AdminApp() {
         { id: 'sandbox', label: 'Sandbox Invites', icon: Box, researcherOnly: true, researchOnly: true },
         { id: 'qualtrics', label: 'Qualtrics Sync', icon: RefreshCw, researcherOnly: true, researchOnly: true },
         { id: 'survey-data', label: 'Survey Data', icon: Clipboard, researcherOnly: true, researchOnly: true },
-        { id: 'flightdeck', label: 'Findings', icon: Flag, roles: ['therapist', 'researcher'] },
         { id: 'export', label: 'Export', icon: Download, researchOnly: true },
       ],
     },
@@ -428,7 +426,6 @@ export default function AdminApp() {
               {currentView === 'study-ops' && <StudyOps />}
               {currentView === 'qualtrics' && <QualtricsSync />}
               {currentView === 'survey-data' && <SurveyData />}
-              {currentView === 'flightdeck' && <Flightdeck />}
               {currentView === 'assistant' && <Assistant role={userRole} />}
               {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
@@ -465,10 +462,16 @@ export default function AdminApp() {
         </Suspense>
       )}
 
-      {/* Floating flightdeck findings widget (mirrors the participant-side
-          report pill); findings access is therapist/researcher. */}
-      {(userRole === 'therapist' || userRole === 'researcher') && (
-        <FlightdeckWidget onOpenFull={() => setCurrentView('flightdeck')} />
+      {/* Staff feedback pill (same widget + ingest as the participant side):
+          the app is a flightdeck SOURCE — stress-test feedback drops straight
+          into Nathan's queue, stamped with the reporter's identity. */}
+      {userRole && (
+        <BugReport
+          buttonLabel="Report feedback"
+          heading="Feedback for the study team?"
+          subheading="Bugs, rough edges, ideas — anything you notice lands directly in the work queue."
+          extraMeta={{ surface: 'admin', reporter: username, reporter_role: userRole }}
+        />
       )}
 
       {/* Toast Notifications */}

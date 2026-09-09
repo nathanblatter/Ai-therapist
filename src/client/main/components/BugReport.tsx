@@ -16,7 +16,21 @@ type Status = "idle" | "sending" | "sent" | "error";
 
 type Shot = { file: File; preview: string };
 
-export default function BugReport() {
+interface BugReportProps {
+  /** Extra meta merged into the report payload (e.g. staff reporter identity
+   *  from the admin portal — the endpoint is public and has no session). */
+  extraMeta?: Record<string, unknown>;
+  buttonLabel?: string;
+  heading?: string;
+  subheading?: string;
+}
+
+export default function BugReport({
+  extraMeta,
+  buttonLabel = "Report a problem",
+  heading = "Something not working?",
+  subheading = "Let us know what happened — it helps us make this better.",
+}: BugReportProps = {}) {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -101,7 +115,7 @@ export default function BugReport() {
           message: trimmed,
           severity,
           url: window.location.href,
-          meta: { path: window.location.pathname, viewport: `${window.innerWidth}x${window.innerHeight}`, userAgent: navigator.userAgent },
+          meta: { path: window.location.pathname, viewport: `${window.innerWidth}x${window.innerHeight}`, userAgent: navigator.userAgent, ...extraMeta },
         }),
       });
       if (!res.ok) throw new Error();
@@ -141,7 +155,7 @@ export default function BugReport() {
                    hover:-translate-y-0.5 hover:bg-navy focus:outline-none focus-visible:ring-2 focus-visible:ring-lightBlue"
       >
         <MessageSquare size={16} aria-hidden="true" />
-        <span className="hidden sm:inline">Report a problem</span>
+        <span className="hidden sm:inline">{buttonLabel}</span>
       </button>
 
       {open && (
@@ -151,10 +165,8 @@ export default function BugReport() {
         >
           <div role="dialog" aria-modal="true" aria-label="Report a problem"
                className="w-full max-w-md rounded-2xl border border-lightBlue bg-white p-6 shadow-2xl">
-            <h2 className="text-xl font-semibold text-navy">Something not working?</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Let us know what happened — it helps us make this better.
-            </p>
+            <h2 className="text-xl font-semibold text-navy">{heading}</h2>
+            <p className="mt-1 text-sm text-gray-500">{subheading}</p>
 
             {status === "sent" ? (
               <div className="mt-6 rounded-xl bg-lightBlue/30 px-4 py-6 text-center text-sm font-medium text-navy">
