@@ -25,6 +25,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       FLIGHTDECK_URL: ${FLIGHTDECK_URL:-http://flightdeck:8080}
       FLIGHTDECK_INGEST_KEY: ${FLIGHTDECK_INGEST_KEY}
+      FLIGHTDECK_READ_KEY: ${FLIGHTDECK_READ_KEY}
       # Object storage for session recordings. Endpoint is hardcoded (not
       # interpolated) so the host .env's local-dev value (127.0.0.1:9000) can't
       # leak in — the container reaches MinIO by service name on the shared
