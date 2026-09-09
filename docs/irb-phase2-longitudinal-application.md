@@ -15,8 +15,12 @@ proposed answer text ready to paste into the xForm.
 **Principal Investigator:** James Gaskin (Information Systems) — same PI qualifications text as
 Phase 1 (reuse verbatim; it is PI-specific, not study-specific).
 
-**Co-Investigators:** David Erekson (CAPS clinical director) — **[DECISION Q1]** confirm he
-continues as Co-I; his role grows in Phase 2 (clinical oversight of longitudinal remote use).
+**Co-Investigators:** none carried over — Erekson is NOT on Phase 2 (Nathan decision Q1,
+2026-09-02). **[PENDING 2026-09-09]** Kimberly Sagers, LCSW (BYU CAPS, Marriott School
+Specialist) has agreed in principle to be named as licensed clinical consultant and is
+seeking her CAPS supervisor's permission — see docs/irb-phase2-sagers-personnel.md for the
+staged personnel entry, role text, and Q17 implications (supervisor permission doubles as
+CAPS documentation, retiring the placeholder support letter).
 
 **Research personnel:** same RA roster as Phase 1 (Blatter, Hutchings, Limb, Ward, Villar
 Barrios, Morrow, Ashcroft, Zapata Neira) — **[DECISION Q2]** confirm roster; the Personnel
