@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, Box, Info, RefreshCw, Flag } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw, Flag } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
 import useAuth from "../hooks/useAuth";
@@ -39,6 +39,7 @@ const SandboxInvites = lazy(() => import("./SandboxInvites"));
 const QualtricsSync = lazy(() => import("./QualtricsSync"));
 const SurveyData = lazy(() => import("./SurveyData"));
 const Flightdeck = lazy(() => import("./Flightdeck"));
+const Assistant = lazy(() => import("./Assistant"));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -209,6 +210,7 @@ export default function AdminApp() {
         { id: 'sessions', label: 'Sessions', icon: List, roles: ['therapist', 'researcher', 'demo'] },
         // Historic id: 'dashboard' renders the Analytics view.
         { id: 'dashboard', label: 'Analytics', icon: BarChart2, roles: ['therapist', 'researcher', 'demo'] },
+        { id: 'assistant', label: 'Assistant', icon: MessageCircle, roles: ['therapist', 'researcher', 'caseworker'] },
       ],
     },
     {
@@ -426,6 +428,7 @@ export default function AdminApp() {
               {currentView === 'qualtrics' && <QualtricsSync />}
               {currentView === 'survey-data' && <SurveyData />}
               {currentView === 'flightdeck' && <Flightdeck />}
+              {currentView === 'assistant' && <Assistant role={userRole} />}
               {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
               {currentView === 'retention' && <DataRetention />}

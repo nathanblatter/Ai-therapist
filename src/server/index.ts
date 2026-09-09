@@ -66,6 +66,7 @@ import surveysRoutes from "./routes/public/surveys.routes.js";
 import qualtricsWebhookRoutes from "./routes/public/qualtricsWebhook.routes.js";
 import caseworkerDashboardRoutes from "./routes/admin/caseworkerDashboard.routes.js";
 import flightdeckRoutes from "./routes/admin/flightdeck.routes.js";
+import assistantRoutes from "./routes/admin/assistant.routes.js";
 import workQueueRoutes from "./routes/admin/workQueue.routes.js";
 import notificationsRoutes from "./routes/admin/notifications.routes.js";
 import escalationsRoutes from "./routes/admin/escalations.routes.js";
@@ -714,6 +715,7 @@ app.use(invitesRoutes());
 // Caseworker triage dashboard (roster + detail) -> routes/admin/caseworkerDashboard.routes.ts
 app.use(caseworkerDashboardRoutes());
 app.use(flightdeckRoutes());
+app.use(assistantRoutes());
 
 // Work queue (ack/resolve lifecycle) -> routes/admin/workQueue.routes.ts
 app.use(workQueueRoutes());
