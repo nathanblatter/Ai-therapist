@@ -46,6 +46,23 @@ minutes once permission lands. Owner of the go/no-go and designation: Gaskin.
   credential for her; more responsibility).
 - Authorship/experience expectations, stated explicitly.
 
+## OneAegis lookup results (checked 2026-09-09, Nathan's session)
+
+- **She has NO OneAegis account.** The all-personnel picker's surname search
+  returns only Abby, Luke, and Ryan Sagers — no Kimberly. (Decisive: the
+  surname search is not truncated the way first-name searches are.)
+- **She cannot be a Co-Investigator in the form regardless**: that picker is
+  scoped to PI-eligible faculty (Gaskin/Meservy appear; Blatter — who has an
+  account — does not). As CAPS staff she goes in the **Research Personnel
+  table** (like the RA roster, which shows role + subject-interaction +
+  training-expiry per row); "licensed clinical consultant" lives in the
+  application text and her row's role field.
+- **The unblock is hers, ~10 minutes:** log in once at byu.oneaegis.com with
+  her BYU NetID (Click here to log in with your BYU Account) — first CAS
+  login provisions the account — and make sure her CITI human-subjects
+  training is current so the training-verification column resolves. The
+  moment she appears in the picker, we add the row.
+
 ## OneAegis actions (once permission lands)
 
 1. Personnel page: add row — Kimberly Sagers, LCSW, BYU CAPS; role per
