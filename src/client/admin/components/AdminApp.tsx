@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw, ExternalLink } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
 import useAuth from "../hooks/useAuth";
@@ -365,6 +365,21 @@ export default function AdminApp() {
                 </div>
               </div>
             ))}
+
+            {/* Cross-surface jump (Kimberly's request): the participant app in
+                a new tab, so stress-testers can flip between the AI side and
+                the admin side without hunting for the URL. */}
+            <div className="pt-2 mt-2 border-t border-gray-200">
+              <a
+                href="/"
+                target="_blank"
+                rel="noopener"
+                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition text-gray-700 hover:bg-gray-100"
+              >
+                <ExternalLink size={20} />
+                <span className="font-medium">Participant App</span>
+              </a>
+            </div>
           </nav>
         </aside>
 
