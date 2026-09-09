@@ -1,0 +1,67 @@
+/* AI Support Agent Study - BYU-branded survey skin (navy #002E5D / royal #0047BA / lightBlue #BDD6E6) */
+:root {
+  --background-color: #002E5D;
+  --mixes-primary-1: #0047BA;
+  --mixes-primary-2: #FFFFFF;
+  --mixes-primary-for-active-1: #E5EEF8;
+  --mixes-primary-for-active-2: #002E5D;
+  --mixes-primary-text-on-white-2: #0047BA;
+  --palettes-info-1: #0047BA;
+  --palettes-info-2: #5E8BC8;
+  --question-text-size: 1.08rem;
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+#page { background: linear-gradient(160deg,#001527 0%,#00335E 55%,#002E5D 100%) fixed; }
+main#survey-canvas { max-width: 860px; margin: 0 auto; }
+
+/* header */
+#header-container { background: transparent; }
+#header.rich-text { padding: 26px 0 14px; }
+.ws-head { text-align:center; }
+.ws-brand { font-family:'Consolas','Andale Mono',monospace; font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:#8FB3D6; }
+.ws-title { font-family:'Consolas','Andale Mono',monospace; font-size:25px; font-weight:700; color:#FFFFFF; margin-top:7px; }
+.ws-rule { width:56px; height:3px; background:#BDD6E6; margin:13px auto 0; border-radius:2px; }
+
+/* progress bar */
+#progress-bar { color:#C8DCEA; font-family:'Consolas','Andale Mono',monospace; font-size:12px; }
+#progress-bar > div { background:#00224A; border-radius:6px; overflow:hidden; }
+#progress-bar > div > div { background:#BDD6E6; }
+
+/* content card */
+section#contents { background:#FFFFFF; border-radius:14px; box-shadow:0 12px 34px rgba(0,16,36,.40); padding: 10px 36px; }
+section.question { padding: 20px 0 18px; border-bottom:1px solid #E3ECF3; }
+section.question:last-of-type { border-bottom:none; }
+.question-display { color:#14243A; line-height:1.55; }
+
+/* navigation */
+nav#navigation { padding: 14px 6px 30px; }
+#next-button.navigation-button, #previous-button.navigation-button { border-radius:8px; font-family:'Consolas','Andale Mono',monospace; }
+
+/* intro + crisis callout */
+.ws-intro { font-size:1.02rem; color:#14243A; }
+.ws-crisis { margin-top:14px; background:#F0F6FA; border:1px solid #BDD6E6; border-left:4px solid #0047BA; border-radius:8px; padding:12px 14px; font-family:'Consolas','Andale Mono',monospace; font-size:.82rem; line-height:1.65; color:#002E5D; }
+
+/* WAI lead + footnote */
+.ws-qlead .ws-eyebrow { display:block; font-family:'Consolas','Andale Mono',monospace; font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:#0047BA; margin-bottom:7px; }
+.ws-footnote { font-family:'Consolas','Andale Mono',monospace; font-size:.72rem; color:#6B7280; line-height:1.6; }
+section#question-QID14 { padding-top:8px; }
+
+/* matrix (JFE6: .matrix-row is display:contents, so paint its cells, not the row) */
+.matrix-table .matrix-header { background:#FFFFFF; box-shadow:0 2px 0 #E3ECF3; }
+.matrix-header .matrix-scale-points-item p,
+.matrix-header .matrix-scale-points-item span { font-family:'Consolas','Andale Mono',monospace !important; font-size:.74rem !important; color:#0047BA !important; letter-spacing:.04em; }
+.matrix-content .matrix-row:nth-child(even) .matrix-statement-header,
+.matrix-content .matrix-row:nth-child(even) .statement-wrapper { background:#F3F8FB; }
+.matrix-content .matrix-row:hover .matrix-statement-header,
+.matrix-content .matrix-row:hover .statement-wrapper { background:#E9F2F9; }
+.matrix-statement-header { color:#14243A; border-radius:6px 0 0 6px; }
+.statement-wrapper { border-radius:0 6px 6px 0; }
+@media (min-width: 701px) {
+  .sticky-container.matrix-table .matrix-content { grid-template-columns: minmax(240px, 40%) 1fr !important; }
+}
+
+@media (max-width: 700px) {
+  section#contents { padding: 6px 16px; border-radius:10px; }
+  .ws-title { font-size:20px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition-duration:0.01ms !important; animation-duration:0.01ms !important; } }
