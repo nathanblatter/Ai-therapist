@@ -41,13 +41,82 @@ export default function BugReport({
   const [shotError, setShotError] = useState("");
   const [shotWarning, setShotWarning] = useState("");
   const [dragging, setDragging] = useState(false);
+  // Movable pill: null = the default corner; a position once the user drags
+  // it out of the way (persisted per browser so it stays where they put it).
+  const [pillPos, setPillPos] = useState<{ x: number; y: number } | null>(null);
+  const [pillDragging, setPillDragging] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const shotsRef = useRef<Shot[]>([]);
   shotsRef.current = shots;
+  const pillRef = useRef<HTMLButtonElement>(null);
+  const pillDrag = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
+
+  const clampPillPos = (x: number, y: number) => {
+    const w = pillRef.current?.offsetWidth ?? 170;
+    const h = pillRef.current?.offsetHeight ?? 44;
+    return {
+      x: Math.min(Math.max(8, x), window.innerWidth - w - 8),
+      y: Math.min(Math.max(8, y), window.innerHeight - h - 8),
+    };
+  };
 
   // Client-only — avoids any SSR hydration mismatch.
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const raw = localStorage.getItem("bug-report-pill-pos");
+      if (raw) {
+        const p = JSON.parse(raw) as { x?: unknown; y?: unknown };
+        if (typeof p.x === "number" && typeof p.y === "number") {
+          setPillPos(clampPillPos(p.x, p.y));
+        }
+      }
+    } catch { /* default corner */ }
+  }, []);
+
+  // Keep a moved pill on screen when the window shrinks. The functional
+  // update reads the latest position, so this only needs to attach once.
+  useEffect(() => {
+    const onResize = () => setPillPos((p) => (p ? clampPillPos(p.x, p.y) : p));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  function onPillPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
+    const rect = pillRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    pillDrag.current = { startX: e.clientX, startY: e.clientY, originX: rect.left, originY: rect.top, moved: false };
+    pillRef.current?.setPointerCapture(e.pointerId);
+  }
+
+  function onPillPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
+    const d = pillDrag.current;
+    if (!d) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (!d.moved && Math.hypot(dx, dy) < 5) return; // click, not a drag
+    if (!d.moved) setPillDragging(true);
+    d.moved = true;
+    setPillPos(clampPillPos(d.originX + dx, d.originY + dy));
+  }
+
+  function onPillPointerUp(e: React.PointerEvent<HTMLButtonElement>) {
+    const d = pillDrag.current;
+    if (!d) return;
+    pillRef.current?.releasePointerCapture(e.pointerId);
+    setPillDragging(false);
+    if (d.moved) {
+      setPillPos((p) => {
+        if (p) {
+          try { localStorage.setItem("bug-report-pill-pos", JSON.stringify(p)); } catch { /* best effort */ }
+        }
+        return p;
+      });
+    }
+    // pillDrag is cleared in onClick (which fires after pointerup) so the
+    // click handler can tell a drag-release from a real click.
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -147,9 +216,24 @@ export default function BugReport({
   return (
     <>
       <button
+        ref={pillRef}
         type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Report a problem"
+        onClick={() => {
+          const wasDrag = pillDrag.current?.moved;
+          pillDrag.current = null;
+          if (!wasDrag) setOpen(true);
+        }}
+        onPointerDown={onPillPointerDown}
+        onPointerMove={onPillPointerMove}
+        onPointerUp={onPillPointerUp}
+        onPointerCancel={() => { pillDrag.current = null; setPillDragging(false); }}
+        aria-label={buttonLabel}
+        title="Drag to move"
+        style={{
+          touchAction: "none",
+          ...(pillPos ? { left: pillPos.x, top: pillPos.y, right: "auto", bottom: "auto" } : {}),
+          ...(pillDragging ? { transition: "none" } : {}),
+        }}
         className="fixed bottom-24 right-4 sm:bottom-5 sm:right-5 z-30 flex items-center gap-2 rounded-full bg-royal px-4 py-3
                    text-sm font-medium text-white shadow-lg shadow-royal/25 transition
                    hover:-translate-y-0.5 hover:bg-navy focus:outline-none focus-visible:ring-2 focus-visible:ring-lightBlue"
