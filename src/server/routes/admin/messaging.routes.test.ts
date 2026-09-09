@@ -115,8 +115,11 @@ describe('GET /api/admin/messaging/inbox', () => {
     expect(dbMocks.listThreadsForClinician).toHaveBeenCalledWith(CLINICIAN_ID);
   });
 
-  it('blocks researchers (clinical correspondence, not study data) and participants', async () => {
-    expect((await request(appAs('researcher')).get('/api/admin/messaging/inbox')).status).toBe(403);
+  it('allows researchers (empty own-thread inbox), blocks participants and anonymous', async () => {
+    // Researchers reach the surface (unscoped study role sees every admin
+    // view) but own no threads — the clinician_role CHECK keeps them out of
+    // the correspondence itself.
+    expect((await request(appAs('researcher')).get('/api/admin/messaging/inbox')).status).toBe(200);
     expect((await request(appAs('participant')).get('/api/admin/messaging/inbox')).status).toBe(403);
     expect((await request(appAs(null)).get('/api/admin/messaging/inbox')).status).toBe(401);
   });

@@ -52,7 +52,11 @@ function participantMessageView(m: ThreadMessageRow) {
 export default function adminMessagingRoutes(): Router {
   const router = Router();
 
-  const requireClinician = requireRole('therapist', 'caseworker');
+  // Researchers get the messaging surface read-only in practice: threads are
+  // owned by care-team members (DB CHECK on clinician_role), so a researcher
+  // inbox is empty and thread creation is blocked by isCareTeamRole below —
+  // but the view must not 403 for the unscoped study role.
+  const requireClinician = requireRole('therapist', 'caseworker', 'researcher');
 
   // GET /api/admin/messaging/inbox - the clinician's threads + unread total
   router.get('/api/admin/messaging/inbox', requireClinician, async (req, res) => {

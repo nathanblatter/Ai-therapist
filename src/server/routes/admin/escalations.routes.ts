@@ -360,10 +360,11 @@ export default function escalationsRoutes(): Router {
     }
   );
 
-  // POST /admin/api/escalations/:escalationId/reopen - raiser or care team
+  // POST /admin/api/escalations/:escalationId/reopen - raiser, care team, or
+  // the unscoped study role (requireEscalationAccess org-checks researchers)
   router.post(
     '/admin/api/escalations/:escalationId/reopen',
-    requireRole('therapist', 'caseworker'),
+    requireRole('therapist', 'caseworker', 'researcher'),
     requireEscalationAccess(),
     async (req, res) => {
       try {

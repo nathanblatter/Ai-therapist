@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, Box, Info, RefreshCw } from "react-feather";
+import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, Box, Info, RefreshCw, Flag } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
 import useAuth from "../hooks/useAuth";
@@ -38,6 +38,7 @@ const MessagingInbox = lazy(() => import("./MessagingInbox"));
 const SandboxInvites = lazy(() => import("./SandboxInvites"));
 const QualtricsSync = lazy(() => import("./QualtricsSync"));
 const SurveyData = lazy(() => import("./SurveyData"));
+const Flightdeck = lazy(() => import("./Flightdeck"));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -203,7 +204,7 @@ export default function AdminApp() {
         // queue. Caseworkers are summaries-tier — Live Monitoring, Sessions
         // and Analytics stay hidden for them (roles allowlists below).
         { id: 'triage', label: 'Triage', icon: Target, roles: ['caseworker', 'therapist', 'researcher'] },
-        { id: 'work-queue', label: 'Work Queue', icon: Inbox, roles: ['caseworker', 'therapist'] },
+        { id: 'work-queue', label: 'Work Queue', icon: Inbox, roles: ['caseworker', 'therapist', 'researcher'] },
         { id: 'live', label: 'Live Monitoring', icon: Activity, roles: ['therapist', 'researcher', 'demo'] },
         { id: 'sessions', label: 'Sessions', icon: List, roles: ['therapist', 'researcher', 'demo'] },
         // Historic id: 'dashboard' renders the Analytics view.
@@ -214,7 +215,7 @@ export default function AdminApp() {
       label: 'Safety',
       items: [
         { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle },
-        { id: 'escalations', label: 'Escalations', icon: ArrowUpCircle, roles: ['therapist', 'caseworker'] },
+        { id: 'escalations', label: 'Escalations', icon: ArrowUpCircle, roles: ['therapist', 'caseworker', 'researcher'] },
         { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus, roles: ['therapist', 'caseworker', 'researcher', 'demo'] },
       ],
     },
@@ -226,7 +227,7 @@ export default function AdminApp() {
         // invites; researcher sees the assignment matrix. Hidden from demo
         // accounts for MVP (demoVisible: false).
         { id: 'caseload', label: 'Caseload', icon: UserCheck, demoVisible: false },
-        { id: 'messages', label: 'Messages', icon: MessageSquare, roles: ['therapist', 'caseworker'] },
+        { id: 'messages', label: 'Messages', icon: MessageSquare, roles: ['therapist', 'caseworker', 'researcher'] },
         { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
         { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle, roles: ['therapist', 'researcher', 'demo'] },
       ],
@@ -243,6 +244,7 @@ export default function AdminApp() {
         { id: 'sandbox', label: 'Sandbox Invites', icon: Box, researcherOnly: true, researchOnly: true },
         { id: 'qualtrics', label: 'Qualtrics Sync', icon: RefreshCw, researcherOnly: true, researchOnly: true },
         { id: 'survey-data', label: 'Survey Data', icon: Clipboard, researcherOnly: true, researchOnly: true },
+        { id: 'flightdeck', label: 'Findings', icon: Flag, roles: ['therapist', 'researcher'] },
         { id: 'export', label: 'Export', icon: Download, researchOnly: true },
       ],
     },
@@ -423,6 +425,7 @@ export default function AdminApp() {
               {currentView === 'study-ops' && <StudyOps />}
               {currentView === 'qualtrics' && <QualtricsSync />}
               {currentView === 'survey-data' && <SurveyData />}
+              {currentView === 'flightdeck' && <Flightdeck />}
               {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
               {currentView === 'retention' && <DataRetention />}
