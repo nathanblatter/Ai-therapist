@@ -29,24 +29,21 @@ const WEEKLY_KEYS = {
 
 const USAGE_LABELS: Record<number, string> = { 1: '0', 2: '1', 3: '2-3', 4: '4-6', 5: '7 or more' };
 
-// Weekly W4 alliance matrix (6 investigator-developed items adapted from the
-// working-alliance construct; IRB Phase 2 Q10 decision 2026-09-04). Matrix
-// rows export as QIDx_n subfields on a 1-5 agree scale. Row order after the
-// live-survey edit (rows 4-6 appended to the original 3):
-//   _1 "I feel the AI understands me"                       (Bond)
-//   _2 "I feel comfortable being open with the AI"          (Bond)
-//   _3 "The AI and I are working toward things I care about" (Goal)
-//   _4 "The AI and I agree on what to work on"              (Task)
-//   _5 "The way we work on my concerns feels right for me"  (Task)
-//   _6 "The AI and I agree on what I want to get out of it" (Goal)
+// Weekly W4 alliance matrix: WAI-SR client version (Hatcher & Gillaspy 2006;
+// items (c) Adam Horvath), adapted "my therapist" -> "the AI support agent",
+// licensed by SPR 2026-09-09 (letter in docs/irb-phase2-instruments). Replaced
+// the 6 investigator-developed stopgap items on 2026-09-09 while the survey
+// was still Draft (no field data on the old keys). 12 rows in canonical WAI-SR
+// item order, 1-5 frequency scale (Seldom..Always, no recodes); subscale
+// mapping per the instrument's scoring key.
 // VERIFY the matrix QID + row order against live survey-definitions after ANY
 // Qualtrics edit — alliance metrics return null unless every item is present
 // and in range, so a stale key yields empty columns, never corrupt scores.
 const ALLIANCE_MATRIX_QID = 'QID7';
 const ALLIANCE_KEYS = {
-  bond: [`${ALLIANCE_MATRIX_QID}_1`, `${ALLIANCE_MATRIX_QID}_2`],
-  goal: [`${ALLIANCE_MATRIX_QID}_3`, `${ALLIANCE_MATRIX_QID}_6`],
-  task: [`${ALLIANCE_MATRIX_QID}_4`, `${ALLIANCE_MATRIX_QID}_5`],
+  task: [1, 2, 10, 12].map((n) => `${ALLIANCE_MATRIX_QID}_${n}`),
+  bond: [3, 5, 7, 9].map((n) => `${ALLIANCE_MATRIX_QID}_${n}`),
+  goal: [4, 6, 8, 11].map((n) => `${ALLIANCE_MATRIX_QID}_${n}`),
 } as const;
 
 export interface InstrumentScores {
@@ -131,13 +128,13 @@ export interface WeeklyMetrics {
   helpfulness: number | null;
   /** Display bucket for session count, e.g. "2-3". */
   usage: string | null;
-  /** Mean of the 2 Task items (1-5); null unless both present and in range. */
+  /** Mean of the 4 WAI-SR Task items (1-5); null unless all present and in range. */
   allianceTask: number | null;
-  /** Mean of the 2 Bond items (1-5). */
+  /** Mean of the 4 WAI-SR Bond items (1-5). */
   allianceBond: number | null;
-  /** Mean of the 2 Goal items (1-5). */
+  /** Mean of the 4 WAI-SR Goal items (1-5). */
   allianceGoal: number | null;
-  /** Mean of all 6 alliance items (1-5); null unless all subscales scored. */
+  /** Mean of all 12 WAI-SR items (1-5); null unless all subscales scored. */
   allianceTotal: number | null;
 }
 
@@ -147,10 +144,14 @@ function choice(answers: Record<string, unknown>, key: string, max: number): num
   return raw;
 }
 
-function subscaleMean(answers: Record<string, unknown>, keys: readonly [string, string]): number | null {
-  const a = choice(answers, keys[0], 5);
-  const b = choice(answers, keys[1], 5);
-  return a === null || b === null ? null : (a + b) / 2;
+function subscaleMean(answers: Record<string, unknown>, keys: readonly string[]): number | null {
+  let sum = 0;
+  for (const key of keys) {
+    const v = choice(answers, key, 5);
+    if (v === null) return null;
+    sum += v;
+  }
+  return Math.round((sum / keys.length) * 100) / 100;
 }
 
 /** Mood/stress/helpfulness/usage + alliance subscales from a weekly payload. */

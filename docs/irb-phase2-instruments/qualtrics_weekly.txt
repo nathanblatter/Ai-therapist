@@ -46,20 +46,30 @@ Not applicable - did not use it this week
 
 [[Question:Matrix:SingleAnswer]]
 [[ID:W4]]
-Please rate how much you agree with each statement, based on this week. (Shown only if you used the agent this week.)
+Below is a list of statements about experiences people might have with the AI support agent. Thinking about your conversations with the AI support agent this week, choose the category that best describes your own experience. There are no right or wrong answers. (Shown only if you used the agent this week. WAI-SR client version, adapted; Task items 1, 2, 10, 12; Bond items 3, 5, 7, 9; Goal items 4, 6, 8, 11.)
 [[Choices]]
-The AI support agent understands what matters to me.
-I feel comfortable being open with the AI support agent.
-The AI support agent and I are working toward things I care about.
-The AI support agent and I agree on what to work on in our conversations.
-The way the AI support agent and I work on my concerns feels right for me.
-The AI support agent and I agree on what I want to get out of using it.
+As a result of these sessions I am clearer as to how I might be able to change.
+What I am doing in these sessions gives me new ways of looking at my problem.
+I believe the AI support agent likes me.
+The AI support agent and I collaborate on setting goals for my sessions.
+The AI support agent and I respect each other.
+The AI support agent and I are working towards mutually agreed upon goals.
+I feel that the AI support agent appreciates me.
+The AI support agent and I agree on what is important for me to work on.
+I feel the AI support agent cares about me even when I do things that it does not approve of.
+I feel that the things I do in these sessions will help me to accomplish the changes that I want.
+The AI support agent and I have established a good understanding of the kind of changes that would be good for me.
+I believe the way we are working with my problem is correct.
 [[Answers]]
-Strongly disagree
-Somewhat disagree
-Neutral (neither agree nor disagree)
-Somewhat agree
-Strongly agree
+Seldom
+Sometimes
+Fairly Often
+Very Often
+Always
+
+[[Question:DB]]
+[[ID:W4NOTE]]
+Working Alliance Inventory - Short Revised (WAI-SR; Hatcher & Gillaspy, 2006), adapted for this study to refer to the AI support agent. Items copyright © Adam Horvath. Reprinted by permission of the Society for Psychotherapy Research © 2026.
 
 [[Question:MC:SingleAnswer:Vertical]]
 [[ID:W5]]

@@ -127,13 +127,16 @@ restricted to authorized study staff for safety review and oversight.
    Kroenke et al. 2003 (Med Care 41:1284-92).
 2. GAD-2 (Kroenke, Spitzer, Williams & Löwe) — public-domain validated 2-item anxiety
    screener, same administration. Cite Kroenke et al. 2007 (Ann Intern Med 146:317-25).
-3. Weekly check-in survey (investigator-developed, Qualtrics): usage reflection, perceived
-   usefulness, and a 6-item investigator-developed working-alliance measure adapted from the
-   working-alliance construct (Bordin's Task/Bond/Goal model; 2 items per dimension, 5-point
-   agreement scale). **[DECIDED Q10, 2026-09-04: investigator-developed items — the WAI-SR is
-   copyrighted (SPR); a permission request has been sent to SPR and, if granted before launch,
-   the items may be replaced with licensed WAI-SR wording via an amendment or pre-approval
-   update to this draft.]**
+3. Weekly check-in survey (Qualtrics): usage reflection, perceived usefulness, and the
+   Working Alliance Inventory — Short Revised (WAI-SR; Hatcher & Gillaspy, 2006), client
+   version adapted to refer to the AI support agent (12 items; Task/Bond/Goal subscales,
+   4 items each; 5-point Seldom–Always scale). Used with written permission from the
+   Society for Psychotherapy Research (letter dated 2026-09-09, attached); the required
+   note "Reprinted by permission of the Society for Psychotherapy Research © 2026." is
+   displayed at the end of the measure. Validation: WAI-SR psychometrics cite Hatcher &
+   Gillaspy 2006 (Psychother Res 16:12-25) and Munder et al. 2010 (Clin Psychol Psychother
+   17:231-9); item wording adapted only to name the AI support agent in place of the
+   therapist.
 4. Baseline survey (adapted from Phase 1 "Part 1" survey): demographics, therapy history,
    AI attitudes, and a contact email (required; used only to schedule onboarding and send
    survey reminder emails through BYU's Qualtrics platform — stored with the survey

@@ -1,5 +1,21 @@
 # Phase 2 IRB — Open questions for Nathan (and Dr. Gaskin / Dr. Erekson)
 
+## PRE-SUBMISSION SWEEP 2026-09-07 (Nathan-authed session; form saved, NOT submitted)
+
+- OneAegis draft verified page-by-page and the **Check & Submit validation passes clean**
+  (zero missing required fields). Instrument cards, consent (09.02v2, single copy), and
+  compensation are all current; stale 09.01 weekly docx already deleted.
+- **Attached this session** (Other Attachments, Study Material):
+  `Redaction_Validation_Evidence_09.07.2026.docx` (Safe Harbor 17/17 category test +
+  signal-retention check) and `Crisis_Notification_and_Admin_Dashboard_Examples_09.07.2026.docx`
+  (verbatim SMS page templates + 5 demo-env dashboard screenshots). The IRB comment now lists
+  only the CAPS letter and vendor DPA documentation as pending.
+- App_Tutorial PDF regenerated from the corrected docx (HELLO→HOME); NEEDS_REEXPORT.txt removed.
+- **Remaining, all people-gated:** Gaskin — ZDR/education-license documentation + account owner
+  (Q8), real CAPS letter + signer (Q17), budget confirmation (Q6), wellness-framing sanity check
+  (Q14), Phase 1 amendment interplay. Nathan — end-to-end read, then Submit (goes to Gaskin for
+  PI signature; target ~Thursday so the signature lands by Friday 9/11).
+
 ## ANSWERS FROM NATHAN (2026-09-02 interview) — ALL APPLIED same day
 
 Everything below has been executed in OneAegis + Qualtrics + the consent doc:
@@ -125,13 +141,16 @@ currently assumes; correct anything wrong and the draft gets updated.
 - **Q18 — Compensation:** ★ prorated: baseline $10, $3/weekly survey, $20 exit, ≈$54 total
   (or SONA-credit equivalents; drawing as budget fallback). Needs budget confirmation (Q6)
   and coercion check.
-- **Q10 — Alliance measure: DECIDED by Nathan 2026-09-04 — investigator-developed items.**
-  The weekly W4 matrix is expanded from 3 to 6 items covering Bordin's Task/Bond/Goal
-  dimensions (2 each, 5-pt agree scale); scoring (task/bond/goal subscale means + 6-item
-  total) is wired into the app's surveys_scored export. In parallel, Nathan sent a WAI-SR
-  permission request to SPR (sprexecutive@gmail.com, 2026-09-04); if SPR grants a license
-  before launch, the Draft survey items can be swapped for licensed WAI-SR wording (surveys
-  are still Draft; drift guard + QID re-verification apply).
+- **Q10 — Alliance measure: RESOLVED 2026-09-09 — licensed WAI-SR.** SPR granted written
+  permission (letter to Gaskin, 2026-09-09; filed as
+  `docs/irb-phase2-instruments/WAI_Permission_SPR_09.09.2026.pdf`) to use all versions of
+  the WAI in this research. The weekly W4 matrix was swapped (while still Draft, no field
+  data) from the 6 investigator-developed stopgap items to the full 12-item WAI-SR client
+  version, adapted "my therapist" → "the AI support agent" (Seldom–Always 5-pt scale;
+  Task 1,2,10,12 / Bond 3,5,7,9 / Goal 4,6,8,11). SPR's required note ("Reprinted by
+  permission of the Society for Psychotherapy Research © 2026.") is displayed at the end of
+  the measure in Qualtrics (QID14) and printed in the instrument doc. Scoring (4-item
+  subscale means + 12-item total) re-verified against the live definition (QID7_1..12).
 - **Q14 — "Not a therapeutic study" framing:** draft argues general-wellness/support framing.
   Sanity-check with Gaskin — FDA general-wellness guidance language included.
 
