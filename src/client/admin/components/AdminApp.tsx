@@ -6,6 +6,7 @@ import useAuth from "../hooks/useAuth";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
 import ErrorBoundary from "../../shared/components/ErrorBoundary";
+import FlightdeckWidget from "./FlightdeckWidget";
 
 // Heavy, independently-navigable views are code-split so the initial admin
 // bundle stays small.
@@ -462,6 +463,12 @@ export default function AdminApp() {
             isEditMode={isEditMode}
           />
         </Suspense>
+      )}
+
+      {/* Floating flightdeck findings widget (mirrors the participant-side
+          report pill); findings access is therapist/researcher. */}
+      {(userRole === 'therapist' || userRole === 'researcher') && (
+        <FlightdeckWidget onOpenFull={() => setCurrentView('flightdeck')} />
       )}
 
       {/* Toast Notifications */}
