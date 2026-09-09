@@ -4,7 +4,7 @@
 // item for a client on my caseload) so routes keep 404-over-403 semantics
 // without a second lookup.
 import { pool } from '../config/db.js';
-import type { CareTeamRole } from '../../shared/roles.js';
+import type { CareTeamRole, StaffCommsRole } from '../../shared/roles.js';
 
 export type WorkItemType =
   | 'crisis_flag'
@@ -28,7 +28,7 @@ export interface WorkItemRow {
   org_id: number;
   client_id: number | null;
   assignee_id: number | null;
-  assignee_role: CareTeamRole | null;
+  assignee_role: StaffCommsRole | null;
   item_type: WorkItemType;
   severity: WorkItemSeverity;
   title: string;
@@ -64,7 +64,7 @@ export interface EnqueueWorkItemInput {
   orgId: number;
   clientId?: number | null;
   assigneeId?: number | null;
-  assigneeRole?: CareTeamRole | null;
+  assigneeRole?: StaffCommsRole | null;
   itemType: WorkItemType;
   severity?: WorkItemSeverity;
   title: string;
@@ -180,6 +180,35 @@ export async function ackWorkItem(itemId: number, memberId: number): Promise<Wor
      WHERE item_id = $2 AND status = 'open' AND ${MEMBER_VISIBILITY}
      RETURNING ${ITEM_COLUMNS}`,
     [memberId, itemId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Org-scoped ack (researcher: unscoped in the org, no caseload edge). */
+export async function ackWorkItemForOrg(itemId: number, orgId: number, actorId: number): Promise<WorkItemRow | null> {
+  const result = await pool.query<WorkItemRow>(
+    `UPDATE work_items
+     SET status = 'acked', acked_by = $1, acked_at = now()
+     WHERE item_id = $2 AND status = 'open' AND org_id = $3
+     RETURNING ${ITEM_COLUMNS}`,
+    [actorId, itemId, orgId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Org-scoped resolve (researcher). Same null semantics as resolveWorkItem. */
+export async function resolveWorkItemForOrg(
+  itemId: number,
+  orgId: number,
+  actorId: number,
+  resolutionNote: string | null
+): Promise<WorkItemRow | null> {
+  const result = await pool.query<WorkItemRow>(
+    `UPDATE work_items
+     SET status = 'resolved', resolved_by = $1, resolved_at = now(), resolution_note = $4
+     WHERE item_id = $2 AND status IN ('open', 'acked') AND org_id = $3
+     RETURNING ${ITEM_COLUMNS}`,
+    [actorId, itemId, orgId, resolutionNote]
   );
   return result.rows[0] ?? null;
 }

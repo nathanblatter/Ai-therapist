@@ -2,8 +2,9 @@
 // docs/caseworker-portal.md section 3). One thread per (client, clinician)
 // pair, structurally enforcing the caseworker tier: a clinician only ever
 // sees their OWN correspondence with a client (requireThreadClinician,
-// 404-over-403), never another clinician's thread. Researchers are blocked
-// v1 (clinical correspondence, not study data — Nathan decision 7).
+// 404-over-403), never another clinician's thread. Since migration 091 the
+// unscoped researcher role may also own threads (full admin access, 2026-09-09
+// decision) — participants see those labeled "Study team".
 //
 // Thread creation verifies an active care-team assignment
 // (requireBodyClientAccess: 404 for non-assigned care-team members) and is
@@ -27,7 +28,7 @@ import {
   type ThreadMessageRow,
 } from '../../db/index.js';
 import { userRoom } from '../../services/messageSafety.service.js';
-import { isCareTeamRole, dataTierFor, type CareTeamRole } from '../../../shared/roles.js';
+import { isCareTeamRole, isStaffCommsRole, dataTierFor, type StaffCommsRole } from '../../../shared/roles.js';
 import { projectRows, FLAGGED_EVENT_SUMMARY_FIELDS } from '../../utils/tierScrub.js';
 import { createLogger } from '../../utils/logger.js';
 import { parsePagination } from '../../utils/pagination.js';
@@ -52,10 +53,9 @@ function participantMessageView(m: ThreadMessageRow) {
 export default function adminMessagingRoutes(): Router {
   const router = Router();
 
-  // Researchers get the messaging surface read-only in practice: threads are
-  // owned by care-team members (DB CHECK on clinician_role), so a researcher
-  // inbox is empty and thread creation is blocked by isCareTeamRole below —
-  // but the view must not 403 for the unscoped study role.
+  // Staff-comms roles: the care team plus the unscoped researcher role
+  // (migration 091 admits researcher into the clinician_role/sender_role
+  // CHECKs; researchers own their threads like any clinician).
   const requireClinician = requireRole('therapist', 'caseworker', 'researcher');
 
   // GET /api/admin/messaging/inbox - the clinician's threads + unread total
@@ -84,7 +84,7 @@ export default function adminMessagingRoutes(): Router {
         const clientId = Number(req.body.client_id);
         const clinicianId = req.session.userId!;
         const role = req.session.userRole;
-        if (!isCareTeamRole(role)) {
+        if (!isStaffCommsRole(role)) {
           // requireRole already guarantees this; belt for the type system.
           return res.status(403).json({ error: 'Insufficient permissions' });
         }
@@ -97,7 +97,7 @@ export default function adminMessagingRoutes(): Router {
         const thread = await getOrCreateThread({
           clientId,
           clinicianId,
-          clinicianRole: role as CareTeamRole,
+          clinicianRole: role,
           orgId,
           isSandbox,
         });
@@ -151,7 +151,7 @@ export default function adminMessagingRoutes(): Router {
       }
       try {
         const thread = res.locals.thread as MessageThreadRow;
-        const role = req.session.userRole as CareTeamRole;
+        const role = req.session.userRole as StaffCommsRole;
         const message = await insertThreadMessage({
           threadId: thread.thread_id,
           senderId: req.session.userId!,

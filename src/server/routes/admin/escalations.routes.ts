@@ -38,7 +38,7 @@ import {
 } from '../../db/index.js';
 import { emitSummaryEvent } from '../../utils/adminBroadcast.js';
 import { enqueueWorkItem } from '../../services/workQueue.service.js';
-import { isCareTeamRole, type CareTeamRole } from '../../../shared/roles.js';
+import { isCareTeamRole, type CareTeamRole, type StaffCommsRole } from '../../../shared/roles.js';
 
 const URGENCIES: readonly EscalationUrgency[] = ['routine', 'urgent', 'emergency'];
 const STATUSES: readonly EscalationStatus[] = ['open', 'acknowledged', 'resolved'];
@@ -95,10 +95,11 @@ async function enqueueResponseItem(
 export default function escalationsRoutes(): Router {
   const router = Router();
 
-  // POST /admin/api/escalations - raise an escalation about a caseload client
+  // POST /admin/api/escalations - raise an escalation about a caseload
+  // client (care team) or any org client (researcher, unscoped)
   router.post(
     '/admin/api/escalations',
-    requireRole('therapist', 'caseworker'),
+    requireRole('therapist', 'caseworker', 'researcher'),
     requireBodyClientAccess('client_id'),
     async (req, res) => {
       try {
@@ -111,7 +112,7 @@ export default function escalationsRoutes(): Router {
         }
 
         const raisedBy = req.session.userId!;
-        const raisedByRole = req.session.userRole as CareTeamRole;
+        const raisedByRole = req.session.userRole as StaffCommsRole;
 
         const client = await getUserById(clientId);
         if (!client) return res.status(404).json({ error: 'Not found' });
@@ -288,16 +289,17 @@ export default function escalationsRoutes(): Router {
     }
   );
 
-  // POST /admin/api/escalations/:escalationId/acknowledge - assignee only
+  // POST /admin/api/escalations/:escalationId/acknowledge - assignee, or a
+  // researcher (org-checked by requireEscalationAccess)
   router.post(
     '/admin/api/escalations/:escalationId/acknowledge',
-    requireRole('therapist'),
+    requireRole('therapist', 'researcher'),
     requireEscalationAccess(),
     async (req, res) => {
       try {
         const escalation = res.locals.escalation as EscalationRow;
         const me = req.session.userId!;
-        if (escalation.assigned_to !== me) {
+        if (escalation.assigned_to !== me && req.session.userRole !== 'researcher') {
           return res.status(403).json({ error: 'Only the assigned therapist can acknowledge' });
         }
         const updated = await acknowledgeEscalation(escalation.escalation_id, me);
@@ -318,16 +320,17 @@ export default function escalationsRoutes(): Router {
     }
   );
 
-  // POST /admin/api/escalations/:escalationId/resolve - assignee only
+  // POST /admin/api/escalations/:escalationId/resolve - assignee, or a
+  // researcher (org-checked by requireEscalationAccess)
   router.post(
     '/admin/api/escalations/:escalationId/resolve',
-    requireRole('therapist'),
+    requireRole('therapist', 'researcher'),
     requireEscalationAccess(),
     async (req, res) => {
       try {
         const escalation = res.locals.escalation as EscalationRow;
         const me = req.session.userId!;
-        if (escalation.assigned_to !== me) {
+        if (escalation.assigned_to !== me && req.session.userRole !== 'researcher') {
           return res.status(403).json({ error: 'Only the assigned therapist can resolve' });
         }
         const resolutionNote =
@@ -439,7 +442,7 @@ export default function escalationsRoutes(): Router {
   // claimer's caseload (audited) so they can act — Q4, approved.
   router.post(
     '/admin/api/escalations/:escalationId/claim',
-    requireRole('therapist'),
+    requireRole('therapist', 'researcher'),
     requireEscalationAccess(),
     async (req, res) => {
       try {

@@ -4,11 +4,11 @@
 // assignment — unassign freezes (read-only, retained), re-assign of the same
 // pair unfreezes the same thread. No edit/delete of sent messages in v1.
 import { pool } from '../config/db.js';
-import type { CareTeamRole } from '../../shared/roles.js';
+import type { StaffCommsRole } from '../../shared/roles.js';
 
 export type ThreadStatus = 'active' | 'frozen';
 export type ThreadFrozenReason = 'unassigned' | 'client_deactivated' | 'manual';
-export type MessageSenderRole = 'participant' | CareTeamRole;
+export type MessageSenderRole = 'participant' | StaffCommsRole;
 export type MessageScanStatus = 'not_applicable' | 'pending' | 'clear' | 'flagged' | 'scan_failed';
 
 export interface MessageThreadRow {
@@ -16,7 +16,7 @@ export interface MessageThreadRow {
   org_id: number;
   client_id: number;
   clinician_id: number;
-  clinician_role: CareTeamRole;
+  clinician_role: StaffCommsRole;
   status: ThreadStatus;
   frozen_at: string | null;
   frozen_reason: ThreadFrozenReason | null;
@@ -74,7 +74,7 @@ export async function getThreadForPair(
 export async function getOrCreateThread(input: {
   clientId: number;
   clinicianId: number;
-  clinicianRole: CareTeamRole;
+  clinicianRole: StaffCommsRole;
   orgId: number;
   isSandbox?: boolean;
 }): Promise<MessageThreadRow> {

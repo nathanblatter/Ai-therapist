@@ -14,6 +14,11 @@ export type UserRole = 'therapist' | 'researcher' | 'participant' | 'demo' | 'ca
 /** Roles that can appear on a care team (therapist_clients.member_role). */
 export type CareTeamRole = 'therapist' | 'caseworker';
 
+/** Roles that may own care correspondence and raise escalations (migration
+ *  091): the care team plus the unscoped researcher role, which has full
+ *  admin access. Caseload assignment itself stays CareTeamRole-only. */
+export type StaffCommsRole = CareTeamRole | 'researcher';
+
 /** Admin data tier a role is entitled to (before row scoping). */
 export type DataTier = 'full' | 'summary' | 'none';
 
@@ -30,6 +35,11 @@ export const CARE_TEAM_ROLES: readonly CareTeamRole[] = ['therapist', 'caseworke
 /** Is this role a caseload-row-scoped care-team role? */
 export function isCareTeamRole(role: string | undefined | null): role is CareTeamRole {
   return role === 'therapist' || role === 'caseworker';
+}
+
+/** May this role own message threads / raise escalations? */
+export function isStaffCommsRole(role: string | undefined | null): role is StaffCommsRole {
+  return isCareTeamRole(role) || role === 'researcher';
 }
 
 /**

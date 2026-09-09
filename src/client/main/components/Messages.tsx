@@ -24,7 +24,10 @@ const DEFAULT_CRISIS: DisplayCrisisContact = {
 
 function clinicianLabel(thread: ParticipantThread): string {
   const name = thread.counterpart_username || 'Your care team';
-  const role = thread.clinician_role === 'caseworker' ? 'Care coordinator' : 'Therapist';
+  const role =
+    thread.clinician_role === 'caseworker' ? 'Care coordinator'
+    : thread.clinician_role === 'researcher' ? 'Study team'
+    : 'Therapist';
   return `${name} (${role})`;
 }
 

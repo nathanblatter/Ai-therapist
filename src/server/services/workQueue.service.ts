@@ -25,7 +25,7 @@ import {
   type WorkItemType,
   type WorkItemSeverity,
 } from '../db/index.js';
-import type { CareTeamRole } from '../../shared/roles.js';
+import type { CareTeamRole, StaffCommsRole } from '../../shared/roles.js';
 import { therapistRoom, caseworkerRoom, ADMIN_BROADCAST_ROOM } from '../utils/adminBroadcast.js';
 import { denverDateStamp } from '../utils/timezoneHelpers.js';
 import {
@@ -53,7 +53,7 @@ export interface EnqueueWorkItemOptions {
   orgId?: number | null;
   /** NULL assignee = pool item for the client's care team. */
   assigneeId?: number | null;
-  assigneeRole?: CareTeamRole | null;
+  assigneeRole?: StaffCommsRole | null;
   /** Resolved from users.is_sandbox when absent. */
   isSandbox?: boolean;
   /** Fan the socket/notification recipients out to EVERY therapist in the
@@ -68,7 +68,7 @@ export interface EnqueueWorkItemOptions {
 
 async function resolveRecipients(
   item: WorkItemRow,
-  assigneeRole: CareTeamRole | null | undefined
+  assigneeRole: StaffCommsRole | null | undefined
 ): Promise<NotificationRecipient[]> {
   const recipients: NotificationRecipient[] = [];
   if (item.assignee_id !== null) {

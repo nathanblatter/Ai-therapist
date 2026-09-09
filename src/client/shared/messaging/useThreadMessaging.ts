@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export interface ThreadBase {
   thread_id: number;
   clinician_id: number;
-  clinician_role: 'therapist' | 'caseworker';
+  clinician_role: 'therapist' | 'caseworker' | 'researcher';
   status: 'active' | 'frozen';
   frozen_reason: string | null;
   last_message_at: string | null;

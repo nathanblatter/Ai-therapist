@@ -10,7 +10,9 @@ import {
   listWorkItemsForOrg,
   getWorkItemById,
   ackWorkItem,
+  ackWorkItemForOrg,
   resolveWorkItem,
+  resolveWorkItemForOrg,
   isAssigned,
   insertCaseloadAudit,
   type WorkItemRow,
@@ -58,15 +60,16 @@ function parseStatuses(raw: unknown): WorkItemStatus[] | null {
  * Distinguish 404 (missing or not visible to me — same answer) from 409
  * (visible but the guarded UPDATE lost the state race) after a null result.
  */
-async function missOrConflict(itemId: number, memberId: number):
+async function missOrConflict(itemId: number, memberId: number, orgId: number | null = null):
   Promise<{ status: 404 } | { status: 409; itemStatus: string }> {
   const item = await getWorkItemById(itemId);
   if (!item) return { status: 404 };
-  const visible =
-    item.assignee_id === memberId ||
-    (item.assignee_id === null &&
-      item.client_id !== null &&
-      (await isAssigned(memberId, item.client_id)));
+  const visible = orgId !== null
+    ? item.org_id === orgId
+    : item.assignee_id === memberId ||
+      (item.assignee_id === null &&
+        item.client_id !== null &&
+        (await isAssigned(memberId, item.client_id)));
   if (!visible) return { status: 404 };
   return { status: 409, itemStatus: item.status };
 }
@@ -99,18 +102,24 @@ export default function workQueueRoutes(): Router {
     }
   );
 
-  // POST /admin/api/work-items/:itemId/ack — care-team members only
+  // POST /admin/api/work-items/:itemId/ack — care-team members (caseload
+  // visibility) or researchers (org-scoped, unscoped study role)
   router.post(
     '/admin/api/work-items/:itemId/ack',
-    requireRole('caseworker', 'therapist'),
+    requireRole('caseworker', 'therapist', 'researcher'),
     async (req, res) => {
       const itemId = Number(req.params.itemId);
       if (!Number.isInteger(itemId)) return res.status(400).json({ error: 'Invalid item id' });
       try {
         const memberId = req.session.userId!;
-        const item = await ackWorkItem(itemId, memberId);
+        const researcher = !isCareTeamRole(req.session.userRole);
+        const orgId = researcher ? await orgIdFor(req) : null;
+        if (researcher && orgId === null) return res.status(404).json({ error: 'Not found' });
+        const item = researcher
+          ? await ackWorkItemForOrg(itemId, orgId!, memberId)
+          : await ackWorkItem(itemId, memberId);
         if (!item) {
-          const miss = await missOrConflict(itemId, memberId);
+          const miss = await missOrConflict(itemId, memberId, orgId);
           if (miss.status === 404) return res.status(404).json({ error: 'Not found' });
           return res.status(409).json({ error: 'Item is not open', status: miss.itemStatus });
         }
@@ -131,7 +140,7 @@ export default function workQueueRoutes(): Router {
   // POST /admin/api/work-items/:itemId/resolve — body { resolution_note? }
   router.post(
     '/admin/api/work-items/:itemId/resolve',
-    requireRole('caseworker', 'therapist'),
+    requireRole('caseworker', 'therapist', 'researcher'),
     async (req, res) => {
       const itemId = Number(req.params.itemId);
       if (!Number.isInteger(itemId)) return res.status(400).json({ error: 'Invalid item id' });
@@ -142,9 +151,14 @@ export default function workQueueRoutes(): Router {
       const note = typeof rawNote === 'string' && rawNote.trim() !== '' ? rawNote.trim() : null;
       try {
         const memberId = req.session.userId!;
-        const item = await resolveWorkItem(itemId, memberId, note);
+        const researcher = !isCareTeamRole(req.session.userRole);
+        const orgId = researcher ? await orgIdFor(req) : null;
+        if (researcher && orgId === null) return res.status(404).json({ error: 'Not found' });
+        const item = researcher
+          ? await resolveWorkItemForOrg(itemId, orgId!, memberId, note)
+          : await resolveWorkItem(itemId, memberId, note);
         if (!item) {
-          const miss = await missOrConflict(itemId, memberId);
+          const miss = await missOrConflict(itemId, memberId, orgId);
           if (miss.status === 404) return res.status(404).json({ error: 'Not found' });
           return res.status(409).json({ error: 'Item is not open or acknowledged', status: miss.itemStatus });
         }

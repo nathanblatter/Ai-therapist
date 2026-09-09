@@ -188,8 +188,9 @@ describe('POST /admin/api/escalations', () => {
     expect(dbMocks.createEscalation).not.toHaveBeenCalled();
   });
 
-  it('rejects researchers (403) and anonymous (401)', async () => {
-    expect((await request(appAs('researcher')).post('/admin/api/escalations').send(body)).status).toBe(403);
+  it('lets researchers raise escalations (unscoped, no caseload check) and rejects anonymous (401)', async () => {
+    expect((await request(appAs('researcher', 3)).post('/admin/api/escalations').send(body)).status).toBe(201);
+    expect(dbMocks.isAssigned).not.toHaveBeenCalled(); // researcher bypasses caseload gating
     expect((await request(appAs(null)).post('/admin/api/escalations').send(body)).status).toBe(401);
   });
 

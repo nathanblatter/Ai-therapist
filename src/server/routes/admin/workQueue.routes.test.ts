@@ -10,7 +10,9 @@ const dbMocks = vi.hoisted(() => ({
   listWorkItemsForOrg: vi.fn(),
   getWorkItemById: vi.fn(),
   ackWorkItem: vi.fn(),
+  ackWorkItemForOrg: vi.fn(),
   resolveWorkItem: vi.fn(),
+  resolveWorkItemForOrg: vi.fn(),
   isAssigned: vi.fn(),
   insertCaseloadAudit: vi.fn(),
   getOrganizationIdForUser: vi.fn(),
@@ -52,7 +54,9 @@ beforeEach(() => {
   dbMocks.listWorkItemsForOrg.mockResolvedValue([ITEM]);
   dbMocks.getWorkItemById.mockResolvedValue(ITEM);
   dbMocks.ackWorkItem.mockResolvedValue({ ...ITEM, status: 'acked' });
+  dbMocks.ackWorkItemForOrg.mockResolvedValue({ ...ITEM, status: 'acked' });
   dbMocks.resolveWorkItem.mockResolvedValue({ ...ITEM, status: 'resolved' });
+  dbMocks.resolveWorkItemForOrg.mockResolvedValue({ ...ITEM, status: 'resolved' });
   dbMocks.isAssigned.mockResolvedValue(true);
   dbMocks.insertCaseloadAudit.mockResolvedValue(undefined);
   emitWorkItemUpdatedMock.mockResolvedValue(undefined);
@@ -156,8 +160,11 @@ describe('POST /admin/api/work-items/:itemId/ack', () => {
     expect(res.body.status).toBe('resolved');
   });
 
-  it('is care-team only: researchers get 403', async () => {
-    expect((await request(appAs('researcher')).post('/admin/api/work-items/5/ack')).status).toBe(403);
+  it('acks org-scoped for researchers (never the caseload path)', async () => {
+    dbMocks.getOrganizationIdForUser.mockResolvedValue(1);
+    const res = await request(appAs('researcher', 3)).post('/admin/api/work-items/5/ack');
+    expect(res.status).toBe(200);
+    expect(dbMocks.ackWorkItemForOrg).toHaveBeenCalledWith(5, 1, 3);
     expect(dbMocks.ackWorkItem).not.toHaveBeenCalled();
   });
 

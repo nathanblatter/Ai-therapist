@@ -4,7 +4,7 @@
 // ack/resolve fields). Every transition is a guarded UPDATE ... WHERE
 // status = expected, returning null on a lost race so the route can 409.
 import { pool } from '../config/db.js';
-import type { CareTeamRole } from '../../shared/roles.js';
+import type { StaffCommsRole } from '../../shared/roles.js';
 
 export type EscalationUrgency = 'routine' | 'urgent' | 'emergency';
 export type EscalationStatus = 'open' | 'acknowledged' | 'resolved';
@@ -22,7 +22,7 @@ export interface EscalationRow {
   org_id: number;
   client_id: number;
   raised_by: number | null;
-  raised_by_role: CareTeamRole;
+  raised_by_role: StaffCommsRole;
   assigned_to: number | null;
   reason: string;
   urgency: EscalationUrgency;
@@ -56,7 +56,7 @@ export interface CreateEscalationInput {
   orgId: number;
   clientId: number;
   raisedBy: number;
-  raisedByRole: CareTeamRole;
+  raisedByRole: StaffCommsRole;
   assignedTo?: number | null; // null = org unassigned queue
   reason: string;
   urgency: EscalationUrgency;
