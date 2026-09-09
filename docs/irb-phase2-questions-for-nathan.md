@@ -116,10 +116,19 @@ currently assumes; correct anything wrong and the draft gets updated.
   What's the honest overnight policy? (Options: best-effort overnight; agent-only overnight
   with morning review; quiet-hours usage discouragement in-app.) Also BLOCKER
   ai-therapist-147: prod crisis paging env is unset — must be wired before launch.
-- **Q17 — CAPS role for remote participants.** Phase 1's escalation = RA escorts participant
-  to CAPS from the lab. Remote participants can't be escorted. Need Erekson to agree in
-  writing (updated support letter) to CAPS being the named clinical resource for remote BYU
-  participants + what CAPS wants the after-hours path to be (988 first?).
+- **Q17 — CAPS role for remote participants. NEW DIRECTION (Nathan, 2026-09-09):** the
+  institutional CAPS support letter may not be needed; "if we have a CAPS person it will be
+  Kimberly Sagers." Verified: Sagers is a Licensed Clinical Social Worker at BYU CAPS
+  (Marriott School Specialist, caps.byu.edu/directory/kimberly-sagers) and is already
+  stress-testing the app. Decision for Nathan+Gaskin: (a) name her as licensed clinical
+  personnel/consultant on the protocol — this also answers the Q1 "no licensed clinician on
+  key personnel" concern more directly than the de Vreede row (PhD researcher, not licensed);
+  needs her agreement + CITI training status + OneAegis personnel entry; or (b) she signs a
+  support letter — noting a letter committing CAPS *as an institution* (on-call referral
+  path for remote participants) may still want director-level signature, while a personal
+  letter reads as clinical-consultant support and pairs naturally with (a). Either way,
+  replace or remove the PLACEHOLDER_CAPS docx in OneAegis before submission, and settle the
+  after-hours path wording (988 first when CAPS is closed).
 - **Q13 — Study design.** ★ Option A: single-arm observational longitudinal cohort.
   Option B: 2-arm randomized proactive-offering comparison (pre-registration angle,
   ai-therapist-108). Gaskin's call — affects sample size, analysis plan, and how "experiment"
