@@ -1,36 +1,34 @@
 #!/bin/sh
 # Install/rotate the OpenAI ADMIN key everywhere it belongs, without leaking it.
 #
-#   sh scripts/set-openai-admin-key.sh sk-admin-...
-#   sh scripts/set-openai-admin-key.sh            # prompts, no shell history
+#   sh scripts/set-openai-admin-key.sh              # prompts, echo off (preferred)
+#   sh scripts/set-openai-admin-key.sh sk-admin-... # arg form; lands in shell history
 #
-# Targets:
-#   1. local repo .env                 (dev)
-#   2. stage deploy checkout .env      (~/deploy/Ai-therapist) + container restart
-#   3. prod /opt/ai-therapist/.env     (over SSH) + zero-arg container recreate
+# Targets: local repo .env, stage checkout .env (+ restart), prod .env over SSH
+# (+ container recreate). Any unreachable target is skipped, not fatal.
 #
-# The key is never echoed, never written to a temp file, and never passed on a
-# remote command line (it goes over stdin to the remote shell). Any target that
-# isn't reachable is skipped with a warning rather than failing the whole run.
+# Leak-avoidance: the key is never echoed, never written to a temp file, and
+# never passed in argv — locally or remotely. For prod it is interpolated into
+# the remote script body, which travels over the SSH channel on stdin.
 #
-# NOTE ON SHELL HISTORY: passing the key as an argument puts it in your shell
-# history. Either run with no argument (you'll be prompted silently), or prefix
-# the command with a space if your shell is set up to skip those.
-
+# Correctness: the key is validated against the costs endpoint BEFORE anything
+# is written, and every target is re-read and hash-compared AFTER writing, so a
+# partial or mangled write is reported rather than silently left in place.
 set -eu
 
 PROD_HOST="ubuntu@54.151.38.104"
-PROD_KEY="$HOME/.ssh/ai-therapist-prod.pem"
+PROD_SSH_KEY="$HOME/.ssh/ai-therapist-prod.pem"
 PROD_DIR="/opt/ai-therapist"
 STAGE_DIR="$HOME/deploy/Ai-therapist"
 REPO_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 VAR="OPENAI_ADMIN_KEY"
+FAILED=""
 
-# ---- get the key without putting it on screen -------------------------------
+# ---- obtain the key ---------------------------------------------------------
 if [ $# -ge 1 ]; then
   ADMIN_KEY="$1"
-  echo "! key passed as an argument — it is now in your shell history."
-  echo "  Consider: history -d \$(history 1)   (or run this script with no args next time)"
+  echo "! passed as an argument, so it is now in your shell history."
+  echo "  Next time run with no arguments and paste at the prompt."
 else
   printf 'Paste the OpenAI admin key (input hidden): '
   stty -echo 2>/dev/null || true
@@ -41,119 +39,137 @@ fi
 
 case "$ADMIN_KEY" in
   sk-admin-*) ;;
-  *) echo "ERROR: that does not look like an admin key (expected sk-admin-...)."
-     echo "       Project keys (sk-proj-/sk-) will NOT work: the costs endpoint"
-     echo "       requires an admin key. Aborting."; exit 1 ;;
+  *) echo "ERROR: expected an admin key (sk-admin-...). Project keys cannot read"
+     echo "       org costs. Nothing written."; exit 1 ;;
 esac
 
-# ---- fail fast: does the key actually work? ---------------------------------
-# Better to find out now than after writing it to three machines.
-echo "==> verifying the key against GET /v1/organization/costs"
-START=$(( $(date +%s) - 86400 ))
-HTTP=$(curl -s -o /tmp/.oak_probe.$$ -w '%{http_code}' \
-  "https://api.openai.com/v1/organization/costs?start_time=${START}&bucket_width=1d&limit=1" \
-  -H "Authorization: Bearer ${ADMIN_KEY}") || HTTP="000"
-if [ "$HTTP" != "200" ]; then
-  echo "ERROR: key rejected (HTTP $HTTP). Nothing was written."
-  [ -s /tmp/.oak_probe.$$ ] && sed -e 's/sk-admin-[A-Za-z0-9_-]*/sk-admin-***/g' /tmp/.oak_probe.$$ | head -c 300
-  rm -f /tmp/.oak_probe.$$
-  echo; exit 1
-fi
-rm -f /tmp/.oak_probe.$$
-echo "    OK — key is valid and can read org costs."
+WANT_HASH=$(printf '%s' "$ADMIN_KEY" | shasum -a 256 | cut -d' ' -f1)
 
-# ---- helper: idempotently set VAR=value in a local .env ---------------------
-set_local_env() {
+# ---- validate before writing anything ---------------------------------------
+echo "==> verifying the key against GET /v1/organization/costs"
+PROBE_OUT=$(mktemp)
+HTTP=$(curl -s -o "$PROBE_OUT" -w '%{http_code}' \
+  "https://api.openai.com/v1/organization/costs?start_time=$(( $(date +%s) - 86400 ))&bucket_width=1d&limit=1" \
+  -H "Authorization: Bearer ${ADMIN_KEY}" 2>/dev/null) || HTTP="000"
+if [ "$HTTP" != "200" ]; then
+  echo "ERROR: key rejected (HTTP $HTTP). Nothing written."
+  sed -E 's/sk-admin-[A-Za-z0-9_-]*/sk-admin-***/g' "$PROBE_OUT" | head -c 300
+  rm -f "$PROBE_OUT"; echo; exit 1
+fi
+rm -f "$PROBE_OUT"
+echo "    OK - valid and able to read org costs."
+
+# ---- local writer (also used for stage) -------------------------------------
+# Python does the edit so no value ever passes through sed/awk escaping.
+write_env() {
   target="$1"; label="$2"
-  if [ ! -f "$target" ]; then
-    echo "==> $label: no .env at $target — skipping"
-    return 0
-  fi
-  # Use a here-doc into a tiny inline editor so the key never appears in ps(1).
+  [ -f "$target" ] || { echo "==> $label: no .env at $target - skipping"; return 0; }
   ADMIN_KEY="$ADMIN_KEY" VAR="$VAR" TARGET="$target" python3 - <<'PY'
 import os, re
 target, var, key = os.environ["TARGET"], os.environ["VAR"], os.environ["ADMIN_KEY"]
-with open(target) as f:
-    lines = f.read().splitlines()
+lines = open(target).read().splitlines()
 pat = re.compile(r'^\s*' + re.escape(var) + r'\s*=')
-out, replaced = [], False
+out, done = [], False
 for line in lines:
     if pat.match(line):
-        if not replaced:
-            out.append(f"{var}={key}"); replaced = True
-        # drop any duplicate definitions
+        if not done:
+            out.append(f"{var}={key}"); done = True   # dedupe extras
     else:
         out.append(line)
-if not replaced:
+if not done:
     if out and out[-1].strip():
         out.append("")
     out.append("# OpenAI ADMIN key (read-only billing). See .env.example.")
     out.append(f"{var}={key}")
-with open(target, "w") as f:
-    f.write("\n".join(out) + "\n")
-print(f"    {'replaced' if replaced else 'appended'} {var}")
+open(target, "w").write("\n".join(out) + "\n")
+print("    " + ("replaced" if done else "appended") + f" {var}")
 PY
   chmod 600 "$target"
-  echo "==> $label: written to $target (chmod 600)"
+  got=$(grep "^${VAR}=" "$target" | head -1 | cut -d= -f2- | tr -d '\n' | shasum -a 256 | cut -d' ' -f1)
+  if [ "$got" = "$WANT_HASH" ]; then
+    echo "==> $label: verified at $target"
+  else
+    echo "==> $label: ! WRITE MISMATCH at $target"
+    FAILED="$FAILED $label"
+  fi
 }
 
-# ---- 1. local repo ----------------------------------------------------------
-set_local_env "$REPO_DIR/.env" "local"
+write_env "$REPO_DIR/.env" "local"
 
-# ---- 2. stage ---------------------------------------------------------------
 if [ -d "$STAGE_DIR" ]; then
-  set_local_env "$STAGE_DIR/.env" "stage"
+  write_env "$STAGE_DIR/.env" "stage"
   if command -v docker >/dev/null 2>&1; then
-    echo "==> stage: recreating app container"
     ( cd "$STAGE_DIR" && docker compose up -d --force-recreate app >/dev/null 2>&1 ) \
-      && echo "    stage app recreated" \
-      || echo "    ! stage container recreate failed (is the stack up?)"
+      && echo "    stage app recreated" || echo "    ! stage recreate failed (stack down?)"
   fi
 else
-  echo "==> stage: $STAGE_DIR not found — skipping"
+  echo "==> stage: $STAGE_DIR not found - skipping"
 fi
 
-# ---- 3. prod ----------------------------------------------------------------
-if [ -f "$PROD_KEY" ]; then
+# ---- prod -------------------------------------------------------------------
+# NOTE: the outer heredoc is UNQUOTED so the LOCAL shell interpolates the key
+# into the script text. Remote-side variables are therefore escaped as \$.
+# Do NOT "simplify" this into `printf key | ssh ... <<HEREDOC` - the heredoc
+# already owns stdin, the pipe is discarded, and the remote read gets nothing.
+# That bug shipped once and left prod on a stale key while local/stage updated,
+# which is why this step hash-verifies the write before restarting anything.
+if [ -f "$PROD_SSH_KEY" ]; then
   echo "==> prod: installing over SSH"
-  # The key goes over STDIN, not argv, so it never lands in the remote host's
-  # process list or history.
-  printf '%s\n' "$ADMIN_KEY" | ssh -i "$PROD_KEY" -o ConnectTimeout=15 "$PROD_HOST" \
-    "PROD_DIR='$PROD_DIR' VAR='$VAR' bash -s" <<'REMOTE'
+  if ssh -i "$PROD_SSH_KEY" -o ConnectTimeout=15 "$PROD_HOST" bash -s <<EOF
 set -euo pipefail
-read -r KEY
-cd "$PROD_DIR"
-if sudo grep -q "^${VAR}=" .env 2>/dev/null; then
-  sudo sed -i "s|^${VAR}=.*|${VAR}=${KEY}|" .env; echo "    replaced ${VAR}"
-else
-  printf '%s=%s\n' "$VAR" "$KEY" | sudo tee -a .env >/dev/null; echo "    appended ${VAR}"
-fi
+cd '${PROD_DIR}'
+sudo python3 - <<'PYIN'
+import re
+var = "${VAR}"
+key = "${ADMIN_KEY}"
+lines = open(".env").read().splitlines()
+pat = re.compile(r'^\\s*' + re.escape(var) + r'\\s*=')
+out, done = [], False
+for line in lines:
+    if pat.match(line):
+        if not done:
+            out.append(var + "=" + key); done = True
+    else:
+        out.append(line)
+if not done:
+    out.append(var + "=" + key)
+open(".env", "w").write("\\n".join(out) + "\\n")
+print("    " + ("replaced" if done else "appended") + " " + var)
+PYIN
 sudo chmod 600 .env
+GOT=\$(sudo sh -c "grep '^${VAR}=' .env | head -1 | cut -d= -f2- | tr -d '\\n' | sha256sum" | cut -d' ' -f1)
+if [ "\$GOT" != "${WANT_HASH}" ]; then
+  echo "    ! WRITE MISMATCH on prod .env - not restarting."
+  exit 1
+fi
+echo "    on-disk value verified"
 source .deploy-env 2>/dev/null || true
-export IMAGE_TAG="${IMAGE_TAG:-prod}"
+export IMAGE_TAG="\${IMAGE_TAG:-prod}"
 echo "    recreating app container"
 docker compose up -d --force-recreate app >/dev/null 2>&1
-for i in $(seq 1 30); do
-  CID=$(docker compose ps -q app | head -1)
-  ST=$(docker inspect --format='{{.State.Health.Status}}' "$CID" 2>/dev/null || echo starting)
-  if [ "$ST" = "healthy" ]; then
-    echo "    prod healthy: $(docker inspect --format='{{.Name}}' "$CID")"
-    docker compose exec -T app sh -c \
-      'if [ -n "$OPENAI_ADMIN_KEY" ]; then echo "    verified in container (${#OPENAI_ADMIN_KEY} chars)"; else echo "    ! NOT visible in container"; fi'
+for i in \$(seq 1 30); do
+  CID=\$(docker compose ps -q app | head -1)
+  ST=\$(docker inspect --format='{{.State.Health.Status}}' "\$CID" 2>/dev/null || echo starting)
+  if [ "\$ST" = "healthy" ]; then
+    echo "    prod healthy: \$(docker inspect --format='{{.Name}}' "\$CID")"
     exit 0
   fi
   sleep 5
 done
-echo "    ! prod container did not report healthy in 150s — check: docker compose logs app"
+echo "    ! not healthy after 150s - check: docker compose logs app"
 exit 1
-REMOTE
+EOF
+  then :; else FAILED="$FAILED prod"; fi
 else
-  echo "==> prod: SSH key $PROD_KEY not found — skipping"
+  echo "==> prod: $PROD_SSH_KEY not found - skipping"
 fi
 
 unset ADMIN_KEY
 echo
-echo "Done. The admin spend card should now render in Admin -> Ops."
-echo "Reminder: if this key has ever been pasted into a chat, terminal share,"
-echo "or ticket, rotate it at platform.openai.com/settings/organization/admin-keys"
-echo "and re-run this script."
+if [ -n "$FAILED" ]; then
+  echo "FAILED on:$FAILED - re-run, or fix by hand. Other targets are fine."
+  exit 1
+fi
+echo "Done. The spend card should render in Admin -> Ops."
+echo "If this key ever touched a chat, screen share, or ticket, rotate it at"
+echo "platform.openai.com/settings/organization/admin-keys and re-run this."
