@@ -25,6 +25,13 @@ import { getUserSocket, closeUserSocket } from '../lib/userSocket';
 import { useMessagingUnread } from '../hooks/useMessaging';
 import { getStoredTheme, setTheme } from '../../shared/theme';
 import { reportClientEvent } from '../utils/telemetry';
+import {
+  configureEngagementTelemetry,
+  installEngagementTracking,
+  recordEngagementEvent,
+  recordTurnTiming,
+  setEngagementSessionId,
+} from '../utils/engagementTelemetry';
 import type { ChatMessage } from './ChatLog';
 // Canonical crisis-contact blob shape is shared with the server (src/shared).
 import type { CrisisContact } from '../../../shared/systemConfig';
@@ -34,6 +41,8 @@ interface Features {
   voice_enabled: boolean;
   chat_enabled: boolean;
   session_recording_enabled?: boolean;
+  telemetry_interaction_timing?: boolean;
+  telemetry_engagement_events?: boolean;
 }
 
 interface SessionSettings {
@@ -175,6 +184,29 @@ export default function App() {
     return () => closeUserSocket();
   }, [isAuthenticated]);
 
+  // Phase 2 engagement telemetry (flag-gated, default off). Reply timing is
+  // measured from the last assistant message rendered to the next user send;
+  // events are scoped to the active session and flushed when it ends.
+  const lastAssistantAtRef = useRef<number | null>(null);
+  const prevToolUIKindRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setEngagementSessionId(isSessionActive ? sessionId : null);
+  }, [isSessionActive, sessionId]);
+
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant') lastAssistantAtRef.current = performance.now();
+  }, [messages]);
+
+  useEffect(() => {
+    const kind = toolUI?.kind ?? null;
+    const prev = prevToolUIKindRef.current;
+    prevToolUIKindRef.current = kind;
+    if (kind && kind !== prev) recordEngagementEvent('tool_open', { tool: kind });
+    else if (!kind && prev) recordEngagementEvent('tool_close', { tool: prev });
+  }, [toolUI]);
+
   // Consent (ai-therapist-24): must be accepted before a session can start.
   const [isConsentOpen, setIsConsentOpen] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
@@ -187,6 +219,7 @@ export default function App() {
 
     // Initialize logger first (controls console.log output)
     initializeLogger();
+    installEngagementTracking();
 
     // Fetch crisis contact info
     fetch('/api/config/crisis')
@@ -218,7 +251,14 @@ export default function App() {
     // Fetch features config
     fetch('/api/config/features')
       .then(res => res.json())
-      .then(data => setFeatures(data))
+      .then(data => {
+        setFeatures(data);
+        // Phase 2 telemetry gates (default off; server enforces regardless).
+        configureEngagementTelemetry({
+          interactionTiming: data.telemetry_interaction_timing === true,
+          engagementEvents: data.telemetry_engagement_events === true,
+        });
+      })
       .catch(err => console.error('Failed to fetch features config:', err));
 
     // Fetch consent status: has this browser session already accepted the
@@ -1218,6 +1258,13 @@ export default function App() {
   }
 
   async function sendTextMessage(message: string) {
+    // Phase 2 telemetry: typed-turn reply timing (length only, no content).
+    recordTurnTiming(
+      lastAssistantAtRef.current === null ? null : performance.now() - lastAssistantAtRef.current,
+      message.length,
+      sessionType === 'chat' ? 'chat' : 'realtime_text',
+    );
+
     // Handle chat-only session
     if (sessionType === 'chat') {
       // Add user message to UI immediately
@@ -1535,7 +1582,11 @@ export default function App() {
         )}
         <div className="w-full flex-1 overflow-y-auto p-2 sm:p-4">
           {isSessionActive ? (
-            <ChatLog messages={messages} assistantStream={assistantStream} />
+            <ChatLog
+              messages={messages}
+              assistantStream={assistantStream}
+              onScrollBack={() => recordEngagementEvent('scroll_back')}
+            />
           ) : activeView === 'messages' && isAuthenticated ? (
             /* Async secure messaging (caseworker portal): not real-time —
                the component carries its own crisis-resources banner. */
@@ -1625,7 +1676,10 @@ export default function App() {
           if (sessionType === 'chat') void reportToolEvent('scale_result', text);
           else sendInvisiblePrompt(text);
         }}
-        onToolEvent={(kind, summary) => void reportToolEvent(kind, summary)}
+        onToolEvent={(kind, summary) => {
+          recordEngagementEvent('tool_event', { kind });
+          void reportToolEvent(kind, summary);
+        }}
         onLogRecord={(type, message, extras) => {
           logConversation({ sessionId, role: 'user', type, message, extras });
           // Kept for "Download my work" (ai-therapist-76) — participant-entered
@@ -1688,8 +1742,12 @@ export default function App() {
       {/* Pre-session check-in (optional, skippable) */}
       <PreSessionCheckIn
         isOpen={isCheckInOpen}
-        onCancel={() => setIsCheckInOpen(false)}
+        onCancel={() => {
+          recordEngagementEvent('checkin_dismissed');
+          setIsCheckInOpen(false);
+        }}
         onStart={(checkin) => {
+          recordEngagementEvent(checkin ? 'checkin_complete' : 'checkin_skip');
           setIsCheckInOpen(false);
           void startSession(checkin);
         }}

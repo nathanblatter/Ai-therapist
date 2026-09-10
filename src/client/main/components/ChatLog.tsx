@@ -12,9 +12,29 @@ export interface ChatMessage {
 interface ChatLogProps {
   messages: ChatMessage[];
   assistantStream: string;
+  /** Fired (throttled) when the participant scrolls back up through earlier
+   *  messages — Phase 2 engagement telemetry; no-op when unset/disabled. */
+  onScrollBack?: () => void;
 }
 
-export default function ChatLog({ messages, assistantStream }: ChatLogProps) {
+// A participant is "scrolled back" once they are this far above the bottom.
+const SCROLL_BACK_PX = 300;
+const SCROLL_BACK_THROTTLE_MS = 15_000;
+
+export default function ChatLog({ messages, assistantStream, onScrollBack }: ChatLogProps) {
+  const lastScrollBackAt = React.useRef(0);
+
+  function handleScroll(e: React.UIEvent<HTMLDivElement>) {
+    if (!onScrollBack) return;
+    const el = e.currentTarget;
+    const fromBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+    if (fromBottom < SCROLL_BACK_PX) return;
+    const now = Date.now();
+    if (now - lastScrollBackAt.current < SCROLL_BACK_THROTTLE_MS) return;
+    lastScrollBackAt.current = now;
+    onScrollBack();
+  }
+
   return (
     <div
       className="flex-grow flex-col gap-3 p-4 overflow-y-auto h-full"
@@ -22,6 +42,7 @@ export default function ChatLog({ messages, assistantStream }: ChatLogProps) {
       aria-label="Conversation messages"
       aria-live="polite"
       aria-relevant="additions"
+      onScroll={handleScroll}
     >
       {messages.length === 0 && !assistantStream ? (
         <p className="text-gray-400 text-2xl text-center" role="status">Start talking or type in the chat bar to begin...</p>

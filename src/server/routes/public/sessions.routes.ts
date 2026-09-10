@@ -476,10 +476,14 @@ export default function sessionsRoutes(): Router {
         .then(() => generateSessionNameAsync(sessionId))
         .catch(e => console.error('[Redaction] session redaction/naming failed:', e));
 
-      // Finalize the audio recording (wrap buffered PCM → WAV → object storage).
+      // Finalize the audio recording (wrap buffered PCM → WAV → object
+      // storage), then derive acoustic features from the participant track —
+      // a flag-gated no-op until Phase 2 telemetry is enabled (migration 095).
       import('../../services/recorder.service.js')
         .then(m => m.finalize(sessionId))
-        .catch(e => console.error('[Recorder] finalize failed:', e));
+        .then(() => import('../../services/acousticFeatures.service.js'))
+        .then(m => m.generateAcousticFeaturesAsync(sessionId))
+        .catch(e => console.error('[Recorder] finalize/acoustic failed:', e));
 
       // Memory summary + draft SOAP note (fire-and-forget).
       import('../../services/sessionInsights.service.js')
