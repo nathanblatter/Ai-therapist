@@ -427,3 +427,67 @@ describe('moderation tier (ai-therapist-167, supplementary signal)', () => {
     expect(r.severity).toBe('none');
   });
 });
+
+describe('strict-schema severity reconciliation (ai-therapist-179)', () => {
+  beforeEach(() => {
+    queryMock.mockReset().mockResolvedValue({ rows: [] });
+    createMock.mockReset();
+    moderationCreateMock.mockReset().mockRejectedValue(new Error('moderation unavailable'));
+  });
+
+  it('never lets a calm label mask a high score (the dangerous mismatch)', async () => {
+    // Strict schema guarantees a valid enum, not a consistent one.
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 90, severity: 'none', context: 'genuine',
+      factors: ['expressed plan'], reasoning: 'mismatched pair',
+    }));
+    const r = await analyzeStandaloneRisk('I have a plan and the means');
+    expect(r.riskScore).toBe(90);
+    expect(r.severity).toBe('high'); // derived band wins over the calm label
+  });
+
+  it('keeps the more severe label when the model is more worried than the score', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 8, severity: 'high', context: 'genuine',
+      factors: ['expressed plan'], reasoning: 'observed live from gpt-4o-mini',
+    }));
+    const r = await analyzeStandaloneRisk('...');
+    expect(r.severity).toBe('high');
+  });
+
+  it('treats a refusal as an assessment failure, not as "no risk"', async () => {
+    createMock.mockResolvedValue({ choices: [{ message: { refusal: 'I cannot help with that' } }] });
+    // Keyword floor stands rather than a false all-clear.
+    const r = await analyzeMessageRisk(
+      { content: 'I want to end my life', session_id: 'sess-refusal', message_id: 1 }, []
+    );
+    expect(r.riskScore).toBe(75);
+    expect(r.severity).toBe('high');
+  });
+
+  it('treats a truncated assessment as a failure', async () => {
+    createMock.mockResolvedValue({
+      choices: [{ finish_reason: 'length', message: { content: '{"risk_score":' } }],
+    });
+    const r = await analyzeMessageRisk(
+      { content: 'I want to end my life', session_id: 'sess-trunc', message_id: 1 }, []
+    );
+    expect(r.riskScore).toBe(75);
+  });
+
+  it('falls back to json_object if the configured model rejects strict schema', async () => {
+    createMock
+      .mockRejectedValueOnce(new Error("400 Invalid parameter: 'response_format.json_schema' is not supported"))
+      .mockResolvedValue(llmResponse({
+        risk_score: 55, severity: 'medium', context: 'genuine',
+        factors: ['passive ideation'], reasoning: 'ok on the fallback format',
+      }));
+    const r = await analyzeMessageRisk(
+      { content: "I don't want to be here anymore", session_id: 'sess-fallback', message_id: 1 }, []
+    );
+    expect(r.riskScore).toBe(55);
+    // First attempt strict, retry plain.
+    expect(createMock.mock.calls[0][0].response_format.type).toBe('json_schema');
+    expect(createMock.mock.calls[1][0].response_format).toEqual({ type: 'json_object' });
+  });
+});

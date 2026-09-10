@@ -206,6 +206,20 @@ export default function tokenRoutes(): Router {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('OpenAI API error:', response.status, errorText);
+
+        // A blocked safety identifier is permanent and unrecoverable on
+        // OpenAI's side (ai-therapist-186). Surface it as its own error so
+        // the participant gets a supportive screen with crisis resources and
+        // the research team's contact info, and so the study team sees it in
+        // the logs as an enrollment problem rather than a network blip.
+        const { isIdentifierBlockedError } = await import('../../utils/safetyIdentifier.js');
+        if (isIdentifierBlockedError(null, errorText)) {
+          console.error(
+            `[Token] BLOCKED SAFETY IDENTIFIER for user ${userId ?? 'anonymous'} — ` +
+            'participant cannot start sessions; study team must re-enroll or contact OpenAI.'
+          );
+          return res.status(403).json({ error: 'identifier_blocked' });
+        }
         throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
       }
 

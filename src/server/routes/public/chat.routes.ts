@@ -299,6 +299,16 @@ export default function chatRoutes(): Router {
       res.json({ success: true, response: aiResponse, toolEvents, sessionId });
     } catch (error: unknown) {
       console.error('Failed to process chat message:', error);
+
+      // Blocked safety identifier (ai-therapist-186): permanent on the
+      // provider's side, so answer with the dedicated code that drives the
+      // supportive screen instead of a generic 500.
+      const { isIdentifierBlockedError } = await import('../../utils/safetyIdentifier.js');
+      if (isIdentifierBlockedError(error)) {
+        console.error('[Chat] BLOCKED SAFETY IDENTIFIER — participant cannot send messages; study team must re-enroll or contact OpenAI.');
+        return res.status(403).json({ error: 'identifier_blocked' });
+      }
+
       res.status(500).json({
         error: 'Failed to process message',
         details: error instanceof Error ? error.message : String(error),

@@ -146,16 +146,21 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     : '';
 
   const client = await getClient();
-  const response = await client.chat.completions.create({
+  // Post-session job: flex halves the cost where the model supports it
+  // (a no-op on gpt-4o-mini, which is not flex-eligible — see flexTier.ts).
+  const { withFlex } = await import('../utils/flexTier.js');
+  const response = await withFlex(INSIGHTS_MODEL, (tierParams) => client.chat.completions.create({
     model: INSIGHTS_MODEL,
     response_format: { type: 'json_object' },
     temperature: 0.3,
     max_tokens: 1400, // affect array (ai-therapist-86) adds ~30 compact entries
+    store: false,
+    ...tierParams,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: `${checkinLine}${priorProfileLine}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}` },
     ],
-  });
+  }));
 
   // Cost tracking (ai-therapist-25c): best-effort, never blocks insights generation.
   import('../db/index.js')

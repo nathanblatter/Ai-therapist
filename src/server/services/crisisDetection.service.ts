@@ -169,6 +169,44 @@ interface LlmRiskAssessment {
   reasoning: string;
 }
 
+// Strict structured output (ai-therapist-179). json_object only guarantees
+// *valid* JSON; strict json_schema guarantees the SHAPE, which is what a
+// risk-scoring path needs — a malformed severity or a missing risk_score
+// previously fell through to defensive defaults that could read as calmer
+// than reality. Strict-mode rules: additionalProperties:false, and every
+// property listed in `required`.
+const RISK_ASSESSMENT_SCHEMA = {
+  type: 'json_schema' as const,
+  json_schema: {
+    name: 'crisis_risk_assessment',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        risk_score: { type: 'integer', minimum: 0, maximum: 100 },
+        severity: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
+        context: { type: 'string', enum: ['genuine', 'negated', 'bystander', 'reference', 'unclear'] },
+        factors: { type: 'array', items: { type: 'string' } },
+        reasoning: { type: 'string' },
+      },
+      required: ['risk_score', 'severity', 'context', 'factors', 'reasoning'],
+      additionalProperties: false,
+    },
+  },
+};
+
+// Sticky fallback: if the configured assessor model rejects json_schema
+// (an admin can point crisis.risk_model at anything), degrade to the old
+// json_object format for the rest of the process rather than failing the
+// assessment. The defensive parsing below still covers that case.
+let strictSchemaUnsupported = false;
+
+function isSchemaUnsupportedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /json_schema|response_format|structured output/i.test(message)
+    && /unsupported|not supported|invalid|unknown/i.test(message);
+}
+
 // HistoryMessage (role + content/content_redacted) is shared with the minor
 // safeguard, which exports the canonical declaration.
 
@@ -233,11 +271,11 @@ async function assessRiskWithLLM(
     } catch { /* proceed without */ }
   }
 
-  const response = await client.chat.completions.create({
+  const callAssessor = (useStrictSchema: boolean) => client.chat.completions.create({
     model: riskModel,
     temperature: 0,
     max_tokens: 300,
-    response_format: { type: 'json_object' },
+    response_format: useStrictSchema ? RISK_ASSESSMENT_SCHEMA : { type: 'json_object' },
     // This call carries un-redacted transcript excerpts (the assessment
     // needs the participant's actual words). Never let it become stored
     // application state on OpenAI's side.
@@ -252,6 +290,31 @@ async function assessRiskWithLLM(
     ],
   });
 
+  let response;
+  if (strictSchemaUnsupported) {
+    response = await callAssessor(false);
+  } else {
+    try {
+      response = await callAssessor(true);
+    } catch (err) {
+      if (!isSchemaUnsupportedError(err)) throw err;
+      strictSchemaUnsupported = true;
+      log.error({ err }, `[risk] model '${riskModel}' rejected strict json_schema; falling back to json_object for this process`);
+      response = await callAssessor(false);
+    }
+  }
+
+  // Structured outputs can return a refusal instead of content. Treat it as
+  // an assessment failure so the caller's keyword/moderation fallback runs —
+  // never as a silent "no risk found".
+  const refusal = response.choices[0]?.message?.refusal;
+  if (refusal) {
+    throw new Error(`Risk assessor refused to answer: ${String(refusal).slice(0, 200)}`);
+  }
+  if (response.choices[0]?.finish_reason === 'length') {
+    throw new Error('Risk assessment truncated before completing (max_tokens)');
+  }
+
   // Cost tracking (ai-therapist-25c): best-effort, never blocks risk assessment.
   if (sessionId) {
     import('../db/index.js')
@@ -264,9 +327,20 @@ async function assessRiskWithLLM(
 
   const parsed = JSON.parse(response.choices[0]?.message?.content ?? '{}') as Partial<LlmRiskAssessment>;
   const score = Math.max(0, Math.min(100, Math.round(Number(parsed.risk_score) || 0)));
-  const severity = (['none', 'low', 'medium', 'high'] as const).includes(parsed.severity as 'none')
+
+  // Strict schema guarantees severity is a VALID enum, not that it AGREES
+  // with risk_score — models do emit mismatched pairs (observed: score 8 with
+  // severity 'high'). analyzeStandaloneRisk consumes this severity directly,
+  // so reconcile by taking the MORE severe of the model's label and the
+  // score-derived band: a "score 90 / severity none" pairing must never read
+  // as calm. Fail toward detection, consistent with the rest of the pipeline.
+  const derived: LlmRiskAssessment['severity'] =
+    score >= 75 ? 'high' : score >= 50 ? 'medium' : score >= 25 ? 'low' : 'none';
+  const stated = (['none', 'low', 'medium', 'high'] as const).includes(parsed.severity as 'none')
     ? (parsed.severity as LlmRiskAssessment['severity'])
-    : score >= 75 ? 'high' : score >= 50 ? 'medium' : score >= 25 ? 'low' : 'none';
+    : derived;
+  const RANK = { none: 0, low: 1, medium: 2, high: 3 } as const;
+  const severity = RANK[stated] >= RANK[derived] ? stated : derived;
 
   return {
     risk_score: score,

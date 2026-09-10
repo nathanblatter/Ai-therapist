@@ -59,6 +59,18 @@ const FUNNEL_STAGES: Array<{ key: keyof FunnelCounts; label: string }> = [
   { key: 'ended_gracefully', label: 'Ended gracefully' },
 ];
 
+interface CostsData {
+  days: number;
+  configured: boolean;
+  totalUsd: number;
+  byLineItem: Array<{ lineItem: string; amountUsd: number }>;
+  fetchedAt: string;
+}
+
+function formatUsd(amount: number): string {
+  return `$${amount.toFixed(2)}`;
+}
+
 function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
@@ -77,6 +89,9 @@ export default function OpsPanel() {
   const { data: ops, loading: opsLoading, error } = useAdminFetch<OpsData>('/admin/api/analytics/ops');
   // Funnel is best-effort: if it fails, the funnel section is simply omitted.
   const { data: funnel, loading: funnelLoading } = useAdminFetch<FunnelData>('/admin/api/analytics/funnel?days=30');
+  // Real OpenAI spend (ai-therapist-181). Returns configured:false rather
+  // than erroring when no admin key is set, so this never blocks the panel.
+  const { data: costs } = useAdminFetch<CostsData>('/admin/api/analytics/openai-costs?days=30');
 
   if (opsLoading || funnelLoading) {
     return (
@@ -171,6 +186,51 @@ export default function OpsPanel() {
           </table>
         )}
       </Panel>
+
+      {costs && (
+        <Panel title={`OpenAI Spend (Last ${costs.days} Days)`}>
+          {!costs.configured ? (
+            <p className="text-sm text-gray-500 py-2">
+              Not configured. Set <code className="bg-gray-100 px-1 rounded">OPENAI_ADMIN_KEY</code> to an
+              OpenAI <em>admin</em> key (Settings &rarr; Organization &rarr; Admin keys) to show real spend
+              here. Admin keys cannot make model calls, and this key is only ever used server-side.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-baseline gap-3 mb-4">
+                <span className="text-3xl font-semibold text-gray-900">{formatUsd(costs.totalUsd)}</span>
+                <span className="text-sm text-gray-500">
+                  total &middot; the most recent day may be incomplete
+                </span>
+              </div>
+              {costs.byLineItem.length === 0 ? (
+                <p className="text-gray-500 text-sm py-2">No spend recorded in this window.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b">
+                      <th className="py-1 font-medium">Line item</th>
+                      <th className="py-1 font-medium text-right">Cost</th>
+                      <th className="py-1 font-medium text-right">Share</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {costs.byLineItem.map(item => (
+                      <tr key={item.lineItem} className="border-b last:border-0">
+                        <td className="py-1 text-gray-700">{item.lineItem}</td>
+                        <td className="py-1 text-right text-gray-900">{formatUsd(item.amountUsd)}</td>
+                        <td className="py-1 text-right text-gray-500">
+                          {costs.totalUsd > 0 ? `${((item.amountUsd / costs.totalUsd) * 100).toFixed(0)}%` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+        </Panel>
+      )}
 
       {funnelCounts && (
         <Panel title={`Session Funnel (Last ${funnel?.days ?? 30} Days)`}>

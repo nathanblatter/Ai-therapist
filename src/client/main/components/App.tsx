@@ -162,7 +162,7 @@ export default function App() {
   // Withdrawn/paused study status (server-enforced 403 study_status on
   // session start; see middleware/studyStatus.ts). Rendered as a blocking
   // screen with crisis resources — never a generic error toast.
-  const [studyStatusBlock, setStudyStatusBlock] = useState<'paused' | 'withdrawn' | null>(null);
+  const [studyStatusBlock, setStudyStatusBlock] = useState<'paused' | 'withdrawn' | 'access_blocked' | null>(null);
 
   // Async secure messaging (caseworker portal): between-sessions view switch
   // + persistent user socket for logged-in participants. The socket is
@@ -510,6 +510,11 @@ export default function App() {
           setIsConnecting(false);
           return;
         }
+        if (errorData?.error === 'identifier_blocked') {
+          setStudyStatusBlock('access_blocked');
+          setIsConnecting(false);
+          return;
+        }
         throw new Error(errorData?.message || 'Chat session start was forbidden (403)');
       }
 
@@ -611,6 +616,14 @@ export default function App() {
       }
       if (errorData?.error === 'study_status') {
         setStudyStatusBlock(errorData.studyStatus === 'paused' ? 'paused' : 'withdrawn');
+        setIsConnecting(false);
+        return;
+      }
+      // Our AI provider blocked this participant's anonymous identifier
+      // (ai-therapist-186) — unrecoverable client-side, so point them at the
+      // research team instead of a "check your connection" toast.
+      if (errorData?.error === 'identifier_blocked') {
+        setStudyStatusBlock('access_blocked');
         setIsConnecting(false);
         return;
       }
@@ -1280,6 +1293,13 @@ export default function App() {
           body: JSON.stringify({ sessionId, message })
         });
 
+        if (response.status === 403) {
+          const errorData = await response.json().catch(() => null);
+          if (errorData?.error === 'identifier_blocked') {
+            setStudyStatusBlock('access_blocked');
+            return;
+          }
+        }
         if (!response.ok) {
           throw new Error('Failed to send message');
         }
@@ -1719,7 +1739,11 @@ export default function App() {
       {quietHours?.blocksYou && !isSessionActive && !postSessionData && (
         <QuietHoursScreen startHour={quietHours.startHour} endHour={quietHours.endHour} />
       )}
-      {studyStatusBlock && !isSessionActive && !postSessionData && (
+      {/* paused/withdrawn are start-time gates, so they defer to an in-flight
+          session; access_blocked can surface MID-session (the provider
+          rejects the very next turn), and leaving the participant staring at
+          a dead conversation would be worse than interrupting it. */}
+      {studyStatusBlock && (studyStatusBlock === 'access_blocked' || (!isSessionActive && !postSessionData)) && (
         <StudyStatusScreen status={studyStatusBlock} />
       )}
 

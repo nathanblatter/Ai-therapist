@@ -69,5 +69,21 @@ export default function opsRoutes(): Router {
     }
   });
 
+  // GET /admin/api/analytics/openai-costs?days=30 - real OpenAI spend in USD
+  // (ai-therapist-181). Researcher-only: this is org-level billing data, not
+  // study data. Returns {configured:false} when no admin key is set rather
+  // than erroring, so the panel can show a setup hint.
+  router.get('/admin/api/analytics/openai-costs', requireRole('researcher'), async (req, res) => {
+    const rawDays = req.query.days ? parseInt(String(req.query.days), 10) : 30;
+    const days = Number.isFinite(rawDays) ? Math.min(180, Math.max(1, rawDays)) : 30;
+    try {
+      const { getCostsSummary } = await import('../../services/openaiCosts.service.js');
+      res.json({ ...(await getCostsSummary(days)), days });
+    } catch (err) {
+      console.error('Failed to fetch OpenAI costs:', err);
+      res.status(500).json({ error: 'Failed to fetch OpenAI costs' });
+    }
+  });
+
   return router;
 }

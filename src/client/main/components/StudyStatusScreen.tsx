@@ -8,8 +8,27 @@
 import { PauseCircle, Phone, MessageSquare, Mail } from 'react-feather';
 
 interface StudyStatusScreenProps {
-  status: 'paused' | 'withdrawn';
+  /** 'access_blocked': our AI provider has blocked this participant's
+   *  anonymous identifier (ai-therapist-186). It is not something the
+   *  participant did wrong and they cannot clear it themselves, so the copy
+   *  points them straight at the research team. */
+  status: 'paused' | 'withdrawn' | 'access_blocked';
 }
+
+const TITLES: Record<StudyStatusScreenProps['status'], string> = {
+  paused: 'Your participation is paused',
+  withdrawn: 'You have left the study',
+  access_blocked: 'Sessions are unavailable on this account',
+};
+
+const BODY: Record<StudyStatusScreenProps['status'], string> = {
+  paused:
+    'New AI sessions are closed while your study participation is paused. When you are ready to resume, contact the research team and they will reopen your access. You can still view your past sessions and download your data from your profile.',
+  withdrawn:
+    'You have withdrawn from the study, so new AI sessions are closed. You can still view your past sessions and download your data from your profile. If this was not what you intended, contact the research team.',
+  access_blocked:
+    'We could not start a session because our AI provider has restricted the anonymous ID attached to this account. This is not something you did wrong, and it is not something you can fix from here — please contact the research team and they will get your access working again. You can still view your past sessions and download your data from your profile.',
+};
 
 export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
   return (
@@ -27,15 +46,11 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
               <PauseCircle size={22} className="text-amber-600" aria-hidden="true" />
             </div>
             <h2 id="study-status-title" className="text-lg font-semibold text-gray-800">
-              {status === 'paused' ? 'Your participation is paused' : 'You have left the study'}
+              {TITLES[status]}
             </h2>
           </div>
 
-          <p className="text-sm text-gray-700 mb-4">
-            {status === 'paused'
-              ? 'New AI sessions are closed while your study participation is paused. When you are ready to resume, contact the research team and they will reopen your access. You can still view your past sessions and download your data from your profile.'
-              : 'You have withdrawn from the study, so new AI sessions are closed. You can still view your past sessions and download your data from your profile. If this was not what you intended, contact the research team.'}
-          </p>
+          <p className="text-sm text-gray-700 mb-4">{BODY[status]}</p>
 
           <div className="bg-red-50 rounded-xl p-4 mb-3">
             <p className="text-sm font-semibold text-red-900 mb-2">
@@ -73,6 +88,8 @@ export default function StudyStatusScreen({ status }: StudyStatusScreenProps) {
             <p className="text-sm font-semibold text-gray-800 mb-2">
               {status === 'paused'
                 ? 'To resume, or with any questions, contact the research team:'
+                : status === 'access_blocked'
+                ? 'Please contact the research team so they can restore your access:'
                 : 'Questions, or want to talk it over? Contact the research team:'}
             </p>
             <ul className="space-y-2 text-sm text-gray-700">

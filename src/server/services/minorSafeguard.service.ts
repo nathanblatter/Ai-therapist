@@ -106,7 +106,29 @@ export async function confirmMinorDisclosure(
     model: CONFIRM_MODEL,
     temperature: 0,
     max_tokens: 200,
-    response_format: { type: 'json_object' },
+    // Strict schema (ai-therapist-179): an eligibility verdict that decides
+    // whether to terminate a session should not depend on shape-guessing.
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'minor_disclosure_verdict',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: {
+            is_minor: { type: 'boolean' },
+            // Nullable optionals must still be listed in `required`.
+            stated_age: { type: ['integer', 'null'] },
+            confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+            reasoning: { type: 'string' },
+          },
+          required: ['is_minor', 'stated_age', 'confidence', 'reasoning'],
+          additionalProperties: false,
+        },
+      },
+    },
+    // Carries un-redacted transcript excerpts by design.
+    store: false,
     messages: [
       { role: 'system', content: MINOR_CONFIRM_PROMPT },
       {
@@ -115,6 +137,12 @@ export async function confirmMinorDisclosure(
       },
     ],
   });
+
+  // A refusal or truncation must throw so the caller's fail-open path runs
+  // explicitly, rather than parsing '{}' into a confident "not a minor".
+  if (response.choices[0]?.message?.refusal) {
+    throw new Error('Minor-disclosure confirmation refused');
+  }
 
   // Cost tracking: best-effort, never blocks the verdict.
   recordLlmUsage(

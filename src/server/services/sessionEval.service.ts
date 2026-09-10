@@ -184,11 +184,15 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
   const judgeModel = options.judgeModel || evalsConfig.judge_model || DEFAULT_JUDGE_MODEL;
 
   const client = await getClient();
-  const response = await client.chat.completions.create({
+  // Offline quality judging: flex halves the cost on eligible models.
+  const { withFlex } = await import('../utils/flexTier.js');
+  const response = await withFlex(judgeModel, (tierParams) => client.chat.completions.create({
     model: judgeModel,
     response_format: { type: 'json_object' },
     temperature: 0, // deterministic-as-possible judging
     max_tokens: 1200,
+    store: false,
+    ...tierParams,
     messages: [
       { role: 'system', content: JUDGE_SYSTEM_PROMPT },
       {
@@ -198,7 +202,7 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
           `Transcript:\n${conversation}`,
       },
     ],
-  });
+  }));
 
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error('Empty eval response from judge model');
