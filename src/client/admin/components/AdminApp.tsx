@@ -3,6 +3,12 @@ import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key,
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
 import useAuth from "../hooks/useAuth";
+import {
+  configureAdminUsageTelemetry,
+  installAdminUsageTracking,
+  recordAdminUsage,
+  setAdminUsageView,
+} from "../utils/adminUsageTelemetry";
 import ToastContainer from "../../shared/components/Toast";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
 import ErrorBoundary from "../../shared/components/ErrorBoundary";
@@ -99,6 +105,35 @@ export default function AdminApp() {
   const [messagingUnread, setMessagingUnread] = useState(0);
 
   const setCurrentView = useCallback((view: string) => setCurrentViewState(view), []);
+
+  // De-identified usage telemetry (migration 096): enable from the public
+  // features flag, then report views/overlays by NAME only. The module never
+  // sends identity; the server stores only the coarse role cohort.
+  const currentViewRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentViewRef.current = currentView;
+    setAdminUsageView(currentView);
+  }, [currentView]);
+
+  useEffect(() => {
+    installAdminUsageTracking();
+    fetch('/api/config/features')
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        configureAdminUsageTelemetry(data?.telemetry_admin_usage === true);
+        // Re-report the view that was active before the flag arrived (the
+        // module drops events while disabled, including the landing view).
+        setAdminUsageView(currentViewRef.current);
+      })
+      .catch(() => { /* stays disabled */ });
+  }, []);
+
+  useEffect(() => {
+    if (selectedSessionId !== null) recordAdminUsage('overlay_open', { overlay: 'session_detail' });
+  }, [selectedSessionId]);
+  useEffect(() => {
+    if (selectedUser !== null) recordAdminUsage('overlay_open', { overlay: 'participant_profile' });
+  }, [selectedUser]);
 
   // Once the shared auth-status fetch resolves, pick the role-dependent
   // landing view. useAuth falls back to a null role on any failure, so the

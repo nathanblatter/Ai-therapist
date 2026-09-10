@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { recordAdminApiError } from '../utils/adminUsageTelemetry';
 
 // Shared JSON GET hook for admin API endpoints (ai-therapist-120): every admin
 // view was hand-rolling the same fetch/loading/error triple. Refetches when
@@ -13,7 +14,11 @@ export default function useAdminFetch<T>(url: string) {
     setError(null);
     fetch(url, { credentials: 'include' })
       .then(r => {
-        if (!r.ok) throw new Error(`Request failed (${r.status})`);
+        if (!r.ok) {
+          // De-identified usage telemetry: templated path + status only.
+          recordAdminApiError(url, r.status);
+          throw new Error(`Request failed (${r.status})`);
+        }
         return r.json() as Promise<T>;
       })
       .then(setData)

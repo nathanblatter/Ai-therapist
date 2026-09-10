@@ -34,6 +34,14 @@ interface Features {
   output_modalities: string[];
   /** AI tools removed from new sessions (ai-therapist-32). */
   disabled_tools?: string[];
+  /** Phase 2 research telemetry gates (migration 095). Default off; enable
+   *  only under an IRB protocol that authorizes the stream. */
+  telemetry_interaction_timing?: boolean;
+  telemetry_engagement_events?: boolean;
+  telemetry_acoustic_features?: boolean;
+  /** De-identified admin-app usage telemetry (migration 096). Staff-facing
+   *  product telemetry, default on; stores no user identity. */
+  telemetry_admin_usage?: boolean;
 }
 
 interface AiToolInfo {
@@ -1265,6 +1273,81 @@ export default function SystemConfig() {
         </p>
 
         <div className="space-y-3">
+        </div>
+      </div>
+
+      {/* Phase 2 research telemetry (migration 095) */}
+      <div className="mb-6 bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Phase 2 Research Telemetry</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          Streams declared in the Phase 2 IRB application. All default off and are enforced
+          server-side. Enable a stream only once the approved protocol and consent authorize it;
+          Phase 1 (2025-519) does not.
+        </p>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">Interaction timing</p>
+              <p className="text-xs text-gray-600">Participant reply latency and message length per typed turn (no content)</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.telemetry_interaction_timing === true}
+              onChange={(e) => updateFeatures('telemetry_interaction_timing', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">Engagement events</p>
+              <p className="text-xs text-gray-600">Window focus changes, scroll-back, tool overlay opens, check-in completion/skips</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.telemetry_engagement_events === true}
+              onChange={(e) => updateFeatures('telemetry_engagement_events', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">Acoustic features</p>
+              <p className="text-xs text-gray-600">Derived vocal measures (pitch, energy, pauses) from the participant recording track after each session; requires recording to be enabled</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.telemetry_acoustic_features === true}
+              onChange={(e) => updateFeatures('telemetry_acoustic_features', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* De-identified admin usage telemetry (migration 096) */}
+      <div className="mb-6 bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Admin Usage Telemetry</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          De-identified product telemetry for this admin app (view opens, time on screen, errors).
+          Stores no user identity — a random per-tab session id and role cohort only, with resource
+          ids stripped — so it cannot reconstruct what any specific person did. Separate from the
+          identified access-audit log, which exists for accountability and is unaffected.
+        </p>
+
+        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <div>
+            <p className="font-medium text-gray-900">Collect admin usage telemetry</p>
+            <p className="text-xs text-gray-600">Staff-facing product telemetry; on by default</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={features.telemetry_admin_usage === true}
+            onChange={(e) => updateFeatures('telemetry_admin_usage', e.target.checked)}
+            className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+          />
         </div>
       </div>
 

@@ -54,6 +54,8 @@ import sessionsRoutes from "./routes/public/sessions.routes.js";
 import tokenRoutes from "./routes/public/token.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
 import clientEventsRoutes from "./routes/public/clientEvents.routes.js";
+import engagementEventsRoutes from "./routes/public/engagementEvents.routes.js";
+import adminUsageRoutes from "./routes/admin/adminUsage.routes.js";
 import opsRoutes from "./routes/admin/ops.routes.js";
 import consentRoutes from "./routes/public/consent.routes.js";
 import progressRoutes from "./routes/public/progress.routes.js";
@@ -222,7 +224,7 @@ app.post(
 // parsed first and 413'd any audio batch bigger than ~1.5s of PCM, silently
 // dropping recording audio whenever a client uploads a backlog).
 const globalJsonParser = express.json();
-const OWN_PARSER_PATHS = /^\/api\/(client-events$|sessions\/[^/]+\/audio$)/;
+const OWN_PARSER_PATHS = /^\/api\/(client-events$|engagement-events$|sessions\/[^/]+\/audio$)/;
 app.use((req, res, next) =>
   OWN_PARSER_PATHS.test(req.path) ? next() : globalJsonParser(req, res, next)
 );
@@ -643,6 +645,9 @@ app.use(logsRoutes());
 // Client error beacon (rate-limited, allowlisted kinds) -> routes/public/clientEvents.routes.ts.
 app.use(clientEventsRoutes());
 
+// Phase 2 engagement telemetry (flag-gated, default off) -> routes/public/engagementEvents.routes.ts.
+app.use(engagementEventsRoutes());
+
 
 // ===================== Admin API Routes =====================
 
@@ -654,6 +659,9 @@ app.use(analyticsRoutes());
 
 // Ops telemetry + product funnel -> routes/admin/ops.routes.ts.
 app.use(opsRoutes());
+
+// De-identified admin usage telemetry ingest -> routes/admin/adminUsage.routes.ts.
+app.use(adminUsageRoutes());
 
 // Study-ops dashboard (enrollment/arm-balance/deviations) -> routes/admin/studyOps.routes.ts.
 app.use(studyOpsRoutes());
