@@ -3,10 +3,19 @@
 ## Problem
 
 The realtime and transcription models are configured as **floating aliases**
-(`gpt-realtime-2.1` / `gpt-realtime-2.1-mini`, `gpt-4o-transcribe` /
-`gpt-4o-mini-transcribe`). OpenAI can move the snapshot behind an alias at any
+(`gpt-realtime-2.1` / `gpt-realtime-2.1-mini`; transcription `gpt-transcribe`
+as of migration 097). OpenAI can move the snapshot behind an alias at any
 time, so two sessions run a week apart under the "same" configuration may have
 been produced by different model weights — a confound for any study analysis.
+
+> **Transcription migration (2026-09-09, ai-therapist-166):** OpenAI shuts
+> down `whisper-1` and the whole `gpt-4o(-mini)-transcribe(-diarize)` family
+> on **2027-02-26**. Migration 097 moved the default to `gpt-transcribe`,
+> which also takes crisis-vocabulary `keywords` + a context `prompt`
+> (defaults in `src/server/utils/transcriptionConfig.ts`, admin override via
+> `system_config.transcription_context`). If a dated `gpt-4o-*` snapshot is
+> still pinned anywhere, re-pin to a `gpt-transcribe` snapshot before the
+> shutdown.
 
 ## What the system records
 

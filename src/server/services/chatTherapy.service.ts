@@ -100,6 +100,34 @@ export function toResponsesTools(
   }));
 }
 
+// Sticky kill-switch for the inline-moderation request param (see callModel).
+let inlineModerationDisabled = false;
+
+/** Surface high inline-moderation self-harm scores on the ASSISTANT's output.
+ *  Participant input is scored by the crisis pipeline; this is the only check
+ *  on what the model said back. Log-only for now — the acted-on signal stays
+ *  the crisis pipeline until these scores earn a role via calibration. */
+function checkOutputModeration(sessionId: string, response: ResponsesResult): void {
+  try {
+    const modOutput = (response as unknown as {
+      moderation?: { output?: { type?: string; flagged?: boolean; category_scores?: Record<string, number> } };
+    }).moderation?.output;
+    if (!modOutput || modOutput.type === 'error') return;
+    const scores = modOutput.category_scores ?? {};
+    const selfHarmMax = Math.max(
+      scores['self-harm'] ?? 0, scores['self-harm/intent'] ?? 0, scores['self-harm/instructions'] ?? 0
+    );
+    if (modOutput.flagged || selfHarmMax >= 0.4) {
+      console.warn('[ChatTherapy] output moderation elevated', JSON.stringify({
+        sessionId, flagged: modOutput.flagged === true,
+        self_harm: scores['self-harm'] ?? 0,
+        self_harm_intent: scores['self-harm/intent'] ?? 0,
+        self_harm_instructions: scores['self-harm/instructions'] ?? 0,
+      }));
+    }
+  } catch { /* observational only */ }
+}
+
 /** Fire-and-forget cost tracking for one Responses call (telemetry audit). */
 function recordChatUsage(sessionId: string, usage: ResponsesResult['usage']): void {
   import('../db/index.js')
@@ -168,13 +196,42 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
       { role: 'user', content: userMessage },
     ];
 
-    const callModel = (toolChoice: 'auto' | 'none') =>
-      client.responses.create({
+    // Inline moderation (ai-therapist-167): free omni-moderation scores for
+    // input AND generated output ride the same response — the output side is
+    // a check nothing else covers. safety_identifier (ai-therapist-168)
+    // scopes OpenAI enforcement to this participant, matching the identifier
+    // the realtime mint sends. If the API ever rejects the moderation param
+    // (e.g. model/endpoint drift), degrade permanently for this process
+    // rather than failing participant turns.
+    let safetyIdentifier: string | undefined;
+    try {
+      const { safetyIdentifierForSession } = await import('../utils/safetyIdentifier.js');
+      safetyIdentifier = await safetyIdentifierForSession(sessionId);
+    } catch { /* proceed without */ }
+
+    const callModel = async (toolChoice: 'auto' | 'none') => {
+      const baseParams = {
         model: CHAT_MODEL,
         input,
         store: false,
+        ...(safetyIdentifier ? { safety_identifier: safetyIdentifier } : {}),
         ...(tools.length > 0 ? { tools, tool_choice: toolChoice } : {}),
-      });
+      };
+      if (inlineModerationDisabled) return client.responses.create(baseParams);
+      try {
+        return await client.responses.create({
+          ...baseParams,
+          moderation: { model: 'omni-moderation-latest' },
+        });
+      } catch (err) {
+        if (err instanceof Error && /moderation/i.test(err.message) && /unknown|unexpected|unsupported|invalid/i.test(err.message)) {
+          inlineModerationDisabled = true;
+          console.error('[ChatTherapy] inline moderation param rejected; disabled for this process:', err.message);
+          return client.responses.create(baseParams);
+        }
+        throw err;
+      }
+    };
 
     // Tool loop (ai-therapist-118): execute function calls via the registry
     // (with sideband-parity logging), feed the outputs back, and re-call
@@ -227,6 +284,7 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
 
     // Extract assistant message from response
     const assistantMessage = response.output_text;
+    checkOutputModeration(sessionId, response);
 
     // Telemetry pass 3: log the full turn wall time (user request -> final
     // text, including any tool rounds). turn_index = this user turn's ordinal.

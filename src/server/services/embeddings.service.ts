@@ -10,14 +10,37 @@ import { getOpenAIKey } from '../config/secrets.js';
 export const EMBEDDING_MODEL = 'text-embedding-3-small';
 export const EMBEDDING_DIMENSIONS = 1536;
 
+// Raw fetch bypasses the OpenAI SDK's built-in retry, so retryable statuses
+// (429 incl. the 2026-09 `slow_down` code, 5xx incl. `server_is_overloaded`)
+// are retried here, honoring Retry-After when the API sends one.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+
+async function postEmbeddings(body: string): Promise<Response> {
+  const apiKey = await getOpenAIKey();
+  let lastRes: Response | null = null;
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    const res = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body,
+    });
+    if (res.ok || !RETRYABLE_STATUS.has(res.status)) return res;
+    lastRes = res;
+    if (i < MAX_ATTEMPTS - 1) {
+      const retryAfter = Number(res.headers.get('retry-after'));
+      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 30_000)
+        : 1000 * (i + 1);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  return lastRes!;
+}
+
 /** Embed a single string into a dense vector. Throws on API failure. */
 export async function embedText(text: string): Promise<number[]> {
-  const apiKey = await getOpenAIKey();
-  const res = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text }),
-  });
+  const res = await postEmbeddings(JSON.stringify({ model: EMBEDDING_MODEL, input: text }));
   if (!res.ok) {
     throw new Error(`Embeddings API error: ${res.status} ${await res.text()}`);
   }
@@ -42,12 +65,7 @@ export async function embedTextBatch(texts: string[]): Promise<number[][]> {
   const out: number[][] = [];
   for (let start = 0; start < texts.length; start += BATCH_INPUT_LIMIT) {
     const chunk = texts.slice(start, start + BATCH_INPUT_LIMIT);
-    const apiKey = await getOpenAIKey();
-    const res = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: EMBEDDING_MODEL, input: chunk }),
-    });
+    const res = await postEmbeddings(JSON.stringify({ model: EMBEDDING_MODEL, input: chunk }));
     if (!res.ok) {
       throw new Error(`Embeddings API error: ${res.status} ${await res.text()}`);
     }

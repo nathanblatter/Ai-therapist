@@ -122,8 +122,9 @@ export async function getAiModel(): Promise<string> {
 
 /**
  * The configured input-audio transcription model, defaulting to
- * 'gpt-4o-mini-transcribe'. This transcription feeds the crisis keyword screen
- * and the redaction pipeline, so it is admin-configurable (system_config
+ * 'gpt-transcribe' (the 4o/whisper transcription family shuts down
+ * 2027-02-26). This transcription feeds the crisis keyword screen and the
+ * redaction pipeline, so it is admin-configurable (system_config
  * 'transcription_model') rather than hard-coded.
  */
 export async function getTranscriptionModel(): Promise<string> {
@@ -134,12 +135,12 @@ export async function getTranscriptionModel(): Promise<string> {
 
     if (result.rows.length > 0) {
       const config = result.rows[0].config_value as { model?: string } | null;
-      return config?.model || 'gpt-4o-mini-transcribe';
+      return config?.model || 'gpt-transcribe';
     }
 
-    return 'gpt-4o-mini-transcribe';
+    return 'gpt-transcribe';
   } catch (error) {
     console.error('Failed to fetch transcription model config:', error);
-    return 'gpt-4o-mini-transcribe';
+    return 'gpt-transcribe';
   }
 }

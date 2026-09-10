@@ -128,10 +128,19 @@ export class SidebandManager {
     const wsUrl = `wss://api.openai.com/v1/realtime?call_id=${callId}`;
     console.log(`[Sideband] Attaching to ${wsUrl} (attempt ${attempt + 1})`);
 
+    // Same per-participant safety identifier the client-secret mint sent
+    // (ai-therapist-168) — OpenAI asks for it on every realtime connection.
+    let safetyIdentifier: string | undefined;
+    try {
+      const { safetyIdentifierForSession } = await import('../utils/safetyIdentifier.js');
+      safetyIdentifier = await safetyIdentifierForSession(sessionId);
+    } catch { /* best-effort */ }
+
     try {
       const ws = new WebSocket(wsUrl, {
         headers: {
-          'Authorization': `Bearer ${apiKey}`
+          'Authorization': `Bearer ${apiKey}`,
+          ...(safetyIdentifier ? { 'OpenAI-Safety-Identifier': safetyIdentifier } : {}),
         }
       });
 

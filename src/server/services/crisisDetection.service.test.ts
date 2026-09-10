@@ -3,11 +3,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // Mock the DB pool, secrets, and OpenAI so the tests exercise the two-stage
 // risk pipeline (keyword screen → LLM context assessment → fallback) without
 // touching Postgres or the network.
-const { queryMock, createMock, connectMock, draftAeMock } = vi.hoisted(() => ({
+const { queryMock, createMock, connectMock, draftAeMock, moderationCreateMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   createMock: vi.fn(),
   connectMock: vi.fn(),
   draftAeMock: vi.fn(),
+  moderationCreateMock: vi.fn(),
 }));
 
 vi.mock('../config/db.js', () => ({
@@ -26,6 +27,7 @@ vi.mock('../config/secrets.js', () => ({
 vi.mock('openai', () => ({
   default: class {
     chat = { completions: { create: createMock } };
+    moderations = { create: moderationCreateMock };
   },
 }));
 
@@ -98,6 +100,9 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
   beforeEach(() => {
     queryMock.mockReset().mockResolvedValue({ rows: [] });
     createMock.mockReset();
+    // Default: moderation unavailable — the pipeline must behave exactly as
+    // it did before the moderation tier existed (supplementary signal only).
+    moderationCreateMock.mockReset().mockRejectedValue(new Error('moderation unavailable'));
   });
 
   const msg = (content: string) => ({ content, session_id: 'sess-test', message_id: 1 });
@@ -358,5 +363,67 @@ describe('flagSessionCrisis → adverse-event auto-draft hook', () => {
     await flagSessionCrisis('sess-low', 'low', 30, 'system', 'auto', 1, [], null);
     await new Promise(r => setTimeout(r, 0));
     expect(draftAeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('moderation tier (ai-therapist-167, supplementary signal)', () => {
+  beforeEach(() => {
+    queryMock.mockReset().mockResolvedValue({ rows: [] });
+    createMock.mockReset();
+    moderationCreateMock.mockReset();
+  });
+
+  const modResponse = (scores: Record<string, number>, flagged = true) => ({
+    results: [{ flagged, category_scores: scores }],
+  });
+
+  it('wakes the LLM when keywords miss but moderation reads self-harm intent', async () => {
+    moderationCreateMock.mockResolvedValue(modResponse({ 'self-harm/intent': 0.7 }));
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 55, severity: 'medium', context: 'genuine',
+      factors: ['passive ideation'], reasoning: 'Indirect phrasing the keyword screen missed.',
+    }));
+    const r = await analyzeMessageRisk(
+      { content: 'unusual phrasing with no screen keywords at all', session_id: 'sess-modwake', message_id: 1 }, []
+    );
+    expect(createMock).toHaveBeenCalledOnce();
+    expect(r.riskScore).toBe(55);
+    expect(r.breakdown.moderation).toBe(70);
+    expect(r.breakdown.llm).toBe(55);
+  });
+
+  it('does not wake the LLM below the moderation threshold, but still records the score', async () => {
+    moderationCreateMock.mockResolvedValue(modResponse({ 'self-harm': 0.2 }, false));
+    const r = await analyzeMessageRisk(
+      { content: 'another ordinary message', session_id: 'sess-modlow', message_id: 1 }, []
+    );
+    expect(createMock).not.toHaveBeenCalled();
+    expect(r.riskScore).toBe(0);
+    expect(r.breakdown.moderation).toBe(17); // round(100 * 0.85 * 0.2)
+  });
+
+  it('uses moderation as a capped fallback scorer when the LLM is down', async () => {
+    moderationCreateMock.mockResolvedValue(modResponse({ 'self-harm/intent': 0.95 }));
+    createMock.mockRejectedValue(new Error('openai down'));
+    const r = await analyzeMessageRisk(
+      { content: 'I want to end my life', session_id: 'sess-modfallback', message_id: 1 }, []
+    );
+    // keyword tier 75, moderation 95 capped at 85 -> 85 (fail toward detection)
+    expect(r.riskScore).toBe(85);
+    expect(r.severity).toBe('high');
+    expect(r.factors.some(f => f.includes('moderation self-harm signal'))).toBe(true);
+  });
+
+  it('LLM context judgment still wins over a hot moderation score (negation)', async () => {
+    moderationCreateMock.mockResolvedValue(modResponse({ 'self-harm/intent': 0.8 }));
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 10, severity: 'none', context: 'negated',
+      factors: [], reasoning: 'Participant explicitly denies ideation.',
+    }));
+    const r = await analyzeMessageRisk(
+      { content: "I promise I'm not suicidal, my roommate asked me to say that clearly", session_id: 'sess-modneg', message_id: 1 }, []
+    );
+    expect(r.riskScore).toBe(10);
+    expect(r.severity).toBe('none');
   });
 });

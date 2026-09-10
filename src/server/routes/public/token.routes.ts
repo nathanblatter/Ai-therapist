@@ -162,6 +162,15 @@ export default function tokenRoutes(): Router {
         (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) + toolGuidance + memoryBlock + buildCheckinBlock(checkin);
       const activeModality = await getActiveModality();
 
+      // Model-aware transcription payload (ai-therapist-166): the
+      // gpt-transcribe generation gets crisis-vocabulary keywords + context
+      // prompt; legacy models get { model } only. Admin override via
+      // system_config 'transcription_context'.
+      const { buildTranscriptionConfig } = await import('../../utils/transcriptionConfig.js');
+      const transcriptionContext = (await getSystemConfig()).transcription_context as
+        | { prompt?: unknown; keywords?: unknown; languages?: unknown }
+        | undefined;
+
       const dynamicSessionConfig = JSON.stringify({
         session: {
           type: 'realtime',
@@ -171,7 +180,7 @@ export default function tokenRoutes(): Router {
           instructions,
           audio: {
             input: {
-              transcription: { model: transcriptionModel },
+              transcription: buildTranscriptionConfig(transcriptionModel, transcriptionContext),
               // Semantic VAD (low eagerness): decide the participant is done by
               // their words, not just silence — far less likely to treat
               // background noise as a turn, and won't cut them off mid-thought.

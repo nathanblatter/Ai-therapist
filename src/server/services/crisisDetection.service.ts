@@ -116,7 +116,21 @@ export function detectCrisisKeywords(content: string): KeywordAnalysis {
 // STAGE 2: LLM RISK ASSESSMENT
 // ============================================
 
-const RISK_MODEL = 'gpt-4o-mini';
+const DEFAULT_RISK_MODEL = 'gpt-4o-mini';
+
+/** Admin-configurable assessor model (system_config crisis.risk_model,
+ *  mirroring evals.judge_model) so a candidate model can be A/B'd without a
+ *  deploy. Any swap must pass the red-team suite first. */
+async function resolveRiskModel(): Promise<string> {
+  try {
+    const { getSystemConfig } = await import('../utils/sessionHelpers.js');
+    const config = await getSystemConfig();
+    const crisis = config.crisis as { risk_model?: string } | undefined;
+    return typeof crisis?.risk_model === 'string' && crisis.risk_model ? crisis.risk_model : DEFAULT_RISK_MODEL;
+  } catch {
+    return DEFAULT_RISK_MODEL;
+  }
+}
 
 let openaiClient: OpenAI | null = null;
 async function getClient(): Promise<OpenAI> {
@@ -207,11 +221,24 @@ async function assessRiskWithLLM(
     .join('\n')
     .slice(-6000);
 
+  const riskModel = await resolveRiskModel();
+
+  // safety_identifier scopes any OpenAI-side enforcement to this participant
+  // rather than the org key; best-effort, never blocks the assessment.
+  let safetyIdentifier: string | undefined;
+  if (sessionId) {
+    try {
+      const { safetyIdentifierForSession } = await import('../utils/safetyIdentifier.js');
+      safetyIdentifier = await safetyIdentifierForSession(sessionId);
+    } catch { /* proceed without */ }
+  }
+
   const response = await client.chat.completions.create({
-    model: RISK_MODEL,
+    model: riskModel,
     temperature: 0,
     max_tokens: 300,
     response_format: { type: 'json_object' },
+    ...(safetyIdentifier ? { safety_identifier: safetyIdentifier } : {}),
     messages: [
       { role: 'system', content: RISK_ASSESSMENT_PROMPT },
       {
@@ -225,7 +252,7 @@ async function assessRiskWithLLM(
   if (sessionId) {
     import('../db/index.js')
       .then(({ recordLlmUsage }) => recordLlmUsage(
-        sessionId, 'crisis', RISK_MODEL,
+        sessionId, 'crisis', riskModel,
         response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
       ))
       .catch(err => log.error({ err }, '[risk] failed to record LLM usage (non-fatal)'));
@@ -417,11 +444,21 @@ interface RiskAnalysisResult {
  */
 export async function analyzeMessageRisk(message: MessageInput, conversationHistory: HistoryMessage[] = []): Promise<RiskAnalysisResult> {
   try {
+    // Free moderation screen runs in parallel with the keyword/trajectory
+    // work (ai-therapist-167). It is a supplementary signal: null on outage.
+    const moderationPromise = import('./moderation.service.js')
+      .then(m => m.getSelfHarmScores(message.content).then(scores => ({ scores, riskOf: m.moderationRiskScore })))
+      .catch(() => null);
+
     const keywordAnalysis = detectCrisisKeywords(message.content);
 
     // Trajectory across the session's recent scores (computed BEFORE this
     // message's insert, so it reflects the run-up, not the current message).
     const trajectory = await trackEmotionalTrajectory(message.session_id);
+
+    const moderationResult = await moderationPromise;
+    const moderation = moderationResult?.scores ?? null;
+    const moderationScore = moderation ? moderationResult!.riskOf(moderation) : 0;
 
     let riskScore = Math.min(keywordAnalysis.keywordScore, 100);
     let factors = keywordAnalysis.keywords;
@@ -429,23 +466,35 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
     let llm: LlmRiskAssessment | null = null;
 
     const isSweep = keywordAnalysis.keywordScore === 0 && sweepDue(message.session_id);
+    // Moderation as a second screen: when the keyword tier saw nothing but
+    // moderation reads meaningful self-harm signal, wake the LLM so the
+    // context-aware assessor (negation, bystander, reference) stays the
+    // scorer. Moderation itself never scores directly while the LLM is up.
+    const isModerationWake = keywordAnalysis.keywordScore === 0 && !isSweep && moderationScore >= 40;
 
-    if (keywordAnalysis.keywordScore > 0 || isSweep) {
+    if (keywordAnalysis.keywordScore > 0 || isSweep || isModerationWake) {
       try {
         llm = await assessRiskWithLLM(message.content, conversationHistory, message.session_id);
         resetSweep(message.session_id);
         riskScore = llm.risk_score;
         factors = llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords;
-        method = isSweep ? 'llm_sweep' : 'llm_assessed';
+        method = isSweep ? 'llm_sweep' : isModerationWake ? 'llm_moderation_wake' : 'llm_assessed';
         log.info(
-          `[risk] session ${message.session_id.substring(0, 12)}…: ${isSweep ? 'periodic sweep' : `keywords [${keywordAnalysis.keywords.join(', ')}]`} ` +
+          `[risk] session ${message.session_id.substring(0, 12)}…: ${isSweep ? 'periodic sweep' : isModerationWake ? `moderation wake (${moderationScore}/100)` : `keywords [${keywordAnalysis.keywords.join(', ')}]`} ` +
             `→ LLM ${llm.risk_score}/100 (${llm.context}): ${llm.reasoning}`,
         );
       } catch (err) {
-        // LLM unavailable — keyword tier score stands as the provisional score.
+        // LLM unavailable — fall back to the best available screen signal
+        // (fail toward detection, never away from it). Moderation is capped
+        // below 90 so a screen alone cannot mimic the very top band.
+        riskScore = Math.max(riskScore, Math.min(85, moderationScore));
         method = 'keyword_fallback';
-        log.error({ err }, `[risk] LLM assessment failed for session ${message.session_id}; using keyword tier score ${riskScore}`);
+        log.error({ err }, `[risk] LLM assessment failed for session ${message.session_id}; using screen-tier score ${riskScore}`);
       }
+    }
+
+    if (moderation && moderationScore >= 30) {
+      factors = [...factors, `moderation self-harm signal (${moderationScore}/100)`];
     }
 
     // Trajectory bonus: a deteriorating run-up makes the same message more
@@ -482,6 +531,13 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
               trajectory_score: trajectory.trajectoryScore,
               trajectory_trend: trajectory.trend,
             } : {}),
+            ...(moderation ? {
+              moderation_score: moderationScore,
+              moderation_flagged: moderation.flagged,
+              moderation_self_harm: moderation.selfHarm,
+              moderation_self_harm_intent: moderation.selfHarmIntent,
+              moderation_self_harm_instructions: moderation.selfHarmInstructions,
+            } : {}),
             ...(llm ? {
               llm_score: llm.risk_score,
               llm_context: llm.context,
@@ -502,6 +558,7 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
       breakdown: {
         keywords: keywordAnalysis.keywordScore,
         ...(trajectory.trajectoryScore > 0 ? { trajectory: trajectory.trajectoryScore } : {}),
+        ...(moderationScore > 0 ? { moderation: moderationScore } : {}),
         ...(llm ? { llm: llm.risk_score } : {}),
       }
     };
