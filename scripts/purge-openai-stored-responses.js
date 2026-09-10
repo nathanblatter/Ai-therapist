@@ -6,39 +6,39 @@
  * carried RAW PRE-REDACTION participant transcripts. The leak was fixed in
  * f4c0234 and verified stopped; this clears the backlog.
  *
- * WHY IT CLONES THE APP'S OWN REQUEST
- * -----------------------------------
+ * WHY IT BORROWS THE PAGE'S OWN CREDENTIALS
+ * -----------------------------------------
  * There is no server-side path (verified 2026-09-09): project keys are told
  * "must be made with a session key ... only from the browser", and admin keys
- * — even unrestricted — fail with "Missing scopes: api.responses.read", which
+ * - even unrestricted - fail with "Missing scopes: api.responses.read", which
  * is not an admin scope at all. So it has to run in the logged-in tab.
  *
- * Two earlier attempts failed for instructive reasons, both now handled:
- *   v1  credentials:'include'  -> 401. The console does NOT use cookies for
+ * Three earlier attempts failed instructively; all are handled now:
+ *   v1  credentials:'include' -> 401. The console does NOT use cookies for
  *       api.openai.com; it sends Authorization: Bearer <session token>. The
- *       401 carried no CORS headers, so Chrome reported the confusing
- *       "blocked by CORS policy" instead of an auth error.
+ *       401 carried no CORS headers, so Chrome reported the misleading
+ *       "blocked by CORS policy" rather than an auth error.
  *   v2  borrowed the token but sent my own URL (?limit=100) -> "Found 0".
- *       The listing evidently needs the app's exact parameter set; the console
- *       actually calls
- *         /v1/responses?include[]=message.input_image.image_url
- *                      &input_item_limit=1&output_item_limit=1
- *       with no `limit` at all, and may add project-scoping headers.
+ *       The listing needs the console's parameter set; adding `limit` returns
+ *       nothing.
+ *   v3  waited for the app's own LIST call to clone it -> hung, because the
+ *       page serves that view from cache and may never re-issue it.
  *
- * v3 therefore clones the real thing: it wraps window.fetch, waits for the app
- * to issue its own /v1/responses list call, and captures that URL *and* every
- * header it used. It then replays that exact request, only adding pagination.
- * Nothing is guessed. The token never leaves the tab; window.fetch is restored
- * on every exit path.
+ * v4: take the auth headers from ANY api.openai.com call (the page makes them
+ * constantly, so this is reliable), and use the console's real list URL, which
+ * was read off the network trace:
+ *     /v1/responses?include[]=message.input_image.image_url
+ *                  &input_item_limit=1&output_item_limit=1
+ * If the live LIST call does happen to fly by, its URL is preferred. The token
+ * never leaves the tab; window.fetch is restored on every exit path.
  *
  * HOW TO RUN
  * ----------
  *  1. https://platform.openai.com/logs  (logged in), DevTools console
  *     (Cmd+Option+J). If prompted, type:  allow pasting
  *  2. Paste this whole file, press Enter.
- *  3. When it says "waiting", make the page reload its list — switch the tab
- *     Responses -> Completions -> Responses, or change a filter. It continues
- *     by itself.
+ *  3. It proceeds within a few seconds on its own. If it lingers on
+ *     "waiting", click anything in the Logs UI to make the page call the API.
  *  4. Keep the tab OPEN and FOCUSED until DONE (background tabs throttle).
  *
  * DRY RUN by default. Confirm the sample, then set DRY_RUN = false and paste
@@ -51,7 +51,8 @@
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const origFetch = window.fetch;
-  let captured = null;        // { url, headers }
+  let authHeaders = null;     // headers from any api.openai.com call
+  let listUrl = null;         // the app's own list URL, if we see it
 
   // ---- 1. clone the app's own list request ---------------------------------
   const headersToObject = (h, input) => {
@@ -76,11 +77,15 @@
   window.fetch = function (input, init) {
     try {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
-      // the LIST call, not a single /responses/{id} fetch
-      if (!captured && /\/v1\/responses(\?|$)/.test(url)) {
+      if (url.includes('api.openai.com')) {
         const hdrs = headersToObject(init && init.headers, input);
-        const hasAuth = Object.keys(hdrs).some(k => k.toLowerCase() === 'authorization');
-        if (hasAuth) captured = { url, headers: hdrs };
+        const authKey = Object.keys(hdrs).find(k => k.toLowerCase() === 'authorization');
+        if (authKey) {
+          // Token from ANY api call (the page issues these constantly).
+          if (!authHeaders) authHeaders = hdrs;
+          // If we happen to see the real LIST call, prefer its exact URL.
+          if (!listUrl && /\/v1\/responses(\?|$)/.test(url)) listUrl = url;
+        }
       }
     } catch { /* never break the page */ }
     return origFetch.apply(this, arguments);
@@ -88,20 +93,28 @@
 
   const restore = () => { window.fetch = origFetch; };
 
-  console.log('%cWaiting for the page to issue its own list request…',
+  console.log('%cWaiting for any API call from the page…',
     'color:#0af;font-weight:bold',
-    '\nSwitch the Logs tab (Responses -> Completions -> Responses) or change a filter.');
+    '\nSwitch the Logs tab or change a filter if it does not proceed within a few seconds.');
 
-  for (let i = 0; i < 120 && !captured; i++) await sleep(500);   // up to 60s
-  if (!captured) {
+  for (let i = 0; i < 120 && !authHeaders; i++) await sleep(500);   // up to 60s
+  if (!authHeaders) {
     restore();
-    console.error('%cNothing captured.', 'color:red;font-weight:bold',
-      '\nRe-paste, then interact with the Logs list so it refetches.');
+    console.error('%cNo API call seen.', 'color:red;font-weight:bold',
+      '\nRe-paste, then click around the Logs page.');
     return;
   }
 
-  console.log('%cCaptured the app request:', 'color:green;font-weight:bold');
-  console.log('  ' + captured.url.replace(/([?&])/g, '\n    $1'));
+  // The console's real list URL, observed in the network trace. Used unless we
+  // captured the live one. Note: NO `limit` param - adding one returns 0 rows.
+  const KNOWN_LIST_URL = 'https://api.openai.com/v1/responses'
+    + '?include[]=message.input_image.image_url'
+    + '&input_item_limit=1&output_item_limit=1';
+  const captured = { url: listUrl || KNOWN_LIST_URL, headers: authHeaders };
+
+  console.log('%cReady.', 'color:green;font-weight:bold');
+  console.log('  list url: ' + (listUrl ? '(captured live)' : '(known console URL)'));
+  console.log('  ' + captured.url);
   console.log('  headers: ' + Object.keys(captured.headers).join(', '));
 
   // Reuse the captured URL verbatim, only swapping the pagination cursor.
