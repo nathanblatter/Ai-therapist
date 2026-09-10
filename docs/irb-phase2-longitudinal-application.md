@@ -466,13 +466,16 @@ Reuse Phase 1's structure with these updates (accuracy fixes — see questions d
   redaction succeeds and are then wiped. De-identified data retained indefinitely for
   future use (same as Phase 1, disclosed in consent).
 - Commercial AI models: state the CURRENT stack truthfully — voice conversation via OpenAI's
-  Realtime API (gpt-realtime-2.1-mini; transcription via gpt-4o-mini-transcribe; model
-  pinning per `docs/model-pinning.md`, with the per-session resolved model stamped in the
-  database); typed chat via gpt-5.2 (Chat Completions, not Realtime); redaction via gpt-5
-  (dual pass); auxiliary safety/analysis calls via gpt-4o-mini (crisis risk assessment,
-  minor-disclosure confirmation, session naming, session insights, worksheet ranking, eval
-  judging); and message embeddings via text-embedding-3-small (computed from redacted text
-  only; vectors retained, never exported). Third-party processing under
+  Realtime API (gpt-realtime-2.1-mini; transcription via gpt-transcribe as of 2026-09-09,
+  with a crisis-vocabulary keyword list and context prompt supplied to improve transcription
+  fidelity on safety-relevant terms; model pinning per `docs/model-pinning.md`, with the
+  per-session resolved model stamped in the database); typed chat via gpt-5.2 (Responses
+  API); redaction via gpt-5 (dual pass); auxiliary safety/analysis calls via gpt-4o-mini
+  (crisis risk assessment, minor-disclosure confirmation, session naming, session insights,
+  worksheet ranking, eval judging); OpenAI's free moderation model (omni-moderation-latest)
+  scores every participant message for self-harm signals as a supplementary crisis-detection
+  tier; and message embeddings via text-embedding-3-small (computed from redacted text only;
+  vectors retained, never exported). Third-party processing under
   [BAA / zero-data-retention — Q8]; include the current system prompt, redaction prompt, and
   session-name prompt as Phase 1 did (pull from src at submission time so they're current).
 - Automated safety processing: crisis risk assessment sends recent unredacted conversation
