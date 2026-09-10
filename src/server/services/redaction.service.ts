@@ -82,6 +82,12 @@ async function redactPHISinglePass(input: string): Promise<string> {
         reasoning: { effort: "low" },
         instructions: prompt,
         input: input,
+        // store defaults to TRUE on the Responses API. This call carries the
+        // one payload in the system that is by definition un-redacted
+        // participant content, so it must never become 30-day application
+        // state on OpenAI's side. Explicit here rather than relying on an
+        // org-level ZDR posture (see IRB Q8, unconfirmed).
+        store: false,
     });
 
     return response.output_text;
@@ -150,6 +156,9 @@ async function redactBatchSinglePass(inputs: string[]): Promise<string[]> {
         reasoning: { effort: "low" },
         instructions: batchInstructions,
         input: JSON.stringify(inputs.map((text, i) => ({ i, text }))),
+        // See redactPHISinglePass: un-redacted participant content must not
+        // be stored as application state (store defaults to true).
+        store: false,
     });
 
     return parseAnchoredBatch(response.output_text, inputs.length);

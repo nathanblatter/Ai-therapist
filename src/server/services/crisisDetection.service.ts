@@ -238,6 +238,10 @@ async function assessRiskWithLLM(
     temperature: 0,
     max_tokens: 300,
     response_format: { type: 'json_object' },
+    // This call carries un-redacted transcript excerpts (the assessment
+    // needs the participant's actual words). Never let it become stored
+    // application state on OpenAI's side.
+    store: false,
     ...(safetyIdentifier ? { safety_identifier: safetyIdentifier } : {}),
     messages: [
       { role: 'system', content: RISK_ASSESSMENT_PROMPT },
