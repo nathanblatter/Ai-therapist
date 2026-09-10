@@ -23,6 +23,10 @@ services:
       EVALS_ENABLED: "true"
       # OpenAI Realtime API key
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # OpenAI ADMIN key (a distinct credential class: org-level billing reads
+      # only, cannot make model calls). Powers the real-spend card in the admin
+      # Ops panel. Optional — unset just makes that card show a setup hint.
+      OPENAI_ADMIN_KEY: ${OPENAI_ADMIN_KEY:-}
       FLIGHTDECK_URL: ${FLIGHTDECK_URL:-http://flightdeck:8080}
       FLIGHTDECK_INGEST_KEY: ${FLIGHTDECK_INGEST_KEY}
       ASSISTANT_ENABLED: ${ASSISTANT_ENABLED:-false}
