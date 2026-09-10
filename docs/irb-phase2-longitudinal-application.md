@@ -1,6 +1,13 @@
 # Phase 2 IRB Application Draft — Human + AI Therapy: Better For Everyone (Phase 2, Longitudinal)
 
 **Status: WORKING DRAFT (agent-drafted 2026-09-01/02, not reviewed by Nathan or Dr. Gaskin).**
+**2026-09-09 revision (Nathan-directed): Data Collection, Analysis Plan, Confidentiality, and
+Consent Documentation expanded to declare the full behavioral-telemetry set (engagement/
+interaction telemetry, derived risk/affect measures, performance and technical telemetry)
+with per-stream research justifications and an explicit non-collection boundary. Streams not
+yet implemented in code (response-timing, interface-engagement events, expanded acoustic
+features) are declared here and must ship — gated on Phase 2 approval — before launch.
+Phase 1's live study is unchanged; nothing here authorizes new collection under 2025-519.**
 Mirrors the OneAegis xForm section order of the approved Phase 1 application (2025-519-BYU,
 scraped in full to `docs/irb-phase1-application.md`). Items marked **[DECISION]** have a
 corresponding entry in `docs/irb-phase2-questions-for-nathan.md`. Text in plain paragraphs is
@@ -95,10 +102,41 @@ team, is a web application accessible from participants' own devices. It support
 and voice conversation (realtime speech-to-speech via OpenAI's Realtime API under [BAA/ZDR
 status — DECISION Q8, MUST be resolved truthfully before submission]).
 
+Data collection is deliberately comprehensive on the behavioral layer — each stream below
+maps to a named aim in the analysis plan — while remaining strictly minimal on the identity
+layer (redaction, transient-only IP use, no device fingerprinting; see the deliberate
+non-collection paragraph below).
+
 What it collects, per session: conversation transcripts with timestamps; participant-initiated
 mood check-ins; responses to brief validated screeners (PHQ-2, GAD-2) administered in-app;
-session feedback ratings; engagement metadata (session frequency, duration, time of day);
-crisis-detection events and system actions. **[DECISION Q5]** Voice sessions [are / are not]
+session feedback ratings; crisis-detection events and system actions.
+
+Engagement and interaction telemetry (aims: engagement trajectories, habit formation,
+novelty decay, alliance development): session frequency, duration, and time of day;
+inter-session intervals and usage streaks; per-turn interaction timing (time from agent
+reply to participant reply; message length over time); interface engagement events during
+a session (window focus/visibility changes, revisiting earlier messages, opening in-app
+features such as worksheets, resources, and mood check-ins, and check-in completion vs.
+skip); and the participant's typed-vs-voice modality choice per session.
+
+Derived safety and affect measures (aims: safety-architecture performance, longitudinal
+mood trajectories), computed automatically by the system: per-message crisis risk scores
+with their component factors (keyword, sentiment, conversational-context, and trajectory
+scores) and the resulting within-participant risk-score history; graduated severity
+assessments and crisis-event records; participants' responses to the agent's structured,
+laddered safety-check questions when risk is elevated, with the resolved risk band; a
+per-turn affect trajectory (estimated emotional valence/arousal, computed from redacted
+transcript text); and AI-generated session summaries and structured session notes
+(computed from redacted content) supporting session-over-session continuity and
+qualitative analysis.
+
+System performance and technical telemetry (aims: safety-system performance and
+operational reliability): per-turn agent response latency; model token usage; automated
+quality evaluations of agent responses (LLM-judge ratings computed on redacted content);
+client-side error reports (error message, page, and browser user-agent string — no page
+content and no keystroke capture); and connection/session lifecycle events. IP addresses
+are read transiently on each request to enforce the US-only eligibility requirement
+(country-level geolocation check) and are not stored in the research dataset. **[DECISION Q5]** Voice sessions [are / are not]
 recorded as audio. Current system capability stores session audio (WAV) in access-controlled
 cloud storage (AWS S3, encrypted at rest) for safety review and transcription-fidelity
 auditing; Phase 1's application stated no audio is stored, so Phase 2 must either (a) disclose
@@ -107,8 +145,8 @@ participants. Option (a) recommended: recordings materially support safety audit
 consent form can disclose them plainly. If audio is stored, it is kept as (i) a session
 recording (participant + agent, for safety review and transcription-fidelity auditing) and
 (ii) a participant-voice-only track; derived acoustic features (e.g., pitch variability,
-speaking rate, pause structure) may be computed from the participant track for research
-analyses of vocal indicators of mood. Only derived, non-identifying acoustic features appear
+speaking rate, pause structure, loudness/energy, and spectral characteristics) may be
+computed from the participant track for research analyses of vocal indicators of mood. Only derived, non-identifying acoustic features appear
 in the de-identified research dataset; raw audio never leaves access-controlled storage and
 is automatically deleted 12 months after recording (retention long enough to cover the
 study period plus derived-feature extraction and safety audit, then hard-deleted with an
@@ -124,6 +162,15 @@ are then wiped. Crisis-flagged sessions follow the same schedule: their unredact
 are deleted on the same 24-hour cycle as all content, and the retained crisis material
 consists of redacted transcripts and derived event records, kept in a secure database
 restricted to authorized study staff for safety review and oversight.
+
+Deliberate non-collection (data-minimization boundary): the app does not log keystrokes and
+does not capture message drafts a participant types but chooses not to send; it does not
+fingerprint devices; it collects no location information beyond the transient country-level
+IP eligibility check; it collects nothing while the app is closed; and it collects nothing
+after withdrawal. All behavioral and derived measures above are computed from content and
+interface events participants deliberately submit while using the app, and every
+transcript-derived research measure downstream of the redaction pipeline is computed from
+redacted text only.
 
 **Instruments list (cards):**
 1. PHQ-2 (Kroenke, Spitzer & Williams) — public-domain validated 2-item depression screener,
@@ -214,11 +261,17 @@ proactive_offering arm with a pre-registered analysis script. Randomization of a
 feature keeps risk identical across arms. More reviewable, more publishable, slightly slower.
 Draft below assumes **Option A** with Option B text held in reserve.
 
-**Analysis plan (proposed):** Mixed-effects models of PHQ-2/GAD-2 trajectories over time;
-engagement survival analysis (time-to-disengagement); within-person alliance growth curves;
-descriptive safety-system performance metrics (flag rates, time-to-researcher-acknowledgment,
-false-positive review outcomes); qualitative thematic analysis of exit interviews and
-de-identified transcripts. A pre-registered analysis script will be finalized before
+**Analysis plan (proposed):** Mixed-effects models of PHQ-2/GAD-2 trajectories over time,
+with the system's derived affect trajectories and acoustic mood features examined as
+convergent-validity measures against the validated screeners; engagement survival analysis
+(time-to-disengagement) with engagement/interaction telemetry — session rhythm,
+response-timing patterns, and interface-engagement events — as predictors; habit-formation
+analyses of inter-session intervals, usage streaks, and time-of-day regularity across the
+8 weeks (the novelty-decay question); within-person alliance growth curves (WAI-SR), with
+behavioral engagement measures examined as correlates of self-reported alliance;
+safety-system performance metrics (flag rates, risk-score calibration against human review
+outcomes, time-to-researcher-acknowledgment, false-positive review outcomes); qualitative
+thematic analysis of exit interviews and de-identified transcripts. A pre-registered analysis script will be finalized before
 unblinding/analysis (see ai-therapist-108).
 
 ## Drug/Device/Therapeutic Intervention
@@ -378,7 +431,11 @@ consent document, and automatically upon any crisis flag.
   as `docs/irb-phase2-consent-draft.md`, incorporating: the three Phase-1 reviewer
   stipulations verbatim-or-stronger (concrete AI-interaction risk phrasing; no therapy-benefit
   promises; explicit mandatory-reporting disclosure listing abuse/neglect/exploitation/harm
-  with identity-disclosure consequence); audio recording disclosure [per Q5]; data flows
+  with identity-disclosure consequence); audio recording disclosure [per Q5]; a prominent
+  plain-language "what the app records and analyzes" section covering the full behavioral
+  telemetry set (usage/interaction patterns, automated per-message risk scoring and
+  emotional-tone analysis, technical telemetry, and the explicit non-collection boundary —
+  no keystrokes/unsent drafts, no fingerprinting, no precise location); data flows
   (OpenAI processing, redaction, retention windows, indefinite de-identified retention);
   withdrawal mechanics (stop using app, request data removal via manual pathway); crisis
   monitoring disclosure (what the system watches for and who gets paged); compensation
@@ -422,6 +479,13 @@ Reuse Phase 1's structure with these updates (accuracy fixes — see questions d
   excerpts to OpenAI (gpt-4o-mini) for scoring, and at elevated risk the system injects
   hidden de-escalation guidance into the AI model's context to steer its responses; the
   steering is logged but not announced to the participant.
+- Behavioral and technical telemetry: the engagement, interaction-timing, interface-event,
+  performance, and client-error telemetry described under Data Collection is stored in the
+  study database keyed to the anonymous participant/session ID and contains no conversation
+  content; the only device-descriptive element retained is the browser user-agent string
+  attached to client error reports. Derived safety/affect measures (risk scores, affect
+  trajectories, session notes) live in the same access-controlled database as the redacted
+  transcripts, with the same staff-access audit logging.
 - Staff access to identifiable content: researchers with live safety-monitoring duties can
   view conversations in real time before redaction (only while a session is active), and
   authorized staff (therapist/researcher roles) can access session audio recordings for
