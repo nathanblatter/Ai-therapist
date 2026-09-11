@@ -222,6 +222,12 @@ export async function initiateCrisisWindDown(
   initiatedBy: string,
 ): Promise<{ injected: boolean }> {
   const { sidebandManager } = await import('./sidebandManager.service.js');
+  // The trailing `true` (respond-now) is INERT under GPT-Live and kept only for
+  // signature compatibility. Realtime could force a reply with response.create;
+  // GPT-Live decides for itself when to speak, and an appended instruction can
+  // already interrupt speech in progress. Practically this means wind-down
+  // guidance is delivered but the model may finish its current sentence first —
+  // which is why WIND_DOWN_GRACE_MS exists rather than an immediate cut.
   const injected = await sidebandManager.tryInject(sessionId, 'system', CRISIS_WIND_DOWN_GUIDANCE, true);
 
   await logInterventionAction(sessionId, 'handoff_initiated', {

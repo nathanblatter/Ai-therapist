@@ -90,8 +90,9 @@ Stored shape: `rubric` JSONB `{dimension: {score, rationale}}` plus
 ## Cost note
 
 One judge call per session (~transcript + ~1.2k output tokens on
-`gpt-4o-mini`) — negligible next to the realtime session itself, fine to
-auto-run once verified.
+`gpt-4o-mini`) — negligible next to the voice session itself, fine to
+auto-run once verified. (For scale: a GPT-Live voice session bills $0.05/min for
+the voice layer plus the delegated backend's tokens — see `docs/gpt-live.md`.)
 
 ---
 

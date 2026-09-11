@@ -3,8 +3,9 @@
 // 10:00 PM to 6:00 AM Mountain Time and shows crisis and support resources
 // instead — this is that screen. It renders as a blocking overlay (same
 // layering as ConsentScreen) whenever GET /api/config/quiet-hours reports the
-// window active; the server middleware enforces the same rule on /token and
-// /api/chat/start, so this is presentation, not the security boundary.
+// window active; the server middleware enforces the same rule on
+// /api/live/session and /api/chat/start, so this is presentation, not the
+// security boundary.
 import { Moon, Phone, MessageSquare } from 'react-feather';
 
 interface QuietHoursScreenProps {

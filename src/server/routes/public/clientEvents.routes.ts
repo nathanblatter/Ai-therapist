@@ -37,10 +37,20 @@ const KIND_SET = new Set<string>(CLIENT_EVENT_KINDS);
 export const MAX_DETAIL_BYTES = 2048;
 
 // Session IDs attached to beacons must look like the ids this app actually
-// mints/uses: OpenAI realtime ('sess_...'), chat ('chat_...') or redteam
-// ('redteam_...'), alphanumeric+underscore, bounded length. Anything else
-// (junk, injection attempts, over-long strings) is stored as null.
-const SESSION_ID_RE = /^(sess|chat|redteam)_\w{1,56}$/;
+// mints/uses: GPT-Live voice ('live_...'), chat ('chat_...'), redteam
+// ('redteam_...'), or a legacy Realtime id ('sess_...'), alphanumeric+
+// underscore, bounded length. Anything else (junk, injection attempts,
+// over-long strings) is stored as null.
+//
+// 'live_' was added with the GPT-Live migration. Without it EVERY beacon from a
+// voice session stored a null sessionId — silently, since a rejected id is not
+// an error — which would have made client-side error telemetry impossible to
+// tie back to a session for the entire voice product.
+//
+// 'sess_' is retained deliberately: Phase 1 sessions recorded under the
+// Realtime API still exist in client_events and their historical rows must keep
+// validating.
+const SESSION_ID_RE = /^(live|sess|chat|redteam)_\w{1,56}$/;
 
 export function cleanSessionId(sessionId: unknown): string | null {
   return typeof sessionId === 'string' && sessionId.length <= 64 && SESSION_ID_RE.test(sessionId)

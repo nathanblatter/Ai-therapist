@@ -50,6 +50,77 @@ Stores all conversation messages from AI therapy sessions.
 - Redaction happens at insert time in the `/logs/batch` endpoint
 - **Future implementation:** Role-based redaction retrieval will allow therapists to view unredacted data
 
+### 3. GPT-Live voice tables (migration 098)
+
+Added by the GPT-Live migration. Architecture reference: `docs/gpt-live.md`.
+
+#### `therapy_sessions.openai_live_session_id`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| openai_live_session_id | TEXT | Opaque GPT-Live session id (`live_...`) returned in the JSON body of `POST /v1/live/sessions`. `NULL` for Realtime-era sessions. |
+
+Kept separate from `openai_call_id` on purpose: a Realtime `call_id` and a Live
+session id are different namespaces with different attach URLs, and the sideband
+reattach query after a restart has to tell them apart. Indexed by
+`idx_therapy_sessions_live_reattach` (partial: active sessions with a non-null
+live session id).
+
+#### `live_usage`
+
+Per-second voice billing for GPT-Live sessions. **One row per session**,
+overwritten as snapshots arrive.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| session_id | TEXT | PRIMARY KEY, FK → `therapy_sessions(session_id)` ON DELETE CASCADE |
+| model | TEXT | Voice model (`gpt-live-1`) |
+| duration_seconds | NUMERIC(12,3) | Latest **cumulative** voice duration reported by the API |
+| finalized | BOOLEAN | TRUE once `session.closed` has been observed |
+| close_reason | TEXT | `close_requested` / `expired` / `content` / `remote_hangup` / `connection_lost`; NULL while running |
+| peak_context_ratio | NUMERIC(5,4) | Peak `context_window.usage_ratio` seen |
+| created_at, updated_at | TIMESTAMP | |
+
+**The cumulative-snapshot rule.** `session.usage.updated` carries a cumulative
+total, **not** an increment. Summing the snapshots would massively overcount a
+long session. So each snapshot **overwrites** the row (`GREATEST` of stored and
+incoming, so a late out-of-order frame cannot walk the number backwards), and
+`finalized` is sticky (`OR`) so a stray in-flight snapshot cannot downgrade a
+confirmed total back to provisional.
+
+Because the table stores the latest snapshot rather than appending deltas, it is
+safe — and correct — to `SUM(duration_seconds)` **across sessions**. It is never
+correct to sum snapshots *within* a session; the schema simply makes that
+impossible by holding only one row.
+
+`finalized = FALSE` means the connection dropped before `session.closed` and the
+duration is the last in-flight snapshot — formally unconfirmed. It is persisted
+anyway so the session is not billed as zero; the cost dashboard reports these
+separately as `unfinalized_sessions`. A socket close alone does not establish
+finalization.
+
+Billing: `$0.05` per minute for the voice layer, charged per second and not
+rounded up. `POST /v1/live/sessions` bills 15 seconds at initialization, credited
+back against the running session — so an abandoned session still costs money.
+Rates live in `LIVE_RATES_PER_MINUTE` (`src/server/db/liveUsage.queries.ts`) and
+are a hand-maintained estimate; invoices are the source of truth.
+
+#### `session_llm_usage.purpose` — new value `live_delegation`
+
+The delegated Responses backend is billed **separately** from the voice layer, at
+normal token rates. Those figures arrive as nested `response.completed` events on
+the sideband and are written to the existing `session_llm_usage` table with
+`purpose = 'live_delegation'`, so the cost dashboard picks them up with no
+special handling. Each backend response id is metered once, so a replayed event
+cannot double-bill.
+
+Full value set: `insights | redaction | crisis | eligibility | rerank | chat |
+live_delegation`. The column is free-text TEXT, so no enum change was needed;
+migration 098 only updates the column comment.
+
+This row is also the only per-session record of which backend model a voice
+session actually ran on — see `docs/model-pinning.md`.
+
 ## Authentication Flow
 
 ### Login
@@ -79,7 +150,9 @@ Stores all conversation messages from AI therapy sessions.
 - `POST /api/auth/login` - Login endpoint
 - `POST /api/auth/logout` - Logout endpoint
 - `GET /api/auth/status` - Check authentication status
-- `GET /token` - Get OpenAI realtime API token (for AI therapist)
+- `POST /api/live/session` - Exchange the browser's SDP offer for a GPT-Live session
+  (server holds the project API key; returns `session_id` + SDP answer). Replaces the
+  Realtime-era `GET /token` ephemeral-key endpoint.
 - `POST /logs/batch` - Log conversation messages
 - `/` - Main AI therapist interface
 

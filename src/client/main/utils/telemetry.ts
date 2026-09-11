@@ -19,12 +19,12 @@ export type ClientEventKind =
   | 'sdp_fetch_failed'
   | 'data_channel_error'
   | 'socket_connect_error'
-  | 'chat_send_failed'
-  // Sideband attach failures (ai-therapist-195) — no sideband means no live
-  // monitoring and no crisis steering for that realtime session.
-  | 'sideband_no_location'
-  | 'sideband_register_failed'
-  | 'sideband_never_registered';
+  | 'chat_send_failed';
+// The sideband_* kinds (ai-therapist-195) are gone from the client: they
+// reported the browser's failure to scrape a call_id out of a CORS-hidden
+// Location header and hand it to the server. GPT-Live gives the server the
+// session id directly, so there is no client-side sideband attach left to fail.
+// The server keeps the kinds in its allowlist for the historical rows.
 
 const MAX_PER_KIND = 5;
 const MAX_TOTAL = 20;
