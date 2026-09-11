@@ -64,13 +64,31 @@ describe('public config routes', () => {
     expect(res.body).toMatchObject({ voice_enabled: true, chat_enabled: true });
   });
 
-  it('GET /api/config/voices returns only enabled voices', async () => {
+  it('GET /api/config/voices returns only enabled voices, enriched from the GPT-Live registry', async () => {
     const res = await request(app).get('/api/config/voices');
     expect(res.status).toBe(200);
+    // The admin-authored label/description still win; the route adds the
+    // registry metadata the picker needs (accent, presentation, source) plus
+    // hasPreview, so it can hide the play control for voices that ship no clip.
     expect(res.body.voices).toEqual([
-      { value: 'cedar', label: 'Cedar', description: 'Warm' },
+      expect.objectContaining({
+        value: 'cedar', label: 'Cedar', description: 'Warm', hasPreview: true,
+      }),
     ]);
     expect(res.body.default_voice).toBe('cedar');
+  });
+
+  it('GET /api/config/voices annotates every voice with registry metadata', async () => {
+    // A voice missing from the registry is dropped rather than offered, because
+    // it would 400 the session creation the moment the participant presses
+    // start. Anything that survives must therefore carry registry fields.
+    const res = await request(app).get('/api/config/voices');
+    expect(res.status).toBe(200);
+    expect(res.body.voices.length).toBeGreaterThan(0);
+    for (const voice of res.body.voices) {
+      expect(typeof voice.accent).toBe('string');
+      expect(['natural', 'generated']).toContain(voice.source);
+    }
   });
 });
 
@@ -249,9 +267,24 @@ describe('session management routes', () => {
     expect(res.status).toBe(401);
   });
 
-  it('POST /api/sessions/:id/register-call requires call_id (400)', async () => {
+  // register-call was removed with the GPT-Live migration: the session id now
+  // arrives in the body of POST /api/live/session and the sideband attaches
+  // there, so the client has nothing to register. Asserting it is GONE guards
+  // against the endpoint being resurrected with a dead Realtime code path.
+  it('POST /api/sessions/:id/register-call no longer exists (404)', async () => {
     const res = await request(app).post('/api/sessions/abc/register-call').send({});
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /api/live/session is mounted and gated before it can reach OpenAI', async () => {
+    const res = await request(app).post('/api/live/session').send({});
+    // An unconsented request is rejected by requireConsent with 412 before the
+    // handler runs. That ordering is the point of the assertion: session
+    // creation bills 15 seconds of voice duration at initialization, so every
+    // gate must fire BEFORE the OpenAI call, not after it.
+    //
+    // 404 would mean the route is not mounted; 500 would mean a gate threw.
+    expect([400, 401, 403, 409, 412, 429]).toContain(res.status);
   });
 });
 

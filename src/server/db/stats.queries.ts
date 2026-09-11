@@ -101,7 +101,7 @@ export async function getConfigStats(): Promise<{ languages: LanguageStatRow[]; 
   return { languages: languageStats, voices: voiceStats };
 }
 
-/** The configured AI model, defaulting to 'gpt-realtime-2.1-mini'. */
+/** The configured AI model, defaulting to 'gpt-live-1'. */
 export async function getAiModel(): Promise<string> {
   try {
     const result = await pool.query<Pick<SystemConfigRow, 'config_value'>>(
@@ -110,13 +110,13 @@ export async function getAiModel(): Promise<string> {
 
     if (result.rows.length > 0) {
       const config = result.rows[0].config_value as { model?: string } | null;
-      return config?.model || 'gpt-realtime-2.1-mini';
+      return config?.model || 'gpt-live-1';
     }
 
-    return 'gpt-realtime-2.1-mini';
+    return 'gpt-live-1';
   } catch (error) {
     console.error('Failed to fetch AI model config:', error);
-    return 'gpt-realtime-2.1-mini';
+    return 'gpt-live-1';
   }
 }
 

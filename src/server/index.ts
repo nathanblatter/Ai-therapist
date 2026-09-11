@@ -51,7 +51,7 @@ import prepRoutes from "./routes/admin/prep.routes.js";
 import evalsRoutes from "./routes/admin/evals.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
-import tokenRoutes from "./routes/public/token.routes.js";
+import liveSessionRoutes from "./routes/public/liveSession.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
 import clientEventsRoutes from "./routes/public/clientEvents.routes.js";
 import engagementEventsRoutes from "./routes/public/engagementEvents.routes.js";
@@ -609,7 +609,6 @@ app.use(usersRoutes());
 // ===================== Session Token and Creation Endpoints =====================
 
 // Realtime session token minting -> routes/public/token.routes.js.
-app.use(tokenRoutes());
 
 // Participant consent screen (accept/status) -> routes/public/consent.routes.ts.
 app.use(consentRoutes());
@@ -630,6 +629,7 @@ app.use(sidebandRoutes());
 
 // ===================== Session Management API Routes =====================
 // Public session create/list/view/end + register-call -> routes/public/sessions.routes.ts.
+app.use(liveSessionRoutes());
 app.use(sessionsRoutes());
 
 

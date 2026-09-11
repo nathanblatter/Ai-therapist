@@ -221,13 +221,15 @@ application text. Ordered roughly by severity.
 - **Likely objection:** S9 shows the reviewers drill into third-party AI data flows. Phase 1
   asserted "a signed Business Associate Agreement (BAA) is in place with the model provider
   (OpenAI)" and zero-retention endpoints. If Phase 2 restates this and is asked for the
-  agreement — or the agreement does not cover the Realtime API now used for speech-to-speech —
+  agreement — or the agreement does not cover GPT-Live, the speech-to-speech service now in use —
   the whole data-flow section loses credibility.
 - **Pre-emptive mitigation:** Verify before writing (Q8 / ai-therapist-132): who holds the
-  OpenAI agreement, what it covers (must include the Realtime API), and the actual retention
+  OpenAI agreement, what it covers (must include GPT-Live AND the delegated Responses backend
+  it hands reasoning to — they are two separately billed services), and the actual retention
   posture; move the account off the personal account to a university-controlled org
   (ai-therapist-139) so the application names the right owner. Then replicate the S9-response
-  disclosure level for the current stack: vendor, exact services (Realtime API,
+  disclosure level for the current stack: vendor, exact services (GPT-Live voice,
+  its delegated Responses backend,
   redaction/analysis models by name from src/config at submission time), links, DPA/BAA
   status, retention, no-training statement, and current prompts attached. State only what is
   documented.
@@ -321,9 +323,16 @@ application text. Ordered roughly by severity.
   way to save a round.
 
 ### P11. Accuracy of system description vs. deployed reality
+> **Stack change 2026-09-11:** the voice backend moved from the OpenAI Realtime API to
+> GPT-Live (`gpt-live-1`) with a delegated `gpt-5.6-terra` Responses backend. Any vendor,
+> service-name or model-name statement below must be re-checked against `docs/gpt-live.md`
+> before it is reused in IRB correspondence. See ai-therapist-215 for the open question of
+> whether the swap itself requires a Phase 1 amendment.
+
 - **Likely objection:** Not raised in Phase 1 (the description was accurate when written), but
   Phase 2 restating stale Phase 1 text creates contradictions the reviewers can catch against
-  attachments and prior filings: "Whisper + GPT-4o" (now Realtime API), multi-layer risk
+  attachments and prior filings: "Whisper + GPT-4o" (was the Realtime API, now GPT-Live),
+  multi-layer risk
   scoring (shipped detector flags on keywords, trajectory logged passively), "BYU Box" as
   primary storage (reality: AWS RDS/S3 operational layer, Box for de-identified exports),
   24-hour original-retention default (verify prod value, Q9).
@@ -351,7 +360,7 @@ application text. Ordered roughly by severity.
    automated-detection + on-call-paging model, and wire prod paging before launch.
 2. **Audio (P2):** reconcile "no audio is stored" with the S3 WAVs — disclose or disable, and
    clean up Phase 1 via amendment first.
-3. **BAA (P3):** verify the OpenAI agreement (including Realtime API coverage) before
+3. **BAA (P3):** verify the OpenAI agreement (covering GPT-Live and its delegated backend) before
    restating it; move off the personal account.
 4. **Clinical backstop (P4):** with no clinician Co-I, the updated CAPS letter covering remote
    participants plus a written remote escalation path is load-bearing.

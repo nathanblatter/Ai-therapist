@@ -445,22 +445,54 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime',
   return basePrompt + modalityAddition + proactiveAddition + languageAddition;
 }
 
+/**
+ * Human-readable name for a language code, as configured in system_config.
+ *
+ * GPT-Live's prompting guide asks for the spoken language to be named in the
+ * instructions ("Speak Spanish unless…"), rather than inferred by the model.
+ * Falls back to the raw code so an unconfigured language still produces a
+ * coherent instruction rather than a dangling sentence.
+ */
+export async function getLanguageName(language: string): Promise<string | null> {
+  if (!language) return null;
+  try {
+    const config = await getSystemConfig();
+    const languagesConfig = config.languages as LanguagesConfig | undefined;
+    const match = languagesConfig?.languages?.find((l: LanguageOption) => l.value === language);
+    return match?.label ?? language;
+  } catch {
+    return language;
+  }
+}
+
+/**
+ * Baseline GPT-Live session shape.
+ *
+ * Kept deliberately small compared to its Realtime predecessor, because most of
+ * what used to live here has no Live equivalent: there is no `type`, no
+ * `turn_detection` (GPT-Live owns turn-taking), and no `audio.input.transcription`
+ * (it transcribes both sides itself and emits session.*_transcript.delta).
+ * `audio.format` is likewise absent — WebRTC negotiates it through SDP and the
+ * API rejects the field. Tools and instructions now belong to the delegated
+ * backend; see utils/liveSessionConfig.ts for the real builder.
+ */
 export const sessionConfigDefault = {
   session: {
-    type: "realtime",
-    tools: [] as unknown[],
-    tool_choice: "auto",
-    model: "gpt-realtime-2.1-mini",
+    model: "gpt-live-1",
     audio: {
-      input: {
-        transcription: {
-          model: "gpt-4o-mini-transcribe",
-        },
-        turn_detection: { type: "semantic_vad", eagerness: "low" },
-      },
       output: {
-        voice: "cedar",
+        voice: "marin",
       },
     },
+    delegation: {
+      type: "responses",
+      responses: {
+        model: "gpt-5.6-terra",
+        tools: [] as unknown[],
+        tool_choice: "auto",
+        parallel_tool_calls: false,
+      },
+    },
+    store: false,
   },
 };

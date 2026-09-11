@@ -1,7 +1,11 @@
 // Public session management API: create/list/view/end a participant's own
-// therapy sessions, plus register-call which attaches the OpenAI realtime call
-// id. Session owners see their own unredacted content. Mutations reuse
+// therapy sessions, plus audio ingest and scale/worksheet submission. Session
+// owners see their own unredacted content. Mutations reuse
 // db/sessions.queries.ts + db/messages.queries.ts.
+//
+// The register-call endpoint was removed with the GPT-Live migration — the
+// session id now comes back in the body of POST /api/live/session, so there is
+// nothing for the client to register. See that route for the full rationale.
 import { Router, json } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import { appendChunk, isFinalized } from '../../services/recorder.service.js';
@@ -14,7 +18,6 @@ import {
   getSessionConfig,
   updateSessionStatus,
   getSessionAccessInfo,
-  setSessionCallId,
 } from '../../db/index.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -317,73 +320,22 @@ export default function sessionsRoutes(): Router {
     res.json(def);
   });
 
-  // POST /api/sessions/:sessionId/register-call - attach an OpenAI call id
-  router.post('/api/sessions/:sessionId/register-call', async (req, res) => {
-    const { sessionId } = req.params;
-    const { call_id, ephemeral_key } = req.body;
-
-    if (!call_id) {
-      return res.status(400).json({ error: 'call_id is required' });
-    }
-
-    try {
-      const session = await getSessionAccessInfo(sessionId);
-      if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
-      }
-      if (!canAccessSession(req, session, sessionId)) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-      if (session.status !== 'active') {
-        return res.status(400).json({ error: 'Session is not active' });
-      }
-
-      await setSessionCallId(sessionId, call_id);
-
-      // Attach the server-side sideband WebSocket to this in-progress WebRTC call
-      // so the backend can run tools / monitor / steer the session. Fire-and-forget
-      // and non-fatal: the user's call continues even if the sideband fails to
-      // attach (errors are logged to the session via sidebandManager).
-      // Kill switch: set SIDEBAND_ENABLED=false to stop attaching without a redeploy.
-      const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
-      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
-      // Auth (ai-therapist-62, revised after live verification 2026-07-31):
-      // the STANDARD API key is rejected with 404 call_id_not_found for the
-      // entire life of a real WebRTC call (verified in prod logs — all retry
-      // attempts fail, so it is NOT the attach-before-registered race; likely
-      // a key/project scope mismatch). The per-session EPHEMERAL key is what
-      // attaches successfully, so it stays the primary. The standard key is
-      // kept as the fallback for late reconnects where the ephemeral key may
-      // have expired (the original item-62 concern).
-      if (!sidebandEnabled) {
-        console.log('[Sideband] Disabled via SIDEBAND_ENABLED=false; call_id recorded only.');
-      } else {
-        const { getOpenAIKey } = await import('../../config/secrets.js');
-        const standardKey = await getOpenAIKey();
-        const ephemeralKey = typeof ephemeral_key === 'string' && ephemeral_key ? ephemeral_key : undefined;
-        const apiKey = ephemeralKey ?? standardKey;
-        const fallbackKey = ephemeralKey ? standardKey : undefined;
-        if (!apiKey) {
-          console.error('[Sideband] No usable OpenAI key (ephemeral or standard); skipping sideband attach.');
-        } else {
-          sidebandManager.connect(sessionId, call_id, apiKey, 0, fallbackKey).catch(err => {
-            console.warn(`[Sideband] connect() failed for ${sessionId}:`, err instanceof Error ? err.message : err);
-          });
-        }
-      }
-
-      res.json({ success: true, message: 'Call registered', sessionId, call_id });
-    } catch (error: unknown) {
-      console.error('Failed to establish sideband connection:', error);
-      res.status(500).json({
-        error: 'Failed to establish sideband connection',
-        details: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
+  // POST /api/sessions/:sessionId/register-call was REMOVED in the GPT-Live
+  // migration, along with the whole class of bug it existed to work around.
+  //
+  // Under Realtime the browser POSTed its SDP straight to OpenAI and the server
+  // had no way to learn the call id except by having the browser scrape it out
+  // of a `Location` response header and hand it back here — which silently
+  // failed whenever CORS hid the header, leaving the session with no sideband
+  // and therefore no tool execution, no crisis steering and no monitoring.
+  //
+  // GPT-Live inverts the handshake: POST /api/live/session receives the SDP
+  // offer, creates the session server-side, and gets the session id in the JSON
+  // response body. The sideband attaches there, before the SDP answer is even
+  // returned to the browser. There is nothing left for the client to register.
 
   // POST /api/sessions/create - create a new therapy session. Quiet-hours
-  // gated as defense in depth alongside /token and /api/chat/start.
+  // gated as defense in depth alongside /api/live/session and /api/chat/start.
   router.post('/api/sessions/create', requireOutsideQuietHours, requireActiveStudyStatus, async (req, res) => {
     try {
       const userId = req.session?.userId || null;

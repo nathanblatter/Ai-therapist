@@ -10,6 +10,37 @@ nightly.
 
 Design spec: flightdeck item `ai-therapist-82` (see `spec-redteam.md`).
 
+> ## KNOWN GAP — the voice suite is BROKEN by the GPT-Live migration
+>
+> `src/redteam/voiceClient.ts` still connects to
+> `wss://api.openai.com/v1/realtime`. Production voice sessions now run on
+> GPT-Live (`gpt-live-1`) over a completely different protocol, so
+> **`npm run redteam:voice` no longer exercises anything the app actually
+> does** — at best it tests a backend we no longer use, at worst it fails to
+> connect. It has not been ported.
+>
+> This does **not** affect the deploy gate: `redteam:smoke` and `redteam:full`
+> drive the chat and `/logs/batch` paths and are unaffected. Voice is opt-in
+> and never part of either suite.
+>
+> Porting it would require, roughly:
+> - Replacing the WebSocket connect with the GPT-Live handshake — create the
+>   session via `POST /v1/live/sessions` (WebRTC SDP transport, which the
+>   harness currently has no way to drive headlessly) and attach the sideband
+>   at `wss://api.openai.com/v1/live/sessions/{id}/attach`.
+> - Rewriting the event vocabulary (mapping table in `docs/gpt-live.md`):
+>   `session.*_transcript.delta` instead of the Realtime transcription events,
+>   `response.event` envelopes for tool calls, `session.usage.updated` for
+>   metering.
+> - Reassembling turns from transcript fragments, since there is no
+>   turn-completed event — or reusing `TranscriptAssembler`.
+> - **Solving turn-taking**, which is the hard part. The harness drives turns
+>   by disabling server VAD; GPT-Live is full duplex and exposes no VAD to
+>   disable, so persona turns would have to be paced some other way.
+> - Re-costing: GPT-Live bills the voice layer per second at a flat rate, plus
+>   the delegated backend's tokens separately — not Realtime audio token
+>   rates — so the cost table in `src/redteam/config.ts` needs new figures.
+
 ## Why two drive surfaces
 
 The app has two independent pipelines that differ in a decisive way:
@@ -45,7 +76,7 @@ regression backstop. This keeps the gate deterministic and judge-drift-resistant
 npm run redteam:smoke     # safety subset, no judge — the deploy gate
 npm run redteam:full      # all safety + quality scenarios + judge — nightly
 npm run redteam:quality   # quality (rubric-floor) scenarios only
-npm run redteam:voice     # REAL Realtime voice sessions + playable recordings
+npm run redteam:voice     # BROKEN — still targets the Realtime API (see KNOWN GAP above)
 npm run redteam -- --scenario prompt-injection   # one scenario
 npm run redteam -- --dry-run                      # offline: no OpenAI calls
 npm run redteam:replay -- --sessions 5            # replay real redacted sessions
@@ -60,13 +91,14 @@ persist (harness run with trigger 'replay').
 
 Quality scenarios (ai-therapist-124) simulate ordinary participants (hesitant
 first-timer, rambler, terse, advice-demander, engaged low-mood) and gate on
-LLM-judge rubric floors. The voice suite drives a real OpenAI Realtime session
-over WebSocket — persona turns spoken via TTS, both audio directions teed into
-the ordinary session recording (playable in admin SessionDetail). Voice is
-opt-in only (never rides along with smoke/full): each run is minutes of
-wall-clock and bills Realtime audio rates. Turn-taking is harness-driven
-(server VAD disabled for the connection) — see plans/covalStyleEvalsPlan.md
-for the why. Semantic assertions known to flake can request a 3-vote majority
+LLM-judge rubric floors. The voice suite was written against the OpenAI Realtime
+API over WebSocket — persona turns spoken via TTS, both audio directions teed
+into the ordinary session recording (playable in admin SessionDetail), with
+turn-taking harness-driven by disabling server VAD (see
+plans/covalStyleEvalsPlan.md for the why). **That design no longer matches
+production**, which runs GPT-Live; see the KNOWN GAP at the top of this
+document. Voice was always opt-in only (never rides along with smoke/full):
+each run is minutes of wall-clock and bills real audio rates. Semantic assertions known to flake can request a 3-vote majority
 classifier (`votes: 3` on the classify request; used by context-not-leaked).
 
 Flags: `--suite smoke|full|quality|voice` · `--scenario <id>` · `--out <dir>` (default
@@ -146,8 +178,9 @@ scenarios are dominated by sequential `gpt-5.2` reply latency (~7-10 s/turn).
 
 ## Known limitations (from the spec's risk register)
 
-- **R3 — tool-firing is not asserted directly.** The realtime model's tool calls
-  (`run_risk_check`, `show_resource_card`, …) and the `safety_protocol` /
+- **R3 — tool-firing is not asserted directly.** The voice path's tool calls
+  (`run_risk_check`, `show_resource_card`, … — issued by the delegated backend
+  under GPT-Live) and the `safety_protocol` /
   `risk_steering` injections are **sideband-gated** (`maybeSteerSession` /
   `executeHighRiskResponse` early-return when there's no live sideband socket).
   The harness has no sideband, so it asserts the **equivalent server signals** that

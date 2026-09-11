@@ -76,21 +76,75 @@ export default function configRoutes(): Router {
   });
 
   // GET /api/config/voices - enabled voices with metadata
-  router.get('/api/config/voices', async (_req, res) => {
+  //
+  // Two things happen here beyond reading system_config, both added with the
+  // GPT-Live migration:
+  //
+  //  1. Every configured voice is validated against the GPT-Live voice registry
+  //     and enriched from it. An admin typo in system_config would otherwise
+  //     reach the participant's picker, then 400 the session creation at the
+  //     moment they press start — a failure with no useful explanation. Unknown
+  //     voices are dropped here instead, and logged.
+  //  2. Each voice reports whether a bundled preview clip exists. The twelve
+  //     voices introduced with gpt-live-1 ship no preview audio, so the picker
+  //     needs to hide the play control for them rather than offer a button that
+  //     404s.
+  //
+  // Optional ?language= filters to voices appropriate for that language: Bossa
+  // and Tempo are Brazilian Portuguese and sound wrong reading English.
+  router.get('/api/config/voices', async (req, res) => {
     try {
+      const [{ getLiveVoice, liveVoicesForLanguage, LIVE_DEFAULT_VOICE }, { voicePreviewExists }] =
+        await Promise.all([
+          import('../../utils/liveSessionConfig.js'),
+          import('../../utils/voicePreviews.js'),
+        ]);
+
       const config = await getSystemConfig();
-      const voicesConfig = (config.voices as VoicesConfig | undefined) ?? {
-        voices: [{ value: 'cedar', label: 'Cedar', description: 'Warm & natural', enabled: true }],
-        default_voice: 'cedar',
-      };
+      const voicesConfig = config.voices as VoicesConfig | undefined;
 
-      const enabledVoices = voicesConfig.voices
-        ? voicesConfig.voices
-            .filter((v) => v.enabled)
-            .map((v) => ({ value: v.value, label: v.label, description: v.description }))
-        : [];
+      const language = typeof req.query.language === 'string' ? req.query.language : null;
+      const allowed = new Set(liveVoicesForLanguage(language).map(v => v.value));
 
-      res.json({ voices: enabledVoices, default_voice: voicesConfig.default_voice });
+      const configured = voicesConfig?.voices?.filter(v => v.enabled) ?? [];
+      const unknown: string[] = [];
+
+      const voices = configured
+        .filter(v => {
+          if (!getLiveVoice(v.value)) { unknown.push(v.value); return false; }
+          return allowed.has(v.value);
+        })
+        .map(v => {
+          const meta = getLiveVoice(v.value)!;
+          return {
+            value: v.value,
+            // Admin-authored label/description win; the registry fills any gap.
+            label: v.label || meta.label,
+            description: v.description || meta.description,
+            accent: meta.accent,
+            presentation: meta.presentation,
+            source: meta.source,
+            hasPreview: voicePreviewExists(v.value),
+          };
+        });
+
+      if (unknown.length > 0) {
+        console.warn(
+          `[Config] Dropping voice(s) not supported by GPT-Live: ${unknown.join(', ')}. ` +
+          'Fix system_config.voices — these would fail at session creation.',
+        );
+      }
+
+      // Fall back through: configured default -> first offered voice -> the
+      // documented GPT-Live default. Never return a default that is not in the
+      // list we just returned, or the picker opens with nothing selected.
+      const configuredDefault = voicesConfig?.default_voice;
+      const defaultVoice =
+        (configuredDefault && voices.some(v => v.value === configuredDefault) && configuredDefault) ||
+        voices[0]?.value ||
+        LIVE_DEFAULT_VOICE;
+
+      res.json({ voices, default_voice: defaultVoice });
     } catch (err) {
       console.error('Failed to fetch voices config:', err);
       res.status(500).json({ error: 'Failed to fetch voices config' });

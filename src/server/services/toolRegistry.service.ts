@@ -6,7 +6,7 @@
 import { pool } from '../config/db.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
-interface ToolDefinition {
+export interface ToolDefinition {
   type: string;
   name: string;
   description: string;
@@ -1677,63 +1677,20 @@ export class ToolRegistry {
     // model's response while it delivers something important. Refused while a
     // high-severity crisis flag is active (the participant must always be able
     // to interrupt during a crisis) and outside realtime sessions (no sideband).
-    this.registerTool(
-      'hold_floor',
-      {
-        type: 'function',
-        name: 'hold_floor',
-        description:
-          "Briefly prevent your speech from being interrupted while you deliver something important (a safety message, a key insight). The participant's microphone stays on; their speech simply won't cut you off. Use sparingly.",
-        parameters: {
-          type: 'object',
-          properties: {
-            seconds: { type: 'number', description: 'How long to hold the floor, 1-20 seconds.' },
-            reason: { type: 'string', description: 'One short sentence: why this moment must not be interrupted.' },
-          },
-          required: ['seconds', 'reason'],
-        },
-      },
-      async (args: Record<string, unknown>, ctx: ToolContext) => {
-        if (!ctx.sessionId) return { held: false, reason: 'not-available' };
-
-        // Realtime only: without a live sideband there is no turn detection to
-        // suppress (chat sessions, or the sideband dropped).
-        const { sidebandManager } = await import('./sidebandManager.service.js');
-        if (!sidebandManager.isConnected(ctx.sessionId)) {
-          return { held: false, reason: 'not-available' };
-        }
-
-        const rawSeconds = Number(args['seconds']);
-        const seconds = Math.min(Math.max(Number.isFinite(rawSeconds) ? rawSeconds : 10, 1), 20);
-
-        // Never hold the floor during an active high-severity crisis — the
-        // participant must always be able to interrupt. A failed lookup also
-        // refuses: err on the side of interruptibility.
-        try {
-          const { getSessionCrisisState } = await import('../db/index.js');
-          const crisis = await getSessionCrisisState(ctx.sessionId);
-          if (crisis?.crisis_flagged && crisis.crisis_severity === 'high') {
-            return { held: false, reason: 'crisis-active' };
-          }
-        } catch (error) {
-          console.error('[ToolRegistry] hold_floor crisis check failed (refusing hold):', error);
-          return { held: false, reason: 'not-available' };
-        }
-
-        try {
-          await sidebandManager.holdFloor(ctx.sessionId, seconds);
-        } catch (error) {
-          console.error('[ToolRegistry] hold_floor failed:', error);
-          return { held: false, reason: 'not-available' };
-        }
-
-        return {
-          held: true,
-          seconds,
-          guidance: `You have the floor for about ${seconds} seconds — the participant's speech will not cut you off, but they can still hear and speak. Deliver the important message calmly, then pause and invite their response; normal turn-taking resumes automatically.`,
-        };
-      }
-    );
+    // hold_floor (ai-therapist-102) was REMOVED in the GPT-Live migration.
+    //
+    // It worked by sending audio.input.turn_detection: null over the sideband,
+    // suppressing semantic VAD so the participant's speech could not cancel the
+    // assistant's response. GPT-Live is full duplex and owns turn-taking
+    // internally: there is no VAD configuration to disable, and no session
+    // field that makes the model uninterruptible. The only remaining lever is
+    // an instructions append, which is advisory and cannot stop speech the
+    // participant has already started talking over.
+    //
+    // Rather than keep a tool whose contract ("your speech will not be cut
+    // off") the platform can no longer honour, it is gone. The model was
+    // steered to use it for safety messages, and a tool that silently fails to
+    // do what it promises during a crisis disclosure is worse than no tool.
 
     console.log('[ToolRegistry] Default tools registered');
   }

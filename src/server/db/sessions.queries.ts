@@ -46,6 +46,8 @@ export interface SessionConfigRow {
   modality: string | null;
   ai_model: string | null;
   transcription_model: string | null;
+  /** Delegated Responses backend for a GPT-Live voice session; NULL otherwise. */
+  live_backend_model: string | null;
   theme: string | null;
   proactive_offering: boolean | null;
 }
@@ -65,6 +67,7 @@ export interface UpsertSessionConfigInput {
   ai_model?: string | null;
   /** Exact input-audio transcription model used. */
   transcription_model?: string | null;
+  live_backend_model?: string | null;
   /** UI theme active at session start ('default', 'sage', 'ocean', 'dusk', 'dark'). */
   theme?: string | null;
   /** ai-therapist-74 A/B condition resolved for this session; null = not evaluated. */
@@ -252,6 +255,7 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
     modality = null,
     ai_model = null,
     transcription_model = null,
+    live_backend_model = null,
     theme = 'default',
     proactive_offering = null
   } = config;
@@ -262,8 +266,8 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
 
   const result = await pool.query<SessionConfigRow>(
     `INSERT INTO session_configurations
-     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme, proactive_offering)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14)
+     (session_id, voice, modalities, instructions, turn_detection, tools, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme, proactive_offering, live_backend_model)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      ON CONFLICT (session_id)
      DO UPDATE SET
        voice = EXCLUDED.voice,
@@ -280,10 +284,11 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
        -- them.
        ai_model = COALESCE(EXCLUDED.ai_model, session_configurations.ai_model),
        transcription_model = COALESCE(EXCLUDED.transcription_model, session_configurations.transcription_model),
+       live_backend_model = COALESCE(EXCLUDED.live_backend_model, session_configurations.live_backend_model),
        theme = EXCLUDED.theme,
        proactive_offering = EXCLUDED.proactive_offering
      RETURNING *`,
-    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme, proactive_offering]
+    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme, proactive_offering, live_backend_model]
   );
   return result.rows[0];
 }

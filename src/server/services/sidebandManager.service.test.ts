@@ -1,146 +1,660 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Exercises the two new steering behaviors added to schedulePhaseNudges
-// (ai-therapist-51 per-modality phase scripts, ai-therapist-74 proactive-
-// offering mid-session nudge) and the new mid-session re-grounding feature
-// (ai-therapist-49).
+// Covers the GPT-Live sideband (SidebandManager), which replaced the Realtime
+// implementation wholesale. Priorities, in order of risk:
 //
-// handleOpen (the public entry point) fires schedulePhaseNudges/
-// scheduleRegrounding without awaiting them — they're background steering,
-// by design. To keep these tests deterministic under fake timers (an
-// unawaited promise chain races unpredictably against fake-timer advancement),
-// most tests call the private scheduler methods directly and await them; one
-// integration test asserts handleOpen actually wires both up.
+//   1. TranscriptAssembler — brand-new turn-assembly logic with no upstream
+//      equivalent. Everything downstream (crisis scoring, the messages table)
+//      depends on it producing whole, correctly ordered turns.
+//   2. The crisis pipeline join point, INCLUDING the DB-outage path: a failed
+//      insert must never silently disable crisis detection.
+//   3. Usage metering, where session.usage.updated carries a CUMULATIVE
+//      snapshot — accumulating instead of assigning would massively overbill.
+//   4. Delegated tool execution and backend-usage dedup.
+//   5. tryInject / phase nudges, ported from the Realtime coverage.
+//
+// The real WebSocket is replaced with a fake so `connect()` can build genuine
+// per-session state (real TranscriptAssemblers wired to the real turn handlers)
+// without opening a socket. Private methods are reached through a typed cast,
+// the way the Realtime test file did.
 const {
   queryMock, getSystemConfigMock, getActiveModalityMock, insertMessagesBatchMock,
-  insertTurnLatencyMock, insertRealtimeUsageMock,
+  insertToolInvocationMock, recordLlmUsageMock, recordLiveUsageMock,
+  runCrisisPipelineMock, executeToolMock, broadcastMock, safetyIdentifierMock,
 } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
   getActiveModalityMock: vi.fn(),
   insertMessagesBatchMock: vi.fn(),
-  insertTurnLatencyMock: vi.fn(),
-  insertRealtimeUsageMock: vi.fn(),
+  insertToolInvocationMock: vi.fn(),
+  recordLlmUsageMock: vi.fn(),
+  recordLiveUsageMock: vi.fn(),
+  runCrisisPipelineMock: vi.fn(),
+  executeToolMock: vi.fn(),
+  broadcastMock: vi.fn(),
+  safetyIdentifierMock: vi.fn(),
 }));
+
+interface FakeSocket {
+  on: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn>;
+  ping: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  readyState: number;
+}
+
+// The real socket is replaced so connect() can build genuine per-session state
+// (real TranscriptAssemblers wired to the real turn handlers) without dialling
+// out. WS_OPEN lives in the hoisted block because vi.mock factories run first.
+const { WS_OPEN, fakeWs } = vi.hoisted(() => {
+  const OPEN = 1; // matches the real 'ws' package's WebSocket.OPEN
+  return {
+    WS_OPEN: OPEN,
+    fakeWs: () => ({
+      on: vi.fn(),
+      send: vi.fn(),
+      ping: vi.fn(),
+      close: vi.fn(),
+      readyState: OPEN,
+    }),
+  };
+});
+
+vi.mock('ws', () => {
+  const ctor = vi.fn(() => fakeWs());
+  (ctor as unknown as { OPEN: number }).OPEN = WS_OPEN;
+  return { default: ctor };
+});
 
 vi.mock('../config/db.js', () => ({ pool: { query: queryMock } }));
 vi.mock('../db/index.js', () => ({
   insertMessagesBatch: insertMessagesBatchMock,
-  insertTurnLatency: insertTurnLatencyMock,
-  insertRealtimeUsage: insertRealtimeUsageMock,
+  insertToolInvocation: insertToolInvocationMock,
+  recordLlmUsage: recordLlmUsageMock,
 }));
+vi.mock('../db/liveUsage.queries.js', () => ({ recordLiveUsage: recordLiveUsageMock }));
+vi.mock('./crisisPipeline.service.js', () => ({ runCrisisPipeline: runCrisisPipelineMock }));
+vi.mock('./toolRegistry.service.js', () => ({ toolRegistry: { executeTool: executeToolMock } }));
+vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEventForSession: broadcastMock }));
+vi.mock('../utils/safetyIdentifier.js', () => ({ safetyIdentifierForSession: safetyIdentifierMock }));
 vi.mock('../utils/sessionHelpers.js', () => ({
   getSystemConfig: getSystemConfigMock,
   getActiveModality: getActiveModalityMock,
-  // Mirrors the real default (sessionHelpers.ts) — restoreTurnDetection reads
-  // the semantic-VAD config from here.
-  sessionConfigDefault: {
-    session: {
-      type: 'realtime',
-      audio: {
-        input: { turn_detection: { type: 'semantic_vad', eagerness: 'low' } },
-      },
-    },
-  },
 }));
 
-import { sidebandManager } from './sidebandManager.service.js';
-
-const WS_OPEN = 1; // matches the real 'ws' package's WebSocket.OPEN
-
-function fakeWs() {
-  return { send: vi.fn(), ping: vi.fn(), readyState: WS_OPEN };
-}
+import { sidebandManager, TranscriptAssembler } from './sidebandManager.service.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Internal = any;
 
-function resetInternals() {
-  const sb = sidebandManager as Internal;
-  sb.connections.clear();
-  sb.phaseTimers.clear();
-  sb.regroundingTimers.clear();
-  sb.pingIntervals.clear();
-  sb.reconnectAttempts.clear();
-  sb.sessionKeys.clear();
-  sb.endedSessions.clear();
-  sb.holdFloorTimers.clear();
-  sb.pendingToolChoiceResets.clear();
-  sb.holdRestoreRetries.clear();
-  sb.toolResetRetries.clear();
-  sb.activeResponses.clear();
-  sb.pendingTurns.clear();
-  sb.turnCounters.clear();
+const sb = sidebandManager as unknown as Internal;
+
+const MODEL = 'gpt-live-1';
+const BACKEND_MODEL = 'gpt-5.6-terra';
+const TURN_GAP_MS = 900;
+const MAX_DURATION_MINUTES = 30;
+
+/** Attach a session with genuine internal state over a fake socket. */
+async function attach(sessionId: string): Promise<FakeSocket> {
+  const ws = await sidebandManager.connect(sessionId, `live_${sessionId}`, 'sk-test', {
+    model: MODEL, backendModel: BACKEND_MODEL,
+  });
+  return ws as unknown as FakeSocket;
 }
 
-function sentEventTypes(ws: ReturnType<typeof fakeWs>): Array<Record<string, Internal>> {
+function sentEvents(ws: FakeSocket): Array<Record<string, Internal>> {
   return ws.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string));
 }
 
-const MAX_DURATION_MINUTES = 30;
+/** Deliver one server event through the private message handler. */
+async function fire(sessionId: string, event: Record<string, unknown>): Promise<void> {
+  await sb.handleMessage(sessionId, Buffer.from(JSON.stringify(event)));
+}
+
+/** Drain the fire-and-forget dynamic-import chains the handlers kick off. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(0);
+}
+
+function userDelta(delta: string, startMs: number, endMs = startMs + 100) {
+  return { type: 'session.input_transcript.delta', delta, start_ms: startMs, end_ms: endMs };
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.setSystemTime(new Date('2026-07-30T12:00:00Z'));
-  resetInternals();
-  queryMock.mockReset();
-  insertMessagesBatchMock.mockReset().mockResolvedValue(undefined);
-  insertTurnLatencyMock.mockReset().mockResolvedValue(undefined);
-  insertRealtimeUsageMock.mockReset().mockResolvedValue(undefined);
+  vi.setSystemTime(new Date('2026-09-11T12:00:00Z'));
+  sb.sessions.clear();
+  sb.endedSessions.clear();
+
+  queryMock.mockReset().mockImplementation((sql: string) => {
+    if (sql.includes('created_at')) return Promise.resolve({ rows: [{ created_at: new Date() }] });
+    return Promise.resolve({ rows: [] });
+  });
+  insertMessagesBatchMock.mockReset().mockResolvedValue([{ message_id: 42 }]);
+  insertToolInvocationMock.mockReset().mockResolvedValue(undefined);
+  recordLlmUsageMock.mockReset().mockResolvedValue(undefined);
+  recordLiveUsageMock.mockReset().mockResolvedValue(undefined);
+  runCrisisPipelineMock.mockReset().mockResolvedValue({ severity: 'none' });
+  executeToolMock.mockReset().mockResolvedValue({ ok: true });
+  broadcastMock.mockReset().mockResolvedValue(undefined);
+  safetyIdentifierMock.mockReset().mockResolvedValue('sid-test');
   getSystemConfigMock.mockReset().mockResolvedValue({
     features: {},
     session_limits: { enabled: true, max_duration_minutes: MAX_DURATION_MINUTES },
   });
   getActiveModalityMock.mockReset().mockResolvedValue(null);
   (global as Internal).io = { to: () => ({ emit: vi.fn() }) };
-
-  // Default DB responses: therapy_sessions.created_at "now", and no
-  // proactive_offering row unless a test overrides it.
-  queryMock.mockImplementation((sql: string) => {
-    if (sql.includes('created_at')) return Promise.resolve({ rows: [{ created_at: new Date() }] });
-    if (sql.includes('proactive_offering')) return Promise.resolve({ rows: [{ proactive_offering: null }] });
-    return Promise.resolve({ rows: [] });
-  });
 });
 
 afterEach(() => {
   vi.clearAllTimers();
-  resetInternals();
+  sb.sessions.clear();
+  sb.endedSessions.clear();
   vi.useRealTimers();
 });
 
-describe('handleOpen wiring', () => {
-  it('triggers both the phase-nudge and re-grounding schedulers', async () => {
-    const sb = sidebandManager as Internal;
-    const phaseSpy = vi.spyOn(sb, 'schedulePhaseNudges').mockResolvedValue(undefined);
-    const regroundingSpy = vi.spyOn(sb, 'scheduleRegrounding').mockResolvedValue(undefined);
+// ---------------------------------------------------------------------------
+// TranscriptAssembler
+// ---------------------------------------------------------------------------
 
-    const sessionId = 's-wiring';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
+describe('TranscriptAssembler', () => {
+  it('concatenates fragments exactly as received (no trimming, no inserted spaces)', () => {
+    const turns: string[] = [];
+    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
 
-    await sidebandManager.handleOpen(sessionId, 'call-1');
+    a.add({ delta: 'I have', start_ms: 0, end_ms: 400 });
+    a.add({ delta: ' been', start_ms: 400, end_ms: 700 });
+    a.add({ delta: ' thinking.', start_ms: 700, end_ms: 1000 });
+    a.flush();
 
-    expect(phaseSpy).toHaveBeenCalledWith(sessionId);
-    expect(regroundingSpy).toHaveBeenCalledWith(sessionId);
+    expect(turns).toEqual(['I have been thinking.']);
+  });
 
-    phaseSpy.mockRestore();
-    regroundingSpy.mockRestore();
+  it('orders fragments by start_ms, not arrival order', () => {
+    const turns: Array<{ text: string; startMs: number; endMs: number }> = [];
+    const a = new TranscriptAssembler(TURN_GAP_MS, (text, startMs, endMs) =>
+      turns.push({ text, startMs, endMs }));
+
+    // Deliberately out of order: the docs allow late, out-of-order delivery.
+    a.add({ delta: ' world', start_ms: 500, end_ms: 900 });
+    a.add({ delta: 'hello', start_ms: 100, end_ms: 500 });
+    a.add({ delta: ' again', start_ms: 900, end_ms: 1200 });
+    a.flush();
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0].text).toBe('hello world again');
+    expect(turns[0].startMs).toBe(100);
+    expect(turns[0].endMs).toBe(1200);
+  });
+
+  it('flushes only after gapMs of silence, and rides through shorter pauses', () => {
+    const turns: string[] = [];
+    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+
+    a.add({ delta: 'one', start_ms: 0, end_ms: 100 });
+    vi.advanceTimersByTime(TURN_GAP_MS - 1);
+    expect(turns).toEqual([]);
+
+    // A fragment inside the gap re-arms the timer rather than closing the turn.
+    a.add({ delta: ' two', start_ms: 900, end_ms: 1000 });
+    vi.advanceTimersByTime(TURN_GAP_MS - 1);
+    expect(turns).toEqual([]);
+
+    vi.advanceTimersByTime(1);
+    expect(turns).toEqual(['one two']);
+  });
+
+  it('starts a NEW turn for a fragment arriving after a flush', () => {
+    const turns: string[] = [];
+    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+
+    a.add({ delta: 'first', start_ms: 0, end_ms: 100 });
+    vi.advanceTimersByTime(TURN_GAP_MS);
+    a.add({ delta: 'second', start_ms: 2000, end_ms: 2100 });
+    vi.advanceTimersByTime(TURN_GAP_MS);
+
+    expect(turns).toEqual(['first', 'second']);
+  });
+
+  it('flush() emits a pending turn immediately, without waiting for the gap', () => {
+    const turns: string[] = [];
+    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+
+    a.add({ delta: 'final words', start_ms: 0, end_ms: 100 });
+    a.flush();
+    expect(turns).toEqual(['final words']);
+
+    // The gap timer was cancelled, so nothing fires a second time.
+    vi.advanceTimersByTime(TURN_GAP_MS * 2);
+    expect(turns).toEqual(['final words']);
+  });
+
+  it('does not emit a turn for whitespace-only accumulations', () => {
+    const turns: string[] = [];
+    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+
+    a.add({ delta: '  ', start_ms: 0, end_ms: 100 });
+    a.add({ delta: '\n', start_ms: 100, end_ms: 200 });
+    vi.advanceTimersByTime(TURN_GAP_MS);
+
+    expect(turns).toEqual([]);
+  });
+
+  it('flush() on an empty buffer is a no-op', () => {
+    const onTurn = vi.fn();
+    const a = new TranscriptAssembler(TURN_GAP_MS, onTurn);
+    a.flush();
+    expect(onTurn).not.toHaveBeenCalled();
+  });
+
+  it('dispose() cancels the pending flush and drops the buffer', () => {
+    const turns: string[] = [];
+    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+
+    a.add({ delta: 'never emitted', start_ms: 0, end_ms: 100 });
+    a.dispose();
+    vi.advanceTimersByTime(TURN_GAP_MS * 3);
+
+    expect(turns).toEqual([]);
   });
 });
 
-describe('schedulePhaseNudges (ai-therapist-51 / ai-therapist-74)', () => {
-  it('falls back to the fixed 60%/85% script when the active modality has no phases', async () => {
-    const sessionId = 's-fixed';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
+// ---------------------------------------------------------------------------
+// Crisis pipeline integration (the safety-critical join point)
+// ---------------------------------------------------------------------------
 
-    await (sidebandManager as Internal).schedulePhaseNudges(sessionId);
+describe('user turn -> crisis pipeline', () => {
+  it('assembles transcript deltas into one turn, persists it, and scores it', async () => {
+    const sessionId = 's-crisis';
+    await attach(sessionId);
+
+    await fire(sessionId, userDelta('I have been', 0, 500));
+    await fire(sessionId, userDelta(' feeling hopeless', 500, 1200));
+    await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+    await flush();
+
+    const userInserts = insertMessagesBatchMock.mock.calls
+      .map(c => c[0][0])
+      .filter((row: Internal) => row.role === 'user');
+    expect(userInserts).toHaveLength(1);
+    expect(userInserts[0].content).toBe('I have been feeling hopeless');
+    expect(userInserts[0].metadata).toMatchObject({ channel: 'live', start_ms: 0, end_ms: 1200 });
+
+    expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+    expect(runCrisisPipelineMock).toHaveBeenCalledWith(
+      { sessionId, messageId: 42, content: 'I have been feeling hopeless' },
+      'realtime',
+    );
+  });
+
+  it('still runs the crisis pipeline when the message insert REJECTS', async () => {
+    const sessionId = 's-crisis-db-down';
+    await attach(sessionId);
+    insertMessagesBatchMock.mockRejectedValue(new Error('connection terminated'));
+
+    await fire(sessionId, userDelta('I want to kill myself', 0, 1500));
+    await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+    await flush();
+
+    // A DB outage must never silently disable crisis detection.
+    expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+    expect(runCrisisPipelineMock).toHaveBeenCalledWith(
+      { sessionId, messageId: null, content: 'I want to kill myself' },
+      'realtime',
+    );
+  });
+
+  it('does not score assistant turns through the crisis pipeline', async () => {
+    const sessionId = 's-assistant-turn';
+    await attach(sessionId);
+
+    await fire(sessionId, {
+      type: 'session.output_transcript.delta', delta: 'That sounds hard.', start_ms: 0, end_ms: 900,
+    });
+    await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+    await flush();
+
+    const assistantInserts = insertMessagesBatchMock.mock.calls
+      .map(c => c[0][0])
+      .filter((row: Internal) => row.role === 'assistant');
+    expect(assistantInserts).toHaveLength(1);
+    expect(assistantInserts[0].content).toBe('That sounds hard.');
+    expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+  });
+
+  it('flushes a half-spoken final turn on session.closed rather than losing it', async () => {
+    const sessionId = 's-final-turn';
+    await attach(sessionId);
+
+    await fire(sessionId, userDelta('one last thing', 0, 600));
+    // No gap elapses; session.closed arrives first.
+    await fire(sessionId, { type: 'session.closed', reason: 'client_closed', usage: { seconds: 10 } });
+    await flush();
+
+    expect(runCrisisPipelineMock).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'one last thing' }),
+      'realtime',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Usage metering
+// ---------------------------------------------------------------------------
+
+describe('voice usage metering', () => {
+  it('treats session.usage.updated as a CUMULATIVE snapshot, not an increment', async () => {
+    const sessionId = 's-usage';
+    await attach(sessionId);
+
+    await fire(sessionId, { type: 'session.usage.updated', usage: { seconds: 12 } });
+    await flush();
+    await fire(sessionId, { type: 'session.usage.updated', usage: { seconds: 30 } });
+    await flush();
+
+    const durations = recordLiveUsageMock.mock.calls.map(c => c[2]);
+    expect(durations).toEqual([12, 30]);
+    // 12 + 30 = 42 would be the accumulate bug.
+    expect(durations).not.toContain(42);
+    expect(sidebandManager.getUsageSeconds(sessionId)).toBe(30);
+  });
+
+  it('tracks the PEAK context-window ratio across snapshots', async () => {
+    const sessionId = 's-usage-context';
+    await attach(sessionId);
+
+    await fire(sessionId, {
+      type: 'session.usage.updated', usage: { seconds: 5 }, context_window: { usage_ratio: 0.7 },
+    });
+    await flush();
+    await fire(sessionId, {
+      type: 'session.usage.updated', usage: { seconds: 9 }, context_window: { usage_ratio: 0.4 },
+    });
+    await flush();
+
+    const last = recordLiveUsageMock.mock.calls[recordLiveUsageMock.mock.calls.length - 1];
+    expect(last[3]).toMatchObject({ finalized: false, contextRatio: 0.7 });
+  });
+
+  it('records finalized usage with the close reason on session.closed', async () => {
+    const sessionId = 's-usage-closed';
+    await attach(sessionId);
+
+    await fire(sessionId, { type: 'session.usage.updated', usage: { seconds: 100 } });
+    await flush();
+    await fire(sessionId, {
+      type: 'session.closed', reason: 'max_duration_reached', usage: { seconds: 118 },
+    });
+    await flush();
+
+    const last = recordLiveUsageMock.mock.calls[recordLiveUsageMock.mock.calls.length - 1];
+    expect(last[0]).toBe(sessionId);
+    expect(last[1]).toBe(MODEL);
+    expect(last[2]).toBe(118);
+    expect(last[3]).toMatchObject({ finalized: true, closeReason: 'max_duration_reached' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delegated tool calls
+// ---------------------------------------------------------------------------
+
+describe('delegated tool calls (nested response.event)', () => {
+  function outputItemDone(callId: string, name: string, args: string, delegationId = 'dg_1') {
+    return {
+      type: 'response.event',
+      delegation_id: delegationId,
+      event: {
+        type: 'response.output_item.done',
+        item: { type: 'function_call', call_id: callId, name, arguments: args },
+      },
+    };
+  }
+
+  it('executes the tool and replies with response.item.create then response.create', async () => {
+    const sessionId = 's-tool';
+    const ws = await attach(sessionId);
+    executeToolMock.mockResolvedValue({ worksheet: 'thought-record' });
+
+    await fire(sessionId, outputItemDone('call_a', 'find_worksheet', '{"topic":"anxiety"}'));
+    await flush();
+
+    expect(executeToolMock).toHaveBeenCalledWith(
+      'find_worksheet', { topic: 'anxiety' }, { sessionId, channel: 'realtime' },
+    );
+
+    const events = sentEvents(ws);
+    expect(events.map(e => e.type)).toEqual(['response.item.create', 'response.create']);
+    expect(events[0].item).toEqual({
+      type: 'function_call_output',
+      call_id: 'call_a',
+      output: JSON.stringify({ worksheet: 'thought-record' }),
+    });
+  });
+
+  it('returns an error payload (still via response.item.create) when the tool throws', async () => {
+    const sessionId = 's-tool-fail';
+    const ws = await attach(sessionId);
+    executeToolMock.mockRejectedValue(new Error('worksheet service down'));
+
+    await fire(sessionId, outputItemDone('call_b', 'find_worksheet', '{}'));
+    await flush();
+
+    const events = sentEvents(ws);
+    expect(events.map(e => e.type)).toEqual(['response.item.create', 'response.create']);
+    expect(JSON.parse(events[0].item.output)).toEqual({ error: 'worksheet service down', success: false });
+  });
+
+  it('ignores an arguments-done event on its own (it cannot identify a call)', async () => {
+    const sessionId = 's-tool-argsonly';
+    const ws = await attach(sessionId);
+
+    await fire(sessionId, {
+      type: 'response.event',
+      delegation_id: 'dg_1',
+      event: {
+        type: 'response.function_call_arguments.done',
+        arguments: '{"topic":"anxiety"}',
+      },
+    });
+    await flush();
+
+    expect(executeToolMock).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('ignores a non-function_call output item', async () => {
+    const sessionId = 's-tool-message-item';
+    const ws = await attach(sessionId);
+
+    await fire(sessionId, {
+      type: 'response.event',
+      event: { type: 'response.output_item.done', item: { type: 'message', id: 'msg_1' } },
+    });
+    await flush();
+
+    expect(executeToolMock).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('sends response.create only once EVERY pending call has a result', async () => {
+    const sessionId = 's-tool-parallel';
+    const ws = await attach(sessionId);
+
+    // A sibling call from the same delegated response is already outstanding
+    // (parallel_tool_calls is off by default, but the backend can still be
+    // configured for it, and the guide's terminal snapshot cannot be trusted to
+    // tell us how many calls are open).
+    sb.sessions.get(sessionId).pendingCalls.set('call_b', {
+      name: 'tool_b', args: '{}', delegationId: 'dg_1',
+    });
+
+    await fire(sessionId, outputItemDone('call_a', 'tool_a', '{}'));
+    await flush();
+
+    // Call A's result is submitted, but B is still outstanding — continuing the
+    // backend now would run it while it waits on a sibling call.
+    expect(sentEvents(ws).map(e => e.type)).toEqual(['response.item.create']);
+    expect([...sb.sessions.get(sessionId).pendingCalls.keys()]).toEqual(['call_b']);
+
+    await fire(sessionId, outputItemDone('call_b', 'tool_b', '{}'));
+    await flush();
+
+    const types = sentEvents(ws).map(e => e.type);
+    expect(types).toEqual(['response.item.create', 'response.item.create', 'response.create']);
+    expect(types.filter(t => t === 'response.create')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Backend (delegated Responses) usage
+// ---------------------------------------------------------------------------
+
+describe('backend usage metering (nested response.completed)', () => {
+  function completed(id: string, model?: string) {
+    return {
+      type: 'response.event',
+      delegation_id: 'dg_1',
+      event: {
+        type: 'response.completed',
+        response: { id, model, usage: { input_tokens: 1200, output_tokens: 300 } },
+      },
+    };
+  }
+
+  it("records the delegated call under purpose 'live_delegation'", async () => {
+    const sessionId = 's-backend-usage';
+    await attach(sessionId);
+
+    await fire(sessionId, completed('resp_1', 'gpt-5.6-terra'));
+    await flush();
+
+    expect(recordLlmUsageMock).toHaveBeenCalledTimes(1);
+    expect(recordLlmUsageMock).toHaveBeenCalledWith(
+      sessionId, 'live_delegation', 'gpt-5.6-terra', 1200, 300,
+    );
+  });
+
+  it('falls back to the configured backend model when the event omits one', async () => {
+    const sessionId = 's-backend-usage-nomodel';
+    await attach(sessionId);
+
+    await fire(sessionId, completed('resp_2'));
+    await flush();
+
+    expect(recordLlmUsageMock.mock.calls[0][2]).toBe(BACKEND_MODEL);
+  });
+
+  it('does NOT double-record a replayed event with the same response id', async () => {
+    const sessionId = 's-backend-usage-dedup';
+    await attach(sessionId);
+
+    await fire(sessionId, completed('resp_3'));
+    await flush();
+    await fire(sessionId, completed('resp_3'));
+    await flush();
+
+    expect(recordLlmUsageMock).toHaveBeenCalledTimes(1);
+
+    // A genuinely different response still counts.
+    await fire(sessionId, completed('resp_4'));
+    await flush();
+    expect(recordLlmUsageMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tryInject
+// ---------------------------------------------------------------------------
+
+describe('tryInject', () => {
+  it('returns false without throwing when there is no sideband connection', async () => {
+    const result = await sidebandManager.tryInject('s-no-conn', 'system', 'hello', true);
+    expect(result).toBe(false);
+  });
+
+  it('appends trusted instructions over a live connection', async () => {
+    const sessionId = 's-inject';
+    const ws = await attach(sessionId);
+
+    const result = await sidebandManager.tryInject(sessionId, 'system', 'exercise finished', true);
+
+    expect(result).toBe(true);
+    const events = sentEvents(ws);
+    expect(events.map(e => e.type)).toEqual(['session.instructions.append']);
+    expect(events[0].content).toBe('exercise finished');
+    expect(events[0].delegation_id).toBeNull();
+  });
+
+  it('returns false when the underlying send fails', async () => {
+    const sessionId = 's-inject-err';
+    const ws = await attach(sessionId);
+    ws.send.mockImplementation(() => { throw new Error('socket torn down'); });
+
+    const result = await sidebandManager.tryInject(sessionId, 'system', 'text', false);
+    expect(result).toBe(false);
+  });
+
+  it('returns false when the socket exists but is not OPEN', async () => {
+    const sessionId = 's-inject-closing';
+    const ws = await attach(sessionId);
+    ws.readyState = 2; // CLOSING
+
+    expect(await sidebandManager.tryInject(sessionId, 'system', 'text', false)).toBe(false);
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('truncates over-long content to the append cap rather than dropping the steer', async () => {
+    const sessionId = 's-inject-long';
+    const ws = await attach(sessionId);
+    const MAX_CHARS = 1600;
+    const long = 'a'.repeat(MAX_CHARS + 500);
+
+    const result = await sidebandManager.tryInject(sessionId, 'system', long, false);
+
+    expect(result).toBe(true);
+    const sent = sentEvents(ws)[0];
+    expect(sent.type).toBe('session.instructions.append');
+    expect((sent.content as string).length).toBe(MAX_CHARS);
+    expect(sent.content).toBe(long.slice(0, MAX_CHARS));
+  });
+
+  it('leaves content at exactly the cap untouched', async () => {
+    const sessionId = 's-inject-exact';
+    const ws = await attach(sessionId);
+    const exact = 'b'.repeat(1600);
+
+    await sidebandManager.tryInject(sessionId, 'system', exact, false);
+    expect(sentEvents(ws)[0].content).toBe(exact);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase nudges (ported from the Realtime coverage)
+// ---------------------------------------------------------------------------
+
+describe('schedulePhaseNudges', () => {
+  function appended(ws: FakeSocket): string[] {
+    return sentEvents(ws)
+      .filter(e => e.type === 'session.instructions.append')
+      .map(e => e.content as string);
+  }
+
+  it('falls back to the fixed 60%/85% script when the active modality has no phases', async () => {
+    const sessionId = 's-phase-fixed';
+    const ws = await attach(sessionId);
+
+    await sb.schedulePhaseNudges(sessionId);
     await vi.advanceTimersByTimeAsync(MAX_DURATION_MINUTES * 60 * 1000 * 0.6);
 
-    const injected = sentEventTypes(ws).filter(e => e.type === 'conversation.item.create');
-    expect(injected.length).toBe(1);
-    expect(injected[0].item.content[0].text).toMatch(/halfway point/i);
+    const texts = appended(ws);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toMatch(/halfway point/i);
+
+    await vi.advanceTimersByTimeAsync(MAX_DURATION_MINUTES * 60 * 1000 * 0.25);
+    const later = appended(ws);
+    expect(later).toHaveLength(2);
+    expect(later[1]).toMatch(/winding down/i);
   });
 
   it("walks the active modality's phase script instead, when one is defined", async () => {
@@ -155,715 +669,321 @@ describe('schedulePhaseNudges (ai-therapist-51 / ai-therapist-74)', () => {
         ],
       },
     });
-    const sessionId = 's-modality';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
+    const sessionId = 's-phase-modality';
+    const ws = await attach(sessionId);
 
-    await (sidebandManager as Internal).schedulePhaseNudges(sessionId);
+    await sb.schedulePhaseNudges(sessionId);
     await vi.advanceTimersByTimeAsync(MAX_DURATION_MINUTES * 60 * 1000 * 0.15);
 
-    let injected = sentEventTypes(ws).filter(e => e.type === 'conversation.item.create');
-    expect(injected.length).toBe(1);
-    expect(injected[0].item.content[0].text).toMatch(/Set the agenda collaboratively/);
-    // The generic 60% consolidation text should NOT fire for a modality with its own script.
-    expect(injected[0].item.content[0].text).not.toMatch(/halfway point/i);
+    let texts = appended(ws);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toMatch(/Set the agenda collaboratively/);
+    expect(texts[0]).not.toMatch(/halfway point/i);
 
     await vi.advanceTimersByTimeAsync(MAX_DURATION_MINUTES * 60 * 1000 * 0.7);
-    injected = sentEventTypes(ws).filter(e => e.type === 'conversation.item.create');
-    expect(injected.length).toBe(2);
-    expect(injected[1].item.content[0].text).toMatch(/Suggest a small practice item/);
+    texts = appended(ws);
+    expect(texts).toHaveLength(2);
+    expect(texts[1]).toMatch(/Suggest a small practice item/);
+    // Late phases carry a minutes-remaining tail.
+    expect(texts[1]).toMatch(/minutes remain/);
   });
 
-  it('adds a mid-session (40%) proactive-offering reminder only for sessions in that research arm', async () => {
-    queryMock.mockImplementation((sql: string) => {
-      if (sql.includes('created_at')) return Promise.resolve({ rows: [{ created_at: new Date() }] });
-      if (sql.includes('proactive_offering')) return Promise.resolve({ rows: [{ proactive_offering: true }] });
-      return Promise.resolve({ rows: [] });
+  it('does nothing when features.phase_guidance_enabled is false', async () => {
+    getSystemConfigMock.mockResolvedValue({
+      features: { phase_guidance_enabled: false },
+      session_limits: { enabled: true, max_duration_minutes: MAX_DURATION_MINUTES },
     });
-    const sessionId = 's-proactive';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
+    const sessionId = 's-phase-disabled';
+    const ws = await attach(sessionId);
 
-    await (sidebandManager as Internal).schedulePhaseNudges(sessionId);
-    await vi.advanceTimersByTimeAsync(MAX_DURATION_MINUTES * 60 * 1000 * 0.4);
-
-    const injected = sentEventTypes(ws).filter(e => e.type === 'conversation.item.create');
-    expect(injected.some(e => /proactively OFFERING one fitting exercise/.test(e.item.content[0].text))).toBe(true);
-  });
-
-  it('does not add the proactive reminder for the reactive-arm control (proactive_offering=false)', async () => {
-    queryMock.mockImplementation((sql: string) => {
-      if (sql.includes('created_at')) return Promise.resolve({ rows: [{ created_at: new Date() }] });
-      if (sql.includes('proactive_offering')) return Promise.resolve({ rows: [{ proactive_offering: false }] });
-      return Promise.resolve({ rows: [] });
-    });
-    const sessionId = 's-reactive';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
-
-    await (sidebandManager as Internal).schedulePhaseNudges(sessionId);
+    await sb.schedulePhaseNudges(sessionId);
     await vi.advanceTimersByTimeAsync(MAX_DURATION_MINUTES * 60 * 1000);
 
-    const injected = sentEventTypes(ws).filter(e => e.type === 'conversation.item.create');
-    expect(injected.some(e => /proactively OFFERING one fitting exercise/.test(e.item.content[0].text))).toBe(false);
+    expect(appended(ws)).toEqual([]);
+    expect(sb.sessions.get(sessionId).phaseTimers).toHaveLength(0);
+  });
+
+  it('does nothing when session limits are not enabled', async () => {
+    getSystemConfigMock.mockResolvedValue({ features: {}, session_limits: { enabled: false } });
+    const sessionId = 's-phase-nolimit';
+    const ws = await attach(sessionId);
+
+    await sb.schedulePhaseNudges(sessionId);
+    await vi.advanceTimersByTimeAsync(MAX_DURATION_MINUTES * 60 * 1000);
+
+    expect(appended(ws)).toEqual([]);
   });
 
   it('is idempotent per session (a second call does not double-schedule)', async () => {
-    const sessionId = 's-idempotent';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
+    const sessionId = 's-phase-idempotent';
+    await attach(sessionId);
 
-    await (sidebandManager as Internal).schedulePhaseNudges(sessionId);
-    const timersAfterFirst = (sidebandManager as Internal).phaseTimers.get(sessionId).length;
-    await (sidebandManager as Internal).schedulePhaseNudges(sessionId);
-    expect((sidebandManager as Internal).phaseTimers.get(sessionId).length).toBe(timersAfterFirst);
+    await sb.schedulePhaseNudges(sessionId);
+    const afterFirst = sb.sessions.get(sessionId).phaseTimers.length;
+    expect(afterFirst).toBeGreaterThan(0);
+
+    await sb.schedulePhaseNudges(sessionId);
+    expect(sb.sessions.get(sessionId).phaseTimers.length).toBe(afterFirst);
   });
 });
 
-describe('mid-session re-grounding (ai-therapist-49)', () => {
-  it('is off by default (opt-in via features.regrounding_enabled)', async () => {
-    const sessionId = 's-regrounding-off';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
+// ---------------------------------------------------------------------------
+// Re-grounding scheduling (opt-in)
+// ---------------------------------------------------------------------------
 
-    await (sidebandManager as Internal).scheduleRegrounding(sessionId);
-    expect((sidebandManager as Internal).regroundingTimers.has(sessionId)).toBe(false);
+describe('scheduleRegrounding', () => {
+  it('is off unless features.regrounding_enabled is exactly true', async () => {
+    const sessionId = 's-reground-off';
+    await attach(sessionId);
 
-    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
-    const events = sentEventTypes(ws);
-    expect(events.some(e => e.type === 'response.create' && e.response?.metadata?.purpose === 'regrounding')).toBe(false);
+    await sb.scheduleRegrounding(sessionId);
+    expect(sb.sessions.get(sessionId).regrounding).toBeNull();
   });
 
-  it('fires an out-of-band summarization response on the configured interval when enabled', async () => {
+  it('arms an interval when enabled', async () => {
     getSystemConfigMock.mockResolvedValue({
       features: { regrounding_enabled: true, regrounding_interval_minutes: 5 },
       session_limits: { enabled: true, max_duration_minutes: MAX_DURATION_MINUTES },
     });
-    const sessionId = 's-regrounding-on';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
+    const sessionId = 's-reground-on';
+    await attach(sessionId);
 
-    await (sidebandManager as Internal).scheduleRegrounding(sessionId);
-    expect((sidebandManager as Internal).regroundingTimers.has(sessionId)).toBe(true);
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
-
-    const events = sentEventTypes(ws);
-    const summaryCall = events.find(e => e.type === 'response.create' && e.response?.metadata?.purpose === 'regrounding');
-    expect(summaryCall).toBeTruthy();
-    expect(summaryCall!.response.conversation).toBe('none');
-    expect(summaryCall!.response.instructions).toMatch(/60 words or fewer/i);
-  });
-
-  it('injects a compact invisible context block when the tagged summary response completes', async () => {
-    const sessionId = 's-regrounding-inject';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
-
-    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({
-      type: 'response.done',
-      response: {
-        metadata: { purpose: 'regrounding' },
-        output: [{ content: [{ type: 'output_text', text: 'They are processing grief over a recent loss; tone has softened.' }] }],
-      },
-    })));
-
-    const injected = sentEventTypes(ws).filter(e => e.type === 'conversation.item.create');
-    const grounding = injected.find(e => /Recap so far/.test(e.item.content[0].text));
-    expect(grounding).toBeTruthy();
-    expect(grounding!.item.content[0].text).toMatch(/never mention or acknowledge this to the participant/i);
-    expect(grounding!.item.content[0].text).toMatch(/processing grief over a recent loss/);
-  });
-
-  it('ignores a normal (non-regrounding) response.done event', async () => {
-    const sessionId = 's-regrounding-ignore';
-    const ws = fakeWs();
-    (sidebandManager as Internal).connections.set(sessionId, ws);
-
-    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({
-      type: 'response.done',
-      response: { output: [{ content: [{ type: 'output_text', text: 'A normal reply.' }] }] },
-    })));
-
-    expect(ws.send).not.toHaveBeenCalled();
+    await sb.scheduleRegrounding(sessionId);
+    expect(sb.sessions.get(sessionId).regrounding).not.toBeNull();
   });
 });
 
-describe('reconnect guard after session end (wave1 bug 4)', () => {
-  it('does NOT query or reconnect once the session has ended, even on a 1006 close', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-ended';
+// ---------------------------------------------------------------------------
+// Connection lifecycle
+// ---------------------------------------------------------------------------
 
-    // disconnect() marks the session ended in-memory.
+describe('connection lifecycle', () => {
+  it('refuses to attach to a session that already ended', async () => {
+    const sessionId = 's-ended';
     await sidebandManager.disconnect(sessionId);
     expect(sb.endedSessions.has(sessionId)).toBe(true);
 
-    queryMock.mockClear();
-    // Abnormal (1006) close arrives after the session already ended.
-    await sidebandManager.handleClose(sessionId, 1006, Buffer.from(''));
-
-    // No status lookup and no reconnect scheduled — the guard short-circuits.
-    const statusQueries = queryMock.mock.calls.filter((c: unknown[]) =>
-      typeof c[0] === 'string' && (c[0] as string).includes('SELECT status'));
-    expect(statusQueries.length).toBe(0);
-    expect(sb.reconnectAttempts.has(sessionId)).toBe(false);
-  });
-
-  it('aborts an attach retry attempt for an ended session', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-ended-attach';
-    sb.endedSessions.add(sessionId);
-
-    // attempt > 0 (a retry) must throw/abort rather than open a socket.
     await expect(
-      sidebandManager.connect(sessionId, 'call-x', 'sk-test', 1),
+      sidebandManager.connect(sessionId, 'live_x', 'sk-test', { model: MODEL, backendModel: BACKEND_MODEL }),
     ).rejects.toThrow(/ended/i);
-    expect(sb.connections.has(sessionId)).toBe(false);
+    expect(sb.sessions.has(sessionId)).toBe(false);
   });
 
-  // Leak regression: nothing ever removed ended-session ids, so the set grew
-  // one entry per ended session for the life of the process. The most recent
-  // end (the one whose retry window is live) must survive eviction.
-  it('bounds the ended-sessions set instead of growing per session forever', async () => {
+  it('bounds the ended-sessions set instead of growing forever, keeping the most recent', async () => {
     for (let i = 0; i < 1200; i++) {
       await sidebandManager.disconnect(`leak-${i}`);
     }
-    expect(sidebandManager._endedSessionsSizeForTests()).toBeLessThanOrEqual(1000);
-    const sb = sidebandManager as Internal;
+    expect(sb.endedSessions.size).toBeLessThanOrEqual(1000);
     expect(sb.endedSessions.has('leak-1199')).toBe(true);
   });
-});
 
-describe('tryInject (ai-therapist-112)', () => {
-  it('returns false without throwing when the session has no sideband connection', async () => {
-    const result = await sidebandManager.tryInject('s-no-conn', 'system', 'hello', true);
-    expect(result).toBe(false);
+  it('returns the existing socket rather than double-attaching', async () => {
+    const sessionId = 's-double-attach';
+    const first = await attach(sessionId);
+    const second = await attach(sessionId);
+    expect(second).toBe(first);
+    expect(sb.sessions.size).toBe(1);
   });
 
-  it('injects the item (and response.create when respond=true) over a live connection', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-tryinject';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
+  it('reports active connections and connection state', async () => {
+    const sessionId = 's-active';
+    await attach(sessionId);
 
-    const result = await sidebandManager.tryInject(sessionId, 'system', 'exercise finished', true);
-
-    expect(result).toBe(true);
-    const events = sentEventTypes(ws);
-    expect(events.map(e => e.type)).toEqual(['conversation.item.create', 'response.create']);
-    expect(events[0].item.role).toBe('system');
-    expect(events[0].item.content[0].text).toBe('exercise finished');
+    expect(sidebandManager.getActiveConnections()).toEqual([sessionId]);
+    expect(sidebandManager.isConnected(sessionId)).toBe(true);
+    expect(sidebandManager.isConnected('s-unknown')).toBe(false);
+    expect(sidebandManager.getUsageSeconds('s-unknown')).toBeNull();
   });
 
-  it('omits response.create when respond=false', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-tryinject-quiet';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
+  it('disconnect() disposes assemblers, clears timers and closes the socket', async () => {
+    const sessionId = 's-disconnect';
+    const ws = await attach(sessionId);
+    await sb.schedulePhaseNudges(sessionId);
 
-    const result = await sidebandManager.tryInject(sessionId, 'system', 'closing note', false);
+    // finalized short-circuits the graceful-close wait so the test stays fast.
+    sb.sessions.get(sessionId).finalized = true;
+    await sidebandManager.disconnect(sessionId, { graceMs: 0 });
 
-    expect(result).toBe(true);
-    expect(sentEventTypes(ws).map(e => e.type)).toEqual(['conversation.item.create']);
-  });
-
-  it('returns false when the underlying send fails', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-tryinject-err';
-    const ws = fakeWs();
-    ws.send.mockImplementation(() => { throw new Error('socket torn down'); });
-    sb.connections.set(sessionId, ws);
-
-    const result = await sidebandManager.tryInject(sessionId, 'system', 'text', false);
-    expect(result).toBe(false);
+    expect(ws.close).toHaveBeenCalledWith(1000, 'Session ended');
+    expect(sb.sessions.has(sessionId)).toBe(false);
+    expect(sb.endedSessions.has(sessionId)).toBe(true);
   });
 });
 
-describe('startup re-attach sweep (ai-therapist-112 follow-up)', () => {
-  it('re-connects each orphaned active realtime session and skips already-connected ones', async () => {
-    const sb = sidebandManager as Internal;
+// ---------------------------------------------------------------------------
+// Re-attach sweep
+// ---------------------------------------------------------------------------
+
+describe('reattachActiveSessions', () => {
+  it('re-attaches orphaned live sessions, skipping connected and non-live ones', async () => {
     queryMock.mockImplementation((sql: string) => {
-      if (sql.includes("status = 'active'") && sql.includes('openai_call_id')) {
-        return Promise.resolve({ rows: [
-          { session_id: 's-orphan-1', openai_call_id: 'call-1' },
-          { session_id: 's-already', openai_call_id: 'call-2' },
-        ] });
+      if (sql.includes('openai_live_session_id')) {
+        return Promise.resolve({
+          rows: [
+            { session_id: 's-orphan', openai_live_session_id: 'live_1', ai_model: 'gpt-live-1' },
+            { session_id: 's-already', openai_live_session_id: 'live_2', ai_model: 'gpt-live-1' },
+            { session_id: 's-realtime', openai_live_session_id: 'live_3', ai_model: 'gpt-realtime-2026' },
+          ],
+        });
       }
       return Promise.resolve({ rows: [] });
     });
-    // s-already still has a live connection (e.g. attached between query and loop).
-    sb.connections.set('s-already', fakeWs());
+    await attach('s-already');
 
-    const connectSpy = vi.spyOn(sb, 'connect').mockImplementation(async (...args: unknown[]) => {
-      const sessionId = args[0] as string;
-      sb.connections.set(sessionId, fakeWs());
-      return sb.connections.get(sessionId);
-    });
-
+    const connectSpy = vi.spyOn(sb, 'connect');
     const { attempted } = await sidebandManager.reattachActiveSessions('sk-standard');
 
-    expect(attempted).toBe(2);
+    expect(attempted).toBe(3);
     expect(connectSpy).toHaveBeenCalledTimes(1);
-    expect(connectSpy).toHaveBeenCalledWith('s-orphan-1', 'call-1', 'sk-standard');
+    expect(connectSpy).toHaveBeenCalledWith('s-orphan', 'live_1', 'sk-standard', {
+      model: 'gpt-live-1', backendModel: 'gpt-5.6-terra',
+    });
     connectSpy.mockRestore();
   });
 
-  it('continues past individual re-attach failures', async () => {
-    const sb = sidebandManager as Internal;
+  it('continues past an individual re-attach failure', async () => {
     queryMock.mockImplementation((sql: string) => {
-      if (sql.includes("status = 'active'") && sql.includes('openai_call_id')) {
-        return Promise.resolve({ rows: [
-          { session_id: 's-dead-call', openai_call_id: 'call-gone' },
-          { session_id: 's-alive', openai_call_id: 'call-ok' },
-        ] });
+      if (sql.includes('openai_live_session_id')) {
+        return Promise.resolve({
+          rows: [
+            { session_id: 's-dead', openai_live_session_id: 'live_dead', ai_model: 'gpt-live-1' },
+            { session_id: 's-alive', openai_live_session_id: 'live_ok', ai_model: 'gpt-live-1' },
+          ],
+        });
       }
       return Promise.resolve({ rows: [] });
     });
-
-    const connectSpy = vi.spyOn(sb, 'connect').mockImplementation(async (...args: unknown[]) => {
-      const sessionId = args[0] as string;
-      if (sessionId === 's-dead-call') throw new Error('404 call_id_not_found');
-      sb.connections.set(sessionId, fakeWs());
-      return sb.connections.get(sessionId);
-    });
+    sb.endedSessions.add('s-dead'); // makes the first connect() throw
 
     const { attempted } = await sidebandManager.reattachActiveSessions('sk-standard');
 
     expect(attempted).toBe(2);
-    expect(connectSpy).toHaveBeenCalledTimes(2);
-    // The healthy session got its reconnect note injected despite the earlier failure.
-    const ws = sb.connections.get('s-alive');
-    expect(sentEventTypes(ws).some((e: Internal) => e.type === 'conversation.item.create')).toBe(true);
-    connectSpy.mockRestore();
+    expect(sb.sessions.has('s-alive')).toBe(true);
   });
 });
 
-describe('admin trigger-tool control (ai-therapist-103)', () => {
-  it('forces tool_choice, injects the invisible nudge (with args context), and triggers a response', async () => {
-    const sb = sidebandManager as Internal;
+// ---------------------------------------------------------------------------
+// Admin control surface
+// ---------------------------------------------------------------------------
+
+describe('admin control surface', () => {
+  it('triggerTool pins the delegated tool_choice, nudges, and schedules a reset', async () => {
     const sessionId = 's-trigger';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
+    const ws = await attach(sessionId);
 
     await sidebandManager.triggerTool(sessionId, 'start_breathing_exercise', { duration_seconds: 90 });
 
-    const events = sentEventTypes(ws);
-    expect(events.map(e => e.type)).toEqual(['session.update', 'conversation.item.create', 'response.create']);
-    expect(events[0].session.tool_choice).toEqual({ type: 'function', name: 'start_breathing_exercise' });
-    const nudge = events[1].item.content[0].text as string;
-    expect(nudge).toMatch(/clinician overseeing this session asks you to use the start_breathing_exercise tool now/i);
+    const events = sentEvents(ws);
+    expect(events.map(e => e.type)).toEqual(['session.update', 'session.instructions.append']);
+    expect(events[0].session.delegation.responses.tool_choice).toEqual({
+      type: 'function', name: 'start_breathing_exercise',
+    });
+    const nudge = events[1].content as string;
+    expect(nudge).toMatch(/clinician overseeing this session asks you to use the start_breathing_exercise/i);
     expect(nudge).toContain('"duration_seconds":90');
-    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(true);
+    expect(sb.sessions.get(sessionId).toolChoiceReset).not.toBeNull();
+
+    ws.send.mockClear();
+    await vi.advanceTimersByTimeAsync(45_000);
+    await flush();
+
+    const reset = sentEvents(ws).find(e => e.type === 'session.update');
+    expect(reset!.session.delegation.responses.tool_choice).toBe('auto');
+    expect(sb.sessions.get(sessionId).toolChoiceReset).toBeNull();
   });
 
-  it('omits the args context when no args are given', async () => {
-    const sb = sidebandManager as Internal;
+  it('triggerTool omits the args context when no args are given', async () => {
     const sessionId = 's-trigger-noargs';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
+    const ws = await attach(sessionId);
 
     await sidebandManager.triggerTool(sessionId, 'end_session');
 
-    const nudge = sentEventTypes(ws).find(e => e.type === 'conversation.item.create')!.item.content[0].text as string;
+    const nudge = sentEvents(ws).find(e => e.type === 'session.instructions.append')!.content as string;
     expect(nudge).not.toMatch(/context for the tool arguments/);
   });
 
-  it('resets tool_choice to auto on the next response.done', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-trigger-reset';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
+  it('interrupt() sends an advisory stop-speaking instruction', async () => {
+    const sessionId = 's-interrupt';
+    const ws = await attach(sessionId);
 
-    await sidebandManager.triggerTool(sessionId, 'log_mood');
-    ws.send.mockClear();
+    await sidebandManager.interrupt(sessionId);
 
-    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({
-      type: 'response.done',
-      response: { output: [] },
-    })));
-
-    const events = sentEventTypes(ws);
-    const reset = events.find(e => e.type === 'session.update');
-    expect(reset).toBeTruthy();
-    expect(reset!.session.tool_choice).toBe('auto');
-    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
-
-    // A second response.done is a no-op (nothing pending).
-    ws.send.mockClear();
-    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({
-      type: 'response.done',
-      response: { output: [] },
-    })));
-    expect(ws.send).not.toHaveBeenCalled();
+    const events = sentEvents(ws);
+    expect(events.map(e => e.type)).toEqual(['session.instructions.append']);
+    expect(events[0].content).toMatch(/stop speaking immediately/i);
   });
 
-  it('falls back to a timed reset when no response.done ever arrives', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-trigger-fallback';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
+  it('updateSession routes updates into the delegated backend config', async () => {
+    const sessionId = 's-update';
+    const ws = await attach(sessionId);
 
-    await sidebandManager.triggerTool(sessionId, 'log_mood');
-    ws.send.mockClear();
+    await sidebandManager.updateSession(sessionId, { instructions: 'new clinical prompt' });
 
-    await vi.advanceTimersByTimeAsync(30 * 1000);
+    const events = sentEvents(ws);
+    expect(events[0].type).toBe('session.update');
+    expect(events[0].session).toEqual({
+      delegation: { responses: { instructions: 'new clinical prompt' } },
+    });
+  });
 
-    const reset = sentEventTypes(ws).find(e => e.type === 'session.update');
-    expect(reset!.session.tool_choice).toBe('auto');
-    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
+  it('createResponse ignores per-response overrides and sends a bare response.create', async () => {
+    const sessionId = 's-create-response';
+    const ws = await attach(sessionId);
+
+    await sidebandManager.createResponse(sessionId, { model: 'gpt-5', instructions: 'nope' });
+
+    const events = sentEvents(ws);
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('response.create');
+    expect(events[0].model).toBeUndefined();
+    expect(events[0].response).toBeUndefined();
+  });
+
+  it('injectMessage throws when the sideband is not connected', async () => {
+    await expect(sidebandManager.injectMessage('s-gone', 'system', 'hi', false))
+      .rejects.toThrow(/not active/i);
+  });
+
+  it('mute / unmute send the server-side input-audio controls', async () => {
+    const sessionId = 's-mute';
+    const ws = await attach(sessionId);
+
+    await sidebandManager.muteInput(sessionId);
+    await sidebandManager.unmuteInput(sessionId);
+
+    expect(sentEvents(ws).map(e => e.type))
+      .toEqual(['session.input_audio.mute', 'session.input_audio.unmute']);
   });
 });
 
-describe('hold_floor turn-taking suppression (ai-therapist-102)', () => {
-  it('disables turn detection (GA audio.input nesting) and restores semantic VAD after the duration', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-hold';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
+// ---------------------------------------------------------------------------
+// Error handling
+// ---------------------------------------------------------------------------
 
-    await sidebandManager.holdFloor(sessionId, 8);
+describe('error handling', () => {
+  it('persists an API error event to sideband_error', async () => {
+    const sessionId = 's-api-error';
+    await attach(sessionId);
 
-    let updates = sentEventTypes(ws).filter(e => e.type === 'session.update');
-    expect(updates.length).toBe(1);
-    expect(updates[0].session.audio.input.turn_detection).toBeNull();
-    expect(sb.holdFloorTimers.has(sessionId)).toBe(true);
+    await fire(sessionId, { type: 'error', error: { code: 'invalid_event', message: 'bad event' } });
+    await flush();
 
-    await vi.advanceTimersByTimeAsync(8 * 1000);
-
-    updates = sentEventTypes(ws).filter(e => e.type === 'session.update');
-    expect(updates.length).toBe(2);
-    expect(updates[1].session.audio.input.turn_detection).toEqual({ type: 'semantic_vad', eagerness: 'low' });
-    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
-  });
-
-  it('a second hold replaces the pending restore timer instead of stacking', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-hold-restack';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
-
-    await sidebandManager.holdFloor(sessionId, 5);
-    await vi.advanceTimersByTimeAsync(3 * 1000);
-    await sidebandManager.holdFloor(sessionId, 10);
-
-    // 5s mark passes (old timer would have fired) — still held.
-    await vi.advanceTimersByTimeAsync(4 * 1000);
-    let restores = sentEventTypes(ws).filter(e =>
-      e.type === 'session.update' && e.session.audio?.input?.turn_detection?.type === 'semantic_vad');
-    expect(restores.length).toBe(0);
-
-    await vi.advanceTimersByTimeAsync(6 * 1000);
-    restores = sentEventTypes(ws).filter(e =>
-      e.type === 'session.update' && e.session.audio?.input?.turn_detection?.type === 'semantic_vad');
-    expect(restores.length).toBe(1);
-  });
-
-  it('disconnect() restores VAD defensively when a hold is pending, then clears the timer', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-hold-cleanup';
-    const ws = fakeWs();
-    (ws as Internal).close = vi.fn();
-    sb.connections.set(sessionId, ws);
-
-    await sidebandManager.holdFloor(sessionId, 15);
-    await sidebandManager.disconnect(sessionId);
-
-    const updates = sentEventTypes(ws).filter(e => e.type === 'session.update');
-    expect(updates[updates.length - 1].session.audio.input.turn_detection).toEqual({ type: 'semantic_vad', eagerness: 'low' });
-    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
-    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
-  });
-
-  it('restoreTurnDetection does not throw when the session has no live connection', async () => {
-    await expect(sidebandManager.restoreTurnDetection('s-gone')).resolves.toBeUndefined();
-  });
-});
-
-describe('restore resilience across sideband drops (pass-5 review)', () => {
-  // Disabled VAD / forced tool_choice live in the OpenAI session and survive
-  // a sideband WS drop; a restore firing during a reconnect gap must retry,
-  // not silently give up.
-  it('re-arms the VAD restore while disconnected and sends it once reconnected', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-hold-gap';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
-
-    await sidebandManager.holdFloor(sessionId, 5);
-    // Sideband drops before the hold expires.
-    sb.connections.delete(sessionId);
-
-    await vi.advanceTimersByTimeAsync(5 * 1000);
-    // Nothing sent (socket gone), but the restore is re-armed, not dropped.
-    expect(sentEventTypes(ws).filter(e => e.type === 'session.update').length).toBe(1); // only the initial disable
-    expect(sb.holdFloorTimers.has(sessionId)).toBe(true);
-
-    // Sideband re-attaches; the retry timer restores semantic VAD.
-    const ws2 = fakeWs();
-    sb.connections.set(sessionId, ws2);
-    await vi.advanceTimersByTimeAsync(2 * 1000);
-
-    const restores = sentEventTypes(ws2).filter(e =>
-      e.type === 'session.update' && e.session.audio?.input?.turn_detection?.type === 'semantic_vad');
-    expect(restores.length).toBe(1);
-    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
-    expect(sb.holdRestoreRetries.has(sessionId)).toBe(false);
-  });
-
-  it('re-arms the tool_choice reset while disconnected and sends it once reconnected', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-tool-gap';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
-
-    await sidebandManager.triggerTool(sessionId, 'log_mood');
-    // Sideband drops before any response.done; the 30s fallback fires into the gap.
-    sb.connections.delete(sessionId);
-    await vi.advanceTimersByTimeAsync(30 * 1000);
-    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(true); // retry armed
-
-    const ws2 = fakeWs();
-    sb.connections.set(sessionId, ws2);
-    await vi.advanceTimersByTimeAsync(2 * 1000);
-
-    const reset = sentEventTypes(ws2).find(e => e.type === 'session.update');
-    expect(reset!.session.tool_choice).toBe('auto');
-    expect(sb.pendingToolChoiceResets.has(sessionId)).toBe(false);
-    expect(sb.toolResetRetries.has(sessionId)).toBe(false);
-  });
-
-  it('gives up after the retry cap instead of retrying forever', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-hold-dead';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
-
-    await sidebandManager.holdFloor(sessionId, 1);
-    sb.connections.delete(sessionId);
-
-    // Initial fire + 10 capped retries at 2s each.
-    await vi.advanceTimersByTimeAsync(1000 + 11 * 2000);
-    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
-    expect(sb.holdRestoreRetries.has(sessionId)).toBe(false);
-  });
-
-  it('does not retry once the session has ended', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-hold-ended';
-    const ws = fakeWs();
-    (ws as Internal).close = vi.fn();
-    sb.connections.set(sessionId, ws);
-
-    await sidebandManager.holdFloor(sessionId, 5);
-    sb.connections.delete(sessionId);
-    sb.endedSessions.add(sessionId);
-
-    await vi.advanceTimersByTimeAsync(5 * 1000);
-    expect(sb.holdFloorTimers.has(sessionId)).toBe(false);
-    expect(sb.holdRestoreRetries.has(sessionId)).toBe(false);
-  });
-
-  it('reattachActiveSessions defensively resets tool_choice and turn_detection', async () => {
-    const sb = sidebandManager as Internal;
-    queryMock.mockImplementation((sql: string) => {
-      if (sql.includes("status = 'active'") && sql.includes('openai_call_id')) {
-        return Promise.resolve({ rows: [{ session_id: 's-reattach', openai_call_id: 'call-r' }] });
-      }
-      return Promise.resolve({ rows: [] });
-    });
-    const connectSpy = vi.spyOn(sb, 'connect').mockImplementation(async (...args: unknown[]) => {
-      const sessionId = args[0] as string;
-      sb.connections.set(sessionId, fakeWs());
-      return sb.connections.get(sessionId);
-    });
-
-    await sidebandManager.reattachActiveSessions('sk-standard');
-
-    const ws = sb.connections.get('s-reattach');
-    const update = sentEventTypes(ws).find(e => e.type === 'session.update');
+    const update = queryMock.mock.calls.find((c: unknown[]) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('SET sideband_error'));
     expect(update).toBeTruthy();
-    expect(update!.session.tool_choice).toBe('auto');
-    expect(update!.session.audio.input.turn_detection).toEqual({ type: 'semantic_vad', eagerness: 'low' });
-    connectSpy.mockRestore();
-  });
-});
-
-describe('trigger-tool active-response guard (pass-5 review)', () => {
-  it('rejects triggerTool while a response is in flight, then allows it after response.done', async () => {
-    const sb = sidebandManager as Internal;
-    const sessionId = 's-trigger-busy';
-    const ws = fakeWs();
-    sb.connections.set(sessionId, ws);
-
-    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({ type: 'response.created' })));
-    await expect(sidebandManager.triggerTool(sessionId, 'log_mood'))
-      .rejects.toThrow(/conversation_already_has_active_response/);
-    expect(ws.send).not.toHaveBeenCalled();
-
-    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify({
-      type: 'response.done', response: { output: [] },
-    })));
-    await expect(sidebandManager.triggerTool(sessionId, 'log_mood')).resolves.toBeUndefined();
-    expect(sentEventTypes(ws).some(e => e.type === 'response.create')).toBe(true);
-  });
-});
-
-describe('turn-latency capture (telemetry pass 3)', () => {
-  const sessionId = 's-latency';
-
-  async function fire(event: Record<string, unknown>): Promise<void> {
-    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify(event)));
-    // Flush the fire-and-forget dynamic-import chain.
-    await vi.advanceTimersByTimeAsync(0);
-  }
-
-  it('records one row for user turn -> first audio delta -> response.done', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i1', transcript: 'hello' });
-    await vi.advanceTimersByTimeAsync(800);
-    await fire({ type: 'response.output_audio.delta', item_id: 'i2', delta: 'AAAA' });
-    await vi.advanceTimersByTimeAsync(2200);
-    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
-
-    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1);
-    const row = insertTurnLatencyMock.mock.calls[0][0];
-    expect(row.sessionId).toBe(sessionId);
-    expect(row.channel).toBe('realtime');
-    expect(row.turnIndex).toBe(1);
-    expect(row.firstOutputAt!.getTime() - row.userDoneAt.getTime()).toBe(800);
-    expect(row.responseDoneAt.getTime() - row.userDoneAt.getTime()).toBe(3000);
+    expect((update![1] as unknown[])[0]).toContain('bad event');
   });
 
-  it('only the first output delta stamps time-to-first-audio', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i1', transcript: 'hi' });
-    await vi.advanceTimersByTimeAsync(500);
-    await fire({ type: 'response.output_audio.delta' });
-    await vi.advanceTimersByTimeAsync(500);
-    await fire({ type: 'response.output_audio.delta' });
-    await fire({ type: 'response.done', response: { output: [] } });
-
-    const row = insertTurnLatencyMock.mock.calls[0][0];
-    expect(row.firstOutputAt!.getTime() - row.userDoneAt.getTime()).toBe(500);
+  it('swallows a malformed (non-JSON) frame without throwing', async () => {
+    const sessionId = 's-bad-frame';
+    await attach(sessionId);
+    await expect(sb.handleMessage(sessionId, Buffer.from('not json'))).resolves.toBeUndefined();
   });
 
-  it('skips a response.done with no pending user turn (e.g. admin-triggered response)', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
-
-    expect(insertTurnLatencyMock).not.toHaveBeenCalled();
-  });
-
-  it('keeps the turn pending across a tool-call-only response and records the post-tool response once', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i1', transcript: 'help' });
-    await vi.advanceTimersByTimeAsync(1000);
-    // Intermediate response: function_call only, no audible output yet.
-    await fire({ type: 'response.done', response: { output: [{ type: 'function_call' }] } });
-    expect(insertTurnLatencyMock).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(1500);
-    await fire({ type: 'response.output_audio.delta' });
-    await vi.advanceTimersByTimeAsync(500);
-    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
-
-    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1);
-    const row = insertTurnLatencyMock.mock.calls[0][0];
-    expect(row.firstOutputAt!.getTime() - row.userDoneAt.getTime()).toBe(2500);
-    expect(row.responseDoneAt.getTime() - row.userDoneAt.getTime()).toBe(3000);
-
-    // The consumed turn does not get double-counted by a later response.done.
-    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
-    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('an out-of-band regrounding response.done does not consume the pending turn', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i1', transcript: 'hi' });
-    await fire({
-      type: 'response.done',
-      response: { metadata: { purpose: 'regrounding' }, output: [{ content: [{ type: 'output_text', text: 'recap' }] }] },
-    });
-    expect(insertTurnLatencyMock).not.toHaveBeenCalled();
-
-    await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
-    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('increments turn_index across measured turns', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    for (let i = 0; i < 2; i++) {
-      await fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: `t${i}`, transcript: 'x' });
-      await fire({ type: 'response.done', response: { output: [{ type: 'message' }] } });
-    }
-
-    expect(insertTurnLatencyMock).toHaveBeenCalledTimes(2);
-    expect(insertTurnLatencyMock.mock.calls.map(c => c[0].turnIndex)).toEqual([1, 2]);
-  });
-});
-
-describe('realtime usage capture (telemetry pass 3)', () => {
-  const sessionId = 's-usage';
-
-  async function fire(event: Record<string, unknown>): Promise<void> {
-    await sidebandManager.handleMessage(sessionId, Buffer.from(JSON.stringify(event)));
-    await vi.advanceTimersByTimeAsync(0);
-  }
-
-  it('records response.usage with the audio/text/cached split on response.done', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    await fire({
-      type: 'response.done',
-      response: {
-        id: 'resp_123',
-        output: [{ type: 'message' }],
-        usage: {
-          input_tokens: 1200,
-          output_tokens: 800,
-          input_token_details: { text_tokens: 400, audio_tokens: 700, cached_tokens: 100 },
-          output_token_details: { text_tokens: 300, audio_tokens: 500 },
-        },
-      },
-    });
-
-    expect(insertRealtimeUsageMock).toHaveBeenCalledTimes(1);
-    expect(insertRealtimeUsageMock).toHaveBeenCalledWith(sessionId, 'resp_123', {
-      inputTokens: 1200,
-      outputTokens: 800,
-      inputAudioTokens: 700,
-      outputAudioTokens: 500,
-      cachedTokens: 100,
-    });
-  });
-
-  it('is defensive about missing detail fields (nulls, not NaN)', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    await fire({
-      type: 'response.done',
-      response: { output: [{ type: 'message' }], usage: { input_tokens: 50 } },
-    });
-
-    expect(insertRealtimeUsageMock).toHaveBeenCalledWith(sessionId, null, {
-      inputTokens: 50,
-      outputTokens: null,
-      inputAudioTokens: null,
-      outputAudioTokens: null,
-      cachedTokens: null,
-    });
-  });
-
-  it('skips a response.done without usage', async () => {
-    (sidebandManager as Internal).connections.set(sessionId, fakeWs());
-
-    await fire({ type: 'response.done', response: { output: [] } });
-
-    expect(insertRealtimeUsageMock).not.toHaveBeenCalled();
+  it('ignores transcript deltas for a session that is no longer attached', async () => {
+    await expect(fire('s-detached', userDelta('orphan text', 0))).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
+    await flush();
+    expect(runCrisisPipelineMock).not.toHaveBeenCalled();
   });
 });

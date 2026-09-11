@@ -13,6 +13,16 @@ interface VoiceOption {
   value: string;
   label: string;
   description: string;
+  /** Speaking style of the voice, e.g. "Irish". Not an accent guarantee. */
+  accent?: string;
+  presentation?: 'Feminine' | 'Masculine';
+  /** 'natural' voices come from a human recording; 'generated' are synthesised. */
+  source?: 'natural' | 'generated';
+  /**
+   * Whether a preview clip is bundled for this voice. Absent on responses from
+   * a server predating the GPT-Live voice work; treated as true there.
+   */
+  hasPreview?: boolean;
 }
 
 interface LanguageOption {
@@ -417,19 +427,26 @@ function VoiceOptionCard({ voice, isSelected, isPlaying, onSelect, onPlayPreview
         <div className="font-medium text-sm text-gray-800">{voice.label}</div>
         <div className="text-xs text-gray-500">{voice.description}</div>
       </div>
-      <button
-        onClick={onPlayPreview}
-        disabled={disabled}
-        className="p-2 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        aria-label={isPlaying ? `Stop ${voice.label} preview` : `Play ${voice.label} preview`}
-        title={isPlaying ? 'Stop preview' : 'Play preview'}
-      >
-        {isPlaying ? (
-          <Square size={18} className="text-gray-700" fill="currentColor" />
-        ) : (
-          <Volume2 size={18} className="text-gray-700" />
-        )}
-      </button>
+      {/* The twelve voices introduced with gpt-live-1 ship no bundled preview
+          clip, so the server reports hasPreview per voice and the control is
+          omitted rather than offering a button that 404s. Undefined means an
+          older server that predates the flag — assume a preview exists, which
+          is the previous behaviour. */}
+      {voice.hasPreview !== false && (
+        <button
+          onClick={onPlayPreview}
+          disabled={disabled}
+          className="p-2 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-label={isPlaying ? `Stop ${voice.label} preview` : `Play ${voice.label} preview`}
+          title={isPlaying ? 'Stop preview' : 'Play preview'}
+        >
+          {isPlaying ? (
+            <Square size={18} className="text-gray-700" fill="currentColor" />
+          ) : (
+            <Volume2 size={18} className="text-gray-700" />
+          )}
+        </button>
+      )}
     </div>
   );
 }

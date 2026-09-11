@@ -19,7 +19,9 @@ This document provides a comprehensive guide to the project's folder structure, 
 This is a real-time AI therapy assistant application built with:
 - **Backend**: Express.js server with PostgreSQL database
 - **Frontend**: React with Server-Side Rendering (SSR)
-- **AI Integration**: OpenAI Realtime API for voice-based therapy sessions
+- **AI Integration**: OpenAI GPT-Live (`gpt-live-1`) for voice-based therapy
+  sessions, with clinical reasoning delegated to a Responses backend model
+  (see `docs/gpt-live.md`)
 - **Build Tool**: Vite for bundling and development
 
 The application supports multiple users having simultaneous therapy sessions with configurable voice, language, and other settings. It includes both a participant interface and an admin dashboard for therapists/researchers.
@@ -97,7 +99,10 @@ src/server/
 #### **`index.js`** (Main Server File)
 - **Lines 1-100**: Imports, configuration, middleware setup
 - **Lines 101-400**: Session management, analytics endpoints
-- **Lines 401-550**: `/token` endpoint - Creates OpenAI Realtime session with idempotency check
+- **Lines 401-550**: voice session creation with idempotency check. Now lives in
+  `src/server/routes/public/liveSession.routes.ts` as
+  `POST /api/live/session`, which takes the browser's SDP offer and returns the
+  SDP answer — the old `/token` ephemeral-key endpoint is gone
 - **Lines 551-680**: Session CRUD endpoints (`/api/sessions/*`)
 - **Lines 681-850**: Admin analytics endpoints (`/admin/api/analytics`)
 - **Lines 851-1000**: Admin session/message management endpoints
@@ -222,7 +227,9 @@ src/client/main/
 
 **`App.jsx`** (Main Therapy Interface)
 - **State Management**: Session state, messages, audio streams, settings
-- **WebRTC Integration**: Manages peer connection to OpenAI Realtime API
+- **WebRTC Integration**: Manages the peer connection to OpenAI GPT-Live. The
+  SDP offer is POSTed to our own server, which exchanges it for the answer — no
+  ephemeral key ever reaches the browser
 - **Audio Handling**: Captures user microphone, plays assistant responses
 - **Real-time Communication**: DataChannel for sending/receiving messages
 - **Session Lifecycle**: Start session, end session, save messages to database
@@ -499,11 +506,15 @@ In development (`npm run dev`):
 ### Therapy Session Flow
 1. **User Login** (`Login.jsx` → `/api/login` → `auth.js`)
 2. **Session Configuration** (`SessionSettings.jsx` - select voice/language)
-3. **Session Start** (`App.jsx` → `/token` → `index.js`)
-   - Idempotency check via `getActiveSessionForUser()`
-   - Create session in database
-   - Get OpenAI ephemeral token
-   - Establish WebRTC connection
+3. **Session Start** (`App.tsx` → `POST /api/live/session` → `liveSession.routes.ts`)
+   - Browser builds an SDP offer and POSTs it to our server
+   - Gates run first: consent, quiet hours, study status, rate limits,
+     idempotency check via `getActiveSessionForUser()` — all before the OpenAI
+     call, because session creation bills immediately
+   - Server creates the GPT-Live session with the project API key and gets back
+     `session.id` + the SDP answer
+   - Create session in database; attach the server-side sideband
+   - Browser applies the answer and waits for `session.started`
 4. **Real-time Conversation** (WebRTC DataChannel)
    - User speaks → microphone → OpenAI
    - OpenAI responds → speaker
@@ -638,7 +649,8 @@ node src/database/scripts/runMigration005.js
 - **React + SSR**: SEO, faster initial load, better UX
 - **Vite**: Fast builds, hot module replacement, modern tooling
 - **PostgreSQL**: ACID compliance for medical data, JSON support, powerful queries
-- **OpenAI Realtime API**: Low-latency voice conversation, natural interactions
+- **OpenAI GPT-Live**: Full-duplex voice conversation (listens and speaks
+  simultaneously), with reasoning and tools delegated to a separate backend model
 - **WebRTC**: Real-time audio streaming, works across browsers
 - **Express Session + PostgreSQL**: Secure, scalable session storage
 - **AWS Secrets Manager**: Secure credential storage, automatic rotation support

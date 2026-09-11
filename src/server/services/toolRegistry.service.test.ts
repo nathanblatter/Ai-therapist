@@ -808,59 +808,24 @@ describe('run_risk_check (ai-therapist-71)', () => {
   });
 });
 
-describe('hold_floor (ai-therapist-102)', () => {
-  it('returns not-available without a session context', async () => {
-    const r = await toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'safety message' });
-    expect(r).toEqual({ held: false, reason: 'not-available' });
-    expect(sidebandHoldFloorMock).not.toHaveBeenCalled();
+// hold_floor (ai-therapist-102) was REMOVED in the GPT-Live migration.
+//
+// It worked by sending audio.input.turn_detection: null over the sideband to
+// suppress semantic VAD. GPT-Live is full duplex and owns turn-taking
+// internally, so there is no VAD to disable and no way to make the model
+// uninterruptible. The tool was deleted rather than left in place failing
+// silently, since the model was steered to reach for it during exactly the
+// moments that matter most.
+describe('hold_floor removal (GPT-Live migration)', () => {
+  it('is no longer a registered tool', async () => {
+    await expect(
+      toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'safety message' }, { sessionId: 's1' }),
+    ).rejects.toThrow('Tool not found: hold_floor');
   });
 
-  it('returns not-available when there is no live sideband connection (non-realtime)', async () => {
-    sidebandIsConnectedMock.mockReturnValue(false);
-    const r = await toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'safety message' }, { sessionId: 's1' });
-    expect(r).toEqual({ held: false, reason: 'not-available' });
-    expect(sidebandHoldFloorMock).not.toHaveBeenCalled();
-  });
-
-  it('refuses while a high-severity crisis flag is active', async () => {
-    getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: true, crisis_severity: 'high', crisis_risk_score: 85 });
-    const r = await toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'key insight' }, { sessionId: 's1' });
-    expect(r).toEqual({ held: false, reason: 'crisis-active' });
-    expect(sidebandHoldFloorMock).not.toHaveBeenCalled();
-  });
-
-  it('still holds when a crisis flag is active but not high severity', async () => {
-    getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: true, crisis_severity: 'medium', crisis_risk_score: 50 });
-    const r = await toolRegistry.executeTool('hold_floor', { seconds: 10, reason: 'key insight' }, { sessionId: 's1' }) as { held: boolean };
-    expect(r.held).toBe(true);
-    expect(sidebandHoldFloorMock).toHaveBeenCalledWith('s1', 10);
-  });
-
-  it('clamps seconds to [1, 20] and defaults non-numeric input', async () => {
-    await toolRegistry.executeTool('hold_floor', { seconds: 45, reason: 'r' }, { sessionId: 's1' });
-    expect(sidebandHoldFloorMock).toHaveBeenLastCalledWith('s1', 20);
-
-    await toolRegistry.executeTool('hold_floor', { seconds: 0.2, reason: 'r' }, { sessionId: 's1' });
-    expect(sidebandHoldFloorMock).toHaveBeenLastCalledWith('s1', 1);
-
-    await toolRegistry.executeTool('hold_floor', { seconds: 'a while', reason: 'r' }, { sessionId: 's1' });
-    expect(sidebandHoldFloorMock).toHaveBeenLastCalledWith('s1', 10);
-  });
-
-  it('refuses (fail-safe) when the crisis lookup throws', async () => {
-    getSessionCrisisStateMock.mockRejectedValue(new Error('db down'));
-    const r = await toolRegistry.executeTool('hold_floor', { seconds: 5, reason: 'r' }, { sessionId: 's1' });
-    expect(r).toEqual({ held: false, reason: 'not-available' });
-    expect(sidebandHoldFloorMock).not.toHaveBeenCalled();
-  });
-
-  it('returns held:true with the applied duration on success', async () => {
-    const r = await toolRegistry.executeTool('hold_floor', { seconds: 8, reason: 'safety message' }, { sessionId: 's1' }) as {
-      held: boolean; seconds: number; guidance: string;
-    };
-    expect(r.held).toBe(true);
-    expect(r.seconds).toBe(8);
-    expect(r.guidance).toContain('8 seconds');
+  it('is not advertised to the model', async () => {
+    const defs = await toolRegistry.getEnabledToolDefinitions();
+    expect(defs.map(d => d.name)).not.toContain('hold_floor');
   });
 });
 

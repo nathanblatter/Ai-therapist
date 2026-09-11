@@ -37,10 +37,14 @@ Once one paying therapist uses this with real clients, we are a business
 associate. Before pilot launch:
 
 - [ ] **BAA from OpenAI.** Required before any real-client traffic.
-      **Flag: Realtime API BAA eligibility must be verified explicitly** —
-      zero-retention/BAA coverage for the Realtime (voice) endpoint is not
-      guaranteed by a standard API BAA. Get it in writing; if Realtime is not
-      covered, pilot launches chat-only.
+      **Flag: GPT-Live BAA eligibility must be verified explicitly** —
+      zero-retention/BAA coverage for the Live (voice) endpoint
+      (`/v1/live/sessions`) is not guaranteed by a standard API BAA. Note this
+      is now TWO surfaces to get covered: the voice model and the delegated
+      Responses backend the voice session calls (see `docs/gpt-live.md`). Get it
+      in writing; if the voice path is not covered, pilot launches chat-only.
+      Sessions are created with `store: false`, so OpenAI-side retention of
+      session audio is already off, but that is not a substitute for a BAA.
 - [ ] **BAAs WITH each pilot therapist** (we are their business associate).
       Use a standard template; free pilot does not waive this.
 - [ ] Existing controls to present (already built):

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
+import { Loader } from 'react-feather';
 import ChatLog from "./ChatLog";
 import SessionControls from "./SessionControls";
 import SessionSettings from "./SessionSettings";
@@ -68,6 +69,79 @@ interface LogConversationParams {
   extra?: unknown;
 }
 
+/** Shape every GPT-Live data-channel event shares. Fields are read per case. */
+interface LiveServerEvent {
+  type?: string;
+  [key: string]: unknown;
+}
+
+// GPT-Live caps `session.*.append` content at 500 tokens. We clamp on
+// characters rather than risk the API rejecting the event outright: dropping a
+// crisis steer because it ran three words long is not an acceptable failure
+// mode. Mirrors truncateForAppend in sidebandManager.service.ts.
+const MAX_APPEND_CHARS = 1600; // ~500 tokens at a pessimistic 3.2 chars/token
+
+function truncateForAppend(content: string): string {
+  if (content.length <= MAX_APPEND_CHARS) return content;
+  console.warn(`[Live] Append content truncated from ${content.length} to ${MAX_APPEND_CHARS} chars.`);
+  return content.slice(0, MAX_APPEND_CHARS);
+}
+
+/** How long to wait for `session.closed` after asking the session to finish. */
+const LIVE_CLOSE_TIMEOUT_MS = 15_000;
+/** How long to wait for `session.started` after the SDP answer is applied. */
+const LIVE_START_TIMEOUT_MS = 20_000;
+/** How long a delegation may run before the "thinking" hint gives up on itself. */
+const LIVE_THINKING_TIMEOUT_MS = 20_000;
+
+/**
+ * Resolve once the peer connection has gathered all of its ICE candidates.
+ *
+ * GPT-Live takes the offer through a single HTTP request, so there is no
+ * trickle-ICE path for candidates discovered after we send it — an offer posted
+ * early just connects with fewer candidates. The timeout is a deliberate
+ * compromise: a network that never reaches 'complete' (a stalled STUN server is
+ * the usual cause) should still get a session rather than hang on Start.
+ */
+function waitForIceGathering(pc: RTCPeerConnection, timeoutMs: number): Promise<void> {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      pc.removeEventListener('icegatheringstatechange', onStateChange);
+      resolve();
+    };
+    const onStateChange = () => {
+      if (pc.iceGatheringState === 'complete') finish();
+    };
+    const timer = setTimeout(() => {
+      console.warn('[Live] ICE gathering did not complete in time; sending the offer as gathered.');
+      finish();
+    }, timeoutMs);
+    pc.addEventListener('icegatheringstatechange', onStateChange);
+  });
+}
+
+/**
+ * One caption row on screen.
+ *
+ * GPT-Live transcript deltas carry no item id and no turn-completed event, so
+ * row identity is ours to invent and then keep stable — the captions guide is
+ * explicit that deriving it from the (changing) text or from end timestamps
+ * breaks as rows grow. `startMs`/`endMs` are positions on the session timeline,
+ * not wall-clock times, and are used only for grouping.
+ */
+interface CaptionRow {
+  id: string;
+  startMs: number;
+  endMs: number;
+}
+
+// Fragments from the same speaker within this distance of a row's interval join
+// that row. It is an application choice, not a protocol value: a display group
+// is not a semantic turn, and both speakers can be mid-row at the same time.
+const CAPTION_GAP_MS = 2000;
+
 export default function App() {
   const [isClient, setIsClient] = useState(false);
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -76,9 +150,6 @@ export default function App() {
   const [assistantStream, setAssistantStream] = useState("");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const assistantBuffer = useRef("");
-  const userBuffer = useRef("");
-  const currentVoiceMessageId = useRef<string | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const audioElement = useRef<HTMLAudioElement | null>(null);
@@ -101,6 +172,26 @@ export default function App() {
   // session — otherwise it lingers as "active" and blocks every retry until
   // the duration limit expires.
   const pendingStartSessionRef = useRef<{ id: string; kind: 'realtime' | 'chat' } | null>(null);
+  // ---- GPT-Live session state --------------------------------------------
+  // All of these are refs rather than state because the data-channel handler is
+  // attached once, during startRealtimeSession, and would otherwise read the
+  // start-render's values forever (the ai-therapist-113 stale-closure family).
+  //
+  // liveSessionId  — the id the SERVER returned; authoritative before the
+  //                  sessionId state update has landed.
+  // liveStarted    — `session.started` seen. Nothing may be sent before this.
+  // liveFinalized  — `session.closed` seen. Only this confirms finalization and
+  //                  final usage; a transport close on its own does not.
+  const liveSessionIdRef = useRef<string | null>(null);
+  const liveStartedRef = useRef(false);
+  const liveFinalizedRef = useRef(false);
+  const liveClosedWaiterRef = useRef<(() => void) | null>(null);
+  const liveStartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTearingDownRef = useRef(false);
+  // Tool calls arrive on the data channel AND on the server's sideband. Ours is
+  // UI-only, but a redelivered envelope must not re-open an overlay.
+  const handledToolCallsRef = useRef<Set<string>>(new Set());
+  const captionRowsRef = useRef<{ user: CaptionRow[]; assistant: CaptionRow[] }>({ user: [], assistant: [] });
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
     language: 'en'
@@ -139,6 +230,13 @@ export default function App() {
   // where neither ever arrives.
   const [micLocked, setMicLocked] = useState(false);
   const wrapUpFailsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // GPT-Live hands substantive work to a delegated backend and tells us when it
+  // starts (session.delegation.created). Surfacing that keeps a few seconds of
+  // "why is nothing happening" from reading as a broken session. The timer is a
+  // failsafe: delegated work that never produces speech must not pin the hint on
+  // screen for the rest of the session.
+  const [isBackendThinking, setIsBackendThinking] = useState(false);
+  const thinkingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sessionType, setSessionType] = useState<string | null>(null); // 'realtime' or 'chat'
 
   // Start-flow feedback (ai-therapist-117): true from the moment the
@@ -238,7 +336,7 @@ export default function App() {
     const quietHoursTimer = setInterval(fetchQuietHours, 5 * 60_000);
 
     // Fetch daily-session rate-limit status so a capped participant sees the
-    // limit up front instead of after consent + check-in (429 on /token).
+    // limit up front instead of after consent + check-in (429 on session start).
     fetch('/api/rate-limits/status', { credentials: 'include' })
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
@@ -411,10 +509,61 @@ export default function App() {
     }
   }
 
+  /**
+   * Fold one GPT-Live transcript fragment into this speaker's captions.
+   *
+   * The rules here come straight from the captions guide and each one is load
+   * bearing:
+   *  - the delta is concatenated EXACTLY as received (no trim, no inserted
+   *    space) — the fragments already carry their own spacing;
+   *  - a fragment is not a turn, and the model is full duplex, so the user and
+   *    assistant rows are grown independently and can both be open at once;
+   *  - rows keep the id they were created with and are never reordered, so a
+   *    growing row does not jump to the bottom of an overlapping exchange;
+   *  - the newest-first scan (rather than "always the last row") is what lets a
+   *    late fragment land back in the earlier row it belongs to.
+   */
+  function appendTranscriptDelta(role: 'user' | 'assistant', delta: string, startMs: number, endMs: number) {
+    if (!delta) return;
+    const rows = captionRowsRef.current[role];
+    let row: CaptionRow | undefined;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const candidate = rows[i];
+      if (startMs - candidate.endMs <= CAPTION_GAP_MS && candidate.startMs - endMs <= CAPTION_GAP_MS) {
+        row = candidate;
+        break;
+      }
+    }
+
+    if (row) {
+      row.startMs = Math.min(row.startMs, startMs);
+      row.endMs = Math.max(row.endMs, endMs);
+      const rowId = row.id;
+      setMessages(prev => prev.map(m => (m.id === rowId ? { ...m, text: m.text + delta } : m)));
+      return;
+    }
+
+    const created: CaptionRow = { id: crypto.randomUUID(), startMs, endMs };
+    rows.push(created);
+    setMessages(prev => [...prev, { id: created.id, role, text: delta }]);
+  }
+
+  /** Show the delegated-work hint, with a failsafe so it always clears. */
+  function markBackendThinking(thinking: boolean) {
+    if (thinkingTimeoutRef.current) {
+      clearTimeout(thinkingTimeoutRef.current);
+      thinkingTimeoutRef.current = null;
+    }
+    setIsBackendThinking(thinking);
+    if (thinking) {
+      thinkingTimeoutRef.current = setTimeout(() => setIsBackendThinking(false), LIVE_THINKING_TIMEOUT_MS);
+    }
+  }
+
   // Wrapper function that routes to realtime or chat-only based on features.
-  // Any failure on the start path (mic permission, token fetch, SDP exchange)
-  // lands here: show a specific toast and always re-enable the Start button
-  // instead of failing silently (ai-therapist-117).
+  // Any failure on the start path (mic permission, session request, SDP
+  // exchange) lands here: show a specific toast and always re-enable the Start
+  // button instead of failing silently (ai-therapist-117).
   async function startSession(checkin: CheckinData | null = null) {
     setPostSessionData(null); // clear the previous session's post-session screen
     setIsConnecting(true);
@@ -580,43 +729,307 @@ export default function App() {
     }
   }
 
-  // Realtime therapy session (WebRTC with voice + chat)
+  // Voice therapy session over GPT-Live: WebRTC media tracks for audio, an
+  // `oai-events` data channel for JSON events.
+  //
+  // The handshake is inverted relative to the Realtime API this replaces. We no
+  // longer mint an ephemeral key and POST the SDP to api.openai.com from the
+  // browser; the offer goes to OUR server, which creates the session with the
+  // project key and returns the SDP answer and the session id in the JSON body.
+  // Two consequences worth remembering:
+  //  - no OpenAI credential ever reaches the browser;
+  //  - the `Location`-header scraping that used to hand the server a call_id is
+  //    gone entirely, and with it the whole class of failure it caused. That
+  //    header was invisible whenever CORS did not expose it, which meant no
+  //    sideband, no live monitoring and no crisis steering — silently, until we
+  //    added a beacon for it (ai-therapist-195). The server now knows the
+  //    session id before the browser does and attaches its own sideband, so
+  //    there is nothing left to register.
   async function startRealtimeSession(checkin: CheckinData | null = null) {
-    // Get a session token for OpenAI Realtime API. The current picker values
-    // are sent explicitly (request body wins server-side) so the choice also
-    // applies for anonymous participants, who have no saved preferences row;
-    // logged-in users' preferences remain the fallback when nothing is sent.
-    const tokenResponse = await fetch("/token", {
+    // Reset per-session Live state before anything can dispatch into it.
+    liveSessionIdRef.current = null;
+    liveStartedRef.current = false;
+    liveFinalizedRef.current = false;
+    liveClosedWaiterRef.current = null;
+    isTearingDownRef.current = false;
+    handledToolCallsRef.current = new Set();
+    captionRowsRef.current = { user: [], assistant: [] };
+
+    // Create a peer connection. Assigned to the ref immediately so a failure
+    // later in the start path (mic permission, SDP exchange) can be torn down
+    // from startSession()'s catch block.
+    const pc = new RTCPeerConnection();
+    peerConnection.current = pc;
+
+    // Surface connection drops (ai-therapist-117): 'failed' ends the session
+    // right away; 'disconnected' can self-heal, so give it a short grace
+    // period before treating it as a drop. Either way the participant gets an
+    // explanation and the post-session screen instead of a frozen orb.
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === 'connected') {
+        if (disconnectTimerRef.current) {
+          clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
+      } else if (state === 'failed') {
+        if (disconnectTimerRef.current) {
+          clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
+        toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+        reportClientEvent('webrtc_failed', { stage: 'connectionstatechange' }, liveSessionIdRef.current);
+        void stopSessionRef.current();
+      } else if (state === 'disconnected') {
+        if (!disconnectTimerRef.current) {
+          disconnectTimerRef.current = setTimeout(() => {
+            disconnectTimerRef.current = null;
+            const s = pc.connectionState;
+            if (s === 'disconnected' || s === 'failed') {
+              toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+              reportClientEvent('webrtc_disconnected', { stage: 'grace-period-expired', state: s }, liveSessionIdRef.current);
+              void stopSessionRef.current();
+            }
+          }, 7000);
+        }
+      }
+    };
+
+    // Set up to play remote audio from the model
+    const audioEl = document.createElement("audio");
+    audioEl.autoplay = true;
+    audioElement.current = audioEl;
+
+    // Microphone first: the SDP offer has to carry the audio track. Asking
+    // before the server call also means a denied-permission start never creates
+    // a session — and GPT-Live bills 15 seconds of voice duration at session
+    // initialization, so an abandoned session costs real money.
+    //
+    // Enable the browser's built-in mic DSP so steady background noise (fans,
+    // hum, room tone) is suppressed before audio ever reaches the model.
+    const ms = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    setLocalStream(ms);
+    pc.addTrack(ms.getTracks()[0], ms);
+
+    // The data channel and every one of its listeners must exist BEFORE
+    // createOffer(): the channel is negotiated in the SDP, and `session.started`
+    // can arrive the moment the answer is applied.
+    const dc = pc.createDataChannel("oai-events");
+    dataChannelRef.current = dc;
+
+    dc.addEventListener("error", (e) => {
+      console.error('[DataChannel] error:', e);
+      reportClientEvent('data_channel_error', { stage: 'oai-events' }, liveSessionIdRef.current);
+    });
+
+    dc.addEventListener("close", () => {
+      // A transport close is not finalization. If it happens before
+      // `session.closed`, the final usage for this session is unconfirmed —
+      // worth reporting, because our own teardown closes the channel only after
+      // that event (or after giving up on it).
+      if (!liveFinalizedRef.current && !isTearingDownRef.current) {
+        console.warn('[Live] Data channel closed before session.closed; final usage is unconfirmed.');
+        reportClientEvent('data_channel_error', { stage: 'closed_before_finalize' }, liveSessionIdRef.current);
+      }
+    });
+
+    dc.addEventListener("message", async (e) => {
+      const event = JSON.parse(e.data as string) as LiveServerEvent;
+      if (!event.type) return;
+
+      switch (event.type) {
+        // The session is ready. Nothing may be sent before this arrives.
+        case 'session.started': {
+          const startedId = (event.session as { id?: string } | undefined)?.id ?? null;
+          console.log('[Live] Session started:', startedId);
+          liveStartedRef.current = true;
+          if (liveStartTimeoutRef.current) {
+            clearTimeout(liveStartTimeoutRef.current);
+            liveStartTimeoutRef.current = null;
+          }
+          pendingStartSessionRef.current = null; // start succeeded — nothing to release
+          setIsConnecting(false);
+          setIsSessionActive(true);
+          setEvents([]);
+          setMessages([]);
+          setAssistantStream("");
+          startPeriodicFlush();
+
+          // Opening preamble. Realtime got this as a hidden user turn plus a
+          // forced response; GPT-Live has neither, so it is delivered the
+          // documented way — a trusted instructions append that tells the model
+          // to speak first instead of waiting for the participant.
+          const initialPrompt = getInitialPromptForLanguage(sessionSettings.language);
+          sendInvisiblePrompt(
+            `${initialPrompt} Say it immediately, before the participant speaks, then pause and listen.`,
+            `Initial prompt: ${initialPrompt}`,
+          );
+          break;
+        }
+
+        // Participant speech. There is no completion event and no item id, so
+        // the caption row is grouped and owned entirely on our side.
+        case 'session.input_transcript.delta':
+          appendTranscriptDelta(
+            'user',
+            String(event.delta ?? ''),
+            Number(event.start_ms ?? 0),
+            Number(event.end_ms ?? 0),
+          );
+          break;
+
+        // Assistant speech. Its arrival also means the delegated work (if any)
+        // has produced something to say.
+        case 'session.output_transcript.delta':
+          markBackendThinking(false);
+          appendTranscriptDelta(
+            'assistant',
+            String(event.delta ?? ''),
+            Number(event.start_ms ?? 0),
+            Number(event.end_ms ?? 0),
+          );
+          break;
+
+        // Backend work started — drives the "thinking" hint only. It is not a
+        // promise that the model will say anything about it.
+        case 'session.delegation.created':
+          markBackendThinking(true);
+          break;
+
+        // Nested Responses events arrive wrapped. The envelope's own type is
+        // always 'response.event'; dispatching on it instead of the inner type
+        // would silently drop every tool call.
+        case 'response.event':
+          await handleNestedResponseEvent(event.event as LiveServerEvent | undefined);
+          break;
+
+        // The final event. Only this confirms finalization and final usage.
+        case 'session.closed': {
+          const usage = event.usage as { seconds?: number } | undefined;
+          console.log(`[Live] Session closed: reason=${String(event.reason)} seconds=${String(usage?.seconds)}`);
+          liveFinalizedRef.current = true;
+          markBackendThinking(false);
+          logConversation({
+            sessionId: liveSessionIdRef.current,
+            role: 'system',
+            type: 'system',
+            message: 'Live session closed',
+            extras: { reason: event.reason ?? null, usage: usage ?? null },
+          });
+          const waiter = liveClosedWaiterRef.current;
+          if (waiter) {
+            // stopSession() asked for this close and is holding the transport
+            // open for it — let it finish the teardown.
+            liveClosedWaiterRef.current = null;
+            waiter();
+          } else if (!isTearingDownRef.current) {
+            // The session ended on its own (duration limit, safety filter,
+            // upstream drop). Run the normal teardown through the latest-ref so
+            // the POST /end, the session_end log and the post-session snapshot
+            // still happen (ai-therapist-113).
+            void stopSessionRef.current();
+          }
+          break;
+        }
+
+        // Errors are not necessarily terminal: moderation can cut off the
+        // assistant's current speech and leave the session running. Read them
+        // even while audio plays, and do not tear down on our own here.
+        case 'error': {
+          const err = event.error as { code?: string; message?: string; client_event_id?: string } | undefined;
+          console.error('[Live] API error:', err);
+          reportClientEvent('data_channel_error', {
+            stage: 'live_error',
+            code: err?.code ?? null,
+            message: (err?.message ?? '').slice(0, 200),
+          }, liveSessionIdRef.current);
+          logConversation({
+            sessionId: liveSessionIdRef.current,
+            role: 'system',
+            type: 'system',
+            message: `Live API error: ${err?.message ?? 'unknown'}`,
+            extras: err ?? null,
+          });
+          break;
+        }
+
+        default:
+          break;
+      }
+
+      // Lifecycle events only. Transcript deltas arrive several times a second
+      // and nothing reads them back, so keeping them here would be a pure leak.
+      if (!event.type.endsWith('_transcript.delta')) {
+        setEvents((prev) => [event, ...prev].slice(0, 200));
+      }
+    });
+
+    // SDP offer, then wait for ICE gathering: the offer travels in one HTTP
+    // request, so late candidates have nowhere to go.
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitForIceGathering(pc, 10_000);
+
+    const localSdp = pc.localDescription?.sdp;
+    if (!localSdp) {
+      const missingSdp = new Error('Missing local SDP offer');
+      missingSdp.name = 'SdpFetchError';
+      throw missingSdp;
+    }
+
+    // Every early return below happens with the microphone already open (the
+    // offer needs the track), so each one has to hand the mic back.
+    const abortStart = () => {
+      dataChannelRef.current = null;
+      dc.close();
+      pc.onconnectionstatechange = null;
+      pc.getSenders().forEach((sender) => sender.track?.stop());
+      pc.close();
+      peerConnection.current = null;
+      setLocalStream(null);
+      setIsConnecting(false);
+    };
+
+    // The offer goes to our own server, which holds the project key, runs the
+    // study's gates (consent, quiet hours, study status, rate limits) and only
+    // then creates the OpenAI session. The current picker values are sent
+    // explicitly (request body wins server-side) so the choice also applies for
+    // anonymous participants, who have no saved preferences row; logged-in
+    // users' preferences remain the fallback when nothing is sent.
+    const response = await fetch("/api/live/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        sdp: localSdp,
         voice: sessionSettings.voice,
         language: sessionSettings.language,
         checkin,
-      })
+      }),
     });
 
     // Check for rate limiting errors
-    if (tokenResponse.status === 429) {
-      const errorData = await tokenResponse.json();
+    if (response.status === 429) {
+      const errorData = await response.json();
       toast.error(errorData.message || "You have reached your session limit. Please try again later.");
       console.warn("Rate limit exceeded:", errorData);
       setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
-      setIsConnecting(false);
+      abortStart();
       return;
     }
 
     // Quiet hours (server-enforced): swap to the overnight screen.
-    if (tokenResponse.status === 403) {
-      const errorData = await tokenResponse.json().catch(() => null);
+    if (response.status === 403) {
+      const errorData = await response.json().catch(() => null);
       if (errorData?.error === 'quiet_hours') {
         setQuietHours({ blocksYou: true, ...errorData.quietHours });
-        setIsConnecting(false);
+        abortStart();
         return;
       }
       if (errorData?.error === 'study_status') {
         setStudyStatusBlock(errorData.studyStatus === 'paused' ? 'paused' : 'withdrawn');
-        setIsConnecting(false);
+        abortStart();
         return;
       }
       // Our AI provider blocked this participant's anonymous identifier
@@ -624,28 +1037,50 @@ export default function App() {
       // research team instead of a "check your connection" toast.
       if (errorData?.error === 'identifier_blocked') {
         setStudyStatusBlock('access_blocked');
-        setIsConnecting(false);
+        abortStart();
         return;
       }
     }
 
-    if (!tokenResponse.ok) {
-      throw new Error(`Token request failed with status ${tokenResponse.status}`);
+    // The study was rolled back to a non-Live voice backend after this page
+    // loaded. Nothing the participant can fix, and not a network problem.
+    if (response.status === 409) {
+      const errorData = await response.json().catch(() => null);
+      if (errorData?.error === 'live_not_active') {
+        toast.error('Voice sessions are temporarily unavailable. Please refresh the page and try again, or contact the research team if this keeps happening.');
+        console.warn('Live backend is not active:', errorData);
+        abortStart();
+        return;
+      }
     }
 
-    const data = await tokenResponse.json();
-    console.log("Session token data:", data);
+    if (!response.ok) {
+      // Name the error so startSession()'s catch reports it as sdp_fetch_failed
+      // (rather than a generic webrtc_failed) before the network toast.
+      const sdpError = new Error(`Live session request failed with status ${response.status}`);
+      sdpError.name = 'SdpFetchError';
+      throw sdpError;
+    }
+
+    const data = await response.json();
 
     // Check if session already exists (idempotency check)
     if (data.session?.exists) {
       toast.warning(data.message || "You already have an active session. Please end it before starting a new one.");
       console.warn("Active session already exists:", data.session.id);
-      setIsConnecting(false);
-      return; // Don't proceed with session creation
+      abortStart();
+      return;
     }
 
-    const EPHEMERAL_KEY = data.value;
-    const newSessionId = data.session.id;
+    const newSessionId = data.session_id as string;
+    const sdpAnswer = data.sdp as string;
+    if (!newSessionId || !sdpAnswer) {
+      const badResponse = new Error('Live session response is missing session_id or sdp');
+      badResponse.name = 'SdpFetchError';
+      throw badResponse;
+    }
+
+    liveSessionIdRef.current = newSessionId;
     setSessionId(newSessionId);
     setSessionType('realtime');
     pendingStartSessionRef.current = { id: newSessionId, kind: 'realtime' };
@@ -716,7 +1151,7 @@ export default function App() {
       messages.forEach(msg => {
         // Handle AI guidance messages (hidden from user, sent to AI)
         if (msg.message_type === 'ai_guidance' && msg.metadata?.hidden_from_user) {
-          console.log('[Crisis] Sending AI guidance to OpenAI');
+          console.log('[Crisis] Steering the live model with AI guidance');
           sendInvisiblePrompt(msg.content);
         }
         // Crisis intervention and admin messages: send to AI to speak them
@@ -724,21 +1159,23 @@ export default function App() {
           console.log('[Crisis] Sending intervention message to AI to speak:', msg.content.substring(0, 100));
           // Escape single quotes in the message content
           const escapedContent = msg.content.replace(/'/g, "\\'");
-          // Wrap in "Say this phrase exactly" format so AI speaks it
+          // Wrap in "Say this phrase exactly" format so AI speaks it. An
+          // instruction requests the wording; it does not guarantee it, which is
+          // why the same text is also shown in the chat log below.
           const promptToSpeak = `Say this phrase exactly: '${escapedContent}'`;
 
           // Retry sending if data channel isn't ready yet
           const trySendMessage = (attempt = 0) => {
             const maxAttempts = 10;
-            if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
-              console.log('[Crisis] DataChannel is open, sending message');
+            if (dataChannelRef.current && dataChannelRef.current.readyState === 'open' && liveStartedRef.current) {
+              console.log('[Crisis] Session is live, steering the model');
               sendInvisiblePrompt(promptToSpeak);
             } else if (attempt < maxAttempts) {
               const state = dataChannelRef.current ? dataChannelRef.current.readyState : 'null';
-              console.log(`[Crisis] DataChannel not ready (${state}), retry ${attempt + 1}/${maxAttempts} in 500ms`);
+              console.log(`[Crisis] Session not ready (channel=${state}, started=${liveStartedRef.current}), retry ${attempt + 1}/${maxAttempts} in 500ms`);
               setTimeout(() => trySendMessage(attempt + 1), 500);
             } else {
-              console.error('[Crisis] Failed to send message after max retries - data channel never opened');
+              console.error('[Crisis] Failed to send message after max retries - session never became ready');
             }
           };
 
@@ -760,7 +1197,6 @@ export default function App() {
     // Listen for admin messages during active session
     socket.on('admin:message', (data) => {
       console.log('Received admin message:', data);
-      console.log('[Admin] DataChannel state:', dataChannelRef.current ? dataChannelRef.current.readyState : 'null');
       const { message, messageType, senderName } = data;
 
       if (messageType === 'visible') {
@@ -778,32 +1214,11 @@ export default function App() {
           }
         ]);
       } else if (messageType === 'invisible') {
-        // Send as invisible prompt to AI (guides AI response without user seeing it)
-        if (dataChannelRef.current) {
-          const event = {
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "user",
-              content: [
-                {
-                  type: "input_text",
-                  text: message,
-                },
-              ],
-            },
-          };
-          dataChannelRef.current.send(JSON.stringify(event));
-          dataChannelRef.current.send(JSON.stringify({ type: "response.create" }));
-
-          // Log the invisible prompt
-          logConversation({
-            sessionId: newSessionId,
-            role: "system",
-            type: "admin_invisible",
-            message: `Admin invisible prompt: ${message}`
-          });
-        }
+        // Steer the AI without the participant seeing it. Note the behaviour
+        // change GPT-Live forces: Realtime inserted this as a hidden turn in the
+        // participant's voice, but Live has no conversation item list, so it
+        // becomes an application instruction instead of impersonation.
+        sendInvisiblePrompt(message, `Admin invisible prompt: ${message}`);
       }
     });
 
@@ -813,89 +1228,40 @@ export default function App() {
 
     socketRef.current = socket;
 
-    const trimmedData = {
-      ...data.session,
-      
-      instructions: "[[ OMITTED FOR LOGGING ]]",
-      
-      
-     
-    };
-
     logConversation({
-      sessionId: trimmedData.id,
+      sessionId: newSessionId,
       role: "system",
       type: "session_start",
       message: "Session started",
     });
     logConversation({
-      sessionId: trimmedData.id,
+      sessionId: newSessionId,
       role: "system",
       type: "system",
       message: "Session settings",
-      extras: trimmedData, // This will include trimmed session metadata
+      // The clinical prompt and tool schemas live server-side now — the browser
+      // never sees them, so there is nothing to omit from this record.
+      extras: {
+        id: newSessionId,
+        backend: 'live',
+        voice: data.voice ?? sessionSettings.voice,
+        language: data.language ?? sessionSettings.language,
+        session_limits: data.session_limits ?? null,
+      },
     });
-    // Create a peer connection. Assigned to the ref immediately so a failure
-    // later in the start path (mic permission, SDP exchange) can be torn down
-    // from startSession()'s catch block.
-    const pc = new RTCPeerConnection();
-    peerConnection.current = pc;
 
-    // Surface connection drops (ai-therapist-117): 'failed' ends the session
-    // right away; 'disconnected' can self-heal, so give it a short grace
-    // period before treating it as a drop. Either way the participant gets an
-    // explanation and the post-session screen instead of a frozen orb.
-    pc.onconnectionstatechange = () => {
-      const state = pc.connectionState;
-      if (state === 'connected') {
-        if (disconnectTimerRef.current) {
-          clearTimeout(disconnectTimerRef.current);
-          disconnectTimerRef.current = null;
-        }
-      } else if (state === 'failed') {
-        if (disconnectTimerRef.current) {
-          clearTimeout(disconnectTimerRef.current);
-          disconnectTimerRef.current = null;
-        }
-        toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
-        reportClientEvent('webrtc_failed', { stage: 'connectionstatechange' }, newSessionId);
-        void stopSessionRef.current();
-      } else if (state === 'disconnected') {
-        if (!disconnectTimerRef.current) {
-          disconnectTimerRef.current = setTimeout(() => {
-            disconnectTimerRef.current = null;
-            const s = pc.connectionState;
-            if (s === 'disconnected' || s === 'failed') {
-              toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
-              reportClientEvent('webrtc_disconnected', { stage: 'grace-period-expired', state: s }, newSessionId);
-              void stopSessionRef.current();
-            }
-          }, 7000);
-        }
-      }
-    };
-    // Set up to play remote audio from the model
-    const audioEl = document.createElement("audio");
-    audioEl.autoplay = true;
-    audioElement.current = audioEl;
-    // Add local audio track for microphone input in the browser
-    // Enable the browser's built-in mic DSP so steady background noise (fans,
-    // hum, room tone) is suppressed before audio ever reaches the Realtime API.
-    const ms = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-    setLocalStream(ms);
-    pc.addTrack(ms.getTracks()[0]);
-
+    // Assistant audio arrives on a media track. Registered before the answer is
+    // applied so no track event can land before we are listening.
     pc.ontrack = (e) => {
       audioEl.srcObject = e.streams[0];
       setRemoteStream(e.streams[0]);
       // Capture the whole conversation: mix mic + assistant audio into one PCM
       // stream and upload it over HTTP for the entire session, so the server can
-      // record it and relay it live to any admin who is listening. Gated on the
-      // features.session_recording_enabled flag (also shown in the consent
-      // screen the participant just accepted) — when it's off, capture never
-      // starts and nothing is uploaded.
+      // record it and relay it live to any admin who is listening. Independent
+      // of the API change — it taps the media tracks, not the event stream.
+      // Gated on the features.session_recording_enabled flag (also shown in the
+      // consent screen the participant just accepted) — when it's off, capture
+      // never starts and nothing is uploaded.
       if (!audioTeeRef.current && features.session_recording_enabled) {
         const uploader = createAudioUploader(newSessionId);
         audioUploaderRef.current = uploader;
@@ -917,205 +1283,66 @@ export default function App() {
         );
       }
     };
-    // Set up data channel for sending and receiving events
-    const dc = pc.createDataChannel("oai-events");
-    dataChannelRef.current = dc;
-    dc.addEventListener("error", (e) => {
-      console.error('[DataChannel] error:', e);
-      reportClientEvent('data_channel_error', { stage: 'oai-events' }, newSessionId);
-    });
 
-    // Set up data channel event listeners
-    dc.addEventListener("message", async (e) => {
-      const event = JSON.parse(e.data);
-      console.log(event)
-      if (!event.timestamp) {
-        event.timestamp = new Date().toLocaleTimeString();
-      }
+    // Apply the answer. The HTTP request already started the session — there is
+    // deliberately no `session.start` on the data channel.
+    await pc.setRemoteDescription({ type: "answer", sdp: sdpAnswer });
 
-      if (event.type === 'response.function_call_arguments.done') {
-        const fn = (fns as Record<string, ((args: unknown) => Promise<unknown>) | undefined>)[event.name as string];
-        if (fn !== undefined) {
-          const args = JSON.parse(event.arguments as string);
-          const result = await fn(args);
-          logConversation({ sessionId: newSessionId, role: "system", type: "function_call", message: `Function ${event.name as string} called`, extras: { args, result } });
-        }
-      }
-
-      if (event.type && event.type.startsWith("response")) {
-        if (event.response && event.response.output) {
-          (event.response.output as Array<{ type: string; text?: string }>).forEach((out) => {
-            if (out.type === "text") {
-              assistantBuffer.current += out.text;
-              setAssistantStream(assistantBuffer.current.trim());
-            }
-          });
-        }
-
-        if (event.type === "response.content_part.done") {
-          if (event.part?.type === "audio" && event.part.transcript) {
-            const assistantMessage = event.part.transcript.trim();
-            setMessages((prev) => [
-              ...prev,
-              { id: crypto.randomUUID(), role: "assistant", text: assistantMessage },
-            ]);
-            assistantBuffer.current = "";
-            setAssistantStream("");
-            logConversation({
-              sessionId: newSessionId,
-              role: "assistant",
-              type: "response",
-              message: assistantMessage,
-            });
-          }
-        }
-      }
-
-      if (event.type === "conversation.item.input_audio_transcription.completed") {
-        const transcript = event.transcript;
-        if (transcript) {
-          const id = crypto.randomUUID();
-          setMessages((prev) => [
-            ...prev,
-            { id, role: "user", text: transcript.trim() }
-          ]);
-          logConversation({ sessionId: newSessionId, role: "user", type: "voice", message: transcript.trim() });
-        }
-      }
-      setEvents((prev) => [event, ...prev]);
-    });
-
-    dc.addEventListener("open", () => {
-      console.log('[DataChannel] Channel opened');
-      pendingStartSessionRef.current = null; // start succeeded — nothing to release
-      setIsConnecting(false);
-      setIsSessionActive(true);
-      setEvents([]);
-      setMessages([]);
-      setAssistantStream("");
-      startPeriodicFlush();
-
-      const initialPrompt = getInitialPromptForLanguage(sessionSettings.language);
-      sendInvisiblePrompt(initialPrompt, `Initial prompt: ${initialPrompt}`);
-    });
-
-    // Start the session using the Session Description Protocol (SDP)
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    // Fetch AI model from system config
-    const modelResponse = await fetch("/api/config/ai-model");
-    const modelData = await modelResponse.json();
-    const model = modelData.model || "gpt-realtime-2.1-mini"; // Fallback to default
-
-    const baseUrl = "https://api.openai.com/v1/realtime/calls";
-    const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-    method: "POST",
-    body: offer.sdp,
-    headers: {
-        Authorization: `Bearer ${EPHEMERAL_KEY}`,
-        "Content-Type": "application/sdp",
-    },
-});
-
-    // Extract the call_id from the Location header so the server can attach a
-    // sideband WebSocket to this same Realtime call (tools/monitoring/control).
-    // Location format: /v1/realtime/calls/rtc_xxxxx
-    const locationHeader = sdpResponse.headers.get('Location');
-    const callId = locationHeader ? locationHeader.split('/').pop() : null;
-    if (callId) {
-      console.log(`[Sideband] Extracted call_id: ${callId}`);
-    } else {
-      // If this is null the header likely isn't CORS-exposed to the browser —
-      // the server can't attach the sideband without it.
-      //
-      // This used to be console.warn only, which made it invisible server-side:
-      // no sideband means no live monitoring AND no crisis de-escalation
-      // steering for this session, yet nothing was recorded anywhere. Beacon it
-      // so the failure shows up in ops instead of a browser console nobody
-      // reads (ai-therapist-195).
-      console.warn('[Sideband] No readable Location header on the SDP response; sideband will not attach.');
-      reportClientEvent('sideband_no_location', {
-        status: sdpResponse.status,
-        // Which headers WERE exposed — tells us whether this is a CORS
-        // expose-headers change on OpenAI's side.
-        exposed: Array.from(sdpResponse.headers.keys()).join(',').slice(0, 200),
+    // If the answer applies but `session.started` never lands, the participant
+    // would sit on "Connecting..." forever with a session that is already
+    // billing. Fail loudly instead.
+    liveStartTimeoutRef.current = setTimeout(() => {
+      liveStartTimeoutRef.current = null;
+      if (liveStartedRef.current) return;
+      console.error('[Live] No session.started within the timeout; abandoning this connection.');
+      reportClientEvent('webrtc_failed', {
+        stage: 'no_session_started',
+        connectionState: pc.connectionState,
+        iceState: pc.iceConnectionState,
       }, newSessionId);
+      toast.error('Could not start your session — there was a problem reaching the server. Please check your connection and try again.');
+      void stopSessionRef.current();
+    }, LIVE_START_TIMEOUT_MS);
+  }
+
+  /**
+   * Handle one nested Responses event from a `response.event` envelope.
+   *
+   * Only `response.output_item.done` matters to the browser: it is the one place
+   * a call's name AND call_id both appear (an arguments-done event carries
+   * neither). What we do with it is UI only — open the overlay the model asked
+   * for. The server's sideband is watching the same session and owns the
+   * canonical execution, so the browser must never send a function_call_output
+   * or the backend would receive two results for one call.
+   */
+  async function handleNestedResponseEvent(inner: LiveServerEvent | undefined) {
+    if (inner?.type !== 'response.output_item.done') return;
+    const item = inner.item as
+      | { type?: string; name?: string; call_id?: string; arguments?: string }
+      | undefined;
+    if (item?.type !== 'function_call' || !item.name || !item.call_id) return;
+    if (handledToolCallsRef.current.has(item.call_id)) return;
+    handledToolCallsRef.current.add(item.call_id);
+
+    markBackendThinking(false);
+
+    const fn = (fns as Record<string, ((args: unknown) => Promise<unknown>) | undefined>)[item.name];
+    if (fn === undefined) return;
+
+    let args: unknown = {};
+    try {
+      args = JSON.parse(item.arguments || '{}');
+    } catch (err) {
+      console.error(`[Live] Could not parse arguments for ${item.name}:`, err);
     }
-
-    // A non-2xx SDP answer means the Realtime call never came up. Name the
-    // error so startSession()'s catch reports it as sdp_fetch_failed (rather
-    // than a generic webrtc_failed) before showing the network-problem toast.
-    if (!sdpResponse.ok) {
-      const sdpError = new Error(`SDP exchange failed with status ${sdpResponse.status}`);
-      sdpError.name = 'SdpFetchError';
-      throw sdpError;
-    }
-
-    const answer: RTCSessionDescriptionInit = {
-      type: "answer",
-      sdp: await sdpResponse.text(),
-    };
-    await pc.setRemoteDescription(answer);
-
-    // Hand the call_id to the server so it can open its sideband WebSocket — but
-    // only once the WebRTC call is actually CONNECTED. Registering right after
-    // setRemoteDescription races OpenAI: the session for the call_id doesn't
-    // exist until negotiation finishes, which yields a 404 call_id_not_found.
-    // Non-fatal: the voice session continues even if this fails.
-    if (callId && newSessionId) {
-      let registered = false;
-      const registerSideband = async () => {
-        if (registered) return;
-        registered = true;
-        try {
-          const registerResponse = await fetch(`/api/sessions/${newSessionId}/register-call`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            // The server attaches its sideband WS with the standard API key
-            // (per OpenAI's server-side-controls docs — ai-therapist-62). The
-            // ephemeral key is still sent as a one-shot fallback in case the
-            // standard key is rejected live. (This ephemeral secret originated
-            // from our own /token endpoint.)
-            body: JSON.stringify({ call_id: callId, ephemeral_key: EPHEMERAL_KEY })
-          });
-
-          if (registerResponse.ok) {
-            console.log(`[Sideband] Registered call_id with server for session ${newSessionId}`);
-          } else {
-            const errorText = await registerResponse.text();
-            console.warn('[Sideband] Failed to register call_id with server:', errorText);
-            reportClientEvent('sideband_register_failed', {
-              status: registerResponse.status, message: errorText.slice(0, 200),
-            }, newSessionId);
-          }
-        } catch (error) {
-          console.error('[Sideband] Error registering call_id:', error);
-          reportClientEvent('sideband_register_failed', {
-            message: (error instanceof Error ? error.message : String(error)).slice(0, 200),
-          }, newSessionId);
-        }
-      };
-
-      if (pc.connectionState === 'connected') {
-        registerSideband();
-      } else {
-        pc.addEventListener('connectionstatechange', () => {
-          if (pc.connectionState === 'connected') registerSideband();
-        });
-        // If the peer connection never reaches 'connected', registerSideband is
-        // never called and the session runs with no sideband — silently. That
-        // path left no trace at all before (ai-therapist-195), so report it.
-        setTimeout(() => {
-          if (!registered) {
-            console.warn(`[Sideband] Never registered — connectionState=${pc.connectionState}`);
-            reportClientEvent('sideband_never_registered', {
-              connectionState: pc.connectionState, iceState: pc.iceConnectionState,
-            }, newSessionId);
-          }
-        }, 30_000);
-      }
-    }
+    const result = await fn(args);
+    logConversation({
+      sessionId: liveSessionIdRef.current,
+      role: "system",
+      type: "function_call",
+      message: `Function ${item.name} called`,
+      extras: { args, result },
+    });
   }
 
   async function stopSession() {
@@ -1123,6 +1350,11 @@ export default function App() {
     setToolUI(null);
     setMicLocked(false);
     setIsConnecting(false);
+    markBackendThinking(false);
+    if (liveStartTimeoutRef.current) {
+      clearTimeout(liveStartTimeoutRef.current);
+      liveStartTimeoutRef.current = null;
+    }
     if (wrapUpFailsafeRef.current) {
       clearTimeout(wrapUpFailsafeRef.current);
       wrapUpFailsafeRef.current = null;
@@ -1182,7 +1414,44 @@ export default function App() {
       return;
     }
 
-    // Handle realtime session (original logic)
+    // ---- Handle the GPT-Live voice session -------------------------------
+    isTearingDownRef.current = true;
+
+    // Graceful close. Ask the session to finish, then keep the peer connection,
+    // the data channel and the microphone tracks ALIVE until `session.closed`
+    // arrives: that event is the only thing that confirms finalization and
+    // carries the final usage seconds, and closing the transport straight after
+    // sending the command is documented to prevent it from ever being
+    // delivered. The `session.closed` listener is the data-channel handler
+    // installed at session start, so it is registered long before this command.
+    const liveChannel = dataChannelRef.current;
+    if (liveChannel && liveChannel.readyState === 'open' && liveStartedRef.current && !liveFinalizedRef.current) {
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(closeTimer);
+          liveClosedWaiterRef.current = null;
+          resolve();
+        };
+        liveClosedWaiterRef.current = done;
+        const closeTimer = setTimeout(() => {
+          // Incomplete finalization: report it and release the resources rather
+          // than holding a dead call open forever.
+          console.warn('[Live] No session.closed within the timeout; final usage is unconfirmed.');
+          reportClientEvent('data_channel_error', { stage: 'no_session_closed' }, liveSessionIdRef.current);
+          done();
+        }, LIVE_CLOSE_TIMEOUT_MS);
+        try {
+          liveChannel.send(JSON.stringify({ type: 'session.close', event_id: `close_${Date.now()}` }));
+        } catch (error) {
+          console.error('[Live] Failed to send session.close:', error);
+          done();
+        }
+      });
+    }
+
     logConversation({ sessionId:sessionId, role: "system", type: "session_end", message: "Session ended" });
     stopPeriodicFlush();
     await flushLogs();
@@ -1243,6 +1512,12 @@ export default function App() {
     setSessionEndTime(null);
     setTimeRemaining(null);
     peerConnection.current = null;
+    // Live state: liveSessionId and the caption rows are left for the
+    // post-session screen's lifetime and reset by the next start.
+    // isTearingDownRef deliberately stays true, so a session.closed that lands
+    // after teardown cannot start a second one.
+    liveStartedRef.current = false;
+    liveClosedWaiterRef.current = null;
   }
 
   // Handle page unload - warn user and end session
@@ -1284,18 +1559,17 @@ export default function App() {
   }, [isSessionActive, sessionId, sessionType]);
 
 
+  // Send one client event on the GPT-Live data channel. Guarded on
+  // `session.started` as well as the channel state: the HTTP request starts the
+  // session, but commands sent before that event are not accepted.
   function sendClientEvent(message: Record<string, unknown>) {
-    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
-      const timestamp = new Date().toLocaleTimeString();
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open' && liveStartedRef.current) {
       message.event_id = (message.event_id as string | undefined) || crypto.randomUUID();
       dataChannelRef.current.send(JSON.stringify(message));
-      if (!message.timestamp) {
-        message.timestamp = timestamp;
-      }
-      setEvents((prev) => [message, ...prev]);
+      setEvents((prev) => [{ ...message, timestamp: new Date().toLocaleTimeString() }, ...prev].slice(0, 200));
     } else {
       const state = dataChannelRef.current ? dataChannelRef.current.readyState : 'null';
-      console.error(`Failed to send message - data channel not ready (state: ${state})`, message);
+      console.error(`Failed to send message - session not ready (channel: ${state}, started: ${liveStartedRef.current})`, message);
     }
   }
 
@@ -1376,9 +1650,14 @@ export default function App() {
       return;
     }
 
-    // Handle realtime session (original logic)
-    const event = {
-      type: "conversation.item.create",
+    // Handle the GPT-Live voice session. Typed text is participant DATA, not an
+    // instruction, so it is queued for the delegated backend as a user message
+    // rather than appended to the live model's instructions. Queueing an item
+    // does not start work on its own — response.create is what continues the
+    // backend. (Both replace the Realtime conversation.item.create pair; Live
+    // has no conversation item list to write into.)
+    sendClientEvent({
+      type: "response.item.create",
       item: {
         type: "message",
         role: "user",
@@ -1389,42 +1668,45 @@ export default function App() {
           },
         ],
       },
-    };
-
-    sendClientEvent(event);
+    });
     setMessages((prev) => [
       ...prev,
       { id: crypto.randomUUID(), role: "user", text: message },
     ]);
     sendClientEvent({ type: "response.create" });
-    logConversation({ sessionId:sessionId, role: "user", type: "chat", message: message });
+    // Typed turns produce no transcript deltas, so unlike spoken turns the
+    // server's sideband never sees them — this log is the only record.
+    logConversation({ sessionId: liveSessionIdRef.current ?? sessionId, role: "user", type: "chat", message: message });
   }
 
+  /**
+   * Steer the live model with trusted application text: the opening preamble, a
+   * crisis intervention line, an admin's invisible prompt, a tool outcome.
+   *
+   * Realtime did this by inserting a hidden user turn and then forcing a
+   * response. GPT-Live has neither — no conversation item list, and no
+   * response.create that makes the VOICE model speak — so the equivalent is an
+   * instructions append: it influences behaviour and speech, can interrupt
+   * speech already in progress, and needs no follow-up event. `delegation_id:
+   * null` scopes it to the session rather than to one piece of backend work.
+   *
+   * An append requests wording; it never guarantees it. Callers that must show
+   * the participant the exact text (crisis interventions) also render it.
+   */
   function sendInvisiblePrompt(text: string, logMessage: string | null = null) {
-    console.log('[sendInvisiblePrompt] Sending text:', text);
-    console.log('[sendInvisiblePrompt] Text length:', text.length);
-
-    const event = {
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: text,
-          },
-        ],
-      },
-    };
-
-    console.log('[sendInvisiblePrompt] Event:', JSON.stringify(event, null, 2));
-    sendClientEvent(event);
-    sendClientEvent({ type: "response.create" });
+    console.log('[sendInvisiblePrompt] Appending instructions, length:', text.length);
+    sendClientEvent({
+      type: "session.instructions.append",
+      delegation_id: null,
+      content: truncateForAppend(text),
+    });
     // Only log if a custom log message is provided (for initial prompts)
     // Crisis intervention guidance messages are already logged server-side
     if (logMessage !== null) {
-      logConversation({ sessionId:sessionId, role: "system", type: "system", message: logMessage });
+      // Latest-ref, not state: this runs from data-channel and socket handlers
+      // that closed over the render where sessionId was still null, which used
+      // to drop the record entirely (ai-therapist-113 family).
+      logConversation({ sessionId: liveSessionIdRef.current ?? sessionId, role: "system", type: "system", message: logMessage });
     }
   }
 
@@ -1590,10 +1872,12 @@ export default function App() {
     },
   };
 
-  // NOTE: the realtime session config (model, voice, instructions, tools,
-  // transcription, modalities) is applied server-side when /token mints the
-  // OpenAI client secret — see routes/public/token.routes.ts. The client does
-  // not send its own session.update at start.
+  // NOTE: the whole session config (model, voice, instructions, delegated
+  // backend, tools) is applied server-side when POST /api/live/session creates
+  // the GPT-Live session — see routes/public/liveSession.routes.ts. The client
+  // sends no configuration of its own, and could not: GPT-Live freezes model,
+  // instructions, input and audio after startup, so there is no client-side
+  // session.update path to drift from the server's config.
 
   if (!isClient) {
     // Render a placeholder or nothing on the server
@@ -1662,6 +1946,15 @@ export default function App() {
               role="status"
             >
               Wrapping up your session... the AI is saying goodbye, and the session will close in a moment.
+            </div>
+          )}
+          {/* Delegated-work hint (session.delegation.created). Deliberately
+              quiet: it says work started, not that the assistant is about to
+              speak about it. Suppressed during wrap-up, which has its own copy. */}
+          {isSessionActive && sessionType === 'realtime' && isBackendThinking && !micLocked && (
+            <div className="mb-2 flex items-center justify-center gap-2 text-sm text-gray-500" role="status">
+              <Loader size={14} className="animate-spin" aria-hidden="true" />
+              Thinking...
             </div>
           )}
           <SessionControls

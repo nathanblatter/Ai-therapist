@@ -32,9 +32,18 @@ export function modelFamilyOf(lineItem: string): string | null {
   if (!model) return null;
   if (model.startsWith('gpt-realtime')) return 'realtime';
   if (model.startsWith('gpt-5.2')) return 'gpt-5.2';
+  // The GPT-Live delegated reasoning backend. It is the voice pipeline's
+  // brain, so its spend belongs to the realtime subsystem rather than to a
+  // generic text bucket — attributing it elsewhere would make voice look
+  // cheaper than it is.
+  if (model.startsWith('gpt-5.6')) return 'live-backend';
   if (/^gpt-5(-|$)/.test(model)) return 'gpt-5';
   if (model.startsWith('gpt-4o-mini-transcribe') || model.startsWith('gpt-transcribe')
       || model.startsWith('gpt-live-transcribe')) return 'transcribe';
+  // Must follow the gpt-live-transcribe check above: that is a transcription
+  // model, not the full-duplex voice model, and startsWith('gpt-live') would
+  // otherwise swallow it.
+  if (model.startsWith('gpt-live')) return 'live-voice';
   if (model.startsWith('gpt-4o-mini')) return 'gpt-4o-mini';
   if (model.startsWith('text-embedding')) return 'embeddings';
   if (model.startsWith('omni-moderation')) return 'moderation';
@@ -48,6 +57,10 @@ const FAMILY_TO_SUBSYSTEMS: Record<string, Subsystem[]> = {
   'gpt-4o-mini': ['crisis', 'insights'],
   realtime: ['realtime'],
   transcribe: ['realtime'],
+  // GPT-Live: the voice layer is billed per second and the delegated backend
+  // per token, but both are the voice product from the study's point of view.
+  'live-voice': ['realtime'],
+  'live-backend': ['realtime'],
   moderation: ['crisis'],
   embeddings: ['other'],
 };
@@ -130,6 +143,11 @@ function attribute(
     }
   }
   if (realtimeResponses > 0) addWeight('realtime', 'realtime', realtimeResponses);
+  // GPT-Live voice spend has exactly one consumer, so the whole family goes to
+  // 'realtime' with a nominal weight. There is nothing to apportion between —
+  // the weight only has to be non-zero for the family to be attributed at all.
+  addWeight('live-voice', 'realtime', 1);
+  addWeight('live-backend', 'realtime', 1);
 
   const totals = new Map<Subsystem, number>();
   const estimatedSubs = new Set<Subsystem>();

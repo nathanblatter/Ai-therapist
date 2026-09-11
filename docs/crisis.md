@@ -10,6 +10,59 @@ the automated system surfaces and prioritizes, the human on duty decides how to 
 
 ---
 
+## What feeds the detector (changed by the GPT-Live migration)
+
+The detection tiers below are **unchanged**. What changed is the INPUT to them,
+and the delivery mechanism for steering. See `docs/gpt-live.md`.
+
+**Input.** Under the Realtime API, a participant turn arrived as a single
+completed transcription event (`conversation.item.input_audio_transcription.completed`)
+and that whole turn was scored. GPT-Live emits no such event: it streams
+`session.input_transcript.delta` fragments with `start_ms` / `end_ms` and no turn
+boundary, because the model is full duplex and both speakers can talk at once.
+Turns are therefore **reassembled server-side** by `TranscriptAssembler` in
+`sidebandManager.service.ts` — a turn closes after 900 ms of silence from that
+speaker — and the assembled turn is what calls `runCrisisPipeline`.
+
+Consequences the study team should know:
+
+- **Scoring is gated on the silence gap.** Nothing is assessed until the
+  participant pauses for 900 ms. The gap is deliberately tuned to err LATE:
+  flushing early would hand the assessor half a sentence, and "I've been
+  thinking about" scores very differently from "I've been thinking about killing
+  myself." If the value is ever retuned, retune it upward.
+- **Crisis detection runs even when the DB write fails.** The pipeline tolerates
+  a null `messageId`; a database outage must never silently disable detection.
+- **A late fragment starts a new turn** rather than being merged backwards, so
+  no words are lost but a single spoken sentence can occasionally be scored as
+  two turns.
+- Detection requires the sideband. With `SIDEBAND_ENABLED=false`, or while the
+  sideband is disconnected, no voice turns reach the detector at all.
+
+**Steering delivery.** Realtime injected a hidden `conversation.item.create` with
+`role: 'system'`. GPT-Live has no conversation item list; steering is delivered
+as `session.instructions.append` (capped at 500 tokens, enforced client-side by
+character count so a steer is never rejected for running slightly long).
+
+Two behaviour changes follow:
+
+- **Steering can no longer be paired with a forced response.** The `respond`
+  argument on `injectMessage` / `tryInject` is accepted for signature
+  compatibility and ignored — there is no `response.create` that makes the voice
+  model speak. The crisis wind-down steer, which previously passed
+  `respond: true`, now only steers; the model decides when to speak. An appended
+  instruction can interrupt speech already in progress, but it cannot compel a
+  reply.
+- **An append acknowledgement is not proof of effect.** `session.instructions.appended`
+  confirms only that the API accepted the event. It does not establish that the
+  model consumed the instruction, acted on it, or that the participant heard
+  anything. `intervention_actions` rows therefore record an *attempted and
+  delivered* intervention, not a confirmed behavioural change. `tryInject`
+  returning `false` (sideband not connected) is recorded as an **undelivered**
+  intervention.
+
+---
+
 ## Detection: Two-Stage (Keyword Screen + LLM Assessment)
 
 **File:** `src/server/services/crisisDetection.service.ts`
@@ -80,8 +133,8 @@ Responses are tiered by severity/score:
 - **Medium severity**: real-time dashboard alert plus a work-queue item for the study team.
   No SMS page.
 - **Risk score >= 25 (low and up)**: the system injects hidden de-escalation steering
-  guidance into the model's context (sideband system message for realtime sessions; system
-  message for chat). This changes how the agent responds — grounding, safety-checking,
+  guidance into the model's context (`session.instructions.append` over the sideband for
+  voice sessions; system message for chat). This changes how the agent responds — grounding, safety-checking,
   surfacing crisis resources — but is not shown or announced to the participant. Steering
   is rate-limited to once per 3 minutes per session and every injection is logged in
   `intervention_actions` (`risk_steering` / `safety_protocol`) and broadcast to the admin
