@@ -11,17 +11,26 @@ interface RedactRow {
 }
 
 /**
- * Redact every not-yet-redacted user/assistant message in a session in one
- * batched (double-pass) model call, then persist + notify admins. Fire-and-forget
- * safe: never throws; failures are recorded in message metadata for re-run.
+ * Redact every not-yet-redacted participant-authored message in a session in
+ * one batched (double-pass) model call, then persist + notify admins.
+ * Fire-and-forget safe: never throws; failures are recorded in message metadata
+ * for re-run.
  */
 export async function redactSession(sessionId: string): Promise<void> {
   const { rows } = await pool.query<RedactRow>(
+    // role='system' rows are normally machine-authored (steering, tool calls)
+    // and need no redaction — but tool_event_* rows are the exception. Their
+    // body is verbatim participant-typed free text from thought records and
+    // fear ladders, carrying names, places and dates. They used to be skipped
+    // by the role filter AND written with content_redacted pre-filled, so raw
+    // PHI reached every researcher surface that reads the redacted column.
+    // This clause is the half that gets them redacted; the other half is
+    // sessions.routes.ts no longer pre-filling content_redacted.
     `SELECT message_id, content
        FROM messages
       WHERE session_id = $1
         AND content_redacted IS NULL
-        AND role IN ('user', 'assistant')
+        AND (role IN ('user', 'assistant') OR message_type LIKE 'tool_event_%')
       ORDER BY message_id ASC`,
     [sessionId]
   );

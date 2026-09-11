@@ -163,6 +163,12 @@ interface LiveSessionState {
    */
   userTurnIndex: number;
   assistantTurnIndex: number;
+  /**
+   * Which attach this state belongs to. A reconnect builds fresh state with the
+   * turn counters back at 0, so the sequence disambiguates transcript row ids
+   * across attaches. See emitTranscript.
+   */
+  attachSeq: number;
   reconnectAttempts: number;
 }
 
@@ -170,6 +176,8 @@ export class SidebandManager {
   private sessions = new Map<string, LiveSessionState>();
   /** Sessions that have ended. Never re-attach: the live session id is gone. */
   private endedSessions = new Set<string>();
+  /** Monotonic attach counter per session, so reconnects mint distinct row ids. */
+  private attachSeqs = new Map<string, number>();
 
   private readonly maxReconnectAttempts = 3;
   private readonly reconnectDelayMs = 2000;
@@ -186,6 +194,13 @@ export class SidebandManager {
    * no per-turn completion event to restore on, so this is a fixed window.
    */
   private readonly toolChoiceResetMs = 45000;
+
+  /** Next attach sequence for a session. Cleared on disconnect with the rest. */
+  private nextAttachSeq(sessionId: string): number {
+    const next = (this.attachSeqs.get(sessionId) ?? 0) + 1;
+    this.attachSeqs.set(sessionId, next);
+    return next;
+  }
 
   // -------------------------------------------------------------------------
   // Connection lifecycle
@@ -252,6 +267,7 @@ export class SidebandManager {
       toolChoiceReset: null,
       userTurnIndex: 0,
       assistantTurnIndex: 0,
+      attachSeq: this.nextAttachSeq(sessionId),
       reconnectAttempts: 0,
     };
     this.sessions.set(sessionId, state);
@@ -274,10 +290,112 @@ export class SidebandManager {
             sessionId, error: detail, statusCode: res.statusCode,
           }, sessionId);
         }
+        // Do not leave an active voice session running with no monitoring.
+        void this.failClosedUnmonitored(sessionId, `attach rejected with HTTP ${res.statusCode}`);
       });
     });
 
     return ws;
+  }
+
+  /**
+   * Attach and WAIT for the socket to actually open.
+   *
+   * `connect()` returns as soon as the WebSocket object exists — it never
+   * awaits the upgrade — so a caller that awaits it learns nothing about
+   * whether the sideband is live. That matters much more under GPT-Live than
+   * it did under Realtime: the client no longer batches transcripts to
+   * /logs/batch, so this socket is the ONLY path by which participant speech
+   * reaches runCrisisPipeline. An unattached voice session is an unmonitored
+   * one.
+   *
+   * Rejects on upgrade rejection, socket error, or timeout.
+   */
+  async connectAndWait(
+    sessionId: string,
+    liveSessionId: string,
+    apiKey: string,
+    opts: { model: string; backendModel: string; timeoutMs?: number },
+  ): Promise<void> {
+    const timeoutMs = opts.timeoutMs ?? 10_000;
+    const ws = await this.connect(sessionId, liveSessionId, apiKey, opts);
+    if (ws.readyState === WebSocket.OPEN) return;
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => { cleanup(); reject(new Error(`Live sideband did not open within ${timeoutMs}ms`)); },
+        timeoutMs,
+      );
+      timer.unref?.();
+      const onOpen = () => { cleanup(); resolve(); };
+      const onFail = () => { cleanup(); reject(new Error('Live sideband closed before opening')); };
+      const cleanup = () => {
+        clearTimeout(timer);
+        ws.off('open', onOpen);
+        ws.off('close', onFail);
+        ws.off('error', onFail);
+      };
+      ws.once('open', onOpen);
+      ws.once('close', onFail);
+      ws.once('error', onFail);
+    });
+  }
+
+  /**
+   * The sideband for an ACTIVE voice session is gone for good.
+   *
+   * Under Realtime this was survivable: participant speech also reached the
+   * server through the client's /logs/batch transcript upload, so a dead
+   * sideband cost steering and tool execution but detection kept running.
+   * Under GPT-Live there is no second path — onUserTurn is the only writer and
+   * the only runCrisisPipeline caller for voice. A live session with no
+   * sideband is a session where a suicide disclosure would be neither scored,
+   * flagged, paged, nor even recorded.
+   *
+   * So we fail closed: end the session rather than let it continue unmonitored,
+   * and page the study team, because this is an operational failure a human
+   * needs to know about rather than a console line.
+   */
+  private async failClosedUnmonitored(sessionId: string, reason: string): Promise<void> {
+    try {
+      const { getSessionAccessInfo } = await import('../db/index.js');
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session || session.status !== 'active') return;
+
+      console.error(
+        `[Live] UNMONITORED SESSION ${sessionId.substring(0, 12)}... — ${reason}. ` +
+        'Ending it: with no sideband there is no crisis detection on the voice path.',
+      );
+
+      // Alert first: if the teardown itself fails, the page still went out.
+      try {
+        const { sendCrisisAlert } = await import('./crisisAlert.service.js');
+        await sendCrisisAlert(
+          `AI-Therapist: voice session ${sessionId.substring(0, 12)}... lost its monitoring connection ` +
+          `(${reason}) and was ended automatically. No crisis detection was running on that session ` +
+          'after the disconnect. Review the transcript.',
+        );
+      } catch (err) {
+        console.error('[Live] Failed to page on unmonitored session:', err);
+      }
+
+      if (global.io) {
+        void broadcastAdminEventForSession(global.io, 'sideband:unmonitored', {
+          sessionId, reason, endedAt: new Date(),
+        }, sessionId);
+      }
+
+      const { serverEndSession } = await import('./sessionLifecycle.service.js');
+      await serverEndSession(sessionId, {
+        endedBy: 'system',
+        reason: 'sideband_lost',
+        message:
+          'Your session ended because the connection to our monitoring system was lost. ' +
+          'Nothing you shared was lost. You can start a new session whenever you are ready.',
+      });
+    } catch (err) {
+      console.error(`[Live] failClosedUnmonitored failed for ${sessionId.substring(0, 12)}...:`, err);
+    }
   }
 
   private async handleOpen(sessionId: string, liveSessionId: string): Promise<void> {
@@ -631,7 +749,11 @@ export class SidebandManager {
 
     const state = this.sessions.get(sessionId);
     const counters = payload.role === 'user' ? state?.userTurnIndex : state?.assistantTurnIndex;
-    const itemId = `live-${payload.role}-${counters ?? 0}`;
+    // The attach sequence is part of the id because a reconnect builds fresh
+    // per-session state with counters back at 0. Without it, turn ids repeat
+    // after a reconnect and the admin monitor — which keys rows by itemId —
+    // merges post-reconnect turns into pre-reconnect rows.
+    const itemId = `live-${payload.role}-${state?.attachSeq ?? 0}-${counters ?? 0}`;
     if (payload.final && state) {
       if (payload.role === 'user') state.userTurnIndex += 1;
       else state.assistantTurnIndex += 1;
@@ -969,7 +1091,10 @@ export class SidebandManager {
     const { pool: db } = await import('../config/db.js');
     const rows = await db.query<{ role: string; content: string }>(
       `SELECT role, content FROM messages
-        WHERE session_id = $1 AND message_type = 'message'
+        -- Must match what the Live path actually writes ('voice'/'response');
+        -- 'message' is never written, so this silently returned zero rows and
+        -- re-grounding no-opped every time it fired.
+        WHERE session_id = $1 AND message_type IN ('voice', 'response', 'text', 'message')
         ORDER BY created_at ASC LIMIT 200`,
       [sessionId],
     );
@@ -1211,6 +1336,9 @@ export class SidebandManager {
     const attempts = state.reconnectAttempts;
     if (attempts >= this.maxReconnectAttempts) {
       console.error(`[Live] Max reconnection attempts reached for ${sessionId.substring(0, 12)}...`);
+      await this.failClosedUnmonitored(
+        sessionId, `sideband reconnect exhausted after ${this.maxReconnectAttempts} attempts`,
+      );
       return;
     }
     const timer = setTimeout(() => {
@@ -1269,11 +1397,21 @@ export class SidebandManager {
 
     const current = this.sessions.get(sessionId);
     if (current) {
+      // FLUSH before dispose. dispose() drops the buffer outright, so a
+      // participant utterance still inside the 900ms gap window would be
+      // discarded — never persisted, never crisis-scored. That is the most
+      // likely moment for it to matter: the graceful-close path above waits on
+      // session.closed, and if that times out we arrive here holding exactly
+      // the last thing the participant said. handleClose already flushes;
+      // this path did not.
+      current.userTranscript.flush();
+      current.assistantTranscript.flush();
       current.userTranscript.dispose();
       current.assistantTranscript.dispose();
       this.clearTimers(current);
       current.ws.close(1000, 'Session ended');
       this.sessions.delete(sessionId);
+      this.attachSeqs.delete(sessionId);
     }
   }
 
@@ -1335,8 +1473,21 @@ export class SidebandManager {
     ).catch(err => console.error('[Live] Failed to log error:', err));
   }
 
+  /**
+   * Sessions with a LIVE sideband socket.
+   *
+   * Filters on readyState, not map membership. A session is in `this.sessions`
+   * from the moment connect() is called until 'close' fires, so returning raw
+   * keys reported sessions whose socket was still CONNECTING or already
+   * CLOSING as usable. Callers treat this as "can I steer this session", and
+   * every one of them then calls a method that throws unless the socket is
+   * OPEN — so the gap produced steers that consumed their cooldown, threw, and
+   * were recorded as neither delivered nor undelivered.
+   */
   getActiveConnections(): string[] {
-    return Array.from(this.sessions.keys());
+    return Array.from(this.sessions.entries())
+      .filter(([, state]) => state.ws.readyState === WebSocket.OPEN)
+      .map(([sessionId]) => sessionId);
   }
 
   isConnected(sessionId: string): boolean {

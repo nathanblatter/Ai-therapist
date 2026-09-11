@@ -246,8 +246,18 @@ export default function sessionsRoutes(): Router {
 
       const text = summary.trim().slice(0, 4000);
 
+      // content_redacted is left NULL on purpose. `summary` is verbatim
+      // participant-typed text — thought records and fear ladders carry names,
+      // places and dates — so writing it into the redacted column would ship
+      // raw PHI to every researcher surface that reads content_redacted (the
+      // admin session view and the full export both select that column for
+      // non-owner roles), and would make the nightly content wipe null the raw
+      // `content` on the assumption redaction had already run.
+      //
+      // NULL keeps it in redactSession's work queue instead; that query now
+      // covers these rows (see sessionRedaction.service.ts).
       const { insertMessage } = await import('../../db/index.js');
-      await insertMessage(sessionId, 'system', `tool_event_${kind}`, text, text, { source: 'tool-event' });
+      await insertMessage(sessionId, 'system', `tool_event_${kind}`, text, null, { source: 'tool-event' });
 
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
       let injected = await sidebandManager.tryInject(sessionId, 'system', text, true);

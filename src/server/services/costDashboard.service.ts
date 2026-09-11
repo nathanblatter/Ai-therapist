@@ -54,7 +54,10 @@ export function modelFamilyOf(lineItem: string): string | null {
 const FAMILY_TO_SUBSYSTEMS: Record<string, Subsystem[]> = {
   'gpt-5': ['redaction'],
   'gpt-5.2': ['chat'],
-  'gpt-4o-mini': ['crisis', 'insights'],
+  // 'other' carries rerank + eligibility, which also run on gpt-4o-mini. Without
+  // it their token volume was excluded from the denominator, so their spend was
+  // silently apportioned to crisis and insights and inflated both.
+  'gpt-4o-mini': ['crisis', 'insights', 'other'],
   realtime: ['realtime'],
   transcribe: ['realtime'],
   // GPT-Live: the voice layer is billed per second and the delegated backend

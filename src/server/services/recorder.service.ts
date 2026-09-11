@@ -116,10 +116,14 @@ export async function finalize(sessionId: string): Promise<void> {
     track,
     rec: recordings.get(recKey(sessionId, track)),
   })).filter((t): t is { track: RecordingTrack; rec: ActiveRecording } => Boolean(t.rec));
+  // Mark finalized FIRST, before the empty-tracks early return. The session has
+  // ended either way, so returning early without the marker re-opened the
+  // post-finalize write window: a straggler audio batch for a session that had
+  // nothing buffered yet would start a fresh recording that nothing would ever
+  // finalize.
+  markFinalized(sessionId);
   if (tracks.length === 0) return;
   for (const { track } of tracks) recordings.delete(recKey(sessionId, track));
-  // Block any straggler audio batches from re-opening this recording.
-  markFinalized(sessionId);
 
   for (const { track, rec } of tracks) {
     await finalizeTrack(sessionId, track, rec);
@@ -190,9 +194,12 @@ export function abort(sessionId: string): void {
   const tracks = TRACKS.map((track) => recordings.get(recKey(sessionId, track))).filter(
     (rec): rec is ActiveRecording => Boolean(rec),
   );
+  // Same ordering fix as finalize(): the marker must be set even when nothing
+  // was buffered, or a straggler batch re-opens a recording for an aborted
+  // session.
+  markFinalized(sessionId);
   if (tracks.length === 0) return;
   for (const track of TRACKS) recordings.delete(recKey(sessionId, track));
-  markFinalized(sessionId);
   for (const rec of tracks) {
     rec.stream.destroy();
     void cleanupTemp(rec.filePath);

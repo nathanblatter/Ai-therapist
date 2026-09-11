@@ -125,7 +125,14 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
     // Sideband gate FIRST so the shared cooldown is only consumed when there is
     // actually a live connection to inject into (preserves realtime behavior).
     const { sidebandManager } = await import('./sidebandManager.service.js');
-    if (!sidebandManager.getActiveConnections().includes(sessionId)) {
+    // isConnected(), not getActiveConnections(). The latter is map membership,
+    // and a session is in the map from the moment connect() is called until the
+    // socket's 'close' fires — so it reports true while the socket is still
+    // CONNECTING or already CLOSING. In those windows shouldSteer would consume
+    // the per-session cooldown and injectMessage would then throw (sendEvent
+    // requires readyState OPEN), leaving the steer recorded as neither
+    // delivered nor undelivered, and the cooldown spent.
+    if (!sidebandManager.isConnected(sessionId)) {
       if (!steeringSuppressed.has(sessionId)) {
         steeringSuppressed.add(sessionId);
         // Bounded so a long-lived process can't grow this without limit.

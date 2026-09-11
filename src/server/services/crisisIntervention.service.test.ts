@@ -16,7 +16,13 @@ const {
   sendCrisisAlertMock: vi.fn(),
   isSandboxAccountSessionMock: vi.fn(),
   sidebandManagerMock: {
+    // maybeSteerSession gates on isConnected(), not getActiveConnections():
+    // map membership reports true while the socket is still CONNECTING or
+    // already CLOSING, and injectMessage throws unless it is OPEN. Both are
+    // mocked so a test that sets one and not the other fails loudly rather
+    // than silently exercising the wrong gate.
     getActiveConnections: vi.fn(() => [] as string[]),
+    isConnected: vi.fn(() => false),
     injectMessage: vi.fn(),
     tryInject: vi.fn(),
   },
@@ -130,6 +136,7 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
 
   it('records an UNDELIVERED risk_steering action when no sideband is attached', async () => {
     sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    sidebandManagerMock.isConnected.mockReturnValue(false);
     await maybeSteerSession(SESSION, 80, 'high');
 
     expect(sidebandManagerMock.injectMessage).not.toHaveBeenCalled();
@@ -141,6 +148,7 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
 
   it('records the suppression only ONCE per session, not once per risky turn', async () => {
     sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    sidebandManagerMock.isConnected.mockReturnValue(false);
     const s = 'sess_no_sideband_dedupe';
     await maybeSteerSession(s, 70, 'medium');
     await maybeSteerSession(s, 85, 'high');
@@ -153,6 +161,7 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
   it('marks delivered:true when the sideband IS attached', async () => {
     const s = 'sess_with_sideband';
     sidebandManagerMock.getActiveConnections.mockReturnValue([s]);
+    sidebandManagerMock.isConnected.mockReturnValue(true);
     sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
     await maybeSteerSession(s, 80, 'high');
 
@@ -164,6 +173,7 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
 
   it('stays silent below the steering threshold regardless of sideband state', async () => {
     sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    sidebandManagerMock.isConnected.mockReturnValue(false);
     await maybeSteerSession('sess_low_risk', 5, 'none');
     expect(logInterventionActionMock).not.toHaveBeenCalled();
   });

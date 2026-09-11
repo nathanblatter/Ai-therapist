@@ -32,6 +32,7 @@ import {
   createActiveRealtimeSession,
   recordConsent,
   setSessionCheckin,
+  updateSessionStatus,
 } from '../../db/index.js';
 import {
   checkSessionLimits,
@@ -310,17 +311,57 @@ export default function liveSessionRoutes(): Router {
           // over a DB hiccup would be worse than running with a lazily-created row.
         }
 
-        // Attach the sideband before returning, so no transcript fragment — and
-        // therefore no crisis signal — can arrive before we are listening. The
-        // session is already running; this cannot race a call registration the
-        // way the Realtime attach could.
+        // The sideband must be OPEN before this route returns, and a failure to
+        // attach must fail the session start.
+        //
+        // Under Realtime this was a best-effort side effect, and that was
+        // defensible: participant speech also reached the server through the
+        // client's /logs/batch transcript upload, so a dead sideband cost
+        // steering and tool execution while detection kept running. GPT-Live
+        // removed that second path — the client no longer logs transcripts, so
+        // SidebandManager.onUserTurn is the ONLY writer and the only
+        // runCrisisPipeline caller for voice. Starting a voice session whose
+        // sideband never attached means a participant could disclose intent
+        // and have it neither scored, flagged, paged, nor recorded.
+        //
+        // So: await the open, and on failure hang up the OpenAI session and
+        // surface an error rather than handing back a live, unmonitored one.
         const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
         if (!sidebandEnabled) {
-          console.log('[Live] Sideband disabled via SIDEBAND_ENABLED=false; session id recorded only.');
+          // Explicitly loud. This kill switch now disables crisis detection on
+          // the voice path, which it did not under Realtime.
+          console.warn(
+            '[Live] SIDEBAND_ENABLED=false — starting a voice session with NO crisis detection. ' +
+            'This switch is far more dangerous under GPT-Live than it was under Realtime.',
+          );
         } else {
-          sidebandManager
-            .connect(sessionId, liveSessionId, apiKey, { model: aiModel, backendModel })
-            .catch(err => console.error(`[Live] Sideband attach failed for ${sessionId}:`, err));
+          try {
+            await sidebandManager.connectAndWait(sessionId, liveSessionId, apiKey, {
+              model: aiModel, backendModel,
+            });
+          } catch (err) {
+            console.error(
+              `[Live] Sideband attach FAILED for ${sessionId} — refusing to start an unmonitored ` +
+              'voice session:', err instanceof Error ? err.message : err,
+            );
+
+            // Hang up the OpenAI side so the participant's browser cannot keep
+            // talking to a session we are not watching, and so we stop paying
+            // for it.
+            await fetch(
+              `https://api.openai.com/v1/live/sessions/${encodeURIComponent(liveSessionId)}/hangup`,
+              { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` } },
+            ).catch((e: unknown) => console.error('[Live] hangup after failed attach also failed:', e));
+
+            await updateSessionStatus(sessionId, 'ended', 'system')
+              .catch((e: unknown) => console.error('[Live] Failed to mark unmonitored session ended:', e));
+
+            return res.status(503).json({
+              error: 'monitoring_unavailable',
+              message:
+                'We could not start your session right now. Please try again in a moment.',
+            });
+          }
         }
 
         if (limitCheck.limits?.max_duration_minutes && !limitCheck.bypass) {
