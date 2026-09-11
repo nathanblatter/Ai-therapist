@@ -1,7 +1,15 @@
 // Admin sideband control API (therapist/researcher): inspect sideband
 // connection state and push live instruction updates / disconnects to an active
-// session. The sidebandManager service is imported lazily because the feature
-// is currently disabled (OpenAI returns 404 for WebRTC sessions).
+// session. The sidebandManager service is imported lazily to keep it off the
+// cold-start path.
+//
+// NOTE (2026-09-10): this header previously claimed the feature was "currently
+// disabled (OpenAI returns 404 for WebRTC sessions)". That was false and it is
+// why nobody investigated the attach rate for months — LiveMonitoring calls
+// these endpoints, and sidebandManager drives phase guidance, crisis steering
+// injection and turn-latency capture. 404s do occur for SOME calls, but the
+// dominant failure is the client never obtaining a call_id at all. See
+// ai-therapist-195.
 import { Router } from 'express';
 import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';

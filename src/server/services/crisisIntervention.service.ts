@@ -97,10 +97,26 @@ export const CHAT_SAFETY_PROTOCOL_GUIDANCE =
   `and, if they engage, offer to write out a simple safety plan together in the chat. ` +
   `Do not end the session yourself. Stay with them.`;
 
+// Sessions already recorded as having undeliverable steering. Keeps the signal
+// to one row per session rather than one per risky turn, while still making the
+// session countable.
+const steeringSuppressed = new Set<string>();
+
+/** Test hook: number of sessions currently holding a suppression marker. */
+export function _suppressedSteeringCountForTests(): number {
+  return steeringSuppressed.size;
+}
+
 /**
  * Inject de-escalation guidance when risk is elevated. Per-session cooldown so
- * a rough patch doesn't flood the model with repeated guidance. No-op when the
- * session has no live sideband connection.
+ * a rough patch doesn't flood the model with repeated guidance.
+ *
+ * When the session has no live sideband the guidance CANNOT be delivered. That
+ * used to be a bare `return` — completely invisible. It is safety-relevant: the
+ * risk score still records and the dashboard still alerts, so an audit of "did
+ * we intervene?" would silently overcount while the live conversation was never
+ * steered at all. Now recorded as an undelivered risk_steering action (once per
+ * session) so delivery rate is measurable rather than assumed.
  */
 export async function maybeSteerSession(sessionId: string, riskScore: number, severity: string): Promise<void> {
   try {
@@ -109,12 +125,31 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
     // Sideband gate FIRST so the shared cooldown is only consumed when there is
     // actually a live connection to inject into (preserves realtime behavior).
     const { sidebandManager } = await import('./sidebandManager.service.js');
-    if (!sidebandManager.getActiveConnections().includes(sessionId)) return;
+    if (!sidebandManager.getActiveConnections().includes(sessionId)) {
+      if (!steeringSuppressed.has(sessionId)) {
+        steeringSuppressed.add(sessionId);
+        // Bounded so a long-lived process can't grow this without limit.
+        if (steeringSuppressed.size > 2000) {
+          for (const id of steeringSuppressed) {
+            if (steeringSuppressed.size <= 1000) break;
+            steeringSuppressed.delete(id);
+          }
+        }
+        console.warn(
+          `[crisis] risk steering UNDELIVERABLE for ${sessionId.substring(0, 12)}… ` +
+          `(score ${riskScore}, ${severity}) — no live sideband connection`,
+        );
+        await logInterventionAction(sessionId, 'risk_steering', {
+          riskScore, severity, delivered: false, reason: 'no_sideband',
+        });
+      }
+      return;
+    }
 
     if (!shouldSteer(sessionId, riskScore, severity === 'high')) return;
 
     await sidebandManager.injectMessage(sessionId, 'system', steeringGuidance(riskScore, severity), false);
-    await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity });
+    await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity, delivered: true });
 
     if (global.io) {
       void broadcastAdminEventForSession(global.io, 'session:risk-steering', {

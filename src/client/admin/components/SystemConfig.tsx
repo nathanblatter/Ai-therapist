@@ -42,6 +42,8 @@ interface Features {
   /** De-identified admin-app usage telemetry (migration 096). Staff-facing
    *  product telemetry, default on; stores no user identity. */
   telemetry_admin_usage?: boolean;
+  /** Periodic role re-grounding over the sideband (sidebandManager.service). */
+  regrounding_enabled?: boolean;
 }
 
 interface AiToolInfo {
@@ -1273,6 +1275,46 @@ export default function SystemConfig() {
         </p>
 
         <div className="space-y-3">
+          {/* Session recording. This flag was typed in the Features interface
+              and seeded in migration 007 but had NO control, so the only way to
+              enable recording was hand-editing system_config JSON — which meant
+              recording, playback, the acoustic-feature pipeline and the voice
+              red-team suite were all effectively unreachable (ai-therapist-201). */}
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">Session audio recording</p>
+              <p className="text-xs text-gray-600">
+                Records voice sessions (mixed track plus a participant-only track for prosody
+                research). Participants see an explicit recording disclosure in consent when this
+                is on, and per-session consent is still required. Also unblocks the voice
+                red-team suite.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.session_recording_enabled === true}
+              onChange={(e) => updateFeatures('session_recording_enabled', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
+
+          {/* Periodic re-grounding: implemented in sidebandManager, previously
+              only settable by editing JSON. */}
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">Periodic re-grounding</p>
+              <p className="text-xs text-gray-600">
+                Sends the model a quiet reminder of its role at a fixed interval during long
+                voice sessions. Requires a live sideband connection.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.regrounding_enabled === true}
+              onChange={(e) => updateFeatures('regrounding_enabled', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
         </div>
       </div>
 

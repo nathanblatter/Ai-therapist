@@ -34,7 +34,7 @@ vi.mock('../db/index.js', () => ({
   getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
 
-const { executeGraduatedResponse } = await import('./crisisIntervention.service.js');
+const { executeGraduatedResponse, maybeSteerSession } = await import('./crisisIntervention.service.js');
 
 const flush = async () => {
   // The paging chain is fire-and-forget (import().then...); drain it.
@@ -86,5 +86,54 @@ describe('executeGraduatedResponse — high-risk paging', () => {
     await executeGraduatedResponse('sess-1', 'medium', 55);
     await flush();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
+  });
+});
+
+
+// Crisis steering is delivered over the sideband. When no sideband is attached
+// the guidance cannot reach the model — that used to be a bare `return`, so an
+// audit of "did we intervene?" counted a steer that never happened. These pin
+// the visibility fix (ai-therapist-195).
+describe('maybeSteerSession — undeliverable steering must be recorded, not silent', () => {
+  const SESSION = 'sess_no_sideband_1';
+
+  it('records an UNDELIVERED risk_steering action when no sideband is attached', async () => {
+    sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    await maybeSteerSession(SESSION, 80, 'high');
+
+    expect(sidebandManagerMock.injectMessage).not.toHaveBeenCalled();
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      SESSION, 'risk_steering',
+      expect.objectContaining({ delivered: false, reason: 'no_sideband', riskScore: 80 }),
+    );
+  });
+
+  it('records the suppression only ONCE per session, not once per risky turn', async () => {
+    sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    const s = 'sess_no_sideband_dedupe';
+    await maybeSteerSession(s, 70, 'medium');
+    await maybeSteerSession(s, 85, 'high');
+    await maybeSteerSession(s, 90, 'high');
+
+    const calls = logInterventionActionMock.mock.calls.filter(c => c[0] === s);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('marks delivered:true when the sideband IS attached', async () => {
+    const s = 'sess_with_sideband';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([s]);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+    await maybeSteerSession(s, 80, 'high');
+
+    expect(sidebandManagerMock.injectMessage).toHaveBeenCalled();
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      s, 'risk_steering', expect.objectContaining({ delivered: true }),
+    );
+  });
+
+  it('stays silent below the steering threshold regardless of sideband state', async () => {
+    sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    await maybeSteerSession('sess_low_risk', 5, 'none');
+    expect(logInterventionActionMock).not.toHaveBeenCalled();
   });
 });

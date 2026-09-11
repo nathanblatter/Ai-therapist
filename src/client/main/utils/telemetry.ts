@@ -19,7 +19,12 @@ export type ClientEventKind =
   | 'sdp_fetch_failed'
   | 'data_channel_error'
   | 'socket_connect_error'
-  | 'chat_send_failed';
+  | 'chat_send_failed'
+  // Sideband attach failures (ai-therapist-195) — no sideband means no live
+  // monitoring and no crisis steering for that realtime session.
+  | 'sideband_no_location'
+  | 'sideband_register_failed'
+  | 'sideband_never_registered';
 
 const MAX_PER_KIND = 5;
 const MAX_TOTAL = 20;

@@ -1028,7 +1028,19 @@ export default function App() {
     } else {
       // If this is null the header likely isn't CORS-exposed to the browser —
       // the server can't attach the sideband without it.
+      //
+      // This used to be console.warn only, which made it invisible server-side:
+      // no sideband means no live monitoring AND no crisis de-escalation
+      // steering for this session, yet nothing was recorded anywhere. Beacon it
+      // so the failure shows up in ops instead of a browser console nobody
+      // reads (ai-therapist-195).
       console.warn('[Sideband] No readable Location header on the SDP response; sideband will not attach.');
+      reportClientEvent('sideband_no_location', {
+        status: sdpResponse.status,
+        // Which headers WERE exposed — tells us whether this is a CORS
+        // expose-headers change on OpenAI's side.
+        exposed: Array.from(sdpResponse.headers.keys()).join(',').slice(0, 200),
+      }, newSessionId);
     }
 
     // A non-2xx SDP answer means the Realtime call never came up. Name the
@@ -1073,9 +1085,15 @@ export default function App() {
           } else {
             const errorText = await registerResponse.text();
             console.warn('[Sideband] Failed to register call_id with server:', errorText);
+            reportClientEvent('sideband_register_failed', {
+              status: registerResponse.status, message: errorText.slice(0, 200),
+            }, newSessionId);
           }
         } catch (error) {
           console.error('[Sideband] Error registering call_id:', error);
+          reportClientEvent('sideband_register_failed', {
+            message: (error instanceof Error ? error.message : String(error)).slice(0, 200),
+          }, newSessionId);
         }
       };
 
@@ -1085,6 +1103,17 @@ export default function App() {
         pc.addEventListener('connectionstatechange', () => {
           if (pc.connectionState === 'connected') registerSideband();
         });
+        // If the peer connection never reaches 'connected', registerSideband is
+        // never called and the session runs with no sideband — silently. That
+        // path left no trace at all before (ai-therapist-195), so report it.
+        setTimeout(() => {
+          if (!registered) {
+            console.warn(`[Sideband] Never registered — connectionState=${pc.connectionState}`);
+            reportClientEvent('sideband_never_registered', {
+              connectionState: pc.connectionState, iceState: pc.iceConnectionState,
+            }, newSessionId);
+          }
+        }, 30_000);
       }
     }
   }

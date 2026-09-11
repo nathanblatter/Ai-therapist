@@ -24,6 +24,12 @@ export const CLIENT_EVENT_KINDS = [
   'data_channel_error',
   'socket_connect_error',
   'chat_send_failed',
+  // Sideband attach failures (ai-therapist-195). Without a sideband a realtime
+  // session has no live monitoring and no crisis de-escalation steering, so
+  // these are safety-relevant, not just diagnostics.
+  'sideband_no_location',
+  'sideband_register_failed',
+  'sideband_never_registered',
 ] as const;
 
 const KIND_SET = new Set<string>(CLIENT_EVENT_KINDS);
