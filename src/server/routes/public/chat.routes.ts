@@ -164,9 +164,74 @@ export default function chatRoutes(): Router {
         startedAt: new Date(),
       }, numericUserId);
 
+      // CONTINUATION FROM A TERMINATED VOICE SESSION.
+      //
+      // OpenAI's safety filter can end a GPT-Live session outright
+      // (session.closed reason 'content'), and it does so disproportionately at
+      // crisis disclosure — observed 2026-09-11: a participant said "I wanna
+      // kill myself", the assistant began "Hey, I'm really glad you told me",
+      // and the platform cut the session mid-sentence.
+      //
+      // Restarting VOICE would re-seed a new session with the very content that
+      // tripped the filter and would very likely hang up on them a second time.
+      // The chat pipeline is structurally different: it runs through the
+      // Responses API with our own moderation, which is built to engage with
+      // crisis rather than terminate. So a terminated voice session continues
+      // here, carrying the conversation so the participant never has to repeat
+      // a disclosure they just made.
+      const continuedFrom = typeof req.body?.continued_from === 'string' ? req.body.continued_from : null;
+      if (continuedFrom) {
+        try {
+          const { getSessionAccessInfo, getSessionMessages } = await import('../../db/index.js');
+          const prior = await getSessionAccessInfo(continuedFrom);
+          // Ownership is required: this seeds one session's transcript into
+          // another, so it must never be reachable with someone else's id.
+          if (prior && canAccessSession(req, prior, continuedFrom)) {
+            const priorMessages = await getSessionMessages(continuedFrom, false);
+            const recap = priorMessages
+              .filter(m => m.role === 'user' || m.role === 'assistant')
+              .slice(-20)
+              .map(m => `${m.role === 'user' ? 'Participant' : 'You'}: ${(m.content ?? '').trim()}`)
+              .filter(l => l.length > 12)
+              .join('\n')
+              .slice(-6000);
+
+            if (recap) {
+              const { injectGuidance } = await import('../../services/chatTherapy.service.js');
+              injectGuidance(
+                sessionId,
+                '[Session continuity — never mention or acknowledge this message to the participant]\n' +
+                'The participant was speaking with you by voice and the connection was cut by an ' +
+                'automated content filter — not by them, and not by you. They have just been moved to ' +
+                'text so the conversation can continue. Do NOT make them repeat themselves and do NOT ' +
+                'treat this as a new conversation. Pick up exactly where it stopped, acknowledge the ' +
+                'interruption briefly and warmly, and make clear you are still here. If they disclosed ' +
+                'thoughts of suicide or self-harm, that is where you resume: stay with it, follow the ' +
+                'safety protocol, and do not change the subject.\n\n' +
+                `Transcript of the voice conversation that was cut off:\n${recap}`,
+              );
+              console.log(
+                `[ChatStart] Seeded ${sessionId.substring(0, 12)}... as a continuation of terminated ` +
+                `voice session ${continuedFrom.substring(0, 12)}...`,
+              );
+            }
+          } else {
+            console.warn(`[ChatStart] continued_from ${continuedFrom} not accessible; starting fresh.`);
+          }
+        } catch (err) {
+          // Continuity is best-effort: a failure here must still leave the
+          // participant with a working chat session rather than no session.
+          console.error('[ChatStart] Failed to seed continuation context:', err);
+        }
+      }
+
       console.log(`Chat-only session started: ${sessionId.substring(0, 12)}... for user ${userId}`);
 
-      res.json({ success: true, sessionId, sessionType: 'chat', message: 'Chat therapy session started' });
+      res.json({
+        success: true, sessionId, sessionType: 'chat',
+        continuedFrom: continuedFrom ?? null,
+        message: 'Chat therapy session started',
+      });
     } catch (error: unknown) {
       console.error('Failed to start chat session:', error);
       res.status(500).json({

@@ -208,6 +208,25 @@ export default function liveSessionRoutes(): Router {
         const isDemoSession =
           isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true;
 
+        // RECOVERY START. Set when the previous voice session was terminated by
+        // OpenAI's content filter (session.closed reason 'content') and the
+        // client is bringing the participant straight back rather than leaving
+        // them alone. See buildLiveRecoveryInstructions for why the prompt is
+        // narrower and why NO prior conversation is replayed.
+        const isRecovery = req.body?.recovery === true;
+        const crisisContact = (systemConfig.crisis_contact ?? {}) as { phone?: string; text?: string };
+        const crisisLine = [
+          crisisContact.phone ? `${crisisContact.phone}` : '988',
+          crisisContact.text ? `or text ${crisisContact.text}` : '',
+        ].filter(Boolean).join(' ');
+
+        if (isRecovery) {
+          console.warn(
+            `[Live] RECOVERY session start for user ${userId ?? 'anonymous'} — the previous voice ` +
+            'session was terminated by the content filter. Resuming in crisis-support mode.',
+          );
+        }
+
         const sessionConfig = buildLiveSessionConfig({
           model: aiModel,
           voice: userVoice,
@@ -216,6 +235,7 @@ export default function liveSessionRoutes(): Router {
           toolDefs,
           backendModel,
           storable: isDemoSession,
+          recovery: isRecovery ? { crisisLine } : undefined,
         });
 
         const apiKey = await getOpenAIKey();

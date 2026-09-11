@@ -11,6 +11,7 @@ import StudyStatusScreen from "./StudyStatusScreen";
 import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
 import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
 import PostSessionScreen, { type PostSessionData, type SessionRecapData, type SharedWriteup } from "./PostSessionScreen";
+import ModerationRecoveryScreen, { type ModerationRecoveryStage } from "./ModerationRecoveryScreen";
 import Header from './Header';
 import Home from './Home';
 import Messages from './Messages';
@@ -93,6 +94,23 @@ const LIVE_CLOSE_TIMEOUT_MS = 15_000;
 const LIVE_START_TIMEOUT_MS = 20_000;
 /** How long a delegation may run before the "thinking" hint gives up on itself. */
 const LIVE_THINKING_TIMEOUT_MS = 20_000;
+/**
+ * Voice sessions we will start to recover from a content-filter termination
+ * (incident 2026-09-11) before falling back to text.
+ *
+ * Two, not more: the recovery session carries no history and runs a narrow
+ * crisis-support prompt, so a filter termination on it is far less likely — but
+ * if it happens twice anyway, the platform is refusing this conversation in
+ * voice and retrying a third time would just keep hanging up on the participant.
+ */
+const MAX_VOICE_RECOVERY_ATTEMPTS = 2;
+/**
+ * How long the recovery flow waits for `session.started` before declaring the
+ * attempt dead. Deliberately longer than LIVE_START_TIMEOUT_MS so the start
+ * path's own failsafe tears the half-open call down first — the recovery flow
+ * never has to run a competing teardown.
+ */
+const RECOVERY_START_WAIT_MS = LIVE_START_TIMEOUT_MS + 3_000;
 
 /**
  * Resolve once the peer connection has gathered all of its ICE candidates.
@@ -238,6 +256,51 @@ export default function App() {
   const [isBackendThinking, setIsBackendThinking] = useState(false);
   const thinkingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sessionType, setSessionType] = useState<string | null>(null); // 'realtime' or 'chat'
+
+  // ---- Content-filter takeover (incident 2026-09-11) ----------------------
+  // OpenAI's own safety filter can terminate a GPT-Live session outright
+  // (`session.closed` with reason 'content'), and it does so disproportionately
+  // at the exact moment a participant discloses suicidal intent — which is what
+  // happened on 2026-09-11: the assistant had started the right response and the
+  // platform cut the call mid-sentence, dropping the participant onto the
+  // generic post-session screen. We hung up on someone in crisis.
+  //
+  // The recovery is to bring the VOICE agent straight back and keep it talking.
+  // POST /api/live/session with `recovery: true` starts a session on a narrow
+  // crisis-support prompt (short warm replies, repeatedly encourage 988, ask who
+  // could be with them, 911 if in immediate danger, never go silent) running in
+  // client delegation mode so there are no backend pauses — and carrying NO
+  // prior history, because replaying the disclosure that tripped the filter is
+  // the most likely way to trip it again. Text is now the LAST resort, only
+  // after the voice attempts are spent. See handleModerationTermination below.
+  const [moderationRecovery, setModerationRecovery] = useState<ModerationRecoveryStage | null>(null);
+  // Both `session.closed` (data channel, fast) and `session:moderation-terminated`
+  // (socket backstop) can announce the same termination; only the first wins.
+  // Reset on every live start, recovery sessions included, so a second
+  // termination is not swallowed by the first one's guard.
+  const moderationHandledRef = useRef(false);
+  // True from the moment the takeover starts until the participant is talking
+  // again (voice or text). stopSession() reads it so the voice teardown still
+  // runs in full but does NOT raise the post-session screen underneath the
+  // recovery screen — and so a failed recovery start does not either.
+  const moderationTakeoverRef = useRef(false);
+  // The ORIGINAL filter-terminated voice session: the only one that holds the
+  // conversation, so it is what the text continuation is seeded from and what
+  // the manual retry reuses. Recovery sessions never overwrite it.
+  const moderationVoiceSessionIdRef = useRef<string | null>(null);
+  // Voice recovery attempts spent on the current crisis. Capped at
+  // MAX_VOICE_RECOVERY_ATTEMPTS; reset only by a genuinely new (non-recovery)
+  // voice session, so a filter that kills the recovery too cannot loop forever.
+  const moderationVoiceAttemptsRef = useRef(0);
+  // Set while stopSession()'s voice teardown is actually in flight. isTearingDown
+  // stays true after it finishes (it exists to reject late session.closed events),
+  // so it cannot answer "has the old call finished dying yet?" — which is exactly
+  // what the recovery start has to wait for to avoid two peer connections and two
+  // mic captures overlapping.
+  const voiceTeardownInFlightRef = useRef(false);
+  // Latest-ref (ai-therapist-113 family): the data-channel handler is attached
+  // once at session start, so it must not close over that render's handler.
+  const moderationHandlerRef = useRef<(terminatedSessionId: string | null) => Promise<void>>(async () => {});
 
   // Start-flow feedback (ai-therapist-117): true from the moment the
   // participant confirms the check-in until the data channel opens (realtime)
@@ -566,6 +629,7 @@ export default function App() {
   // button instead of failing silently (ai-therapist-117).
   async function startSession(checkin: CheckinData | null = null) {
     setPostSessionData(null); // clear the previous session's post-session screen
+    setModerationRecovery(null); // and any leftover content-filter recovery screen
     setIsConnecting(true);
     try {
       if (features.voice_enabled === false) {
@@ -588,39 +652,52 @@ export default function App() {
         toast.error('Could not start your session — there was a problem reaching the server. Please check your connection and try again.');
         reportClientEvent(name === 'SdpFetchError' ? 'sdp_fetch_failed' : 'webrtc_failed', { stage: 'start', name, message: errMessage });
       }
-      setIsConnecting(false);
-      // Best-effort teardown of whatever the failed start left behind
-      // (socket, peer connection, mic track) so the next attempt is clean.
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-      if (dataChannelRef.current) {
-        dataChannelRef.current.close();
-        dataChannelRef.current = null;
-      }
-      if (peerConnection.current) {
-        peerConnection.current.getSenders().forEach((sender) => {
-          if (sender.track) sender.track.stop();
-        });
-        peerConnection.current.close();
-        peerConnection.current = null;
-      }
-      setLocalStream(null);
-      setSessionId(null);
-      setSessionType(null);
-      setSessionEndTime(null);
-      setTimeRemaining(null);
-      // Release the server-side session this failed attempt created, so the
-      // participant can retry immediately instead of hitting "active session
-      // already exists" until the duration limit expires.
-      const orphan = pendingStartSessionRef.current;
-      if (orphan) {
-        pendingStartSessionRef.current = null;
-        const endUrl = orphan.kind === 'chat' ? '/api/chat/end' : `/api/sessions/${orphan.id}/end`;
-        void fetch(endUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
-          .catch((endErr) => console.error('Failed to release orphaned session:', endErr));
-      }
+      cleanupFailedStart();
+    }
+  }
+
+  /**
+   * Best-effort teardown of whatever a failed start left behind (socket, data
+   * channel, peer connection, mic track, server-side session) so the next
+   * attempt is clean.
+   *
+   * Shared with the content-filter voice recovery (incident 2026-09-11), which
+   * bypasses startSession entirely: a half-started recovery attempt must not
+   * leave a second peer connection or a second mic capture alive behind the
+   * crisis screen. It deliberately touches no moderation state — the takeover is
+   * still in progress when this runs on that path.
+   */
+  function cleanupFailedStart() {
+    setIsConnecting(false);
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
+    if (dataChannelRef.current) {
+      dataChannelRef.current.close();
+      dataChannelRef.current = null;
+    }
+    if (peerConnection.current) {
+      peerConnection.current.getSenders().forEach((sender) => {
+        if (sender.track) sender.track.stop();
+      });
+      peerConnection.current.close();
+      peerConnection.current = null;
+    }
+    setLocalStream(null);
+    setSessionId(null);
+    setSessionType(null);
+    setSessionEndTime(null);
+    setTimeRemaining(null);
+    // Release the server-side session this failed attempt created, so the
+    // participant can retry immediately instead of hitting "active session
+    // already exists" until the duration limit expires.
+    const orphan = pendingStartSessionRef.current;
+    if (orphan) {
+      pendingStartSessionRef.current = null;
+      const endUrl = orphan.kind === 'chat' ? '/api/chat/end' : `/api/sessions/${orphan.id}/end`;
+      void fetch(endUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .catch((endErr) => console.error('Failed to release orphaned session:', endErr));
     }
   }
 
@@ -684,28 +761,7 @@ export default function App() {
       pendingStartSessionRef.current = { id: newSessionId, kind: 'chat' };
 
       // Connect to Socket.io for remote session management
-      const socket = createParticipantSocket(newSessionId, 'chat');
-
-      socket.on('session:status', (data) => {
-        console.log('Received session:status event:', data);
-        if (data.status === 'ended' && data.remoteTermination) {
-          toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
-          // Via the latest-ref (ai-therapist-113 pattern): this handler closes
-          // over the render where sessionId/sessionType state were still null,
-          // so a direct stopSession() would take the wrong teardown path and
-          // skip the post-session snapshot.
-          void stopSessionRef.current();
-        }
-      });
-
-      // Deterministic crisis-resource surfacing: a high-severity flag must not
-      // depend on the model choosing to include resources in its reply — the
-      // server's crisis-emergency event opens the resource card directly.
-      socket.on('session:crisis-emergency', () => {
-        setToolUI({ kind: 'resource', resourceType: 'all' });
-      });
-
-      socketRef.current = socket;
+      socketRef.current = connectChatSocket(newSessionId);
 
       // Add preamble message to chat (similar to realtime voice therapy)
       setMessages([{
@@ -729,6 +785,257 @@ export default function App() {
     }
   }
 
+  // Socket wiring shared by every chat session — the ordinary one started above
+  // and the crisis continuation below — so a handler can never exist on one path
+  // and be missing from the other.
+  function connectChatSocket(chatSessionId: string): Socket {
+    const socket = createParticipantSocket(chatSessionId, 'chat');
+
+    socket.on('session:status', (data) => {
+      console.log('Received session:status event:', data);
+      if (data.status === 'ended' && data.remoteTermination) {
+        toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
+        // Via the latest-ref (ai-therapist-113 pattern): this handler closes
+        // over the render where sessionId/sessionType state were still null,
+        // so a direct stopSession() would take the wrong teardown path and
+        // skip the post-session snapshot.
+        void stopSessionRef.current();
+      }
+    });
+
+    // Deterministic crisis-resource surfacing: a high-severity flag must not
+    // depend on the model choosing to include resources in its reply — the
+    // server's crisis-emergency event opens the resource card directly.
+    socket.on('session:crisis-emergency', () => {
+      setToolUI({ kind: 'resource', resourceType: 'all' });
+    });
+
+    return socket;
+  }
+
+  /**
+   * Move a voice conversation that the content filter killed into text.
+   *
+   * POST /api/chat/start with `continued_from` seeds the new session with the
+   * last turns of the voice conversation plus an instruction to pick up exactly
+   * where it stopped — so the participant never has to repeat a disclosure they
+   * just made. Failure is NOT allowed to fall through to the generic end screen:
+   * the recovery screen stays up with crisis resources and a retry button.
+   *
+   * This is the LAST resort. The first move is always to bring the voice agent
+   * back (startRecoveryVoiceSession below); we only end up here once those
+   * attempts are spent.
+   */
+  async function continueInChat(voiceSessionId: string | null) {
+    setModerationRecovery('text');
+    try {
+      const response = await fetch('/api/chat/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: sessionSettings.language, continued_from: voiceSessionId }),
+      });
+      if (!response.ok) {
+        throw new Error(`Chat continuation start failed with status ${response.status}`);
+      }
+      const data = await response.json();
+      // `alreadyActive` means the server still has the voice session (or another
+      // one) open, so this is not a session we can safely talk in — treat it as
+      // a failure and let the retry run once the /end has landed.
+      if (data.alreadyActive || !data.sessionId) {
+        throw new Error(data.alreadyActive ? 'Chat continuation blocked by an active session' : 'Chat continuation returned no session id');
+      }
+
+      const newSessionId = data.sessionId as string;
+      setSessionId(newSessionId);
+      setSessionType('chat');
+      setSessionEndTime(null);
+      setTimeRemaining(null);
+      setIsSessionActive(true);
+      socketRef.current = connectChatSocket(newSessionId);
+
+      // The voice captions are deliberately left on screen: this is the same
+      // conversation continuing, not a new one. One system line explains the
+      // switch; everything else the participant hears comes from the model,
+      // which the server has already told to resume where it stopped.
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'system',
+          text: "We got cut off by an automated filter — not by anything you said. I'm still here. Let's keep going right here, in writing.",
+        },
+      ]);
+
+      moderationTakeoverRef.current = false;
+      setModerationRecovery(null);
+      console.log(`[Live] Voice session continued as chat session ${newSessionId}`);
+    } catch (error) {
+      console.error('[Live] Failed to continue a filter-terminated session in chat:', error);
+      reportClientEvent('chat_send_failed', {
+        where: 'moderation_continuation',
+        message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      }, voiceSessionId);
+      setModerationRecovery('failed');
+    }
+  }
+
+  /**
+   * Bring the voice agent straight back after a content-filter termination.
+   *
+   * `recovery: true` is the whole request: the server swaps in the narrow
+   * crisis-support prompt, runs the session in client delegation mode so the
+   * model answers with no backend pause, and deliberately carries NO prior
+   * conversation history. The client must not put that history back — no seeded
+   * input, no replaying captions into the new session — because re-stating the
+   * disclosure that tripped the filter is the most reliable way to trip it
+   * again. The participant's own voice and language carry over; nothing else.
+   *
+   * Resolves true only once `session.started` has actually landed, i.e. the
+   * agent is live and about to speak. Anything short of that is a failed attempt
+   * and the caller moves on to the next fallback.
+   */
+  async function startRecoveryVoiceSession(): Promise<boolean> {
+    moderationVoiceAttemptsRef.current += 1;
+    const attempt = moderationVoiceAttemptsRef.current;
+    setModerationRecovery('voice');
+    console.warn(`[Live] Starting voice recovery attempt ${attempt}/${MAX_VOICE_RECOVERY_ATTEMPTS}.`);
+
+    try {
+      await startRealtimeSession(null, true);
+      // startRealtimeSession returns as soon as the SDP answer is applied; the
+      // session is only genuinely usable at `session.started`.
+      const started = await waitForLiveStart(RECOVERY_START_WAIT_MS);
+      if (!started) {
+        throw new Error('Recovery voice session never reported session.started');
+      }
+
+      // Live again: drop the interstitial and hand the screen back to the normal
+      // voice UI. The agent re-greets on its own (see the speak-first nudge in
+      // the `session.started` branch), so there is no silence to explain.
+      moderationTakeoverRef.current = false;
+      setModerationRecovery(null);
+      console.log(`[Live] Voice recovery attempt ${attempt} is live as session ${String(liveSessionIdRef.current)}.`);
+      return true;
+    } catch (error) {
+      console.error(`[Live] Voice recovery attempt ${attempt} failed:`, error);
+      reportClientEvent('webrtc_failed', {
+        stage: 'moderation_voice_recovery',
+        attempt,
+        message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      }, moderationVoiceSessionIdRef.current);
+      // Whatever the failed start left behind (peer connection, mic track,
+      // socket, server-side session) is released here, so the next attempt — or
+      // the text fallback — starts from a clean slate.
+      cleanupFailedStart();
+      return false;
+    }
+  }
+
+  /** Poll for `session.started`; the flag is a ref, so there is nothing to await on. */
+  async function waitForLiveStart(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (liveStartedRef.current) return true;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    return liveStartedRef.current;
+  }
+
+  /** Wait out an in-flight voice teardown so the recovery start cannot race it. */
+  async function waitForVoiceTeardown(timeoutMs = 12_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (voiceTeardownInFlightRef.current && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    if (voiceTeardownInFlightRef.current) {
+      console.warn('[Live] Voice teardown did not finish in time; starting recovery anyway.');
+    }
+  }
+
+  /**
+   * OpenAI's content filter ended this voice session (incident 2026-09-11 — a
+   * participant said "I wanna kill myself", the assistant began the right
+   * response, and the platform cut the call mid-sentence, leaving them on the
+   * generic post-session screen).
+   *
+   * The teardown of the terminated session still runs in full underneath (peer
+   * connection, mic tracks, audio uploaders, POST /end, session_end log) — what
+   * changes is what the participant SEES and where the conversation goes:
+   *
+   *   1. the recovery screen, immediately, with 988 / the text line / 911 on it;
+   *   2. a NEW voice session on the crisis-support prompt, started automatically,
+   *      and they are back in the normal voice UI still talking;
+   *   3. if the filter kills that one too, one more voice attempt;
+   *   4. only then the text continuation;
+   *   5. and if even that fails, the crisis screen stays up with a manual retry.
+   *
+   * Never the generic post-session screen. That is the failure this fixes.
+   */
+  async function handleModerationTermination(terminatedSessionId: string | null) {
+    if (moderationHandledRef.current) return; // data channel and socket both announce it
+    // A late announcement about a session we have already moved on from (the
+    // socket backstop can arrive after the recovery session is up) must not tear
+    // down the conversation the participant is currently having.
+    if (terminatedSessionId && liveSessionIdRef.current && terminatedSessionId !== liveSessionIdRef.current) {
+      console.warn('[Live] Ignoring a moderation termination for a session that is no longer live.');
+      return;
+    }
+    moderationHandledRef.current = true;
+
+    const voiceSessionId = terminatedSessionId ?? liveSessionIdRef.current ?? sessionId;
+    // First one wins: only the original session holds the conversation, so it is
+    // what the text continuation would be seeded from. Recovery sessions have no
+    // history to continue.
+    moderationVoiceSessionIdRef.current ??= voiceSessionId;
+    console.error('[Live] Session terminated by the content filter; taking over with the recovery screen.');
+    reportClientEvent('data_channel_error', {
+      stage: 'moderation_terminated',
+      voiceRecoveryAttemptsSpent: moderationVoiceAttemptsRef.current,
+    }, voiceSessionId);
+
+    // Screen first: the participant must not see the post-session screen for a
+    // single frame, so this happens before any awaited teardown work.
+    moderationTakeoverRef.current = true;
+    setPostSessionData(null);
+    setModerationRecovery('voice');
+
+    if (isTearingDownRef.current) {
+      // A stopSession() is already in flight (it asked for this close, or the
+      // server ended the session first). Running teardown twice would fight it;
+      // wait for it to finish instead — both so its POST /end lands before we
+      // ask for a new session, and so its peer connection and mic capture are
+      // really gone before the recovery start opens new ones.
+      await waitForVoiceTeardown();
+    } else {
+      try {
+        await stopSessionRef.current();
+      } catch (error) {
+        console.error('[Live] Teardown failed during the content-filter takeover:', error);
+      }
+    }
+
+    // Voice first, and again if the filter takes the recovery session too.
+    if (features.voice_enabled !== false && moderationVoiceAttemptsRef.current < MAX_VOICE_RECOVERY_ATTEMPTS) {
+      if (await startRecoveryVoiceSession()) return;
+    }
+
+    // Voice is spent. A failed voice attempt may have tripped the start path's
+    // own failsafe teardown, which is still landing its POST /end — wait it out,
+    // or /api/chat/start would reject the continuation as "active session
+    // already exists" and strand the participant on the failure screen.
+    await waitForVoiceTeardown();
+
+    // Text is the last resort — and if this deployment has no text modality
+    // there is nowhere left to go, so stay on the screen with the resources
+    // rather than dumping them onto the end screen.
+    if (features.chat_enabled === false) {
+      setModerationRecovery('unavailable');
+      return;
+    }
+
+    await continueInChat(moderationVoiceSessionIdRef.current ?? voiceSessionId);
+  }
+
   // Voice therapy session over GPT-Live: WebRTC media tracks for audio, an
   // `oai-events` data channel for JSON events.
   //
@@ -745,15 +1052,40 @@ export default function App() {
   //    added a beacon for it (ai-therapist-195). The server now knows the
   //    session id before the browser does and attaches its own sideband, so
   //    there is nothing left to register.
-  async function startRealtimeSession(checkin: CheckinData | null = null) {
+  /**
+   * @param recovery Start this session on the server's crisis-support prompt to
+   *   recover from a content-filter termination (incident 2026-09-11). It is a
+   *   fresh session with no history by design, so the ordinary opening preamble
+   *   and the caption reset are skipped and the moderation takeover state is
+   *   left alone — the takeover is still in progress while this runs.
+   */
+  async function startRealtimeSession(checkin: CheckinData | null = null, recovery = false) {
     // Reset per-session Live state before anything can dispatch into it.
     liveSessionIdRef.current = null;
     liveStartedRef.current = false;
     liveFinalizedRef.current = false;
     liveClosedWaiterRef.current = null;
+    // The previous session's teardown left this true so that its own late
+    // `session.closed` could not start anything; this is a real new session, and
+    // leaving it set would make its data-channel and socket handlers treat every
+    // event as arriving during a teardown.
     isTearingDownRef.current = false;
     handledToolCallsRef.current = new Set();
+    // Always: caption rows are grouped by position on the SESSION timeline,
+    // which restarts at zero here. Carrying rows across would let the first
+    // words of the recovery session merge into the last row of the terminated
+    // one. The visible messages are a separate list and do survive (below).
     captionRowsRef.current = { user: [], assistant: [] };
+    // Per-session — recovery sessions included — or a second filter termination
+    // would be swallowed by the first one's dedupe guard and the participant
+    // would land on the post-session screen after all.
+    moderationHandledRef.current = false;
+    if (!recovery) {
+      // A genuinely new conversation: the crisis that spent these is over.
+      moderationTakeoverRef.current = false;
+      moderationVoiceSessionIdRef.current = null;
+      moderationVoiceAttemptsRef.current = 0;
+    }
 
     // Create a peer connection. Assigned to the ref immediately so a failure
     // later in the start path (mic permission, SDP exchange) can be torn down
@@ -853,9 +1185,29 @@ export default function App() {
           setIsConnecting(false);
           setIsSessionActive(true);
           setEvents([]);
-          setMessages([]);
+          // A content-filter recovery session (incident 2026-09-11) is a new
+          // session, but it is the SAME conversation to the participant: wiping
+          // the captions would make it look like the last few minutes never
+          // happened, at the worst possible moment. Only the in-progress
+          // fragment goes.
+          if (!recovery) setMessages([]);
           setAssistantStream("");
           startPeriodicFlush();
+
+          if (recovery) {
+            // The recovery session must speak first — "never go silent" is the
+            // whole point of it — and GPT-Live never speaks unprompted, so it
+            // still needs the documented instructions-append nudge. What it must
+            // NOT get is any of the previous conversation: the server left that
+            // history out deliberately, because restating the disclosure that
+            // tripped the filter is the most likely way to trip it again. This
+            // nudge carries timing only, no content.
+            sendInvisiblePrompt(
+              'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.',
+              'Recovery session: speak-first nudge',
+            );
+            break;
+          }
 
           // Opening preamble. Realtime got this as a hidden user turn plus a
           // forced response; GPT-Live has neither, so it is delivered the
@@ -924,7 +1276,17 @@ export default function App() {
             // open for it — let it finish the teardown.
             liveClosedWaiterRef.current = null;
             waiter();
-          } else if (!isTearingDownRef.current) {
+          }
+
+          // reason 'content' means OpenAI's own safety filter ended the call.
+          // On 2026-09-11 that happened to a participant the moment they
+          // disclosed suicidal intent, and the normal teardown below dropped
+          // them onto the generic post-session screen — we hung up on someone in
+          // crisis. This branch takes over instead: recovery screen with crisis
+          // resources, then the same conversation continued in text.
+          if (event.reason === 'content') {
+            void moderationHandlerRef.current(liveSessionIdRef.current);
+          } else if (!waiter && !isTearingDownRef.current) {
             // The session ended on its own (duration limit, safety filter,
             // upstream drop). Run the normal teardown through the latest-ref so
             // the POST /end, the session_end log and the post-session snapshot
@@ -1006,6 +1368,12 @@ export default function App() {
         voice: sessionSettings.voice,
         language: sessionSettings.language,
         checkin,
+        // Content-filter recovery (incident 2026-09-11). The server owns what
+        // this means: the crisis-support prompt, client delegation mode so there
+        // are no backend pauses, and no prior conversation history. The client
+        // sends the flag and the participant's existing voice/language — and
+        // nothing else, so there is no history for it to smuggle back in.
+        ...(recovery ? { recovery: true } : {}),
       }),
     });
 
@@ -1140,6 +1508,15 @@ export default function App() {
       setToolUI({ kind: 'resource', resourceType: 'all' });
     });
 
+    // Backstop for the content-filter takeover (incident 2026-09-11). The
+    // server's sideband sees the same termination we do; `session.closed` on the
+    // data channel is faster and more reliable, so this only matters when the
+    // transport died with it. handleModerationTermination dedupes the two.
+    socket.on('session:moderation-terminated', (data: { sessionId?: string } | undefined) => {
+      console.warn('[Live] Moderation termination announced over the socket.');
+      void moderationHandlerRef.current(data?.sessionId ?? null);
+    });
+
     // Listen for crisis intervention messages
     socket.on('messages:new', (data) => {
       console.log('[Crisis] Received messages:new event:', data);
@@ -1244,6 +1621,9 @@ export default function App() {
       extras: {
         id: newSessionId,
         backend: 'live',
+        // Marks the sessions started by the content-filter recovery flow so the
+        // research data can tell them apart from participant-initiated ones.
+        recovery,
         voice: data.voice ?? sessionSettings.voice,
         language: data.language ?? sessionSettings.language,
         session_limits: data.session_limits ?? null,
@@ -1297,10 +1677,16 @@ export default function App() {
       console.error('[Live] No session.started within the timeout; abandoning this connection.');
       reportClientEvent('webrtc_failed', {
         stage: 'no_session_started',
+        recovery,
         connectionState: pc.connectionState,
         iceState: pc.iceConnectionState,
       }, newSessionId);
-      toast.error('Could not start your session — there was a problem reaching the server. Please check your connection and try again.');
+      // No toast on the recovery path: the crisis screen is already up and owns
+      // the explanation, and it is about to move the participant on to the next
+      // fallback — a "check your connection" toast over it would only alarm.
+      if (!recovery) {
+        toast.error('Could not start your session — there was a problem reaching the server. Please check your connection and try again.');
+      }
       void stopSessionRef.current();
     }, LIVE_START_TIMEOUT_MS);
   }
@@ -1370,7 +1756,11 @@ export default function App() {
     // Snapshot what the participant chose to keep/share before clearing
     // per-session state, so the post-session screen (recap + safety plan +
     // "download my work") has something to show (ai-therapist-25b/76).
-    if (sessionId) {
+    // Suppressed during a content-filter takeover (incident 2026-09-11): the
+    // teardown below still runs in full, but the participant stays on the
+    // recovery screen and continues in text — the post-session screen appearing
+    // underneath it is the exact "we hung up on them" experience we are fixing.
+    if (sessionId && !moderationTakeoverRef.current) {
       setPostSessionData({
         sessionId,
         endedAt: new Date(),
@@ -1416,6 +1806,12 @@ export default function App() {
 
     // ---- Handle the GPT-Live voice session -------------------------------
     isTearingDownRef.current = true;
+    // Separate from isTearingDown, which stays true afterwards so a late
+    // session.closed cannot start anything. This one is cleared at the end, so
+    // the content-filter recovery (incident 2026-09-11) can wait for the old
+    // call to actually finish dying before opening a new peer connection and a
+    // new mic capture.
+    voiceTeardownInFlightRef.current = true;
 
     // Graceful close. Ask the session to finish, then keep the peer connection,
     // the data channel and the microphone tracks ALIVE until `session.closed`
@@ -1518,6 +1914,10 @@ export default function App() {
     // after teardown cannot start a second one.
     liveStartedRef.current = false;
     liveClosedWaiterRef.current = null;
+    // The old call is fully dead: transport closed, mic tracks stopped,
+    // uploaders flushed, POST /end sent. A content-filter recovery waiting on
+    // this can now safely open its own.
+    voiceTeardownInFlightRef.current = false;
   }
 
   // Handle page unload - warn user and end session
@@ -1784,6 +2184,10 @@ export default function App() {
   // channel (the server sideband executes the canonical tool; these drive UI).
   // Keep the ref pointing at the freshest closure on every render.
   stopSessionRef.current = stopSession;
+  // Same latest-ref discipline for the content-filter takeover: it is invoked
+  // from the data-channel handler and the participant socket, both of which were
+  // registered in the session-start render.
+  moderationHandlerRef.current = handleModerationTermination;
 
   const fns = {
     stopSession: () => stopSessionRef.current(),
@@ -2052,6 +2456,23 @@ export default function App() {
         }}
         sessionId={sessionId}
       />
+
+      {/* Content-filter recovery (incident 2026-09-11). z-[70] — above every
+          other overlay, including quiet hours: a participant whose session was
+          cut at a crisis disclosure must see this and its resources, not the
+          overnight screen and not the post-session screen. Normally up for only
+          a few seconds while the voice agent comes back.
+
+          The manual retry is text: the 'failed' stage is only reachable once the
+          voice attempts are spent, and offering another would just hang up on
+          them again. */}
+      {moderationRecovery && (
+        <ModerationRecoveryScreen
+          stage={moderationRecovery}
+          crisisContact={crisisContact}
+          onRetry={() => { void continueInChat(moderationVoiceSessionIdRef.current); }}
+        />
+      )}
 
       {/* Quiet hours (ai-therapist-152): overnight blocking screen with crisis
           resources. z-[60] so it sits above the consent overlay (z-50).

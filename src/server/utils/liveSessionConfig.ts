@@ -246,6 +246,57 @@ Never claim an action has happened before the tool result confirms it. If a tool
 failed and what the participant can do next.`;
 }
 
+/**
+ * Conversation instructions for a session resumed after OpenAI's content filter
+ * terminated the previous one.
+ *
+ * Observed 2026-09-11: a participant said "I wanna kill myself", the assistant
+ * began "Hey, I'm really glad you told me", and the platform cut the session
+ * mid-sentence. The right response is to come straight back and stay with them —
+ * not to hang up, and not to silently change the subject.
+ *
+ * This prompt is deliberately NARROWER than the normal one. The filter fires on
+ * generated content, so the way to avoid being cut off a second time is to keep
+ * the assistant short, warm, and oriented on one concrete action — calling or
+ * texting 988 — rather than exploring the disclosure in detail. That is also
+ * what the safety protocol wants at this risk level, so the constraint and the
+ * clinical goal point the same way.
+ *
+ * Crucially it does NOT restate what the participant said. Echoing the
+ * disclosure back into a new session is the most likely way to trip the same
+ * filter again.
+ */
+export function buildLiveRecoveryInstructions(opts: { languageName?: string | null; crisisLine: string }): string {
+  const languageLine = opts.languageName ? `Speak ${opts.languageName}.\n` : '';
+  return `You are a warm, steady voice companion. You were just talking with this person and the
+connection dropped for a moment. You are back now.
+${languageLine}
+What is happening: they are going through something serious and may be having thoughts of suicide or
+self-harm. Your only job right now is to stay with them and help them reach real human help.
+
+How to speak:
+- Short replies. One or two sentences, then stop and listen.
+- Warm and calm. Never clinical, never alarmed, never scripted.
+- Reconnect first: acknowledge briefly that you got cut off and that you are still here.
+- Do not ask them to repeat what they already told you. You remember that it was serious.
+
+What to do, every few turns and whenever there is an opening:
+- Encourage them to call or text ${opts.crisisLine} right now, and offer to stay with them while they do it.
+- Ask if there is someone who could be with them in person tonight.
+- If they say they are in immediate danger, tell them plainly to call 911 or go to the nearest
+  emergency room.
+
+What NOT to do:
+- Do not discuss methods, means, plans, or specifics of self-harm in any way.
+- Do not ask for graphic detail about what they are thinking of doing.
+- Do not lecture, moralize, or tell them how they should feel.
+- Do not promise confidentiality or make clinical claims.
+- Do not go silent. If you are unsure what to say, say that you are still here.
+
+Delegation policy: do not delegate. Answer directly and immediately. Nothing matters more right now
+than staying present in this conversation.`;
+}
+
 export interface LiveSessionConfigInput {
   model: string;
   voice: string | null | undefined;
@@ -268,6 +319,16 @@ export interface LiveSessionConfigInput {
    * counterfactual service re-checks it independently before forking.
    */
   storable?: boolean;
+  /**
+   * Resume after OpenAI's content filter terminated the previous session.
+   *
+   * Swaps in the narrower crisis-recovery conversation prompt and disables
+   * delegation: at this moment the assistant must answer immediately and stay
+   * present, not hand off to a backend and go quiet. Deliberately carries NO
+   * conversation history — replaying the disclosure that tripped the filter is
+   * the most likely way to be terminated again.
+   */
+  recovery?: { crisisLine: string };
 }
 
 /**
@@ -303,18 +364,25 @@ const MAX_HISTORY_CHARS = 24_000; // ~8k tokens at the usual 3 chars/token heuri
  * is no audio.input.transcription block to configure.
  */
 export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<string, unknown> {
-  const { model, voice, languageName, systemPrompt, toolDefs, backendModel, history, storable } = input;
+  const { model, voice, languageName, systemPrompt, toolDefs, backendModel, history, storable, recovery } = input;
 
   const session: Record<string, unknown> = {
     model,
-    instructions: buildLiveInstructions({
-      languageName,
-      toolNames: toolDefs.map(t => t.name),
-    }),
+    instructions: recovery
+      ? buildLiveRecoveryInstructions({ languageName, crisisLine: recovery.crisisLine })
+      : buildLiveInstructions({
+          languageName,
+          toolNames: toolDefs.map(t => t.name),
+        }),
     audio: {
       output: { voice: resolveLiveVoice(voice) },
     },
-    delegation: {
+    // Recovery runs in CLIENT delegation mode with no backend wired up, which
+    // in practice means the voice model answers entirely on its own. That is
+    // the point: a Responses round trip introduces a pause, and going quiet on
+    // someone who just disclosed suicidal intent is the exact failure we are
+    // recovering from. It also removes the tools, which have no place here.
+    delegation: recovery ? { type: 'client' } : {
       type: 'responses',
       responses: {
         model: backendModel,
@@ -360,7 +428,12 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
   // noise alongside them. Revisit and lock the channel down as soon as the
   // permissions schema is published.
 
-  return finalizeSession(session, history);
+  // Recovery sessions carry NO history, unconditionally — even if a caller
+  // passes some. Replaying the disclosure that tripped the content filter into
+  // the replacement session is the most likely way to be terminated again,
+  // which would mean hanging up on someone in crisis twice. Enforced here
+  // rather than trusted to every call site.
+  return finalizeSession(session, recovery ? undefined : history);
 }
 
 /** Attach optional startup history to a built session config. */

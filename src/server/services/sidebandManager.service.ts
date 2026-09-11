@@ -398,6 +398,83 @@ export class SidebandManager {
     }
   }
 
+  /**
+   * OpenAI's safety filter terminated the voice session (session.closed with
+   * reason 'content').
+   *
+   * This is not a normal end and must not be recorded or presented as one. It
+   * happens disproportionately at crisis disclosure — which is precisely the
+   * moment a participant must not experience the assistant disappearing.
+   *
+   * Three things have to happen, in this order of importance:
+   *   1. Tell the participant's client so it can show crisis resources rather
+   *      than the generic post-session screen. That is the actual harm.
+   *   2. Tell the study team. The crisis SMS may already have fired from the
+   *      risk pipeline, but "the platform cut the conversation" is a different
+   *      fact from "risk was detected" and a human needs both.
+   *   3. Record it, so how often the vendor terminates a therapeutic
+   *      conversation is a measurable number rather than an anecdote.
+   */
+  private async handleModerationTermination(sessionId: string): Promise<void> {
+    const short = sessionId.substring(0, 12);
+    console.error(
+      `[Live] MODERATION TERMINATION for ${short}... — OpenAI's safety filter ended this session. ` +
+      'Surfacing crisis resources to the participant and alerting the study team.',
+    );
+
+    // 1. Participant-facing. Emitted before anything that can throw.
+    global.io?.to(`session:${sessionId}`).emit('session:moderation-terminated', {
+      sessionId,
+      reason: 'content_filter',
+      message:
+        'The connection ended unexpectedly. That was not your fault, and nothing you said was wrong.',
+    });
+
+    // Was this session already known to be in crisis? Changes what we tell the
+    // on-call: "cut during a flagged crisis" is more urgent than "cut for some
+    // other reason", and the first is the case actually observed.
+    let flagged = false;
+    try {
+      const result = await pool.query<{ crisis_flagged: boolean | null; crisis_severity: string | null }>(
+        'SELECT crisis_flagged, crisis_severity FROM therapy_sessions WHERE session_id = $1',
+        [sessionId],
+      );
+      flagged = result.rows[0]?.crisis_flagged === true;
+    } catch (err) {
+      console.error(`[Live] Could not read crisis state for ${short}...:`, err);
+    }
+
+    // 2. Alert the study team.
+    try {
+      const { sendCrisisAlert } = await import('./crisisAlert.service.js');
+      await sendCrisisAlert(
+        `AI-Therapist: OpenAI's safety filter TERMINATED voice session ${short}... mid-conversation` +
+        `${flagged ? ' DURING AN ACTIVE CRISIS FLAG' : ''}. The participant lost the assistant without warning. ` +
+        'Review the transcript and consider reaching out.',
+      );
+    } catch (err) {
+      console.error(`[Live] Failed to alert on moderation termination for ${short}...:`, err);
+    }
+
+    // 3. Record it against the session.
+    try {
+      const { logInterventionAction } = await import('./crisisDetection.service.js');
+      await logInterventionAction(sessionId, 'external_api_called', {
+        event: 'moderation_terminated_session',
+        vendor: 'openai',
+        crisisFlaggedAtTermination: flagged,
+      });
+    } catch (err) {
+      console.error(`[Live] Failed to record moderation termination for ${short}...:`, err);
+    }
+
+    if (global.io) {
+      void broadcastAdminEventForSession(global.io, 'session:moderation-terminated', {
+        sessionId, crisisFlagged: flagged, timestamp: new Date(),
+      }, sessionId);
+    }
+  }
+
   private async handleOpen(sessionId: string, liveSessionId: string): Promise<void> {
     try {
       await pool.query(
@@ -573,6 +650,21 @@ export class SidebandManager {
           void broadcastAdminEventForSession(global.io, 'live:closed', {
             sessionId, reason: event.reason ?? null, usage: event.usage ?? null, timestamp: new Date(),
           }, sessionId);
+        }
+        // reason 'content' means OPENAI'S OWN safety filter ended the session,
+        // not the participant and not us. In a mental-health context that fires
+        // at the worst possible moment — observed 2026-09-11, a participant said
+        // "I wanna kill myself", the assistant began "Hey, I'm really glad you
+        // told me", and the platform terminated the session mid-sentence. Our
+        // crisis pipeline had already scored it 100/high and paged on-call
+        // correctly; the harm was purely that the conversation vanished.
+        //
+        // We cannot disable OpenAI's filter, so this must be handled rather than
+        // prevented. Treated as its own event class so the participant gets
+        // crisis resources instead of a generic end screen (see the client), the
+        // study team is told, and the frequency is measurable.
+        if (event.reason === 'content') {
+          await this.handleModerationTermination(sessionId);
         }
         break;
       }
