@@ -36,9 +36,40 @@ vi.mock('../db/index.js', () => ({
 
 const { executeGraduatedResponse, maybeSteerSession } = await import('./crisisIntervention.service.js');
 
-const flush = async () => {
-  // The paging chain is fire-and-forget (import().then...); drain it.
-  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+/**
+ * Wait until a fire-and-forget spy has been called.
+ *
+ * The paging chain is fire-and-forget through dynamic `import()`, whose
+ * resolution timing is nondeterministic. Draining a FIXED number of ticks
+ * (the previous approach) passed locally and on a warm runner but flaked on a
+ * cold CI runner, where module resolution took longer than the budget — a
+ * flaky test on the crisis-paging path is worse than no test, because it
+ * trains you to re-run instead of read it.
+ *
+ * Polling until the call actually lands is deterministic in the success case
+ * and still fails loudly, with a useful message, if paging genuinely regresses.
+ */
+const waitForCall = async (spy: { mock: { calls: unknown[] } }, times = 1, label = 'spy') => {
+  const deadline = Date.now() + 2000;
+  while (spy.mock.calls.length < times) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Timed out after 2000ms waiting for ${label} to be called ${times} time(s); ` +
+        `it was called ${spy.mock.calls.length} time(s).`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
+};
+
+/**
+ * Let the fire-and-forget chain settle before asserting something did NOT
+ * happen. Polling cannot prove a negative, so this is necessarily a fixed
+ * budget — kept deliberately generous, since a too-short settle here produces a
+ * FALSE PASS (the page hadn't been attempted yet) rather than a visible failure.
+ */
+const settle = async () => {
+  for (let i = 0; i < 25; i++) await new Promise((r) => setTimeout(r, 2));
 };
 
 beforeEach(() => {
@@ -53,7 +84,7 @@ beforeEach(() => {
 describe('executeGraduatedResponse — high-risk paging', () => {
   it('pages the on-call for a real session and logs crisis_sms_alert', async () => {
     await executeGraduatedResponse('sess-1', 'high', 90);
-    await flush();
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
     expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
     expect(logInterventionActionMock).toHaveBeenCalledWith('sess-1', 'crisis_sms_alert', { riskScore: 90 });
   });
@@ -61,7 +92,7 @@ describe('executeGraduatedResponse — high-risk paging', () => {
   it('suppresses the page only on an affirmative sandbox=true (suppression logged out-of-band)', async () => {
     isSandboxAccountSessionMock.mockResolvedValue(true);
     await executeGraduatedResponse('sbx-1', 'high', 90);
-    await flush();
+    await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
     expect(logInterventionActionMock).toHaveBeenCalledWith('sbx-1', 'external_api_called',
       expect.objectContaining({ suppressed: 'crisis_sms_alert', reason: 'sandbox' }));
@@ -70,7 +101,7 @@ describe('executeGraduatedResponse — high-risk paging', () => {
   it('FAILS TOWARD PAGING: a throwing sandbox lookup still sends the real page', async () => {
     isSandboxAccountSessionMock.mockRejectedValue(new Error('db blip'));
     await executeGraduatedResponse('sess-1', 'high', 90);
-    await flush();
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
     expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
   });
 
@@ -78,13 +109,13 @@ describe('executeGraduatedResponse — high-risk paging', () => {
     isSandboxAccountSessionMock.mockResolvedValue(true);
     logInterventionActionMock.mockRejectedValue(new Error('log down'));
     await expect(executeGraduatedResponse('sbx-1', 'high', 90)).resolves.toBeUndefined();
-    await flush();
+    await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
   });
 
   it('non-high severity never pages', async () => {
     await executeGraduatedResponse('sess-1', 'medium', 55);
-    await flush();
+    await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
   });
 });
