@@ -85,5 +85,21 @@ export default function opsRoutes(): Router {
     }
   });
 
+  // GET /admin/api/analytics/cost-dashboard?days=30 - real spend plus product
+  // attribution, unit economics, and budget-cap risk. Researcher-only (org
+  // billing data). Returns {configured:false} with no admin key, like the
+  // simpler costs endpoint.
+  router.get('/admin/api/analytics/cost-dashboard', requireRole('researcher'), async (req, res) => {
+    const rawDays = req.query.days ? parseInt(String(req.query.days), 10) : 30;
+    const days = Number.isFinite(rawDays) ? Math.min(180, Math.max(1, rawDays)) : 30;
+    try {
+      const { getCostDashboard } = await import('../../services/costDashboard.service.js');
+      res.json(await getCostDashboard(days));
+    } catch (err) {
+      console.error('Failed to build cost dashboard:', err);
+      res.status(500).json({ error: 'Failed to build cost dashboard' });
+    }
+  });
+
   return router;
 }

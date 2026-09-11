@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw, ExternalLink } from "react-feather";
+import { DollarSign, BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw, ExternalLink } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
 import useAuth from "../hooks/useAuth";
@@ -23,6 +23,7 @@ const ExportPanel = lazy(() => import("./ExportPanel"));
 const UserManagement = lazy(() => import("./UserManagement"));
 const LiveMonitoring = lazy(() => import("./LiveMonitoring"));
 const SystemConfig = lazy(() => import("./SystemConfig"));
+const CostDashboard = lazy(() => import("./CostDashboard"));
 const SystemPrompts = lazy(() => import("./SystemPrompts"));
 const RateLimitedUsers = lazy(() => import("./RateLimitedUsers"));
 const UserSessions = lazy(() => import("./UserSessions"));
@@ -287,6 +288,7 @@ export default function AdminApp() {
     {
       label: 'System',
       items: [
+        { id: 'costs', label: 'OpenAI Spend', icon: DollarSign, researcherOnly: true },
         { id: 'config', label: 'System Config', icon: Settings, researcherOnly: true },
         { id: 'retention', label: 'Data Retention', icon: Trash2, researcherOnly: true },
       ],
@@ -480,7 +482,8 @@ export default function AdminApp() {
               {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
               {currentView === 'retention' && <DataRetention />}
-              {currentView === 'config' && <SystemConfig />}
+              {currentView === 'costs' && <CostDashboard />}
+            {currentView === 'config' && <SystemConfig />}
               {currentView === 'export' && <ExportPanel />}
             </Suspense>
           </ErrorBoundary>

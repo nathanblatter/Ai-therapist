@@ -44,6 +44,7 @@ export * from './clientEvents.queries.js';
 export * from './engagementEvents.queries.js';
 export * from './acousticFeatures.queries.js';
 export * from './adminUsage.queries.js';
+export * from './costAttribution.queries.js';
 export * from './funnel.queries.js';
 export * from './latency.queries.js';
 export * from './practiceAssignments.queries.js';
