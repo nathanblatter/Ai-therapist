@@ -257,6 +257,17 @@ export interface LiveSessionConfigInput {
   backendModel: string;
   /** Prior conversation to seed, oldest first. Trimmed to the API's limits. */
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /**
+   * Let OpenAI store this session's recording, which is what makes it forkable.
+   *
+   * MUST stay false for real participant sessions: storage means vendor-side
+   * retention of session audio, which participant consent does not cover. It is
+   * enabled only for non-study sessions (demo, sandbox, simulated) so the
+   * counterfactual fork harness has something to branch from. The caller is
+   * responsible for passing the session's is_demo determination; the
+   * counterfactual service re-checks it independently before forking.
+   */
+  storable?: boolean;
 }
 
 /**
@@ -292,7 +303,7 @@ const MAX_HISTORY_CHARS = 24_000; // ~8k tokens at the usual 3 chars/token heuri
  * is no audio.input.transcription block to configure.
  */
 export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<string, unknown> {
-  const { model, voice, languageName, systemPrompt, toolDefs, backendModel, history } = input;
+  const { model, voice, languageName, systemPrompt, toolDefs, backendModel, history, storable } = input;
 
   const session: Record<string, unknown> = {
     model,
@@ -318,10 +329,12 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
         parallel_tool_calls: false,
       },
     },
-    // Never store participant audio on OpenAI's side. Storage is what enables
-    // forking and recording download, neither of which we use, and the Phase 1
-    // consent does not cover OpenAI-side retention of session audio.
-    store: false,
+    // Storage means OpenAI retains this session's audio for 30 days, and is
+    // what makes a session forkable. Participant consent does not cover
+    // vendor-side retention, so this is false for every real session and true
+    // ONLY for non-study ones (demo, sandbox, simulated), which is what gives
+    // the counterfactual fork harness something to branch from.
+    store: storable === true,
   };
 
   // OPEN ITEM — frontend data-channel permissions.

@@ -198,6 +198,15 @@ export default function liveSessionRoutes(): Router {
           (typeof systemConfig.live_backend_model === 'string' && systemConfig.live_backend_model) ||
           LIVE_DEFAULT_BACKEND_MODEL;
 
+        // Non-study determination is needed BEFORE the OpenAI call, because
+        // `store` is a creation-time field. Storage is what makes a session
+        // forkable for the counterfactual eval harness, and it means OpenAI
+        // retains the audio for 30 days — so it is enabled for demo, sandbox
+        // and simulated sessions only, never for a real participant.
+        const { isNonStudyUser } = await import('../../utils/harness.js');
+        const isDemoSession =
+          isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true;
+
         const sessionConfig = buildLiveSessionConfig({
           model: aiModel,
           voice: userVoice,
@@ -205,6 +214,7 @@ export default function liveSessionRoutes(): Router {
           systemPrompt,
           toolDefs,
           backendModel,
+          storable: isDemoSession,
         });
 
         const apiKey = await getOpenAIKey();
@@ -255,12 +265,7 @@ export default function liveSessionRoutes(): Router {
         recordSessionOwnership(req, sessionId);
 
         try {
-          const { isNonStudyUser } = await import('../../utils/harness.js');
-          await createActiveRealtimeSession(
-            sessionId,
-            userId,
-            isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true,
-          );
+          await createActiveRealtimeSession(sessionId, userId, isDemoSession);
 
           if (checkin) {
             setSessionCheckin(sessionId, checkin).catch(err =>

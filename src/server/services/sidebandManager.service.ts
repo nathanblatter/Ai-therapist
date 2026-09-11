@@ -560,7 +560,11 @@ export class SidebandManager {
         const inserted = await insertMessagesBatch([{
           session_id: sessionId,
           role: 'user',
-          message_type: 'message',
+          // 'voice' / 'response', not 'message': analytics.queries.ts and
+          // adminSessions.queries.ts count voice turns with
+          // `message_type = 'voice'`, so anything else reports zero voice
+          // messages for every GPT-Live session.
+          message_type: 'voice',
           content: text,
           content_redacted: null,
           metadata: { channel: 'live', start_ms: startMs, end_ms: endMs },
@@ -595,7 +599,8 @@ export class SidebandManager {
         await insertMessagesBatch([{
           session_id: sessionId,
           role: 'assistant',
-          message_type: 'message',
+          // Matches the assistant-side voice convention in existing data.
+          message_type: 'response',
           content: text,
           content_redacted: null,
           metadata: { channel: 'live', start_ms: startMs, end_ms: endMs },
