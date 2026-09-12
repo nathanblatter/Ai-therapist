@@ -283,6 +283,14 @@ export class SidebandManager {
         const detail =
           `Live sideband upgrade rejected: HTTP ${res.statusCode} for ${liveSessionId} — ${body || '(empty body)'}`;
         console.error(`[Live] ${detail}`);
+        // Abort the handshake explicitly. The ws library only calls
+        // abortHandshake when 'unexpected-response' has NO listener
+        // (ws/lib/websocket.js), so registering this handler suppresses it —
+        // leaving the socket in CONNECTING, emitting neither 'close' nor
+        // 'error'. connectAndWait waits on exactly those, so an attach
+        // rejection (401 on a rotated key, 404, 429) could not fail fast and
+        // always burned the full timeout before the participant was told.
+        try { ws.terminate(); } catch { /* already gone */ }
         this.sessions.delete(sessionId);
         void this.logConnectionError(sessionId, new Error(detail));
         if (global.io) {
@@ -1418,7 +1426,16 @@ export class SidebandManager {
       }, sessionId);
     }
 
-    if (this.endedSessions.has(sessionId) || code === 1000 || !state) return;
+    // state.finalized means session.closed already arrived: the OpenAI-side live
+    // session is definitively over and its id will 404 on re-attach. Without
+    // this check, any non-1000 socket close after session.closed (1006 on a
+    // dropped TCP connection, 1001 going-away, and notably the content-filter
+    // termination path) scheduled a re-attach that was rejected, ran the
+    // unexpected-response handler, and called failClosedUnmonitored — which
+    // pages the on-call and ends the session. On a NORMAL end that is a false
+    // crisis page; after a content-filter termination it actively races the
+    // crisis recovery the client is trying to start.
+    if (this.endedSessions.has(sessionId) || code === 1000 || !state || state.finalized) return;
 
     const status = await pool.query<{ status: string }>(
       'SELECT status FROM therapy_sessions WHERE session_id = $1', [sessionId],
