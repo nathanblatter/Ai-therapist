@@ -402,7 +402,11 @@ export async function findEndedSessionsWithRedactionGaps(limit = 200): Promise<s
       WHERE ts.status = 'ended'
         AND m.content IS NOT NULL
         AND m.content_redacted IS NULL
-        AND m.role IN ('user', 'assistant')
+        -- Must match redactSession's predicate. tool_event_% rows are role='system'
+  -- but carry verbatim participant free text, and migration 102 re-queued them
+  -- by nulling content_redacted. Without this clause the sweep never selects
+  -- them, so for already-ended sessions they could never be redacted at all.
+  AND (m.role IN ('user', 'assistant') OR m.message_type LIKE 'tool_event_%')
         AND u.is_sandbox IS NOT TRUE
       LIMIT $1`,
     [limit]

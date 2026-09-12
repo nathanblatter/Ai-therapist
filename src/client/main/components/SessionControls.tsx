@@ -51,6 +51,17 @@ interface SessionActiveProps {
   stopSession: () => void;
   sendTextMessage: (message: string) => void;
   localStream: MediaStream | null;
+  /**
+   * Start this session with the microphone already live.
+   *
+   * Only set when resuming after OpenAI's content filter terminated a session
+   * the participant was already speaking in. The normal default is mic OFF,
+   * and the opening preamble tells them to press the mic button — but the
+   * recovery session deliberately skips that preamble, so without this it came
+   * back muted with nothing telling them why the assistant had stopped
+   * answering. A session built to never go silent would go silent.
+   */
+  startMicOn?: boolean;
   chatEnabled: boolean;
   sessionType: string | null;
   /** True once the session hit its time limit and is wrapping up: the mic is
@@ -58,7 +69,7 @@ interface SessionActiveProps {
   micLocked: boolean;
 }
 
-function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled, sessionType, micLocked }: SessionActiveProps) {
+function SessionActive({ stopSession, sendTextMessage, localStream, startMicOn, chatEnabled, sessionType, micLocked }: SessionActiveProps) {
   const [message, setMessage] = useState("");
   const [isMicOn, setIsMicOn] = useState(true);
   const [micPermission, setMicPermission] = useState('unknown'); // 'granted', 'denied', 'prompt', 'unknown'
@@ -90,11 +101,16 @@ function SessionActive({ stopSession, sendTextMessage, localStream, chatEnabled,
     if (localStream) {
       const track = localStream.getAudioTracks()[0];
       if (track) {
-        track.enabled = false; // turn mic OFF by default
-        setIsMicOn(false);
+        // Mic OFF by default; ON when resuming a session the participant was
+        // already speaking in (see startMicOn). Muting a crisis recovery would
+        // mean the assistant speaks, the participant answers out loud, and
+        // nothing is heard — no reply, and no turn reaching the crisis
+        // pipeline, since the sideband is the only writer for voice.
+        track.enabled = startMicOn === true;
+        setIsMicOn(startMicOn === true);
       }
     }
-  }, [localStream]);
+  }, [localStream, startMicOn]);
 
   function handleSendTextMessage() {
     if (message.trim()) {
@@ -237,6 +253,8 @@ interface SessionControlsProps {
   sendTextMessage: (message: string) => void;
   isSessionActive: boolean;
   localStream: MediaStream | null;
+  /** See SessionActiveProps.startMicOn — resumed crisis sessions come back live. */
+  startMicOn?: boolean;
   onOpenSettings: () => void;
   chatEnabled: boolean;
   sessionType: string | null;
@@ -252,6 +270,7 @@ export default function SessionControls({
   sendTextMessage,
   isSessionActive,
   localStream,
+  startMicOn,
   onOpenSettings,
   chatEnabled,
   sessionType,
@@ -267,6 +286,7 @@ export default function SessionControls({
           stopSession={stopSession}
           sendTextMessage={sendTextMessage}
           localStream={localStream}
+          startMicOn={startMicOn}
           chatEnabled={chatEnabled}
           sessionType={sessionType}
           micLocked={micLocked}

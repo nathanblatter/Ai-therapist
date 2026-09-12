@@ -8,9 +8,32 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getQuietHoursStatus } from '../utils/quietHours.js';
 
+/**
+ * Whether this request resumes a session that OpenAI's content filter
+ * terminated, rather than starting a new one.
+ *
+ * `recovery` is the voice path; `continued_from` is the text fallback. Both mean
+ * the participant was already mid-conversation — and in the observed 2026-09-11
+ * incident had just disclosed suicidal intent when the platform cut them off.
+ * Gates that exist to stop someone STARTING a session must not strand them
+ * there.
+ */
+export function isCrisisContinuation(req: Request): boolean {
+  return req.body?.recovery === true || typeof req.body?.continued_from === 'string';
+}
+
 export function requireOutsideQuietHours(req: Request, res: Response, next: NextFunction): void {
   const role = req.session?.userRole ?? 'participant';
   if (role !== 'participant' || req.session?.isSandbox) {
+    next();
+    return;
+  }
+  // Quiet hours block NEW sessions. Resuming after a content-filter termination
+  // is not a new session — and 10pm-6am is precisely when a participant in
+  // crisis is most likely to be alone. Blocking the assistant's return here
+  // would make the overnight window the one where we hang up and stay hung up.
+  if (isCrisisContinuation(req)) {
+    console.warn('[QuietHours] Bypassed for a crisis continuation — resuming a terminated session.');
     next();
     return;
   }

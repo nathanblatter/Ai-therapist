@@ -131,8 +131,25 @@ export default function liveSessionRoutes(): Router {
         const userId = req.session?.userId || null;
         const userRole = req.session?.userRole || null;
 
+        // RECOVERY START — read BEFORE the limit gate, deliberately.
+        //
+        // When OpenAI's content filter terminates a session mid-crisis the
+        // client brings the assistant straight back with recovery: true. That
+        // continuation must not be rate limited, and the bug this guards
+        // against was guaranteed rather than unlikely: handleModerationTermination
+        // tears the old session down first, and POST /end stamps ended_at = now,
+        // so the cooldown clock has JUST been reset by the very session the
+        // filter killed. With the shipped default (cooldown_minutes: 30) every
+        // logged-in participant's recovery 429'd — both voice attempts and the
+        // text fallback — leaving someone who had just disclosed suicidal
+        // intent looking at "I'm coming right back" forever.
+        //
+        // A filter-terminated session is a continuation of one the participant
+        // already spent their quota on, not a new session.
+        const isRecovery = req.body?.recovery === true;
+
         const limitCheck = await checkSessionLimits(userId, userRole);
-        if (!limitCheck.allowed) {
+        if (!limitCheck.allowed && !isRecovery) {
           console.log(`Session limit exceeded for user ${userId}:`, limitCheck.reason);
           return res.status(429).json({
             error: 'rate_limit_exceeded',
@@ -149,7 +166,10 @@ export default function liveSessionRoutes(): Router {
 
         // Idempotency: one active session per user. Checked before the OpenAI
         // call so a double-click can't bill two session initializations.
-        if (userId) {
+        // Recovery skips this too: the terminated session may not have finished
+        // its teardown yet, and returning "you already have a session" would
+        // block the assistant's return with a message about session hygiene.
+        if (userId && !isRecovery) {
           const existing = await getActiveSessionForUser(userId);
           if (existing) {
             return res.status(200).json({
@@ -213,12 +233,18 @@ export default function liveSessionRoutes(): Router {
         // client is bringing the participant straight back rather than leaving
         // them alone. See buildLiveRecoveryInstructions for why the prompt is
         // narrower and why NO prior conversation is replayed.
-        const isRecovery = req.body?.recovery === true;
         const crisisContact = (systemConfig.crisis_contact ?? {}) as { phone?: string; text?: string };
         const crisisLine = [
           crisisContact.phone ? `${crisisContact.phone}` : '988',
           crisisContact.text ? `or text ${crisisContact.text}` : '',
         ].filter(Boolean).join(' ');
+
+        if (isRecovery && !limitCheck.allowed) {
+          console.warn(
+            `[Live] Session limits BYPASSED for a crisis recovery start (reason: ${limitCheck.reason}). ` +
+            'A content-filter termination is a continuation, not a new session.',
+          );
+        }
 
         if (isRecovery) {
           console.warn(
@@ -384,7 +410,11 @@ export default function liveSessionRoutes(): Router {
           }
         }
 
-        if (limitCheck.limits?.max_duration_minutes && !limitCheck.bypass) {
+        // `limitCheck.allowed` narrows the union: the denied variants carry no
+        // limits/bypass. A recovery start can now proceed while denied, so this
+        // must be guarded rather than assuming the allowed shape. A recovery
+        // session still gets its duration cap when one applies.
+        if (limitCheck.allowed && limitCheck.limits?.max_duration_minutes && !limitCheck.bypass) {
           scheduleAutoTermination({
             sessionId,
             maxDurationMinutes: limitCheck.limits.max_duration_minutes,
@@ -398,7 +428,7 @@ export default function liveSessionRoutes(): Router {
           sdp: sdpAnswer,
           voice: userVoice,
           language: userLanguage,
-          session_limits: limitCheck.limits || null,
+          session_limits: limitCheck.allowed ? (limitCheck.limits || null) : null,
         });
       } catch (error) {
         console.error('[Live] Session creation error:', error);

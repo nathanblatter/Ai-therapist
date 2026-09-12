@@ -61,8 +61,13 @@ export default function chatRoutes(): Router {
       // anonymous express-session id string made the limit/idempotency
       // queries throw a pg cast error and 500 every anonymous chat start.
       const userRole = req.session?.userRole || 'participant';
+      // A continuation of a content-filter-terminated session is not a new
+      // session. The terminated session's own POST /end has just reset the
+      // cooldown clock, so without this the text fallback 429s exactly when it
+      // is needed — see the same exemption in liveSession.routes.ts.
+      const isContinuation = typeof req.body?.continued_from === 'string';
       const limitCheck = await checkSessionLimits(numericUserId, userRole);
-      if (!limitCheck.allowed) {
+      if (!limitCheck.allowed && !isContinuation) {
         return res.status(429).json({
           error: 'Session limit exceeded',
           reason: limitCheck.reason,
@@ -72,7 +77,13 @@ export default function chatRoutes(): Router {
 
       // One active session per user at a time (logged-in users only — the
       // integer user_id column cannot key anonymous browsers).
-      const existingSession = numericUserId ? await getActiveSessionForUser(numericUserId) : null;
+      // A continuation must not be turned away as "you already have a session":
+      // the terminated voice session may still be finishing its teardown, and
+      // the client treats alreadyActive as a failure and strands the
+      // participant on the crisis screen.
+      const existingSession = numericUserId && !isContinuation
+        ? await getActiveSessionForUser(numericUserId)
+        : null;
       if (existingSession) {
         return res.status(200).json({
           message: 'Active session already exists',
@@ -289,6 +300,31 @@ export default function chatRoutes(): Router {
           const history = await getRecentSessionMessages(sessionId, 10);
           const verdict = await confirmMinorDisclosure(message, history, sessionId);
           if (verdict.isMinor && verdict.confidence !== 'low') {
+            // Score the turn for crisis BEFORE ending the session.
+            //
+            // This branch returns, so without it the crisis screen below is
+            // never reached and handleConfirmedMinor does not run the pipeline
+            // itself — it only logs eligibility, drafts an ELIGIBILITY adverse
+            // event and ends the session. A minor who disclosed suicidal intent
+            // in the same message that revealed their age would get no risk
+            // score, no crisis flag, no on-call page and no crisis AE.
+            //
+            // Detection must never depend on study eligibility. An ineligible
+            // minor in crisis needs the on-call paged exactly as much — arguably
+            // more. The realtime path already behaves this way: the sideband
+            // runs runCrisisPipeline on every participant turn independently of
+            // the minor gate, so the two channels disagreed on the single
+            // highest-stakes case.
+            try {
+              const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
+              await runCrisisPipeline(
+                { sessionId, messageId: userMsg.message_id, content: message },
+                'chat',
+              );
+            } catch (crisisErr) {
+              console.error('[MinorSafeguard] crisis screen on the minor path failed:', crisisErr);
+            }
+
             await insertMessagesBatch([
               { session_id: sessionId, role: 'assistant', message_type: 'text', content: MINOR_ELIGIBILITY_MESSAGE, content_redacted: null },
             ]);

@@ -292,6 +292,15 @@ export default function App() {
   // MAX_VOICE_RECOVERY_ATTEMPTS; reset only by a genuinely new (non-recovery)
   // voice session, so a filter that kills the recovery too cannot loop forever.
   const moderationVoiceAttemptsRef = useRef(0);
+  // Whether the CURRENTLY RUNNING voice session is a crisis recovery. Reactive
+  // (not a ref) because it drives SessionControls' startMicOn: a recovery
+  // session must come back with the mic already live. The normal default is
+  // mic OFF and the opening preamble tells the participant to press the mic
+  // button — but recovery deliberately skips that preamble, so a muted
+  // recovery means the assistant speaks, the participant answers out loud, and
+  // nothing is heard. The session built to never go silent would go silent,
+  // and no turn would reach the crisis pipeline.
+  const [isRecoverySession, setIsRecoverySession] = useState(false);
   // Set while stopSession()'s voice teardown is actually in flight. isTearingDown
   // stays true after it finishes (it exists to reject late session.closed events),
   // so it cannot answer "has the old call finished dying yet?" — which is exactly
@@ -1060,6 +1069,11 @@ export default function App() {
    *   left alone — the takeover is still in progress while this runs.
    */
   async function startRealtimeSession(checkin: CheckinData | null = null, recovery = false) {
+    // Drives SessionControls.startMicOn. A recovery session resumes a
+    // conversation the participant was already speaking in, so it must come
+    // back with the microphone live rather than muted behind a preamble it
+    // never hears.
+    setIsRecoverySession(recovery);
     // Reset per-session Live state before anything can dispatch into it.
     liveSessionIdRef.current = null;
     liveStartedRef.current = false;
@@ -2373,6 +2387,7 @@ export default function App() {
             sendTextMessage={sendTextMessage}
             isSessionActive={isSessionActive}
             localStream={localStream}
+            startMicOn={isRecoverySession}
             onOpenSettings={() => setIsSettingsOpen(true)}
             chatEnabled={features.chat_enabled !== false}
             sessionType={sessionType}

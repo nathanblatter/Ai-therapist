@@ -5,7 +5,7 @@
 // caseworkers can FILE a report for a caseload client and view ONLY their own
 // filed reports (list/detail filtered to reporter); review, triage, and
 // lifecycle management stay therapist+researcher.
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { requireClientAccess, requireSessionClientAccess } from '../../middleware/caseload.js';
 import {
@@ -53,10 +53,51 @@ function countsFor(rows: AdverseEventRowWithFlags[]): AdverseEventCounts {
 export default function adverseEventsRoutes(): Router {
   const router = Router();
   // Reads: caseworkers included, but row-filtered to their own filed reports.
-  const canRead = requireRole('therapist', 'researcher', 'caseworker');
+  /**
+   * Sandbox accounts must never read the real adverse-event register.
+   *
+   * POST /join-sandbox/:token lets an outside party self-provision a real
+   * account with role 'therapist' or 'caseworker' in a fresh sandbox org. The
+   * AE read routes were gated on ROLE only, and adverse_event_reports has no
+   * org column (migration 048), so listAdverseEvents returns every row in the
+   * table for every organization. A self-provisioned sandbox therapist could
+   * therefore read the real IRB register: participant_ref, user_id,
+   * occurred_at, severity, narrative summaries and event timelines.
+   *
+   * Proper org scoping is the real fix and needs a schema change (filed
+   * separately). This is the hard stop in the meantime, and it is the correct
+   * behaviour regardless: a sandbox tester has no business reading real
+   * participant adverse events.
+   */
+  const denySandbox = (req: Request, res: Response, next: NextFunction): void => {
+    if (req.session?.isSandbox === true) {
+      console.warn(
+        `[AE] Blocked sandbox account '${req.session?.username ?? 'unknown'}' from reading the ` +
+        'adverse-event register.',
+      );
+      // 404, not 403 — existence of the register must not be confirmable,
+      // matching the caseload middleware's convention in this file.
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    next();
+  };
+
+  /** Compose a role gate with the sandbox denial into one middleware. */
+  const gated = (...roles: Parameters<typeof requireRole>) => {
+    const role = requireRole(...roles);
+    return (req: Request, res: Response, next: NextFunction): void => {
+      role(req, res, (err?: unknown) => {
+        if (err) return next(err);
+        denySandbox(req, res, next);
+      });
+    };
+  };
+
+  const canRead = gated('therapist', 'researcher', 'caseworker');
   // Review/triage/lifecycle stays full-tier (spec s10 item 6).
-  const canReview = requireRole('therapist', 'researcher');
-  const canWrite = requireRole('therapist', 'researcher');
+  const canReview = gated('therapist', 'researcher');
+  const canWrite = gated('therapist', 'researcher');
   const VALID_SEVERITIES = ['low', 'medium', 'high'] as const;
 
   // List + counts (optional ?status= draft|submitted|closed|all).
