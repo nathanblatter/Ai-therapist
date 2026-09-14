@@ -6,17 +6,23 @@
 // point values/thresholds are overridable via system_config key
 // 'attention_ranking'.
 import { Router } from 'express';
+import OpenAI from 'openai';
 import { requireRole } from '../../middleware/auth.js';
 import { requireClientAccess } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
+import { getOpenAIKey } from '../../config/secrets.js';
 import {
   listCaseworkerRoster,
   getRosterClientDetail,
+  getClientEngagementSignals,
   countUnreadByClientForMember,
   getSystemConfigByKey,
   getAllUsers,
   getUserById,
+  recordLlmUsage,
   type RosterRow,
+  type RosterClientDetail,
+  type ClientEngagementSignals,
 } from '../../db/index.js';
 import { isCareTeamRole } from '../../../shared/roles.js';
 import { createLogger } from '../../utils/logger.js';
@@ -112,6 +118,92 @@ export function computeAttention(
   return { score: reasons.reduce((sum, r) => sum + r.points, 0), reasons };
 }
 
+// ---------------------------------------------------------------------------
+// Catch-up summary (ai-therapist-229): a short LLM paragraph catching a
+// caseworker up on a client, composed STRICTLY from summaries-tier data (the
+// caseworkerDashboard.queries audit boundary — AI session summaries, screener
+// scores, risk severities, check-in moods, counts). Never transcripts, never
+// SOAP notes. Same in-memory cache + fail-soft pattern as the therapist-only
+// brief in participantProfile.routes.ts.
+// ---------------------------------------------------------------------------
+
+const CATCHUP_MODEL = 'gpt-4o-mini';
+const CATCHUP_SYSTEM_PROMPT =
+  'You are a documentation assistant for an AI-assisted therapy research study. ' +
+  'Write a single short paragraph (3-5 sentences, plain prose, no lists, no headings) catching a ' +
+  'care coordinator up on this participant: how they seem to be doing overall, what changed ' +
+  'recently, and anything worth keeping an eye on. Descriptive and non-diagnostic; never invent ' +
+  'facts beyond the data given; never include names or identifying details.';
+
+let openaiClient: OpenAI | null = null;
+async function getClient(): Promise<OpenAI> {
+  if (!openaiClient) openaiClient = new OpenAI({ apiKey: await getOpenAIKey() });
+  return openaiClient;
+}
+
+// Repeat views are free; a new ended session (new latest summary) regenerates.
+const catchupCache = new Map<number, { key: string; summary: string }>();
+/** Test hook: reset the module-level catch-up cache. */
+export function _clearCatchupCache(): void {
+  catchupCache.clear();
+}
+
+/** Compact, deterministic prompt context from summaries-tier data only. */
+export function composeCatchupContext(
+  detail: RosterClientDetail,
+  engagement: ClientEngagementSignals
+): string {
+  const lines: string[] = [];
+  lines.push(`Completed sessions: ${engagement.ended_session_count}`);
+  if (engagement.last_session_at) lines.push(`Last session: ${engagement.last_session_at}`);
+
+  for (const row of detail.recent_summaries.slice(0, 3)) {
+    const s = (row.summary ?? {}) as Record<string, unknown>;
+    lines.push(
+      `Session (${row.ended_at ?? 'date unknown'}): ${String(s.headline ?? '')}. ` +
+      `Topics: ${Array.isArray(s.topics) ? s.topics.join(', ') : 'n/a'}. ` +
+      `Mood trajectory: ${String(s.mood_trajectory ?? 'n/a')}.` +
+      (s.follow_up ? ` Open follow-up: ${String(s.follow_up)}` : '')
+    );
+  }
+
+  // Screener deltas: latest vs previous score per scale (history is newest-first).
+  const byScale = new Map<string, { score: number; created_at: string }[]>();
+  for (const p of detail.scale_history) {
+    const arr = byScale.get(p.scale) ?? [];
+    arr.push(p);
+    byScale.set(p.scale, arr);
+  }
+  for (const [scale, points] of byScale) {
+    const [latest, prev] = points;
+    lines.push(
+      `${scale.toUpperCase()} latest: ${latest.score}` +
+      (prev ? ` (previous ${prev.score}, delta ${latest.score - prev.score})` : '')
+    );
+  }
+
+  const [latestRisk, prevRisk] = detail.risk_history;
+  if (latestRisk) {
+    lines.push(
+      `Risk severity latest: ${latestRisk.severity ?? 'unknown'} (${latestRisk.calculated_at})` +
+      (prevRisk ? `, previous: ${prevRisk.severity ?? 'unknown'}` : '')
+    );
+  }
+
+  const moods = detail.mood_history
+    .filter((m) => m.mood !== null)
+    .slice(0, 3)
+    .reverse()
+    .map((m) => m.mood);
+  if (moods.length >= 2) lines.push(`Check-in mood (1-10), oldest to newest: ${moods.join(' -> ')}`);
+
+  if (engagement.open_crisis_count > 0) lines.push(`Open crisis flags: ${engagement.open_crisis_count}`);
+  if (engagement.open_escalation_count > 0) lines.push(`Open escalations: ${engagement.open_escalation_count}`);
+  if (engagement.has_safety_plan) lines.push('A safety plan is on file.');
+
+  return lines.join('\n');
+}
+
 async function buildRoster(memberId: number, config: AttentionRankingConfig) {
   const [rows, unread] = await Promise.all([
     listCaseworkerRoster(memberId),
@@ -196,6 +288,78 @@ export default function caseworkerDashboardRoutes(): Router {
       } catch (err) {
         log.error({ err, clientId }, 'Failed to load roster client detail');
         res.status(500).json({ error: 'Failed to load client detail' });
+      }
+    }
+  );
+
+  // GET /admin/api/caseworker/roster/:userId/catchup — the "catch up on this
+  // person" bundle (ai-therapist-229): engagement/flag signals plus a short
+  // AI-written rollup paragraph. Summaries tier throughout, so caseworkers
+  // (the requesting audience) are first-class. Fail-soft on the LLM: any
+  // generation failure still returns the signals with summary null.
+  router.get(
+    '/admin/api/caseworker/roster/:userId/catchup',
+    requireRole('caseworker', 'therapist', 'researcher'),
+    requireClientAccess(),
+    async (req, res) => {
+      const clientId = Number(req.params.userId);
+      if (!Number.isInteger(clientId)) return res.status(400).json({ error: 'Invalid user id' });
+      try {
+        // Same researcher org-scoping (C13) as the detail route above.
+        if (!isCareTeamRole(req.session.userRole)) {
+          const orgId = await orgIdFor(req);
+          if (orgId === null) return res.status(404).json({ error: 'Not found' });
+          const target = await getUserById(clientId);
+          if (!target || target.organization_id !== orgId) {
+            return res.status(404).json({ error: 'Not found' });
+          }
+        }
+
+        const [detail, engagement] = await Promise.all([
+          getRosterClientDetail(clientId),
+          getClientEngagementSignals(clientId),
+        ]);
+
+        const base = { client_id: clientId, engagement, generated_at: new Date().toISOString() };
+        if (engagement.ended_session_count === 0 && detail.recent_summaries.length === 0) {
+          return res.json({ ...base, summary: null });
+        }
+
+        const latestSummarySessionId = detail.recent_summaries[0]?.session_id ?? null;
+        const cacheKey = `${latestSummarySessionId ?? 'none'}:${engagement.ended_session_count}`;
+        const cached = catchupCache.get(clientId);
+        if (cached && cached.key === cacheKey) {
+          return res.json({ ...base, summary: cached.summary, cached: true });
+        }
+
+        let summary: string | null = null;
+        try {
+          const client = await getClient();
+          const response = await client.chat.completions.create({
+            model: CATCHUP_MODEL,
+            temperature: 0.3,
+            max_tokens: 200,
+            messages: [
+              { role: 'system', content: CATCHUP_SYSTEM_PROMPT },
+              { role: 'user', content: composeCatchupContext(detail, engagement) },
+            ],
+          });
+          // Cost tracking: same best-effort pattern as the profile brief;
+          // attributed to the latest summarized session (purpose 'insights').
+          recordLlmUsage(
+            latestSummarySessionId, 'insights', CATCHUP_MODEL,
+            response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
+          ).catch(() => { /* recordLlmUsage already swallows; belt and braces */ });
+          summary = response.choices[0]?.message?.content?.trim() || null;
+          if (summary) catchupCache.set(clientId, { key: cacheKey, summary });
+        } catch (err) {
+          log.error({ err, clientId }, 'Catch-up summary generation failed (fail-soft)');
+        }
+
+        res.json({ ...base, summary });
+      } catch (err) {
+        log.error({ err, clientId }, 'Failed to build catch-up');
+        res.status(500).json({ error: 'Failed to build catch-up' });
       }
     }
   );

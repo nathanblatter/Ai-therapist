@@ -8,12 +8,14 @@ import request from 'supertest';
 const dbMocks = vi.hoisted(() => ({
   listCaseworkerRoster: vi.fn(),
   getRosterClientDetail: vi.fn(),
+  getClientEngagementSignals: vi.fn(),
   countUnreadByClientForMember: vi.fn(),
   getSystemConfigByKey: vi.fn(),
   getAllUsers: vi.fn(),
   getUserById: vi.fn(),
   getOrganizationIdForUser: vi.fn(),
   getIrbStudyOrgId: vi.fn(),
+  recordLlmUsage: vi.fn(),
   // Transitive imports of middleware/caseload.ts:
   isAssigned: vi.fn(),
   getSessionAccessInfo: vi.fn(),
@@ -23,7 +25,22 @@ const dbMocks = vi.hoisted(() => ({
 }));
 vi.mock('../../db/index.js', () => dbMocks);
 
-import caseworkerDashboardRoutes, { computeAttention, DEFAULT_ATTENTION_RANKING } from './caseworkerDashboard.routes.js';
+const { openaiCreate } = vi.hoisted(() => ({ openaiCreate: vi.fn() }));
+vi.mock('../../config/secrets.js', () => ({
+  getOpenAIKey: vi.fn().mockResolvedValue('test-key'),
+}));
+vi.mock('openai', () => ({
+  default: class MockOpenAI {
+    chat = { completions: { create: openaiCreate } };
+  },
+}));
+
+import caseworkerDashboardRoutes, {
+  computeAttention,
+  composeCatchupContext,
+  DEFAULT_ATTENTION_RANKING,
+  _clearCatchupCache,
+} from './caseworkerDashboard.routes.js';
 
 function appAs(role: string | null, userId = 8, orgId?: number) {
   const app = express();
@@ -59,7 +76,17 @@ beforeEach(() => {
   dbMocks.getRosterClientDetail.mockResolvedValue({
     recent_summaries: [], scale_history: [], risk_history: [], mood_history: [], safety_plan: null,
   });
+  dbMocks.getClientEngagementSignals.mockResolvedValue({
+    last_session_at: '2026-09-10T12:00:00Z', ended_session_count: 5, last_checkin_mood: 6,
+    open_crisis_count: 0, open_escalation_count: 0, has_safety_plan: false,
+  });
+  dbMocks.recordLlmUsage.mockResolvedValue(undefined);
   dbMocks.isAssigned.mockResolvedValue(true);
+  _clearCatchupCache();
+  openaiCreate.mockReset().mockResolvedValue({
+    choices: [{ message: { content: 'They are doing steadily better.' } }],
+    usage: { prompt_tokens: 100, completion_tokens: 40 },
+  });
   // orgIdFor contract: an authenticated caller's org always resolves (a
   // failed lookup throws -> 500), so give researchers a resolvable org.
   dbMocks.getOrganizationIdForUser.mockResolvedValue(1);
@@ -192,5 +219,113 @@ describe('GET /admin/api/caseworker/roster/:userId/detail', () => {
 
   it('400s on a non-numeric client id', async () => {
     expect((await request(appAs('caseworker', 8)).get('/admin/api/caseworker/roster/abc/detail')).status).toBe(400);
+  });
+});
+
+describe('GET /admin/api/caseworker/roster/:userId/catchup', () => {
+  const detailWithSummary = {
+    recent_summaries: [{
+      session_id: 's9', ended_at: '2026-09-10T12:00:00Z',
+      summary: { headline: 'steady week', topics: ['sleep'], mood_trajectory: 'started flat, ended brighter', follow_up: 'sleep routine' },
+    }],
+    scale_history: [
+      { scale: 'phq2', score: 3, created_at: '2026-09-10' },
+      { scale: 'phq2', score: 5, created_at: '2026-09-01' },
+    ],
+    risk_history: [
+      { risk_score: 20, severity: 'low', calculated_at: '2026-09-10' },
+      { risk_score: 40, severity: 'moderate', calculated_at: '2026-09-01' },
+    ],
+    mood_history: [{ mood: 6, created_at: '2026-09-10' }, { mood: 4, created_at: '2026-09-01' }],
+    safety_plan: null,
+  };
+
+  it('returns engagement signals plus the AI catch-up paragraph for an assigned client', async () => {
+    dbMocks.getRosterClientDetail.mockResolvedValue(detailWithSummary);
+    const res = await request(appAs('caseworker', 8)).get('/admin/api/caseworker/roster/42/catchup');
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toBe('They are doing steadily better.');
+    expect(res.body.engagement.ended_session_count).toBe(5);
+    expect(dbMocks.isAssigned).toHaveBeenCalledWith(8, 42);
+    // Prompt context is composed from summaries-tier data only.
+    const userMsg = openaiCreate.mock.calls[0][0].messages[1].content as string;
+    expect(userMsg).toContain('steady week');
+    expect(userMsg).toContain('PHQ2 latest: 3 (previous 5, delta -2)');
+    expect(userMsg).toContain('Risk severity latest: low');
+    expect(dbMocks.recordLlmUsage).toHaveBeenCalledWith('s9', 'insights', expect.any(String), 100, 40);
+  });
+
+  it('serves repeat views from the cache without a second LLM call', async () => {
+    dbMocks.getRosterClientDetail.mockResolvedValue(detailWithSummary);
+    const app = appAs('caseworker', 8);
+    await request(app).get('/admin/api/caseworker/roster/42/catchup');
+    const res = await request(app).get('/admin/api/caseworker/roster/42/catchup');
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toBe('They are doing steadily better.');
+    expect(res.body.cached).toBe(true);
+    expect(openaiCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the LLM entirely for a client with no completed sessions', async () => {
+    dbMocks.getClientEngagementSignals.mockResolvedValue({
+      last_session_at: null, ended_session_count: 0, last_checkin_mood: null,
+      open_crisis_count: 0, open_escalation_count: 0, has_safety_plan: false,
+    });
+    const res = await request(appAs('caseworker', 8)).get('/admin/api/caseworker/roster/42/catchup');
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toBeNull();
+    expect(openaiCreate).not.toHaveBeenCalled();
+  });
+
+  it('fails soft when the LLM errors: signals still return, summary null', async () => {
+    dbMocks.getRosterClientDetail.mockResolvedValue(detailWithSummary);
+    openaiCreate.mockRejectedValue(new Error('model down'));
+    const res = await request(appAs('caseworker', 8)).get('/admin/api/caseworker/roster/42/catchup');
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toBeNull();
+    expect(res.body.engagement.ended_session_count).toBe(5);
+  });
+
+  it('404s (never 403) for a client outside the caseload', async () => {
+    dbMocks.isAssigned.mockResolvedValue(false);
+    const res = await request(appAs('caseworker', 8)).get('/admin/api/caseworker/roster/42/catchup');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Not found');
+    expect(openaiCreate).not.toHaveBeenCalled();
+  });
+
+  it('404s a researcher reading a client outside their org (C13)', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 42, role: 'participant', organization_id: 9 });
+    const res = await request(appAs('researcher', 3, 1)).get('/admin/api/caseworker/roster/42/catchup');
+    expect(res.status).toBe(404);
+    expect(dbMocks.getRosterClientDetail).not.toHaveBeenCalled();
+  });
+
+  it('lets a researcher read a same-org client', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 42, role: 'participant', organization_id: 1 });
+    dbMocks.getRosterClientDetail.mockResolvedValue(detailWithSummary);
+    const res = await request(appAs('researcher', 3, 1)).get('/admin/api/caseworker/roster/42/catchup');
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toBe('They are doing steadily better.');
+  });
+
+  it('denies participants (403) and anonymous (401)', async () => {
+    expect((await request(appAs('participant')).get('/admin/api/caseworker/roster/42/catchup')).status).toBe(403);
+    expect((await request(appAs(null)).get('/admin/api/caseworker/roster/42/catchup')).status).toBe(401);
+  });
+});
+
+describe('composeCatchupContext', () => {
+  it('lists open crisis flags and escalations when present', () => {
+    const context = composeCatchupContext(
+      { recent_summaries: [], scale_history: [], risk_history: [], mood_history: [], safety_plan: null },
+      {
+        last_session_at: '2026-09-01', ended_session_count: 3, last_checkin_mood: 4,
+        open_crisis_count: 1, open_escalation_count: 2, has_safety_plan: true,
+      }
+    );
+    expect(context).toContain('Open crisis flags: 1');
+    expect(context).toContain('Open escalations: 2');
+    expect(context).toContain('A safety plan is on file.');
   });
 });
