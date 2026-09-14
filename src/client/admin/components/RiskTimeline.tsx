@@ -37,10 +37,10 @@ function Sparkline({ scores }: { scores: number[] }) {
   return (
     <svg width={w} height={h} className="block" aria-label="Risk score sparkline">
       <line x1={0} y1={h - (75 / 100) * h} x2={w} y2={h - (75 / 100) * h} stroke="#fecaca" strokeWidth={1} strokeDasharray="3,3" />
-      <line x1={0} y1={h - (50 / 100) * h} x2={w} y2={h - (50 / 100) * h} stroke="#fed7aa" strokeWidth={1} strokeDasharray="3,3" />
+      <line x1={0} y1={h - (50 / 100) * h} x2={w} y2={h - (50 / 100) * h} stroke="#fde68a" strokeWidth={1} strokeDasharray="3,3" />
       <polyline points={points} fill="none" stroke="#6366f1" strokeWidth={1.5} />
       {scores.map((s, i) =>
-        s > 0 ? <circle key={i} cx={i * step} cy={h - (s / 100) * h} r={2.5} fill={s >= 75 ? '#dc2626' : s >= 50 ? '#ea580c' : '#d97706'} /> : null
+        s > 0 ? <circle key={i} cx={i * step} cy={h - (s / 100) * h} r={2.5} fill={s >= 75 ? '#dc2626' : s >= 50 ? '#d97706' : s >= 25 ? '#16a34a' : '#9ca3af'} /> : null
       )}
     </svg>
   );

@@ -1192,7 +1192,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       <button
                         onClick={handleInterrupt}
                         title="Cancel the in-progress response and clear buffered audio"
-                        className="px-3 py-1.5 bg-orange-500 text-white rounded hover:bg-orange-600 transition text-sm min-h-[44px] inline-flex items-center gap-1"
+                        className="px-3 py-1.5 bg-amber-700 text-white rounded hover:bg-amber-800 transition text-sm min-h-[44px] inline-flex items-center gap-1"
                       >
                         <Square size={14} aria-hidden="true" />
                         Interrupt
