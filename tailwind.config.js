@@ -30,7 +30,6 @@ export default {
         yellow: varScale('yellow'),
         purple: varScale('purple'),
         indigo: varScale('indigo'),
-        orange: varScale('orange'),
         amber: varScale('amber'),
         emerald: varScale('emerald'),
         // Semantic tokens — prefer these in new code

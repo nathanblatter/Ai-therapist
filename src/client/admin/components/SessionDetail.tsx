@@ -744,7 +744,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                 {session?.status === 'active' && (
                   <button
                     onClick={handleCrisisWindDown}
-                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded text-sm font-medium transition min-h-[44px]"
+                    className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded text-sm font-medium transition min-h-[44px]"
                     aria-label="Have the AI share crisis resources, close warmly, and end the session"
                     title="The AI shares crisis resources and closes warmly; the session is force-ended if that doesn't finish within 75 seconds"
                   >

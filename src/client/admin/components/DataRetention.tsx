@@ -240,7 +240,7 @@ export default function DataRetention() {
             <Trash2 size={16} />
             <span className="text-xs font-medium uppercase">Ready to Wipe</span>
           </div>
-          <p className="text-lg font-bold text-orange-600">
+          <p className="text-lg font-bold text-amber-600">
             {stats?.pending_wipe || 0}
           </p>
           <p className="text-xs text-gray-500 mt-1">messages eligible</p>

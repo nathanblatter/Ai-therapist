@@ -89,17 +89,6 @@
   --c-indigo-800: 55 48 163;
   --c-indigo-900: 49 46 129;
   --c-indigo-950: 30 27 75;
-  --c-orange-50: 255 247 237;
-  --c-orange-100: 255 237 213;
-  --c-orange-200: 254 215 170;
-  --c-orange-300: 253 186 116;
-  --c-orange-400: 251 146 60;
-  --c-orange-500: 249 115 22;
-  --c-orange-600: 234 88 12;
-  --c-orange-700: 194 65 12;
-  --c-orange-800: 154 52 18;
-  --c-orange-900: 124 45 18;
-  --c-orange-950: 67 20 7;
   --c-amber-50: 255 251 235;
   --c-amber-100: 254 243 199;
   --c-amber-200: 253 230 138;
@@ -252,17 +241,6 @@
   --c-indigo-800: 199 210 254;
   --c-indigo-900: 224 231 255;
   --c-indigo-950: 238 242 255;
-  --c-orange-50: 67 20 7;
-  --c-orange-100: 124 45 18;
-  --c-orange-200: 154 52 18;
-  --c-orange-300: 194 65 12;
-  --c-orange-400: 251 146 60;
-  --c-orange-500: 249 115 22;
-  --c-orange-600: 234 88 12;
-  --c-orange-700: 194 65 12;
-  --c-orange-800: 254 215 170;
-  --c-orange-900: 255 237 213;
-  --c-orange-950: 255 247 237;
   --c-amber-50: 69 26 3;
   --c-amber-100: 120 53 15;
   --c-amber-200: 146 64 14;
@@ -331,9 +309,6 @@
 [data-theme="dark"] .text-indigo-500 { color: #818cf8; }
 [data-theme="dark"] .text-indigo-600 { color: #818cf8; }
 [data-theme="dark"] .text-indigo-700 { color: #a5b4fc; }
-[data-theme="dark"] .text-orange-500 { color: #fb923c; }
-[data-theme="dark"] .text-orange-600 { color: #fb923c; }
-[data-theme="dark"] .text-orange-700 { color: #fdba74; }
 [data-theme="dark"] .text-amber-500 { color: #fbbf24; }
 [data-theme="dark"] .text-amber-600 { color: #fbbf24; }
 [data-theme="dark"] .text-amber-700 { color: #fcd34d; }

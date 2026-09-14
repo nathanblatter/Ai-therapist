@@ -274,9 +274,9 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Interventions</p>
-              <p className="text-2xl font-bold text-orange-600">{data.interventionActions.length}</p>
+              <p className="text-2xl font-bold text-amber-600">{data.interventionActions.length}</p>
             </div>
-            <Activity className="text-orange-500" size={32} />
+            <Activity className="text-amber-500" size={32} />
           </div>
         </div>
 
