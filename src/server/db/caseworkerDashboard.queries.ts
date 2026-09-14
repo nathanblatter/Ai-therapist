@@ -118,6 +118,66 @@ export async function listCaseworkerRoster(memberId: number): Promise<RosterRow[
   return result.rows;
 }
 
+export interface ClientEngagementSignals {
+  last_session_at: string | null;
+  ended_session_count: number;
+  last_checkin_mood: number | null;
+  open_crisis_count: number;
+  open_escalation_count: number;
+  has_safety_plan: boolean;
+}
+
+/**
+ * Member-independent engagement/flag scalars for one client (the roster row
+ * carries these too, but only for the viewing member's own caseload — the
+ * catch-up view also serves researchers). Same audit boundary as the rest of
+ * this module: counts and timestamps only, the messages table is never
+ * touched.
+ */
+export async function getClientEngagementSignals(clientId: number): Promise<ClientEngagementSignals> {
+  const result = await pool.query<ClientEngagementSignals>(
+    `SELECT
+       sess.last_session_at,
+       COALESCE(sess.ended_session_count, 0)::int AS ended_session_count,
+       sess.last_checkin_mood,
+       COALESCE(crisis.open_crisis_count, 0)::int AS open_crisis_count,
+       COALESCE(esc.open_escalation_count, 0)::int AS open_escalation_count,
+       COALESCE(sp.has_safety_plan, FALSE) AS has_safety_plan
+     FROM (SELECT $1::int AS client_id) c
+     LEFT JOIN LATERAL (
+       SELECT MAX(ts.created_at)::text AS last_session_at,
+              COUNT(*) FILTER (WHERE ts.status = 'ended') AS ended_session_count,
+              (SELECT (ts2.checkin->>'mood')::int FROM therapy_sessions ts2
+               WHERE ts2.user_id = c.client_id AND ts2.checkin IS NOT NULL
+               ORDER BY ts2.created_at DESC LIMIT 1) AS last_checkin_mood
+       FROM therapy_sessions ts WHERE ts.user_id = c.client_id
+     ) sess ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*) AS open_crisis_count
+       FROM therapy_sessions ts
+       WHERE ts.user_id = c.client_id AND ts.crisis_flagged = TRUE
+     ) crisis ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*) AS open_escalation_count
+       FROM escalations e
+       WHERE e.client_id = c.client_id AND e.status <> 'resolved'
+     ) esc ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT TRUE AS has_safety_plan
+       FROM safety_plans p WHERE p.user_id = c.client_id LIMIT 1
+     ) sp ON TRUE`,
+    [clientId]
+  );
+  return result.rows[0] ?? {
+    last_session_at: null,
+    ended_session_count: 0,
+    last_checkin_mood: null,
+    open_crisis_count: 0,
+    open_escalation_count: 0,
+    has_safety_plan: false,
+  };
+}
+
 export interface RosterClientDetail {
   recent_summaries: Array<{
     session_id: string;

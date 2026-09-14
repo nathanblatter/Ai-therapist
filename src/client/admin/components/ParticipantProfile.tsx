@@ -6,11 +6,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   X, User, Cpu, Shield, AlertTriangle, TrendingUp, TrendingDown, Minus,
-  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity,
+  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity, Clock,
 } from 'react-feather';
 import Panel from './ui/Panel';
 import StatCard from './ui/StatCard';
 import useAdminFetch from '../hooks/useAdminFetch';
+import CatchUp from './CatchUp';
 import NotesPanel from './notes/NotesPanel';
 import MyEscalations from './escalations/MyEscalations';
 import MessageThreadView from './MessageThreadView';
@@ -538,12 +539,24 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
               <p className="font-semibold">Clinical sections require the therapist role.</p>
               <p className="mt-1">
                 The status strip, AI brief, and clinical timeline entries are derived from unredacted clinical
-                content and are only visible to therapists (the same rule as session insights). Your{' '}
-                {userRole ?? 'current'} account can still browse this participant&rsquo;s session history and
-                manage the risk-context toggle.
+                content and are only visible to therapists (the same rule as session insights). The catch-up
+                below is built from summaries and signals only, so your {userRole ?? 'current'} account can
+                use it alongside this participant&rsquo;s session history.
               </p>
             </div>
           </div>
+        )}
+
+        {/* ============ Catch-up (summaries tier, ai-therapist-229) ============
+            The quick "how is this person doing" read for viewers without the
+            therapist-only clinical bundle: caseworkers and researchers. */}
+        {!loading && profileDenied && (
+          <section aria-label="Catch-up">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <Clock size={15} className="text-gray-500" /> Catch-up
+            </h3>
+            <CatchUp userId={user.userid} onViewSession={onViewSession} />
+          </section>
         )}
 
         {/* ============ 1. Status strip — the 5-second read ============ */}
