@@ -7,6 +7,8 @@ import {
   buildGrokSessionConfig,
   buildGrokOpeningPrompt,
   grokRealtimeUrl,
+  resolveGrokTuning,
+  GROK_DEFAULT_TUNING,
   GROK_VOICES,
   GROK_DEFAULT_VOICE,
 } from './grokVoiceConfig.js';
@@ -78,7 +80,8 @@ describe('buildGrokSessionConfig', () => {
   });
 
   it('uses server VAD and 24 kHz PCM on both legs', () => {
-    expect(config.turn_detection).toEqual({ type: 'server_vad' });
+    expect(config.turn_detection).toEqual({ type: 'server_vad', threshold: 0.85, silence_duration_ms: 500, prefix_padding_ms: 333 });
+    expect(config.reasoning).toEqual({ effort: 'none' });
     const audio = config.audio as { input: { format: unknown; transcription: unknown }; output: { format: unknown } };
     expect(audio.input.format).toEqual({ type: 'audio/pcm', rate: 24000 });
     expect(audio.output.format).toEqual({ type: 'audio/pcm', rate: 24000 });
@@ -126,5 +129,25 @@ describe('buildGrokOpeningPrompt', () => {
 describe('grokRealtimeUrl', () => {
   it('encodes the model as a query parameter', () => {
     expect(grokRealtimeUrl('grok-voice-latest')).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-latest');
+  });
+});
+
+describe('resolveGrokTuning — admin knobs', () => {
+  it('returns defaults for missing or garbage config', () => {
+    expect(resolveGrokTuning(undefined)).toEqual(GROK_DEFAULT_TUNING);
+    expect(resolveGrokTuning('nope')).toEqual(GROK_DEFAULT_TUNING);
+    expect(resolveGrokTuning({ vad: { threshold: 'x' }, reasoning_effort: 'medium', speed: null })).toEqual(GROK_DEFAULT_TUNING);
+  });
+
+  it('clamps to xAI ranges and forwards into session.update', () => {
+    const t = resolveGrokTuning({ vad: { threshold: 5, silence_duration_ms: -10, prefix_padding_ms: 200.6 }, reasoning_effort: 'high', speed: 9 });
+    expect(t).toEqual({ vad: { threshold: 0.9, silence_duration_ms: 0, prefix_padding_ms: 201 }, reasoning_effort: 'high', speed: 1.5 });
+    const cfg = buildGrokSessionConfig({
+      model: 'grok-voice-latest', voice: 'eve', language: null, languageName: null,
+      systemPrompt: CLINICAL_PROMPT, toolDefs: [], tuning: t,
+    });
+    expect(cfg.turn_detection).toEqual({ type: 'server_vad', threshold: 0.9, silence_duration_ms: 0, prefix_padding_ms: 201 });
+    expect(cfg.reasoning).toEqual({ effort: 'high' });
+    expect((cfg.audio as { output: { speed: number } }).output.speed).toBe(1.5);
   });
 });

@@ -78,6 +78,7 @@ interface SystemConfigData {
   ai_model?: ConfigEntry<AiModel>;
   transcription_model?: ConfigEntry<AiModel>;
   client_logging?: ConfigEntry<ClientLogging>;
+  grok_voice?: ConfigEntry<Record<string, unknown>>;
   voices?: ConfigEntry<VoicesConfig>;
   languages?: ConfigEntry<LanguagesConfig>;
 }
@@ -199,6 +200,13 @@ export default function SystemConfig() {
     description: 'Latest cost-effective transcription model'
   });
 
+  // Grok Voice turn-taking knobs (system_config.grok_voice; docs/grok-voice.md).
+  const [grokTuning, setGrokTuning] = useState({
+    vad: { threshold: 0.85, silence_duration_ms: 500, prefix_padding_ms: 333 },
+    reasoning_effort: 'none' as 'none' | 'high',
+    speed: 1.0,
+  });
+
   const [clientLogging, setClientLogging] = useState<ClientLogging>({
     enabled: false
   });
@@ -286,6 +294,10 @@ export default function SystemConfig() {
       if (data.client_logging) {
         setClientLogging(data.client_logging.value);
       }
+      if (data.grok_voice?.value) {
+        const v = data.grok_voice.value as Partial<typeof grokTuning>;
+        setGrokTuning(prev => ({ ...prev, ...v, vad: { ...prev.vad, ...(v.vad ?? {}) } }));
+      }
       if (data.voices) {
         setVoices({ voices: [], default_voice: 'cedar', ...data.voices.value });
       }
@@ -363,6 +375,13 @@ export default function SystemConfig() {
       if (!transcriptionResponse.ok) throw new Error('Failed to save transcription model');
 
       // Save client logging
+      const grokResponse = await fetch('/admin/api/config/grok_voice', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: grokTuning })
+      });
+      if (!grokResponse.ok) throw new Error('Failed to save Grok Voice tuning');
+
       const loggingResponse = await fetch('/admin/api/config/client_logging', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1437,6 +1456,58 @@ export default function SystemConfig() {
           />
         </div>
       </div>
+
+      {/* Grok Voice turn-taking */}
+      {grokActive && (
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Grok Voice Turn-Taking</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Grok Voice is turn-based: it listens, detects the end of your speech, then replies. These
+            knobs set how quickly that boundary is detected and how fast the reply starts. Applied to
+            the next session start (no cache). Ranges are xAI&apos;s.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="text-sm">
+              <span className="block font-medium text-gray-700">End-of-speech silence (ms)</span>
+              <input type="number" min={0} max={10000} step={50} value={grokTuning.vad.silence_duration_ms}
+                onChange={e => setGrokTuning({ ...grokTuning, vad: { ...grokTuning.vad, silence_duration_ms: Number(e.target.value) } })}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              <span className="block text-xs text-gray-500 mt-1">Lower feels snappier; too low splits mid-sentence pauses into separate turns.</span>
+            </label>
+            <label className="text-sm">
+              <span className="block font-medium text-gray-700">VAD threshold (0.1–0.9)</span>
+              <input type="number" min={0.1} max={0.9} step={0.05} value={grokTuning.vad.threshold}
+                onChange={e => setGrokTuning({ ...grokTuning, vad: { ...grokTuning.vad, threshold: Number(e.target.value) } })}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              <span className="block text-xs text-gray-500 mt-1">Lower is more sensitive to quiet speech (and to room noise).</span>
+            </label>
+            <label className="text-sm">
+              <span className="block font-medium text-gray-700">Prefix padding (ms)</span>
+              <input type="number" min={0} max={10000} step={50} value={grokTuning.vad.prefix_padding_ms}
+                onChange={e => setGrokTuning({ ...grokTuning, vad: { ...grokTuning.vad, prefix_padding_ms: Number(e.target.value) } })}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              <span className="block text-xs text-gray-500 mt-1">Audio kept from before speech was detected, so first syllables are not clipped.</span>
+            </label>
+            <label className="text-sm">
+              <span className="block font-medium text-gray-700">Voice speed (0.7–1.5)</span>
+              <input type="number" min={0.7} max={1.5} step={0.05} value={grokTuning.speed}
+                onChange={e => setGrokTuning({ ...grokTuning, speed: Number(e.target.value) })}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+            </label>
+            <div className="text-sm sm:col-span-2">
+              <span className="block font-medium text-gray-700 mb-1">Reasoning effort</span>
+              <label className="mr-4"><input type="radio" name="grok_reasoning" checked={grokTuning.reasoning_effort === 'none'}
+                onChange={() => setGrokTuning({ ...grokTuning, reasoning_effort: 'none' })} className="mr-1" />none (fastest first word)</label>
+              <label><input type="radio" name="grok_reasoning" checked={grokTuning.reasoning_effort === 'high'}
+                onChange={() => setGrokTuning({ ...grokTuning, reasoning_effort: 'high' })} className="mr-1" />high (xAI default; slower, more considered)</label>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            Measured per-turn latency (end of speech to first audio, and to response done) is recorded in
+            turn_latency for every Grok turn; see Analytics.
+          </p>
+        </div>
+      )}
 
       {/* Client Logging Configuration */}
       <div className="mb-6 bg-white rounded-lg shadow p-6">

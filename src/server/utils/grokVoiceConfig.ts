@@ -127,12 +127,64 @@ export function buildGrokVoiceHeader(languageName: string | null): string {
 You are speaking aloud with the participant in real time. Speak calmly and unhurriedly, in plain
 sentences a person can follow by ear: no Markdown, no headings, no lists, no stage directions.
 Keep replies short and leave room for silence — one or two sentences, then listen. Stop speaking
-the moment the participant starts talking. ${languageLine}
+the moment the participant starts talking. Do not end every reply with a question; reflect or
+simply acknowledge when that is enough, and never repeat a question you just asked. ${languageLine}
 
 Messages with the system role that arrive mid-conversation are trusted guidance from the study's
 monitoring system or the clinician overseeing this session. Follow them, and never read them aloud
 or mention them to the participant.
 `;
+}
+
+/**
+ * Turn-taking and latency knobs, admin-editable as system_config.grok_voice.
+ *
+ * Grok Voice is a TURN-BASED model: it listens, detects end of speech, then
+ * replies. It cannot overlap or backchannel the way GPT-Live's full-duplex
+ * model does, so the conversational feel is set almost entirely by how fast
+ * the turn boundary is detected and how fast the reply starts. These are the
+ * levers, all forwarded verbatim to session.update (ranges from xAI's docs):
+ *
+ *   vad.threshold            0.1–0.9, xAI default 0.85. Lower = more sensitive.
+ *   vad.silence_duration_ms  0–10000. Silence that ends a turn. Lower = snappier,
+ *                            but mid-sentence pauses start splitting turns.
+ *   vad.prefix_padding_ms    0–10000, xAI default 333. Audio kept before speech.
+ *   reasoning_effort         'none' | 'high' (xAI default 'high'). 'none' trades
+ *                            some depth for a faster first word.
+ *   speed                    0.7–1.5 playback speed of the voice.
+ */
+export interface GrokVoiceTuning {
+  vad: { threshold: number; silence_duration_ms: number; prefix_padding_ms: number };
+  reasoning_effort: 'none' | 'high';
+  speed: number;
+}
+
+export const GROK_DEFAULT_TUNING: GrokVoiceTuning = {
+  vad: { threshold: 0.85, silence_duration_ms: 500, prefix_padding_ms: 333 },
+  reasoning_effort: 'none',
+  speed: 1.0,
+};
+
+const clamp = (n: unknown, lo: number, hi: number, dflt: number): number => {
+  if (n === null || n === undefined || n === '') return dflt;
+  const v = typeof n === 'number' ? n : Number(n);
+  return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt;
+};
+
+/** Coerce a stored config value to a valid tuning object (bad fields → defaults). */
+export function resolveGrokTuning(raw: unknown): GrokVoiceTuning {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const vad = (r.vad && typeof r.vad === 'object' ? r.vad : {}) as Record<string, unknown>;
+  const d = GROK_DEFAULT_TUNING;
+  return {
+    vad: {
+      threshold: clamp(vad.threshold, 0.1, 0.9, d.vad.threshold),
+      silence_duration_ms: Math.round(clamp(vad.silence_duration_ms, 0, 10_000, d.vad.silence_duration_ms)),
+      prefix_padding_ms: Math.round(clamp(vad.prefix_padding_ms, 0, 10_000, d.vad.prefix_padding_ms)),
+    },
+    reasoning_effort: r.reasoning_effort === 'high' ? 'high' : 'none',
+    speed: clamp(r.speed, 0.7, 1.5, d.speed),
+  };
 }
 
 export interface GrokSessionConfigInput {
@@ -146,6 +198,8 @@ export interface GrokSessionConfigInput {
   systemPrompt: string;
   /** Enabled tool definitions from the registry. */
   toolDefs: ToolDefinition[];
+  /** Turn-taking knobs; defaults when omitted. */
+  tuning?: GrokVoiceTuning;
 }
 
 /**
@@ -157,13 +211,21 @@ export interface GrokSessionConfigInput {
  */
 export function buildGrokSessionConfig(input: GrokSessionConfigInput): Record<string, unknown> {
   const { voice, language, languageName, systemPrompt, toolDefs } = input;
+  const tuning = input.tuning ?? GROK_DEFAULT_TUNING;
   return {
     instructions: buildGrokVoiceHeader(languageName) + '\n' + systemPrompt,
     voice: resolveGrokVoice(voice),
     // Server VAD: xAI detects end of speech, commits the buffer and starts the
     // response on its own. Interruptions arrive as input_audio_buffer.
-    // speech_started, which the proxy relays so the browser drops playback.
-    turn_detection: { type: 'server_vad' },
+    // speech_started, which the proxy relays so the browser drops playback and
+    // cancels the in-flight reply upstream.
+    turn_detection: {
+      type: 'server_vad',
+      threshold: tuning.vad.threshold,
+      silence_duration_ms: tuning.vad.silence_duration_ms,
+      prefix_padding_ms: tuning.vad.prefix_padding_ms,
+    },
+    reasoning: { effort: tuning.reasoning_effort },
     audio: {
       input: {
         format: { type: 'audio/pcm', rate: GROK_SAMPLE_RATE },
@@ -171,6 +233,7 @@ export function buildGrokSessionConfig(input: GrokSessionConfigInput): Record<st
       },
       output: {
         format: { type: 'audio/pcm', rate: GROK_SAMPLE_RATE },
+        speed: tuning.speed,
       },
     },
     tools: toRealtimeTools(toolDefs),

@@ -84,6 +84,11 @@ interface GrokSessionState {
   toolChoicePinned: boolean;
   /** Ends the session if the browser never attaches / drops without ending. */
   orphanTimer: NodeJS.Timeout | null;
+  /** A model response is in flight (response.created … response.done). */
+  responseInFlight: boolean;
+  /** Turn latency: when the participant stopped speaking, and first audio since. */
+  lastSpeechStoppedAt: Date | null;
+  firstOutputAt: Date | null;
 }
 
 export class GrokVoiceManager implements VoiceSidebandDelegate {
@@ -131,6 +136,9 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       phaseTimers: [],
       toolChoicePinned: false,
       orphanTimer: null,
+      responseInFlight: false,
+      lastSpeechStoppedAt: null,
+      firstOutputAt: null,
     };
     this.sessions.set(sessionId, state);
     this.armOrphanTimer(sessionId, this.pendingTtlMs, 'client_never_connected');
@@ -333,9 +341,24 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       // --- Participant speech ---------------------------------------------
       case 'input_audio_buffer.speech_started':
         // Barge-in. The browser must drop queued playback or the participant
-        // hears the assistant keep talking over them for a few seconds.
+        // hears the assistant keep talking over them for a few seconds — and
+        // the upstream reply is cancelled so no further audio follows.
         this.sendToClient(sessionId, { type: 'speech_started' });
+        if (state.responseInFlight) {
+          state.responseInFlight = false;
+          try { this.sendUpstream(sessionId, { type: 'response.cancel' }); } catch { /* closing */ }
+        }
         this.finalizeAssistantTurn(sessionId, 'interrupted');
+        break;
+
+      case 'input_audio_buffer.speech_stopped':
+        // Start of the turn-latency clock (docs/grok-voice.md §7a).
+        state.lastSpeechStoppedAt = new Date();
+        state.firstOutputAt = null;
+        break;
+
+      case 'response.created':
+        state.responseInFlight = true;
         break;
 
       case 'conversation.item.input_audio_transcription.updated': {
@@ -358,6 +381,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       // --- Assistant speech -----------------------------------------------
       case 'response.output_audio.delta': {
         if (typeof event.delta !== 'string') break;
+        if (!state.firstOutputAt) state.firstOutputAt = new Date();
         const client = state.client;
         if (client && client.readyState === WebSocket.OPEN) {
           client.send(Buffer.from(event.delta, 'base64'), { binary: true });
@@ -399,6 +423,8 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
       // --- Usage ----------------------------------------------------------
       case 'response.done': {
+        state.responseInFlight = false;
+        await this.recordTurnLatency(sessionId);
         await this.meterResponse(sessionId, event);
         this.finalizeAssistantTurn(sessionId, 'response_done');
         this.sendToClient(sessionId, { type: 'response_done' });
@@ -669,6 +695,31 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       state.meteredResponses.add(responseId);
       const { recordLlmUsage } = await import('../db/index.js');
       await recordLlmUsage(sessionId, 'grok_voice', model, usage.input_tokens ?? null, usage.output_tokens ?? null);
+    }
+  }
+
+  /**
+   * Ground-truth turn latency for the study record and for tuning: the gap
+   * from the participant's end of speech to the first audio byte (TTFA) and to
+   * response.done. Only turns that follow a speech_stopped are measured, so
+   * server-injected turns (opening line, steers, tool continuations) do not
+   * pollute the numbers. Same table the GPT-Live/Realtime path used.
+   */
+  private async recordTurnLatency(sessionId: string): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state?.lastSpeechStoppedAt) return;
+    const userDoneAt = state.lastSpeechStoppedAt;
+    const firstOutputAt = state.firstOutputAt;
+    state.lastSpeechStoppedAt = null;
+    state.firstOutputAt = null;
+    try {
+      const { insertTurnLatency } = await import('../db/latency.queries.js');
+      await insertTurnLatency({
+        sessionId, turnIndex: state.userTurnIndex, userDoneAt, firstOutputAt,
+        responseDoneAt: new Date(), channel: 'realtime',
+      });
+    } catch (err) {
+      console.error('[Grok] turn latency record failed:', err);
     }
   }
 

@@ -231,6 +231,32 @@ xAI spend does not appear in the OpenAI organisation-costs feed the admin
 cost dashboard treats as ground truth; for Grok the `live_usage` estimate is
 the only figure. Invoices at console.x.ai are the source of truth.
 
+## 7a. Turn-taking feel, and the knobs
+
+Grok Voice is a **turn-based** model: it listens, detects the end of speech,
+then replies. It cannot overlap or backchannel the way GPT-Live's full-duplex
+model does, so a Grok conversation always has a walkie-talkie cadence to some
+degree. What can be tuned is how small the gap feels. Admin → System Config →
+"Grok Voice Turn-Taking" (stored as `system_config.grok_voice`, read fresh at
+every session start, no cache):
+
+| Knob | Default | Effect |
+|---|---|---|
+| `vad.silence_duration_ms` | 500 | Silence that ends a turn. Lower = snappier; too low splits pauses into separate turns (the duplicated-turn artefact) |
+| `vad.threshold` | 0.85 | Speech sensitivity, 0.1–0.9 |
+| `vad.prefix_padding_ms` | 333 | Audio kept from before speech was detected |
+| `reasoning_effort` | `none` | `none` = fastest first word; `high` = xAI default, slower |
+| `speed` | 1.0 | Playback speed, 0.7–1.5 |
+
+Barge-in: on `input_audio_buffer.speech_started` the proxy tells the browser
+to flush playback **and** sends `response.cancel` upstream when a reply is in
+flight, so the assistant stops rather than finishing over the participant.
+
+Every participant turn's latency is measured (end of speech → first audio
+byte, and → `response.done`) into `turn_latency` with `channel='realtime'`,
+the same table the earlier voice paths used, so backends and knob settings
+can be compared with numbers rather than impressions.
+
 ## 8. Browser audio
 
 `GrokVoiceClient` runs an `AudioContext` at 24 kHz — the browser resamples

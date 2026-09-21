@@ -51,8 +51,10 @@ import {
   buildGrokOpeningPrompt,
   isGrokVoiceModel,
   resolveGrokVoice,
+  resolveGrokTuning,
   type CrisisContactLike,
 } from '../../utils/grokVoiceConfig.js';
+import { pool } from '../../config/db.js';
 import { grokVoiceManager } from '../../services/grokVoiceManager.service.js';
 import { GROK_SAMPLE_RATE, GROK_VOICE_WS_PATH } from '../../../shared/grokVoiceProtocol.js';
 
@@ -163,6 +165,14 @@ export default function grokSessionRoutes(): Router {
         const isDemoSession =
           isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true;
 
+        // Turn-taking knobs (system_config.grok_voice). Read directly, not via
+        // the ~10-minute getSystemConfig cache: these exist to be tuned between
+        // back-to-back test sessions and must take effect on the next start.
+        const tuningRow = await pool.query<{ config_value: unknown }>(
+          "SELECT config_value FROM system_config WHERE config_key = 'grok_voice'",
+        ).catch(() => ({ rows: [] as Array<{ config_value: unknown }> }));
+        const tuning = resolveGrokTuning(tuningRow.rows[0]?.config_value);
+
         const sessionConfig = buildGrokSessionConfig({
           model: aiModel,
           voice: userVoice,
@@ -170,6 +180,7 @@ export default function grokSessionRoutes(): Router {
           languageName: await getLanguageName(userLanguage),
           systemPrompt,
           toolDefs,
+          tuning,
         });
 
         // xAI issues no session id before the socket opens, and we need one
