@@ -23,6 +23,8 @@ import DemoSwitcher from '../../shared/components/DemoSwitcher';
 import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
 import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
 import { createParticipantSocket } from '../lib/participantSocket';
+import { GrokVoiceClient } from '../lib/grokVoiceClient';
+import type { GrokServerMessage } from '../../../shared/grokVoiceProtocol';
 import { getUserSocket, closeUserSocket } from '../lib/userSocket';
 import { useMessagingUnread } from '../hooks/useMessaging';
 import { getStoredTheme, setTheme } from '../../shared/theme';
@@ -190,6 +192,16 @@ export default function App() {
   // session — otherwise it lingers as "active" and blocks every retry until
   // the duration limit expires.
   const pendingStartSessionRef = useRef<{ id: string; kind: 'realtime' | 'chat' } | null>(null);
+  // ---- Grok Voice (xAI) session state — docs/grok-voice.md -----------------
+  // Which voice backend the CURRENT session runs on. The admin's ai_model
+  // choice decides it at every start. Read by the steer helpers (under Grok the
+  // browser cannot steer the model; the server does) and by stopSession.
+  const voiceBackendRef = useRef<'live' | 'grok'>('live');
+  const grokClientRef = useRef<GrokVoiceClient | null>(null);
+  const grokMicRef = useRef<MediaStream | null>(null);
+  // Caption rows keyed by role + upstream item id, so streamed assistant deltas
+  // land on one row and the final transcript replaces it.
+  const grokRowsRef = useRef<Map<string, string>>(new Map());
   // ---- GPT-Live session state --------------------------------------------
   // All of these are refs rather than state because the data-channel handler is
   // attached once, during startRealtimeSession, and would otherwise read the
@@ -513,6 +525,7 @@ export default function App() {
         peerConnection.current?.getSenders().forEach(sender => {
           if (sender.track) sender.track.enabled = false;
         });
+        grokClientRef.current?.muteMic();
         // Failsafe: if neither the model's end_session nor the server's hard
         // end ever reaches us, close locally rather than hanging forever.
         wrapUpFailsafeRef.current = setTimeout(() => void stopSession(), 120 * 1000);
@@ -646,9 +659,15 @@ export default function App() {
         // Chat has no data channel; the session is live once the fetch returns.
         setIsConnecting(false);
       } else {
-        await startRealtimeSession(checkin);
+        // The voice backend follows the admin's ai_model choice, read fresh at
+        // every start so a switch made after page load still takes effect.
+        if (await detectVoiceBackend() === 'grok') {
+          await startGrokSession(checkin);
+        } else {
+          await startRealtimeSession(checkin);
+        }
         // isConnecting stays true until the data channel opens (or an early
-        // return inside startRealtimeSession already cleared it).
+        // return inside the start function already cleared it).
       }
     } catch (error) {
       console.error('Failed to start session:', error);
@@ -678,6 +697,14 @@ export default function App() {
    */
   function cleanupFailedStart() {
     setIsConnecting(false);
+    if (grokClientRef.current) {
+      grokClientRef.current.stop();
+      grokClientRef.current = null;
+    }
+    if (grokMicRef.current) {
+      grokMicRef.current.getTracks().forEach((t) => t.stop());
+      grokMicRef.current = null;
+    }
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
@@ -1069,6 +1096,7 @@ export default function App() {
    *   left alone — the takeover is still in progress while this runs.
    */
   async function startRealtimeSession(checkin: CheckinData | null = null, recovery = false) {
+    voiceBackendRef.current = 'live';
     // Drives SessionControls.startMicOn. A recovery session resumes a
     // conversation the participant was already speaking in, so it must come
     // back with the microphone live rather than muted behind a preamble it
@@ -1476,148 +1504,7 @@ export default function App() {
       console.log(`Session will end in ${data.session_limits.max_duration_minutes} minutes`);
     }
 
-    // Connect to Socket.io for remote session management. The participant
-    // socket is known to be unreliable through the tunnel (ai-therapist-18);
-    // audio doesn't depend on it (uploaded over plain HTTP) and abandonment
-    // is also handled server-side independent of a clean disconnect (see
-    // sessionLifecycle.service.ts) — this socket is only used for
-    // remote-termination notices and live crisis messages.
-    const socket = createParticipantSocket(newSessionId, 'realtime');
-
-    // Audio capture is started in pc.ontrack below (once both the mic and the
-    // assistant track exist) and runs for the whole session so the server can
-    // record it and relay it live to any admin who chooses to listen.
-
-    // Listen for remote session termination by admin or system
-    socket.on('session:status', (data) => {
-      console.log('Received session:status event:', data);
-      if (data.status === 'ended' && data.remoteTermination) {
-        if (data.endedBy === 'system' && data.reason === 'duration_limit') {
-          toast.warning(data.message || 'Your session has ended due to time limit.');
-        } else {
-          toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
-        }
-        // Via the latest-ref (ai-therapist-113): this handler was created in
-        // the render where sessionId state is still null; a direct
-        // stopSession() call skipped the POST /end, the session_end log and
-        // the post-session snapshot.
-        void stopSessionRef.current();
-      }
-    });
-
-    // Age-eligibility end (ai-therapist-106): the participant disclosed being a
-    // minor. The server has injected goodbye guidance to the model and will
-    // force-end the session after a short grace; the client closes its own
-    // end-session flow (same family as the remote-termination notice above).
-    socket.on('session:eligibility-end', () => {
-      toast.warning('This study is only open to adults 18 and older, so this session is ending. Take good care.');
-      // Latest-ref for the same stale-closure reason as session:status above.
-      void stopSessionRef.current();
-    });
-
-    // Deterministic crisis-resource surfacing: a high-severity flag must not
-    // depend on the model choosing to call show_resource_card — the server's
-    // crisis-emergency event opens the resource card directly.
-    socket.on('session:crisis-emergency', () => {
-      setToolUI({ kind: 'resource', resourceType: 'all' });
-    });
-
-    // Backstop for the content-filter takeover (incident 2026-09-11). The
-    // server's sideband sees the same termination we do; `session.closed` on the
-    // data channel is faster and more reliable, so this only matters when the
-    // transport died with it. handleModerationTermination dedupes the two.
-    socket.on('session:moderation-terminated', (data: { sessionId?: string } | undefined) => {
-      console.warn('[Live] Moderation termination announced over the socket.');
-      void moderationHandlerRef.current(data?.sessionId ?? null);
-    });
-
-    // Listen for crisis intervention messages
-    socket.on('messages:new', (data) => {
-      console.log('[Crisis] Received messages:new event:', data);
-      console.log('[Crisis] DataChannel state:', dataChannelRef.current ? dataChannelRef.current.readyState : 'null');
-
-      // Handle both array and single object formats
-      const messages = Array.isArray(data) ? data : [data];
-
-      messages.forEach(msg => {
-        // Handle AI guidance messages (hidden from user, sent to AI)
-        if (msg.message_type === 'ai_guidance' && msg.metadata?.hidden_from_user) {
-          console.log('[Crisis] Steering the live model with AI guidance');
-          sendInvisiblePrompt(msg.content);
-        }
-        // Crisis intervention and admin messages: send to AI to speak them
-        else if (msg.message_type === 'crisis_intervention' || msg.message_type === 'crisis_emergency' || msg.message_type === 'admin_visible') {
-          console.log('[Crisis] Sending intervention message to AI to speak:', msg.content.substring(0, 100));
-          // Escape single quotes in the message content
-          const escapedContent = msg.content.replace(/'/g, "\\'");
-          // Wrap in "Say this phrase exactly" format so AI speaks it. An
-          // instruction requests the wording; it does not guarantee it, which is
-          // why the same text is also shown in the chat log below.
-          const promptToSpeak = `Say this phrase exactly: '${escapedContent}'`;
-
-          // Retry sending if data channel isn't ready yet
-          const trySendMessage = (attempt = 0) => {
-            const maxAttempts = 10;
-            if (dataChannelRef.current && dataChannelRef.current.readyState === 'open' && liveStartedRef.current) {
-              console.log('[Crisis] Session is live, steering the model');
-              sendInvisiblePrompt(promptToSpeak);
-            } else if (attempt < maxAttempts) {
-              const state = dataChannelRef.current ? dataChannelRef.current.readyState : 'null';
-              console.log(`[Crisis] Session not ready (channel=${state}, started=${liveStartedRef.current}), retry ${attempt + 1}/${maxAttempts} in 500ms`);
-              setTimeout(() => trySendMessage(attempt + 1), 500);
-            } else {
-              console.error('[Crisis] Failed to send message after max retries - session never became ready');
-            }
-          };
-
-          trySendMessage();
-
-          // Also display in chat log
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: "system",
-              text: msg.content
-            }
-          ]);
-        }
-      });
-    });
-
-    // Listen for admin messages during active session
-    socket.on('admin:message', (data) => {
-      console.log('Received admin message:', data);
-      const { message, messageType, senderName } = data;
-
-      if (messageType === 'visible') {
-        console.log('[Admin] Received visible message:', message);
-
-        // Display message to user only — do NOT forward to the bot
-        const fullMessage = `[Message from ${senderName}]: ${message}`;
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: "system",
-            text: fullMessage,
-            isAdminMessage: true
-          }
-        ]);
-      } else if (messageType === 'invisible') {
-        // Steer the AI without the participant seeing it. Note the behaviour
-        // change GPT-Live forces: Realtime inserted this as a hidden turn in the
-        // participant's voice, but Live has no conversation item list, so it
-        // becomes an application instruction instead of impersonation.
-        sendInvisiblePrompt(message, `Admin invisible prompt: ${message}`);
-      }
-    });
-
-    socket.on('disconnect', () => {
-      console.log('Socket.io disconnected');
-    });
-
-    socketRef.current = socket;
+    wireVoiceSocket(newSessionId);
 
     logConversation({
       sessionId: newSessionId,
@@ -1703,6 +1590,473 @@ export default function App() {
       }
       void stopSessionRef.current();
     }, LIVE_START_TIMEOUT_MS);
+  }
+
+  // =========================================================================
+  // Grok Voice (xAI) — docs/grok-voice.md
+  //
+  // The parallel voice backend. Selected by the admin's ai_model choice
+  // (a grok-voice-* id) and nothing else. Instead of WebRTC to the vendor, the
+  // browser opens ONE WebSocket to our server, which proxies audio to xAI and
+  // owns everything else: transcripts, crisis scoring, tools, steering, usage.
+  // The browser sends microphone PCM and receives assistant PCM plus a small
+  // set of JSON notices (shared/grokVoiceProtocol.ts). It cannot steer the
+  // model — there is no client-side instructions channel to protect.
+  // =========================================================================
+
+  /** Which backend to use, from the admin's ai_model choice. */
+  async function detectVoiceBackend(): Promise<'live' | 'grok'> {
+    try {
+      const res = await fetch('/api/config/ai-model', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json() as { voice_backend?: string };
+        if (data.voice_backend === 'grok') return 'grok';
+      }
+    } catch (err) {
+      console.warn('[Voice] Could not read the voice backend; assuming GPT-Live:', err);
+    }
+    return 'live';
+  }
+
+  /** Upsert the caption row for one Grok transcript notice. */
+  function applyGrokTranscript(msg: Extract<GrokServerMessage, { type: 'transcript' }>) {
+    if (!msg.text) return;
+    const key = `${msg.role}:${msg.itemId}`;
+    const rows = grokRowsRef.current;
+    const existing = rows.get(key);
+    if (existing) {
+      // Participant text arrives cumulative (replace); assistant text streams
+      // as deltas (append) until the final transcript replaces the row.
+      const replace = msg.final || msg.role === 'user';
+      setMessages(prev => prev.map(m => (m.id === existing ? { ...m, text: replace ? msg.text : m.text + msg.text } : m)));
+      return;
+    }
+    const id = crypto.randomUUID();
+    rows.set(key, id);
+    setMessages(prev => [...prev, { id, role: msg.role, text: msg.text }]);
+  }
+
+  /** UI-only: open the overlay for a tool the SERVER is executing. */
+  async function handleGrokToolCall(msg: Extract<GrokServerMessage, { type: 'tool_call' }>) {
+    if (handledToolCallsRef.current.has(msg.callId)) return;
+    handledToolCallsRef.current.add(msg.callId);
+    const fn = (fns as Record<string, ((args: unknown) => Promise<unknown>) | undefined>)[msg.name];
+    if (fn === undefined) return;
+    const result = await fn(msg.args);
+    logConversation({
+      sessionId: liveSessionIdRef.current,
+      role: 'system',
+      type: 'function_call',
+      message: `Function ${msg.name} called`,
+      extras: { args: msg.args, result },
+    });
+  }
+
+  function handleGrokMessage(msg: GrokServerMessage) {
+    switch (msg.type) {
+      case 'transcript':
+        applyGrokTranscript(msg);
+        return; // several a second; not worth an events-panel entry
+      case 'tool_call':
+        void handleGrokToolCall(msg);
+        break;
+      case 'error':
+        reportClientEvent('data_channel_error', {
+          stage: 'grok_error', code: msg.code ?? null, message: msg.message.slice(0, 200),
+        }, liveSessionIdRef.current);
+        logConversation({
+          sessionId: liveSessionIdRef.current, role: 'system', type: 'system',
+          message: `Grok API error: ${msg.message}`, extras: { code: msg.code ?? null },
+        });
+        break;
+      case 'closed':
+        // The server ended the session (participant end, time limit, model
+        // end_session, admin, or an upstream loss). Run the normal teardown via
+        // the latest-ref unless a stopSession() is already doing it.
+        liveFinalizedRef.current = true;
+        if (!isTearingDownRef.current) {
+          if (msg.reason !== 'ended') {
+            toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+            reportClientEvent('webrtc_disconnected', { stage: 'grok_closed', reason: msg.reason }, liveSessionIdRef.current);
+          }
+          void stopSessionRef.current();
+        }
+        break;
+      default:
+        break;
+    }
+    setEvents((prev) => [{ ...msg, timestamp: new Date().toLocaleTimeString() }, ...prev].slice(0, 200));
+  }
+
+  async function startGrokSession(checkin: CheckinData | null = null) {
+    setIsRecoverySession(false);
+    voiceBackendRef.current = 'grok';
+    liveSessionIdRef.current = null;
+    liveStartedRef.current = false;
+    liveFinalizedRef.current = false;
+    liveClosedWaiterRef.current = null;
+    isTearingDownRef.current = false;
+    handledToolCallsRef.current = new Set();
+    grokRowsRef.current = new Map();
+    captionRowsRef.current = { user: [], assistant: [] };
+    moderationHandledRef.current = false;
+    moderationTakeoverRef.current = false;
+    moderationVoiceSessionIdRef.current = null;
+    moderationVoiceAttemptsRef.current = 0;
+
+    // Microphone first: a denied permission must never create a session.
+    const ms = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    grokMicRef.current = ms;
+    setLocalStream(ms);
+
+    const abortStart = () => {
+      ms.getTracks().forEach((t) => t.stop());
+      grokMicRef.current = null;
+      setLocalStream(null);
+      setIsConnecting(false);
+    };
+
+    // Our server runs the study's gates and creates the session; nothing about
+    // xAI comes back — just the id and the path of the proxy socket.
+    const response = await fetch('/api/grok/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice: sessionSettings.voice, language: sessionSettings.language, checkin }),
+    });
+
+    if (response.status === 429) {
+      const errorData = await response.json();
+      toast.error(errorData.message || 'You have reached your session limit. Please try again later.');
+      setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
+      abortStart();
+      return;
+    }
+    if (response.status === 403) {
+      const errorData = await response.json().catch(() => null);
+      if (errorData?.error === 'quiet_hours') {
+        setQuietHours({ blocksYou: true, ...errorData.quietHours });
+        abortStart();
+        return;
+      }
+      if (errorData?.error === 'study_status') {
+        setStudyStatusBlock(errorData.studyStatus === 'paused' ? 'paused' : 'withdrawn');
+        abortStart();
+        return;
+      }
+    }
+    if (response.status === 409) {
+      const errorData = await response.json().catch(() => null);
+      toast.error(errorData?.message || 'Voice sessions are temporarily unavailable. Please refresh the page and try again.');
+      console.warn('Grok backend not active/configured:', errorData);
+      abortStart();
+      return;
+    }
+    if (!response.ok) {
+      const err = new Error(`Grok session request failed with status ${response.status}`);
+      err.name = 'SdpFetchError'; // reported as a session-request failure, not a WebRTC one
+      throw err;
+    }
+
+    const data = await response.json();
+    if (data.session?.exists) {
+      toast.warning(data.message || 'You already have an active session. Please end it before starting a new one.');
+      abortStart();
+      return;
+    }
+    const newSessionId = data.session_id as string | undefined;
+    const wsPath = data.ws_path as string | undefined;
+    if (!newSessionId || !wsPath) {
+      const bad = new Error('Grok session response is missing session_id or ws_path');
+      bad.name = 'SdpFetchError';
+      throw bad;
+    }
+
+    liveSessionIdRef.current = newSessionId;
+    setSessionId(newSessionId);
+    setSessionType('realtime');
+    pendingStartSessionRef.current = { id: newSessionId, kind: 'realtime' };
+
+    if (data.session_limits && data.session_limits.max_duration_minutes) {
+      const durationMs = data.session_limits.max_duration_minutes * 60 * 1000;
+      setSessionEndTime(Date.now() + durationMs);
+      setTimeRemaining(durationMs);
+    }
+
+    wireVoiceSocket(newSessionId);
+
+    logConversation({ sessionId: newSessionId, role: 'system', type: 'session_start', message: 'Session started' });
+    logConversation({
+      sessionId: newSessionId, role: 'system', type: 'system', message: 'Session settings',
+      extras: {
+        id: newSessionId,
+        backend: 'grok',
+        voice: data.voice ?? sessionSettings.voice,
+        language: data.language ?? sessionSettings.language,
+        session_limits: data.session_limits ?? null,
+      },
+    });
+
+    const client = new GrokVoiceClient(wsPath, ms, {
+      onMessage: (msg) => handleGrokMessage(msg),
+      onClose: ({ code, reason, clean }) => {
+        if (clean || isTearingDownRef.current) return;
+        console.error(`[Grok] Voice socket dropped: ${code} ${reason}`);
+        reportClientEvent('webrtc_disconnected', { stage: 'grok_socket_dropped', code }, liveSessionIdRef.current);
+        toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+        void stopSessionRef.current();
+      },
+      onError: (message) => {
+        reportClientEvent('data_channel_error', { stage: 'grok_socket_error', message }, liveSessionIdRef.current);
+      },
+    });
+    grokClientRef.current = client;
+
+    // Resolves once the server reports the xAI session configured. Throws on
+    // timeout or refusal, which startSession() turns into a toast + cleanup.
+    await client.connect();
+
+    liveStartedRef.current = true;
+    pendingStartSessionRef.current = null;
+    setIsConnecting(false);
+    setIsSessionActive(true);
+    setEvents([]);
+    setMessages([]);
+    setAssistantStream('');
+    startPeriodicFlush();
+    setRemoteStream(client.remoteStream);
+
+    // Session recording: same consent-gated tee and HTTP uploader as the
+    // GPT-Live path, tapping the mic and the assistant playback stream.
+    if (!audioTeeRef.current && features.session_recording_enabled && client.remoteStream) {
+      const uploader = createAudioUploader(newSessionId);
+      audioUploaderRef.current = uploader;
+      const participantUploader = createAudioUploader(newSessionId, 400, 'participant');
+      participantUploaderRef.current = participantUploader;
+      audioTeeRef.current = startMixedTee(
+        [ms, client.remoteStream],
+        (pcm, sampleRate) => { uploader.push(pcm, sampleRate); },
+        { stream: ms, onChunk: (pcm, sampleRate) => { participantUploader.push(pcm, sampleRate); } },
+      );
+    }
+  }
+
+  /** Teardown for a Grok session (called from stopSession). */
+  async function stopGrokSession(endingSessionId: string | null) {
+    if (isTearingDownRef.current) return;
+    isTearingDownRef.current = true;
+    voiceTeardownInFlightRef.current = true;
+
+    // Tell the server first so upstream billing stops immediately; POST /end
+    // below runs the rest of the server-side teardown.
+    grokClientRef.current?.end();
+
+    logConversation({ sessionId: endingSessionId, role: 'system', type: 'session_end', message: 'Session ended' });
+    stopPeriodicFlush();
+    await flushLogs();
+
+    if (endingSessionId) {
+      try {
+        await fetch(`/api/sessions/${endingSessionId}/end`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (error) {
+        console.error('Failed to end session:', error);
+      }
+    }
+
+    if (socketRef.current) {
+      if (endingSessionId) socketRef.current.emit('session:leave', { sessionId: endingSessionId });
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
+
+    if (audioTeeRef.current) {
+      audioTeeRef.current.stop();
+      audioTeeRef.current = null;
+    }
+    if (audioUploaderRef.current) {
+      audioUploaderRef.current.stop();
+      audioUploaderRef.current = null;
+    }
+    if (participantUploaderRef.current) {
+      participantUploaderRef.current.stop();
+      participantUploaderRef.current = null;
+    }
+
+    grokClientRef.current?.stop();
+    grokClientRef.current = null;
+    grokMicRef.current?.getTracks().forEach((t) => t.stop());
+    grokMicRef.current = null;
+
+    setIsSessionActive(false);
+    setLocalStream(null);
+    setRemoteStream(null);
+    setSessionId(null);
+    setSessionType(null);
+    setSessionEndTime(null);
+    setTimeRemaining(null);
+    liveStartedRef.current = false;
+    voiceTeardownInFlightRef.current = false;
+  }
+
+  /**
+   * Socket.io wiring shared by both voice backends: remote termination,
+   * eligibility end, crisis-resource surfacing, crisis/admin messages. The
+   * socket is unreliable through the tunnel (ai-therapist-18), so nothing
+   * here is load-bearing for either backend.
+   */
+  function wireVoiceSocket(newSessionId: string): Socket {
+    // Connect to Socket.io for remote session management. The participant
+    // socket is known to be unreliable through the tunnel (ai-therapist-18);
+    // audio doesn't depend on it (uploaded over plain HTTP) and abandonment
+    // is also handled server-side independent of a clean disconnect (see
+    // sessionLifecycle.service.ts) — this socket is only used for
+    // remote-termination notices and live crisis messages.
+    const socket = createParticipantSocket(newSessionId, 'realtime');
+
+    // Audio capture is started in pc.ontrack below (once both the mic and the
+    // assistant track exist) and runs for the whole session so the server can
+    // record it and relay it live to any admin who chooses to listen.
+
+    // Listen for remote session termination by admin or system
+    socket.on('session:status', (data) => {
+      console.log('Received session:status event:', data);
+      if (data.status === 'ended' && data.remoteTermination) {
+        if (data.endedBy === 'system' && data.reason === 'duration_limit') {
+          toast.warning(data.message || 'Your session has ended due to time limit.');
+        } else {
+          toast.warning(`Your session has been remotely ended by ${data.endedBy}. The session will now close.`);
+        }
+        // Via the latest-ref (ai-therapist-113): this handler was created in
+        // the render where sessionId state is still null; a direct
+        // stopSession() call skipped the POST /end, the session_end log and
+        // the post-session snapshot.
+        void stopSessionRef.current();
+      }
+    });
+
+    // Age-eligibility end (ai-therapist-106): the participant disclosed being a
+    // minor. The server has injected goodbye guidance to the model and will
+    // force-end the session after a short grace; the client closes its own
+    // end-session flow (same family as the remote-termination notice above).
+    socket.on('session:eligibility-end', () => {
+      toast.warning('This study is only open to adults 18 and older, so this session is ending. Take good care.');
+      // Latest-ref for the same stale-closure reason as session:status above.
+      void stopSessionRef.current();
+    });
+
+    // Deterministic crisis-resource surfacing: a high-severity flag must not
+    // depend on the model choosing to call show_resource_card — the server's
+    // crisis-emergency event opens the resource card directly.
+    socket.on('session:crisis-emergency', () => {
+      setToolUI({ kind: 'resource', resourceType: 'all' });
+    });
+
+    // Backstop for the content-filter takeover (incident 2026-09-11). The
+    // server's sideband sees the same termination we do; `session.closed` on the
+    // data channel is faster and more reliable, so this only matters when the
+    // transport died with it. handleModerationTermination dedupes the two.
+    socket.on('session:moderation-terminated', (data: { sessionId?: string } | undefined) => {
+      console.warn('[Live] Moderation termination announced over the socket.');
+      void moderationHandlerRef.current(data?.sessionId ?? null);
+    });
+
+    // Listen for crisis intervention messages
+    socket.on('messages:new', (data) => {
+      console.log('[Crisis] Received messages:new event:', data);
+      console.log('[Crisis] DataChannel state:', dataChannelRef.current ? dataChannelRef.current.readyState : 'null');
+
+      // Handle both array and single object formats
+      const messages = Array.isArray(data) ? data : [data];
+
+      messages.forEach(msg => {
+        // Handle AI guidance messages (hidden from user, sent to AI)
+        if (msg.message_type === 'ai_guidance' && msg.metadata?.hidden_from_user) {
+          console.log('[Crisis] Steering the live model with AI guidance');
+          sendInvisiblePrompt(msg.content);
+        }
+        // Crisis intervention and admin messages: send to AI to speak them
+        else if (msg.message_type === 'crisis_intervention' || msg.message_type === 'crisis_emergency' || msg.message_type === 'admin_visible') {
+          console.log('[Crisis] Sending intervention message to AI to speak:', msg.content.substring(0, 100));
+          // Escape single quotes in the message content
+          const escapedContent = msg.content.replace(/'/g, "\\'");
+          // Wrap in "Say this phrase exactly" format so AI speaks it. An
+          // instruction requests the wording; it does not guarantee it, which is
+          // why the same text is also shown in the chat log below.
+          const promptToSpeak = `Say this phrase exactly: '${escapedContent}'`;
+
+          // Retry sending if data channel isn't ready yet
+          const trySendMessage = (attempt = 0) => {
+            const maxAttempts = 10;
+            if (voiceBackendRef.current === 'grok') {
+              // The server injected this over its xAI socket already (the
+              // sideband path is primary; this relay is the GPT-Live fallback).
+              return;
+            }
+            if (dataChannelRef.current && dataChannelRef.current.readyState === 'open' && liveStartedRef.current) {
+              console.log('[Crisis] Session is live, steering the model');
+              sendInvisiblePrompt(promptToSpeak);
+            } else if (attempt < maxAttempts) {
+              const state = dataChannelRef.current ? dataChannelRef.current.readyState : 'null';
+              console.log(`[Crisis] Session not ready (channel=${state}, started=${liveStartedRef.current}), retry ${attempt + 1}/${maxAttempts} in 500ms`);
+              setTimeout(() => trySendMessage(attempt + 1), 500);
+            } else {
+              console.error('[Crisis] Failed to send message after max retries - session never became ready');
+            }
+          };
+
+          trySendMessage();
+
+          // Also display in chat log
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: "system",
+              text: msg.content
+            }
+          ]);
+        }
+      });
+    });
+
+    // Listen for admin messages during active session
+    socket.on('admin:message', (data) => {
+      console.log('Received admin message:', data);
+      const { message, messageType, senderName } = data;
+
+      if (messageType === 'visible') {
+        console.log('[Admin] Received visible message:', message);
+
+        // Display message to user only — do NOT forward to the bot
+        const fullMessage = `[Message from ${senderName}]: ${message}`;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "system",
+            text: fullMessage,
+            isAdminMessage: true
+          }
+        ]);
+      } else if (messageType === 'invisible') {
+        // Steer the AI without the participant seeing it. Note the behaviour
+        // change GPT-Live forces: Realtime inserted this as a hidden turn in the
+        // participant's voice, but Live has no conversation item list, so it
+        // becomes an application instruction instead of impersonation.
+        sendInvisiblePrompt(message, `Admin invisible prompt: ${message}`);
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Socket.io disconnected');
+    });
+
+    socketRef.current = socket;
+    return socket;
   }
 
   /**
@@ -1815,6 +2169,12 @@ export default function App() {
       setSessionType(null);
       setSessionEndTime(null);
       setTimeRemaining(null);
+      return;
+    }
+
+    // ---- Handle a Grok Voice session -------------------------------------
+    if (voiceBackendRef.current === 'grok') {
+      await stopGrokSession(sessionId);
       return;
     }
 
@@ -2108,6 +2468,13 @@ export default function App() {
    * the participant the exact text (crisis interventions) also render it.
    */
   function sendInvisiblePrompt(text: string, logMessage: string | null = null) {
+    // Under Grok the browser has no steer channel by design: every steer that
+    // reaches this function (crisis guidance, admin messages, tool outcomes)
+    // has already been delivered by the server over its own upstream socket.
+    if (voiceBackendRef.current === 'grok') {
+      console.log('[sendInvisiblePrompt] Grok session: steer is server-side; skipping client copy.');
+      return;
+    }
     console.log('[sendInvisiblePrompt] Appending instructions, length:', text.length);
     sendClientEvent({
       type: "session.instructions.append",

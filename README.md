@@ -6,6 +6,7 @@ A real-time, voice-based AI therapy research demo built on the OpenAI Realtime A
 
 * **Real-time Voice Interaction**: Low-latency conversations over WebRTC using the OpenAI Realtime API, with a server-side "sideband" WebSocket observer for live monitoring and steering.
 * **Chat-Only Fallback**: A text-based therapy flow (chat completions) when voice is disabled.
+* **Two voice backends, one switch**: OpenAI GPT-Live (WebRTC) or xAI Grok Voice (server-side proxy), selected per deployment by `system_config.ai_model` — see `docs/gpt-live.md` and `docs/grok-voice.md`.
 * **Multi-language and Voice Support**: 12+ languages and 10 OpenAI voices, selectable per participant.
 * **PHI Redaction**: All 18 HIPAA PHI identifier categories are redacted by an AI pass once per session at session end; researchers see redacted transcripts, therapists see the originals.
 * **Live Monitoring**: Admins watch active sessions in real time (transcript + mixed session audio) and can send visible or invisible steering messages.

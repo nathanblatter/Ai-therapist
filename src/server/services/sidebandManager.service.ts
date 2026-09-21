@@ -172,8 +172,33 @@ interface LiveSessionState {
   reconnectAttempts: number;
 }
 
+/**
+ * A second voice backend that owns some sessions and answers the same control
+ * surface (docs/grok-voice.md). The GPT-Live manager is what every call site
+ * imports — crisisIntervention, sessionLifecycle, toolRegistry, the admin
+ * routes, index.ts — so rather than rewriting ~20 call sites and their test
+ * mocks, a delegate registers here and each public method forwards to it for
+ * the sessions it owns. Registration happens once at startup (index.ts); in
+ * unit tests nothing registers and behaviour is exactly as before.
+ */
+export interface VoiceSidebandDelegate {
+  /** Does this backend own the session (attached, connecting, or closing)? */
+  owns(sessionId: string): boolean;
+  isConnected(sessionId: string): boolean;
+  getActiveConnections(): string[];
+  tryInject(sessionId: string, role: 'system' | 'user', text: string, respond: boolean): Promise<boolean>;
+  injectMessage(sessionId: string, role: 'system' | 'user', text: string, respond: boolean): Promise<void>;
+  updateSession(sessionId: string, updates: Record<string, unknown>): Promise<void>;
+  interrupt(sessionId: string): Promise<void>;
+  createResponse(sessionId: string, response?: Record<string, unknown>): Promise<void>;
+  triggerTool(sessionId: string, toolName: string, args?: Record<string, unknown>): Promise<void>;
+  disconnect(sessionId: string, opts?: { graceMs?: number }): Promise<void>;
+  shutdown(): Promise<void>;
+}
+
 export class SidebandManager {
   private sessions = new Map<string, LiveSessionState>();
+  private delegates: VoiceSidebandDelegate[] = [];
   /** Sessions that have ended. Never re-attach: the live session id is gone. */
   private endedSessions = new Set<string>();
   /** Monotonic attach counter per session, so reconnects mint distinct row ids. */
@@ -194,6 +219,21 @@ export class SidebandManager {
    * no per-turn completion event to restore on, so this is a fixed window.
    */
   private readonly toolChoiceResetMs = 45000;
+
+  /** Register another voice backend (see VoiceSidebandDelegate). Idempotent. */
+  registerDelegate(delegate: VoiceSidebandDelegate): void {
+    if (!this.delegates.includes(delegate)) this.delegates.push(delegate);
+  }
+
+  /** Test hook. */
+  _clearDelegatesForTests(): void {
+    this.delegates = [];
+  }
+
+  private delegateFor(sessionId: string): VoiceSidebandDelegate | null {
+    for (const d of this.delegates) if (d.owns(sessionId)) return d;
+    return null;
+  }
 
   /** Next attach sequence for a session. Cleared on disconnect with the rest. */
   private nextAttachSeq(sessionId: string): number {
@@ -1036,6 +1076,8 @@ export class SidebandManager {
    * the voice model talk.
    */
   async tryInject(sessionId: string, _role: 'system' | 'user', text: string, _respond: boolean): Promise<boolean> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.tryInject(sessionId, _role, text, _respond);
     if (!this.isConnected(sessionId)) return false;
     try {
       await this.appendInstructions(sessionId, text);
@@ -1080,6 +1122,8 @@ export class SidebandManager {
     text: string,
     _respond: boolean,
   ): Promise<void> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.injectMessage(sessionId, _role, text, _respond);
     await this.appendInstructions(sessionId, text);
   }
 
@@ -1094,6 +1138,8 @@ export class SidebandManager {
    * content lives anyway. Other keys are forwarded to the backend config as-is.
    */
   async updateSession(sessionId: string, updates: Record<string, unknown>): Promise<void> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.updateSession(sessionId, updates);
     await this.updateDelegation(sessionId, updates);
   }
 
@@ -1106,6 +1152,8 @@ export class SidebandManager {
    * treat this as a request, not a guarantee.
    */
   async interrupt(sessionId: string): Promise<void> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.interrupt(sessionId);
     await this.requestStopSpeaking(sessionId);
   }
 
@@ -1120,6 +1168,8 @@ export class SidebandManager {
    * silently sent and rejected by the API.
    */
   async createResponse(sessionId: string, response?: Record<string, unknown>): Promise<void> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.createResponse(sessionId, response);
     if (response && Object.keys(response).length > 0) {
       console.warn(
         '[Live] createResponse() overrides are not supported by GPT-Live and were ignored. ' +
@@ -1144,6 +1194,8 @@ export class SidebandManager {
    * the rest of the session.
    */
   async triggerTool(sessionId: string, toolName: string, args?: Record<string, unknown>): Promise<void> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.triggerTool(sessionId, toolName, args);
     await this.updateDelegation(sessionId, { tool_choice: { type: 'function', name: toolName } });
 
     const argsContext = args && Object.keys(args).length > 0
@@ -1271,47 +1323,15 @@ export class SidebandManager {
     const state = this.sessions.get(sessionId);
     if (!state || state.phaseTimers.length > 0) return;
 
-    const { getSystemConfig, getActiveModality } = await import('../utils/sessionHelpers.js');
-    const config = await getSystemConfig();
-    const features = (config.features ?? {}) as Record<string, unknown>;
-    if (features.phase_guidance_enabled === false) return;
-
-    const limits = (config.session_limits ?? {}) as { enabled?: boolean; max_duration_minutes?: number };
-    if (!limits.enabled || !limits.max_duration_minutes) return;
-
-    const result = await pool.query<{ created_at: Date }>(
-      'SELECT created_at FROM therapy_sessions WHERE session_id = $1', [sessionId],
-    );
-    const createdAt = result.rows[0]?.created_at;
-    if (!createdAt) return;
-
-    const totalMs = limits.max_duration_minutes * 60 * 1000;
-    const elapsedMs = Date.now() - new Date(createdAt).getTime();
-    const minutesLeftAt = (fraction: number) => Math.max(1, Math.round((totalMs * (1 - fraction)) / 60000));
-
-    const modality = await getActiveModality();
-    const modalityPhases = modality?.preset.phases;
-
-    const phases: Array<{ at: number; text: string }> =
-      modalityPhases && modalityPhases.length > 0
-        ? modalityPhases.map(p => ({
-            at: p.at,
-            text: p.guidance + (p.at >= 0.8 ? ` About ${minutesLeftAt(p.at)} minutes remain — close warmly as this phase finishes.` : ''),
-          }))
-        : [
-            { at: 0.6, text: 'The session is past its halfway point. Begin gently consolidating: reflect the main themes so far rather than opening new topics.' },
-            { at: 0.85, text: `About ${minutesLeftAt(0.85)} minutes remain. Begin winding down: summarize what was discussed, invite final thoughts, and close warmly.` },
-          ];
-    phases.sort((a, b) => a.at - b.at);
-
-    for (const phase of phases) {
-      const delay = totalMs * phase.at - elapsedMs;
-      if (delay <= 0) continue;
+    // The schedule itself is shared with the Grok Voice proxy
+    // (utils/phaseGuidance.ts) so both backends nudge at the same points.
+    const { buildPhaseNudgeSchedule } = await import('../utils/phaseGuidance.js');
+    for (const phase of await buildPhaseNudgeSchedule(sessionId)) {
       const timer = setTimeout(() => {
         this.tryInject(sessionId, 'system', phase.text, false)
           .then(ok => ok && console.log(`[Live] Phase nudge (${phase.at * 100}%) sent to ${sessionId.substring(0, 12)}...`))
           .catch(err => console.error('[Live] Phase nudge failed:', err));
-      }, delay);
+      }, phase.delayMs);
       timer.unref?.();
       state.phaseTimers.push(timer);
     }
@@ -1470,6 +1490,8 @@ export class SidebandManager {
    * can prevent the final event from ever arriving, leaving usage unconfirmed.
    */
   async disconnect(sessionId: string, opts: { graceMs?: number } = {}): Promise<void> {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.disconnect(sessionId, opts);
     this.endedSessions.add(sessionId);
     if (this.endedSessions.size > 1000) {
       for (const id of this.endedSessions) {
@@ -1594,12 +1616,15 @@ export class SidebandManager {
    * were recorded as neither delivered nor undelivered.
    */
   getActiveConnections(): string[] {
-    return Array.from(this.sessions.entries())
+    const own = Array.from(this.sessions.entries())
       .filter(([, state]) => state.ws.readyState === WebSocket.OPEN)
       .map(([sessionId]) => sessionId);
+    return own.concat(...this.delegates.map(d => d.getActiveConnections()));
   }
 
   isConnected(sessionId: string): boolean {
+    const delegate = this.delegateFor(sessionId);
+    if (delegate) return delegate.isConnected(sessionId);
     const state = this.sessions.get(sessionId);
     return !!state && state.ws.readyState === WebSocket.OPEN;
   }
@@ -1610,6 +1635,9 @@ export class SidebandManager {
   }
 
   async shutdown(): Promise<void> {
+    for (const d of this.delegates) {
+      await d.shutdown().catch(err => console.error('[Live] delegate shutdown failed:', err));
+    }
     console.log('[Live] Shutting down all Live sideband connections...');
     for (const sessionId of Array.from(this.sessions.keys())) {
       // No graceful close on shutdown: the process is going away and waiting on

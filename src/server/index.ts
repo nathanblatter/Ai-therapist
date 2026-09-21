@@ -52,6 +52,7 @@ import evalsRoutes from "./routes/admin/evals.routes.js";
 import chatRoutes from "./routes/public/chat.routes.js";
 import sessionsRoutes from "./routes/public/sessions.routes.js";
 import liveSessionRoutes from "./routes/public/liveSession.routes.js";
+import grokSessionRoutes from "./routes/public/grokSession.routes.js";
 import logsRoutes from "./routes/public/logs.routes.js";
 import clientEventsRoutes from "./routes/public/clientEvents.routes.js";
 import engagementEventsRoutes from "./routes/public/engagementEvents.routes.js";
@@ -122,7 +123,12 @@ const io = new Server(httpServer, {
       : 'http://localhost:5173',
     credentials: true
   },
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  // The Grok Voice proxy handles its own raw WebSocket upgrades on the same
+  // HTTP server (utils/grokVoiceUpgrade.ts). engine.io's default is to kill
+  // any upgrade nobody wrote to within a second; ours always answers faster
+  // than that, but there is no reason to race it.
+  destroyUpgrade: false,
 });
 
 // Fan socket.io packets (rooms/broadcasts: admin-broadcast, session:<id>, etc.)
@@ -191,6 +197,8 @@ if (process.env.NODE_ENV === 'production') {
         'font-src': ["'self'", 'data:'],
         // Same-origin API/socket.io + OpenAI Realtime (https://api.openai.com for token/config,
         // wss: for WebRTC media). Media streams and RTC endpoints use blob: URIs.
+        // The Grok Voice proxy socket is same-origin (wss://<host>/api/grok/voice/…),
+        // covered by 'self'; the browser never connects to api.x.ai.
         'connect-src': ["'self'", 'https://api.openai.com', 'wss:'],
         'worker-src': ["'self'", 'blob:'], // audio worklets
         'object-src': ["'none'"],
@@ -324,6 +332,30 @@ io.use((socket: AuthSocket, next) => {
     }
   });
 });
+
+// ==================== GROK VOICE PROXY ====================
+// Browser <-WS-> this server <-WS-> api.x.ai. The manager registers itself as
+// a delegate of the GPT-Live sideband so every existing control call site
+// (crisis steering, admin routes, session end) reaches Grok sessions unchanged.
+import('./services/sidebandManager.service.js')
+  .then(async ({ sidebandManager }) => {
+    const { grokVoiceManager } = await import('./services/grokVoiceManager.service.js');
+    const { attachGrokVoiceUpgrade } = await import('./utils/grokVoiceUpgrade.js');
+    const { canAccessSession } = await import('./utils/sessionOwnership.js');
+    sidebandManager.registerDelegate(grokVoiceManager);
+    attachGrokVoiceUpgrade(httpServer, {
+      sessionMiddleware,
+      canAccess: async (req, sessionId) => {
+        // Cookie ownership first (no DB hit); logged-in owners whose cookie
+        // was lost fall back to the user_id check — same rule as the routes.
+        if ((req.session?.ownedSessions ?? []).includes(sessionId)) return true;
+        const info = await getSessionAccessInfo(sessionId);
+        return !!info && info.status === 'active' && canAccessSession(req, info, sessionId);
+      },
+      onClient: (sessionId, ws) => grokVoiceManager.attachClient(sessionId, ws),
+    });
+  })
+  .catch(err => console.error('[Grok] Failed to wire the voice proxy:', err));
 
 // Connection handler
 io.on('connection', (socket: AuthSocket) => {
@@ -630,6 +662,9 @@ app.use(sidebandRoutes());
 // ===================== Session Management API Routes =====================
 // Public session create/list/view/end + register-call -> routes/public/sessions.routes.ts.
 app.use(liveSessionRoutes());
+// Grok Voice (xAI) — the parallel voice backend, active when
+// system_config.ai_model names a grok-voice-* model (docs/grok-voice.md).
+app.use(grokSessionRoutes());
 app.use(sessionsRoutes());
 
 

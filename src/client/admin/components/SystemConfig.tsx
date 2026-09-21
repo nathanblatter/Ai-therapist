@@ -85,9 +85,17 @@ interface SystemConfigData {
 // Latest OpenAI Realtime + transcription models, offered as a good/cheap pair
 // each. Kept in sync with the migration 030 defaults and the server fallbacks
 // in db/stats.queries.ts.
+//
+// The voice BACKEND is selected by this same value (docs/gpt-live.md,
+// docs/grok-voice.md): a gpt-live-* id runs OpenAI GPT-Live over WebRTC with a
+// delegated reasoning backend; a grok-voice-* id runs xAI's Grok Voice through
+// the server-side proxy. Switching is this one field — no redeploy, and each
+// new session picks up the current value.
 const REALTIME_MODEL_OPTIONS = [
-  { model: 'gpt-realtime-2.1-mini', tier: 'Cheaper', description: 'Latest cost-effective realtime model' },
-  { model: 'gpt-realtime-2.1', tier: 'Best quality', description: 'Latest highest-quality realtime model' },
+  { model: 'gpt-live-1', tier: 'OpenAI GPT-Live', description: 'Full-duplex voice model; delegates reasoning to the backend in live_backend_model' },
+  { model: 'grok-voice-latest', tier: 'xAI Grok Voice', description: 'Speech-to-speech model via the server-side proxy; needs XAI_API_KEY on the server' },
+  { model: 'gpt-realtime-2.1-mini', tier: 'Legacy', description: 'Realtime API (no longer wired to a session path)' },
+  { model: 'gpt-realtime-2.1', tier: 'Legacy', description: 'Realtime API (no longer wired to a session path)' },
 ];
 
 const TRANSCRIPTION_MODEL_OPTIONS = [
@@ -733,7 +741,7 @@ export default function SystemConfig() {
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">AI Model Selection</h3>
         <p className="text-sm text-gray-600 mb-4">
-          Choose the OpenAI Realtime model for all therapy sessions. Changes apply to all new sessions immediately.
+          Choose the voice model for all therapy sessions. This also selects the voice backend (OpenAI GPT-Live or xAI Grok Voice). Changes apply to all new sessions immediately.
         </p>
         <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
           <p className="text-sm text-yellow-800">

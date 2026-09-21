@@ -27,6 +27,8 @@ services:
       # only, cannot make model calls). Powers the real-spend card in the admin
       # Ops panel. Optional — unset just makes that card show a setup hint.
       OPENAI_ADMIN_KEY: ${OPENAI_ADMIN_KEY:-}
+      # Grok Voice backend (docs/grok-voice.md); optional until ai_model is switched.
+      XAI_API_KEY: ${XAI_API_KEY:-}
       FLIGHTDECK_URL: ${FLIGHTDECK_URL:-http://flightdeck:8080}
       FLIGHTDECK_INGEST_KEY: ${FLIGHTDECK_INGEST_KEY}
       ASSISTANT_ENABLED: ${ASSISTANT_ENABLED:-false}
