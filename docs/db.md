@@ -115,8 +115,17 @@ special handling. Each backend response id is metered once, so a replayed event
 cannot double-bill.
 
 Full value set: `insights | redaction | crisis | eligibility | rerank | chat |
-live_delegation`. The column is free-text TEXT, so no enum change was needed;
-migration 098 only updates the column comment.
+live_delegation | grok_voice`. The column is VARCHAR(30) with a CHECK constraint
+(046), so every new value needs a migration that re-creates the constraint —
+098's claim that it was free text was wrong (fixed by 103 for `live_delegation`,
+104 for `grok_voice`).
+
+#### `session_llm_usage.purpose` — new value `grok_voice`
+
+The Grok Voice proxy (`docs/grok-voice.md`) records per-response token counts
+from xAI's `response.done` for the research record only. The money is billed
+per audio minute and lives in `live_usage`; `estimateCostUsd` prices
+`grok_voice` rows at zero so voice spend is not double counted.
 
 This row is also the only per-session record of which backend model a voice
 session actually ran on — see `docs/model-pinning.md`.

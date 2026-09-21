@@ -220,7 +220,8 @@ across four responses in the probe). Two rules follow:
   release id.
 - Token counts go to `session_llm_usage` with `purpose='grok_voice'` for the
   research record and are priced at **zero** there (`estimateCostUsd`), so the
-  session is not double-counted.
+  session is not double-counted. Migration 104 adds the value to the column's
+  CHECK constraint; without it the inserts fail silently (SQLSTATE 23514).
 
 xAI spend does not appear in the OpenAI organisation-costs feed the admin
 cost dashboard treats as ground truth; for Grok the `live_usage` estimate is
