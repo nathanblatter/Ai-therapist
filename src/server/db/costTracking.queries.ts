@@ -8,7 +8,7 @@
 // never break the underlying feature.
 import { pool } from '../config/db.js';
 
-export type LlmUsagePurpose = 'insights' | 'redaction' | 'crisis' | 'eligibility' | 'rerank' | 'chat' | 'live_delegation';
+export type LlmUsagePurpose = 'insights' | 'redaction' | 'crisis' | 'eligibility' | 'rerank' | 'chat' | 'live_delegation' | 'grok_voice';
 
 // Rough, hand-maintained $/1M-token rates for the models this app calls
 // LLMs with for insights/redaction/crisis (all OpenAI as of writing). This is
@@ -91,6 +91,10 @@ export async function insertRealtimeUsage(
 }
 
 export function estimateCostUsd(model: string | null, tokensIn: number | null, tokensOut: number | null): number {
+  // Grok Voice token counts (purpose 'grok_voice') are recorded for the
+  // research record only: xAI bills the voice session per audio minute, and
+  // that cost lives in live_usage. Pricing the tokens too would double count.
+  if (model?.startsWith('grok-voice')) return 0;
   const rate = (model && TOKEN_RATES_PER_MILLION[model]) || DEFAULT_RATE;
   const inCost = ((tokensIn ?? 0) / 1_000_000) * rate.input;
   const outCost = ((tokensOut ?? 0) / 1_000_000) * rate.output;
@@ -155,7 +159,7 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
     ),
   ]);
 
-  const callsByPurpose: Record<LlmUsagePurpose, number> = { insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0, chat: 0, live_delegation: 0 };
+  const callsByPurpose: Record<LlmUsagePurpose, number> = { insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0, chat: 0, live_delegation: 0, grok_voice: 0 };
   let tokensIn = 0;
   let tokensOut = 0;
   let estimatedCost = 0;

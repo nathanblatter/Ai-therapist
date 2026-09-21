@@ -52,11 +52,19 @@ export default function configRoutes(): Router {
     }
   });
 
-  // GET /api/config/ai-model - selected AI model
+  // GET /api/config/ai-model - selected AI model, plus which voice backend it
+  // selects. The participant client reads `voice_backend` at session start to
+  // choose between the GPT-Live WebRTC path and the Grok Voice proxy — the
+  // admin flips system_config.ai_model and nothing else (docs/grok-voice.md).
   router.get('/api/config/ai-model', async (_req, res) => {
     try {
+      const [{ isLiveModel }, { isGrokVoiceModel }] = await Promise.all([
+        import('../../utils/liveSessionConfig.js'),
+        import('../../utils/grokVoiceConfig.js'),
+      ]);
       const model = await getAiModel();
-      res.json({ model });
+      const voice_backend = isGrokVoiceModel(model) ? 'grok' : isLiveModel(model) ? 'live' : 'unknown';
+      res.json({ model, voice_backend });
     } catch (err) {
       console.error('Failed to fetch AI model:', err);
       res.status(500).json({ error: 'Failed to fetch AI model configuration' });
@@ -92,13 +100,34 @@ export default function configRoutes(): Router {
   //
   // Optional ?language= filters to voices appropriate for that language: Bossa
   // and Tempo are Brazilian Portuguese and sound wrong reading English.
+  //
+  // When the configured model is a Grok Voice model the picker gets xAI's
+  // roster instead (utils/grokVoiceConfig.ts). system_config.voices stays the
+  // GPT-Live catalogue: switching backends is one admin change (ai_model), and
+  // the voice list follows it rather than needing a second edit.
   router.get('/api/config/voices', async (req, res) => {
     try {
-      const [{ getLiveVoice, liveVoicesForLanguage, LIVE_DEFAULT_VOICE }, { voicePreviewExists }] =
+      const [{ getLiveVoice, liveVoicesForLanguage, LIVE_DEFAULT_VOICE }, { voicePreviewExists }, grok] =
         await Promise.all([
           import('../../utils/liveSessionConfig.js'),
           import('../../utils/voicePreviews.js'),
+          import('../../utils/grokVoiceConfig.js'),
         ]);
+
+      if (grok.isGrokVoiceModel(await getAiModel())) {
+        return res.json({
+          voices: grok.GROK_VOICES.map(v => ({
+            value: v.value,
+            label: v.label,
+            description: v.description,
+            accent: 'Multilingual',
+            presentation: v.presentation,
+            source: 'generated',
+            hasPreview: voicePreviewExists(v.value),
+          })),
+          default_voice: grok.GROK_DEFAULT_VOICE,
+        });
+      }
 
       const config = await getSystemConfig();
       const voicesConfig = config.voices as VoicesConfig | undefined;

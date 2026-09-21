@@ -21,13 +21,20 @@ import { pool } from '../config/db.js';
  */
 export const LIVE_RATES_PER_MINUTE: Record<string, number> = {
   'gpt-live-1': 0.05,
+  // Grok Voice (xAI, docs/grok-voice.md): $0.08/min of billable audio as
+  // published 2026-09. The proxy records the RESOLVED model id, so both the
+  // alias and the dated release are listed.
+  'grok-voice-latest': 0.08,
+  'grok-voice-think-fast-2.0': 0.08,
 };
 const LIVE_DEFAULT_RATE_PER_MINUTE = 0.05;
 
-/** Price a GPT-Live voice session in USD from its billed duration. */
+/** Price a per-minute voice session (GPT-Live or Grok Voice) in USD from its billed duration. */
 export function estimateLiveCostUsd(model: string | null, durationSeconds: number | null): number {
   if (!durationSeconds || durationSeconds <= 0) return 0;
-  const perMinute = (model ? LIVE_RATES_PER_MINUTE[model] : undefined) ?? LIVE_DEFAULT_RATE_PER_MINUTE;
+  const perMinute = (model ? LIVE_RATES_PER_MINUTE[model] : undefined)
+    ?? (model?.startsWith('grok-voice') ? LIVE_RATES_PER_MINUTE['grok-voice-latest'] : undefined)
+    ?? LIVE_DEFAULT_RATE_PER_MINUTE;
   const cost = (durationSeconds / 60) * perMinute;
   return Math.round(cost * 1_000_000) / 1_000_000;
 }
