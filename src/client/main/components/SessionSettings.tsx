@@ -55,6 +55,13 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
   const [theme, setThemeState] = useState('default');
   const [a11y, setA11yState] = useState<A11yPrefs>(getStoredA11y());
 
+  // Latest settings/callback for the load effect below, which runs only when
+  // the modal opens and must not re-run on every settings change.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const onSettingsChangeRef = useRef(onSettingsChange);
+  onSettingsChangeRef.current = onSettingsChange;
+
   // Load available voices and languages when modal opens
   useEffect(() => {
     if (!isOpen) return;
@@ -69,7 +76,16 @@ export default function SessionSettings({ isOpen, onClose, settings, onSettingsC
 
         if (voicesRes.ok) {
           const data = await voicesRes.json();
-          setAvailableVoices((data.voices as VoiceOption[]) || []);
+          const list = (data.voices as VoiceOption[]) || [];
+          setAvailableVoices(list);
+          // The list follows the active backend (OpenAI or xAI voices, never
+          // both). A preference saved under the other backend would otherwise
+          // sit selected-but-invisible, so move it to the server's default.
+          const current = settingsRef.current;
+          if (list.length > 0 && !list.some(v => v.value === current.voice)) {
+            const fallback = (data.default_voice as string | undefined) || list[0].value;
+            onSettingsChangeRef.current({ ...current, voice: fallback });
+          }
         }
 
         if (languagesRes.ok) {

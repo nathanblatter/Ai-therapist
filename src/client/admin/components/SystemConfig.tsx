@@ -203,6 +203,20 @@ export default function SystemConfig() {
     enabled: false
   });
 
+  // The voice backend follows aiModel. Under Grok the participant picker is
+  // served xAI's roster from code (utils/grokVoiceConfig.ts), not from
+  // system_config.voices, so the OpenAI editor below is hidden and the active
+  // roster is shown read-only instead. Under GPT-Live the reverse.
+  const grokActive = aiModel.model.startsWith('grok-voice');
+  const [grokVoices, setGrokVoices] = useState<Array<{ value: string; label: string; description: string }>>([]);
+  useEffect(() => {
+    if (!grokActive) return;
+    fetch('/api/config/voices', { credentials: 'include' })
+      .then(res => (res.ok ? res.json() : { voices: [] }))
+      .then(data => setGrokVoices(data.voices ?? []))
+      .catch(() => setGrokVoices([]));
+  }, [grokActive]);
+
   const [voices, setVoices] = useState<VoicesForm>({
     voices: [],
     default_voice: 'cedar'
@@ -829,11 +843,33 @@ export default function SystemConfig() {
         </div>
       </div>
 
-      {/* Voice Management */}
+      {/* Voice Management — xAI Grok Voice (read-only roster from code) */}
+      {grokActive && (
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Voice Configuration</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            The AI model above is xAI Grok Voice, so participants choose from xAI&apos;s built-in voices.
+            This roster comes from the server code (not from this page); the OpenAI voice list is
+            hidden while Grok is active and comes back when the model is switched to GPT-Live.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {grokVoices.map(voice => (
+              <div key={voice.value} className="p-3 bg-gray-50 rounded-lg">
+                <p className="text-sm font-medium text-gray-900">{voice.label} <span className="text-xs text-gray-500">({voice.value})</span></p>
+                <p className="text-xs text-gray-500">{voice.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Voice Management — OpenAI catalogue (system_config.voices) */}
+      {!grokActive && (
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Voice Configuration</h3>
         <p className="text-sm text-gray-600 mb-4">
-          Manage available AI voices for therapy sessions. Users can only select from enabled voices.
+          Manage available OpenAI voices for therapy sessions. Users can only select from enabled voices.
+          (Hidden automatically while the AI model is xAI Grok Voice.)
         </p>
 
         {/* Voice List */}
@@ -936,6 +972,7 @@ export default function SystemConfig() {
           </button>
         </div>
       </div>
+      )}
 
       {/* Language Management */}
       <div className="mb-6 bg-white rounded-lg shadow p-6">
