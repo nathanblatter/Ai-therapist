@@ -2424,6 +2424,28 @@ export default function App() {
       return;
     }
 
+    // Grok Voice: the browser has no channel to the model, so typed text goes
+    // to the server, which injects it as a participant turn and asks for a
+    // reply. Persistence + crisis scoring still ride the log batch below.
+    if (voiceBackendRef.current === 'grok') {
+      const grokSessionId = liveSessionIdRef.current ?? sessionId;
+      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", text: message }]);
+      logConversation({ sessionId: grokSessionId, role: "user", type: "chat", message });
+      try {
+        const res = await fetch(`/api/grok/session/${grokSessionId}/text`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: message }),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+      } catch (error) {
+        console.error('[Grok] Failed to send typed text:', error);
+        reportClientEvent('chat_send_failed', { where: 'grok_text', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) }, grokSessionId);
+        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "system", text: "Error: Failed to send message. Please try again." }]);
+      }
+      return;
+    }
+
     // Handle the GPT-Live voice session. Typed text is participant DATA, not an
     // instruction, so it is queued for the delegated backend as a user message
     // rather than appended to the live model's instructions. Queueing an item

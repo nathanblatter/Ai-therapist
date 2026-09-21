@@ -62,6 +62,10 @@ Two consequences worth knowing:
   server-side. This closes the open item GPT-Live leaves open, where the
   browser owns a data channel that accepts `session.instructions.append`. The
   client's `sendInvisiblePrompt` is a documented no-op under Grok.
+- **Typed text** during a voice session goes to `POST /api/grok/session/:id/text`,
+  which injects it as a participant (user-role) turn and forces a reply. It is
+  the one client → server message that reaches the model, and it can only ever
+  speak AS the participant, never instruct.
 - **No credential reaches the browser.** The session route returns a session
   id and the proxy path; the API key lives in the process only.
 

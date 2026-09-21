@@ -17,6 +17,8 @@
 // session limits — the same shape POST /api/live/session returns minus `sdp`.
 
 import { Router } from 'express';
+import { getSessionAccessInfo } from '../../db/index.js';
+import { canAccessSession } from '../../utils/sessionOwnership.js';
 import { randomUUID } from 'node:crypto';
 import { getXaiKey, hasXaiKey } from '../../config/secrets.js';
 import {
@@ -252,6 +254,41 @@ export default function grokSessionRoutes(): Router {
       }
     },
   );
+
+  /**
+   * POST /api/grok/session/:sessionId/text — typed text during a voice session.
+   *
+   * Under GPT-Live the browser queued typed text over its own data channel.
+   * Under Grok the browser has no channel to the model by design, so typed
+   * text comes here and is injected as a PARTICIPANT turn (role user) with a
+   * forced response — participant data, not an instruction. Persistence and
+   * crisis scoring of the text are unchanged: the client still logs it via
+   * /logs/batch, which runs runCrisisPipeline on every user row.
+   *
+   * Body: { text }  Returns: { injected: boolean }
+   */
+  router.post('/api/grok/session/:sessionId/text', async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const text = typeof req.body?.text === 'string' ? req.body.text.trim().slice(0, 4000) : '';
+      if (!text) return res.status(400).json({ error: 'text is required' });
+
+      const access = await getSessionAccessInfo(sessionId);
+      if (!access || !canAccessSession(req, access, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      if (access.status !== 'active') return res.status(409).json({ error: 'session_not_active' });
+
+      const injected = await grokVoiceManager.tryInject(sessionId, 'user', text, true);
+      if (!injected) {
+        return res.status(503).json({ injected: false, error: 'voice_not_connected' });
+      }
+      res.json({ injected: true });
+    } catch (error) {
+      console.error('[Grok] typed text inject failed:', error);
+      res.status(500).json({ error: 'Failed to send text' });
+    }
+  });
 
   return router;
 }
