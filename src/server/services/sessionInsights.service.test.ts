@@ -12,6 +12,7 @@ const {
   getUserMemoryEnabledMock,
   getUserCaseProfileMock,
   upsertUserCaseProfileMock,
+  getSessionSafetyContextMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
   getSessionMock: vi.fn(),
@@ -21,7 +22,18 @@ const {
   getUserMemoryEnabledMock: vi.fn(),
   getUserCaseProfileMock: vi.fn(),
   upsertUserCaseProfileMock: vi.fn(),
+  getSessionSafetyContextMock: vi.fn(),
 }));
+
+/** Matches the real crisis.queries helper; the barrel is mocked wholesale. */
+function hasSafetyContextImpl(ctx: {
+  crisisEvents: unknown[]; escalations: unknown[]; resourceCards: unknown[]; adverseEvents: unknown[];
+}): boolean {
+  return ctx.crisisEvents.length > 0 || ctx.escalations.length > 0
+    || ctx.resourceCards.length > 0 || ctx.adverseEvents.length > 0;
+}
+
+const EMPTY_SAFETY = { crisisEvents: [], escalations: [], resourceCards: [], adverseEvents: [] };
 
 vi.mock('../config/secrets.js', () => ({
   getOpenAIKey: vi.fn().mockResolvedValue('test-key'),
@@ -41,6 +53,8 @@ vi.mock('../db/index.js', () => ({
   getUserMemoryEnabled: getUserMemoryEnabledMock,
   getUserCaseProfile: getUserCaseProfileMock,
   upsertUserCaseProfile: upsertUserCaseProfileMock,
+  getSessionSafetyContext: getSessionSafetyContextMock,
+  hasSafetyContext: hasSafetyContextImpl,
 }));
 
 const { generateSessionInsights } = await import('./sessionInsights.service.js');
@@ -64,6 +78,7 @@ beforeEach(() => {
   getUserMemoryEnabledMock.mockReset().mockResolvedValue(false);
   getUserCaseProfileMock.mockReset().mockResolvedValue(null);
   upsertUserCaseProfileMock.mockReset().mockResolvedValue(undefined);
+  getSessionSafetyContextMock.mockReset().mockResolvedValue(EMPTY_SAFETY);
 });
 
 describe('generateSessionInsights', () => {
@@ -101,6 +116,69 @@ describe('generateSessionInsights', () => {
   it('throws when the model response is missing summary or soap', async () => {
     createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY }));
     await expect(generateSessionInsights('s1')).rejects.toThrow(/missing summary or soap/);
+  });
+
+  describe('safety context (ai-therapist-256)', () => {
+    const AT = new Date('2026-09-20T14:35:00Z');
+    const FULL_SAFETY = {
+      crisisEvents: [{ event_type: 'crisis_flagged', severity: 'high', created_at: AT }],
+      escalations: [{ source: 'tool', reason: 'domestic violence disclosure', urgency: 'urgent', status: null, created_at: AT }],
+      resourceCards: [{ tool_name: 'show_resource_card', resource_type: 'domestic_violence', created_at: AT }],
+      adverseEvents: [{ report_id: 77, severity: 'high', category: 'crisis', status: 'draft', summary: 'DV disclosure', created_at: AT }],
+    };
+
+    it('injects crisis events, escalations, resource cards and AE drafts into the LLM context', async () => {
+      getSessionSafetyContextMock.mockResolvedValue(FULL_SAFETY);
+      createMock.mockResolvedValue(llmResponse({
+        summary: { ...BASIC_SUMMARY, safety: 'High-severity crisis flag after a DV disclosure; resources shown and escalated.' },
+        soap: BASIC_SOAP,
+      }));
+
+      await generateSessionInsights('s1');
+
+      const userMessage = createMock.mock.calls[0][0].messages[1].content as string;
+      expect(userMessage).toContain('SAFETY EVENTS');
+      expect(userMessage).toContain('crisis_flagged');
+      expect(userMessage).toContain('severity: high');
+      expect(userMessage).toContain('escalate_to_human tool call: domestic violence disclosure');
+      expect(userMessage).toContain('show_resource_card (domestic_violence)');
+      expect(userMessage).toContain('adverse-event report #77');
+      const stored = upsertSessionInsightsMock.mock.calls[0][2];
+      expect(stored.safety).toContain('DV disclosure');
+    });
+
+    it('substitutes a deterministic safety line when the model omits one', async () => {
+      getSessionSafetyContextMock.mockResolvedValue(FULL_SAFETY);
+      createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP }));
+
+      await generateSessionInsights('s1');
+
+      const stored = upsertSessionInsightsMock.mock.calls[0][2];
+      expect(stored.safety).toContain('1 crisis event(s)');
+      expect(stored.safety).toContain('highest severity high');
+      expect(stored.safety).toContain('1 escalation(s) to a human');
+      expect(stored.safety).toContain('show_resource_card');
+      expect(stored.safety).toContain('#77');
+    });
+
+    it('replaces an empty safety string from the model when events exist', async () => {
+      getSessionSafetyContextMock.mockResolvedValue({ ...EMPTY_SAFETY, crisisEvents: FULL_SAFETY.crisisEvents });
+      createMock.mockResolvedValue(llmResponse({ summary: { ...BASIC_SUMMARY, safety: '   ' }, soap: BASIC_SOAP }));
+
+      await generateSessionInsights('s1');
+
+      expect(upsertSessionInsightsMock.mock.calls[0][2].safety).toMatch(/^Safety: this session recorded 1 crisis event/);
+    });
+
+    it('adds no safety block or field for a session with nothing safety-relevant', async () => {
+      createMock.mockResolvedValue(llmResponse({ summary: { ...BASIC_SUMMARY, safety: '' }, soap: BASIC_SOAP }));
+
+      await generateSessionInsights('s1');
+
+      const userMessage = createMock.mock.calls[0][0].messages[1].content as string;
+      expect(userMessage).not.toContain('SAFETY EVENTS');
+      expect(upsertSessionInsightsMock.mock.calls[0][2]).not.toHaveProperty('safety');
+    });
   });
 
   describe('rolling case profile (ai-therapist-47)', () => {

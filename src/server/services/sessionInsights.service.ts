@@ -16,6 +16,9 @@ import {
   getUserMemoryEnabled,
   getUserCaseProfile,
   upsertUserCaseProfile,
+  getSessionSafetyContext,
+  hasSafetyContext,
+  type SessionSafetyContext,
   type SessionSummary,
   type SoapNote,
   type SessionCheckin,
@@ -39,6 +42,7 @@ Given a support-conversation transcript, produce STRICT JSON with parts:
   - techniques_discussed: coping techniques the assistant suggested
   - techniques_helped: the subset the participant responded well to (empty array if unclear)
   - follow_up: one sentence on what a future conversation could pick up on (empty string if nothing)
+  - safety: REQUIRED whenever a SAFETY EVENTS block appears in the user message. One or two plain sentences naming what fired — crisis flags and their severity, escalations to a human, crisis/resource cards shown, safety plans built, adverse-event drafts — and what the participant disclosed that triggered it. Never soften or omit it, and never let the headline/mood_trajectory read as a calm session when safety events fired. Empty string ONLY when no SAFETY EVENTS block was supplied.
 
 "soap" — a draft SOAP note for a licensed clinician to review. Professional tone. This was a peer-support style AI conversation, not clinical treatment: keep the assessment descriptive and non-diagnostic.
   - subjective: what the participant reported (concerns, feelings, stressors)
@@ -90,6 +94,50 @@ export function sanitizeAffectCurve(raw: unknown): AffectPoint[] | null {
   if (points.length === 0) return null;
   points.sort((a, b) => a.turn - b.turn);
   return points.slice(0, 60);
+}
+
+const timeOf = (at: Date | string | null): string =>
+  at ? new Date(at).toISOString().slice(11, 16) : 'unknown time';
+
+/** The SAFETY EVENTS block handed to the summarizer (ai-therapist-256).
+ *  Empty string when nothing safety-relevant happened in the session. */
+export function buildSafetyBlock(ctx: SessionSafetyContext): string {
+  if (!hasSafetyContext(ctx)) return '';
+  const lines: string[] = [];
+  for (const e of ctx.crisisEvents) {
+    lines.push(`- ${timeOf(e.created_at)} crisis event: ${e.event_type}${e.severity ? ` (severity: ${e.severity})` : ''}`);
+  }
+  for (const e of ctx.escalations) {
+    const via = e.source === 'tool' ? 'escalate_to_human tool call' : 'escalation raised';
+    lines.push(`- ${timeOf(e.created_at)} ${via}: ${e.reason}${e.urgency ? ` (urgency: ${e.urgency})` : ''}${e.status ? ` [${e.status}]` : ''}`);
+  }
+  for (const c of ctx.resourceCards) {
+    lines.push(`- ${timeOf(c.created_at)} shown to participant: ${c.tool_name}${c.resource_type ? ` (${c.resource_type})` : ''}`);
+  }
+  for (const a of ctx.adverseEvents) {
+    lines.push(`- ${timeOf(a.created_at)} adverse-event report #${a.report_id} (${a.category}, severity: ${a.severity}, ${a.status}): ${a.summary}`);
+  }
+  return `SAFETY EVENTS recorded during this session (these DID happen — the "safety" field is REQUIRED and the summary must reflect them):\n${lines.join('\n')}\n\n`;
+}
+
+/** Deterministic safety line, used when the model returns none despite a
+ *  SAFETY EVENTS block. A reviewer must never see a summary that omits the
+ *  event just because the LLM did. */
+export function fallbackSafetyLine(ctx: SessionSafetyContext): string {
+  const parts: string[] = [];
+  const worst = ctx.crisisEvents.find(e => e.severity === 'high')?.severity
+    ?? ctx.crisisEvents.find(e => e.severity)?.severity ?? null;
+  if (ctx.crisisEvents.length > 0) {
+    parts.push(`${ctx.crisisEvents.length} crisis event(s)${worst ? `, highest severity ${worst}` : ''}`);
+  }
+  if (ctx.escalations.length > 0) parts.push(`${ctx.escalations.length} escalation(s) to a human`);
+  if (ctx.resourceCards.length > 0) {
+    parts.push(`crisis/safety resources shown (${[...new Set(ctx.resourceCards.map(c => c.tool_name))].join(', ')})`);
+  }
+  if (ctx.adverseEvents.length > 0) {
+    parts.push(`${ctx.adverseEvents.length} adverse-event draft(s) (#${ctx.adverseEvents.map(a => a.report_id).join(', #')})`);
+  }
+  return `Safety: this session recorded ${parts.join('; ')}. Review the session record.`;
 }
 
 let openaiClient: OpenAI | null = null;
@@ -145,6 +193,12 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     ? `PRIOR CASE PROFILE (update/merge this):\n${JSON.stringify(existingProfile.profile)}\n\n`
     : '';
 
+  // Safety context (ai-therapist-256): crisis events, escalations, resource
+  // cards and AE drafts from this session. Without it the summarizer sees
+  // only the transcript and can miss a disclosure entirely.
+  const safetyContext = await getSessionSafetyContext(sessionId);
+  const safetyBlock = buildSafetyBlock(safetyContext);
+
   const client = await getClient();
   // Post-session job: flex halves the cost where the model supports it
   // (a no-op on gpt-4o-mini, which is not flex-eligible — see flexTier.ts).
@@ -158,7 +212,7 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     ...tierParams,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `${checkinLine}${priorProfileLine}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}` },
+      { role: 'user', content: `${checkinLine}${priorProfileLine}${safetyBlock}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}` },
     ],
   }));
 
@@ -183,9 +237,21 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
     throw new Error('Insights response missing summary or soap');
   }
 
+  // The safety line is not optional when safety events exist: if the model
+  // skipped it (or emptied it), substitute the deterministic one.
+  const summary: SessionSummary = { ...parsed.summary };
+  if (hasSafetyContext(safetyContext)) {
+    if (typeof summary.safety !== 'string' || !summary.safety.trim()) {
+      summary.safety = fallbackSafetyLine(safetyContext);
+      log.warn(`Model omitted the safety line for ${sessionId}; substituted the deterministic one`);
+    }
+  } else if (summary.safety !== undefined && !summary.safety.trim()) {
+    delete summary.safety;
+  }
+
   const affectCurve = sanitizeAffectCurve(parsed.affect);
   await upsertSessionInsights(
-    sessionId, session.user_id ?? null, parsed.summary, parsed.soap, INSIGHTS_MODEL, affectCurve
+    sessionId, session.user_id ?? null, summary, parsed.soap, INSIGHTS_MODEL, affectCurve
   );
   log.info(`Insights stored for ${sessionId} ("${parsed.summary.headline ?? ''}")`);
 

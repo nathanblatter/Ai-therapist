@@ -91,6 +91,13 @@ export default function adminSessionsRoutes(): Router {
         .then(m => m.finalize(sessionId))
         .catch(e => console.error('[Recorder] finalize failed:', e));
 
+      // Post-session insights (ai-therapist-256): an admin/crisis takeover end
+      // skipped these, so sessions a researcher ended from the dashboard — the
+      // most safety-relevant ones — had no summary in the catch-up view.
+      import('../../services/sessionInsights.service.js')
+        .then(m => m.generateSessionInsightsAsync(sessionId))
+        .catch(e => console.error('[Insights] generation failed:', e));
+
       // Quality eval (LLM judge) — no-op unless system_config.evals.auto_run_enabled.
       import('../../services/sessionEval.service.js')
         .then(m => m.maybeAutoEvalSession(sessionId))

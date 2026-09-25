@@ -173,6 +173,17 @@ async function finalizeAbandonedSession(sessionId: string): Promise<void> {
   const { finalize } = await import('./recorder.service.js');
   finalize(sessionId).catch(err => log.error({ err }, `[Recorder] abandon-finalize failed for ${sessionId}`));
 
+  // ai-therapist-256: abandoned sessions (dropped tunnel, closed tab — the
+  // common ending for a voice session) used to be the one end path that
+  // produced no insights at all, so the session showed up in the catch-up
+  // view with no summary. Fire-and-forget like every other end path.
+  try {
+    const { generateSessionInsightsAsync } = await import('./sessionInsights.service.js');
+    generateSessionInsightsAsync(sessionId); // fire-and-forget, self-logging
+  } catch (err) {
+    log.error({ err }, `[Insights] abandon-finalize failed for ${sessionId}`);
+  }
+
   if (global.io) {
     void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'system', reason: 'abandoned' }, sessionId, 'summary');
     global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'system', reason: 'abandoned' });

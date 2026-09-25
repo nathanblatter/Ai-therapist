@@ -386,3 +386,114 @@ export async function getActiveCrisisSessions(scopeTherapistId?: number | null):
   );
   return result.rows;
 }
+
+// ---------- Post-session safety context (ai-therapist-256) ----------
+// Everything safety-relevant that happened inside one session, gathered for
+// the post-session summarizer so a generated summary can never read as a
+// calm "coping with loneliness" session when a crisis actually fired.
+
+export interface SafetyContextCrisisEvent {
+  event_type: string;
+  severity: string | null;
+  created_at: Date;
+}
+
+export interface SafetyContextEscalation {
+  /** 'escalation' = a caseworker-portal escalation row; 'tool' = the model
+   *  calling escalate_to_human during the session. */
+  source: 'escalation' | 'tool';
+  reason: string;
+  urgency: string | null;
+  status: string | null;
+  created_at: Date;
+}
+
+export interface SafetyContextResourceCard {
+  tool_name: string;
+  resource_type: string | null;
+  created_at: Date;
+}
+
+export interface SafetyContextAdverseEvent {
+  report_id: number;
+  severity: string;
+  category: string;
+  status: string;
+  summary: string;
+  created_at: Date;
+}
+
+export interface SessionSafetyContext {
+  crisisEvents: SafetyContextCrisisEvent[];
+  escalations: SafetyContextEscalation[];
+  resourceCards: SafetyContextResourceCard[];
+  adverseEvents: SafetyContextAdverseEvent[];
+}
+
+/** Tool calls that put crisis/safety material on the participant's screen. */
+const RESOURCE_CARD_TOOLS = ['show_resource_card', 'get_crisis_resources', 'create_safety_plan'];
+
+/** True when anything in the context warrants a safety line in the summary. */
+export function hasSafetyContext(ctx: SessionSafetyContext): boolean {
+  return ctx.crisisEvents.length > 0 || ctx.escalations.length > 0
+    || ctx.resourceCards.length > 0 || ctx.adverseEvents.length > 0;
+}
+
+/** Crisis events, escalations, safety/resource tool calls and adverse-event
+ *  drafts for one session, chronological. Read-only; feeds the post-session
+ *  summarizer (services/sessionInsights.service.ts). */
+export async function getSessionSafetyContext(sessionId: string): Promise<SessionSafetyContext> {
+  const [crisisEvents, escalations, toolCalls, adverseEvents] = await Promise.all([
+    pool.query<SafetyContextCrisisEvent>(
+      `SELECT event_type, severity, created_at
+       FROM crisis_events WHERE session_id = $1
+       ORDER BY created_at ASC LIMIT 25`,
+      [sessionId],
+    ),
+    pool.query<Omit<SafetyContextEscalation, 'source'>>(
+      `SELECT reason, urgency, status, created_at
+       FROM escalations WHERE session_id = $1
+       ORDER BY created_at ASC LIMIT 10`,
+      [sessionId],
+    ),
+    pool.query<{ tool_name: string; arguments: Record<string, unknown> | null; created_at: Date }>(
+      `SELECT tool_name, arguments, created_at
+       FROM tool_invocations
+       WHERE session_id = $1 AND tool_name = ANY($2::text[])
+       ORDER BY created_at ASC LIMIT 25`,
+      [sessionId, [...RESOURCE_CARD_TOOLS, 'escalate_to_human']],
+    ),
+    pool.query<SafetyContextAdverseEvent>(
+      `SELECT report_id, severity, category, status, summary, created_at
+       FROM adverse_event_reports WHERE session_id = $1
+       ORDER BY created_at ASC LIMIT 10`,
+      [sessionId],
+    ),
+  ]);
+
+  const toolEscalations: SafetyContextEscalation[] = toolCalls.rows
+    .filter(r => r.tool_name === 'escalate_to_human')
+    .map(r => ({
+      source: 'tool' as const,
+      reason: typeof r.arguments?.reason === 'string' ? r.arguments.reason : 'escalate_to_human called',
+      urgency: typeof r.arguments?.urgency === 'string' ? r.arguments.urgency : null,
+      status: null,
+      created_at: r.created_at,
+    }));
+
+  return {
+    crisisEvents: crisisEvents.rows,
+    escalations: [
+      ...escalations.rows.map(r => ({ ...r, source: 'escalation' as const })),
+      ...toolEscalations,
+    ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    resourceCards: toolCalls.rows
+      .filter(r => RESOURCE_CARD_TOOLS.includes(r.tool_name))
+      .map(r => ({
+        tool_name: r.tool_name,
+        resource_type: typeof r.arguments?.resource_type === 'string' ? r.arguments.resource_type : null,
+        created_at: r.created_at,
+      })),
+    adverseEvents: adverseEvents.rows,
+  };
+}
