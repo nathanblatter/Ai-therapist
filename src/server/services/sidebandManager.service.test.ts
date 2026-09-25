@@ -82,6 +82,7 @@ vi.mock('../utils/sessionHelpers.js', () => ({
   getActiveModality: getActiveModalityMock,
 }));
 
+import WebSocketCtor from 'ws';
 import { sidebandManager, TranscriptAssembler } from './sidebandManager.service.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -807,6 +808,181 @@ describe('connection lifecycle', () => {
     expect(ws.close).toHaveBeenCalledWith(1000, 'Session ended');
     expect(sb.sessions.has(sessionId)).toBe(false);
     expect(sb.endedSessions.has(sessionId)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Opening attach (ai-therapist-195)
+// ---------------------------------------------------------------------------
+//
+// connectAndWait is a hard gate: POST /api/live/session refuses to hand back a
+// voice session whose sideband did not open, because the sideband is the only
+// path by which participant speech reaches crisis scoring. That makes both
+// halves safety-critical — it must not deny a session over one transient blip,
+// and it must never report success (or leave a socket that later reports it)
+// when monitoring is not actually running.
+
+/** A socket whose lifecycle events the test drives by hand. */
+function controllableWs() {
+  const handlers: Record<string, Array<(...args: Internal[]) => void>> = {};
+  const on = vi.fn((event: string, handler: (...args: Internal[]) => void) => {
+    (handlers[event] ??= []).push(handler);
+  });
+  return {
+    readyState: 0, // CONNECTING
+    on,
+    once: on,
+    off: vi.fn((event: string, handler: unknown) => {
+      handlers[event] = (handlers[event] ?? []).filter(h => h !== handler);
+    }),
+    send: vi.fn(),
+    ping: vi.fn(),
+    close: vi.fn(),
+    terminate: vi.fn(),
+    removeAllListeners: vi.fn(() => { for (const k of Object.keys(handlers)) delete handlers[k]; }),
+    emit: (event: string, ...args: Internal[]) => {
+      for (const h of [...(handlers[event] ?? [])]) h(...args);
+    },
+  };
+}
+
+describe('opening attach', () => {
+  const wsCtor = WebSocketCtor as Internal;
+  let sockets: ReturnType<typeof controllableWs>[];
+
+  beforeEach(() => {
+    sockets = [];
+    wsCtor.mockImplementation(() => {
+      const s = controllableWs();
+      sockets.push(s);
+      return s;
+    });
+  });
+
+  afterEach(() => {
+    wsCtor.mockImplementation(() => fakeWs());
+  });
+
+  function startAttach(sessionId: string) {
+    const result = sidebandManager
+      .connectAndWait(sessionId, `live_${sessionId}`, 'sk-test', {
+        model: MODEL, backendModel: BACKEND_MODEL,
+      })
+      .then(() => 'opened' as const, (err: Error) => err);
+    return result;
+  }
+
+  it('retries a failed opening attach with backoff instead of denying the session', async () => {
+    const settled = startAttach('s-attach-retry');
+    await flush();
+    expect(sockets).toHaveLength(1);
+
+    // First socket dies before the upgrade completes (a 1006 blip).
+    sockets[0].emit('close', 1006, Buffer.from(''));
+    await flush();
+    // Nothing is attached in the gap, and no autonomous reconnect was armed:
+    // this loop owns the retry.
+    expect(sb.sessions.has('s-attach-retry')).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(400);
+    await flush();
+    expect(sockets).toHaveLength(2);
+
+    sockets[1].readyState = WS_OPEN;
+    sockets[1].emit('open');
+    await flush();
+
+    expect(await settled).toBe('opened');
+    expect(sb.sessions.get('s-attach-retry').initialAttach).toBe(false);
+  });
+
+  it('records a queryable failure on the session row once the attach budget is spent', async () => {
+    const settled = startAttach('s-attach-dead');
+
+    // Three attempts, each killed the moment its socket appears.
+    for (let i = 0; i < 3; i++) {
+      await flush();
+      expect(sockets).toHaveLength(i + 1);
+      sockets[i].emit('close', 1006, Buffer.from(''));
+      await flush();
+      await vi.advanceTimersByTimeAsync(1200);
+    }
+    await flush();
+
+    expect(await settled).toBeInstanceOf(Error);
+    expect(sockets).toHaveLength(3);
+    expect(sb.sessions.has('s-attach-dead')).toBe(false);
+
+    const errorWrite = queryMock.mock.calls.find(
+      (call: Internal[]) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('sideband_error') && call[0].includes('sideband_connected'),
+    ) as Internal[] | undefined;
+    expect(errorWrite).toBeDefined();
+    expect(errorWrite![1][0]).toContain('sideband attach failed after 3 attempts');
+    expect(broadcastMock).toHaveBeenCalledWith(
+      expect.anything(), 'sideband:attach-failed', expect.objectContaining({
+        sessionId: 's-attach-dead', liveSessionId: 'live_s-attach-dead', attempts: 3,
+      }), 's-attach-dead',
+    );
+  });
+
+  it('abandons a timed-out socket so it cannot report a connection later', async () => {
+    const settled = startAttach('s-attach-slow');
+    await flush();
+
+    // The socket never opens and never closes — the failure mode that used to
+    // leave it CONNECTING in this.sessions, blocking the next attempt and able
+    // to stamp sideband_connected = TRUE on an already-ended session.
+    await vi.advanceTimersByTimeAsync(4000);
+    await flush();
+
+    expect(sockets[0].terminate).toHaveBeenCalled();
+    expect(sockets[0].removeAllListeners).toHaveBeenCalled();
+    expect(sb.sessions.has('s-attach-slow')).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(400);
+    await flush();
+    expect(sockets).toHaveLength(2); // the retry got a fresh socket, not the dead one
+
+    // Drain the remaining attempts so the promise settles inside the test.
+    await vi.advanceTimersByTimeAsync(12_000);
+    await flush();
+    expect(await settled).toBeInstanceOf(Error);
+    expect(
+      queryMock.mock.calls.some(
+        (call: Internal[]) =>
+          typeof call[0] === 'string' && call[0].includes('sideband_connected = TRUE'),
+      ),
+    ).toBe(false);
+  });
+
+  it('does not page the on-call or force-end the session when the opening attach is rejected', async () => {
+    const failClosed = vi.spyOn(sb, 'failClosedUnmonitored').mockResolvedValue(undefined);
+    const settled = startAttach('s-attach-401');
+    await flush();
+
+    // An HTTP upgrade rejection (rotated key, 404, 429) during the OPENING
+    // attach. The route ends the session and tells the participant; a crisis
+    // page about a "lost monitoring connection" would be false — nobody has
+    // spoken in this session yet.
+    const res = {
+      statusCode: 429,
+      on: (event: string, handler: (chunk?: Buffer) => void) => {
+        if (event === 'end') handler();
+      },
+    };
+    sockets[0].emit('unexpected-response', {}, res);
+    await flush();
+    sockets[0].emit('close', 1006, Buffer.from(''));
+    await flush();
+
+    expect(failClosed).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(12_000);
+    await flush();
+    expect(await settled).toBeInstanceOf(Error);
+    failClosed.mockRestore();
   });
 });
 
