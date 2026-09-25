@@ -15,6 +15,7 @@ import CatchUp from './CatchUp';
 import NotesPanel from './notes/NotesPanel';
 import MyEscalations from './escalations/MyEscalations';
 import MessageThreadView from './MessageThreadView';
+import RiskCheckLadder from './RiskCheckLadder';
 import { formatDate, timeAgo } from '../../shared/format';
 import { severityBadgeClass } from '../../shared/severity';
 import { isCareTeamRole } from '../../../shared/roles';
@@ -616,6 +617,18 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
             </Panel>
           </section>
         )}
+
+        {/* ============ 3a. Structured risk ladders (ai-therapist-198) ============ */}
+        {/* Every completed run_risk_check assessment across this participant's
+            sessions: the rungs asked, the band each resolved to, and how far
+            the assessment got. Collapsed by default; empty state is honest
+            ("none recorded") rather than hidden. */}
+        <section aria-label="Structured risk assessments">
+          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+            <Shield size={15} className="text-gray-500" /> Structured risk assessments
+          </h3>
+          <RiskCheckLadder userId={user.userid} onViewSession={onViewSession} />
+        </section>
 
         {/* ============ 3b. Care notes + escalations + messaging (caseworker portal) ============ */}
         {isCareTeamRole(userRole) && (

@@ -12,6 +12,133 @@ import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 const STEER_MIN_SCORE = 25;
 const STEER_COOLDOWN_MS = 3 * 60 * 1000;
+
+// ============================================
+// STRUCTURED RISK LADDER (ai-therapist-198)
+// ============================================
+// The run_risk_check tool (toolRegistry) is the highest-quality risk instrument
+// in the system, but until now nothing ever told the model to reach for it: the
+// steering copy described the C-SSRS ladder in prose and never named the tool,
+// so it fired twice in the platform's lifetime. Every elevated-risk steer now
+// names the tool explicitly, and the pipeline additionally forces the ask when
+// a session crosses the configured score with no ladder logged.
+
+/** Sentence appended to every elevated-risk steer so the tool is always named. */
+const RISK_CHECK_DIRECTIVE =
+  `As you ask each safety question, call the run_risk_check tool once per answer ` +
+  `(step = ideation | plan | means | timeframe | intent, or protective_factors) to log it. ` +
+  `This is required whenever risk is moderate or above and no ladder has been completed in this session; ` +
+  `it is silent to the participant and does not replace anything you would otherwise say.`;
+
+/** Hard requirement injected by the deterministic trigger (see maybeRequireRiskCheck). */
+export const RISK_CHECK_REQUIRED_GUIDANCE =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  `Risk in this session has reached the level that requires a structured safety assessment, ` +
+  `and no assessment ladder has been logged yet. On this turn, begin the ladder: ask ONE gentle, ` +
+  `direct question (start with ideation — whether they are having thoughts of ending their life), ` +
+  `then call the run_risk_check tool with that step, the participant's answer in their own words, ` +
+  `and your clinical risk_band. Continue one rung at a time on later turns ` +
+  `(ideation, plan, means, timeframe, intent), logging each with run_risk_check, ` +
+  `and record protective_factors when they surface. Stay warm and validating between questions — ` +
+  `this is an assessment, not an interrogation.`;
+
+/** Default trigger score: the moderate/medium entry boundary the stage-2 risk
+ *  assessor already uses (40-60 = medium/passive ideation in its rubric).
+ *  Override with system_config crisis.risk_check_min_score, mirroring how
+ *  crisis.risk_model is stored (crisisDetection.resolveRiskModel). */
+const DEFAULT_RISK_CHECK_MIN_SCORE = 40;
+
+/** Once required, don't re-require for this long — the model needs turns to
+ *  work the ladder, and a re-steer every risky turn would both nag the model
+ *  and spam intervention_actions. Cleared when the ladder actually starts. */
+const RISK_CHECK_RETRY_MS = 5 * 60 * 1000;
+const riskCheckRequiredAt = new Map<string, number>();
+
+export async function resolveRiskCheckMinScore(): Promise<number> {
+  try {
+    const { getSystemConfig } = await import('../utils/sessionHelpers.js');
+    const config = await getSystemConfig();
+    const crisis = config.crisis as { risk_check_min_score?: unknown } | undefined;
+    const raw = crisis?.risk_check_min_score;
+    const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+    if (Number.isFinite(value) && value >= 0 && value <= 100) return value;
+    return DEFAULT_RISK_CHECK_MIN_SCORE;
+  } catch {
+    return DEFAULT_RISK_CHECK_MIN_SCORE;
+  }
+}
+
+/** Test hook: number of sessions currently holding a risk-check requirement. */
+export function _riskCheckRequiredCountForTests(): number {
+  return riskCheckRequiredAt.size;
+}
+
+/**
+ * Deterministic risk-ladder trigger (ai-therapist-198). When a turn scores at
+ * or above the configured threshold and the session has logged no ladder step,
+ * require the ladder on the next turn: realtime gets a sideband injection here,
+ * chat gets the guidance string back for the caller to append to its model
+ * call. Either way the attempt is recorded in intervention_actions the way
+ * risk_steering is, so "we asked for a ladder and never got one" is countable
+ * rather than invisible.
+ *
+ * Returns the guidance for the chat channel to inject, or null (realtime, or
+ * no requirement this turn). Never throws.
+ */
+export async function maybeRequireRiskCheck(
+  sessionId: string,
+  riskScore: number,
+  severity: string,
+  channel: 'realtime' | 'chat',
+): Promise<string | null> {
+  try {
+    const minScore = await resolveRiskCheckMinScore();
+    if (riskScore < minScore) return null;
+
+    const lastRequired = riskCheckRequiredAt.get(sessionId) ?? 0;
+    if (Date.now() - lastRequired < RISK_CHECK_RETRY_MS) return null;
+
+    const { sessionHasRiskCheck } = await import('../db/index.js');
+    if (await sessionHasRiskCheck(sessionId)) {
+      // The ladder is underway — the tool description and the steering copy
+      // carry it from here; drop any pending requirement marker.
+      riskCheckRequiredAt.delete(sessionId);
+      return null;
+    }
+
+    riskCheckRequiredAt.set(sessionId, Date.now());
+    if (riskCheckRequiredAt.size > 500) {
+      const cutoff = Date.now() - 60 * 60 * 1000;
+      for (const [id, ts] of riskCheckRequiredAt) {
+        if (ts < cutoff) riskCheckRequiredAt.delete(id);
+      }
+    }
+
+    let delivered = true;
+    if (channel === 'realtime') {
+      const { sidebandManager } = await import('./sidebandManager.service.js');
+      delivered = await sidebandManager.tryInject(sessionId, 'system', RISK_CHECK_REQUIRED_GUIDANCE, false);
+    }
+
+    await logInterventionAction(sessionId, 'risk_steering', {
+      riskScore, severity, channel, delivered,
+      trigger: 'risk_check_required',
+      threshold: minScore,
+    });
+
+    if (global.io) {
+      void broadcastAdminEventForSession(global.io, 'session:risk-check-required', {
+        sessionId, riskScore, severity, threshold: minScore, delivered, requiredAt: new Date(),
+      }, sessionId, 'summary');
+    }
+
+    return channel === 'chat' ? RISK_CHECK_REQUIRED_GUIDANCE : null;
+  } catch (error) {
+    // Safety-adjacent but strictly additive: never break the pipeline over it.
+    console.error('[crisis] risk-check requirement failed (non-fatal):', error);
+    return null;
+  }
+}
 // One shared cooldown map across BOTH pipelines (realtime + chat): a session
 // gets one steering per 3 minutes regardless of channel (ai-therapist-105).
 const steeringLastSent = new Map<string, number>();
@@ -25,9 +152,12 @@ function steeringGuidance(riskScore: number, severity: string): string {
   if (severity === 'high') {
     return base +
       ` Calmly assess their immediate safety, and naturally work the crisis resources from your instructions into the conversation. ` +
-      `Stay with them — the research team's monitoring dashboard has been alerted.`;
+      `Stay with them — the research team's monitoring dashboard has been alerted. ` +
+      RISK_CHECK_DIRECTIVE;
   }
-  return base + ` If anything suggests thoughts of self-harm, follow your crisis protocol.`;
+  return base +
+    ` If anything suggests thoughts of self-harm, follow your crisis protocol. ` +
+    RISK_CHECK_DIRECTIVE;
 }
 
 /**
@@ -60,6 +190,7 @@ export function shouldSteer(sessionId: string, riskScore: number, force = false)
 /** Clear a session's steering cooldown entry (chat end / cleanup). */
 export function clearSteeringState(sessionId: string): void {
   steeringLastSent.delete(sessionId);
+  riskCheckRequiredAt.delete(sessionId);
 }
 
 // ============================================
@@ -77,7 +208,8 @@ export function buildChatSteeringGuidance(riskScore: number, severity: string): 
     `Risk signals in this conversation are elevated (score ${riskScore}/100). ` +
     `Slow your pace and keep responses short, warm, and grounded. Prioritize validation and reflective listening over problem-solving. ` +
     `Gently check how the participant is feeling right now. ` +
-    `If anything suggests thoughts of self-harm, follow your crisis protocol and include the crisis resources from your instructions in your reply.`
+    `If anything suggests thoughts of self-harm, follow your crisis protocol and include the crisis resources from your instructions in your reply. ` +
+    RISK_CHECK_DIRECTIVE
   );
 }
 
@@ -95,7 +227,8 @@ export const CHAT_SAFETY_PROTOCOL_GUIDANCE =
   `Between questions, validate and stay warm — do not interrogate. ` +
   `Include the crisis resources from your instructions directly in your reply — the 988 Suicide & Crisis Lifeline (call or text 988), the Crisis Text Line (text HOME to 741741), and the BYU CAPS crisis line (801-422-3035) — ` +
   `and, if they engage, offer to write out a simple safety plan together in the chat. ` +
-  `Do not end the session yourself. Stay with them.`;
+  `Do not end the session yourself. Stay with them. ` +
+  RISK_CHECK_DIRECTIVE;
 
 // Sessions already recorded as having undeliverable steering. Keeps the signal
 // to one row per session rather than one per risky turn, while still making the
@@ -305,7 +438,8 @@ const SAFETY_PROTOCOL_GUIDANCE =
   `(4) whether they have a timeframe in mind. ` +
   `Between questions, validate and stay warm — do not interrogate. ` +
   `Call the show_resource_card tool so crisis lines are on their screen, and if they engage, offer to build a safety plan together using the create_safety_plan tool. ` +
-  `Do not end the session yourself. Stay with them.`;
+  `Do not end the session yourself. Stay with them. ` +
+  RISK_CHECK_DIRECTIVE;
 
 /**
  * Page the on-call phone. THE single paging choke point for high-severity

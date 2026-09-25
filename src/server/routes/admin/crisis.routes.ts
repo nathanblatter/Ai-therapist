@@ -4,13 +4,14 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
-import { requireSessionClientAccess, careTeamScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
+import { requireSessionClientAccess, requireClientAccess, careTeamScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
 import {
   projectRows,
   CRISIS_EVENT_SUMMARY_FIELDS,
   RISK_HISTORY_SUMMARY_FIELDS,
   INTERVENTION_SUMMARY_FIELDS,
+  RISK_CHECK_STEP_SUMMARY_FIELDS,
 } from '../../utils/tierScrub.js';
 import { dataTierFor } from '../../../shared/roles.js';
 import {
@@ -19,7 +20,10 @@ import {
   getAllCrisisData,
   getAllCrisisEvents,
   getCaseloadClientIds,
+  getSessionRiskCheckLadder,
+  getParticipantRiskCheckLadders,
 } from '../../db/index.js';
+import type { RiskCheckLadder } from '../../db/index.js';
 
 // Caseload guard for session ids arriving via query string (the
 // requireSessionClientAccess middleware only covers :sessionId path params).
@@ -31,6 +35,18 @@ function careTeamMayAccessSession(req: Request, sessionId: string): Promise<bool
   });
 }
 
+
+// Summary-tier projection for a risk-check ladder: the summary shape (bands,
+// depth, timestamps) is safe as-is, but each step's `answer` is the
+// participant's verbatim reply to a suicide-assessment question and is
+// therapist/researcher-only.
+function scrubLadder(ladder: RiskCheckLadder, req: Request): RiskCheckLadder | Record<string, unknown> {
+  if (dataTierFor(req.session.userRole) !== 'summary') return ladder;
+  return {
+    ...ladder,
+    steps: projectRows(ladder.steps as unknown as Record<string, unknown>[], RISK_CHECK_STEP_SUMMARY_FIELDS),
+  };
+}
 
 export default function crisisRoutes(): Router {
   const router = Router();
@@ -246,6 +262,39 @@ export default function crisisRoutes(): Router {
     } catch (err) {
       console.error('Failed to fetch session risk history:', err);
       res.status(500).json({ error: 'Failed to fetch session risk history' });
+    }
+  });
+
+  // ---- Structured risk ladder (ai-therapist-198) ----
+  // The run_risk_check ladder is the highest-quality risk instrument in the
+  // system and had no clinical surface at all: the rows only ever reached a
+  // human buried inside an adverse-event draft's timeline. These two reads back
+  // the RiskCheckLadder panel in SessionDetail / CrisisManagement (by session)
+  // and ParticipantProfile (by participant).
+
+  // GET /admin/api/sessions/:sessionId/risk-check - one session's ladder.
+  router.get('/admin/api/sessions/:sessionId/risk-check', requireRole('therapist', 'researcher', 'caseworker'), requireSessionClientAccess(), async (req, res) => {
+    try {
+      const ladder = await getSessionRiskCheckLadder(req.params.sessionId);
+      res.json({ ladder: scrubLadder(ladder, req) });
+    } catch (err) {
+      console.error('Failed to fetch session risk check:', err);
+      res.status(500).json({ error: 'Failed to fetch session risk check' });
+    }
+  });
+
+  // GET /admin/api/users/:userId/risk-checks - every ladder for a participant.
+  router.get('/admin/api/users/:userId/risk-checks', requireRole('therapist', 'researcher', 'caseworker'), requireClientAccess(), async (req, res) => {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+    try {
+      const ladders = await getParticipantRiskCheckLadders(userId);
+      res.json({ ladders: ladders.map((ladder) => scrubLadder(ladder, req)) });
+    } catch (err) {
+      console.error('Failed to fetch participant risk checks:', err);
+      res.status(500).json({ error: 'Failed to fetch participant risk checks' });
     }
   });
 

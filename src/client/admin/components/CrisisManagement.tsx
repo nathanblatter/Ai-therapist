@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { AlertTriangle, Activity, Users, FileText, TrendingUp, Clock, RefreshCw, ChevronDown, ChevronUp, ArrowUpCircle, MessageSquare } from 'react-feather';
 import EscalationComposer from './escalations/EscalationComposer';
 import FlaggedMessageRow, { useFlaggedMessageEvents } from './FlaggedMessageRow';
+import RiskCheckLadder from './RiskCheckLadder';
 import { formatDateTime } from '../../shared/format';
 import { severityBadgeClass, statusBadgeClass, riskScoreTextClass } from '../../shared/severity';
 
@@ -485,6 +486,13 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                               </div>
                             </div>
                           ))}
+                        </div>
+
+                        {/* Structured C-SSRS-style ladder for this session
+                            (ai-therapist-198). Lazy — only fetches when the
+                            reviewer opens the panel. */}
+                        <div className="mt-4">
+                          <RiskCheckLadder sessionId={sessionId} />
                         </div>
                       </div>
                     )}
