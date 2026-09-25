@@ -26,6 +26,14 @@ import { createParticipantSocket } from '../lib/participantSocket';
 import { GrokVoiceClient } from '../lib/grokVoiceClient';
 import type { GrokServerMessage } from '../../../shared/grokVoiceProtocol';
 import { getUserSocket, closeUserSocket } from '../lib/userSocket';
+import {
+  SESSION_START_OK,
+  classifySessionStartRefusal,
+  describeSessionStartRefusal,
+  sessionStartRefused,
+  type SessionStartErrorBody,
+  type SessionStartResult,
+} from '../lib/sessionStartResult';
 import { useMessagingUnread } from '../hooks/useMessaging';
 import { getStoredTheme, setTheme } from '../../shared/theme';
 import { reportClientEvent } from '../utils/telemetry';
@@ -937,7 +945,15 @@ export default function App() {
     console.warn(`[Live] Starting voice recovery attempt ${attempt}/${MAX_VOICE_RECOVERY_ATTEMPTS}.`);
 
     try {
-      await startRealtimeSession(null, true);
+      const startResult = await startRealtimeSession(null, true);
+      // A synchronous refusal (503 monitoring unavailable, 409 live_not_active,
+      // an active session the server still sees) means no session was created,
+      // so `session.started` can never land. Waiting out RECOVERY_START_WAIT_MS
+      // here would hold a participant in crisis on "I'm coming right back" for
+      // ~23s per attempt for nothing (ai-therapist-227) — fail over now.
+      if (!startResult.ok) {
+        throw new Error(describeSessionStartRefusal(startResult.refusal));
+      }
       // startRealtimeSession returns as soon as the SDP answer is applied; the
       // session is only genuinely usable at `session.started`.
       const started = await waitForLiveStart(RECOVERY_START_WAIT_MS);
@@ -1094,8 +1110,13 @@ export default function App() {
    *   fresh session with no history by design, so the ordinary opening preamble
    *   and the caption reset are skipped and the moderation takeover state is
    *   left alone — the takeover is still in progress while this runs.
+   * @returns `{ ok: true }` once the SDP answer is applied (the session still
+   *   has to report `session.started`), or `{ ok: false, refusal }` when the
+   *   server refused the start outright. Transport-level failures throw, as
+   *   before. Callers must not treat a refusal as a slow connect
+   *   (ai-therapist-227).
    */
-  async function startRealtimeSession(checkin: CheckinData | null = null, recovery = false) {
+  async function startRealtimeSession(checkin: CheckinData | null = null, recovery = false): Promise<SessionStartResult> {
     voiceBackendRef.current = 'live';
     // Drives SessionControls.startMicOn. A recovery session resumes a
     // conversation the participant was already speaking in, so it must come
@@ -1419,48 +1440,58 @@ export default function App() {
       }),
     });
 
-    // Check for rate limiting errors
-    if (response.status === 429) {
-      const errorData = await response.json();
-      toast.error(errorData.message || "You have reached your session limit. Please try again later.");
-      console.warn("Rate limit exceeded:", errorData);
-      setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
-      abortStart();
-      return;
-    }
-
-    // Quiet hours (server-enforced): swap to the overnight screen.
-    if (response.status === 403) {
-      const errorData = await response.json().catch(() => null);
-      if (errorData?.error === 'quiet_hours') {
-        setQuietHours({ blocksYou: true, ...errorData.quietHours });
+    // Synchronous server refusals. Each one is terminal — no session exists, so
+    // nothing will ever arrive on the data channel — and each is reported to the
+    // caller as a refusal rather than swallowed (ai-therapist-227), so the
+    // content-filter voice recovery can fail over at once instead of waiting out
+    // a `session.started` that is never coming.
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null) as SessionStartErrorBody | null;
+      const refusal = classifySessionStartRefusal(response.status, errorData);
+      if (refusal) {
+        switch (refusal) {
+          case 'rate_limited':
+            console.warn('Rate limit exceeded:', errorData);
+            // During a content-filter takeover the crisis screen owns the
+            // screen and the message. Stacking "You have reached your session
+            // limit" on top of it is the wrong thing to say to someone in
+            // crisis, and the limit does not apply to the recovery session
+            // anyway (recovery is server-side exempt) — so neither the toast
+            // nor the home-screen rate-limit banner state is touched here.
+            if (!moderationTakeoverRef.current) {
+              toast.error((errorData?.message as string | undefined) || 'You have reached your session limit. Please try again later.');
+              setRateLimitInfo({ limited: true, resetsAt: (errorData?.limit_resets_at as string | undefined) ?? null });
+            }
+            break;
+          // Quiet hours (server-enforced): swap to the overnight screen.
+          case 'quiet_hours':
+            setQuietHours({
+              blocksYou: true,
+              ...(errorData?.quietHours as { startHour: number; endHour: number }),
+            });
+            break;
+          case 'study_status':
+            setStudyStatusBlock(errorData?.studyStatus === 'paused' ? 'paused' : 'withdrawn');
+            break;
+          // Our AI provider blocked this participant's anonymous identifier
+          // (ai-therapist-186) — unrecoverable client-side, so point them at the
+          // research team instead of a "check your connection" toast.
+          case 'identifier_blocked':
+            setStudyStatusBlock('access_blocked');
+            break;
+          // The study was rolled back to a non-Live voice backend after this
+          // page loaded. Nothing the participant can fix, not a network problem.
+          case 'live_not_active':
+            console.warn('Live backend is not active:', errorData);
+            if (!moderationTakeoverRef.current) {
+              toast.error('Voice sessions are temporarily unavailable. Please refresh the page and try again, or contact the research team if this keeps happening.');
+            }
+            break;
+          default:
+            break;
+        }
         abortStart();
-        return;
-      }
-      if (errorData?.error === 'study_status') {
-        setStudyStatusBlock(errorData.studyStatus === 'paused' ? 'paused' : 'withdrawn');
-        abortStart();
-        return;
-      }
-      // Our AI provider blocked this participant's anonymous identifier
-      // (ai-therapist-186) — unrecoverable client-side, so point them at the
-      // research team instead of a "check your connection" toast.
-      if (errorData?.error === 'identifier_blocked') {
-        setStudyStatusBlock('access_blocked');
-        abortStart();
-        return;
-      }
-    }
-
-    // The study was rolled back to a non-Live voice backend after this page
-    // loaded. Nothing the participant can fix, and not a network problem.
-    if (response.status === 409) {
-      const errorData = await response.json().catch(() => null);
-      if (errorData?.error === 'live_not_active') {
-        toast.error('Voice sessions are temporarily unavailable. Please refresh the page and try again, or contact the research team if this keeps happening.');
-        console.warn('Live backend is not active:', errorData);
-        abortStart();
-        return;
+        return sessionStartRefused(refusal);
       }
     }
 
@@ -1476,10 +1507,12 @@ export default function App() {
 
     // Check if session already exists (idempotency check)
     if (data.session?.exists) {
-      toast.warning(data.message || "You already have an active session. Please end it before starting a new one.");
       console.warn("Active session already exists:", data.session.id);
+      if (!moderationTakeoverRef.current) {
+        toast.warning(data.message || "You already have an active session. Please end it before starting a new one.");
+      }
       abortStart();
-      return;
+      return sessionStartRefused('session_exists');
     }
 
     const newSessionId = data.session_id as string;
@@ -1590,6 +1623,8 @@ export default function App() {
       }
       void stopSessionRef.current();
     }, LIVE_START_TIMEOUT_MS);
+
+    return SESSION_START_OK;
   }
 
   // =========================================================================
