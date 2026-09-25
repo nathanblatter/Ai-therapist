@@ -68,6 +68,93 @@ type ResponsesClient = { responses: { create: (opts: Record<string, unknown>) =>
 const conversationHistory = new Map<string, ChatHistoryItem[]>();
 
 /**
+ * The session's context cannot be reconstructed, so the turn cannot proceed:
+ * the session is gone, ended, or was never a chat session with a stored
+ * prompt. Callers translate this into a 4xx the participant can act on
+ * ("please start a new session"), never a 500 — see chat.routes.ts.
+ */
+export class ChatSessionUnavailableError extends Error {
+  /** Stable code the client switches on. */
+  readonly code = 'session_unavailable';
+  /** Copy safe to show a participant verbatim. */
+  readonly participantMessage: string;
+
+  constructor(reason: string, participantMessage = 'This conversation is no longer available. Please start a new session.') {
+    super(reason);
+    this.name = 'ChatSessionUnavailableError';
+    this.participantMessage = participantMessage;
+  }
+}
+
+/** Type guard usable across the dynamic-import boundary (instanceof survives, but be defensive). */
+export function isChatSessionUnavailableError(err: unknown): err is ChatSessionUnavailableError {
+  return err instanceof ChatSessionUnavailableError
+    || (err instanceof Error && (err as { code?: string }).code === 'session_unavailable');
+}
+
+/**
+ * Rebuild a session's in-memory history from the database (ai-therapist-222).
+ *
+ * The Map above is process-local, so every restart — and every blue-green
+ * cutover, which is routine — wiped the context of sessions that are still
+ * 'active' in `therapy_sessions` and still open in the participant's browser.
+ * Each following turn then threw, permanently, after their words had already
+ * been written to `messages`. This mirrors the intent of
+ * sidebandManager.reattachActiveSessions on the realtime side: an active
+ * session survives a deploy instead of being stranded. The difference is that
+ * chat has no live socket to reattach, so rehydration is lazy — the next turn
+ * pays for it.
+ *
+ * Shape parity with the live Map: index 0 is the system prompt (the exact
+ * instructions persisted to session_configurations at /api/chat/start), then
+ * the user/assistant turns in chronological order. Responses-API function_call
+ * items are NOT persisted to `messages` (they live in the tool-call audit
+ * tables), so a rehydrated history has no tool rows; the model simply loses
+ * the memory of which cards it already rendered, which is a far smaller cost
+ * than a dead session. Ephemeral injected guidance is likewise not restored —
+ * by design, it is never persisted (see injectGuidance).
+ */
+export async function rehydrateChatSession(sessionId: string): Promise<ChatHistoryItem[]> {
+  const { getSessionAccessInfo, getSessionConfig, getSessionMessages } = await import('../db/index.js');
+
+  const session = await getSessionAccessInfo(sessionId);
+  if (!session) {
+    throw new ChatSessionUnavailableError(`Session ${sessionId} does not exist`);
+  }
+  if (session.status !== 'active') {
+    throw new ChatSessionUnavailableError(
+      `Session ${sessionId} is ${session.status}, not active`,
+      'This conversation has ended. Please start a new session.',
+    );
+  }
+  if (session.session_type !== 'chat') {
+    throw new ChatSessionUnavailableError(`Session ${sessionId} is a ${session.session_type} session, not chat`);
+  }
+
+  const config = await getSessionConfig(sessionId);
+  const systemPrompt = config?.instructions?.trim();
+  if (!systemPrompt) {
+    throw new ChatSessionUnavailableError(`Session ${sessionId} has no stored instructions to rebuild the prompt from`);
+  }
+
+  const rows = await getSessionMessages(sessionId, false);
+  const history: ChatHistoryItem[] = [{ role: 'system', content: systemPrompt }];
+  for (const row of rows) {
+    if (row.role !== 'user' && row.role !== 'assistant') continue;
+    const content = (row.content ?? '').trim();
+    if (!content) continue;
+    history.push({ role: row.role, content });
+  }
+
+  conversationHistory.set(sessionId, history);
+  console.log(
+    `[ChatTherapy] Session ${sessionId.substring(0, 12)}... rehydrated from DB ` +
+    `(${history.length - 1} prior message(s))`
+  );
+  return history;
+}
+
+/**
  * Initialize a new chat therapy session
  * @param {string} sessionId - Unique session identifier
  * @param {string} systemPrompt - System instructions for the AI
@@ -165,12 +252,21 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
   const apiKey = await getOpenAIKey();
   const client = new OpenAI({ apiKey }) as unknown as ResponsesClient;
 
-  // Get or initialize conversation history
-  if (!conversationHistory.has(sessionId)) {
-    throw new Error(`Session ${sessionId} not initialized. Call initializeChatSession first.`);
+  // Get the conversation history, lazily rebuilding it from the database when
+  // this process has never seen the session (ai-therapist-222: server restart
+  // / blue-green cutover). Throws ChatSessionUnavailableError — a 4xx, not a
+  // 500 — when the session cannot be rebuilt.
+  let messages = conversationHistory.get(sessionId);
+  if (!messages) {
+    messages = await rehydrateChatSession(sessionId);
+    // The route persists the participant's turn BEFORE calling us, so the
+    // rehydrated tail already contains this exact message. Drop it, since the
+    // turn is appended to `input` below and re-stored in history after.
+    const last = messages[messages.length - 1] as ChatMessage | undefined;
+    if (last && last.role === 'user' && last.content === userMessage.trim()) {
+      messages.pop();
+    }
   }
-
-  const messages = conversationHistory.get(sessionId)!;
 
   // Text-safe tool subset (ai-therapist-118), honoring features.disabled_tools
   // exactly like the realtime mint path. Fail-open: a registry/config error

@@ -2,12 +2,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Capture the input the Responses API is called with, so we can assert that
 // injected clinical guidance rides along in the right position.
-const { createMock, getEnabledToolDefinitionsMock, executeLoggedToolCallMock, recordLlmUsageMock, insertTurnLatencyMock } = vi.hoisted(() => ({
+const {
+  createMock, getEnabledToolDefinitionsMock, executeLoggedToolCallMock, recordLlmUsageMock,
+  insertTurnLatencyMock, getSessionAccessInfoMock, getSessionConfigMock, getSessionMessagesMock,
+} = vi.hoisted(() => ({
   createMock: vi.fn(),
   getEnabledToolDefinitionsMock: vi.fn(),
   executeLoggedToolCallMock: vi.fn(),
   recordLlmUsageMock: vi.fn(),
   insertTurnLatencyMock: vi.fn(),
+  getSessionAccessInfoMock: vi.fn(),
+  getSessionConfigMock: vi.fn(),
+  getSessionMessagesMock: vi.fn(),
 }));
 
 vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue('test-key') }));
@@ -25,11 +31,14 @@ vi.mock('./toolExecution.helpers.js', () => ({
 vi.mock('../db/index.js', () => ({
   recordLlmUsage: recordLlmUsageMock,
   insertTurnLatency: insertTurnLatencyMock,
+  getSessionAccessInfo: getSessionAccessInfoMock,
+  getSessionConfig: getSessionConfigMock,
+  getSessionMessages: getSessionMessagesMock,
 }));
 
 const {
   initializeChatSession, sendMessage, injectGuidance, getConversationHistory, endChatSession,
-  toResponsesTools,
+  toResponsesTools, isChatSessionUnavailableError,
 } = await import('./chatTherapy.service.js');
 
 const SAMPLE_DEF = {
@@ -46,6 +55,9 @@ beforeEach(() => {
   executeLoggedToolCallMock.mockResolvedValue({ result: { success: true }, success: true });
   recordLlmUsageMock.mockResolvedValue(undefined);
   insertTurnLatencyMock.mockResolvedValue(undefined);
+  getSessionAccessInfoMock.mockResolvedValue({ status: 'active', user_id: 7, session_type: 'chat' });
+  getSessionConfigMock.mockResolvedValue({ instructions: 'STORED PROMPT' });
+  getSessionMessagesMock.mockResolvedValue([]);
 });
 
 describe('injectGuidance', () => {
@@ -259,5 +271,104 @@ describe('chat tool calling (ai-therapist-118)', () => {
     expect(text).toBe('done');
     expect(executeLoggedToolCallMock).toHaveBeenCalledWith(sid, 'show_resource_card', {}, 'call_x', 'chat');
     endChatSession(sid);
+  });
+});
+
+// ai-therapist-222: the in-memory history Map is process-local, so a restart
+// (every deploy; blue-green cutovers are routine) used to strand every active
+// chat session — each turn persisted the participant's words and then threw.
+describe('lazy rehydration after a server restart (ai-therapist-222)', () => {
+  it('rebuilds history from the DB for an active session this process has never seen', async () => {
+    const sid = 'chat_restart';
+    // No initializeChatSession: this is a fresh process.
+    getSessionConfigMock.mockResolvedValue({ instructions: 'STORED PROMPT' });
+    getSessionMessagesMock.mockResolvedValue([
+      { role: 'user', content: 'first thing I said' },
+      { role: 'assistant', content: 'reply one' },
+      // The route persists the current turn BEFORE calling sendMessage.
+      { role: 'user', content: 'second thing I said' },
+    ]);
+
+    const { text } = await sendMessage(sid, 'second thing I said');
+    expect(text).toBe('assistant reply');
+
+    const input = createMock.mock.calls[0][0].input as Array<{ role: string; content: string }>;
+    expect(input).toEqual([
+      { role: 'system', content: 'STORED PROMPT' },
+      { role: 'user', content: 'first thing I said' },
+      { role: 'assistant', content: 'reply one' },
+      { role: 'user', content: 'second thing I said' },
+    ]);
+    // The already-persisted turn is sent exactly once, not duplicated.
+    expect(input.filter(m => m.content === 'second thing I said')).toHaveLength(1);
+
+    // And the rebuilt history is cached for the following turns.
+    const history = getConversationHistory(sid) as Array<{ role: string; content: string }>;
+    expect(history[0]).toEqual({ role: 'system', content: 'STORED PROMPT' });
+    expect(history[history.length - 1]).toEqual({ role: 'assistant', content: 'assistant reply' });
+    endChatSession(sid);
+  });
+
+  it('skips non-conversational and empty rows while preserving order', async () => {
+    const sid = 'chat_restart_filter';
+    getSessionMessagesMock.mockResolvedValue([
+      { role: 'user', content: 'hello' },
+      { role: 'system', content: 'internal note' },
+      { role: 'assistant', content: '   ' },
+      { role: 'assistant', content: 'hi back' },
+    ]);
+
+    await sendMessage(sid, 'still here?');
+    const input = createMock.mock.calls[0][0].input as Array<{ role: string; content: string }>;
+    expect(input).toEqual([
+      { role: 'system', content: 'STORED PROMPT' },
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi back' },
+      { role: 'user', content: 'still here?' },
+    ]);
+    endChatSession(sid);
+  });
+
+  it('does not touch the DB when the session is already in memory', async () => {
+    const sid = 'chat_warm';
+    initializeChatSession(sid, 'LIVE PROMPT');
+    await sendMessage(sid, 'hi');
+    expect(getSessionAccessInfoMock).not.toHaveBeenCalled();
+    expect(getSessionMessagesMock).not.toHaveBeenCalled();
+    endChatSession(sid);
+  });
+
+  it('fails cleanly (not a 500-shaped error) for an ended session', async () => {
+    const sid = 'chat_ended';
+    getSessionAccessInfoMock.mockResolvedValue({ status: 'ended', user_id: 7, session_type: 'chat' });
+
+    const err = await sendMessage(sid, 'anyone there?').catch((e: unknown) => e);
+    expect(isChatSessionUnavailableError(err)).toBe(true);
+    expect((err as { code: string }).code).toBe('session_unavailable');
+    expect((err as { participantMessage: string }).participantMessage).toMatch(/start a new session/i);
+    // No model call was made and nothing was cached for the dead session.
+    expect(createMock).not.toHaveBeenCalled();
+    expect(getConversationHistory(sid)).toEqual([]);
+  });
+
+  it('fails cleanly for a session that no longer exists', async () => {
+    getSessionAccessInfoMock.mockResolvedValue(null);
+    const err = await sendMessage('chat_gone', 'hello').catch((e: unknown) => e);
+    expect(isChatSessionUnavailableError(err)).toBe(true);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('fails cleanly when no stored instructions exist to rebuild the prompt from', async () => {
+    getSessionConfigMock.mockResolvedValue({ instructions: null });
+    const err = await sendMessage('chat_noconfig', 'hello').catch((e: unknown) => e);
+    expect(isChatSessionUnavailableError(err)).toBe(true);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses to rehydrate a non-chat session', async () => {
+    getSessionAccessInfoMock.mockResolvedValue({ status: 'active', user_id: 7, session_type: 'realtime' });
+    const err = await sendMessage('chat_voice', 'hello').catch((e: unknown) => e);
+    expect(isChatSessionUnavailableError(err)).toBe(true);
+    expect(createMock).not.toHaveBeenCalled();
   });
 });

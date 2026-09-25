@@ -404,6 +404,15 @@ export default function chatRoutes(): Router {
       // Blocked safety identifier (ai-therapist-186): permanent on the
       // provider's side, so answer with the dedicated code that drives the
       // supportive screen instead of a generic 500.
+      // Unrehydratable session (ai-therapist-222): the process restarted and
+      // the session's context could not be rebuilt from the database. That is
+      // a client-actionable state ("start a new session"), not a server fault.
+      const { isChatSessionUnavailableError } = await import('../../services/chatTherapy.service.js');
+      if (isChatSessionUnavailableError(error)) {
+        console.warn(`[Chat] Session ${sessionId} unavailable for this turn: ${error.message}`);
+        return res.status(409).json({ error: 'session_unavailable', message: error.participantMessage });
+      }
+
       const { isIdentifierBlockedError } = await import('../../utils/safetyIdentifier.js');
       if (isIdentifierBlockedError(error)) {
         console.error('[Chat] BLOCKED SAFETY IDENTIFIER — participant cannot send messages; study team must re-enroll or contact OpenAI.');

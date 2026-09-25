@@ -22,6 +22,10 @@ const dbMocks = vi.hoisted(() => ({
   setSessionCheckin: vi.fn(),
   upsertSessionConfig: vi.fn(),
 }));
+const chatMocks = vi.hoisted(() => ({
+  initializeChatSession: vi.fn(),
+  sendMessage: vi.fn(),
+}));
 const helperMocks = vi.hoisted(() => ({
   checkSessionLimits: vi.fn(),
   getSystemPrompt: vi.fn(),
@@ -47,11 +51,22 @@ vi.mock('../../services/sessionName.service.js', () => ({
   generateSessionNameAsync: vi.fn(),
 }));
 vi.mock('../../services/chatTherapy.service.js', () => ({
-  initializeChatSession: vi.fn(),
-  sendMessage: vi.fn(),
+  initializeChatSession: chatMocks.initializeChatSession,
+  sendMessage: chatMocks.sendMessage,
   injectGuidance: vi.fn(),
   endChatSession: vi.fn(),
   getConversationHistory: vi.fn().mockReturnValue([]),
+  isChatSessionUnavailableError: (err: unknown) =>
+    err instanceof Error && (err as { code?: string }).code === 'session_unavailable',
+}));
+vi.mock('../../services/minorSafeguard.service.js', () => ({
+  detectMinorDisclosurePatterns: () => ({ matched: false }),
+}));
+vi.mock('../../services/crisisDetection.service.js', () => ({
+  detectCrisisKeywords: () => ({ keywordScore: 0 }),
+}));
+vi.mock('../../services/crisisPipeline.service.js', () => ({
+  runCrisisPipeline: vi.fn().mockResolvedValue({ steeringGuidance: null }),
 }));
 vi.mock('../../utils/harness.js', () => ({
   isNonStudyUser: () => false,
@@ -162,5 +177,31 @@ describe('POST /api/chat/message rate limiting', () => {
       lastStatus = res.status;
     }
     expect(lastStatus).toBe(429);
+  });
+});
+
+// ai-therapist-222: a restart that leaves the session unrehydratable is a
+// client-actionable state, not a server fault — the participant must be told
+// to start a new session instead of seeing a generic failure forever.
+describe('POST /api/chat/message when the session cannot be rehydrated', () => {
+  it('answers 409 session_unavailable with showable copy, not a 500', async () => {
+    const sessionId = 'chat_dead';
+    dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: null, session_type: 'chat' });
+    dbMocks.insertMessagesBatch.mockResolvedValue([{ message_id: 42 }]);
+    const err = Object.assign(new Error('Session chat_dead has no stored instructions'), {
+      code: 'session_unavailable',
+      participantMessage: 'This conversation is no longer available. Please start a new session.',
+    });
+    chatMocks.sendMessage.mockRejectedValue(err);
+
+    const res = await request(makeApp({ ownedSessions: [sessionId] }))
+      .post('/api/chat/message')
+      .send({ sessionId, message: 'are you there?' });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: 'session_unavailable',
+      message: 'This conversation is no longer available. Please start a new session.',
+    });
   });
 });
