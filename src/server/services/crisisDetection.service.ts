@@ -18,6 +18,11 @@ const log = createLogger('crisisDetection');
 // on role (an assistant reciting "988 Suicide & Crisis Lifeline" once flagged
 // a session as a high-severity crisis).
 
+/** Passive-ideation tier score. Deliberately at the bottom of the medium
+ *  severity band (>= 50) rather than below it: a passive wish to be dead is
+ *  ideation under C-SSRS and must flag, not merely steer (ai-therapist-254). */
+const PASSIVE_IDEATION_SCORE = 50;
+
 const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
   // Explicit ideation / self-harm / means.
   high: {
@@ -33,6 +38,12 @@ const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
   // Passive ideation / escape wishes — the phrases the old list missed.
   // (Colloquial forms like "wanna" are normalized to "want to" before
   // matching, so spoken variants land here too.)
+  //
+  // Scored at PASSIVE_IDEATION_SCORE (ai-therapist-254): C-SSRS treats a
+  // passive wish to be dead as IDEATION, not distress, so this tier must land
+  // in the medium band (>= 50). At the old 40 it derived severity 'low', which
+  // never flags — a passive-ideation turn whose LLM assessment was unavailable
+  // (or came back under-scored) produced steering but no crisis flag.
   medium: {
     keywords: [
       "don't want to be here", 'do not want to be here', "don't want to exist",
@@ -41,7 +52,7 @@ const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
       'no point going on', 'give up on life', 'tired of living', 'tired of being alive',
       'everyone would be better off without me', 'better off without me',
     ],
-    score: 40,
+    score: PASSIVE_IDEATION_SCORE,
   },
   // Acute distress — enough to warrant a contextual look, nothing more.
   low: {
@@ -52,6 +63,57 @@ const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
     score: 15,
   },
 };
+
+// Indirect / euphemistic passive ideation (ai-therapist-254). The literal
+// keyword lists above only match fixed substrings, so the very common way
+// participants actually phrase a passive wish to be dead - hedged, indirect,
+// with filler words in the middle ("I think it would just be easier sometimes
+// if I just didn't have to do this anymore") - matched nothing at all and the
+// screen never woke the assessor. These are regexes over the SAME normalized
+// text, scored at the passive-ideation tier. Screening, not judging: the
+// stage-2 LLM still decides context (negation, bystander, reference).
+const PASSIVE_IDEATION_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
+  {
+    // "it would be easier if I didn't have to do this anymore" / "...if I
+    // wasn't here" / "...if I were just gone" - with filler between the parts.
+    label: 'easier if (indirect escape wish)',
+    pattern: /\beasier\b[\w\s,'-]{0,40}?\bif\b[\w\s,'-]{0,30}?\bi\b[\w\s,'-]{0,15}?(?:(?:did|do|does|would|could)n'?t have to|(?:was|were)n'?t (?:here|around|alive)|(?:was|were) (?:just )?gone|(?:did|do|would)n'?t wake up|(?:did|do|would)n'?t exist)\b/,
+  },
+  {
+    // The negated-obligation form on its own: "I wish I didn't have to keep
+    // going", "if I just didn't have to do this anymore".
+    label: 'did not have to go on (escape wish)',
+    pattern: /\b(?:did|do|does|would|could)n'?t have to (?:do this|deal with (?:this|it|any of this)|be here|keep going|keep doing this|go on|wake up|exist)\b/,
+  },
+  {
+    label: 'tired of being here (passive ideation)',
+    pattern: /\btired of (?:being here|being around|waking up|existing|holding on|carrying on|fighting to stay)\b/,
+  },
+  {
+    label: 'would not mind not waking up',
+    pattern: /\bwould'?n'?t (?:mind|care)\b[\w\s,'-]{0,20}?(?:not waking up|never waking up|if i (?:did|do|would)n'?t wake up|if i never woke up|if i (?:was|were)n'?t (?:here|around|alive)|if i (?:was|were) (?:just )?gone|if i disappeared|if i (?:did|do)n'?t exist)\b/,
+  },
+  {
+    // "I hope I just don't wake up tomorrow" / "wish I wouldn't wake up".
+    label: 'hope i do not wake up',
+    pattern: /\b(?:hope|hoping|wish|wishing)\b[\w\s,'-]{0,15}?\bi\b[\w\s,'-]{0,12}?(?:do|did|would|could)n'?t wake up\b(?!\s+(?:on time|in time|early|late|until|at|for|to)\b)/,
+  },
+  {
+    // "I just want to go to sleep and not wake up".
+    label: 'sleep and not wake up',
+    pattern: /\b(?:go to sleep|fall asleep|going to sleep)\b[\w\s,'-]{0,20}?\bnot wake up\b(?!\s+(?:on time|in time|early|late|until|at|for|to)\b)/,
+  },
+  {
+    // "everyone would be fine without me" - the non-"better off" variants.
+    label: 'others would be fine without me',
+    pattern: /\bwould be (?:fine|better|ok|okay|happier|relieved|free|at peace) without me\b/,
+  },
+  {
+    // "I just want it all to be over" / "I want everything to end".
+    label: 'want it all to be over',
+    pattern: /\bwant (?:it all|all of (?:it|this)|everything|this all) to (?:just )?(?:be over|end|stop)\b/,
+  },
+];
 
 interface DetectedKeyword {
   keyword: string;
@@ -105,6 +167,13 @@ export function detectCrisisKeywords(content: string): KeywordAnalysis {
     }
   }
 
+  for (const { label, pattern } of PASSIVE_IDEATION_PATTERNS) {
+    if (pattern.test(lowerContent)) {
+      detectedKeywords.push({ keyword: label, level: 'medium', score: PASSIVE_IDEATION_SCORE });
+      totalScore = Math.max(totalScore, PASSIVE_IDEATION_SCORE);
+    }
+  }
+
   return {
     keywords: detectedKeywords.map(k => k.keyword),
     keywordScore: totalScore,
@@ -155,11 +224,51 @@ Context judgment matters more than keywords:
 - "reference": mentioning a hotline's name, suicide prevention, a movie/book/news story → score 0-10, severity none.
 - "negated": "I'm not suicidal", "I'd never hurt myself" → score 0-15, severity none (unless other signals contradict).
 - "bystander": talking about someone ELSE's crisis or loss → score 0-20, severity none/low (their own grief may still warrant low).
-- "genuine" acute distress WITHOUT ideation → 15-30, low. Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30, low. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, or not be here. Never score distress alone as medium.
-- "genuine" passive ideation ("I don't want to be here anymore", "no point going on") → 40-60, medium.
+- "genuine" acute distress WITHOUT ideation → 15-30, low. Distress alone is hopelessness, worthlessness, exhaustion, "can't take it" — e.g. "I just feel hopeless and worthless lately" is 15-30, low. It is NOT passive ideation: reserve that label for an expressed wish to die, disappear, not exist, not wake up, not be here, or not have to go on. Never score distress alone as medium.
+- "genuine" passive ideation → 50-65, medium, ALWAYS at least 50. C-SSRS counts a passive wish to be dead as ideation, not as distress, so it must reach medium — never score it low. This includes INDIRECT and euphemistic phrasing, which is how participants usually say it first: "it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "I'm tired of being here", "I just want it all to be over", "everyone would be fine without me", "I don't want to be here anymore", "no point going on". Hedges and softeners ("I think", "sometimes", "just", "kind of", "maybe") do NOT downgrade it — tentative wording is the normal way passive ideation is disclosed. Absence of a plan, method, or intent does NOT downgrade it either; that is the difference between passive ideation and active ideation, which scores higher still.
 - "genuine" active ideation without plan → 60-75, high.
 - "genuine" ideation with plan, means, or timeframe → 80-100, high.
 Weigh protective factors (future plans, reasons for living, engaged help-seeking) downward. Base the score on the participant's CURRENT state in this conversation, not history alone.`;
+
+const SEVERITY_RANK_ORDER = { none: 0, low: 1, medium: 2, high: 3 } as const;
+
+/** Score → severity band. Single definition; every caller must agree. */
+function severityForScore(score: number): 'none' | 'low' | 'medium' | 'high' {
+  return score >= 75 ? 'high' : score >= 50 ? 'medium' : score >= 25 ? 'low' : 'none';
+}
+
+// Contexts in which the screen's tier score must NOT stand: the assessor has
+// positively judged the language to be about someone else, negated, or a
+// reference (the 988 problem). 'genuine' and 'unclear' keep the floor.
+const FLOOR_EXEMPT_CONTEXTS = new Set(['negated', 'bystander', 'reference']);
+
+/**
+ * Passive-ideation floor (ai-therapist-254). When the screen matched the
+ * passive-ideation tier (or higher) and the assessor did NOT explain the
+ * language away as negated / bystander / reference, the verdict cannot land
+ * below the medium band. Observed failure: "I think it would just be easier
+ * sometimes if I just didn't have to do this anymore" was assessed 30/low with
+ * context 'genuine', so the session got steering but no crisis flag — flagging
+ * requires medium. C-SSRS treats a passive wish to be dead as ideation, so the
+ * floor makes the pipeline fail toward detection here, exactly as it already
+ * does when the assessor is unreachable.
+ */
+function applyIdeationFloor(
+  llm: LlmRiskAssessment,
+  keywordScore: number,
+): { riskScore: number; severity: LlmRiskAssessment['severity']; floored: boolean } {
+  const below = llm.risk_score < PASSIVE_IDEATION_SCORE;
+  if (keywordScore < PASSIVE_IDEATION_SCORE || FLOOR_EXEMPT_CONTEXTS.has(llm.context) || !below) {
+    return { riskScore: llm.risk_score, severity: llm.severity, floored: false };
+  }
+  const floorSeverity = severityForScore(PASSIVE_IDEATION_SCORE);
+  return {
+    riskScore: PASSIVE_IDEATION_SCORE,
+    severity:
+      SEVERITY_RANK_ORDER[llm.severity] >= SEVERITY_RANK_ORDER[floorSeverity] ? llm.severity : floorSeverity,
+    floored: true,
+  };
+}
 
 interface LlmRiskAssessment {
   risk_score: number;
@@ -334,13 +443,11 @@ async function assessRiskWithLLM(
   // so reconcile by taking the MORE severe of the model's label and the
   // score-derived band: a "score 90 / severity none" pairing must never read
   // as calm. Fail toward detection, consistent with the rest of the pipeline.
-  const derived: LlmRiskAssessment['severity'] =
-    score >= 75 ? 'high' : score >= 50 ? 'medium' : score >= 25 ? 'low' : 'none';
+  const derived = severityForScore(score);
   const stated = (['none', 'low', 'medium', 'high'] as const).includes(parsed.severity as 'none')
     ? (parsed.severity as LlmRiskAssessment['severity'])
     : derived;
-  const RANK = { none: 0, low: 1, medium: 2, high: 3 } as const;
-  const severity = RANK[stated] >= RANK[derived] ? stated : derived;
+  const severity = SEVERITY_RANK_ORDER[stated] >= SEVERITY_RANK_ORDER[derived] ? stated : derived;
 
   return {
     risk_score: score,
@@ -398,14 +505,17 @@ export async function analyzeStandaloneRisk(
   // per message is affordable and the safe default.
   try {
     const llm = await assessRiskWithLLM(content, historyLines);
+    const floored = applyIdeationFloor(llm, keywordAnalysis.keywordScore);
     log.info(
       `[risk] standalone: keywords [${keywordAnalysis.keywords.join(', ')}] ` +
-        `→ LLM ${llm.risk_score}/100 (${llm.context}): ${llm.reasoning}`,
+        `→ LLM ${llm.risk_score}/100 (${llm.context}): ${llm.reasoning}` +
+        (floored.floored ? ` [raised to ${floored.riskScore} by the passive-ideation floor]` : ''),
     );
+    const baseFactors = llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords;
     return {
-      riskScore: llm.risk_score,
-      severity: llm.severity,
-      factors: llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords,
+      riskScore: floored.riskScore,
+      severity: floored.severity,
+      factors: floored.floored ? [...baseFactors, 'passive ideation (screen floor)'] : baseFactors,
       method: 'llm_assessed',
     };
   } catch (err) {
@@ -422,7 +532,7 @@ export async function analyzeStandaloneRisk(
     log.error({ err }, `[risk] standalone LLM assessment failed; using keyword tier score ${riskScore}`);
     return {
       riskScore,
-      severity: riskScore >= 75 ? 'high' : riskScore >= 50 ? 'medium' : riskScore >= 25 ? 'low' : 'none',
+      severity: severityForScore(riskScore),
       factors: keywordAnalysis.keywords,
       method: 'keyword_fallback',
     };
@@ -542,6 +652,7 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
     let factors = keywordAnalysis.keywords;
     let method = 'keyword_only';
     let llm: LlmRiskAssessment | null = null;
+    let llmFloored = false;
 
     const isSweep = keywordAnalysis.keywordScore === 0 && sweepDue(message.session_id);
     // Moderation as a second screen: when the keyword tier saw nothing but
@@ -554,8 +665,11 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
       try {
         llm = await assessRiskWithLLM(message.content, conversationHistory, message.session_id);
         resetSweep(message.session_id);
-        riskScore = llm.risk_score;
+        const floored = applyIdeationFloor(llm, keywordAnalysis.keywordScore);
+        riskScore = floored.riskScore;
+        llmFloored = floored.floored;
         factors = llm.factors.length > 0 ? llm.factors : keywordAnalysis.keywords;
+        if (floored.floored) factors = [...factors, 'passive ideation (screen floor)'];
         method = isSweep ? 'llm_sweep' : isModerationWake ? 'llm_moderation_wake' : 'llm_assessed';
         log.info(
           `[risk] session ${message.session_id.substring(0, 12)}…: ${isSweep ? 'periodic sweep' : isModerationWake ? `moderation wake (${moderationScore}/100)` : `keywords [${keywordAnalysis.keywords.join(', ')}]`} ` +
@@ -583,7 +697,7 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
       factors = [...factors, `trajectory: ${trajectory.trend}`];
     }
 
-    const severity = riskScore >= 75 ? 'high' : riskScore >= 50 ? 'medium' : riskScore >= 25 ? 'low' : 'none';
+    const severity = severityForScore(riskScore);
 
     // Passive logging — insert unconditionally regardless of flagging.
     // severity column has CHECK (severity IN ('low','medium','high')), so use NULL when no keyword matched.
@@ -616,6 +730,7 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
               moderation_self_harm_intent: moderation.selfHarmIntent,
               moderation_self_harm_instructions: moderation.selfHarmInstructions,
             } : {}),
+            ...(llmFloored ? { passive_ideation_floor: PASSIVE_IDEATION_SCORE } : {}),
             ...(llm ? {
               llm_score: llm.risk_score,
               llm_context: llm.context,
