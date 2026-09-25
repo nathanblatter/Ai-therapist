@@ -8,6 +8,12 @@ with per-stream research justifications and an explicit non-collection boundary.
 yet implemented in code (response-timing, interface-engagement events, expanded acoustic
 features) are declared here and must ship — gated on Phase 2 approval — before launch.
 Phase 1's live study is unchanged; nothing here authorizes new collection under 2025-519.**
+**2026-09-21 literature update:** the "support from the scientific literature" field on OneAegis
+page 1 was replaced with the September 2026 review in `docs/irb-phase2-literature-review-2026-09.md`
+(section 1 is the field text; section 4 records the Risks, Subject Enrollment, and Benefits
+edits applied in OneAegis the same day, including the Utah H.B. 452 alignment paragraph and
+four launch-gated commitments). The Subject Enrollment and Risks text below is now superseded
+by the OneAegis form text; treat the form as the source of truth for those sections.**
 Mirrors the OneAegis xForm section order of the approved Phase 1 application (2025-519-BYU,
 scraped in full to `docs/irb-phase1-application.md`). Items marked **[DECISION]** have a
 corresponding entry in `docs/irb-phase2-questions-for-nathan.md`. Text in plain paragraphs is

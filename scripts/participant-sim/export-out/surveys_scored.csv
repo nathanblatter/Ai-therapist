@@ -1,0 +1,12 @@
+participant_id,survey_role,recorded_at,completion_seconds,speeder,phq2,gad2,phq2_positive,gad2_positive,weekly_mood,weekly_stress,weekly_helpfulness,weekly_usage,weekly_alliance_task,weekly_alliance_bond,weekly_alliance_goal,weekly_alliance_total
+"P001","baseline","2026-06-08T15:40:00Z","312",false,"4","5",true,true,,,,,,,,
+"P001","weekly","2026-06-16T02:10:00Z","74",false,,,,,"2","5","3","2-3",,,,
+"P001","weekly","2026-06-23T03:05:00Z","68",false,,,,,"2","4","3","2-3",,,,
+"P001","weekly","2026-06-30T01:45:00Z","81",false,,,,,"3","4","4","2-3",,,,
+"P001","weekly","2026-07-07T02:30:00Z","168",false,,,,,"3","5","4","4-6","4","4","3.5","3.83"
+"P001","weekly","2026-07-14T02:15:00Z","72",false,,,,,"3","4","4","2-3",,,,
+"P001","weekly","2026-07-21T00:50:00Z","66",false,,,,,"4","3","4","2-3",,,,
+"P001","weekly","2026-07-28T03:20:00Z","70",false,,,,,"4","3","5","1",,,,
+"P001","weekly","2026-08-04T01:30:00Z","79",false,,,,,"5","2","5","2-3",,,,
+"P001","exit","2026-08-04T22:00:00Z","244",false,"2","2",false,false,,,,,,,,
+"P001","week12","2026-08-31T21:20:00Z","128",false,"1","2",false,false,,,,,,,,

@@ -307,3 +307,35 @@ currently assumes; correct anything wrong and the draft gets updated.
   his RA (write) access; PI signature/submission stays with Gaskin.
 - Target submission date? Scientific Review Committee (Jeff Jenkins) again first?
 - Does the annual check-in (due 2027-02-12) or the open amendment interact with timing?
+
+## Literature review refreshed (2026-09-21)
+
+- The page-1 literature field in OneAegis now carries the Sept 2026 review (45 references,
+  all verified). Source: `docs/irb-phase2-literature-review-2026-09.md`.
+- **[DECISION Q-LIT1]** Utah H.B. 452 (in force since 2025-05-07) almost certainly covers the
+  agent as a "mental health chatbot." Add an explicit compliance statement to the form (clinician
+  involvement, safety testing, real-time acute-risk protocol, harm reporting, 7-day/on-request AI
+  disclosure, no sale/sharing of user input). See review section 4.
+- **[DECISION Q-LIT2]** Psychotic-spectrum history: exclusion or monitored subgroup? The 2026
+  delusion-reinforcement literature (Olsen; Morrin) argues for one or the other.
+- Risks, Subject Enrollment, and Benefits pages were updated in OneAegis on 2026-09-21 (second
+  pass). Four launch-gated commitments now appear in the form text and must ship before launch:
+  screener psychosis item, red-team eating-disorder/substance/delusion scenarios, weekly-survey
+  dependence and problematic-use items, 7-day AI re-disclosure. See review section 4.
+
+## System prompt revised (2026-09-22, from Kimberly Sagers' stage sessions)
+
+- Stage `system_config.system_prompts` (realtime + chat) and the code default in
+  `src/server/utils/sessionHelpers.ts` gained sections: abuse/violence disclosures, reporting
+  questions (aligned to the consent form's mandatory-reporting paragraph), relationship
+  boundaries (no personal name, no romantic or cuddling narration, no unlimited-availability
+  promises), consistency about having no inner life, and graceful declining. Crisis protocol no
+  longer implies the agent will stop talking. Pre-edit prompt backed up in the session scratchpad.
+- Prod DB config was NOT changed (no local prod access); the code default ships with the next
+  deploy but prod's DB override, if any, must be updated from Admin → System Config.
+- **The IRB attachment of verbatim prompts (`docs/irb-phase2-instruments/prompts.html`) is now
+  stale** and must be regenerated before submission.
+- Findings that are code, not prompt: the two-stage risk screen scored passive suicidal
+  ideation ("easier if I didn't have to do this anymore") at 30/low with no flag; xAI's
+  server-side refusal ("I can't help with that request") loops with no recovery on the Grok
+  backend; session summaries omit crisis events.

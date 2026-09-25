@@ -1,0 +1,43 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Items Needing PI Review</title>
+<style>
+body{font-family:Georgia,serif;max-width:7in;margin:40px auto;line-height:1.45;color:#1a1a1a;font-size:12pt}
+h1{font-size:17pt;line-height:1.25} h2{font-size:13pt;margin-top:1.4em;border-bottom:1px solid #999;padding-bottom:3px}
+p{margin:0.5em 0} .item{margin:0.7em 0 0.7em 0.25in;text-indent:-0.25in}
+hr{border:none;border-top:1px solid #bbb;margin:1.5em 0}
+</style></head><body><h1>Items Needing PI Review — AI Support Agent Longitudinal Study</h1>
+<p><b>Prepared by:</b> Nathan Blatter <b>Date:</b> September 14, 2026 <b>For:</b> Dr. James Gaskin, Principal Investigator</p>
+<p>This is the consolidated list of everything currently waiting on your review, decision, or signature, organized by the kind of input needed. Items A1–A3 are the critical path to Phase 2 launch.</p>
+<hr>
+<h2>A. Phase 2 IRB signature path (your signature is the gate)</h2>
+<p class="item"><b>1.</b> <b>Phase 2 longitudinal IRB application (in OneAegis, validation clean).</b></p>
+<p>Needs your end-to-end read of the protocol design — measures (PHQ-2/GAD-2, WAI-SR), 8-week schedule, study arms, safety-monitoring plan — then signature. An open-questions list is drafted for you, notably the <b>study budget</b> (Q6) and <b>study framing</b> (Q14), plus the Sagers supervisor-permission question.</p>
+<p class="item"><b>2.</b> <b>OneAegis re-paste before signing.</b></p>
+<p>The September 9 telemetry expansion changed the Data Collection / Confidentiality text after the form was first filled. What you sign needs to be the re-pasted version declaring the full behavioral-telemetry set and its non-collection boundary.</p>
+<p class="item"><b>3.</b> <b>Consent v3.</b></p>
+<p>Consent gained a "What the App Records and Analyzes" section and an indefinite-retention/embeddings sentence. Needs your review of the new language before the v3 document is attached and signed.</p>
+<h2>B. Compliance decisions only the PI / BYU can make</h2>
+<p class="item"><b>4.</b> <b>No OpenAI BAA, no zero-data-retention (top compliance blocker).</b></p>
+<p>Phase 1's approved text claims both. Decision needed: (a) pursue a BAA + ZDR through OpenAI sales — which requires the real university org, see next item — or (b) have the IRB explicitly bless the current data flow and correct Phase 1's language.</p>
+<p class="item"><b>5.</b> <b>The OpenAI org is a self-serve account merely named "Brigham Young University,"</b> not an institutional org. Decision needed: who at BYU owns standing up or connecting the real university-controlled org, and on what timeline. This gates the BAA path above.</p>
+<p class="item"><b>6.</b> <b>The $120/month hard OpenAI spend cap will rate-limit the crisis-detection path when hit</b> and is undersized for Phase 2. Needs the real study budget (your Q6 answer) so the cap can be raised safely above projected spend.</p>
+<h2>C. Study-design decisions</h2>
+<p class="item"><b>7.</b> <b>Recording retention (90 days) vs. prosody research aims.</b></p>
+<p>The 90-day window erodes the participant-audio corpus the prosody analysis (eGeMAPS) needs. Decision: the Phase 2 retention window — and it must match the consent language.</p>
+<p class="item"><b>8.</b> <b>Almost no human ground truth.</b></p>
+<p>Current state: 1 human rating vs. 76 LLM evaluations and ~700 automated risk scores — the system's safety evidence is largely a model judging a model. Decision: a human-rating/adjudication protocol (who rates, sampling plan, instrument).</p>
+<p class="item"><b>9.</b> <b>Pre-registered analysis plan.</b></p>
+<p>The LLM-as-second-coder qualitative methodology must be named in the pre-registration, and primary outcome models plus power analysis need PI sign-off before unblinding. Decision: approve the analysis-plan approach so it can be written down as the pre-registration artifact.</p>
+<h2>D. Decisions already made that should be ratified by the PI</h2>
+<p class="item"><b>10.</b> <b>GPT-Live model cutover and "Phase 1 is done, no amendment needed"</b> (Nathan's call, September 11): the voice backend was fully replaced between phases. Needs your confirmation that Phase 1 enrollment is closed and the cutover lands cleanly between phases.</p>
+<p class="item"><b>11.</b> <b>Privacy incident</b> (15,949 raw pre-redaction transcripts retained at OpenAI; fixed, purged, IRB write-up filed September 10). Needs: confirmation you have seen the report and agree with the disposition. Root-cause remediation is items 4–5 above.</p>
+<p class="item"><b>12.</b> <b>Phase 2 telemetry expansion</b> (acoustic features, engagement events — feature-flagged OFF until approval). You are effectively signing this in items 1–2; flagging it explicitly rather than letting it ride in the paste.</p>
+<h2>E. Study ops and personnel</h2>
+<p class="item"><b>13.</b> <b>Research team needs to be told old accounts are void</b> (production database fresh start August 28; participants get re-created). Needs you or the study coordinator to communicate re-onboarding to the team.</p>
+<p class="item"><b>14.</b> <b>New collaborator (from our September 14 meeting):</b> needs a name and start date from you. Before they touch participant data: IRB personnel amendment, CITI training, and data-access scoping. A ready-to-hand-off lane of self-contained, non-safety-critical work is already prepared.</p>
+<h2>F. Intellectual property</h2>
+<p class="item"><b>15.</b> <b>Developer allocation settled in writing while still hypothetical</b> (per the conception-record / TTO plan). Needs: a short written-agreement conversation.</p>
+<hr>
+<h2>Additions from the September 14 meeting follow-through</h2>
+<p class="item"><b>16.</b> <b>Exit Survey question X3</b> ("What did you use the AI support agent for most?") is arguably computable from session topic analysis. Your call under the "measure objectively where we can" rule: keep it as a perception measure, or remove it.</p>
+<p class="item"><b>17.</b> <b>FYI for the next IRB touchpoint:</b> per your direction, the two self-report usage questions (times used, voice/text) were removed from the live Weekly Check-in survey on September 14 — usage and modality are now measured from app telemetry. This is a reduction in data collected, but worth noting in the next amendment or continuing-review report.</p>
+<p>Already executed from that meeting (no action needed): removal of the computable weekly survey questions, removal of orange from the app and survey styling, and the caseworker catch-up view.</p></body></html>

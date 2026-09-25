@@ -1,0 +1,2 @@
+participant_id,enrolled_month,memory_enabled,study_status,consent_version_first,consent_version_last,n_sessions,n_sessions_ended,total_session_minutes,first_session_at,last_session_at,phq2_first,phq2_last,phq2_delta,gad2_first,gad2_last,gad2_delta,n_crisis_events,any_crisis_flagged
+"P001","2026-06",false,"active","2026-07-30.1","2026-07-30.1","16","16","304.0","2026-06-12T01:07:00Z","2026-08-02T02:07:00Z",,,,,,,"0",false
