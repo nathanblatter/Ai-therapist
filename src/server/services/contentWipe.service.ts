@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import { redactableRowsSql, REDACTABLE_ROWS_SQL } from '../db/redactionScope.js';
 import { wipeAgedThreadMessageBodies } from '../db/messagingRetention.queries.js';
 import { broadcastAdminEvent } from '../utils/adminBroadcast.js';
 
@@ -285,11 +286,14 @@ export async function getWipeStats(): Promise<Record<string, unknown>> {
     [cutoffTime]
   );
 
-  // Get messages awaiting redaction
+  // Get messages awaiting redaction. Scoped to the rows redaction actually
+  // covers — counting machine-authored system rows here inflated the stat with
+  // rows no job will ever redact.
   const awaitingRedactionResult = await pool.query(
     `SELECT COUNT(*) as count FROM messages
      WHERE content IS NOT NULL
-       AND content_redacted IS NULL`
+       AND content_redacted IS NULL
+       AND ${REDACTABLE_ROWS_SQL}`
   );
 
   // Get messages with redaction errors
@@ -402,11 +406,10 @@ export async function findEndedSessionsWithRedactionGaps(limit = 200): Promise<s
       WHERE ts.status = 'ended'
         AND m.content IS NOT NULL
         AND m.content_redacted IS NULL
-        -- Must match redactSession's predicate. tool_event_% rows are role='system'
-  -- but carry verbatim participant free text, and migration 102 re-queued them
-  -- by nulling content_redacted. Without this clause the sweep never selects
-  -- them, so for already-ended sessions they could never be redacted at all.
-  AND (m.role IN ('user', 'assistant') OR m.message_type LIKE 'tool_event_%')
+        -- Shared redaction scope (db/redactionScope.ts): includes the
+        -- tool_event_% rows, which are role='system' but carry verbatim
+        -- participant free text and were re-queued by migration 102.
+        AND ${redactableRowsSql('m')}
         AND u.is_sandbox IS NOT TRUE
       LIMIT $1`,
     [limit]

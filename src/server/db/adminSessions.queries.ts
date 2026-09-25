@@ -2,6 +2,7 @@
 // list, single-session detail, and redaction status. Session/message mutations
 // (end/delete/update) live in db/sessions.queries.ts + db/messages.queries.ts.
 import { pool } from '../config/db.js';
+import { REDACTABLE_ROWS_SQL } from './redactionScope.js';
 
 export type AdminSessionRow = Record<string, unknown>;
 
@@ -265,7 +266,7 @@ export async function getRedactionStatus(sessionId: string): Promise<number> {
   const result = await pool.query<{ pending_count: string }>(
     `SELECT COUNT(*) as pending_count
      FROM messages
-     WHERE session_id = $1 AND content_redacted IS NULL`,
+     WHERE session_id = $1 AND content_redacted IS NULL AND ${REDACTABLE_ROWS_SQL}`,
     [sessionId]
   );
   return parseInt(result.rows[0].pending_count);
@@ -283,8 +284,11 @@ export interface RedactionStatusBreakdown {
 /**
  * Full redaction breakdown for a session (ai-therapist-22): how many
  * redactable messages it has, how many are already redacted, and a summary
- * label for the admin sessions UI.
- *   - no_content: nothing to redact (e.g. session with no user/assistant turns)
+ * label for the admin sessions UI. "Redactable" is the shared scope from
+ * db/redactionScope.ts — the same rows redactSession processes, so 'complete'
+ * cannot be reported while tool_event_% free text is still unredacted
+ * (ai-therapist-225).
+ *   - no_content: nothing to redact (e.g. session with no redactable turns)
  *   - complete:   every redactable message has content_redacted set
  *   - pending:    none redacted yet (e.g. redaction hasn't run / just ended)
  *   - partial:    some but not all — the gap this feature exists to surface
@@ -292,8 +296,8 @@ export interface RedactionStatusBreakdown {
 export async function getRedactionStatusBreakdown(sessionId: string): Promise<RedactionStatusBreakdown> {
   const result = await pool.query<{ total: string; redacted: string }>(
     `SELECT
-       COUNT(*) FILTER (WHERE role IN ('user', 'assistant') AND content IS NOT NULL) AS total,
-       COUNT(*) FILTER (WHERE role IN ('user', 'assistant') AND content IS NOT NULL AND content_redacted IS NOT NULL) AS redacted
+       COUNT(*) FILTER (WHERE ${REDACTABLE_ROWS_SQL} AND content IS NOT NULL) AS total,
+       COUNT(*) FILTER (WHERE ${REDACTABLE_ROWS_SQL} AND content IS NOT NULL AND content_redacted IS NOT NULL) AS redacted
      FROM messages
      WHERE session_id = $1`,
     [sessionId]

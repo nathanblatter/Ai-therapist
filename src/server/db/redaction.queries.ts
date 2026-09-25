@@ -1,12 +1,17 @@
 // Data-access for the redaction-verification tool.
 import { pool } from '../config/db.js';
+import { REDACTABLE_ROWS_SQL } from './redactionScope.js';
 
-/** A random sample of redacted user/assistant messages for manual review. */
+/**
+ * A random sample of redacted messages for manual review. Scoped with the
+ * shared redaction predicate so tool_event_% rows — participant free text from
+ * thought records and fear ladders — are eligible for verification too.
+ */
 export async function getRandomRedactedMessages(): Promise<Record<string, unknown>[]> {
   const result = await pool.query(`
     SELECT message_id, content_redacted, role, message_type, created_at
     FROM messages
-    WHERE content_redacted IS NOT NULL AND role IN ('user', 'assistant')
+    WHERE content_redacted IS NOT NULL AND ${REDACTABLE_ROWS_SQL}
     ORDER BY RANDOM()
     LIMIT 20
   `);
