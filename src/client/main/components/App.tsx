@@ -2377,6 +2377,23 @@ export default function App() {
             return;
           }
         }
+        // The session's context could not be rebuilt after a server restart
+        // (ai-therapist-222). Show the server's copy rather than the generic
+        // retry line — retrying will never work for this session.
+        if (response.status === 409) {
+          const errorData = await response.json().catch(() => null);
+          if (errorData?.error === 'session_unavailable') {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                text: errorData.message || 'This conversation is no longer available. Please start a new session.',
+              },
+            ]);
+            return;
+          }
+        }
         if (!response.ok) {
           throw new Error('Failed to send message');
         }
