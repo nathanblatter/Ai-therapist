@@ -21,6 +21,7 @@ import {
   updateMessage,
   deleteMessage,
   logDataAccess,
+  projectSafeMetadata,
   type MessageContentColumn,
 } from '../../db/index.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
@@ -368,7 +369,12 @@ export default function adminSessionsRoutes(): Router {
         role: updatedMessage.role,
         message_type: updatedMessage.message_type,
         message: updatedMessage[fieldToUpdate],
-        extras: updatedMessage.metadata,
+        // Same allowlist as the transcript read path (ai-therapist-217): a
+        // researcher editing the redacted column must not get raw participant
+        // text echoed back in metadata.
+        extras: fieldToUpdate === 'content_redacted'
+          ? projectSafeMetadata(updatedMessage.metadata)
+          : updatedMessage.metadata,
         created_at: updatedMessage.created_at,
       };
 

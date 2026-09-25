@@ -4,6 +4,7 @@
 // (or directly from a specific module) — there is no data access elsewhere.
 export * from './sessions.queries.js';
 export * from './messages.queries.js';
+export * from './metadataProjection.js';
 export * from './stats.queries.js';
 export * from './config.queries.js';
 export * from './analytics.queries.js';
