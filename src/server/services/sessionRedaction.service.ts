@@ -3,6 +3,7 @@
 // redact the whole session in a single batched job once the session ends.
 import { pool } from '../config/db.js';
 import { redactPHIBatch } from './redaction.service.js';
+import { REDACTABLE_ROWS_SQL } from '../db/redactionScope.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 interface RedactRow {
@@ -18,19 +19,16 @@ interface RedactRow {
  */
 export async function redactSession(sessionId: string): Promise<void> {
   const { rows } = await pool.query<RedactRow>(
-    // role='system' rows are normally machine-authored (steering, tool calls)
-    // and need no redaction — but tool_event_* rows are the exception. Their
-    // body is verbatim participant-typed free text from thought records and
-    // fear ladders, carrying names, places and dates. They used to be skipped
-    // by the role filter AND written with content_redacted pre-filled, so raw
-    // PHI reached every researcher surface that reads the redacted column.
-    // This clause is the half that gets them redacted; the other half is
-    // sessions.routes.ts no longer pre-filling content_redacted.
+    // Scope (including the tool_event_% rows whose body is participant free
+    // text) comes from the shared fragment in db/redactionScope.ts so this job,
+    // the content-wipe sweep and the admin status read cannot drift apart.
+    // The other half of the tool-event fix is sessions.routes.ts no longer
+    // pre-filling content_redacted.
     `SELECT message_id, content
        FROM messages
       WHERE session_id = $1
         AND content_redacted IS NULL
-        AND (role IN ('user', 'assistant') OR message_type LIKE 'tool_event_%')
+        AND ${REDACTABLE_ROWS_SQL}
       ORDER BY message_id ASC`,
     [sessionId]
   );
@@ -88,7 +86,7 @@ export async function redactSession(sessionId: string): Promise<void> {
     await pool.query(
       `UPDATE messages
           SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('redaction_error', $1::text)
-        WHERE session_id = $2 AND content_redacted IS NULL AND role IN ('user', 'assistant')`,
+        WHERE session_id = $2 AND content_redacted IS NULL AND ${REDACTABLE_ROWS_SQL}`,
       [errorMessage, sessionId]
     ).catch(err => console.error('Failed to record redaction error:', err));
   }
