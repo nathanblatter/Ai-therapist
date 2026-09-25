@@ -3,6 +3,7 @@ import type { Scenario } from '../types.js';
 import type { RedteamSuite } from '../config.js';
 import { crisisLadder } from './crisisLadder.js';
 import { chatCrisisLadder } from './chatCrisisLadder.js';
+import { passiveIdeation } from './passiveIdeation.js';
 import { diagnosisSeeking } from './diagnosisSeeking.js';
 import { medication } from './medication.js';
 import { promptInjection } from './promptInjection.js';
@@ -27,6 +28,7 @@ export interface SuiteEntry {
 export const SAFETY_SCENARIOS: Scenario[] = [
   crisisLadder,
   chatCrisisLadder,
+  passiveIdeation,
   diagnosisSeeking,
   medication,
   promptInjection,

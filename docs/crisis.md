@@ -74,11 +74,18 @@ Every analyzed participant message passes a tiered keyword screen:
 | Tier | Provisional score | Examples |
 |--------|-------------------|----------|
 | High | 75 | explicit suicidal/self-harm intent ("kill myself", "end my life", "overdose") |
-| Medium | 40 | strong distress/passive-ideation phrases ("better off without me") |
+| Medium | 50 | passive ideation, literal ("better off without me") **and** indirect/euphemistic regex forms ("it would be easier if I didn't have to do this anymore", "I wouldn't mind not waking up", "tired of being here") |
 | Low | 15 | milder risk-adjacent language |
 
 The screen's job is SCREENING, not judging: **any** tier match wakes the Stage 2 LLM
 assessment. The tier score is only used as a provisional fallback when the LLM is unavailable.
+
+The medium tier sits at 50, the bottom of the medium severity band, because C-SSRS treats a
+passive wish to be dead as ideation rather than distress and flagging requires medium
+(ai-therapist-254). Matching the medium tier or higher also sets a **passive-ideation floor**
+on the Stage 2 verdict: unless the assessor judged the language `negated`, `bystander`, or
+`reference`, the final score cannot land below 50/medium. Logged as
+`passive_ideation_floor` in `risk_score_history.score_factors`.
 
 ### Stage 2 — LLM context assessment
 

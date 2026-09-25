@@ -47,9 +47,11 @@ describe('detectCrisisKeywords (stage 1 screen)', () => {
     expect(r.keywords).toContain('suicide');
   });
 
-  it('scores passive ideation as medium tier (40) — the old list missed these', () => {
+  // Tier score is 50, not 40: 40 derived severity 'low', which never flags
+  // (ai-therapist-254). Passive ideation is C-SSRS ideation and must reach medium.
+  it('scores passive ideation as medium tier (50) — the old list missed these', () => {
     const r = detectCrisisKeywords("honestly I just don't want to be here anymore");
-    expect(r.keywordScore).toBe(40);
+    expect(r.keywordScore).toBe(50);
   });
 
   it('scores acute distress as low tier (15)', () => {
@@ -59,19 +61,19 @@ describe('detectCrisisKeywords (stage 1 screen)', () => {
 
   it('normalizes curly quotes from Whisper transcripts', () => {
     const r = detectCrisisKeywords('I don’t want to be here');
-    expect(r.keywordScore).toBe(40);
+    expect(r.keywordScore).toBe(50);
   });
 
   // ai-therapist-126: the spoken contraction slipped past the screen entirely
   // (score 0 → no LLM assessment) in the voice crisis ladder.
   it("normalizes colloquial contractions — the exact voice-transcript phrase that scored 0", () => {
     const r = detectCrisisKeywords("Honestly, some days I don't wanna be here anymore.");
-    expect(r.keywordScore).toBe(40);
+    expect(r.keywordScore).toBe(50);
   });
 
   it('normalizes missing apostrophes from typed chat', () => {
-    expect(detectCrisisKeywords('i dont want to be here').keywordScore).toBe(40);
-    expect(detectCrisisKeywords('i cant go on').keywordScore).toBe(40);
+    expect(detectCrisisKeywords('i dont want to be here').keywordScore).toBe(50);
+    expect(detectCrisisKeywords('i cant go on').keywordScore).toBe(50);
   });
 
   it('catches "wanna die" via wanna → want to normalization (high tier)', () => {
@@ -79,9 +81,52 @@ describe('detectCrisisKeywords (stage 1 screen)', () => {
   });
 
   it('covers additional passive-ideation phrasings', () => {
-    expect(detectCrisisKeywords("i'm so tired of living").keywordScore).toBe(40);
-    expect(detectCrisisKeywords("i don't wanna be alive").keywordScore).toBe(40);
-    expect(detectCrisisKeywords("i don't want to wake up tomorrow").keywordScore).toBe(40);
+    expect(detectCrisisKeywords("i'm so tired of living").keywordScore).toBe(50);
+    expect(detectCrisisKeywords("i don't wanna be alive").keywordScore).toBe(50);
+    expect(detectCrisisKeywords("i don't want to wake up tomorrow").keywordScore).toBe(50);
+  });
+
+  // ai-therapist-254: the real stage-session utterance below matched NOTHING in
+  // the literal keyword lists, so the screen never woke the assessor on its own
+  // and the turn ended up at 30/low with no crisis flag.
+  it('catches the indirect passive-ideation utterance from the stage session', () => {
+    const r = detectCrisisKeywords(
+      "I think it would just be easier sometimes if I just didn't have to do this anymore.",
+    );
+    expect(r.keywordScore).toBe(50);
+    expect(r.keywords.length).toBeGreaterThan(0);
+  });
+
+  it('catches indirect / euphemistic passive-ideation phrasings', () => {
+    const phrasings = [
+      "it would be easier if I wasn't here",
+      "honestly it'd be easier if I were just gone",
+      "some nights I wish I didn't have to keep going",
+      "I'm just tired of being here",
+      "I'm so tired of waking up",
+      "I wouldn't mind not waking up tomorrow",
+      "I wouldn't care if I didn't wake up",
+      "I hope I just don't wake up tomorrow",
+      "I want to go to sleep and not wake up",
+      "everyone would be fine without me",
+      "I just want it all to be over",
+    ];
+    for (const phrase of phrasings) {
+      expect(detectCrisisKeywords(phrase).keywordScore, phrase).toBe(50);
+    }
+  });
+
+  it('does not fire the indirect patterns on ordinary language', () => {
+    const benign = [
+      'it would be easier if I had more time in the day',
+      "I'm worried I won't wake up on time for the interview",
+      'my commute is easier if I leave before seven',
+      'I am tired of being sick',
+      'I want this meeting to end',
+    ];
+    for (const phrase of benign) {
+      expect(detectCrisisKeywords(phrase).keywordScore, phrase).toBeLessThan(50);
+    }
   });
 
   it('takes the max tier when multiple match', () => {
@@ -425,6 +470,108 @@ describe('moderation tier (ai-therapist-167, supplementary signal)', () => {
     );
     expect(r.riskScore).toBe(10);
     expect(r.severity).toBe('none');
+  });
+});
+
+// ai-therapist-254: passive ideation scored 30/low with crisis_flagged=false.
+// Flagging needs medium, so a passive wish to be dead has to clear 50 even when
+// the assessor under-scores it as "distress".
+describe('passive-ideation floor (ai-therapist-254)', () => {
+  beforeEach(() => {
+    queryMock.mockReset().mockResolvedValue({ rows: [] });
+    createMock.mockReset();
+    moderationCreateMock.mockReset().mockRejectedValue(new Error('moderation unavailable'));
+  });
+
+  const STAGE_UTTERANCE =
+    "I think it would just be easier sometimes if I just didn't have to do this anymore.";
+
+  it('raises an under-scored genuine passive-ideation turn to medium', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 30, severity: 'low', context: 'genuine',
+      factors: ['hopelessness'], reasoning: 'Reads as exhaustion rather than ideation.',
+    }));
+    const r = await analyzeMessageRisk(
+      { content: STAGE_UTTERANCE, session_id: 'sess-passive', message_id: 1 }, [],
+    );
+    expect(createMock).toHaveBeenCalledOnce();
+    expect(r.riskScore).toBeGreaterThanOrEqual(50);
+    expect(r.severity).toBe('medium');
+    expect(r.factors).toContain('passive ideation (screen floor)');
+  });
+
+  it('records the floor in risk_score_history', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 30, severity: 'low', context: 'genuine',
+      factors: ['hopelessness'], reasoning: 'Under-scored.',
+    }));
+    await analyzeMessageRisk(
+      { content: STAGE_UTTERANCE, session_id: 'sess-passive-log', message_id: 2 }, [],
+    );
+    const insert = queryMock.mock.calls.find(c => String(c[0]).includes('INSERT INTO risk_score_history'));
+    const factorsJson = JSON.parse(insert![1][4] as string);
+    expect(factorsJson.keyword_score).toBe(50);
+    expect(factorsJson.llm_score).toBe(30);
+    expect(factorsJson.passive_ideation_floor).toBe(50);
+    expect(insert![1][3]).toBe('medium');
+  });
+
+  it('flags medium on the keyword tier alone when the assessor is unreachable', async () => {
+    createMock.mockRejectedValue(new Error('openai down'));
+    const r = await analyzeMessageRisk(
+      { content: STAGE_UTTERANCE, session_id: 'sess-passive-down', message_id: 3 }, [],
+    );
+    expect(r.riskScore).toBe(50);
+    expect(r.severity).toBe('medium');
+  });
+
+  it('still lets the assessor discount a negated / bystander / reference reading', async () => {
+    for (const context of ['negated', 'bystander', 'reference']) {
+      createMock.mockReset().mockResolvedValue(llmResponse({
+        risk_score: 8, severity: 'none', context,
+        factors: [], reasoning: 'Not about the participant now.',
+      }));
+      const r = await analyzeMessageRisk(
+        { content: STAGE_UTTERANCE, session_id: `sess-passive-${context}`, message_id: 4 }, [],
+      );
+      expect(r.riskScore, context).toBe(8);
+      expect(r.severity, context).toBe('none');
+    }
+  });
+
+  it('never lowers a verdict the assessor scored above the floor', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 85, severity: 'high', context: 'genuine',
+      factors: ['active ideation'], reasoning: 'Escalated within the turn.',
+    }));
+    const r = await analyzeMessageRisk(
+      { content: STAGE_UTTERANCE, session_id: 'sess-passive-high', message_id: 5 }, [],
+    );
+    expect(r.riskScore).toBe(85);
+    expect(r.severity).toBe('high');
+  });
+
+  it('does not floor distress-without-ideation (low tier stays low)', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 28, severity: 'low', context: 'genuine',
+      factors: ['hopelessness'], reasoning: 'Distress without ideation.',
+    }));
+    const r = await analyzeMessageRisk(
+      { content: 'I just feel hopeless and worthless lately', session_id: 'sess-distress', message_id: 6 }, [],
+    );
+    expect(r.riskScore).toBe(28);
+    expect(r.severity).toBe('low');
+  });
+
+  it('applies the same floor on the standalone (caseworker) path', async () => {
+    createMock.mockResolvedValue(llmResponse({
+      risk_score: 30, severity: 'low', context: 'genuine',
+      factors: ['hopelessness'], reasoning: 'Under-scored.',
+    }));
+    const r = await analyzeStandaloneRisk("lately I wouldn't mind not waking up");
+    expect(r.riskScore).toBe(50);
+    expect(r.severity).toBe('medium');
+    expect(r.factors).toContain('passive ideation (screen floor)');
   });
 });
 
