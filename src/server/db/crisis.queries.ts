@@ -92,14 +92,52 @@ export interface RecentSessionMessage {
   [key: string]: unknown;
 }
 
-/** The most recent messages in a session, chronological order (oldest first). */
+/**
+ * Message types that are BOOKKEEPING, not conversation. Every tool invocation
+ * writes two of these rows (tool_call + tool_response), so a turn that used a
+ * worksheet, a scale and a journaling prompt used to push six or more of them
+ * into the crisis window and evict the participant's actual words
+ * (ai-therapist-223). Every writer stamps them role 'system', but the list is
+ * explicit so a future writer that logs one under 'user'/'assistant' still
+ * cannot crowd the window.
+ */
+const BOOKKEEPING_MESSAGE_TYPES = [
+  'tool_call',
+  'tool_response',
+  'function_call',
+  'notable_moment',
+  'system',
+  'session_start',
+  'session_end',
+  'admin_action',
+  'admin_visible',
+  'admin_invisible',
+];
+
+/**
+ * The most recent CONVERSATIONAL messages in a session, chronological order
+ * (oldest first) — participant and assistant turns only.
+ *
+ * `limit` counts conversational rows, not raw rows: this is the context window
+ * the crisis assessor, the minor-disclosure confirmation and the adverse-event
+ * excerpt all read, and every one of them drops non-conversational rows on the
+ * way in. Filtering in SQL means the window holds `limit` real turns instead of
+ * however many survived the tool plumbing (ai-therapist-223) — which mattered
+ * most in exactly the sessions where the model was working hardest.
+ *
+ * Participant-authored worksheet rows (thought_record, values_sort,
+ * fear_ladder) are written with role 'user' and stay in the window; the
+ * server-side tool_event_* echoes of them are role 'system' and do not.
+ */
 export async function getRecentSessionMessages(sessionId: string, limit = 10): Promise<RecentSessionMessage[]> {
   const result = await pool.query<RecentSessionMessage>(
     `SELECT * FROM messages
      WHERE session_id = $1
+       AND role IN ('user', 'assistant')
+       AND message_type <> ALL($3::text[])
      ORDER BY created_at DESC
      LIMIT $2`,
-    [sessionId, limit]
+    [sessionId, limit, BOOKKEEPING_MESSAGE_TYPES]
   );
   return result.rows.reverse();
 }

@@ -9,7 +9,7 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, on: vi.fn() },
 }));
 
-import { getAllCrisisData, getAllCrisisEvents } from './crisis.queries.js';
+import { getAllCrisisData, getAllCrisisEvents, getRecentSessionMessages } from './crisis.queries.js';
 
 beforeEach(() => {
   queryMock.mockReset().mockResolvedValue({ rows: [] });
@@ -65,5 +65,43 @@ describe('getAllCrisisData org scoping', () => {
       expect(String(call[0])).not.toContain('organization_id');
       expect(call[1]).toEqual([7]);
     }
+  });
+});
+
+// ai-therapist-223: the crisis context window took the last 10 message rows of
+// any kind. Each tool invocation writes two system rows (tool_call +
+// tool_response), so a turn using a worksheet, a scale and a journaling prompt
+// evicted the participant's own words from the window the LLM assessor reads.
+describe('getRecentSessionMessages crisis window', () => {
+  it('restricts the window to conversational turns so tool bookkeeping cannot evict them', async () => {
+    await getRecentSessionMessages('sess-1', 10);
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(String(sql)).toContain("role IN ('user', 'assistant')");
+    expect(String(sql)).toContain('message_type <> ALL($3::text[])');
+    expect(params[0]).toBe('sess-1');
+    expect(params[1]).toBe(10);
+    const excluded = params[2] as string[];
+    for (const type of ['tool_call', 'tool_response', 'function_call', 'notable_moment']) {
+      expect(excluded).toContain(type);
+    }
+  });
+
+  it('never excludes participant- or assistant-authored rows', async () => {
+    await getRecentSessionMessages('sess-1');
+    const excluded = (queryMock.mock.calls[0] as [string, unknown[]])[1][2] as string[];
+    for (const type of ['text', 'voice', 'response', 'chat', 'thought_record', 'values_sort', 'fear_ladder']) {
+      expect(excluded).not.toContain(type);
+    }
+  });
+
+  it('returns the filtered rows oldest-first', async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        { role: 'user', content: 'newest', content_redacted: null },
+        { role: 'assistant', content: 'older', content_redacted: null },
+      ],
+    });
+    const rows = await getRecentSessionMessages('sess-1', 2);
+    expect(rows.map((r) => r.content)).toEqual(['older', 'newest']);
   });
 });
