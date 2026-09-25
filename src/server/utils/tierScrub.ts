@@ -40,6 +40,16 @@ export const INTERVENTION_SUMMARY_FIELDS = [
   'performed_by', 'performed_at', 'outcome',
 ] as const;
 
+/** risk_check_steps rows (ai-therapist-198) — everything EXCEPT `answer`,
+ *  which is the participant's own words on a suicide-assessment question and
+ *  is therefore the most sensitive free text in the crisis surface. Summary-
+ *  tier viewers still see which rungs were asked, the band each resolved to,
+ *  and when — enough to know an assessment happened and where it landed. */
+export const RISK_CHECK_STEP_SUMMARY_FIELDS = [
+  'check_step_id', 'session_id', 'crisis_event_id', 'step', 'risk_band',
+  'sequence', 'created_at',
+] as const;
+
 /** Flagged message-origin crisis events (/api/admin/messaging/flagged) —
  *  everything EXCEPT risk_factors and notes. */
 export const FLAGGED_EVENT_SUMMARY_FIELDS = [

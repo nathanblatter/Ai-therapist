@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const {
   analyzeMessageRiskMock, flagSessionCrisisMock, logInterventionActionMock,
   maybeSteerSessionMock, shouldSteerMock, buildChatSteeringGuidanceMock,
+  maybeRequireRiskCheckMock,
   executeGraduatedResponseMock,
   getRecentSessionMessagesMock, getSessionCrisisStateMock, isDemoAccountSessionMock,
   getSessionAccessInfoMock, enqueueWorkItemMock,
@@ -16,6 +17,7 @@ const {
   maybeSteerSessionMock: vi.fn(),
   shouldSteerMock: vi.fn(),
   buildChatSteeringGuidanceMock: vi.fn(),
+  maybeRequireRiskCheckMock: vi.fn(),
   executeGraduatedResponseMock: vi.fn(),
   getRecentSessionMessagesMock: vi.fn(),
   getSessionCrisisStateMock: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('./crisisIntervention.service.js', () => ({
   maybeSteerSession: maybeSteerSessionMock,
   shouldSteer: shouldSteerMock,
   buildChatSteeringGuidance: buildChatSteeringGuidanceMock,
+  maybeRequireRiskCheck: maybeRequireRiskCheckMock,
   executeGraduatedResponse: executeGraduatedResponseMock,
   CHAT_SAFETY_PROTOCOL_GUIDANCE: 'CHAT_HIGH_GUIDANCE',
 }));
@@ -62,6 +65,7 @@ beforeEach(() => {
   enqueueWorkItemMock.mockResolvedValue(null);
   buildChatSteeringGuidanceMock.mockImplementation((s: number) => `CHAT_STEER_${s}`);
   shouldSteerMock.mockReturnValue(true);
+  maybeRequireRiskCheckMock.mockResolvedValue(null);
 });
 
 const TURN = { sessionId: 'chat_1', messageId: 42, content: 'hi' };
@@ -244,6 +248,47 @@ describe('runCrisisPipeline — summary-tier broadcasts', () => {
     await runCrisisPipeline(TURN, 'realtime');
     await flush();
     expect(emitMock.mock.calls.some(([event]) => event === 'session:crisis-event-created')).toBe(false);
+  });
+});
+
+// ai-therapist-198: the structured ladder needs a deterministic demand, not
+// just prose in the steering copy. The pipeline's job here is to ask on every
+// scored turn and to merge the chat-channel demand into this turn's guidance.
+describe('runCrisisPipeline — structured risk ladder', () => {
+  it('asks for a ladder on both channels with the scored turn', async () => {
+    risk(55, 'medium');
+    await runCrisisPipeline(TURN, 'realtime');
+    expect(maybeRequireRiskCheckMock).toHaveBeenCalledWith('chat_1', 55, 'medium', 'realtime');
+    await runCrisisPipeline(TURN, 'chat');
+    expect(maybeRequireRiskCheckMock).toHaveBeenCalledWith('chat_1', 55, 'medium', 'chat');
+  });
+
+  it('does not ask on a zero-risk turn', async () => {
+    risk(0, 'none');
+    await runCrisisPipeline(TURN, 'chat');
+    expect(maybeRequireRiskCheckMock).not.toHaveBeenCalled();
+  });
+
+  it('chat: appends the ladder demand to the steering guidance for this turn', async () => {
+    risk(45, 'medium');
+    maybeRequireRiskCheckMock.mockResolvedValue('LADDER_DEMAND');
+    const r = await runCrisisPipeline(TURN, 'chat');
+    expect(r.steeringGuidance).toBe('CHAT_STEER_45\n\nLADDER_DEMAND');
+  });
+
+  it('chat: the demand is returned even when steering is on cooldown', async () => {
+    risk(45, 'medium');
+    shouldSteerMock.mockReturnValue(false);
+    maybeRequireRiskCheckMock.mockResolvedValue('LADDER_DEMAND');
+    const r = await runCrisisPipeline(TURN, 'chat');
+    expect(r.steeringGuidance).toBe('LADDER_DEMAND');
+  });
+
+  it('realtime: guidance stays null (the demand went over the sideband)', async () => {
+    risk(85, 'high');
+    maybeRequireRiskCheckMock.mockResolvedValue(null);
+    const r = await runCrisisPipeline(TURN, 'realtime');
+    expect(r.steeringGuidance).toBeNull();
   });
 });
 

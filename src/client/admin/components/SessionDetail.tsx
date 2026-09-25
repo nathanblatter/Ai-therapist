@@ -4,6 +4,7 @@ import ConversationBubble from "./ConversationBubble";
 import SessionInsightsPanel from "./SessionInsightsPanel";
 import SessionEvalPanel from "./SessionEvalPanel";
 import RiskTimeline from "./RiskTimeline";
+import RiskCheckLadder from "./RiskCheckLadder";
 import { useSocket } from '../hooks/useSocket';
 import useAuth from '../hooks/useAuth';
 import { toast } from "../../shared/components/Toast";
@@ -787,6 +788,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
           {/* Per-message risk scores with the LLM's context judgment + reasoning */}
           {!loading && <RiskTimeline sessionId={sessionId} />}
+
+          {/* Structured C-SSRS-style ladder logged by run_risk_check (198) */}
+          {!loading && <RiskCheckLadder sessionId={sessionId} />}
 
           {/* LLM-judge quality scores (ended sessions only) */}
           {!loading && <SessionEvalPanel sessionId={sessionId} sessionStatus={session?.status} />}

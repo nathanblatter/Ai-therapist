@@ -1605,7 +1605,12 @@ export class ToolRegistry {
         type: 'function',
         name: 'run_risk_check',
         description:
-          'Log one step of a structured, C-SSRS-style safety assessment ladder (ideation → plan → means → timeframe → intent, or protective_factors) after asking the participant that question directly. Use during a safety assessment to record clean data on assessment progression — this does not replace your clinical judgment or the automatic crisis protocol, only documents it. Ask one question at a time; call this after each answer.',
+          'REQUIRED whenever risk is moderate or above and no assessment ladder has been completed in this session. ' +
+          'Logs one step of a structured, C-SSRS-style safety assessment ladder (ideation → plan → means → timeframe → intent, plus protective_factors as a counterweight) after you ask the participant that question directly. ' +
+          'Call it every time a participant answers a safety question — including a "no" (log it with risk_band "none" or "low"), which is exactly the data that shows an assessment was done and came back clear. ' +
+          'Silent to the participant: it adds nothing to your reply and interrupts nothing, so there is no cost to logging a step. ' +
+          'It documents your clinical judgment; it does not replace it or the automatic crisis protocol. ' +
+          'Ask one question at a time and call this once after each answer.',
         parameters: {
           type: 'object',
           properties: {

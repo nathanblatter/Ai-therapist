@@ -22,6 +22,7 @@ import {
 } from './crisisDetection.service.js';
 import {
   maybeSteerSession,
+  maybeRequireRiskCheck,
   shouldSteer,
   buildChatSteeringGuidance,
   executeGraduatedResponse,
@@ -137,6 +138,21 @@ export async function runCrisisPipeline(
             steeredAt: new Date(),
           }, turn.sessionId);
         }
+      }
+
+      // ---- Structured risk ladder (ai-therapist-198) ----
+      // Independent of the steering cooldown above: the ladder requirement is
+      // a one-shot-per-window demand keyed on "score crossed the threshold AND
+      // this session has logged no ladder step", not on steering cadence. It
+      // runs on both channels; realtime delivers over the sideband inside,
+      // chat gets a guidance string appended to this turn's model call.
+      const ladderGuidance = await maybeRequireRiskCheck(
+        turn.sessionId, risk.riskScore, severity, channel,
+      );
+      if (ladderGuidance) {
+        steeringGuidance = steeringGuidance
+          ? `${steeringGuidance}\n\n${ladderGuidance}`
+          : ladderGuidance;
       }
 
       // ---- Flagging ---- (identical to the original realtime logic)
