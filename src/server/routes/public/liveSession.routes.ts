@@ -33,6 +33,8 @@ import {
   recordConsent,
   setSessionCheckin,
   updateSessionStatus,
+  setLiveSessionId,
+  markSidebandUnmonitored,
 } from '../../db/index.js';
 import {
   checkSessionLimits,
@@ -314,6 +316,14 @@ export default function liveSessionRoutes(): Router {
         try {
           await createActiveRealtimeSession(sessionId, userId, isDemoSession);
 
+          // Before the attach, deliberately. This column is what
+          // reattachActiveSessions keys on after a deploy, and what says which
+          // OpenAI session an attach failure belongs to. Writing it only from
+          // handleOpen meant an attach that never opened — or a restart in the
+          // window between creation and attach — left an active, unmonitored
+          // session with no id to recover it by.
+          await setLiveSessionId(sessionId, liveSessionId);
+
           if (checkin) {
             setSessionCheckin(sessionId, checkin).catch(err =>
               console.error('[Live] Failed to store check-in:', err));
@@ -380,6 +390,12 @@ export default function liveSessionRoutes(): Router {
             '[Live] SIDEBAND_ENABLED=false — starting a voice session with NO crisis detection. ' +
             'This switch is far more dangerous under GPT-Live than it was under Realtime.',
           );
+          // ...and queryable, not just loud in a log nobody reads. Without this
+          // an intentionally unmonitored session is indistinguishable on the
+          // row from one whose attach simply has not landed yet.
+          await markSidebandUnmonitored(
+            sessionId, 'monitoring_disabled: SIDEBAND_ENABLED=false at session start',
+          ).catch((e: unknown) => console.error('[Live] Failed to record the disabled sideband:', e));
         } else {
           try {
             await sidebandManager.connectAndWait(sessionId, liveSessionId, apiKey, {

@@ -319,6 +319,41 @@ export async function setSessionCallId(sessionId: string, callId: string): Promi
   );
 }
 
+/**
+ * Record the GPT-Live session id on the therapy session.
+ *
+ * Written as soon as POST /v1/live/sessions returns, BEFORE the sideband attach
+ * (ai-therapist-195). handleOpen also writes it, but only on a successful
+ * attach — which left two holes: a deploy landing between session creation and
+ * the attach orphaned an active session that reattachActiveSessions could never
+ * find (it keys on this column), and a session whose attach failed outright
+ * kept no record of which live session it failed to attach to.
+ */
+export async function setLiveSessionId(sessionId: string, liveSessionId: string): Promise<void> {
+  await pool.query(
+    'UPDATE therapy_sessions SET openai_live_session_id = $1 WHERE session_id = $2',
+    [liveSessionId, sessionId]
+  );
+}
+
+/**
+ * Mark a voice session as running with no server-side monitoring, with the
+ * reason (ai-therapist-195).
+ *
+ * The SIDEBAND_ENABLED=false kill switch used to leave nothing but a console
+ * line, so a session started with crisis detection deliberately off looked
+ * exactly like one whose attach had simply not landed yet. Analysts must be
+ * able to exclude these, and admin live-monitoring must be able to show them.
+ */
+export async function markSidebandUnmonitored(sessionId: string, reason: string): Promise<void> {
+  await pool.query(
+    `UPDATE therapy_sessions
+        SET sideband_connected = FALSE, sideband_error = $1
+      WHERE session_id = $2`,
+    [reason, sessionId]
+  );
+}
+
 /** Create an active realtime session for the OpenAI-issued id (no-op if it exists). */
 export async function createActiveRealtimeSession(
   sessionId: string,

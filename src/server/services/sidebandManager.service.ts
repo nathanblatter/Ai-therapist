@@ -170,6 +170,18 @@ interface LiveSessionState {
    */
   attachSeq: number;
   reconnectAttempts: number;
+  /**
+   * True while this is the OPENING attach driven by connectAndWait, and cleared
+   * the moment the socket opens.
+   *
+   * During that window connectAndWait owns the outcome: it retries with backoff
+   * and, if every attempt fails, the route hangs the OpenAI session up, marks
+   * the session ended and tells the participant. The autonomous failure paths
+   * (reconnect scheduling, failClosedUnmonitored) must stay out of it — they
+   * would race the retry loop with a second socket and page the on-call about
+   * a "lost monitoring connection" for a session in which nobody has spoken.
+   */
+  initialAttach: boolean;
 }
 
 /**
@@ -206,6 +218,19 @@ export class SidebandManager {
 
   private readonly maxReconnectAttempts = 3;
   private readonly reconnectDelayMs = 2000;
+  /**
+   * Opening-attach retry budget (ai-therapist-195). The attach is now a hard
+   * gate on starting a voice session, so a single transient upgrade failure —
+   * a 429, a 5xx, a TCP blip — would otherwise deny a participant their
+   * session outright. Three tries inside one bounded wall-clock window.
+   */
+  private readonly attachAttempts = 3;
+  /** Total wall-clock budget for the opening attach, retries and backoff included. */
+  private readonly attachBudgetMs = 12_000;
+  /** Cap on any single attach attempt, so an early one cannot eat the budget. */
+  private readonly attachAttemptMs = 4000;
+  /** Backoff before attach retry n (index 0 = before the second attempt). */
+  private readonly attachBackoffMs = [400, 1200];
   private readonly keepaliveMs = 20000;
   /**
    * Silence that closes a turn. 900ms is long enough to ride through the pauses
@@ -259,8 +284,9 @@ export class SidebandManager {
     sessionId: string,
     liveSessionId: string,
     apiKey: string,
-    opts: { model: string; backendModel: string },
+    opts: { model: string; backendModel: string; initialAttach?: boolean },
   ): Promise<WebSocket> {
+    const initialAttach = opts.initialAttach === true;
     if (this.endedSessions.has(sessionId)) {
       throw new Error('Session ended; Live sideband attach aborted');
     }
@@ -309,6 +335,7 @@ export class SidebandManager {
       assistantTurnIndex: 0,
       attachSeq: this.nextAttachSeq(sessionId),
       reconnectAttempts: 0,
+      initialAttach,
     };
     this.sessions.set(sessionId, state);
 
@@ -338,8 +365,14 @@ export class SidebandManager {
             sessionId, error: detail, statusCode: res.statusCode,
           }, sessionId);
         }
-        // Do not leave an active voice session running with no monitoring.
-        void this.failClosedUnmonitored(sessionId, `attach rejected with HTTP ${res.statusCode}`);
+        // Do not leave an active voice session running with no monitoring —
+        // UNLESS this is the opening attach, where connectAndWait is retrying
+        // and the route already ends the session and tells the participant if
+        // the retries run out. Firing here too would kill a session mid-retry
+        // and page the on-call about a conversation that never started.
+        if (!initialAttach) {
+          void this.failClosedUnmonitored(sessionId, `attach rejected with HTTP ${res.statusCode}`);
+        }
       });
     });
 
@@ -357,36 +390,122 @@ export class SidebandManager {
    * reaches runCrisisPipeline. An unattached voice session is an unmonitored
    * one.
    *
-   * Rejects on upgrade rejection, socket error, or timeout.
+   * Retried with backoff inside a bounded wall-clock window: the attach is a
+   * hard gate on starting the session, so one transient 429 or TCP blip must
+   * not cost a participant their session. Every attempt and the final outcome
+   * land on the session row (`sideband_error`, `sideband_connected`) so "never
+   * attached" is queryable rather than inferred from an absence of rows.
+   *
+   * Rejects, after the budget is spent, on upgrade rejection, socket error, or
+   * timeout.
    */
   async connectAndWait(
     sessionId: string,
     liveSessionId: string,
     apiKey: string,
-    opts: { model: string; backendModel: string; timeoutMs?: number },
+    opts: { model: string; backendModel: string; timeoutMs?: number; attempts?: number },
   ): Promise<void> {
-    const timeoutMs = opts.timeoutMs ?? 10_000;
-    const ws = await this.connect(sessionId, liveSessionId, apiKey, opts);
+    const budgetMs = opts.timeoutMs ?? this.attachBudgetMs;
+    const maxAttempts = Math.max(1, opts.attempts ?? this.attachAttempts);
+    const deadline = Date.now() + budgetMs;
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      try {
+        await this.attachOnce(
+          sessionId, liveSessionId, apiKey,
+          { model: opts.model, backendModel: opts.backendModel },
+          Math.min(this.attachAttemptMs, remaining),
+        );
+        return;
+      } catch (err) {
+        lastError = err;
+        // A session that ended underneath us is not a transient failure.
+        if (this.endedSessions.has(sessionId)) break;
+        const backoff = this.attachBackoffMs[attempt - 1] ?? this.attachBackoffMs.at(-1) ?? 0;
+        if (attempt >= maxAttempts || Date.now() + backoff >= deadline) break;
+        console.warn(
+          `[Live] Sideband attach attempt ${attempt}/${maxAttempts} failed for ` +
+          `${sessionId.substring(0, 12)}... (${err instanceof Error ? err.message : String(err)}); ` +
+          `retrying in ${backoff}ms.`,
+        );
+        await new Promise<void>(resolve => {
+          const t = setTimeout(resolve, backoff);
+          t.unref?.();
+        });
+      }
+    }
+
+    const message = lastError instanceof Error ? lastError.message : String(lastError);
+    const detail = `sideband attach failed after ${maxAttempts} attempts within ${budgetMs}ms: ${message}`;
+    await this.logConnectionError(sessionId, new Error(detail));
+    if (global.io) {
+      void broadcastAdminEventForSession(global.io, 'sideband:attach-failed', {
+        sessionId, liveSessionId, error: detail, attempts: maxAttempts, failedAt: new Date(),
+      }, sessionId);
+    }
+    throw lastError instanceof Error ? lastError : new Error(detail);
+  }
+
+  /** One attach attempt: open the socket and wait for it, or clean up after itself. */
+  private async attachOnce(
+    sessionId: string,
+    liveSessionId: string,
+    apiKey: string,
+    opts: { model: string; backendModel: string },
+    timeoutMs: number,
+  ): Promise<void> {
+    const ws = await this.connect(sessionId, liveSessionId, apiKey, { ...opts, initialAttach: true });
     if (ws.readyState === WebSocket.OPEN) return;
 
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => { cleanup(); reject(new Error(`Live sideband did not open within ${timeoutMs}ms`)); },
-        timeoutMs,
-      );
-      timer.unref?.();
-      const onOpen = () => { cleanup(); resolve(); };
-      const onFail = () => { cleanup(); reject(new Error('Live sideband closed before opening')); };
-      const cleanup = () => {
-        clearTimeout(timer);
-        ws.off('open', onOpen);
-        ws.off('close', onFail);
-        ws.off('error', onFail);
-      };
-      ws.once('open', onOpen);
-      ws.once('close', onFail);
-      ws.once('error', onFail);
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => { cleanup(); reject(new Error(`Live sideband did not open within ${timeoutMs}ms`)); },
+          timeoutMs,
+        );
+        timer.unref?.();
+        const onOpen = () => { cleanup(); resolve(); };
+        const onFail = () => { cleanup(); reject(new Error('Live sideband closed before opening')); };
+        const cleanup = () => {
+          clearTimeout(timer);
+          ws.off('open', onOpen);
+          ws.off('close', onFail);
+          ws.off('error', onFail);
+        };
+        ws.once('open', onOpen);
+        ws.once('close', onFail);
+        ws.once('error', onFail);
+      });
+    } catch (err) {
+      this.abandonAttach(sessionId, ws);
+      throw err;
+    }
+  }
+
+  /**
+   * Drop a half-open attach.
+   *
+   * A timed-out attempt leaves a socket stuck in CONNECTING and its state still
+   * in `this.sessions` — which both blocks the next attempt (connect() returns
+   * the existing, dead socket) and leaves a socket that can open MINUTES later
+   * and stamp sideband_connected = TRUE on a session the route already hung up
+   * and ended.
+   */
+  private abandonAttach(sessionId: string, ws: WebSocket): void {
+    const state = this.sessions.get(sessionId);
+    if (state && state.ws === ws) {
+      this.clearTimers(state);
+      state.userTranscript.dispose();
+      state.assistantTranscript.dispose();
+      this.sessions.delete(sessionId);
+    }
+    try {
+      ws.removeAllListeners();
+      ws.terminate();
+    } catch { /* already gone */ }
   }
 
   /**
@@ -524,6 +643,10 @@ export class SidebandManager {
   }
 
   private async handleOpen(sessionId: string, liveSessionId: string): Promise<void> {
+    // The opening attach succeeded: reconnect scheduling and fail-closed are
+    // this session's own business again from here on.
+    const opened = this.sessions.get(sessionId);
+    if (opened) opened.initialAttach = false;
     try {
       await pool.query(
         `UPDATE therapy_sessions
@@ -1417,6 +1540,19 @@ export class SidebandManager {
   private async handleClose(sessionId: string, code: number, reason: Buffer): Promise<void> {
     console.log(`[Live] Sideband closed for ${sessionId.substring(0, 12)}...: ${code} - ${reason || 'no reason'}`);
     const state = this.sessions.get(sessionId);
+
+    // The OPENING attach never completed. connectAndWait owns that outcome: it
+    // is mid-retry, and the route ends the session and tells the participant if
+    // the retries run out. Scheduling a reconnect here would race a second
+    // socket against the retry loop, and there is no transcript, no usage and
+    // no participant to fail closed on yet.
+    if (state?.initialAttach) {
+      this.clearTimers(state);
+      state.userTranscript.dispose();
+      state.assistantTranscript.dispose();
+      this.sessions.delete(sessionId);
+      return;
+    }
 
     // Flush pending fragments before losing them with the connection.
     state?.userTranscript.flush();
