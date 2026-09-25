@@ -3,6 +3,7 @@
 // (end/delete/update) live in db/sessions.queries.ts + db/messages.queries.ts.
 import { pool } from '../config/db.js';
 import { REDACTABLE_ROWS_SQL } from './redactionScope.js';
+import { projectRowsMetadata } from './metadataProjection.js';
 
 export type AdminSessionRow = Record<string, unknown>;
 
@@ -258,7 +259,9 @@ export async function getAdminSessionMessages(sessionId: string, contentColumn: 
     WHERE session_id = $1
     ORDER BY created_at ASC
   `, [sessionId]);
-  return result.rows;
+  // Researchers reading the redacted column must not get raw participant text
+  // back via the metadata blob beside it (ai-therapist-217).
+  return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
 }
 
 /** Count of not-yet-redacted messages in a session (0 == redaction complete). */

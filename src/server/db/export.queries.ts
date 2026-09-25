@@ -5,6 +5,7 @@
 // (role-derived, whitelisted to two literals) and the aggregation date format
 // (whitelisted to three literals). Neither is raw user input.
 import { pool } from '../config/db.js';
+import { projectRowsMetadata } from './metadataProjection.js';
 
 export type ExportRow = Record<string, unknown>;
 
@@ -86,7 +87,9 @@ export async function getAnonymizedExport(f: ExportFilters, contentColumn: Expor
   `, orgId === null || orgId === undefined
     ? [f.sessionId, f.startDate, f.endDate, f.crisisOnly]
     : [f.sessionId, f.startDate, f.endDate, f.crisisOnly, orgId]);
-  return result.rows;
+  // Redacted content column == a role that may not see raw participant text,
+  // so metadata drops to the telemetry allowlist too (ai-therapist-217).
+  return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
 }
 
 /** Aggregated session statistics bucketed by day/week/month. */
@@ -146,7 +149,7 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
               SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $2))))
       ORDER BY m.created_at ASC
     `, [f.sessionId, orgId ?? null]);
-    return result.rows;
+    return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
   }
 
   const result = await pool.query(`
@@ -172,5 +175,5 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
   `, orgId === null || orgId === undefined
     ? [f.startDate, f.endDate, f.crisisOnly]
     : [f.startDate, f.endDate, f.crisisOnly, orgId]);
-  return result.rows;
+  return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
 }
