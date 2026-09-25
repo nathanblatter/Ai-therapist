@@ -257,6 +257,36 @@ byte, and → `response.done`) into `turn_latency` with `channel='realtime'`,
 the same table the earlier voice paths used, so backends and knob settings
 can be compared with numbers rather than impressions.
 
+## 7b. Refusal loops (xAI moderation)
+
+xAI moderates on its side. When it trips, the model answers with a canned
+`I can't help with that request` and then answers *everything* that way — in
+the stage session of 2026-09-23 a participant got five identical refusals in a
+row, including to "so is the session just over?". The string is not ours, so
+no amount of clinical prompt ("Declining gracefully") can override it: the
+session is bricked unless the proxy notices and breaks the loop.
+
+`utils/grokRefusalGuard.ts` holds the detector (pure, unit-tested); the
+manager owns delivery. A completed assistant turn counts toward a streak when
+it is **short** (≤ `maxChars`) and either matches a configured refusal pattern
+or repeats the previous short turn near verbatim; any real reply resets the
+streak, so a single boundary is never treated as a loop. Turns cut short by
+barge-in do not count.
+
+| Streak | What happens |
+|---|---|
+| `steerAfter` (2) | A system item is injected — acknowledge, one-sentence boundary, redirect to how the participant is feeling, name resources — with `response.create`, so the participant is not left in silence |
+| `recoverAfter` (4) | A **server-authored** line goes out on the transcript channel (there is no server-side TTS on this socket), is persisted as an assistant row with `server_authored: true`, logs an `intervention_actions` row of type `voice_refusal_recovery`, and re-steers without forcing speech. The counter resets, so a longer loop escalates again from the steer rather than repeating our line every turn |
+
+Settings live in `system_config.grok_refusal_guard` (`enabled`, `patterns`,
+`maxChars`, `steerAfter`, `recoverAfter`), read fresh at session start like
+the turn-taking knobs. It is a separate key because the admin turn-taking form
+PUTs `grok_voice` whole. Patterns are normalized (lowercase, apostrophes and
+punctuation dropped) on both sides, so they can be typed naturally.
+
+Crisis detection is untouched by any of this: participant transcripts still
+run through `runCrisisPipeline` on every turn, refusal loop or not.
+
 ## 8. Browser audio
 
 `GrokVoiceClient` runs an `AudioContext` at 24 kHz — the browser resamples

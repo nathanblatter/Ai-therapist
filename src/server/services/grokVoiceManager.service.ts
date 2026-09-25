@@ -40,6 +40,10 @@ import { pool } from '../config/db.js';
 import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { grokRealtimeUrl } from '../utils/grokVoiceConfig.js';
+import {
+  GROK_DEFAULT_REFUSAL_GUARD, GROK_REFUSAL_STEER, GrokRefusalDetector,
+  buildGrokRefusalRecoveryLine, type GrokRefusalGuardConfig,
+} from '../utils/grokRefusalGuard.js';
 import type { VoiceSidebandDelegate } from './sidebandManager.service.js';
 import type { GrokServerMessage } from '../../shared/grokVoiceProtocol.js';
 
@@ -52,6 +56,10 @@ export interface PendingGrokSession {
   sessionConfig: Record<string, unknown>;
   /** Server-authored opening line, injected once the session is configured. */
   openingPrompt: string | null;
+  /** Refusal-loop thresholds (system_config.grok_refusal_guard); defaults when omitted. */
+  refusalGuard?: GrokRefusalGuardConfig;
+  /** Server-authored line delivered when a refusal loop survives the steer. */
+  recoveryLine?: string;
 }
 
 interface GrokSessionState {
@@ -89,6 +97,10 @@ interface GrokSessionState {
   /** Turn latency: when the participant stopped speaking, and first audio since. */
   lastSpeechStoppedAt: Date | null;
   firstOutputAt: Date | null;
+  /** Consecutive-refusal counter for xAI's server-side moderation loop. */
+  refusal: GrokRefusalDetector;
+  /** Participant-facing text used when the steer does not break the loop. */
+  recoveryLine: string;
 }
 
 export class GrokVoiceManager implements VoiceSidebandDelegate {
@@ -139,6 +151,8 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       responseInFlight: false,
       lastSpeechStoppedAt: null,
       firstOutputAt: null,
+      refusal: new GrokRefusalDetector(pending.refusalGuard ?? GROK_DEFAULT_REFUSAL_GUARD),
+      recoveryLine: pending.recoveryLine ?? buildGrokRefusalRecoveryLine(null),
     };
     this.sessions.set(sessionId, state);
     this.armOrphanTimer(sessionId, this.pendingTtlMs, 'client_never_connected');
@@ -532,7 +546,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
   }
 
   /** Close out the in-flight assistant transcript, if any, as one turn. */
-  private finalizeAssistantTurn(sessionId: string, _why: string): void {
+  private finalizeAssistantTurn(sessionId: string, why: string): void {
     const state = this.sessions.get(sessionId);
     if (!state) return;
     const text = state.assistantText.trim();
@@ -551,6 +565,90 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       content_redacted: null,
       metadata: { channel: 'grok', item_id: itemId },
     }]).catch(err => console.error(`[Grok] Failed to persist assistant turn for ${sessionId.substring(0, 12)}...:`, err));
+
+    // Only a turn the model actually finished says anything about a refusal
+    // loop; a turn cut short by barge-in or teardown is truncated by us.
+    if (why === 'completed' || why === 'response_done') this.checkRefusalLoop(sessionId, text);
+  }
+
+  // -------------------------------------------------------------------------
+  // Refusal loops (ai-therapist-255)
+  // -------------------------------------------------------------------------
+
+  /**
+   * xAI moderates server-side. When it trips, the model answers everything —
+   * including "so is the session just over?" — with the same canned refusal,
+   * and no prompt of ours can override it. Count the repeats and break the
+   * loop: first a system steer, then, if that fails, a line we author
+   * ourselves so the participant is never left with silence or a sixth "I
+   * can't help with that". See utils/grokRefusalGuard.ts for the detector.
+   */
+  private checkRefusalLoop(sessionId: string, text: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.ended) return;
+    const action = state.refusal.observe(text);
+    if (action === 'none') return;
+    const streak = state.refusal.streak;
+    // Reset here rather than after delivery: the next loop then escalates from
+    // the top (steer, then recovery) instead of repeating our own line on every
+    // further refusal, and the counter cannot drift while delivery awaits.
+    if (action === 'recover') state.refusal.reset();
+    void this.breakRefusalLoop(sessionId, action, text, streak).catch(err =>
+      console.error(`[Grok] Refusal recovery failed for ${sessionId.substring(0, 12)}...:`, err));
+  }
+
+  private async breakRefusalLoop(
+    sessionId: string, action: 'steer' | 'recover', refusalText: string, streak: number,
+  ): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.ended) return;
+    const short = sessionId.substring(0, 12);
+    console.warn(`[Grok] Refusal loop for ${short}...: ${streak} in a row; action=${action}`);
+
+    if (global.io) {
+      void broadcastAdminEventForSession(global.io, 'sideband:status-update', {
+        sessionId, status: 'refusal_loop', action, streak,
+        error: `Model refused ${streak} turns in a row: ${refusalText.slice(0, 200)}`,
+        timestamp: new Date(),
+      }, sessionId);
+    }
+
+    if (action === 'steer') {
+      // A forced response keeps the participant from sitting in silence while
+      // the model re-reads its guidance.
+      const delivered = await this.tryInject(sessionId, 'system', GROK_REFUSAL_STEER, true);
+      if (!delivered) console.error(`[Grok] Refusal steer could not be delivered for ${short}...`);
+      return;
+    }
+
+    // Second threshold: speak for ourselves. There is no server-side TTS on
+    // this socket, so the line goes out on the transcript channel the browser
+    // already renders, and is persisted like any assistant turn.
+    const line = state.recoveryLine;
+    state.assistantTurnIndex += 1;
+    const itemId = `grok-recovery-${state.assistantTurnIndex}`;
+    this.emitTranscript(sessionId, { role: 'assistant', itemId, text: line, final: true });
+    await insertMessagesBatch([{
+      session_id: sessionId,
+      role: 'assistant',
+      message_type: 'response',
+      content: line,
+      content_redacted: null,
+      metadata: { channel: 'grok', item_id: itemId, server_authored: true, reason: 'refusal_loop' },
+    }]).catch(err => console.error('[Grok] Failed to persist refusal recovery line:', err));
+
+    // Visible to admins alongside crisis interventions.
+    try {
+      const { logInterventionAction } = await import('./crisisDetection.service.js');
+      await logInterventionAction(sessionId, 'voice_refusal_recovery', {
+        channel: 'grok', streak, refusal: refusalText.slice(0, 500), delivered: 'transcript',
+      });
+    } catch (err) {
+      console.error('[Grok] Failed to log refusal intervention:', err);
+    }
+
+    // Re-steer without forcing a reply: the participant is reading our line.
+    await this.tryInject(sessionId, 'system', GROK_REFUSAL_STEER, false);
   }
 
   /** Push a transcript fragment or a finalized turn to the browser and admins. */
