@@ -276,12 +276,21 @@ export interface CrisisContactLike {
   enabled?: boolean;
 }
 
-export function buildGrokOpeningPrompt(language: string, crisis: CrisisContactLike | undefined): string {
+/**
+ * "call the … crisis line at …" — the configured crisis contact as a phrase
+ * that drops into a sentence. Shared by the opening preamble and the
+ * refusal-loop recovery line so a participant hears one set of numbers.
+ */
+export function buildGrokCrisisPhrase(crisis: CrisisContactLike | undefined): string {
   const enabled = crisis?.enabled !== false && Boolean(crisis?.phone);
-  const crisisText = enabled
+  return enabled
     ? `call the ${crisis?.hotline ?? '988 Suicide & Crisis Lifeline'} crisis line at ${crisis?.phone}` +
       (crisis?.text ? ` or text ${crisis.text}` : '')
     : 'call or text 988 (Suicide and Crisis Lifeline), or call 911 for immediate danger';
+}
+
+export function buildGrokOpeningPrompt(language: string, crisis: CrisisContactLike | undefined): string {
+  const crisisText = buildGrokCrisisPhrase(crisis);
 
   const preamble =
     `Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. ` +

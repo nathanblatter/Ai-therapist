@@ -10,7 +10,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 //      once no calls are outstanding, plus the UI-only notice to the browser.
 //   4. Audio relay in both directions, and barge-in propagation.
 //   5. The control surface (steer / update / interrupt / trigger / disconnect).
-//   6. Failure handling: an upstream drop fails closed; a browser that never
+//   6. Refusal loops: xAI moderation can brick a session with a repeated canned
+//      refusal — the proxy must steer, then speak for itself, and keep scoring
+//      the participant's turns throughout.
+//   7. Failure handling: an upstream drop fails closed; a browser that never
 //      attaches or drops without ending gets the session ended.
 //
 // Both sockets (xAI upstream and the browser client) are EventEmitter fakes.
@@ -18,7 +21,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 const {
   queryMock, insertMessagesBatchMock, insertToolInvocationMock, recordLlmUsageMock,
   recordLiveUsageMock, runCrisisPipelineMock, executeToolMock, broadcastMock,
-  serverEndSessionMock, phaseScheduleMock,
+  serverEndSessionMock, phaseScheduleMock, logInterventionActionMock,
 } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   insertMessagesBatchMock: vi.fn(),
@@ -30,6 +33,7 @@ const {
   broadcastMock: vi.fn(),
   serverEndSessionMock: vi.fn(),
   phaseScheduleMock: vi.fn(),
+  logInterventionActionMock: vi.fn(),
 }));
 
 // vi.hoisted runs before ES imports are initialised, so the base class is
@@ -81,6 +85,7 @@ vi.mock('./toolRegistry.service.js', () => ({
 vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEventForSession: broadcastMock }));
 vi.mock('../utils/phaseGuidance.js', () => ({ buildPhaseNudgeSchedule: phaseScheduleMock }));
 vi.mock('./sessionLifecycle.service.js', () => ({ serverEndSession: serverEndSessionMock }));
+vi.mock('./crisisDetection.service.js', () => ({ logInterventionAction: logInterventionActionMock }));
 
 import { grokVoiceManager } from './grokVoiceManager.service.js';
 
@@ -146,6 +151,7 @@ beforeEach(() => {
   broadcastMock.mockReset().mockResolvedValue(undefined);
   serverEndSessionMock.mockReset().mockResolvedValue(true);
   phaseScheduleMock.mockReset().mockResolvedValue([]);
+  logInterventionActionMock.mockReset().mockResolvedValue(undefined);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -450,5 +456,135 @@ describe('failure handling', () => {
     client.emit('message', Buffer.from(JSON.stringify({ type: 'end' })), false);
     expect(upstream.close).toHaveBeenCalledWith(1000, 'participant ended');
     expect(serverEndSessionMock).not.toHaveBeenCalled(); // POST /end owns that
+  });
+});
+
+describe('refusal loops (ai-therapist-255)', () => {
+  const CANNED = "I can't help with that request.";
+
+  /** One completed assistant turn carrying `text`. */
+  function assistantTurn(upstream: InstanceType<typeof FakeWs>, text: string, n: number): void {
+    fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: `a${n}`, delta: text });
+    fire(upstream, { type: 'response.output_audio_transcript.done', item_id: `a${n}`, transcript: text });
+    fire(upstream, { type: 'response.done', response: { id: `r${n}` }, usage: {} });
+  }
+
+  function systemInjections(upstream: InstanceType<typeof FakeWs>): string[] {
+    return sent(upstream)
+      .filter(e => e.type === 'conversation.item.create' && e.item?.role === 'system')
+      .map(e => e.item.content[0].text as string);
+  }
+
+  it('leaves an ordinary reply, and a single refusal, completely alone', async () => {
+    const { upstream } = await bringUp({ openingPrompt: null });
+    assistantTurn(upstream, 'That sounds like a heavy week. What has been hardest?', 1);
+    assistantTurn(upstream, CANNED, 2);
+    await flush();
+    expect(systemInjections(upstream)).toHaveLength(0);
+    expect(logInterventionActionMock).not.toHaveBeenCalled();
+  });
+
+  it('injects a system steer with a forced reply at the first threshold', async () => {
+    const { upstream } = await bringUp({ openingPrompt: null });
+    assistantTurn(upstream, CANNED, 1);
+    assistantTurn(upstream, CANNED, 2);
+    await flush();
+
+    const steers = systemInjections(upstream);
+    expect(steers).toHaveLength(1);
+    expect(steers[0]).toContain('Do not repeat that refusal');
+    expect(steers[0]).toContain('how they are feeling');
+    // The steer is followed by response.create: silence is not an option.
+    const events = sent(upstream);
+    const steerIdx = events.findIndex(e => e.type === 'conversation.item.create' && e.item?.role === 'system');
+    expect(events[steerIdx + 1]).toEqual({ type: 'response.create' });
+    expect(logInterventionActionMock).not.toHaveBeenCalled();
+  });
+
+  it('delivers a server-authored recovery line and logs an intervention at the second threshold', async () => {
+    const { client, upstream } = await bringUp({ openingPrompt: null });
+    for (let i = 1; i <= 4; i++) assistantTurn(upstream, CANNED, i);
+    await flush();
+
+    const recovery = sent(client).find(
+      m => m.type === 'transcript' && m.role === 'assistant' && m.final && String(m.itemId).startsWith('grok-recovery-'),
+    );
+    expect(recovery).toBeDefined();
+    expect(recovery!.text).toContain('not with anything you said');
+    expect(recovery!.text).toContain('988');
+
+    expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({
+      session_id: SESSION, role: 'assistant', content: recovery!.text,
+      metadata: expect.objectContaining({ server_authored: true, reason: 'refusal_loop' }),
+    })]);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(SESSION, 'voice_refusal_recovery', expect.objectContaining({
+      channel: 'grok', streak: 4,
+    }));
+    expect(broadcastMock).toHaveBeenCalledWith(expect.anything(), 'sideband:status-update',
+      expect.objectContaining({ status: 'refusal_loop', action: 'recover', streak: 4 }), SESSION);
+
+    // Re-steered, but without forcing speech over the line just delivered.
+    const events = sent(upstream);
+    const lastSteer = events.map(e => e.type).lastIndexOf('conversation.item.create');
+    expect(events[lastSteer + 1]).toBeUndefined();
+  });
+
+  it('re-escalates from the top after a recovery instead of repeating itself every turn', async () => {
+    const { client, upstream } = await bringUp({ openingPrompt: null });
+    for (let i = 1; i <= 8; i++) {
+      assistantTurn(upstream, CANNED, i);
+      await flush();
+    }
+
+    const recoveries = sent(client).filter(m => String(m.itemId ?? '').startsWith('grok-recovery-'));
+    expect(recoveries).toHaveLength(2);           // turns 4 and 8, not 4,5,6,7,8
+    expect(systemInjections(upstream)).toHaveLength(4); // steer + re-steer, twice
+  });
+
+  it('keeps scoring the participant through a refusal loop', async () => {
+    const { upstream } = await bringUp({ openingPrompt: null });
+    for (let i = 1; i <= 4; i++) {
+      fire(upstream, {
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: `u${i}`, transcript: i === 4 ? 'so is the session just over?' : 'I am still here',
+      });
+      assistantTurn(upstream, CANNED, i);
+      await flush();
+    }
+
+    expect(runCrisisPipelineMock).toHaveBeenCalledTimes(4);
+    expect(runCrisisPipelineMock).toHaveBeenLastCalledWith(
+      { sessionId: SESSION, messageId: 42, content: 'so is the session just over?' }, 'realtime',
+    );
+  });
+
+  it('honours admin-configured thresholds', async () => {
+    grokVoiceManager.registerPending(SESSION, {
+      model: 'grok-voice-latest', apiKey: 'xai-test', sessionConfig: SESSION_CONFIG, openingPrompt: null,
+      refusalGuard: { enabled: true, patterns: ['i cant help with that'], maxChars: 200, steerAfter: 1, recoverAfter: 2 },
+      recoveryLine: 'A study-system note: our software is stuck, not you.',
+    });
+    const client = new FakeWs();
+    await grokVoiceManager.attachClient(SESSION, client as unknown as import('ws').default);
+    const upstream = upstreams[upstreams.length - 1];
+    fire(upstream, { type: 'session.updated', session: SESSION_CONFIG });
+    await flush();
+
+    assistantTurn(upstream, CANNED, 1);
+    await flush();
+    expect(systemInjections(upstream)).toHaveLength(1);
+    assistantTurn(upstream, CANNED, 2);
+    await flush();
+    expect(sent(client).some(m => m.text === 'A study-system note: our software is stuck, not you.')).toBe(true);
+  });
+
+  it('does not count a turn the participant barged in on', async () => {
+    const { upstream } = await bringUp({ openingPrompt: null });
+    for (let i = 1; i <= 4; i++) {
+      fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: `a${i}`, delta: CANNED });
+      fire(upstream, { type: 'input_audio_buffer.speech_started' });
+    }
+    await flush();
+    expect(systemInjections(upstream)).toHaveLength(0);
   });
 });

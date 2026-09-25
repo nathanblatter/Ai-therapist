@@ -49,11 +49,13 @@ import { scheduleAutoTermination } from '../../utils/sessionAutoTerminate.js';
 import {
   buildGrokSessionConfig,
   buildGrokOpeningPrompt,
+  buildGrokCrisisPhrase,
   isGrokVoiceModel,
   resolveGrokVoice,
   resolveGrokTuning,
   type CrisisContactLike,
 } from '../../utils/grokVoiceConfig.js';
+import { resolveGrokRefusalGuard, buildGrokRefusalRecoveryLine } from '../../utils/grokRefusalGuard.js';
 import { pool } from '../../config/db.js';
 import { grokVoiceManager } from '../../services/grokVoiceManager.service.js';
 import { GROK_SAMPLE_RATE, GROK_VOICE_WS_PATH } from '../../../shared/grokVoiceProtocol.js';
@@ -165,13 +167,17 @@ export default function grokSessionRoutes(): Router {
         const isDemoSession =
           isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true;
 
-        // Turn-taking knobs (system_config.grok_voice). Read directly, not via
+        // Turn-taking knobs (system_config.grok_voice) and the refusal-loop
+        // thresholds (system_config.grok_refusal_guard, its own key because the
+        // admin turn-taking form PUTs grok_voice whole). Read directly, not via
         // the ~10-minute getSystemConfig cache: these exist to be tuned between
         // back-to-back test sessions and must take effect on the next start.
-        const tuningRow = await pool.query<{ config_value: unknown }>(
-          "SELECT config_value FROM system_config WHERE config_key = 'grok_voice'",
-        ).catch(() => ({ rows: [] as Array<{ config_value: unknown }> }));
-        const tuning = resolveGrokTuning(tuningRow.rows[0]?.config_value);
+        const knobRows = await pool.query<{ config_key: string; config_value: unknown }>(
+          "SELECT config_key, config_value FROM system_config WHERE config_key IN ('grok_voice', 'grok_refusal_guard')",
+        ).catch(() => ({ rows: [] as Array<{ config_key: string; config_value: unknown }> }));
+        const knobs = new Map(knobRows.rows.map(r => [r.config_key, r.config_value]));
+        const tuning = resolveGrokTuning(knobs.get('grok_voice'));
+        const refusalGuard = resolveGrokRefusalGuard(knobs.get('grok_refusal_guard'));
 
         const sessionConfig = buildGrokSessionConfig({
           model: aiModel,
@@ -239,6 +245,10 @@ export default function grokSessionRoutes(): Router {
           openingPrompt: buildGrokOpeningPrompt(
             userLanguage,
             systemConfig.crisis_contact as CrisisContactLike | undefined,
+          ),
+          refusalGuard,
+          recoveryLine: buildGrokRefusalRecoveryLine(
+            buildGrokCrisisPhrase(systemConfig.crisis_contact as CrisisContactLike | undefined),
           ),
         });
 
