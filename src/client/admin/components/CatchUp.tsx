@@ -221,6 +221,12 @@ export default function CatchUp({ userId, onViewSession }: CatchUpProps) {
                   </div>
                   {s && (
                     <div className="mt-1.5 space-y-1 text-sm text-gray-600">
+                      {s.safety && (
+                        <p className="flex items-start gap-1.5 text-red-700 font-medium">
+                          <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                          <span>{s.safety}</span>
+                        </p>
+                      )}
                       {s.topics?.length ? (
                         <div className="flex flex-wrap gap-1.5">
                           {s.topics.map((t) => (

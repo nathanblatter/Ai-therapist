@@ -7,7 +7,7 @@
 // simply do not render. Therapists can additionally seed an authored progress
 // note from the AI SOAP draft (slice B).
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, RefreshCw, CheckCircle, FileText } from 'react-feather';
+import { ChevronDown, ChevronRight, RefreshCw, CheckCircle, FileText, AlertTriangle } from 'react-feather';
 import PrepBrief from './PrepBrief';
 import { isCareTeamRole } from '../../../shared/roles';
 // Canonical insight shapes live in the server data layer (type-only import,
@@ -283,6 +283,12 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                 Memory summary{summary.headline ? ` — “${summary.headline}”` : ''}
               </h4>
               <div className="bg-white rounded p-3 text-gray-700 space-y-1">
+                {summary.safety && (
+                  <div className="flex items-start gap-1.5 text-red-700 font-medium">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    <span>{summary.safety}</span>
+                  </div>
+                )}
                 {summary.topics && summary.topics.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {summary.topics.map(t => (

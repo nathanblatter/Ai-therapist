@@ -10,6 +10,12 @@ export interface SessionSummary {
   techniques_discussed?: string[];
   techniques_helped?: string[];
   follow_up?: string;
+  /** Safety line (ai-therapist-256): one sentence naming any crisis flag,
+   *  escalation, crisis resource shown or adverse-event draft from this
+   *  session. Empty string / absent means nothing safety-relevant fired.
+   *  Never injected into participant-facing memory (see promptContext.ts) —
+   *  it is for the researcher/caseworker catch-up read. */
+  safety?: string;
 }
 
 export interface SoapNote {

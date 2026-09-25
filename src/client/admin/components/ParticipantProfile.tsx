@@ -303,6 +303,12 @@ function buildTimeline(profile: ProfileBundle | null, sessions: UserSessionRow[]
 function SummaryBody({ summary }: { summary: SessionSummary }) {
   return (
     <div className="mt-1.5 space-y-1 text-sm text-gray-600">
+      {summary.safety && (
+        <p className="flex items-start gap-1.5 text-red-700 font-medium">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>{summary.safety}</span>
+        </p>
+      )}
       {summary.topics?.length ? <TagList items={summary.topics} tone="bg-indigo-100 text-indigo-800" /> : null}
       {summary.mood_trajectory && <p>Mood: {summary.mood_trajectory}</p>}
       {summary.techniques_helped?.length ? <p className="text-emerald-700">Helped: {summary.techniques_helped.join(', ')}</p> : null}

@@ -18,6 +18,11 @@ vi.mock('./sessionRedaction.service.js', () => ({ redactSession: redactSessionMo
 const finalizeMock = vi.fn().mockResolvedValue(undefined);
 vi.mock('./recorder.service.js', () => ({ finalize: finalizeMock }));
 
+const generateSessionInsightsAsyncMock = vi.fn();
+vi.mock('./sessionInsights.service.js', () => ({
+  generateSessionInsightsAsync: generateSessionInsightsAsyncMock,
+}));
+
 const disconnectMock = vi.fn().mockResolvedValue(undefined);
 vi.mock('./sidebandManager.service.js', () => ({ sidebandManager: { disconnect: disconnectMock } }));
 
@@ -35,6 +40,7 @@ beforeEach(() => {
   redactSessionMock.mockClear();
   finalizeMock.mockClear();
   disconnectMock.mockClear();
+  generateSessionInsightsAsyncMock.mockClear();
   vi.useFakeTimers();
 });
 
@@ -66,6 +72,14 @@ describe('sweepAbandonedSessions', () => {
     expect(disconnectMock).toHaveBeenCalledWith('abandoned-1');
     expect(redactSessionMock).toHaveBeenCalledWith('abandoned-1');
     expect(finalizeMock).toHaveBeenCalledWith('abandoned-1');
+  });
+
+  it('generates post-session insights for abandoned sessions (ai-therapist-256)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ session_id: 'abandoned-2' }] });
+
+    await sweepAbandonedSessions();
+
+    expect(generateSessionInsightsAsyncMock).toHaveBeenCalledWith('abandoned-2');
   });
 
   it('does nothing when no sessions are idle past the cutoff', async () => {
