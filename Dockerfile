@@ -1,6 +1,6 @@
 # AI Therapist — self-hosted Docker image
 # Uses debian-slim (not alpine) so the bcrypt native module resolves a prebuilt binary.
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
 
 WORKDIR /app
 
