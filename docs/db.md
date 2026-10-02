@@ -225,3 +225,31 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 - [ ] Add two-factor authentication
 - [ ] Add audit logging for admin actions
 - [ ] Add user management UI in admin dashboard
+
+## Redaction leak-check (`messages.metadata.redaction_check`)
+
+After `redactSession` persists `content_redacted`, `redactionVerifier.service.ts`
+asks a decision model one bounded question per redacted message ("does this
+text still contain a direct personal identifier?") and stores the verdict on
+the row:
+
+```json
+"redaction_check": {
+  "p_leak": 0.83, "flagged": true,
+  "backend": "decisions" | "responses", "model": "gpt-6-luna",
+  "checked_at": "2026-10-02T...", "reviewed": true, "error": "..."
+}
+```
+
+- `flagged` = `p_leak >= system_config.redaction_verifier.threshold` (default 0.5).
+- `reviewed` is set when a researcher corrects or approves the row in the
+  Redaction Verification tool; flagged-and-unreviewed rows are listed first
+  there and counted in its header.
+- Backend `auto` (default) uses the OpenAI Decisions API (`POST /v1/decisions`,
+  limited preview, no published schema yet) and falls back to the Responses API
+  with a strict json_schema until the org is enabled. Only redacted text is
+  sent, `store:false`, usage is recorded under purpose `redaction`.
+- Config row: `system_config.redaction_verifier` =
+  `{"enabled": true, "backend": "auto"|"decisions"|"responses", "threshold": 0.5}`;
+  absent row = defaults. No migration needed.
+

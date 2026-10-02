@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import {
   getRandomRedactedMessages,
+  countFlaggedUnreviewed,
   updateRedactedContent,
   recordRedactionApproval,
 } from '../../db/index.js';
@@ -11,11 +12,15 @@ import {
 export default function redactionRoutes(): Router {
   const router = Router();
 
-  // GET /redact/api/messages - random sample of redacted messages
+  // GET /redact/api/messages - review queue: leak-flagged messages first
+  // (ai-therapist-262), then a random sample; plus the flagged backlog size.
   router.get('/redact/api/messages', requireRole('researcher'), async (_req, res) => {
     try {
-      const messages = await getRandomRedactedMessages();
-      res.json({ messages });
+      const [messages, flaggedUnreviewed] = await Promise.all([
+        getRandomRedactedMessages(),
+        countFlaggedUnreviewed(),
+      ]);
+      res.json({ messages, flagged_unreviewed: flaggedUnreviewed });
     } catch (err) {
       console.error('Failed to fetch redacted messages:', err);
       res.status(500).json({ error: 'Failed to fetch messages' });

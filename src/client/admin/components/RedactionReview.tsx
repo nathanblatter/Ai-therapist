@@ -2,12 +2,24 @@ import { useState, useEffect } from "react";
 import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare } from "react-feather";
 import { formatDateTime } from "../../shared/format";
 
+interface RedactionCheck {
+  p_leak: number;
+  flagged: boolean;
+  backend: string;
+  model: string;
+  checked_at: string;
+  reviewed?: boolean;
+  error?: string;
+}
+
 interface RedactMessage {
   message_id: string;
   role: string;
   message_type: string;
   created_at: string;
   content_redacted: string | null;
+  /** Decision-model leak-check verdict (ai-therapist-262); null when never checked. */
+  redaction_check?: RedactionCheck | null;
 }
 
 // Researcher-only redaction-verification view: review and correct the
@@ -21,6 +33,7 @@ export default function RedactionReview() {
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [flaggedUnreviewed, setFlaggedUnreviewed] = useState<number>(0);
 
   const fetchMessages = async () => {
     setLoading(true);
@@ -34,6 +47,7 @@ export default function RedactionReview() {
       }
       const data = await response.json();
       setMessages(data.messages);
+      setFlaggedUnreviewed(Number(data.flagged_unreviewed ?? 0));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -103,6 +117,12 @@ export default function RedactionReview() {
             <p className="text-sm text-gray-600 mt-1">
               Review and edit redacted message content
             </p>
+            {flaggedUnreviewed > 0 && (
+              <p className="text-sm text-amber-700 mt-1 flex items-center gap-1.5">
+                <AlertCircle size={14} />
+                {flaggedUnreviewed} message{flaggedUnreviewed === 1 ? '' : 's'} flagged by the leak-check await review; they are listed first.
+              </p>
+            )}
           </div>
           <button
             onClick={fetchMessages}
@@ -166,6 +186,15 @@ export default function RedactionReview() {
                     <span className="text-sm text-gray-400">
                       {formatDate(message.created_at)}
                     </span>
+                    {message.redaction_check?.flagged && !message.redaction_check.reviewed && (
+                      <span
+                        className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-800"
+                        title={`Leak-check (${message.redaction_check.backend}, ${message.redaction_check.model}) says an identifier may remain`}
+                      >
+                        <AlertCircle size={12} />
+                        Possible leak, p={message.redaction_check.p_leak.toFixed(2)}
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-gray-400 font-mono">
                     ID: {message.message_id}

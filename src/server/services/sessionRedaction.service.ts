@@ -78,6 +78,14 @@ export async function redactSession(sessionId: string): Promise<void> {
     }
 
     console.log(`Session ${sessionId.substring(0, 12)}... redacted (${redacted.size} messages)`);
+
+    // Second opinion (ai-therapist-262): a decision model answers "does this
+    // still contain an identifier?" per redacted message and flags misses for
+    // the review queue. Fire-and-forget and fail-soft: it must never delay the
+    // wipe, naming or insights, and only redacted text leaves the box.
+    import('./redactionVerifier.service.js')
+      .then(m => m.verifyRedactedMessages(sessionId, [...redacted].map(([id, text]) => ({ id, text }))))
+      .catch(err => console.error('[RedactionVerifier] leak-check failed (non-fatal):', err));
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`Session redaction failed for ${sessionId}:`, errorMessage);

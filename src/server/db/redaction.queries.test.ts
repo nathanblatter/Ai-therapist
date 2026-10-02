@@ -32,6 +32,7 @@ describe('updateRedactedContent', () => {
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ message_id: 42 }] }) // UPDATE
       .mockResolvedValueOnce({ rowCount: 1, rows: [] }) // INSERT review
+      .mockResolvedValueOnce({ rowCount: 1 }) // mark leak-check reviewed (262)
       .mockResolvedValueOnce({}); // COMMIT
 
     await expect(updateRedactedContent('42', '[REDACTED]', 7)).resolves.toBe(true);
@@ -42,7 +43,8 @@ describe('updateRedactedContent', () => {
     expect(sqls[2]).toMatch(/INSERT INTO redaction_review_log/);
     expect(sqls[2]).toMatch(/'corrected'/);
     expect(clientQueryMock.mock.calls[2][1]).toEqual(['42', 7]);
-    expect(sqls[3]).toBe('COMMIT');
+    expect(sqls[3]).toMatch(/jsonb_set\(metadata, '\{redaction_check,reviewed\}'/);
+    expect(sqls[4]).toBe('COMMIT');
     expect(releaseMock).toHaveBeenCalled();
   });
 
@@ -83,5 +85,35 @@ describe('recordRedactionApproval', () => {
   it('returns false when the message does not exist', async () => {
     queryMock.mockResolvedValueOnce({ rowCount: 0, rows: [] });
     await expect(recordRedactionApproval('999', 7)).resolves.toBe(false);
+  });
+});
+
+describe('leak-check review queue (ai-therapist-262)', () => {
+  it('lists flagged-unreviewed rows first and exposes the verdict', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    const { getRandomRedactedMessages } = await import('./redaction.queries.js');
+    await getRandomRedactedMessages();
+    const [sql] = queryMock.mock.calls.at(-1) as [string];
+    expect(sql).toContain("metadata->'redaction_check' AS redaction_check");
+    expect(sql).toMatch(/ORDER BY \(\(metadata->'redaction_check'->>'flagged'\) = 'true'/);
+    expect(sql).toContain('RANDOM()');
+  });
+
+  it('counts only flagged rows nobody has reviewed', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ n: '3' }] });
+    const { countFlaggedUnreviewed } = await import('./redaction.queries.js');
+    expect(await countFlaggedUnreviewed()).toBe(3);
+    const [sql] = queryMock.mock.calls.at(-1) as [string];
+    expect(sql).toContain("->>'reviewed', 'false') <> 'true'");
+  });
+
+  it('marks the leak-check reviewed on approval', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ review_id: 1 }], rowCount: 1 })
+      .mockResolvedValueOnce({ rowCount: 1 });
+    const { recordRedactionApproval } = await import('./redaction.queries.js');
+    expect(await recordRedactionApproval('42', 9)).toBe(true);
+    const sqls = queryMock.mock.calls.map(c => c[0] as string);
+    expect(sqls.at(-1)).toMatch(/jsonb_set\(metadata, '\{redaction_check,reviewed\}', 'true'::jsonb\)/);
   });
 });
