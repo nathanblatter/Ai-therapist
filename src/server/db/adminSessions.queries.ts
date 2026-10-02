@@ -244,15 +244,37 @@ export async function getSessionWithUser(sessionId: string): Promise<AdminSessio
   return result.rows[0] ?? null;
 }
 
+/**
+ * SQL expression for the message text a reader of `contentColumn` should see.
+ *
+ * The content-retention wipe (contentWipe.service, default 24h after a
+ * session) nulls raw `content` once `content_redacted` exists, so a raw-tier
+ * reader selecting `content` alone sees an empty transcript for every
+ * participant/assistant turn of any session older than a day
+ * (ai-therapist-234: "(No message content)" bubbles in the profile view).
+ * Fall back to the redacted copy; the row also reports `content_wiped` so the
+ * UI can say which copy it is showing. The redacted tier is unchanged.
+ */
+export function messageTextSql(contentColumn: MessageContentColumn, alias = ''): string {
+  const q = alias ? `${alias}.` : '';
+  return contentColumn === 'content'
+    ? `COALESCE(${q}content, ${q}content_redacted)`
+    : `${q}content_redacted`;
+}
+
 /** A session's messages in order, exposing the role-appropriate content column. */
 export async function getAdminSessionMessages(sessionId: string, contentColumn: MessageContentColumn): Promise<AdminSessionRow[]> {
+  const contentWipedSql = contentColumn === 'content'
+    ? '(content IS NULL AND content_redacted IS NOT NULL)'
+    : 'FALSE';
   const result = await pool.query(`
     SELECT
       message_id,
       session_id,
       role,
       message_type,
-      ${contentColumn} as message,
+      ${messageTextSql(contentColumn)} as message,
+      ${contentWipedSql} as content_wiped,
       metadata as extras,
       created_at
     FROM messages

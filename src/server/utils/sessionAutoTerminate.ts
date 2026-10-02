@@ -58,6 +58,11 @@ async function hardEnd(opts: AutoTerminateOptions): Promise<void> {
     console.error('[AutoTerminate] Backend teardown failed:', e);
   }
 
+  // Free the in-memory chat transcript (ai-therapist-224). No-op for realtime.
+  import('../services/chatTherapy.service.js')
+    .then(m => m.endChatSession(sessionId))
+    .catch(e => console.error('[AutoTerminate] chat transcript cleanup failed:', e));
+
   import('../services/sessionRedaction.service.js')
     .then(m => m.redactSession(sessionId))
     .catch(e => console.error('[Redaction] session redaction failed:', e));

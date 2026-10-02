@@ -398,3 +398,17 @@ export async function isDemoAccountSession(sessionId: string): Promise<boolean> 
   );
   return result.rows[0]?.role === 'demo';
 }
+
+/**
+ * Which of the given session ids are still `active`. Used by the in-memory
+ * chat-transcript eviction backstop (ai-therapist-224) to find entries whose
+ * session ended through a path that never called endChatSession.
+ */
+export async function getActiveSessionIdsAmong(sessionIds: string[]): Promise<string[]> {
+  if (sessionIds.length === 0) return [];
+  const result = await pool.query<{ session_id: string }>(
+    `SELECT session_id FROM therapy_sessions WHERE session_id = ANY($1::text[]) AND status = 'active'`,
+    [sessionIds]
+  );
+  return result.rows.map(r => r.session_id);
+}

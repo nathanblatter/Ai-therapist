@@ -21,6 +21,8 @@ interface Message {
   extras?: Record<string, unknown>;
   content?: string;
   content_redacted?: string;
+  /** Server flag: raw content wiped by retention, `message` is the redacted copy. */
+  content_wiped?: boolean;
 }
 
 interface Session {

@@ -26,6 +26,13 @@ vi.mock('./sessionInsights.service.js', () => ({
 const disconnectMock = vi.fn().mockResolvedValue(undefined);
 vi.mock('./sidebandManager.service.js', () => ({ sidebandManager: { disconnect: disconnectMock } }));
 
+const endChatSessionMock = vi.fn();
+const evictEndedChatSessionsMock = vi.fn().mockResolvedValue(0);
+vi.mock('./chatTherapy.service.js', () => ({
+  endChatSession: endChatSessionMock,
+  evictEndedChatSessions: evictEndedChatSessionsMock,
+}));
+
 import {
   noteSessionActivity,
   scheduleAbandonCheck,
@@ -41,6 +48,8 @@ beforeEach(() => {
   finalizeMock.mockClear();
   disconnectMock.mockClear();
   generateSessionInsightsAsyncMock.mockClear();
+  endChatSessionMock.mockClear();
+  evictEndedChatSessionsMock.mockClear();
   vi.useFakeTimers();
 });
 
@@ -87,6 +96,21 @@ describe('sweepAbandonedSessions', () => {
     const result = await sweepAbandonedSessions();
     expect(result).toEqual({ finalized: 0 });
     expect(updateSessionStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('frees the in-memory chat transcript of each finalized session and runs the eviction backstop (ai-therapist-224)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ session_id: 'abandoned-3' }] });
+
+    await sweepAbandonedSessions();
+
+    expect(endChatSessionMock).toHaveBeenCalledWith('abandoned-3');
+    expect(evictEndedChatSessionsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the eviction backstop even when nothing was abandoned', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await sweepAbandonedSessions();
+    expect(evictEndedChatSessionsMock).toHaveBeenCalledTimes(1);
   });
 });
 

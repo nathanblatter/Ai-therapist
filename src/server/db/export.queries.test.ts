@@ -113,3 +113,18 @@ describe('metadata allowlist on redacted export paths', () => {
     expect(row['extras']).toEqual(ROW_METADATA);
   });
 });
+
+describe('raw-content export after the retention wipe (ai-therapist-234)', () => {
+  it('falls back to the redacted copy per row on the therapist path', async () => {
+    await getFullExport({ ...FILTERS, sessionId: 's1' }, 'content', null);
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('COALESCE(m.content, m.content_redacted) as message');
+  });
+
+  it('keeps the redacted path on content_redacted only', async () => {
+    await getAnonymizedExport(FILTERS, 'content_redacted', null);
+    const [sql] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('m.content_redacted as message');
+    expect(sql).not.toContain('COALESCE(m.content');
+  });
+});

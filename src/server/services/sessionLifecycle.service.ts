@@ -126,6 +126,7 @@ export async function serverEndSession(
   } catch (err) {
     log.error({ err }, `[serverEnd] sideband cleanup failed for ${sessionId}`);
   }
+  await dropChatTranscript(sessionId, 'serverEnd');
 
   import('./sessionRedaction.service.js')
     .then(m => m.redactSession(sessionId))
@@ -156,6 +157,21 @@ export async function serverEndSession(
   return true;
 }
 
+/**
+ * Free the in-memory chat transcript for a session ended server-side
+ * (ai-therapist-224). Only POST /api/chat/end used to clear it, so every other
+ * end path left a full unredacted transcript in process memory for the life
+ * of the container. No-op for realtime sessions (nothing stored).
+ */
+async function dropChatTranscript(sessionId: string, where: string): Promise<void> {
+  try {
+    const { endChatSession } = await import('./chatTherapy.service.js');
+    endChatSession(sessionId);
+  } catch (err) {
+    log.error({ err }, `[${where}] chat transcript cleanup failed for ${sessionId}`);
+  }
+}
+
 /** End the session, finalize its recording, and trigger redaction — mirrors the /end route. */
 async function finalizeAbandonedSession(sessionId: string): Promise<void> {
   await updateSessionStatus(sessionId, 'ended', 'system');
@@ -166,6 +182,7 @@ async function finalizeAbandonedSession(sessionId: string): Promise<void> {
   } catch (err) {
     log.error({ err }, `[Sideband] cleanup on abandon-finalize failed for ${sessionId}`);
   }
+  await dropChatTranscript(sessionId, 'abandon-finalize');
 
   const { redactSession } = await import('./sessionRedaction.service.js');
   redactSession(sessionId).catch(err => log.error({ err }, `[Redaction] abandon-finalize failed for ${sessionId}`));
@@ -214,6 +231,15 @@ export async function sweepAbandonedSessions(): Promise<{ finalized: number }> {
 
   if (result.rows.length > 0) {
     log.info(`Abandoned-session sweep finalized ${result.rows.length} session(s)`);
+  }
+
+  // Memory backstop (ai-therapist-224): evict chat transcripts whose session
+  // ended through any path that skipped endChatSession.
+  try {
+    const { evictEndedChatSessions } = await import('./chatTherapy.service.js');
+    await evictEndedChatSessions();
+  } catch (err) {
+    log.error({ err }, 'chat transcript eviction failed');
   }
   return { finalized: result.rows.length };
 }

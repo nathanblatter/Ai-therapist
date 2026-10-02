@@ -6,10 +6,14 @@
 // (whitelisted to three literals). Neither is raw user input.
 import { pool } from '../config/db.js';
 import { projectRowsMetadata } from './metadataProjection.js';
+import { messageTextSql } from './adminSessions.queries.js';
 
 export type ExportRow = Record<string, unknown>;
 
 // Therapists may export raw content; everyone else gets the redacted column.
+// Raw content is nulled by the retention wipe after ~24h, so the raw tier
+// falls back to the redacted copy per row (messageTextSql, ai-therapist-234)
+// rather than exporting blank messages.
 export type ExportContentColumn = 'content' | 'content_redacted';
 
 export interface ExportFilters {
@@ -71,7 +75,7 @@ export async function getAnonymizedExport(f: ExportFilters, contentColumn: Expor
            ELSE 'RID_' || LPAD(DENSE_RANK() OVER (ORDER BY u.userid)::TEXT, 3, '0') END as research_id,
       m.role,
       m.message_type,
-      m.${contentColumn} as message,
+      ${messageTextSql(contentColumn, 'm')} as message,
       m.metadata as extras,
       m.created_at
     FROM messages m
@@ -137,7 +141,7 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
         m.session_id,
         m.role,
         m.message_type,
-        m.${contentColumn} as message,
+        ${messageTextSql(contentColumn, 'm')} as message,
         m.metadata as extras,
         m.created_at
       FROM messages m
@@ -160,7 +164,7 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
       u.username,
       m.role,
       m.message_type,
-      m.${contentColumn} as message,
+      ${messageTextSql(contentColumn, 'm')} as message,
       m.metadata as extras,
       m.created_at
     FROM messages m
