@@ -194,7 +194,12 @@ export async function forkAndProbe(opts: ForkOptions): Promise<ForkResult> {
         case 'session.closed': {
           const usage = event.usage as { seconds?: number } | undefined;
           if (typeof usage?.seconds === 'number') result.voiceSeconds = usage.seconds;
-          finish();
+          // A bare finish() here settled the fork before the socket 'close'
+          // handler could attach its "closed before the backend responded"
+          // error, so a backend that produced nothing was recorded as a
+          // $0, empty-text SUCCESS and looked like the cheapest candidate on
+          // the board (ai-therapist-226). Silence is a failure, not a result.
+          finish(gotResponse ? null : 'session closed before the backend produced output');
           break;
         }
 

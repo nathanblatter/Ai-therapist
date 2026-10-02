@@ -199,6 +199,18 @@ function judgeParams(model: string): Record<string, unknown> {
     : { temperature: 0, max_tokens: 400 };
 }
 
+/**
+ * A candidate that produced no backend text is a FAILURE, never a result
+ * (ai-therapist-226). Without this, a silently-failing backend was recorded
+ * as a success with empty text and $0 cost — indistinguishable from a cheap,
+ * terse model, and therefore the apparent best value in a sweep whose whole
+ * purpose is comparing candidates. Judge and cost skip errored rows.
+ */
+export function candidateError(error: string | null | undefined, responseText: string | null | undefined): string | null {
+  if (error) return error;
+  return (responseText ?? '').trim() ? null : 'candidate produced no backend text';
+}
+
 /** Score one candidate response. Best-effort: a judge failure is not fatal. */
 async function judgeCandidate(
   judgeModel: string,
@@ -321,6 +333,7 @@ export async function runCounterfactual(opts: CounterfactualOptions): Promise<Co
           probeText: probe.text,
         });
 
+        const forkError = candidateError(forked.error, forked.responseText);
         await recordCounterfactualResponse({
           runId: run.id,
           model: id,
@@ -328,25 +341,27 @@ export async function runCounterfactual(opts: CounterfactualOptions): Promise<Co
           spokenText: forked.spokenText || null,
           tokensIn: forked.tokensIn,
           tokensOut: forked.tokensOut,
-          estimatedCostUsd: estimateCandidateCostUsd(model, forked.tokensIn, forked.tokensOut),
+          estimatedCostUsd: forkError ? null : estimateCandidateCostUsd(model, forked.tokensIn, forked.tokensOut),
           latencyMs: forked.latencyMs,
-          error: forked.error,
+          error: forkError,
         });
-        if (forked.error) failed++; else succeeded++;
+        if (forkError) failed++; else succeeded++;
         return;
       }
 
       const replayed = await runReplayCandidate(id, backendInstructions, history, probe.text);
+      const replayError = candidateError(null, replayed.text);
       await recordCounterfactualResponse({
         runId: run.id,
         model: id,
         responseText: replayed.text || null,
         tokensIn: replayed.tokensIn,
         tokensOut: replayed.tokensOut,
-        estimatedCostUsd: estimateCandidateCostUsd(model, replayed.tokensIn, replayed.tokensOut),
+        estimatedCostUsd: replayError ? null : estimateCandidateCostUsd(model, replayed.tokensIn, replayed.tokensOut),
         latencyMs: replayed.latencyMs,
+        error: replayError,
       });
-      succeeded++;
+      if (replayError) failed++; else succeeded++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[Counterfactual] candidate ${id} failed: ${message}`);
