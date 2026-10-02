@@ -7,6 +7,8 @@ interface MessageData {
   message_type?: string;
   created_at?: string;
   message?: string;
+  /** Raw content was nulled by the retention wipe; `message` is the redacted copy. */
+  content_wiped?: boolean;
   metadata?: {
     tool_name?: string;
     status?: string;
@@ -104,6 +106,11 @@ export default function ConversationBubble({
               </div>
             ) : (
               <div className="whitespace-pre-line">{message.message || '(No message content)'}</div>
+            )}
+            {message.content_wiped && (
+              <div className="text-xs italic opacity-60 mt-1">
+                (Raw text removed by the retention policy; showing the redacted copy)
+              </div>
             )}
             {message.metadata && (message.message_type === 'tool_call' || message.message_type === 'tool_response') && (
               <div className="mt-2 p-2 bg-white bg-opacity-50 rounded text-xs">

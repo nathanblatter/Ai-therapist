@@ -4,7 +4,9 @@ import { formatDateTime, timeLabel } from "../../shared/format";
 
 interface SessionMessage {
   role: string;
-  content: string;
+  content: string | null;
+  /** Populated at session end; the only copy left once the retention wipe nulls `content`. */
+  content_redacted?: string | null;
   created_at: string;
 }
 
@@ -115,7 +117,7 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
                     <div className="text-xs opacity-70 mb-1">
                       {msg.role.toUpperCase()} | {formatTime(msg.created_at)}
                     </div>
-                    <div className="whitespace-pre-line">{msg.content || '(No message content)'}</div>
+                    <div className="whitespace-pre-line">{msg.content || msg.content_redacted || '(No message content)'}</div>
                   </div>
                 </div>
               ))}
