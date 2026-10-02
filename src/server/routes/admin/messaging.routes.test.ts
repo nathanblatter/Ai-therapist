@@ -238,8 +238,21 @@ describe('GET /api/admin/messaging/clients/:userId/threads', () => {
   it('404s off-caseload clients for care-team members', async () => {
     dbMocks.isAssigned.mockResolvedValue(false);
     const res = await request(appAs('caseworker')).get(`/api/admin/messaging/clients/${CLIENT_ID}/threads`);
+    // ai-therapist-220: a 401 here would mean the request never reached the
+    // caseload branch at all. Pin the branch itself, not just the status, so
+    // the test cannot pass (or fail) for the wrong reason.
+    expect(dbMocks.isAssigned).toHaveBeenCalledWith(CLINICIAN_ID, CLIENT_ID);
     expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'Not found' });
     expect(dbMocks.getThreadForPair).not.toHaveBeenCalled();
+  });
+
+  it('serves the pair thread to care-team members with the client on caseload', async () => {
+    const res = await request(appAs('caseworker')).get(`/api/admin/messaging/clients/${CLIENT_ID}/threads`);
+    expect(dbMocks.isAssigned).toHaveBeenCalledWith(CLINICIAN_ID, CLIENT_ID);
+    expect(res.status).toBe(200);
+    expect(res.body.threads).toHaveLength(1);
+    expect(dbMocks.getThreadForPair).toHaveBeenCalledWith(CLIENT_ID, CLINICIAN_ID);
   });
 
   it('returns an empty list when no thread exists yet', async () => {
