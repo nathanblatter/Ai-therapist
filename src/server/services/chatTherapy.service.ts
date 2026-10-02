@@ -5,7 +5,7 @@
  */
 
 import { getOpenAIKey } from "../config/secrets.js";
-import { insertTurnLatency } from "../db/index.js";
+import { insertTurnLatency, getActiveSessionIdsAmong } from "../db/index.js";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 dotenv.config();
@@ -446,6 +446,32 @@ export function endChatSession(sessionId: string): void {
   if (hadSession) {
     console.log(`[ChatTherapy] Session ${sessionId.substring(0, 12)}... ended and cleaned up`);
   }
+}
+
+/**
+ * Backstop eviction (ai-therapist-224): drop the in-memory transcript of every
+ * session that is no longer active in the DB. /api/chat/end, serverEndSession,
+ * the abandoned-session sweep and the admin end route all call endChatSession
+ * directly; this catches whatever path they miss (a crash between the status
+ * update and the cleanup, a future end path that forgets), so an unredacted
+ * transcript cannot sit in process memory for the life of the container.
+ * Returns the number of entries evicted.
+ */
+export async function evictEndedChatSessions(): Promise<number> {
+  const ids = [...conversationHistory.keys()];
+  if (ids.length === 0) return 0;
+  const active = new Set(await getActiveSessionIdsAmong(ids));
+  let evicted = 0;
+  for (const id of ids) {
+    if (!active.has(id)) {
+      conversationHistory.delete(id);
+      evicted++;
+    }
+  }
+  if (evicted > 0) {
+    console.log(`[ChatTherapy] Evicted ${evicted} ended session transcript(s) from memory`);
+  }
+  return evicted;
 }
 
 /**

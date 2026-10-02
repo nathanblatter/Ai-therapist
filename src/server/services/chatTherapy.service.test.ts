@@ -28,17 +28,19 @@ vi.mock('./toolRegistry.service.js', () => ({
 vi.mock('./toolExecution.helpers.js', () => ({
   executeLoggedToolCall: executeLoggedToolCallMock,
 }));
+const getActiveSessionIdsAmongMock = vi.fn();
 vi.mock('../db/index.js', () => ({
   recordLlmUsage: recordLlmUsageMock,
   insertTurnLatency: insertTurnLatencyMock,
   getSessionAccessInfo: getSessionAccessInfoMock,
   getSessionConfig: getSessionConfigMock,
   getSessionMessages: getSessionMessagesMock,
+  getActiveSessionIdsAmong: (...args: unknown[]) => getActiveSessionIdsAmongMock(...args),
 }));
 
 const {
   initializeChatSession, sendMessage, injectGuidance, getConversationHistory, endChatSession,
-  toResponsesTools, isChatSessionUnavailableError,
+  toResponsesTools, isChatSessionUnavailableError, evictEndedChatSessions, getActiveSessionCount,
 } = await import('./chatTherapy.service.js');
 
 const SAMPLE_DEF = {
@@ -81,6 +83,39 @@ describe('injectGuidance', () => {
     expect(guidanceIdx).toBeLessThan(lastUserIdx);
     expect(input[lastUserIdx].content).toBe('hello there');
     endChatSession(sid);
+  });
+});
+
+describe('evictEndedChatSessions (ai-therapist-224)', () => {
+  it('frees transcripts whose session is no longer active and keeps the live ones', async () => {
+    initializeChatSession('chat_live', 'P');
+    initializeChatSession('chat_ended', 'P');
+    initializeChatSession('chat_gone', 'P');
+    const before = getActiveSessionCount();
+    getActiveSessionIdsAmongMock.mockResolvedValue(['chat_live']);
+
+    const evicted = await evictEndedChatSessions();
+
+    expect(getActiveSessionIdsAmongMock).toHaveBeenCalledWith(
+      expect.arrayContaining(['chat_live', 'chat_ended', 'chat_gone'])
+    );
+    expect(evicted).toBe(2);
+    expect(getActiveSessionCount()).toBe(before - 2);
+    expect(getConversationHistory('chat_live')).toHaveLength(1);
+    expect(getConversationHistory('chat_ended')).toEqual([]);
+    expect(getConversationHistory('chat_gone')).toEqual([]);
+    endChatSession('chat_live');
+  });
+
+  it('does not touch the DB when nothing is held in memory', async () => {
+    getActiveSessionIdsAmongMock.mockClear();
+    // Drain anything a prior test left behind.
+    getActiveSessionIdsAmongMock.mockResolvedValue([]);
+    await evictEndedChatSessions();
+    getActiveSessionIdsAmongMock.mockClear();
+
+    expect(await evictEndedChatSessions()).toBe(0);
+    expect(getActiveSessionIdsAmongMock).not.toHaveBeenCalled();
   });
 });
 

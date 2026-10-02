@@ -78,6 +78,15 @@ export default function adminSessionsRoutes(): Router {
         console.error('[Sideband] cleanup on admin session end failed:', e);
       }
 
+      // Free the in-memory chat transcript (ai-therapist-224): an admin end
+      // never went through /api/chat/end, so it stayed resident, unredacted.
+      try {
+        const { endChatSession } = await import('../../services/chatTherapy.service.js');
+        endChatSession(sessionId);
+      } catch (e) {
+        console.error('[ChatTherapy] cleanup on admin session end failed:', e);
+      }
+
       // Redact the whole session in one batched job (fire-and-forget), THEN
       // auto-name from the redacted transcript. Naming must run after redaction
       // completes, else content_redacted is null and the namer sees a blank
