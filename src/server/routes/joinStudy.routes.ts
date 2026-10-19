@@ -18,7 +18,6 @@ import {
   releaseQualtricsClaim,
   markQualtricsSignupRegistered,
   findQualtricsSignup,
-  createUser,
 } from '../db/index.js';
 import {
   getQualtricsJoinConfig,
@@ -27,6 +26,7 @@ import {
 } from '../services/qualtrics.service.js';
 import { enqueueWorkItem } from '../services/workQueue.service.js';
 import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
+import { registerAccount } from '../services/accounts.service.js';
 
 const PAGE_STYLE = `
   body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f4; color: #1c1917; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
@@ -226,7 +226,7 @@ export default function joinStudyRoutes(): Router {
       try {
         const orgIdRaw = process.env.QUALTRICS_STUDY_ORG_ID;
         const orgId = orgIdRaw && /^\d+$/.test(orgIdRaw) ? Number(orgIdRaw) : null;
-        user = await createUser(username.trim(), password, 'participant', { orgId });
+        user = await registerAccount(username.trim(), password, 'participant', { orgId });
       } catch (error: unknown) {
         // Registration failed — release the claim so the link stays usable.
         await releaseQualtricsClaim(claim.signup_id).catch((releaseError: unknown) => {

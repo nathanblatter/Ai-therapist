@@ -12,6 +12,14 @@ services:
       DATABASE_SSL: "false"
       SESSION_SECRET: ${SESSION_SECRET}
       CORS_ORIGIN: https://ai-therapist.nathanblatter.com
+      # Sign-in through Squawk (auth-service-33). All five unset => legacy
+      # username/password login against the local bcrypt column.
+      SQUAWK_ISSUER: ${SQUAWK_ISSUER:-}
+      SQUAWK_SERVICE_ID: ${SQUAWK_SERVICE_ID:-}
+      SQUAWK_CREDENTIAL: ${SQUAWK_CREDENTIAL:-}
+      SQUAWK_CLIENT_ID: ${SQUAWK_CLIENT_ID:-}
+      SQUAWK_RESOURCE: ${SQUAWK_RESOURCE:-}
+      SQUAWK_OWNER_USERNAME: ${SQUAWK_OWNER_USERNAME:-}
       # Magic-link demo access. Unset => /demo/:token 404s (feature disabled).
       DEMO_MAGIC_TOKEN: ${DEMO_MAGIC_TOKEN}
       # Stage is the public demo: keep the demo pill/overlay + [DEMO] titles.

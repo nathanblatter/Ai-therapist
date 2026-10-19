@@ -2,8 +2,10 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { requireRole } from '../../middleware/auth.js';
-import { verifyCredentials, createUser } from '../../db/index.js';
+import { verifyCredentials } from '../../db/index.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
+import { registerAccount } from '../../services/accounts.service.js';
+import { enabled as squawkEnabled } from '../../services/squawk.service.js';
 
 export default function authRoutes(): Router {
   const router = Router();
@@ -25,6 +27,11 @@ export default function authRoutes(): Router {
 
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
+    }
+    // With Squawk configured the local hash is a stale copy: sign-in goes
+    // through /api/auth/squawk/* (the login page does this on its own).
+    if (squawkEnabled()) {
+      return res.status(410).json({ error: 'Sign in through the login page; password login moved to Squawk', code: 'use_squawk' });
     }
 
     try {
@@ -123,7 +130,7 @@ export default function authRoutes(): Router {
     }
 
     try {
-      const user = await createUser(username, password, role);
+      const user = await registerAccount(username, password, role);
       res.json({
         success: true,
         user: { userid: user.userid, username: user.username, role: user.role },

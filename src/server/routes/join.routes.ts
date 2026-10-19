@@ -20,7 +20,6 @@ import {
   consumeInvite,
   releaseInvite,
   markInviteUsedBy,
-  createUser,
   deleteUser,
   getUserById,
   assignClient,
@@ -35,6 +34,7 @@ import {
 import { seedSandboxCaseload } from '../services/sandboxSeed.js';
 import { isCareTeamRole } from '../../shared/roles.js';
 import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
+import { registerAccount } from '../services/accounts.service.js';
 
 const GONE_MESSAGE = 'This invite link is no longer valid. Ask your therapist for a new one.';
 const SANDBOX_GONE_MESSAGE = 'This sandbox link is no longer valid. Ask whoever sent it for a new one.';
@@ -242,7 +242,7 @@ export default function joinRoutes(): Router {
 
       let user;
       try {
-        user = await createUser(username.trim(), password, 'participant', {
+        user = await registerAccount(username.trim(), password, 'participant', {
           orgId: invite.organization_id ?? inviter.organization_id ?? null,
           // C3: users.is_sandbox is set at creation from the org kind. A
           // sandbox owner minting a client invite must produce a sandbox
@@ -361,7 +361,7 @@ export default function joinRoutes(): Router {
       // 2. Owner account in the invite's role, flagged is_sandbox forever.
       let user;
       try {
-        user = await createUser(username.trim(), password, invite.invite_role, {
+        user = await registerAccount(username.trim(), password, invite.invite_role, {
           orgId: org.org_id,
           isSandbox: true,
         });

@@ -12,6 +12,8 @@ export interface UserRow {
   role: string;
   organization_id?: number;
   is_sandbox?: boolean;
+  /** The account's id in Squawk (auth-service-33), once it exists there. */
+  squawk_user_id?: string | null;
   password?: string;
   preferred_voice?: string | null;
   preferred_language?: string | null;
@@ -391,4 +393,37 @@ export async function deleteUser(userid: number | string): Promise<UserRow> {
     console.error('Error deleting user:', error);
     throw error;
   }
+}
+
+// ── Squawk linkage (auth-service-33) ────────────────────────────────────────
+
+/** The local account a Squawk user id belongs to, with what a login needs. */
+export async function getUserBySquawkId(squawkUserId: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    'SELECT userid, username, role, organization_id, is_sandbox, squawk_user_id FROM users WHERE squawk_user_id = $1',
+    [squawkUserId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** The local account for a username (Squawk's preferred_username), or null. */
+export async function getUserByUsernameForLogin(username: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    'SELECT userid, username, role, organization_id, is_sandbox, squawk_user_id FROM users WHERE username = $1',
+    [username]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Record the Squawk id of a local account (set once, at creation or on the
+ *  first Squawk login that matched by username). */
+export async function setSquawkUserId(userid: number | string, squawkUserId: string): Promise<void> {
+  await pool.query('UPDATE users SET squawk_user_id = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2', [squawkUserId, userid]);
+}
+
+/** Copy the role Squawk holds for the account into users.role (Squawk is the
+ *  source of roles once an account lives there; RBAC middleware keeps reading
+ *  the column). No-op when unchanged. */
+export async function syncRoleFromSquawk(userid: number | string, role: string): Promise<void> {
+  await pool.query('UPDATE users SET role = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2 AND role <> $1', [role, userid]);
 }

@@ -36,6 +36,9 @@ declare module "express-session" {
     consentVersion?: string;
     /** When consent was accepted (ISO string). */
     consentAcceptedAt?: string;
+    /** In-flight Squawk authorization (auth-service-33): PKCE verifier and
+     *  state, written by /api/auth/squawk/start, consumed by the callback. */
+    squawkAuth?: { state: string; verifier: string; startedAt: number };
   }
 }
 

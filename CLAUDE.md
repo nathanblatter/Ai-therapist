@@ -9,3 +9,11 @@ Study integrity, participant safety, and data quality come first; therapist-pilo
 ## UI conventions
 
 - Never use emojis anywhere in this project (participant or admin UI, toasts, server-sent strings). Use react-feather icons instead. (Typographic characters like the U+2022 list bullet are fine.)
+
+## Authentication (Squawk, since 2026-10-19)
+
+Sign-in goes through Squawk (https://squawk.nathanblatter.com) when the `SQUAWK_*`
+env vars are set: see docs/squawk-auth.md. Never add a second password check or a
+local credential store; account creation, password and role changes go through
+`src/server/services/accounts.service.ts` so Squawk stays in sync. Without the
+vars (local dev, tests) the legacy username/password login still works.

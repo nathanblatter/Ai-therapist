@@ -1,5 +1,108 @@
 import { useState, useEffect } from 'react';
 import { Shield, Key, Copy, CheckCircle, AlertTriangle } from 'react-feather';
+import { decodeCreationOptions, deviceName, encodeAttestation, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
+
+interface PasskeyMeta { id: string; name: string; created_at: string }
+
+/** Passkeys on the signed-in account, through Squawk (auth-service-33).
+ *  Registering one converts a password account: Squawk deletes the hash, so
+ *  from then on the person signs in with the passkey (a researcher can set a
+ *  new password, which converts it back). Hidden when Squawk is not configured. */
+function PasskeyCard() {
+  const [state, setState] = useState<{ enabled: boolean; linked: boolean; passkeys: PasskeyMeta[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const cfg = await fetch('/api/auth/squawk/config', { credentials: 'include' }).then((r) => r.json() as Promise<{ enabled: boolean }>);
+      if (!cfg.enabled) {
+        setState({ enabled: false, linked: false, passkeys: [] });
+        return;
+      }
+      const data = await fetch('/api/auth/squawk/passkeys', { credentials: 'include' }).then((r) => r.json() as Promise<{ linked: boolean; passkeys: PasskeyMeta[] }>);
+      setState({ enabled: true, linked: data.linked, passkeys: data.passkeys ?? [] });
+    } catch {
+      setState({ enabled: false, linked: false, passkeys: [] });
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const register = async () => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const beginResp = await fetch('/api/auth/squawk/passkeys/begin', { method: 'POST', credentials: 'include' });
+      const begin = (await beginResp.json()) as { challenge_id?: string; options?: { publicKey: Parameters<typeof decodeCreationOptions>[0] }; error?: string };
+      if (!beginResp.ok || !begin.challenge_id || !begin.options) throw new Error(begin.error || 'Could not start passkey registration.');
+      const cred = await navigator.credentials.create({ publicKey: decodeCreationOptions(begin.options.publicKey) });
+      if (!cred) throw new Error('No passkey was created.');
+      const finishResp = await fetch('/api/auth/squawk/passkeys/finish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ challenge_id: begin.challenge_id, name: deviceName(), credential: encodeAttestation(cred as PublicKeyCredential) }),
+      });
+      const finish = (await finishResp.json()) as { error?: string };
+      if (!finishResp.ok) throw new Error(finish.error || 'Passkey registration failed.');
+      setMessage('Passkey registered. From now on this account signs in with a passkey instead of a password.');
+      await load();
+    } catch (err) {
+      setError(isCancelled(err) ? 'Passkey prompt was cancelled.' : err instanceof Error ? err.message : 'Passkey registration failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!state || !state.enabled) return null;
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
+      <div className="flex items-start gap-3">
+        <Key className="text-royal flex-shrink-0 mt-0.5" size={20} />
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Passkeys</h3>
+          <p className="text-sm text-gray-600 mt-1">
+            Sign in with Face ID, Touch ID or a security key instead of a password. Registering a passkey replaces the
+            password on this account.
+          </p>
+        </div>
+      </div>
+      {state.passkeys.length > 0 ? (
+        <ul className="text-sm text-gray-700 divide-y divide-gray-100">
+          {state.passkeys.map((p) => (
+            <li key={p.id} className="py-2 flex justify-between">
+              <span>{p.name}</span>
+              <span className="text-gray-400">{new Date(p.created_at).toLocaleDateString()}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-gray-500">No passkeys registered on this account.</p>
+      )}
+      {error && <p className="text-sm text-red-700">{error}</p>}
+      {message && <p className="text-sm text-green-700">{message}</p>}
+      {!state.linked ? (
+        <p className="text-sm text-gray-500">This account has not signed in through Squawk yet. Sign out and back in, then register a passkey.</p>
+      ) : passkeysSupported() ? (
+        <button
+          type="button"
+          onClick={register}
+          disabled={busy}
+          className="px-4 py-2 bg-royal text-white rounded-lg text-sm font-semibold hover:bg-navy disabled:opacity-50"
+        >
+          {busy ? 'Waiting for your device...' : 'Register a passkey on this device'}
+        </button>
+      ) : (
+        <p className="text-sm text-gray-500">This browser does not support passkeys.</p>
+      )}
+    </div>
+  );
+}
 
 interface MFAStatus {
   enabled: boolean;
@@ -197,6 +300,7 @@ export default function MFASetup() {
 
   return (
     <div className="p-6 space-y-6">
+      <PasskeyCard />
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold flex items-center gap-2">
           <Shield className="text-royal" />

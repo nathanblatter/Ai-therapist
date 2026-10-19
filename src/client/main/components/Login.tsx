@@ -1,6 +1,21 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Shield, Key } from 'react-feather';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Shield, Key, Lock, User } from 'react-feather';
+import { decodeAssertionOptions, encodeAssertion, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
+
+// Errors Squawk's callback can send us back with (?error=).
+const CALLBACK_ERRORS: Record<string, string> = {
+  access_denied: 'Sign-in was cancelled.',
+  state_mismatch: 'This sign-in attempt expired or was already used. Start over.',
+  invalid_token: 'The sign-in service returned a token this app could not verify.',
+  invalid_grant: 'The sign-in code was rejected. Start over.',
+  invalid_request: 'Malformed sign-in response. Start over.',
+  no_account: 'That sign-in has no account in this app.',
+  owner_not_mapped: 'The owner passkey is not mapped to an account here yet.',
+  server_error: 'The sign-in service is unavailable. Try again shortly.',
+};
+
+interface SquawkConfig { enabled: boolean; owner: boolean }
 
 interface LoginBody {
   username: string;
@@ -16,16 +31,117 @@ function destinationFor(role?: string): string {
 }
 
 export default function Login() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const loginChallenge = params.get('login_challenge');
+  const callbackError = params.get('error');
+  // null = not asked yet; Squawk mode is decided once per page load.
+  const [squawk, setSquawk] = useState<SquawkConfig | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
   const [mfaToken, setMfaToken] = useState('');
   const [useBackupCode, setUseBackupCode] = useState(false);
   const [backupCode, setBackupCode] = useState('');
-  const navigate = useNavigate();
+
+  // Squawk flow (auth-service-33): without a login_challenge the page sends
+  // the browser to /api/auth/squawk/start; Squawk parks the request and comes
+  // back here with one, and the form below completes the ceremony.
+  useEffect(() => {
+    if (callbackError) setError(CALLBACK_ERRORS[callbackError] ?? `Sign-in failed (${callbackError}).`);
+    let cancelled = false;
+    fetch('/api/auth/squawk/config', { credentials: 'include' })
+      .then((r) => (r.ok ? (r.json() as Promise<SquawkConfig>) : { enabled: false, owner: false }))
+      .catch(() => ({ enabled: false, owner: false }))
+      .then((cfg) => {
+        if (cancelled) return;
+        setSquawk(cfg);
+        if (cfg.enabled && !loginChallenge && !callbackError) {
+          window.location.assign('/api/auth/squawk/start');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loginChallenge, callbackError]);
+
+  const squawkMode = squawk?.enabled === true;
+
+  const squawkPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!loginChallenge) {
+      window.location.assign('/api/auth/squawk/start');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/squawk/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ login_challenge: loginChallenge, username, password }),
+      });
+      const data = (await response.json()) as { redirect_to?: string; error?: string; code?: string };
+      if (response.ok && data.redirect_to) {
+        window.location.assign(data.redirect_to);
+        return;
+      }
+      if (data.code === 'not_found') {
+        // The parked request expired: start a fresh one.
+        window.location.assign('/api/auth/squawk/start');
+        return;
+      }
+      setError(data.error || 'Login failed');
+    } catch {
+      setError('An error occurred. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Passkey assertion: `account` for a passkey on an AI Therapist account,
+   *  `owner` for Nathan's Squawk owner passkey. */
+  const squawkPasskey = async (kind: 'account' | 'owner') => {
+    if (!loginChallenge) {
+      window.location.assign('/api/auth/squawk/start');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const beginResp = await fetch(`/api/auth/squawk/${kind === 'owner' ? 'owner' : 'passkey'}/begin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ login_challenge: loginChallenge }),
+      });
+      const begin = (await beginResp.json()) as { challenge_id?: string; options?: { publicKey: Parameters<typeof decodeAssertionOptions>[0] }; error?: string; code?: string };
+      if (!beginResp.ok || !begin.challenge_id || !begin.options) {
+        if (begin.code === 'not_found') {
+          window.location.assign('/api/auth/squawk/start');
+          return;
+        }
+        throw new Error(begin.error || 'Passkey sign-in failed.');
+      }
+      const cred = await navigator.credentials.get({ publicKey: decodeAssertionOptions(begin.options.publicKey) });
+      if (!cred) throw new Error('No passkey was provided.');
+      const finishResp = await fetch(`/api/auth/squawk/${kind === 'owner' ? 'owner' : 'passkey'}/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ challenge_id: begin.challenge_id, credential: encodeAssertion(cred as PublicKeyCredential) }),
+      });
+      const finish = (await finishResp.json()) as { redirect_to?: string; error?: string };
+      if (!finishResp.ok || !finish.redirect_to) throw new Error(finish.error || 'Passkey sign-in failed.');
+      window.location.assign(finish.redirect_to);
+    } catch (err) {
+      setError(isCancelled(err) ? 'Passkey prompt was cancelled.' : err instanceof Error ? err.message : 'Passkey sign-in failed.');
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -53,7 +169,6 @@ export default function Login() {
       if (data.mfaRequired) {
         console.log('Setting MFA required to true');
         setMfaRequired(true);
-        setUserId(data.userId);
         setLoading(false);
         return;
       }
@@ -124,7 +239,7 @@ export default function Login() {
 
           {!mfaRequired ? (
             // Initial login form
-            <form className="space-y-6" onSubmit={handleSubmit}>
+            <form className="space-y-6" onSubmit={squawkMode ? squawkPassword : handleSubmit}>
               <div className="space-y-4">
                 <div>
                   <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
@@ -168,11 +283,42 @@ export default function Login() {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || squawk === null}
                 className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-royal hover:bg-navy focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
               >
                 {loading ? 'Signing in...' : 'Sign in'}
               </button>
+
+              {squawkMode && passkeysSupported() && (
+                <div className="flex flex-col gap-2 pt-2 border-t border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => squawkPasskey('account')}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 border border-gray-300 text-sm font-semibold rounded-lg text-navy bg-white hover:border-royal hover:text-royal transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Key size={16} />
+                    Sign in with a passkey
+                  </button>
+                  {squawk?.owner && (
+                    <button
+                      type="button"
+                      onClick={() => squawkPasskey('owner')}
+                      disabled={loading}
+                      className="w-full flex items-center justify-center gap-2 py-2 px-4 text-xs font-medium rounded-lg text-gray-500 hover:text-royal transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Lock size={14} />
+                      Sign in as owner
+                    </button>
+                  )}
+                </div>
+              )}
+              {squawkMode && !loginChallenge && !loading && (
+                <p className="text-xs text-gray-500 text-center flex items-center justify-center gap-1">
+                  <User size={12} />
+                  Starting a sign-in session with Squawk...
+                </p>
+              )}
             </form>
           ) : (
             // MFA verification form

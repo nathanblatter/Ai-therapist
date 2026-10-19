@@ -21,6 +21,7 @@ import { insertMessagesBatch, getSidebandConnectionsByIds, getSessionAccessInfo 
 import configRoutes from "./routes/public/config.routes.js";
 import voicesRoutes from "./routes/public/voices.routes.js";
 import authRoutes from "./routes/public/auth.routes.js";
+import squawkAuthRoutes from "./routes/public/squawkAuth.routes.js";
 import magicLinkRoutes from "./routes/public/magicLink.routes.js";
 import demoRoutes from "./routes/demo.routes.js";
 import { canAdminAccessSessionLive } from "./middleware/caseload.js";
@@ -616,6 +617,9 @@ io.on('connection', (socket: AuthSocket) => {
 // ===================== Authentication Routes =====================
 // Login, register, logout, status live in routes/public/auth.routes.ts.
 app.use(authRoutes());
+// Sign-in through Squawk (auth-service-33): start/callback + ceremony
+// proxies for the login page, passkey registration for signed-in users.
+app.use(squawkAuthRoutes());
 
 // Magic-link demo access (/demo/:token) — auto-provisions a capped demo account.
 app.use(magicLinkRoutes());

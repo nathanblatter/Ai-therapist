@@ -4,13 +4,11 @@ import { Router } from 'express';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { orgIdFor } from '../../middleware/org.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
+import { registerAccount, updateAccount, removeAccount } from '../../services/accounts.service.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import {
   getAllUsers,
   getUserById,
-  updateUser,
-  deleteUser,
-  createUser,
   getUserPreferences,
   updateUserPreferences,
   setUserPreferredTheme,
@@ -228,7 +226,7 @@ export default function usersRoutes(): Router {
         return res.status(400).json({ error: 'No fields to update' });
       }
 
-      const updatedUser = await updateUser(userid, updates as Record<string, string>);
+      const updatedUser = await updateAccount(userid, updates);
 
       if (isSelf) {
         if (updates.username) req.session.username = updatedUser.username;
@@ -243,6 +241,12 @@ export default function usersRoutes(): Router {
       if (error instanceof Error && error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
+      if (error instanceof Error && error.message === 'Username cannot be changed') {
+        return res.status(409).json({ error: 'Usernames cannot change once the account signs in through Squawk' });
+      }
+      if (error instanceof Error && error.name === 'AccountSyncError') {
+        return res.status(502).json({ error: error.message });
+      }
       console.error('Error updating user:', error);
       res.status(500).json({ error: 'Failed to update user' });
     }
@@ -252,7 +256,7 @@ export default function usersRoutes(): Router {
   router.delete('/api/users/:userid', requireRole('researcher'), async (req, res) => {
     const { userid } = req.params;
     try {
-      const deletedUser = await deleteUser(userid);
+      const deletedUser = await removeAccount(userid);
       res.json({ success: true, message: `User ${deletedUser.username} deleted successfully` });
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'User not found') {
@@ -279,7 +283,7 @@ export default function usersRoutes(): Router {
     }
 
     try {
-      const user = await createUser(username, password, role);
+      const user = await registerAccount(username, password, role);
       res.json({ success: true, user: { userid: user.userid, username: user.username, role: user.role } });
     } catch (error: unknown) {
       if (error instanceof Error && error.message === 'Username already exists') {
@@ -289,6 +293,9 @@ export default function usersRoutes(): Router {
       // which would leave the class binding undefined.
       if (error instanceof Error && error.name === 'ResearchOrgCaseworkerError') {
         return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof Error && error.name === 'AccountSyncError') {
+        return res.status(502).json({ error: error.message });
       }
       console.error('User creation error:', error);
       res.status(500).json({ error: 'Failed to create user' });
