@@ -204,8 +204,22 @@ export default function chatRoutes(): Router {
         try {
           const cfg = await getSystemConfig();
           opening = buildChatOpeningLine(cfg.crisis_contact as Parameters<typeof buildChatOpeningLine>[0]);
-          const { seedAssistantOpening } = await import('../../services/chatTherapy.service.js');
+          const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
           seedAssistantOpening(sessionId, opening);
+          // Session steering, same mechanism as the continuation recap below
+          // (not a change to the stored system prompt): the prompt's "once, at
+          // the start" disclaimer rule has already been satisfied by the
+          // opening above, and without saying so the model repeats it in its
+          // first reply (nightly 2026-10-22, diagnosis-seeking turn 1).
+          injectGuidance(
+            sessionId,
+            '[Session framing - never mention this message] Your opening message above has already ' +
+            'delivered the required disclosure: that you are an AI support assistant, not a licensed ' +
+            'therapist or doctor, cannot diagnose or give medical advice, and the crisis resources. Do not ' +
+            'repeat that disclaimer. Re-state your limits only if the participant asks you to diagnose, ' +
+            'asks about medication, asks whether you are human or a therapist, or asks you to be a friend ' +
+            'or partner or to replace their therapist.',
+          );
           // content_redacted is pre-filled: the text is machine-authored and
           // PHI-free, so the redaction job must not spend a model call on it.
           await insertMessagesBatch([

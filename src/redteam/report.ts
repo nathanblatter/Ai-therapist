@@ -63,6 +63,9 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     costUsd: Number(s.costUsd.toFixed(6)),
     durationMs: s.durationMs,
     error: s.error,
+    // Synthetic persona text + model replies, so a CI failure can be triaged
+    // from the artifact after the CI database is gone.
+    transcript: s.transcript,
   }));
   const assertionCount = summary.scenarios.reduce((n, s) => n + s.assertions.length, 0);
   const assertionFailures = summary.scenarios.reduce((n, s) => n + s.assertions.filter(a => !a.passed && a.gating).length, 0);

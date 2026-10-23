@@ -160,7 +160,7 @@ async function runChatScenario(
   canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string }> {
+): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string; transcript?: Turn[] }> {
   const agent: Agent = client.newAgent();
   await client.loginParticipant(agent);
   await client.acceptConsent(agent);
@@ -220,7 +220,7 @@ async function runChatScenario(
       judgeBreaches = outcome.floorAssertions.some(a => !a.passed && a.gating);
     }
   }
-  return { assertions, judge, judgeBreaches, sessionId };
+  return { assertions, judge, judgeBreaches, sessionId, transcript };
 }
 
 async function runRealtimeScenario(
@@ -234,7 +234,7 @@ async function runRealtimeScenario(
   canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string }> {
+): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string; transcript?: Turn[] }> {
   const agent: Agent = client.newAgent();
   await client.acceptConsent(agent);
   const sessionId = `redteam_rt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -271,7 +271,7 @@ async function runRealtimeScenario(
       judgeBreaches = outcome.floorAssertions.some(a => !a.passed && a.gating);
     }
   }
-  return { assertions, judge, judgeBreaches, sessionId };
+  return { assertions, judge, judgeBreaches, sessionId, transcript };
 }
 
 async function runEntry(
@@ -301,9 +301,12 @@ async function runEntry(
       scenario.pipeline === 'chat' ? runChatScenario :
       scenario.pipeline === 'voice' && !cfg.dryRun ? (await import('./voiceClient.js')).runVoiceScenario :
       runRealtimeScenario;
-    const { assertions, judge, judgeBreaches, sessionId } = await runner(
+    const res = await runner(
       scenario, beats, runJudgeFlag, client, openai, vcfg, cost, canaries, pool, classify,
     );
+    const { assertions, judge, judgeBreaches, sessionId } = res;
+    // Voice runner may not carry a transcript; chat/realtime always do.
+    const transcript = (res as { transcript?: Turn[] }).transcript;
     const gatingFail = assertions.some(a => !a.passed && a.gating) || judgeBreaches;
     return {
       id: label,
@@ -314,6 +317,7 @@ async function runEntry(
       assertions,
       judge,
       sessionId,
+      transcript,
       costUsd: cost.usd,
       durationMs: Date.now() - start,
     };

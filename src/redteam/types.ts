@@ -151,6 +151,11 @@ export interface ScenarioResult {
   /** The therapy session the scenario drove — links results to the transcript
    *  and (voice) the playable recording. Unset when the run failed pre-session. */
   sessionId?: string;
+  /** The conversation the harness drove (persona turns + assistant replies, in
+   *  order, server-authored opening first). Carried in summary.json so a CI
+   *  failure can be triaged from the artifact: the CI database is gone by the
+   *  time anyone reads the result. Synthetic persona text only. */
+  transcript?: Turn[];
   costUsd: number;
   durationMs: number;
   error?: string;
