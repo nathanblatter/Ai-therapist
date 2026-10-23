@@ -92,3 +92,43 @@ export async function getSessionLatency(sessionId: string): Promise<SessionLaten
   );
   return result.rows;
 }
+
+export interface LatencyDriftRow {
+  channel: LatencyChannel;
+  /** Turn-position bucket label ('1-4', '5-9', '10-19', '20+'). */
+  bucket: string;
+  /** Lowest turn_index in the bucket, for ordering. */
+  bucket_start: number;
+  turns: number;
+  p50_ttfa_ms: number | null;
+  p50_total_ms: number | null;
+}
+
+/**
+ * Within-session drift: median TTFA/total per channel, bucketed by position
+ * in the session (turn_index is 1-based). Turns with no recorded index are
+ * excluded — they cannot be placed.
+ */
+export async function getLatencyDrift(days = 7): Promise<LatencyDriftRow[]> {
+  const result = await pool.query<{
+    channel: LatencyChannel; bucket: string; bucket_start: number; turns: string;
+    p50_ttfa_ms: number | null; p50_total_ms: number | null;
+  }>(
+    `SELECT channel,
+            CASE WHEN turn_index < 5 THEN '1-4'
+                 WHEN turn_index < 10 THEN '5-9'
+                 WHEN turn_index < 20 THEN '10-19'
+                 ELSE '20+' END AS bucket,
+            MIN(turn_index) AS bucket_start,
+            COUNT(*) AS turns,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ttfa_ms)  AS p50_ttfa_ms,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY total_ms) AS p50_total_ms
+       FROM turn_latency
+      WHERE created_at >= CURRENT_TIMESTAMP - ($1 || ' days')::INTERVAL
+        AND turn_index IS NOT NULL
+      GROUP BY channel, 2
+      ORDER BY channel, bucket_start`,
+    [days]
+  );
+  return result.rows.map(r => ({ ...r, turns: parseInt(r.turns, 10) }));
+}

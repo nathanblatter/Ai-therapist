@@ -10,6 +10,9 @@ import StatCard from "./ui/StatCard";
 import AnalyticsFilterBar, { EMPTY_FILTERS } from "./analytics/AnalyticsFilterBar";
 import ToolUsagePanel from "./analytics/ToolUsagePanel";
 import CostUsagePanel from "./analytics/CostUsagePanel";
+import AdminUsagePanel from "./telemetry/AdminUsagePanel";
+import EngagementTelemetryPanel from "./telemetry/EngagementTelemetryPanel";
+import useAuth from "../hooks/useAuth";
 import type { AnalyticsData, AnalyticsFilterState } from "./analytics/types";
 
 const COLORS = ['#0047BA', '#002E5D', '#BDD6E6', '#8B959E'];
@@ -489,6 +492,9 @@ const TABS = [
   { id: 'performance', label: 'Performance' },
   { id: 'cost', label: 'Cost' },
   { id: 'tools', label: 'Tools' },
+  // Telemetry reads researcher-only endpoints (ai-therapist-205); hidden for
+  // every other role below.
+  { id: 'telemetry', label: 'Telemetry', researcherOnly: true },
 ] as const;
 type TabId = typeof TABS[number]['id'];
 
@@ -498,6 +504,8 @@ export default function Analytics() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<AnalyticsFilterState>(EMPTY_FILTERS);
   const [tab, setTab] = useState<TabId>('usage');
+  const { isResearcher } = useAuth();
+  const visibleTabs = TABS.filter(t => !('researcherOnly' in t && t.researcherOnly) || isResearcher);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
@@ -552,7 +560,7 @@ export default function Analytics() {
       <h2 className="text-2xl font-bold">Analytics</h2>
 
       <div className="flex gap-1 border-b" role="tablist">
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button
             key={t.id}
             role="tab"
@@ -578,6 +586,12 @@ export default function Analytics() {
       {tab === 'performance' && (mainStatus || (analytics && <PerformanceTab analytics={analytics} />))}
       {tab === 'cost' && <CostUsagePanel />}
       {tab === 'tools' && <ToolUsagePanel />}
+      {tab === 'telemetry' && isResearcher && (
+        <div className="space-y-8">
+          <AdminUsagePanel />
+          <EngagementTelemetryPanel />
+        </div>
+      )}
     </div>
   );
 }

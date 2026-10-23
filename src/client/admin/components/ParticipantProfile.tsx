@@ -643,7 +643,12 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
               <FileText size={15} className="text-gray-500" /> Care notes
             </h3>
-            <NotesPanel clientId={user.userid} userRole={userRole} />
+            <NotesPanel
+              clientId={user.userid}
+              userRole={userRole}
+              clientLabel={user.username}
+              sessionDates={Object.fromEntries((sessions ?? []).map(s => [s.session_id, s.start_time]))}
+            />
           </section>
         )}
 

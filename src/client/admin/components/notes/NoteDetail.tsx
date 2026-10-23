@@ -3,10 +3,16 @@
 // author-only actions (edit/sign for drafts, amend + share toggle for signed
 // progress notes), and the amendment chain link. Signed content is immutable
 // — the server 409s any edit and the DB trigger backstops it.
-import { useState } from "react";
-import { ArrowLeft, Cpu, Edit3, FileText, Lock, Share2 } from "react-feather";
+//
+// Copy and Print (ai-therapist-199) let a clinician get the note out: plain
+// structured text to the clipboard, or a standalone printable document (the
+// browser's Save as PDF covers PDF). Both are client-side renderings of a
+// note the viewer already fetched, so no new data leaves the server.
+import { useEffect, useState } from "react";
+import { ArrowLeft, Check, Copy, Cpu, Edit3, FileText, Lock, Printer, Share2 } from "react-feather";
 import { NoteStatusBadge, type CareNote } from "./NotesPanel";
 import { postJson } from "../../../shared/http";
+import { CASE_ORDER, SOAP_ORDER, copyText, fieldLabel, noteToPlainText, printNote, type NoteExportContext } from "./noteExport";
 
 interface NoteDetailProps {
   note: CareNote;
@@ -14,19 +20,27 @@ interface NoteDetailProps {
   onBack: () => void;
   /** Open the editor for a draft (the note itself, or a fresh amendment). */
   onEditDraft: (note: CareNote) => void;
+  /** Client reference + session date for the copy/print header. */
+  exportContext?: NoteExportContext;
 }
 
-const SOAP_ORDER = ["subjective", "objective", "assessment", "plan"] as const;
-const CASE_ORDER = ["narrative", "contact_method", "referral_to", "outcome"] as const;
 
-function fieldLabel(key: string): string {
-  return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
-}
-
-export default function NoteDetail({ note: initialNote, currentUserId, onBack, onEditDraft }: NoteDetailProps) {
+export default function NoteDetail({ note: initialNote, currentUserId, onBack, onEditDraft, exportContext }: NoteDetailProps) {
   const [note, setNote] = useState<CareNote>(initialNote);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
+
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(null), 2000);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  const handleCopy = async () => {
+    const ok = await copyText(noteToPlainText(note, exportContext));
+    setCopied(ok ? "ok" : "fail");
+  };
 
   const isAuthor = currentUserId !== null && note.author_id === currentUserId;
   const order = note.note_type === "progress" ? SOAP_ORDER : CASE_ORDER;
@@ -57,7 +71,7 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
 
   return (
     <div className="bg-white rounded-lg shadow p-4" role="region" aria-label="Note detail">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <button
           type="button"
           onClick={onBack}
@@ -65,7 +79,28 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
         >
           <ArrowLeft size={14} aria-hidden="true" /> Notes
         </button>
-        <NoteStatusBadge status={note.status} />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="px-2.5 py-1.5 text-xs rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 flex items-center gap-1 min-h-[36px]"
+            title="Copy the note as plain text"
+            aria-label="Copy note as plain text"
+          >
+            {copied === "ok" ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+            {copied === "ok" ? "Copied" : copied === "fail" ? "Copy failed" : "Copy"}
+          </button>
+          <button
+            type="button"
+            onClick={() => printNote(note, exportContext)}
+            className="px-2.5 py-1.5 text-xs rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 flex items-center gap-1 min-h-[36px]"
+            title="Open a printable version (use Save as PDF in the print dialog)"
+            aria-label="Print note"
+          >
+            <Printer size={13} aria-hidden="true" /> Print
+          </button>
+          <NoteStatusBadge status={note.status} />
+        </div>
       </div>
 
       <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2 mb-1">

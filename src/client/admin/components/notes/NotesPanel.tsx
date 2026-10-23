@@ -64,11 +64,15 @@ export function NoteStatusBadge({ status }: { status: CareNoteStatus }) {
 interface NotesPanelProps {
   clientId: number;
   userRole: string | null;
+  /** Client reference shown in the copy/print header (defaults to #clientId). */
+  clientLabel?: string | null;
+  /** session_id -> ISO start time, for the session date in the copy/print header. */
+  sessionDates?: Record<string, string>;
 }
 
 type PanelMode = { kind: "list" } | { kind: "edit"; note: CareNote | null } | { kind: "detail"; note: CareNote };
 
-export default function NotesPanel({ clientId, userRole }: NotesPanelProps) {
+export default function NotesPanel({ clientId, userRole, clientLabel, sessionDates }: NotesPanelProps) {
   const [mode, setMode] = useState<PanelMode>({ kind: "list" });
   const [typeFilter, setTypeFilter] = useState<"all" | CareNoteType>("all");
   const { userId: currentUserId } = useAuth();
@@ -108,6 +112,10 @@ export default function NotesPanel({ clientId, userRole }: NotesPanelProps) {
           refetch();
         }}
         onEditDraft={(note) => setMode({ kind: "edit", note })}
+        exportContext={{
+          clientLabel,
+          sessionDate: mode.note.session_id ? sessionDates?.[mode.note.session_id] ?? null : null,
+        }}
       />
     );
   }
