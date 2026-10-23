@@ -11,6 +11,11 @@ import {
   submitAdverseEvent,
   closeAdverseEvent,
   reopenAdverseEvent,
+  listAdverseEvents,
+  getAdverseEventById,
+  getAdverseEventCounts,
+  adverseEventScopeClause,
+  type AdverseEventScope,
 } from './adverseEvents.queries.js';
 
 beforeEach(() => {
@@ -55,6 +60,89 @@ describe('insertAdverseEventDraft', () => {
     expect(sql).toContain('DO NOTHING');
     expect(params).toContain('eligibility_violation');
     expect(params).toContain('auto_eligibility');
+  });
+});
+
+describe('organization stamping on insert (migration 108)', () => {
+  it('resolves organization_id from the participant when none is given', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ report_id: 11 }] });
+    await insertAdverseEventDraft(draftInput);
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('organization_id');
+    expect(sql).toContain('COALESCE($16::int, (SELECT organization_id FROM users WHERE userid = $3))');
+    expect(params).toHaveLength(16);
+    expect(params[15]).toBeNull();
+  });
+
+  it('passes an explicit organizationId through as the COALESCE override', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ report_id: 12 }] });
+    await insertAdverseEventDraft({ ...draftInput, organizationId: 4 });
+    const params = queryMock.mock.calls[0][1] as unknown[];
+    expect(params[15]).toBe(4);
+  });
+});
+
+describe('read scoping (ai-therapist-228)', () => {
+  const researcher: AdverseEventScope = { orgId: 2, careTeam: null };
+  const therapist: AdverseEventScope = { orgId: 2, careTeam: { role: 'therapist', memberId: 7, username: 'ther1' } };
+  const caseworker: AdverseEventScope = { orgId: 2, careTeam: { role: 'caseworker', memberId: 8, username: 'cw1' } };
+
+  it('researcher clause: own org, plus NULL-org rows only when the org is irb-study', () => {
+    const { sql, params } = adverseEventScopeClause(researcher);
+    expect(params).toEqual([2]);
+    expect(sql).toContain('organization_id = $1');
+    expect(sql).toContain("organization_id IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')");
+    expect(sql).not.toContain('created_by');
+    expect(sql).not.toContain('therapist_clients');
+  });
+
+  it('therapist clause adds caseload-or-own-filed on top of the org clause', () => {
+    const { sql, params } = adverseEventScopeClause(therapist);
+    expect(params).toEqual([2, 'ther1', 7]);
+    expect(sql).toContain('created_by = $2');
+    expect(sql).toContain('tc.therapist_id = $3 AND tc.client_id = adverse_event_reports.user_id');
+    expect(sql).toContain('user_id IS NOT NULL');
+  });
+
+  it('caseworker clause adds own-filed only (no caseload widening)', () => {
+    const { sql, params } = adverseEventScopeClause(caseworker);
+    expect(params).toEqual([2, 'cw1']);
+    expect(sql).toContain('created_by = $2');
+    expect(sql).not.toContain('therapist_clients');
+  });
+
+  it('offsets parameter numbering when params are already bound', () => {
+    const { sql, params } = adverseEventScopeClause(therapist, 1);
+    expect(params).toEqual([2, 'ther1', 7]);
+    expect(sql).toContain('organization_id = $2');
+    expect(sql).toContain('created_by = $3');
+    expect(sql).toContain('tc.therapist_id = $4');
+  });
+
+  it('listAdverseEvents binds status first and the scope after it', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await listAdverseEvents({ status: 'draft' }, therapist);
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(params).toEqual(['draft', 2, 'ther1', 7]);
+    expect(sql).toContain('($1::text IS NULL OR status = $1)');
+    expect(sql).toContain('organization_id = $2');
+  });
+
+  it('getAdverseEventById returns null for a row outside the scope (SQL filters it)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    expect(await getAdverseEventById(5, researcher)).toBeNull();
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(params).toEqual([5, 2]);
+    expect(sql).toContain('WHERE report_id = $1 AND');
+    expect(sql).toContain('organization_id = $2');
+  });
+
+  it('getAdverseEventCounts is scoped (never a global COUNT)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ draft: 1, submitted: 0, overdue: 0, due_soon: 0 }] });
+    await getAdverseEventCounts(caseworker);
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(params).toEqual([2, 'cw1']);
+    expect(sql).toMatch(/FROM adverse_event_reports\s+WHERE \(organization_id = \$1/);
   });
 });
 

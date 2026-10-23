@@ -5,9 +5,16 @@
 // caseworkers can FILE a report for a caseload client and view ONLY their own
 // filed reports (list/detail filtered to reporter); review, triage, and
 // lifecycle management stay therapist+researcher.
+//
+// Organization scoping (ai-therapist-228, migration 108): every read and
+// every lifecycle write resolves the row through an AdverseEventScope built
+// from the caller's org + role (scopeFor below). A report outside the scope
+// reads as 404 — never 403 — so cross-org existence is not confirmable.
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { requireClientAccess, requireSessionClientAccess } from '../../middleware/caseload.js';
+import { orgIdFor } from '../../middleware/org.js';
+import { isCareTeamRole } from '../../../shared/roles.js';
 import {
   listAdverseEvents,
   getAdverseEventCounts,
@@ -19,10 +26,13 @@ import {
   insertAdverseEventDraft,
   insertCaseloadAudit,
   isSandboxAccount,
+  getSessionAccessInfo,
+  getOrganizationIdForUser,
+  getIrbStudyOrgId,
   type UpdateAdverseEventFields,
   type AdverseEventRowWithFlags,
   type AdverseEventActionEntry,
-  type AdverseEventCounts,
+  type AdverseEventScope,
 } from '../../db/index.js';
 import { enqueueWorkItem } from '../../services/workQueue.service.js';
 import { renderAdverseEventPrintHtml } from '../../utils/aePrintView.js';
@@ -34,20 +44,29 @@ function scrubForCaseworker(row: AdverseEventRowWithFlags): AdverseEventRowWithF
   return { ...row, transcript_excerpt: null };
 }
 
-/** Counts strip for a caseworker's own-reports slice (the global SQL counts
- *  would leak other reporters' queue state). Mirrors getAdverseEventCounts. */
-function countsFor(rows: AdverseEventRowWithFlags[]): AdverseEventCounts {
-  const now = Date.now();
-  const drafts = rows.filter((r) => r.status === 'draft');
-  return {
-    draft: drafts.length,
-    submitted: rows.filter((r) => r.status === 'submitted').length,
-    overdue: drafts.filter((r) => r.overdue).length,
-    due_soon: drafts.filter((r) => {
-      const due = new Date(r.due_at).getTime();
-      return due >= now && due < now + 48 * 3_600_000;
-    }).length,
-  };
+/**
+ * The register scope for this caller (docs/caseworker-portal.md, "Adverse
+ * events" scoping rule):
+ *   - researcher: every report in their organization (+ unattributed
+ *     NULL-org rows when their org is the irb-study org);
+ *   - therapist: their organization's reports whose participant is on their
+ *     caseload, or that they filed themselves;
+ *   - caseworker: only reports they filed, within their organization.
+ * Fail closed: orgIdFor THROWS on a failed lookup (-> 500 via the route's
+ * catch), and a care-team session missing its identity also throws rather
+ * than widening to an org-wide read.
+ */
+async function scopeFor(req: Request): Promise<AdverseEventScope> {
+  const orgId = await orgIdFor(req);
+  if (orgId === null) throw new Error('[AE] unauthenticated caller reached a scoped register read');
+  const role = req.session.userRole;
+  if (!isCareTeamRole(role)) return { orgId, careTeam: null };
+  const memberId = req.session.userId;
+  const username = req.session.username;
+  if (typeof memberId !== 'number' || !username) {
+    throw new Error('[AE] care-team session without userId/username cannot be scoped');
+  }
+  return { orgId, careTeam: { role, memberId, username } };
 }
 
 export default function adverseEventsRoutes(): Router {
@@ -100,19 +119,14 @@ export default function adverseEventsRoutes(): Router {
   const canWrite = gated('therapist', 'researcher');
   const VALID_SEVERITIES = ['low', 'medium', 'high'] as const;
 
-  // List + counts (optional ?status= draft|submitted|closed|all).
-  // Caseworkers see ONLY reports they filed (created_by = own username).
+  // List + counts (optional ?status= draft|submitted|closed|all), SQL-scoped
+  // to the caller (org + role; caseworkers see ONLY reports they filed).
   router.get('/admin/api/adverse-events', canRead, async (req, res) => {
     const status = typeof req.query.status === 'string' ? req.query.status : null;
     try {
-      if (req.session.userRole === 'caseworker') {
-        const mine = (await listAdverseEvents({ status: 'all' }))
-          .filter((r) => r.created_by === req.session.username);
-        const wanted = status && status !== 'all' ? status : null;
-        const reports = (wanted === null ? mine : mine.filter((r) => r.status === wanted)).map(scrubForCaseworker);
-        return res.json({ counts: countsFor(mine), reports });
-      }
-      const [counts, reports] = await Promise.all([getAdverseEventCounts(), listAdverseEvents({ status })]);
+      const scope = await scopeFor(req);
+      const [counts, rows] = await Promise.all([getAdverseEventCounts(scope), listAdverseEvents({ status }, scope)]);
+      const reports = req.session.userRole === 'caseworker' ? rows.map(scrubForCaseworker) : rows;
       res.json({ counts, reports });
     } catch (err) {
       console.error('[AE] list failed:', err);
@@ -120,22 +134,16 @@ export default function adverseEventsRoutes(): Router {
     }
   });
 
-  // Single report (must precede the /:id/print route in matching order below is fine — distinct paths).
-  // Caseworkers can load only reports they filed; anyone else's is 404 (never
-  // 403 — existence must not be confirmable, matching the caseload middleware).
+  // Single report. Anything outside the caller's scope (other org, other
+  // reporter for a caseworker, off-caseload for a therapist) is 404 — never
+  // 403 — matching the caseload middleware.
   router.get('/admin/api/adverse-events/:id', canRead, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
     try {
-      const row = await getAdverseEventById(id);
+      const row = await getAdverseEventById(id, await scopeFor(req));
       if (!row) return res.status(404).json({ error: 'not found' });
-      if (req.session.userRole === 'caseworker') {
-        if (row.created_by !== req.session.username) {
-          return res.status(404).json({ error: 'not found' });
-        }
-        return res.json(scrubForCaseworker(row));
-      }
-      res.json(row);
+      res.json(req.session.userRole === 'caseworker' ? scrubForCaseworker(row) : row);
     } catch (err) {
       console.error('[AE] get failed:', err);
       res.status(500).json({ error: 'Failed to load adverse event' });
@@ -147,7 +155,7 @@ export default function adverseEventsRoutes(): Router {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).send('invalid id');
     try {
-      const row = await getAdverseEventById(id);
+      const row = await getAdverseEventById(id, await scopeFor(req));
       if (!row) return res.status(404).send('not found');
       res.set('Content-Type', 'text/html; charset=utf-8').send(renderAdverseEventPrintHtml(row));
     } catch (err) {
@@ -175,13 +183,12 @@ export default function adverseEventsRoutes(): Router {
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: 'no editable fields supplied' });
 
     try {
+      // Visibility first (404 outside scope), then the guarded transition.
+      const scope = await scopeFor(req);
+      if (!(await getAdverseEventById(id, scope))) return res.status(404).json({ error: 'not found' });
       const ok = await updateAdverseEventDraft(id, fields);
-      if (!ok) {
-        const row = await getAdverseEventById(id);
-        if (!row) return res.status(404).json({ error: 'not found' });
-        return res.status(409).json({ error: 'report is not a draft' });
-      }
-      res.json(await getAdverseEventById(id));
+      if (!ok) return res.status(409).json({ error: 'report is not a draft' });
+      res.json(await getAdverseEventById(id, scope));
     } catch (err) {
       console.error('[AE] update failed:', err);
       res.status(500).json({ error: 'Failed to update adverse event' });
@@ -195,9 +202,11 @@ export default function adverseEventsRoutes(): Router {
     const submittedBy = req.session.username;
     if (!submittedBy) return res.status(400).json({ error: 'sign-off requires an identified admin' });
     try {
+      const scope = await scopeFor(req);
+      if (!(await getAdverseEventById(id, scope))) return res.status(404).json({ error: 'not found' });
       const ok = await submitAdverseEvent(id, submittedBy);
-      if (!ok) return await conflictOrNotFound(id, res, 'report is not a draft');
-      res.json(await getAdverseEventById(id));
+      if (!ok) return res.status(409).json({ error: 'report is not a draft' });
+      res.json(await getAdverseEventById(id, scope));
     } catch (err) {
       console.error('[AE] submit failed:', err);
       res.status(500).json({ error: 'Failed to submit adverse event' });
@@ -209,9 +218,11 @@ export default function adverseEventsRoutes(): Router {
     const id = parseInt(req.params.id, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
     try {
+      const scope = await scopeFor(req);
+      if (!(await getAdverseEventById(id, scope))) return res.status(404).json({ error: 'not found' });
       const ok = await reopenAdverseEvent(id);
-      if (!ok) return await conflictOrNotFound(id, res, 'report is not submitted');
-      res.json(await getAdverseEventById(id));
+      if (!ok) return res.status(409).json({ error: 'report is not submitted' });
+      res.json(await getAdverseEventById(id, scope));
     } catch (err) {
       console.error('[AE] reopen failed:', err);
       res.status(500).json({ error: 'Failed to reopen adverse event' });
@@ -224,9 +235,11 @@ export default function adverseEventsRoutes(): Router {
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
     const closedBy = req.session.username ?? 'unknown-admin';
     try {
+      const scope = await scopeFor(req);
+      if (!(await getAdverseEventById(id, scope))) return res.status(404).json({ error: 'not found' });
       const ok = await closeAdverseEvent(id, closedBy);
-      if (!ok) return await conflictOrNotFound(id, res, 'report is not submitted');
-      res.json(await getAdverseEventById(id));
+      if (!ok) return res.status(409).json({ error: 'report is not submitted' });
+      res.json(await getAdverseEventById(id, scope));
     } catch (err) {
       console.error('[AE] close failed:', err);
       res.status(500).json({ error: 'Failed to close adverse event' });
@@ -238,15 +251,20 @@ export default function adverseEventsRoutes(): Router {
   // requireSessionClientAccess row-scopes therapists to their caseload (404,
   // never 403) — without it an off-caseload therapist could draft an AE from
   // ANY session and read back its redacted transcript excerpt in the response.
-  // Researchers pass through (study staff, unscoped) like every other
-  // :sessionId route (evals/insights/crisis/sessions).
+  // Researchers pass the caseload gate (study staff) but are org-checked
+  // here: the session's owner must belong to the caller's organization (an
+  // anonymous session counts as irb-study custody). 404 otherwise.
   router.post('/admin/api/sessions/:sessionId/adverse-events', canWrite, requireSessionClientAccess(), async (req, res) => {
     const createdBy = req.session.username ?? 'unknown-admin';
     try {
+      const scope = await scopeFor(req);
+      if (!scope.careTeam && !(await sessionInOrg(req.params.sessionId, scope.orgId))) {
+        return res.status(404).json({ error: 'Not found' });
+      }
       const { draftAdverseEventFromCrisis } = await import('../../services/adverseEvent.service.js');
       const reportId = await draftAdverseEventFromCrisis(req.params.sessionId, { triggerSource: 'manual', createdBy });
       if (reportId == null) return res.status(422).json({ error: 'Could not draft an adverse event for this session' });
-      res.status(201).json(await getAdverseEventById(reportId));
+      res.status(201).json(await getAdverseEventById(reportId, scope));
     } catch (err) {
       console.error('[AE] manual draft failed:', err);
       res.status(500).json({ error: 'Failed to file adverse event' });
@@ -345,7 +363,7 @@ export default function adverseEventsRoutes(): Router {
 
         // Same tier guard as the read routes: caseworker responses never
         // carry transcript_excerpt (null at creation, but keep the invariant).
-        const created = await getAdverseEventById(reportId);
+        const created = await getAdverseEventById(reportId, await scopeFor(req));
         res.status(201).json(
           created && req.session.userRole === 'caseworker' ? scrubForCaseworker(created) : created
         );
@@ -359,9 +377,14 @@ export default function adverseEventsRoutes(): Router {
   return router;
 }
 
-/** 404 if the row is gone, else 409 with the given transition message. */
-async function conflictOrNotFound(id: number, res: import('express').Response, message: string) {
-  const row = await getAdverseEventById(id);
-  if (!row) return res.status(404).json({ error: 'not found' });
-  return res.status(409).json({ error: message });
+/**
+ * Does the session's owner belong to `orgId`? Anonymous sessions (no owner)
+ * are irb-study custody, mirroring the NULL-org rule in the scope clause.
+ * Missing session -> false (caller 404s).
+ */
+async function sessionInOrg(sessionId: string, orgId: number): Promise<boolean> {
+  const info = await getSessionAccessInfo(String(sessionId));
+  if (!info) return false;
+  if (info.user_id === null || info.user_id === undefined) return (await getIrbStudyOrgId()) === orgId;
+  return (await getOrganizationIdForUser(Number(info.user_id))) === orgId;
 }
