@@ -54,16 +54,6 @@ export async function insertWorksheetInstance(input: WorksheetInstanceInput): Pr
   return result.rows[0].instance_id;
 }
 
-export async function getWorksheetInstance(instanceId: number): Promise<WorksheetInstanceRow | null> {
-  const result = await pool.query<WorksheetInstanceRow>(
-    `SELECT instance_id, session_id, template_chunk_id, template_title, title, intro,
-            sections, responses, status, promoted, created_at, completed_at
-     FROM worksheet_instances WHERE instance_id = $1`,
-    [instanceId],
-  );
-  return result.rows[0] ?? null;
-}
-
 /** Record the participant's completed answers. Returns false if the instance doesn't exist. */
 export async function completeWorksheetInstance(
   instanceId: number,

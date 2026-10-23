@@ -146,33 +146,6 @@ export async function getUserSessions(userId: number | string, status: string | 
   return result.rows;
 }
 
-/** Paginated admin view of all sessions with username + message counts.
- *  When scopeTherapistId is set (caseload RBAC, ai-therapist-119), rows are
- *  restricted to that therapist's assigned clients; null/undefined = unscoped
- *  (researchers), preserving today's SQL exactly. */
-export async function getAllSessions(limit = 50, offset = 0, scopeTherapistId?: number | null): Promise<Array<SessionRow & { username?: string; message_count?: string }>> {
-  const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
-  const scopeClause = scoped
-    ? `
-     WHERE EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $3 AND tc.client_id = ts.user_id)`
-    : '';
-  const params: unknown[] = scoped ? [limit, offset, scopeTherapistId] : [limit, offset];
-  const result = await pool.query<SessionRow & { username?: string; message_count?: string }>(
-    `SELECT
-      ts.*,
-      u.username,
-      COUNT(m.message_id) as message_count
-     FROM therapy_sessions ts
-     LEFT JOIN users u ON ts.user_id = u.userid
-     LEFT JOIN messages m ON ts.session_id = m.session_id${scopeClause}
-     GROUP BY ts.session_id, u.username
-     ORDER BY ts.created_at DESC
-     LIMIT $1 OFFSET $2`,
-    params
-  );
-  return result.rows;
-}
-
 /** Update a session's status (idempotent); stamps ended_at/by when ending. */
 export async function updateSessionStatus(sessionId: string, status: string, endedBy: string | null = null): Promise<SessionRow> {
   const currentSession = await getSession(sessionId);

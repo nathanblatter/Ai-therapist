@@ -88,12 +88,3 @@ export async function completeAssignment(
   return result.rows[0] ?? null;
 }
 
-/** How many assignments are still open for this user. */
-export async function countOpenAssignments(userId: number): Promise<number> {
-  const result = await pool.query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM practice_assignments
-     WHERE user_id = $1 AND status = 'assigned'`,
-    [userId]
-  );
-  return parseInt(result.rows[0]?.count ?? '0', 10);
-}

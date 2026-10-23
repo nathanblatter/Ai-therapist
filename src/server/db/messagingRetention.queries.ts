@@ -42,10 +42,11 @@ export interface AgedMessageDeletionResult {
  *      to CASCADE so the audit row records what went);
  *   3. delete the aged thread_messages themselves.
  * The data_deletion_log audit row is written INSIDE the same transaction:
- * deletions can never happen unaudited — if the audit insert fails (e.g. the
- * data_deletion_log CHECK constraints have not yet been widened for
- * artifact_type 'thread_message' / reason 'message_retention'), the whole
- * deletion rolls back and the messages are retained until the next run.
+ * deletions can never happen unaudited — if the audit insert fails for any
+ * reason (migration 080 widened the data_deletion_log CHECK constraints for
+ * artifact_type 'thread_message' / reason 'message_retention'; a database that
+ * predates it would reject the row), the whole deletion rolls back and the
+ * messages are retained until the next run.
  * Threads themselves are kept: the thread row is the care-team assignment
  * record, not content.
  */

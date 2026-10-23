@@ -219,12 +219,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ## Future Enhancements
 
-- [ ] Implement role-based redaction retrieval (therapists see unredacted data)
-- [ ] Add password reset functionality
-- [ ] Add email verification
-- [ ] Add two-factor authentication
-- [ ] Add audit logging for admin actions
-- [ ] Add user management UI in admin dashboard
+- [x] Role-based redaction retrieval (caseload RBAC, docs/caseload-rbac.md)
+- [ ] Password reset / email verification (sign-in now goes through Squawk, docs/squawk-auth.md)
+- [x] Two-factor authentication (mfa.service.ts; passkeys via Squawk)
+- [x] Audit logging for admin actions (data_access_log, caseload_audit_log, assistant_audit)
+- [x] User management UI in admin dashboard (Users view)
 
 ## Redaction leak-check (`messages.metadata.redaction_check`)
 

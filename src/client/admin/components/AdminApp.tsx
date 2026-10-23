@@ -252,7 +252,9 @@ export default function AdminApp() {
     {
       label: 'Safety',
       items: [
-        { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle },
+        // Roles mirror the crisis routes (crisis.routes.ts): caseworkers can
+        // flag and read the register; wind-down/unflag stay therapist+researcher.
+        { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle, roles: ['therapist', 'caseworker', 'researcher'] },
         { id: 'escalations', label: 'Escalations', icon: ArrowUpCircle, roles: ['therapist', 'caseworker', 'researcher'] },
         { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus, roles: ['therapist', 'caseworker', 'researcher', 'demo'] },
       ],
@@ -264,7 +266,7 @@ export default function AdminApp() {
         // Caseload RBAC (ai-therapist-119): therapist sees own clients +
         // invites; researcher sees the assignment matrix. Hidden from demo
         // accounts for MVP (demoVisible: false).
-        { id: 'caseload', label: 'Caseload', icon: UserCheck, demoVisible: false },
+        { id: 'caseload', label: 'Caseload', icon: UserCheck, roles: ['therapist', 'caseworker', 'researcher'], demoVisible: false },
         { id: 'messages', label: 'Messages', icon: MessageSquare, roles: ['therapist', 'caseworker', 'researcher'] },
         { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
         { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle, roles: ['therapist', 'researcher', 'demo'] },

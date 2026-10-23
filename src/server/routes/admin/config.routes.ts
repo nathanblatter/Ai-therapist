@@ -68,7 +68,7 @@ export default function adminConfigRoutes(): Router {
       if (!config.deployment_mode) {
         config.deployment_mode = {
           value: { mode: 'research' },
-          description: 'Deployment posture: research or clinical (default, not yet persisted)',
+          description: 'Deployment posture: research or clinical (default; migration 060 seeds the row, this database predates it)',
           updated_at: null,
           updated_by: null,
         };
@@ -117,7 +117,7 @@ export default function adminConfigRoutes(): Router {
           return res.json({
             key,
             value: { mode: 'research' },
-            description: 'Deployment posture: research or clinical (default, not yet persisted)',
+            description: 'Deployment posture: research or clinical (default; migration 060 seeds the row, this database predates it)',
             updated_at: null,
             updated_by: null,
           });
