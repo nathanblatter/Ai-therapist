@@ -5,10 +5,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-const { setEnabledMock, isAssignedMock, getSessionAccessInfoMock } = vi.hoisted(() => ({
+const { setEnabledMock, isAssignedMock, getSessionAccessInfoMock, getOrgForUserMock } = vi.hoisted(() => ({
   setEnabledMock: vi.fn(),
   isAssignedMock: vi.fn(),
   getSessionAccessInfoMock: vi.fn(),
+  getOrgForUserMock: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => ({
   getSessionInsights: vi.fn(),
@@ -20,6 +21,9 @@ vi.mock('../../db/index.js', () => ({
   // Caseload middleware deps (ai-therapist-119).
   isAssigned: isAssignedMock,
   getSessionAccessInfo: getSessionAccessInfoMock,
+  // Researcher org gate (ai-therapist-269): caller and target both in org 1.
+  getOrganizationIdForUser: getOrgForUserMock,
+  getIrbStudyOrgId: vi.fn().mockResolvedValue(1),
 }));
 
 import insightsRoutes from './insights.routes.js';
@@ -41,7 +45,8 @@ function appAs(role: string | null) {
 beforeEach(() => {
   setEnabledMock.mockReset();
   isAssignedMock.mockReset().mockResolvedValue(true);
-  getSessionAccessInfoMock.mockReset().mockResolvedValue({ status: 'ended', user_id: 42, session_type: 'realtime' });
+  getSessionAccessInfoMock.mockReset().mockResolvedValue({ status: 'ended', user_id: 42, session_type: 'realtime', owner_organization_id: 1 });
+  getOrgForUserMock.mockReset().mockResolvedValue(1);
 });
 
 describe('POST /admin/api/users/:userId/risk-context auth', () => {
@@ -86,6 +91,13 @@ describe('POST /admin/api/users/:userId/risk-context auth', () => {
     const res = await request(appAs('researcher')).post('/admin/api/users/42/risk-context').send({ enabled: true });
     expect(res.status).toBe(200);
     expect(isAssignedMock).not.toHaveBeenCalled();
+  });
+
+  it('404s a researcher for a participant in another organization (ai-therapist-269)', async () => {
+    getOrgForUserMock.mockImplementation(async (id: number) => (id === 42 ? 2 : 1));
+    const res = await request(appAs('researcher')).post('/admin/api/users/42/risk-context').send({ enabled: true });
+    expect(res.status).toBe(404);
+    expect(setEnabledMock).not.toHaveBeenCalled();
   });
 });
 

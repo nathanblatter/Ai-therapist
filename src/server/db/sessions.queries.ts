@@ -78,6 +78,12 @@ export interface SessionAccessInfo {
   status: string;
   user_id: number | string | null;
   session_type: string;
+  /**
+   * The owner's users.organization_id (NOT NULL since migration 069), joined
+   * in so the caseload middleware's researcher org check costs no extra
+   * query. null for anonymous sessions (user_id NULL) or a dangling owner.
+   */
+  owner_organization_id: number | null;
 }
 
 /**
@@ -275,10 +281,13 @@ export async function getSessionConfig(sessionId: string): Promise<SessionConfig
   return result.rows[0] || null;
 }
 
-/** Status / owner / type for a session, or null if it doesn't exist. */
+/** Status / owner / type / owner org for a session, or null if it doesn't exist. */
 export async function getSessionAccessInfo(sessionId: string): Promise<SessionAccessInfo | null> {
   const result = await pool.query<SessionAccessInfo>(
-    'SELECT status, user_id, session_type FROM therapy_sessions WHERE session_id = $1',
+    `SELECT ts.status, ts.user_id, ts.session_type, u.organization_id AS owner_organization_id
+     FROM therapy_sessions ts
+     LEFT JOIN users u ON u.userid = ts.user_id
+     WHERE ts.session_id = $1`,
     [sessionId]
   );
   return result.rows[0] ?? null;

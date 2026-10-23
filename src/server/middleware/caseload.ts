@@ -1,9 +1,11 @@
 // Care-team enforcement middleware (ai-therapist-119 caseload RBAC MVP,
 // generalized for the caseworker portal — docs/caseworker-portal.md).
 // Row-scopes care-team accounts (therapist AND caseworker) to their assigned
-// clients; researcher and demo roles pass through untouched. Unassigned
-// resources return 404 (never 403) so a care-team member cannot confirm the
-// existence of unassigned data. Spec: docs/caseload-rbac.md.
+// clients; researchers are organization-scoped (ai-therapist-269: the target
+// participant's organization_id must equal the caller's, anonymous sessions
+// are IRB-study custody); demo passes through untouched. Out-of-scope
+// resources return 404 (never 403) so a caller cannot confirm the existence
+// of data they may not see. Spec: docs/caseload-rbac.md.
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import {
   isAssigned,
@@ -11,14 +13,43 @@ import {
   getMessageOwner,
   getCareNoteById,
   getEscalationById,
+  getOrganizationIdForUser,
+  getIrbStudyOrgId,
 } from '../db/index.js';
 import { isCareTeamRole } from '../../shared/roles.js';
 import { orgIdFor } from './org.js';
 
 /**
- * Gate a `:userId`-scoped route. researcher/demo pass through; a care-team
- * member (therapist or caseworker) gets 404 unless the target user is in
- * their caseload. Non-numeric ids -> 400.
+ * Researcher organization rule (ai-therapist-269). A researcher may read a
+ * participant-scoped resource only when the participant's organization_id
+ * equals their own (orgIdFor). An ownerless resource (anonymous session,
+ * `user_id` NULL) is IRB-study custody: visible only when the caller's org is
+ * the irb-study org. Fail closed: a missing/unresolvable org on either side
+ * is a deny, and a thrown lookup error propagates to the caller's catch
+ * (-> 500), never widening to an all-orgs pass.
+ *
+ * @param ownerOrgId the participant's organization_id when the caller already
+ *   loaded it (joined row); `undefined` asks for a lookup by `ownerId`.
+ */
+async function researcherMayAccess(
+  req: Request,
+  ownerId: number | null,
+  ownerOrgId?: number | null
+): Promise<boolean> {
+  const callerOrgId = await orgIdFor(req);
+  if (callerOrgId === null) return false;
+  if (ownerId === null) {
+    return (await getIrbStudyOrgId()) === callerOrgId;
+  }
+  const targetOrgId = ownerOrgId === undefined ? await getOrganizationIdForUser(ownerId) : ownerOrgId;
+  return typeof targetOrgId === 'number' && targetOrgId === callerOrgId;
+}
+
+/**
+ * Gate a `:userId`-scoped route. demo passes through; a researcher gets 404
+ * unless the target user is in their organization (one users lookup); a
+ * care-team member (therapist or caseworker) gets 404 unless the target user
+ * is in their caseload. Non-numeric ids -> 400.
  */
 export function requireClientAccess(paramName?: string): RequestHandler {
   const param = paramName ?? 'userId';
@@ -29,7 +60,7 @@ export function requireClientAccess(paramName?: string): RequestHandler {
     }
 
     const role = req.session.userRole;
-    if (!isCareTeamRole(role)) {
+    if (role !== 'researcher' && !isCareTeamRole(role)) {
       next();
       return;
     }
@@ -37,6 +68,19 @@ export function requireClientAccess(paramName?: string): RequestHandler {
     const clientId = Number(req.params[param]);
     if (!Number.isInteger(clientId)) {
       res.status(400).json({ error: 'Invalid user id' });
+      return;
+    }
+
+    if (role === 'researcher') {
+      researcherMayAccess(req, clientId)
+        .then((ok) => {
+          if (!ok) {
+            res.status(404).json({ error: 'Not found' });
+            return;
+          }
+          next();
+        })
+        .catch(next);
       return;
     }
 
@@ -54,12 +98,14 @@ export function requireClientAccess(paramName?: string): RequestHandler {
 }
 
 /**
- * Gate a `:sessionId`-scoped route. Resolves the therapy session's owner via
- * getSessionAccessInfo; 404 if the session doesn't exist. researcher/demo
- * pass through (including for missing sessions — downstream handlers keep
- * their own 404 behavior); a care-team member gets 404 unless the session's
- * owner is an assigned client. Sessions with null user_id -> 404 for
- * care-team members.
+ * Gate a `:sessionId`-scoped route. Resolves the therapy session's owner (and
+ * the owner's organization) in one getSessionAccessInfo query; 404 if the
+ * session doesn't exist. demo passes through (downstream handlers keep their
+ * own 404 behavior); a researcher gets 404 unless the owner is in their
+ * organization, or — for a session with null user_id — unless their
+ * organization is the irb-study org; a care-team member gets 404 unless the
+ * session's owner is an assigned client. Sessions with null user_id -> 404
+ * for care-team members.
  */
 export function requireSessionClientAccess(paramName?: string): RequestHandler {
   const param = paramName ?? 'sessionId';
@@ -70,7 +116,7 @@ export function requireSessionClientAccess(paramName?: string): RequestHandler {
     }
 
     const role = req.session.userRole;
-    if (!isCareTeamRole(role)) {
+    if (role !== 'researcher' && !isCareTeamRole(role)) {
       next();
       return;
     }
@@ -85,6 +131,16 @@ export function requireSessionClientAccess(paramName?: string): RequestHandler {
           return;
         }
         const ownerId = info.user_id === null ? null : Number(info.user_id);
+        if (role === 'researcher') {
+          const ownerIdOrNull = ownerId !== null && Number.isInteger(ownerId) ? ownerId : null;
+          const ok = await researcherMayAccess(req, ownerIdOrNull, info.owner_organization_id ?? null);
+          if (!ok) {
+            res.status(404).json({ error: 'Not found' });
+            return;
+          }
+          next();
+          return;
+        }
         if (ownerId === null || !Number.isInteger(ownerId)) {
           res.status(404).json({ error: 'Not found' });
           return;
@@ -161,15 +217,19 @@ export async function mayCareTeamAccessSession(
 
 
 /**
- * Gate a `:messageId`-addressed route (message edit/delete). researcher/demo
- * pass through; a care-team member gets 404 unless the message's owning
- * session belongs to an assigned client. Same 404-over-403 semantics as the
- * rest of the caseload middleware. (Caseworkers are additionally excluded
- * from these routes at the requireFullContent allowlist level.)
+ * Gate a `:messageId`-addressed route (message edit/delete). demo passes
+ * through; a researcher gets 404 unless the message's owning session belongs
+ * to a participant in their organization (anonymous session: irb-study org
+ * only) — one getMessageOwner query; a care-team member gets 404 unless the
+ * message's owning session belongs to an assigned client. Same 404-over-403
+ * semantics as the rest of the caseload middleware. (Caseworkers are
+ * additionally excluded from these routes at the requireFullContent
+ * allowlist level.)
  */
 export function requireMessageClientAccess(paramName = 'messageId'): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
-    if (!isCareTeamRole(req.session?.userRole)) return next();
+    const role = req.session?.userRole;
+    if (role !== 'researcher' && !isCareTeamRole(role)) return next();
     const raw = req.params[paramName];
     const messageId = Number(raw);
     if (!Number.isInteger(messageId)) {
@@ -177,6 +237,13 @@ export function requireMessageClientAccess(paramName = 'messageId'): RequestHand
     }
     try {
       const owner = await getMessageOwner(messageId);
+      if (role === 'researcher') {
+        if (!owner) return res.status(404).json({ error: 'Not found' });
+        const ownerId = owner.user_id == null ? null : Number(owner.user_id);
+        const ok = await researcherMayAccess(req, ownerId, owner.owner_organization_id ?? null);
+        if (!ok) return res.status(404).json({ error: 'Not found' });
+        return next();
+      }
       if (!owner || owner.user_id == null) {
         return res.status(404).json({ error: 'Not found' });
       }
@@ -192,8 +259,10 @@ export function requireMessageClientAccess(paramName = 'messageId'): RequestHand
 /**
  * Gate a route whose target client id arrives in the request BODY (e.g.
  * POST /admin/api/escalations with body.client_id). Care-team members must
- * have the client on caseload (404-over-403); researcher/demo pass through.
- * Missing/non-integer client id -> 400 for everyone (the handler needs it).
+ * have the client on caseload (404-over-403); a researcher must share the
+ * client's organization (404-over-403, one users lookup); demo passes
+ * through. Missing/non-integer client id -> 400 for everyone (the handler
+ * needs it).
  */
 export function requireBodyClientAccess(field = 'client_id'): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -204,7 +273,18 @@ export function requireBodyClientAccess(field = 'client_id'): RequestHandler {
     if (!Number.isInteger(clientId)) {
       return res.status(400).json({ error: `Invalid ${field}` });
     }
-    if (!isCareTeamRole(req.session.userRole)) return next();
+    const role = req.session.userRole;
+    if (role === 'researcher') {
+      try {
+        if (!(await researcherMayAccess(req, clientId))) {
+          return res.status(404).json({ error: 'Not found' });
+        }
+        return next();
+      } catch (err) {
+        return next(err);
+      }
+    }
+    if (!isCareTeamRole(role)) return next();
     try {
       const assigned = await isAssigned(req.session.userId, clientId);
       if (!assigned) return res.status(404).json({ error: 'Not found' });

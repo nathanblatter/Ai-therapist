@@ -275,7 +275,7 @@ describe('POST /admin/api/sessions/:sessionId/adverse-events (manual session fil
   });
 
   it('lets a researcher file from any session owned by their organization', async () => {
-    getSessionAccessInfoMock.mockResolvedValue({ user_id: 55 });
+    getSessionAccessInfoMock.mockResolvedValue({ user_id: 55, owner_organization_id: 1 });
     getOrgForUserMock.mockResolvedValue(1); // session owner 55 is in org 1
     draftFromCrisisMock.mockResolvedValueOnce(88);
     getByIdMock.mockResolvedValueOnce({ report_id: 88, status: 'draft' });
@@ -287,7 +287,7 @@ describe('POST /admin/api/sessions/:sessionId/adverse-events (manual session fil
   });
 
   it("404s a researcher filing from another organization's session (never 403; no draft)", async () => {
-    getSessionAccessInfoMock.mockResolvedValue({ user_id: 55 });
+    getSessionAccessInfoMock.mockResolvedValue({ user_id: 55, owner_organization_id: 1 });
     getOrgForUserMock.mockResolvedValue(1); // owner in org 1, caller in org 2
     const res = await request(appAs('researcher', 9, 'res2', 2))
       .post('/admin/api/sessions/s1/adverse-events');
@@ -296,7 +296,7 @@ describe('POST /admin/api/sessions/:sessionId/adverse-events (manual session fil
   });
 
   it('treats an anonymous session as irb-study custody for the manual filing org check', async () => {
-    getSessionAccessInfoMock.mockResolvedValue({ user_id: null });
+    getSessionAccessInfoMock.mockResolvedValue({ user_id: null, owner_organization_id: null });
     draftFromCrisisMock.mockResolvedValueOnce(89);
     getByIdMock.mockResolvedValueOnce({ report_id: 89, status: 'draft' });
     const irb = await request(appAs('researcher', 9, 'res1', 1)).post('/admin/api/sessions/s1/adverse-events');

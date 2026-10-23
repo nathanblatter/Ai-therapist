@@ -9,6 +9,29 @@ findings, all fixed). Owner: Nathan (review); built by agent fleet.
 > therapist-only model and remain accurate for therapists; this update layers
 > the care-team model on top. Full spec: `docs/caseworker-portal.md`.
 
+## 2026-10-22: researcher organization rule on by-id gates (ai-therapist-269)
+
+Researchers are organization-scoped on every by-id gate in
+`src/server/middleware/caseload.ts`, not only on the org-scoped list queries.
+`requireClientAccess` (`:userId`), `requireBodyClientAccess` (`body.client_id`),
+`requireSessionClientAccess` (`:sessionId`) and `requireMessageClientAccess`
+(`:messageId`) resolve the target participant's `users.organization_id` (joined
+into `getSessionAccessInfo` / `getMessageOwner`, or one `getOrganizationIdForUser`
+lookup for a bare user id) and respond **404** — never 403 — when it differs
+from the caller's `orgIdFor(req)`; a missing session/message/user, or an
+unresolvable org on either side, is also 404, and a thrown lookup error
+propagates to the error handler (500) rather than widening to an all-orgs pass.
+`requireEscalationAccess` already compared `escalation.org_id` and
+`requireNoteAccess` already denies researchers; both are unchanged.
+**Anonymous-session rule:** a session (or a message in one) with
+`therapy_sessions.user_id IS NULL` has no participant org and is IRB-study
+custody — a researcher sees it only when their organization is the `irb-study`
+org (`IRB_STUDY_SLUG` / `getIrbStudyOrgId`); every other org gets 404. Care-team
+(therapist/caseworker) and demo branches are unchanged. Still global for
+researchers and out of scope here: `GET /admin/api/user-sessions` (login
+sessions), the `/redact/api/messages` review queue and its by-id
+correct/approve writes, and the `redaction-review` audit log.
+
 ## 2026-08-28: care-team edges, caseworker tier, org scoping
 
 - **`therapist_clients` is now the care-team table** (070). Each row is a
