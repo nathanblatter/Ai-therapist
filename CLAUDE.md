@@ -17,3 +17,12 @@ env vars are set: see docs/squawk-auth.md. Never add a second password check or 
 local credential store; account creation, password and role changes go through
 `src/server/services/accounts.service.ts` so Squawk stays in sync. Without the
 vars (local dev, tests) the legacy username/password login still works.
+
+## Formatting (Prettier, since 2026-10-23)
+
+`npm run format:check` is a CI gate alongside typecheck, lint and tests; run
+`npm run format` before committing. The config matches the codebase's existing
+style (single quotes, 120 columns); docs, SQL, workflow YAML and scripts in
+other languages are ignored on purpose. Run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once per checkout so
+the initial format commit does not pollute blame.
