@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import {
   getStudyOpsSummary,
+  getStudyProtocol,
   listDeviations,
   createDeviation,
   updateDeviation,
@@ -139,14 +140,31 @@ export default function studyOpsRoutes(): Router {
     if (!isoOrNull(b.study_start) || !isoOrNull(b.study_end)) {
       return res.status(400).json({ error: 'study_start/study_end must be ISO dates or null' });
     }
-    const value = {
-      enrollment_target: b.enrollment_target,
-      expected_sessions_per_participant: b.expected_sessions_per_participant,
-      study_start: b.study_start ?? null,
-      study_end: b.study_end ?? null,
-      arm_imbalance_threshold: b.arm_imbalance_threshold,
-    };
+    // Optional study identifiers (IRB packet header). Short free text; an
+    // absent key leaves the stored value alone, an empty string clears it.
+    const ident: Record<string, string | null> = {};
+    for (const key of ['protocol_id', 'principal_investigator', 'study_title']) {
+      if (b[key] === undefined) continue;
+      if (b[key] !== null && typeof b[key] !== 'string') {
+        return res.status(400).json({ error: `${key} must be a string` });
+      }
+      const v = typeof b[key] === 'string' ? b[key].trim() : '';
+      if (v.length > 200) return res.status(400).json({ error: `${key} must be <= 200 chars` });
+      ident[key] = v || null;
+    }
     try {
+      const current = await getStudyProtocol();
+      const value = {
+        enrollment_target: b.enrollment_target,
+        expected_sessions_per_participant: b.expected_sessions_per_participant,
+        study_start: b.study_start ?? null,
+        study_end: b.study_end ?? null,
+        arm_imbalance_threshold: b.arm_imbalance_threshold,
+        protocol_id: current.protocol_id ?? null,
+        principal_investigator: current.principal_investigator ?? null,
+        study_title: current.study_title ?? null,
+        ...ident,
+      };
       const row = await updateSystemConfig('study_protocol', value, req.session.username);
       if (!row) return res.status(404).json({ error: 'study_protocol config missing (run migration 053)' });
       res.json({ success: true, protocol: row.config_value });

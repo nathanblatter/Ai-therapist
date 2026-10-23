@@ -328,6 +328,10 @@ admin **Data Access** view (Research nav group, researcher-only) and the
 | `assistant_audit` (092) — one row per admin-assistant turn, tools + row counts, never payloads | `services/assistant.service.ts` | `listAssistantAudit` in `assistantAudit.queries.ts` |
 | `caseload_audit_log` — assignments, invites, work-queue actions | `insertCaseloadAudit` in `caseload.queries.ts` | `listCaseloadAudit` (same module) |
 
+The IRB continuing-review packet (`docs/irb-packet.md`) reads these audit
+tables for its data-access section and writes one `data_access_log` row
+(`action = 'export'`, `detail.kind = 'irb_packet'`) per HTML or zip generation.
+
 `data_access_log.session_id` is TEXT while `therapy_sessions.session_id` is a
 UUID; the readers join on `ts.session_id::text` and resolve the participant as
 `COALESCE(dal.user_id, ts.user_id)` because recording-stream rows carry only

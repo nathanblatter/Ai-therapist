@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
 } from 'recharts';
-import { RefreshCw, Play, Plus, AlertTriangle, CheckCircle, AlertCircle, Save } from 'react-feather';
+import { RefreshCw, Play, Plus, AlertTriangle, CheckCircle, AlertCircle, Save, Printer, Download } from 'react-feather';
 import { deleteJson, getJson, postJson, requestJson } from '../../shared/http';
 // Canonical protocol shape lives in the server data layer (type-only import,
 // erased at build time).
@@ -40,6 +40,11 @@ interface Deviation {
 }
 
 const MANUAL_CATEGORIES = ['technical_failure', 'enrollment', 'procedure', 'other'];
+
+/** YYYY-MM-DD in UTC. */
+function isoDay(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
 
 export default function StudyOps() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -277,6 +282,24 @@ export default function StudyOps() {
                     onChange={e => setProtocolDraft({ ...protocolDraft, study_end: e.target.value || null })}
                     className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
                 </label>
+                <label className="block text-sm">
+                  <span className="text-gray-700">IRB protocol id</span>
+                  <input type="text" value={protocolDraft.protocol_id ?? ''} maxLength={200} placeholder="e.g. 2025-519-BYU"
+                    onChange={e => setProtocolDraft({ ...protocolDraft, protocol_id: e.target.value })}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-gray-700">Principal investigator</span>
+                  <input type="text" value={protocolDraft.principal_investigator ?? ''} maxLength={200}
+                    onChange={e => setProtocolDraft({ ...protocolDraft, principal_investigator: e.target.value })}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-gray-700">Study title</span>
+                  <input type="text" value={protocolDraft.study_title ?? ''} maxLength={200}
+                    onChange={e => setProtocolDraft({ ...protocolDraft, study_title: e.target.value })}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                </label>
                 <div className="flex items-end">
                   <button onClick={saveProtocol}
                     className="flex items-center gap-2 px-4 py-2 bg-royal text-white rounded-lg hover:bg-navy">
@@ -284,8 +307,11 @@ export default function StudyOps() {
                   </button>
                 </div>
               </div>
+              <p className="text-xs text-gray-500 mt-3">Protocol id, PI and title appear in the IRB packet header.</p>
             </div>
           )}
+
+          <IrbPacketSection />
         </>
       )}
 
@@ -352,6 +378,52 @@ export default function StudyOps() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** IRB continuing-review packet (ai-therapist-107): a printable report plus a
+ *  zip of JSON/CSV attachments over a date range. Generation is server-side
+ *  and audited, so the buttons just open the route URLs. */
+function IrbPacketSection() {
+  const today = new Date();
+  const yearAgo = new Date(today);
+  yearAgo.setUTCFullYear(yearAgo.getUTCFullYear() - 1);
+  const [from, setFrom] = useState(isoDay(yearAgo));
+  const [to, setTo] = useState(isoDay(today));
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
+  const qs = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+
+  return (
+    <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <h3 className="text-lg font-semibold text-gray-900 mb-1">IRB packet</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Continuing-review packet for the period: enrollment, sessions, safety, adverse events, deviations,
+        consent versions, monitoring and data access. Counts only; adverse events and deviations are listed
+        without participant identifiers. Incidents and the narrative are filled in by hand.
+      </p>
+      <div className="flex flex-wrap items-end gap-4">
+        <label className="block text-sm">
+          <span className="text-gray-700">From</span>
+          <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)}
+            className="mt-1 block px-3 py-2 border border-gray-300 rounded-lg" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-gray-700">To</span>
+          <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)}
+            className="mt-1 block px-3 py-2 border border-gray-300 rounded-lg" />
+        </label>
+        <a href={valid ? `/admin/api/irb/packet.html?${qs}` : undefined} target="_blank" rel="noopener noreferrer"
+          aria-disabled={!valid}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white ${valid ? 'bg-royal hover:bg-navy' : 'bg-gray-300 pointer-events-none'}`}>
+          <Printer size={16} /> Open printable
+        </a>
+        <a href={valid ? `/admin/api/irb/packet.zip?${qs}` : undefined} aria-disabled={!valid}
+          className={`flex items-center gap-2 px-4 py-2 border rounded-lg ${valid ? 'border-gray-300 hover:bg-gray-50 text-gray-800' : 'border-gray-200 text-gray-400 pointer-events-none'}`}>
+          <Download size={16} /> Download zip
+        </a>
+      </div>
+      <p className="text-xs text-gray-500 mt-3">Each generation is recorded in the data-access log.</p>
     </div>
   );
 }

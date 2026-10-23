@@ -39,6 +39,7 @@ import redactionRoutes from "./routes/admin/redaction.routes.js";
 import adminConfigRoutes from "./routes/admin/config.routes.js";
 import analyticsRoutes from "./routes/admin/analytics.routes.js";
 import studyOpsRoutes from "./routes/admin/studyOps.routes.js";
+import irbPacketRoutes from "./routes/admin/irbPacket.routes.js";
 import exportRoutes from "./routes/admin/export.routes.js";
 import adminRateLimitsRoutes from "./routes/admin/rateLimits.routes.js";
 import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
@@ -741,6 +742,9 @@ app.use(telemetryRoutes());
 
 // Study-ops dashboard (enrollment/arm-balance/deviations) -> routes/admin/studyOps.routes.ts.
 app.use(studyOpsRoutes());
+
+// IRB continuing-review packet (JSON / printable HTML / zip) -> routes/admin/irbPacket.routes.ts.
+app.use(irbPacketRoutes());
 
 
 // Research-data export (JSON/CSV) -> routes/admin/export.routes.ts.

@@ -10,7 +10,7 @@
 // never exported. Transcript/feedback-comment free text is opt-in only.
 import archiver from 'archiver';
 import type { Writable } from 'node:stream';
-import { execSync } from 'node:child_process';
+import { gitSha } from '../utils/gitSha.js';
 import { SCALES } from '../utils/scales.js';
 import {
   ensurePseudonyms,
@@ -364,16 +364,6 @@ export const TRANSCRIPT_FILES: DatasetFileSpec[] = [
     ],
   },
 ];
-
-function gitSha(): string {
-  if (process.env.GIT_SHA) return process.env.GIT_SHA;
-  try {
-    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString().trim();
-  } catch {
-    return 'unknown';
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Codebook renderer — driven by the SAME registry that builds the CSVs.
