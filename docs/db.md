@@ -29,26 +29,12 @@ Authentication and authorization table for the AI Therapist application.
 | **researcher** | - Full access to admin dashboard<br>- Can view **redacted data only** (PHI is redacted)<br>- Can access AI therapist features<br>- Can create new users via /api/auth/register |
 | **participant** | - **Cannot** access admin dashboard<br>- **Cannot** access admin API routes<br>- Can **only** access AI therapist features |
 
-### 2. conversation_logs
+### 2. conversation_logs (dropped)
 
-Stores all conversation messages from AI therapy sessions.
-
-**Schema:**
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| id | SERIAL | PRIMARY KEY | Auto-incrementing unique identifier for each message |
-| session_id | VARCHAR/TEXT | NOT NULL | Unique identifier for each therapy session |
-| role | VARCHAR | NOT NULL | Message sender - 'user' or 'assistant' |
-| message_type | VARCHAR | NOT NULL | Type of message - 'voice', 'chat', 'session_start', etc. |
-| message | TEXT | | The actual message content (PHI redacted for all entries) |
-| extras | JSONB/JSON | | Additional metadata stored as JSON |
-| created_at | TIMESTAMP | NOT NULL | Timestamp when the message was created |
-
-**Data Redaction:**
-- All messages stored in `conversation_logs` have PHI redacted using the `redactPHI()` function
-- Redaction happens at insert time in the `/logs/batch` endpoint
-- **Future implementation:** Role-based redaction retrieval will allow therapists to view unredacted data
+The original single-table message log. Replaced by `messages` in 003 and
+dropped by `036_drop_conversation_logs_table.sql`; it no longer exists in any
+environment. `scripts/redteam-db-setup.sh` creates a two-column stub only so
+010 can alter it before 036 drops it again.
 
 ### 3. GPT-Live voice tables (migration 098)
 
@@ -165,48 +151,121 @@ session actually ran on — see `docs/model-pinning.md`.
 - `POST /logs/batch` - Log conversation messages
 - `/` - Main AI therapist interface
 
-## Setup Instructions
+## Migrations
 
-### 1. Create the users table
+Schema changes are plain SQL files in `src/database/migrations/`, numbered
+`NNN_<name>.sql` with a matching `NNN_<name>_rollback.sql`. **Current head:
+110** (`110_seed_runtime_config_defaults.sql`). There is no migrations table
+and nothing applies them automatically: both stage and prod are migrated **by
+hand**, and the record of what has been applied is the Flightdeck log plus the
+backup file names below. Author-side conventions live in
+`src/database/scripts/MIGRATION_GUIDE.md`.
 
-Run the migration script:
+### Runners
 
-```bash
-psql -h <host> -U <user> -d <database> -f migrations/001_create_users_table.sql
+- `src/database/scripts/runMigrationRange.js <from> <to>` applies every
+  `NNN_*.sql` in the inclusive range, sorted by filename, each in its own
+  transaction, skipping `*_rollback*`. Run it under `npx tsx` from the repo
+  root with `DATABASE_URL` set (`DATABASE_SSL=true` for RDS). It is the right
+  tool for a batch; for one file, `psql -f` is simpler and is the only option
+  for 021 and its rollback (`CREATE/DROP INDEX CONCURRENTLY` cannot run in a
+  transaction).
+- `scripts/redteam-db-setup.sh` builds a database from **empty** and is what
+  CI runs on every deploy: 001 via psql, a `conversation_logs` stub (010
+  alters it, 036 drops it), `runMigrationRange 003 020`, 021 via psql,
+  `runMigrationRange 022 <newest number on disk>`, then
+  `002_insert_initial_user.js` and the red-team config seed. It is also the
+  fastest way to get a scratch database for testing a rollback.
+- Rollbacks are applied with `psql -f`, in reverse numeric order, one file at
+  a time. There is no rollback range runner.
+
+### Stage (local docker Postgres, database `ai_therapist`)
+
+```sh
+# backup first (shared container: dump the ONE database, never pg_dumpall)
+docker exec docker-services-postgres-1 pg_dump -U postgres --no-owner ai_therapist \
+  | gzip > ~/backups/ai_therapist-pre-NNN-$(date +%Y%m%d).sql.gz
+gunzip -t ~/backups/ai_therapist-pre-NNN-$(date +%Y%m%d).sql.gz
+
+# apply
+docker exec -i docker-services-postgres-1 psql -U postgres -d ai_therapist \
+  -v ON_ERROR_STOP=1 < src/database/migrations/NNN_name.sql
 ```
 
-Or connect to your database and execute the SQL directly:
+### Prod (RDS, database `ai_therapist_prod`)
 
-```sql
--- See migrations/001_create_users_table.sql
+Reachable only from the prod app host and the one fixed home IP in the RDS
+security group (`docs/data-access-boundary.md`, section 7). Use the RDS master
+credential from AWS Secrets Manager for the session only; never write it to a
+file or `.env`. The command shape is:
+
+```sh
+export PGSSLMODE=require PGHOST=<rds endpoint> PGUSER=<master user> PGPASSWORD=<from Secrets Manager>
+
+pg_dump --no-owner ai_therapist_prod | gzip > ~/backups/ai_therapist_prod-pre-NNN-$(date +%Y%m%d).sql.gz
+gunzip -t ~/backups/ai_therapist_prod-pre-NNN-$(date +%Y%m%d).sql.gz
+
+psql -d ai_therapist_prod -v ON_ERROR_STOP=1 -f src/database/migrations/NNN_name.sql
 ```
 
-### 2. Create the initial researcher user
+For a batch, `DATABASE_URL=postgresql://... DATABASE_SSL=true npx tsx
+src/database/scripts/runMigrationRange.js <from> <to>` does the same thing
+with one transaction per file. Then verify (`\d <table>`, a count, one smoke
+request through the app) and log the range plus the backup path in
+Flightdeck. Prod writes that touch participant data follow
+`docs/on-call-sop.md`.
 
-Run the Node.js migration script:
+### Backup-before-migrate convention
 
-```bash
-node migrations/002_insert_initial_user.js
-```
+Every migration run, on either environment, starts with a `pg_dump | gzip`
+into `~/backups/` named `ai_therapist[_prod]-pre-<range>-<YYYYMMDD>.sql.gz`
+(`pre-107-20261022`, `pre-088-096-20260909`), verified with `gunzip -t`
+before the migration is applied. The nightly encrypted off-box backup
+(`scripts/README-backups.md`) is a separate safety net, not a substitute: it
+may be up to a day behind.
 
-This will create a user with:
-- Username: `nathan`
-- Password: `Utab2Kil`
-- Role: `researcher`
+### Intentionally irreversible migrations
 
-### 3. Set session secret (Production)
+These have no `_rollback.sql` on purpose. Reverting them means restoring the
+pre-migration backup (or the nightly dump), never a hand-written restore.
 
-Add to your `.env` file:
+| Migration | Why there is no rollback |
+| --- | --- |
+| `001_create_users_table.sql` | The inverse is `DROP TABLE users CASCADE`, which destroys every account and cascades through nearly every table in the schema. Rolling back 001 is rebuilding the database from a backup. |
+| `035_drop_human_handoff_tables.sql` | Drops `human_handoffs` and `clinical_reviews` with their rows. The DDL is recoverable from `011_add_crisis_management.sql`, the data is not; recreating empty tables would misrepresent the study record. |
+| `036_drop_conversation_logs_table.sql` | Drops the pre-003 legacy `conversation_logs` table. No migration ever created it (it predates 001), so there is no canonical definition to restore and no code path reads it. |
 
-```
-SESSION_SECRET=your-secure-random-secret-key-here
-```
+Everything else has a rollback. The ones added in the 2026-10-22 backfill
+(008, 009, 010, 011-patch, 021, 022, 037) were each validated on a scratch
+database built by `redteam-db-setup.sh`: rollback applied, state checked,
+forward re-applied, state checked. Caveats recorded in their headers: 010's
+rollback needs 095's view dropped first and 010 forward needs the
+`conversation_logs` stub after 036; the 011-patch rollback (like 025/027/068/
+105) refuses while rows hold the newer `action_type` values; 022's rollback
+orphans the recording WAVs in object storage.
 
-Generate a secure secret key using:
+### Number 091 is used twice
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+`091_access_audit_and_redaction_review.sql` (2026-09-05) and
+`091_researcher_care_comms.sql` (2026-09-09) share a number. **Both are
+applied on stage and prod** (prod batch `pre-088-096-20260909`) and they are
+independent: the first creates `data_access_log` and `redaction_review_log`,
+the second rewrites three care-comms role CHECKs. The collision was kept
+rather than renumbered because:
+
+- `runMigrationRange.js` selects by `Number(name.slice(0, 3))` and sorts by
+  full filename, so both files are inside any range that includes 091 and
+  apply deterministically in the order `091_access_audit...` then
+  `091_researcher_care_comms...`. `redteam-db-setup.sh` inherits that, so CI
+  has been building schemas with both since September.
+- Renumbering the second file to the next free number (111) would re-apply
+  it on any environment that runs "everything after 110", and its `DROP
+  CONSTRAINT` statements are not idempotent (no `IF EXISTS`), so a fresh
+  range run would fail on stage and prod.
+
+Rollback order for that pair is the reverse: `091_researcher_care_comms_rollback`
+then `091_access_audit_and_redaction_review_rollback`. Do not reuse a number
+again; take the next free one after the head.
 
 ## Security Notes
 

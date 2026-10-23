@@ -1,297 +1,79 @@
-# Database Schema Migration Guide
-
-## Overview
-
-This migration normalizes the database schema to Third Normal Form (3NF), improving data organization and enabling new features like session history and user-session associations.
-
-## What's Changing
-
-### New Tables
-
-1. **therapy_sessions** - Tracks therapy sessions with user associations
-2. **session_configurations** - Stores OpenAI session settings per session
-3. **messages** - Replaces `conversation_logs` with normalized structure
-4. **user_sessions** - Persists Express.js sessions to database
-
-### Preserved Tables
-
-- **users** - No changes
-- **conversation_logs** - Kept for historical data (read-only going forward)
-
-## Migration Steps
-
-### 1. Backup Your Database
-
-**CRITICAL:** Always backup before migrating!
-
-```bash
-# Example using pg_dump
-pg_dump -h ai-therapist-conversationlog-db.cduiqimmkaym.us-west-1.rds.amazonaws.com \
-  -U your_username -d postgres > backup_$(date +%Y%m%d_%H%M%S).sql
-```
-
-### 2. Run the Migration
-
-```bash
-node runMigration.js
-```
-
-This will:
-- Create 4 new tables with proper indexes
-- Enable UUID extension (pgcrypto)
-- Preserve existing `conversation_logs` data
-- Set up foreign key relationships
-
-Expected output:
-```
-==> Starting database migration to 3NF schema...
-Executing migration script...
-OK: Migration completed successfully!
-
-New tables created:
-  - therapy_sessions
-  - session_configurations
-  - messages
-  - user_sessions
-```
-
-### 3. Verify Migration
-
-Check that all tables were created:
-
-```sql
-SELECT table_name
-FROM information_schema.tables
-WHERE table_schema = 'public'
-ORDER BY table_name;
-```
-
-### 4. Restart Your Application
-
-```bash
-npm start
-```
-
-The application will now use the new schema for all new sessions.
-
-## Rollback Instructions
-
-If you need to revert the migration:
-
-```bash
-node rollbackMigration.js
-```
-
-**WARNING:** This will delete all data in the new tables. Make sure you have backups!
-
-## New Features Enabled
-
-### 1. User-Session Association
-
-Users can now have multiple therapy sessions associated with their account:
-
-```javascript
-// Get all sessions for a user
-GET /api/sessions
-```
-
-### 2. Session History
-
-View past sessions:
-
-```javascript
-{
-  "session_id": "abc-123...",
-  "session_name": "Coping with work anxiety",
-  "status": "ended",
-  "created_at": "2025-12-20T10:30:00Z",
-  "ended_at": "2025-12-20T11:15:00Z"
-}
-```
-
-### 3. Auto-Generated Session Names
-
-When a session ends, AI automatically generates a descriptive name:
-
-```javascript
-POST /api/sessions/:sessionId/end
-// Triggers background AI summarization
-```
-
-### 4. Persistent Login Sessions
-
-Express sessions now survive server restarts (stored in `user_sessions` table).
-
-### 5. Separate Original & Redacted Content
-
-Messages now store both:
-- `content` - Original message (therapists only)
-- `content_redacted` - HIPAA-compliant version (researchers)
-
-## API Changes
-
-### New Endpoints
-
-#### Create Session
-```
-POST /api/sessions/create
-Body: { "sessionName": "Optional name" }
-Response: { session_id, user_id, status, created_at, ... }
-```
-
-#### List User Sessions
-```
-GET /api/sessions
-Headers: Authentication required
-Response: [{ session_id, session_name, status, ... }]
-```
-
-#### Get Session Details
-```
-GET /api/sessions/:sessionId
-Response: {
-  session: { session_id, session_name, ... },
-  messages: [...],
-  config: { voice, modalities, ... }
-}
-```
-
-#### End Session
-```
-POST /api/sessions/:sessionId/end
-Response: { session_id, status: "ended", ended_at, ... }
-Note: Triggers auto-naming in background
-```
-
-### Updated Admin Endpoints
-
-All admin endpoints now use the new schema:
-
-- `GET /admin/api/sessions` - Now includes `session_name`, `username`, `status`
-- `GET /admin/api/sessions/:sessionId` - Returns both session metadata and messages
-- `GET /admin/api/analytics` - Enhanced metrics with session status breakdown
-- `GET /admin/api/export` - Exports from `messages` table with redaction based on role
-
-## Database Schema Reference
-
-### therapy_sessions
-
-| Column | Type | Description |
-|--------|------|-------------|
-| session_id | UUID | Primary key (auto-generated) |
-| user_id | INTEGER | FK to users (NULL for anonymous) |
-| session_name | VARCHAR(255) | Auto-generated descriptive name |
-| status | VARCHAR(20) | 'active', 'ended', or 'archived' |
-| created_at | TIMESTAMP | Session start time |
-| updated_at | TIMESTAMP | Last update time |
-| ended_at | TIMESTAMP | Session end time |
-
-### session_configurations
-
-| Column | Type | Description |
-|--------|------|-------------|
-| config_id | SERIAL | Primary key |
-| session_id | UUID | FK to therapy_sessions (UNIQUE) |
-| voice | VARCHAR(50) | OpenAI voice (default: 'alloy') |
-| modalities | TEXT[] | ['text', 'audio'] |
-| instructions | TEXT | System prompt |
-| turn_detection | JSONB | Turn detection settings |
-| tools | JSONB | OpenAI function tools |
-| temperature | DECIMAL(3,2) | Default: 0.8 |
-| max_response_output_tokens | INTEGER | Default: 4096 |
-
-### messages
-
-| Column | Type | Description |
-|--------|------|-------------|
-| message_id | BIGSERIAL | Primary key |
-| session_id | UUID | FK to therapy_sessions |
-| role | VARCHAR(20) | 'user', 'assistant', 'system' |
-| message_type | VARCHAR(50) | 'voice', 'chat', etc. |
-| content | TEXT | Original message content |
-| content_redacted | TEXT | HIPAA-redacted content |
-| metadata | JSONB | Additional metadata |
-| created_at | TIMESTAMP | Message timestamp |
-
-### user_sessions
-
-| Column | Type | Description |
-|--------|------|-------------|
-| sid | VARCHAR | Primary key (session ID) |
-| sess | JSONB | Session data |
-| expire | TIMESTAMP | Expiration time |
-
-## Code Changes Summary
-
-### Files Created
-
-- `dbQueries.js` - Helper functions for new schema
-- `generateSessionName.js` - AI session naming logic
-- `runMigration.js` - Migration runner
-- `rollbackMigration.js` - Rollback script
-- `migrations/003_normalize_schema.sql` - Forward migration
-- `migrations/003_normalize_schema_rollback.sql` - Rollback migration
-
-### Files Modified
-
-- `server.js`
-  - Added `connect-pg-simple` for persistent sessions
-  - Updated `/logs/batch` to use messages table
-  - Added session management endpoints
-  - Updated admin endpoints for new schema
-  - Integrated auto-naming on session end
-
-- `package.json`
-  - Added `connect-pg-simple` dependency
-
-## Testing Checklist
-
-After migration, verify:
-
-- [ ] Existing users can still log in
-- [ ] New therapy sessions are created in `therapy_sessions` table
-- [ ] Messages are stored in `messages` table with both original and redacted content
-- [ ] Session end triggers auto-naming (check server logs)
-- [ ] Admin dashboard shows sessions with new fields
-- [ ] Export functionality works with role-based redaction
-- [ ] Analytics dashboard displays correct metrics
-- [ ] Login sessions persist after server restart
-
-## Troubleshooting
-
-### Migration Fails
-
-1. Check database connection in `db.js`
-2. Verify AWS Secrets Manager credentials
-3. Ensure PostgreSQL user has CREATE TABLE permissions
-4. Check server logs for detailed error messages
-
-### Auto-Naming Not Working
-
-1. Verify OpenAI API key is set
-2. Check server logs for AI generation errors
-3. Ensure session has messages before ending
-
-### Sessions Not Persisting
-
-1. Verify `user_sessions` table was created
-2. Check `connect-pg-simple` configuration in `server.js`
-3. Restart server after migration
-
-## Support
-
-For issues or questions:
-1. Check server logs: `tail -f server.log`
-2. Review migration output
-3. Contact system administrator
-
-## Rollback Considerations
-
-Rolling back will:
-- KEEP: Preserve `users` table
-- KEEP: Preserve `conversation_logs` table
-- DROP: Delete all data in new tables
-- DROP: Require application restart
-- DROP: Break new features (session history, auto-naming, etc.)
-
-Only rollback if absolutely necessary!
+# Migration guide
+
+How schema changes are written, applied and reverted in this repo. The
+authoritative operational copy (environment commands, backup convention,
+irreversible list, numbering notes) is `docs/db.md`, section "Migrations";
+this file is the author-facing summary that lives next to the runners.
+
+## Layout
+
+- `src/database/migrations/NNN_<name>.sql` - forward migration, plain SQL,
+  three-digit zero-padded number. Current head: **110**.
+- `src/database/migrations/NNN_<name>_rollback.sql` - its inverse. Every
+  forward migration has one except 001, 035 and 036, which are listed as
+  intentionally irreversible in `docs/db.md`.
+- `002_insert_initial_user.js` is the only non-SQL migration (seeds the first
+  researcher account; needs the app's `pool`).
+- There is no migrations table. Nothing records what has been applied; the
+  operator keeps that in Flightdeck and in the backup file names
+  (`~/backups/ai_therapist_prod-pre-NNN-YYYYMMDD.sql.gz`).
+
+## Runners
+
+| Runner | Use |
+| --- | --- |
+| `node src/database/scripts/runMigrationRange.js <from> <to>` (run under `npx tsx` from the repo root; needs `DATABASE_URL`, and `DATABASE_SSL=true` for RDS) | Applies every `NNN_*.sql` with `from <= NNN <= to`, sorted by filename, each file in its own transaction, skipping `*_rollback*`. The normal way to apply a batch. |
+| `psql ... -f <file>` | Single files, and anything that cannot run inside a transaction (021 and its rollback use `CREATE/DROP INDEX CONCURRENTLY`). Also how every rollback is applied: there is no rollback range runner. |
+| `scripts/redteam-db-setup.sh` | Builds a database from empty: 001 via psql, a `conversation_logs` stub (010 alters it, 036 drops it), `runMigrationRange 003 020`, 021 via psql, `runMigrationRange 022 <newest on disk>`, then 002 and the red-team seed. CI uses it on every deploy; use it locally for throwaway databases. |
+| `runMigrationNNN.js` / `rollbackMigrationNNN.js` / `runMigration.js` / `rollbackMigration.js` / `patchMigration011.js` | Historical single-migration wrappers from before the range runner (003 through 034). Kept so old environments can be reproduced; do not add new ones. |
+
+Range-runner selection detail: files are matched by `/^\d{3}_.*\.sql$/`, the
+number is `Number(name.slice(0, 3))`, and ties sort by full filename. Two
+files can therefore share a number and both apply, in filename order; see
+"Number 091" in `docs/db.md`.
+
+## Writing a migration
+
+1. Take the next free number after the current head (`ls src/database/migrations | sort | tail`), never a gap and never an existing number.
+2. Header comment: number, purpose, date, and any ordering constraint (depends on table X from NNN; must run outside a transaction; needs a data backfill).
+3. Prefer idempotent DDL (`IF NOT EXISTS`, `DROP ... IF EXISTS`, `CREATE OR REPLACE VIEW`) so a half-applied batch can be re-run.
+4. CHECK-constraint value sets (`intervention_actions.action_type`, `session_llm_usage.purpose`, the care-comms role checks) are re-created wholesale by each migration that extends them. The rollback restores the previous full set and will refuse while rows hold the newer values; say so in the header.
+5. Write the rollback in the same commit. If the migration destroys data (drops a table or column that holds participant data), do not invent a restore: add the migration to the irreversible table in `docs/db.md` with the reason, and rely on the pre-migration backup.
+6. Prove both directions on a scratch database before committing:
+
+   ```sh
+   export PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH   # node is not on PATH by default
+   PGPASSWORD=<local postgres password> createdb -h localhost -U postgres ai_therapist_scratch
+   DATABASE_URL=postgresql://postgres:<pw>@localhost:5432/ai_therapist_scratch DATABASE_SSL=false \
+     bash scripts/redteam-db-setup.sh
+   psql -h localhost -U postgres -d ai_therapist_scratch -v ON_ERROR_STOP=1 -f src/database/migrations/NNN_x_rollback.sql
+   psql -h localhost -U postgres -d ai_therapist_scratch -v ON_ERROR_STOP=1 -f src/database/migrations/NNN_x.sql
+   dropdb -h localhost -U postgres ai_therapist_scratch
+   ```
+
+   The scratch database can live on the shared local Postgres container; never
+   point `DATABASE_URL` at `ai_therapist` (stage) or prod for this.
+7. Update `docs/db.md` (schema notes, head number) and, if the change adds a
+   filtered column or an FK, check it against `docs/db-index-audit.md`.
+
+## Applying to stage and prod
+
+Both environments are migrated by hand; CI never runs migrations against a
+real database. The exact commands, the backup-first convention and the
+verification steps are in `docs/db.md`, "Migrations". Short form:
+
+1. `pg_dump | gzip` into `~/backups/` named for the range about to be applied, `gunzip -t` it.
+2. Apply the forward file(s) with the environment's psql command.
+3. Verify the expected objects exist (`\d table`, a count, a smoke call).
+4. Log the range and backup path in Flightdeck.
+
+Rolling back is the same sequence with the `_rollback.sql` file(s), applied
+in reverse numeric order, with a fresh backup first.
+
+## Historical note: 003
+
+Migration 003 (`003_normalize_schema.sql`) replaced the original single
+`conversation_logs` table with `therapy_sessions`, `session_configurations`,
+`messages` and `user_sessions`. `runMigration.js` / `rollbackMigration.js`
+are its dedicated wrappers. `conversation_logs` itself was dropped by 036 and
+no longer exists in any environment.
