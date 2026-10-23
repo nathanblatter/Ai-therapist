@@ -1,4 +1,4 @@
--- Migration 111: seed the notification email recipient gate (ai-therapist-154).
+-- migration 112: seed the notification email recipient gate (ai-therapist-154).
 -- Date: 2026-10-22
 --
 -- notification.service emails care-team members at their username when it is

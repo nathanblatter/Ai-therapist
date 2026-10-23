@@ -1,4 +1,4 @@
--- Rollback for 111_notification_email_recipient_gate.sql
+-- Rollback for 112_notification_email_recipient_gate.sql
 --
 -- Removes only the seeded row when it still holds the seeded value and has
 -- never been stamped by an admin; an edited row is a real setting and stays.
