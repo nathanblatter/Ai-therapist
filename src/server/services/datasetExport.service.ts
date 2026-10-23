@@ -24,6 +24,7 @@ import {
   getTranscriptsExport,
   getFeedbackCommentsExport,
   getSemanticMetricsExport,
+  getAcousticFeaturesExport,
   type DatasetRow,
 } from '../db/datasetExport.queries.js';
 import { getSurveyResponsesExport, getSurveyAnswersForExport } from '../db/qualtricsResponses.queries.js';
@@ -303,6 +304,32 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'mean_adjacent_similarity', type: 'float', source: 'derived: AVG(1 - cosine distance) over consecutive embedded turns', values: '~0-1, higher = more topically coherent; empty when <2 embedded turns' },
       { name: 'mean_user_adjacent_similarity', type: 'float', source: 'derived: same, user turns only', notes: 'Participant topical coherence, ignoring assistant turns.' },
       { name: 'first_last_similarity', type: 'float', source: 'derived: 1 - cosine distance between first and last embedded turn', notes: 'Low values suggest within-session topic drift.' },
+    ],
+  },
+  {
+    file: 'acoustic_features.csv',
+    description:
+      'Per-session derived acoustic measures from the participant-only audio track (acousticFeatures.service, migration 095; flag telemetry_acoustic_features). Numeric derivatives only; audio is never exported. Empty until the Phase 2 flag is on.',
+    fetch: getAcousticFeaturesExport,
+    columns: [
+      { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Empty for anonymous sessions.' },
+      { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
+      { name: 'status', type: 'string', source: 'session_acoustic_features.status', values: 'complete, failed', notes: 'failed rows carry empty measures; kept so extraction coverage is auditable.' },
+      { name: 'computed_at', type: 'timestamp', source: 'session_acoustic_features.computed_at' },
+      { name: 'duration_ms', type: 'float', source: 'features.duration_ms', notes: 'Participant-track length analysed.' },
+      { name: 'sample_rate', type: 'int', source: 'features.sample_rate' },
+      { name: 'frames', type: 'int', source: 'features.frames', notes: 'Analysis frames (fixed hop).' },
+      { name: 'rms_mean', type: 'float', source: 'features.rms_mean', notes: 'Mean frame RMS energy (loudness proxy).' },
+      { name: 'rms_sd', type: 'float', source: 'features.rms_sd' },
+      { name: 'silence_ratio', type: 'float', source: 'features.silence_ratio', values: '0-1' },
+      { name: 'pause_count', type: 'int', source: 'features.pause_count', notes: 'Silence runs above the pause threshold.' },
+      { name: 'pause_mean_ms', type: 'float', source: 'features.pause_mean_ms' },
+      { name: 'speech_segments_per_min', type: 'float', source: 'features.speech_segments_per_min', notes: 'Speaking-rate proxy.' },
+      { name: 'voiced_fraction', type: 'float', source: 'features.voiced_fraction', values: '0-1' },
+      { name: 'f0_median_hz', type: 'float', source: 'features.f0_median_hz', notes: 'Autocorrelation pitch over voiced frames; empty when no voiced frames.' },
+      { name: 'f0_iqr_hz', type: 'float', source: 'features.f0_iqr_hz' },
+      { name: 'zcr_mean', type: 'float', source: 'features.zcr_mean', notes: 'Zero-crossing rate (spectral proxy).' },
+      { name: 'zcr_sd', type: 'float', source: 'features.zcr_sd' },
     ],
   },
 ];
