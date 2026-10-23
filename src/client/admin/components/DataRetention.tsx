@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle, Trash2, Clock, Shield, RefreshCw, AlertTriangle } from 'react-feather';
 import { formatDateTime } from '../../shared/format';
+import { getJson, postJson } from '../../shared/http';
 
 interface RetentionSettings {
   enabled: boolean;
@@ -64,15 +65,12 @@ export default function DataRetention() {
     setError(null);
 
     try {
-      const response = await fetch('/admin/api/content-retention');
-      if (!response.ok) throw new Error('Failed to fetch retention data');
-
-      const data = await response.json() as {
+      const data = await getJson<{
         settings: RetentionSettings;
         stats: RetentionStats;
         recent_wipes?: WipeRecord[];
         scheduler: SchedulerInfo;
-      };
+      }>('/admin/api/content-retention', { fallback: 'Failed to fetch retention data' });
       setSettings(data.settings);
       setStats(data.stats);
       setRecentWipes(data.recent_wipes || []);
@@ -91,16 +89,7 @@ export default function DataRetention() {
     setSaveSuccess(null);
 
     try {
-      const response = await fetch('/admin/api/content-retention', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings })
-      });
-
-      if (!response.ok) {
-        const data = await response.json() as { error?: string };
-        throw new Error(data.error || 'Failed to save settings');
-      }
+      await postJson('/admin/api/content-retention', { settings }, { method: 'PUT', fallback: 'Failed to save settings' });
 
       setSaveSuccess('Settings saved successfully!');
       setHasChanges(false);
@@ -126,16 +115,7 @@ export default function DataRetention() {
     setError(null);
 
     try {
-      const response = await fetch('/admin/api/content-retention/wipe', {
-        method: 'POST'
-      });
-
-      if (!response.ok) {
-        const data = await response.json() as { error?: string };
-        throw new Error(data.error || 'Wipe failed');
-      }
-
-      const data = await response.json() as { messagesWiped: number; messagesSkipped: number };
+      const data = await postJson<{ messagesWiped: number; messagesSkipped: number }>('/admin/api/content-retention/wipe', undefined, { fallback: 'Wipe failed' });
       setSaveSuccess(`Wipe completed: ${data.messagesWiped} messages wiped, ${data.messagesSkipped} skipped`);
       await fetchData();
     } catch (err: unknown) {
@@ -521,18 +501,17 @@ function RecordingRetentionCard() {
   const fetchData = async () => {
     setErr(null);
     try {
-      const [sRes, lRes] = await Promise.all([
-        fetch('/admin/api/data-retention'),
-        fetch('/admin/api/data-retention/log?limit=25'),
+      // The deletion log is best-effort: a failure there keeps the stale list.
+      const [s, l] = await Promise.all([
+        getJson<{ settings: DataRetentionSettings; scheduler: { running: boolean; nextScheduledRun: string | null } }>(
+          '/admin/api/data-retention',
+          { fallback: 'Failed to load data retention settings' }
+        ),
+        getJson<{ entries: DeletionLogEntry[] }>('/admin/api/data-retention/log?limit=25').catch(() => null),
       ]);
-      if (!sRes.ok) throw new Error('Failed to load data retention settings');
-      const s = await sRes.json() as { settings: DataRetentionSettings; scheduler: { running: boolean; nextScheduledRun: string | null } };
       setSettings(s.settings);
       setScheduler(s.scheduler);
-      if (lRes.ok) {
-        const l = await lRes.json() as { entries: DeletionLogEntry[] };
-        setLog(l.entries);
-      }
+      if (l) setLog(l.entries);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -544,13 +523,7 @@ function RecordingRetentionCard() {
     if (!settings) return;
     setBusy(true); setErr(null); setMsg(null);
     try {
-      const res = await fetch('/admin/api/data-retention', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }),
-      });
-      if (!res.ok) {
-        const d = await res.json() as { error?: string };
-        throw new Error(d.error || 'Save failed');
-      }
+      await postJson('/admin/api/data-retention', { settings }, { method: 'PUT', fallback: 'Save failed' });
       setMsg('Retention settings saved.');
       await fetchData();
     } catch (e) {
@@ -562,9 +535,7 @@ function RecordingRetentionCard() {
     if (!window.confirm('Run retention enforcement now? This permanently deletes recordings past the window.')) return;
     setBusy(true); setErr(null); setMsg(null);
     try {
-      const res = await fetch('/admin/api/data-retention/run', { method: 'POST' });
-      if (!res.ok) throw new Error('Run failed');
-      const d = await res.json() as { recordingsDeleted: number; graceDeleted: number; failures: number };
+      const d = await postJson<{ recordingsDeleted: number; graceDeleted: number; failures: number }>('/admin/api/data-retention/run', undefined, { fallback: 'Run failed' });
       setMsg(`Run complete: ${d.recordingsDeleted} aged-out, ${d.graceDeleted} grace, ${d.failures} failures.`);
       await fetchData();
     } catch (e) {

@@ -8,6 +8,7 @@ import { useState, type FormEvent } from 'react';
 import { Plus, Edit2, XCircle, RefreshCw, Check } from 'react-feather';
 import Panel from './ui/Panel';
 import useAdminFetch from '../hooks/useAdminFetch';
+import { requestJson, HttpError } from '../../shared/http';
 import { formatDate } from '../../shared/format';
 import { PRACTICE_FREQUENCIES, PRACTICE_KINDS, PRACTICE_TITLE_MAX, PRACTICE_DESCRIPTION_MAX, PRACTICE_CANCEL_REASON_MAX } from '../../../shared/practice';
 import type { PracticeAssignmentListRow } from '../../../server/db/practiceAssignments.queries';
@@ -106,27 +107,17 @@ export default function HomeworkPanel({ clientId }: { clientId: number }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const call = async (url: string, method: string, body?: unknown): Promise<boolean> => {
+  const call = async (url: string, method: 'POST' | 'PATCH', body?: unknown): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null) as { error?: string } | null;
-        setError(data?.error ?? `Request failed (${res.status})`);
-        return false;
-      }
+      await requestJson(url, { method, body });
       list.refetch();
       setMode({ kind: 'idle' });
       setCancelReason('');
       return true;
-    } catch {
-      setError('Request failed');
+    } catch (err: unknown) {
+      setError(err instanceof HttpError ? err.message : 'Request failed');
       return false;
     } finally {
       setBusy(false);

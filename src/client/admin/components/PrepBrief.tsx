@@ -8,6 +8,7 @@
 // summaries). Sections render purely from field presence, so each tier only
 // ever shows what the server sent it.
 import { useState, useEffect, useCallback } from 'react';
+import { getJson } from '../../shared/http';
 import { ChevronDown, ChevronRight, AlertTriangle, Activity, CheckCircle, Circle, FileText, Shield } from 'react-feather';
 
 interface PrepAssignment {
@@ -107,12 +108,7 @@ export default function PrepBrief({ userId }: { userId: number }) {
     setLoading(true);
     setFailed(false);
     try {
-      const res = await fetch(`/admin/api/users/${userId}/prep`);
-      if (res.ok) {
-        setDigest(await res.json() as PrepDigest);
-      } else {
-        setFailed(true);
-      }
+      setDigest(await getJson<PrepDigest>(`/admin/api/users/${userId}/prep`));
     } catch {
       setFailed(true);
     } finally {

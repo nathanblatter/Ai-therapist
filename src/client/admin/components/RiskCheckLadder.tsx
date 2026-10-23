@@ -12,6 +12,7 @@
 // no `answer` text — the server drops it (tierScrub RISK_CHECK_STEP_SUMMARY_
 // FIELDS), so the component simply renders what it is given.
 import { useState, useEffect, useCallback } from 'react';
+import { getJson } from '../../shared/http';
 import { ChevronDown, ChevronRight, CheckSquare } from 'react-feather';
 
 export type RiskBand = 'none' | 'low' | 'moderate' | 'high' | 'imminent';
@@ -148,15 +149,10 @@ export default function RiskCheckLadder(props: Props) {
   const fetchLadders = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(url, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json() as { ladder?: Ladder; ladders?: Ladder[] };
-        const list = data.ladders ?? (data.ladder ? [data.ladder] : []);
-        // A session with no ladder still returns an (empty) summary object.
-        setLadders(list.filter(l => l.steps.length > 0));
-      } else {
-        setLadders([]);
-      }
+      const data = await getJson<{ ladder?: Ladder; ladders?: Ladder[] }>(url);
+      const list = data.ladders ?? (data.ladder ? [data.ladder] : []);
+      // A session with no ladder still returns an (empty) summary object.
+      setLadders(list.filter(l => l.steps.length > 0));
     } catch {
       setLadders([]);
     } finally {

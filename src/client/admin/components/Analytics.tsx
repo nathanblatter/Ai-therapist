@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getJson } from "../../shared/http";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { PieLabelRenderProps } from "recharts";
 import type { TooltipContentProps } from "recharts";
@@ -525,10 +526,7 @@ export default function Analytics() {
         if (filters.endedBy.length > 0) params.append('endedBy', filters.endedBy.join(','));
         if (filters.crisisFlagged) params.append('crisisFlagged', filters.crisisFlagged);
 
-        const response = await fetch(`/admin/api/analytics?${params}`);
-        if (!response.ok) throw new Error('Failed to fetch analytics');
-
-        const data: AnalyticsData = await response.json();
+        const data = await getJson<AnalyticsData>(`/admin/api/analytics?${params}`, { fallback: 'Failed to fetch analytics' });
         setAnalytics(data);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Unknown error');

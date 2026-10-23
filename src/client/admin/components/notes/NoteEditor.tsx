@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, ArrowLeft, Check, Edit3, Trash2 } from "react-feather";
 import type { CareNote, CareNoteType, CaseNoteKind } from "./NotesPanel";
+import { deleteJson, postJson } from "../../../shared/http";
 
 const CASE_KINDS: { value: CaseNoteKind; label: string }[] = [
   { value: "contact", label: "Contact" },
@@ -76,31 +77,24 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
     setSaveState("saving");
     setError(null);
     try {
-      const res = noteId === null
-        ? await fetch(`/admin/api/users/${clientId}/notes`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
+      const data = noteId === null
+        ? await postJson<{ note: CareNote }>(
+            `/admin/api/users/${clientId}/notes`,
+            {
               note_type: noteType,
               case_note_kind: noteType === "case" ? caseKind : undefined,
               content,
-            }),
-          })
-        : await fetch(`/admin/api/notes/${noteId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
+            },
+            { fallback: "Failed to save the draft" }
+          )
+        : await postJson<{ note: CareNote }>(
+            `/admin/api/notes/${noteId}`,
+            {
               content,
               case_note_kind: noteType === "case" ? caseKind : undefined,
-            }),
-          });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to save the draft");
-      }
-      const data = await res.json();
+            },
+            { method: "PUT", fallback: "Failed to save the draft" }
+          );
       const saved: CareNote = data.note;
       setNoteId(saved.note_id);
       setSaveState("saved");
@@ -143,12 +137,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
         if (!saved) return;
         id = saved.note_id;
       }
-      const res = await fetch(`/admin/api/notes/${id}/sign`, { method: "POST", credentials: "include" });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to sign the note");
-      }
-      const data = await res.json();
+      const data = await postJson<{ note: CareNote }>(`/admin/api/notes/${id}/sign`, undefined, { fallback: "Failed to sign the note" });
       onSaved?.(data.note);
       onDone();
     } catch (err: unknown) {
@@ -167,11 +156,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/admin/api/notes/${noteId}`, { method: "DELETE", credentials: "include" });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to delete the draft");
-      }
+      await deleteJson(`/admin/api/notes/${noteId}`, undefined, { fallback: "Failed to delete the draft" });
       onSaved?.(null);
       onDone();
     } catch (err: unknown) {

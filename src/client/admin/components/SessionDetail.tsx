@@ -8,6 +8,7 @@ import RiskCheckLadder from "./RiskCheckLadder";
 import { useSocket } from '../hooks/useSocket';
 import useAuth from '../hooks/useAuth';
 import { toast } from "../../shared/components/Toast";
+import { deleteJson, getJson, postJson, HttpError } from "../../shared/http";
 import { formatDateTime } from "../../shared/format";
 import { severityBadgeClass } from "../../shared/severity";
 
@@ -23,6 +24,21 @@ interface Message {
   content_redacted?: string;
   /** Server flag: raw content wiped by retention, `message` is the redacted copy. */
   content_wiped?: boolean;
+}
+
+interface RedactionStatus {
+  status: 'complete' | 'partial' | 'pending' | 'no_content';
+  total: number;
+  redacted: number;
+  pending: number;
+}
+
+/** GET /admin/api/sessions/:id */
+interface SessionBundle {
+  session: Session;
+  messages: Message[];
+  feedback?: SessionFeedback | null;
+  cost?: SessionCost | null;
 }
 
 interface Session {
@@ -141,12 +157,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [flagNotes, setFlagNotes] = useState('');
   const [flagging, setFlagging] = useState(false);
   const [recording, setRecording] = useState<{ url: string; durationMs: number | null; participantTrack: { url: string } | null } | null>(null);
-  const [redactionStatus, setRedactionStatus] = useState<{
-    status: 'complete' | 'partial' | 'pending' | 'no_content';
-    total: number;
-    redacted: number;
-    pending: number;
-  } | null>(null);
+  const [redactionStatus, setRedactionStatus] = useState<RedactionStatus | null>(null);
   const [feedback, setFeedback] = useState<SessionFeedback | null>(null);
   const [cost, setCost] = useState<SessionCost | null>(null);
 
@@ -158,11 +169,10 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
   const fetchRedactionStatus = async () => {
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/redaction-status`);
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await getJson<RedactionStatus>(`/admin/api/sessions/${sessionId}/redaction-status`);
       setRedactionStatus({ status: data.status, total: data.total, redacted: data.redacted, pending: data.pending });
     } catch (err) {
+      if (err instanceof HttpError) return;
       console.error('Failed to fetch redaction status:', err);
     }
   };
@@ -173,10 +183,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       setError(null);
 
       try {
-        const response = await fetch(`/admin/api/sessions/${sessionId}`);
-        if (!response.ok) throw new Error('Failed to fetch session details');
-
-        const data = await response.json();
+        const data = await getJson<SessionBundle>(`/admin/api/sessions/${sessionId}`, { fallback: 'Failed to fetch session details' });
         setMessages(data.messages);
         setSession(data.session);
         setFeedback(data.feedback ?? null);
@@ -203,9 +210,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     let cancelled = false;
     const fetchRecording = async () => {
       try {
-        const res = await fetch(`/admin/api/sessions/${sessionId}/recording-info`);
-        if (!res.ok) return;
-        const info = await res.json();
+        const info = await getJson<{ available: boolean; url: string; durationMs: number | null; participantTrack?: { url: string } | null }>(
+          `/admin/api/sessions/${sessionId}/recording-info`
+        );
         if (!cancelled) {
           setRecording(info.available ? { url: info.url, durationMs: info.durationMs, participantTrack: info.participantTrack ?? null } : null);
         }
@@ -269,8 +276,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     const handleSessionRedactionComplete = (data: { sessionId: string; count: number }) => {
       if (data.sessionId !== sessionId) return;
       console.log(`Session redaction completed (${data.count} messages); refreshing`);
-      fetch(`/admin/api/sessions/${sessionId}`)
-        .then(r => r.ok ? r.json() : null)
+      getJson<SessionBundle>(`/admin/api/sessions/${sessionId}`)
         .then(d => { if (d?.messages) setMessages(d.messages); })
         .catch(err => console.error('Failed to refresh after redaction:', err));
       fetchRedactionStatus();
@@ -403,18 +409,11 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     }
 
     try {
-      const response = await fetch(`/admin/api/messages/${messageId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: editedContent })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to update message');
-      }
-
-      const { message: updatedMessage } = await response.json();
+      const { message: updatedMessage } = await postJson<{ message: Message }>(
+        `/admin/api/messages/${messageId}`,
+        { content: editedContent },
+        { method: 'PUT', fallback: 'Failed to update message' }
+      );
 
       // Update local state - server returns message in same format as initial fetch
       setMessages(messages.map(msg =>
@@ -437,14 +436,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     }
 
     try {
-      const response = await fetch(`/admin/api/messages/${messageId}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete message');
-      }
+      await deleteJson(`/admin/api/messages/${messageId}`, undefined, { fallback: 'Failed to delete message' });
 
       // Remove from local state
       setMessages(messages.filter(msg => msg.message_id !== messageId));
@@ -511,22 +503,15 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     setUpdatingInstructions(true);
 
     try {
-      const response = await fetch(`/admin/api/sessions/${sessionId}/update-instructions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ instructions: newInstructions })
-      });
-
-      if (response.ok) {
-        toast.success('Instructions updated successfully!');
-        setShowInstructionsModal(false);
-        setNewInstructions('');
-      } else {
-        const errorData = await response.json();
-        toast.error(`Failed to update instructions: ${errorData.error}`);
-      }
+      await postJson(`/admin/api/sessions/${sessionId}/update-instructions`, { instructions: newInstructions });
+      toast.success('Instructions updated successfully!');
+      setShowInstructionsModal(false);
+      setNewInstructions('');
     } catch (error: unknown) {
+      if (error instanceof HttpError) {
+        toast.error(`Failed to update instructions: ${error.message}`);
+        return;
+      }
       console.error('Error updating instructions:', error);
       toast.error('Error updating instructions');
     } finally {
@@ -543,35 +528,27 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     setFlagging(true);
 
     try {
-      const response = await fetch(`/admin/api/sessions/${sessionId}/crisis/flag`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          severity: flagSeverity,
-          notes: flagNotes
-        })
+      const data = await postJson<FlagCrisisResponse>(`/admin/api/sessions/${sessionId}/crisis/flag`, {
+        severity: flagSeverity,
+        notes: flagNotes
       });
-
-      if (response.ok) {
-        const data: FlagCrisisResponse = await response.json();
-        // Update local session state
-        setSession(prev => prev ? ({
-          ...prev,
-          crisis_flagged: true,
-          crisis_severity: data.severity,
-          crisis_risk_score: data.riskScore,
-          crisis_flagged_at: data.flaggedAt,
-          crisis_flagged_by: data.flaggedBy
-        }) : prev);
-        setShowFlagModal(false);
-        setFlagNotes('');
-        toast.success(`Session flagged as ${flagSeverity} risk`);
-      } else {
-        const errorData = await response.json();
-        toast.error(`Failed to flag session: ${errorData.error}`);
-      }
+      // Update local session state
+      setSession(prev => prev ? ({
+        ...prev,
+        crisis_flagged: true,
+        crisis_severity: data.severity,
+        crisis_risk_score: data.riskScore,
+        crisis_flagged_at: data.flaggedAt,
+        crisis_flagged_by: data.flaggedBy
+      }) : prev);
+      setShowFlagModal(false);
+      setFlagNotes('');
+      toast.success(`Session flagged as ${flagSeverity} risk`);
     } catch (error: unknown) {
+      if (error instanceof HttpError) {
+        toast.error(`Failed to flag session: ${error.message}`);
+        return;
+      }
       console.error('Error flagging crisis:', error);
       toast.error('Error flagging session');
     } finally {
@@ -587,18 +564,13 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       return;
     }
     try {
-      const response = await fetch(`/admin/api/sessions/${sessionId}/crisis/wind-down`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      });
-      const data = await response.json();
-      if (response.ok) {
-        toast.success(data.message || 'Wind-down initiated');
-      } else {
-        toast.error(`Failed to start wind-down: ${data.error}`);
-      }
+      const data = await postJson<{ message?: string }>(`/admin/api/sessions/${sessionId}/crisis/wind-down`);
+      toast.success(data.message || 'Wind-down initiated');
     } catch (error: unknown) {
+      if (error instanceof HttpError) {
+        toast.error(`Failed to start wind-down: ${error.message}`);
+        return;
+      }
       console.error('Error initiating crisis wind-down:', error);
       toast.error('Error initiating crisis wind-down');
     }
@@ -612,29 +584,22 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     }
 
     try {
-      const response = await fetch(`/admin/api/sessions/${sessionId}/crisis/flag`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ notes: 'Manually unflagged via admin panel' })
-      });
-
-      if (response.ok) {
-        // Update local session state
-        setSession(prev => prev ? ({
-          ...prev,
-          crisis_flagged: false,
-          crisis_severity: undefined,
-          crisis_risk_score: null,
-          crisis_flagged_at: null,
-          crisis_flagged_by: null
-        }) : prev);
-        toast.success('Crisis flag removed');
-      } else {
-        const errorData = await response.json();
-        toast.error(`Failed to unflag session: ${errorData.error}`);
-      }
+      await deleteJson(`/admin/api/sessions/${sessionId}/crisis/flag`, { notes: 'Manually unflagged via admin panel' });
+      // Update local session state
+      setSession(prev => prev ? ({
+        ...prev,
+        crisis_flagged: false,
+        crisis_severity: undefined,
+        crisis_risk_score: null,
+        crisis_flagged_at: null,
+        crisis_flagged_by: null
+      }) : prev);
+      toast.success('Crisis flag removed');
     } catch (error: unknown) {
+      if (error instanceof HttpError) {
+        toast.error(`Failed to unflag session: ${error.message}`);
+        return;
+      }
       console.error('Error unflagging crisis:', error);
       toast.error('Error unflagging session');
     }

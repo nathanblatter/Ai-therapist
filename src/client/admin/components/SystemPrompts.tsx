@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle, Eye, Code } from 'react-feather';
+import { getJson, postJson } from '../../shared/http';
 // Canonical modality-preset shape lives in the server helpers (type-only
 // import, erased at build time).
 import type { ModalityPreset } from '../../../server/utils/sessionHelpers';
@@ -54,10 +55,7 @@ export default function SystemPrompts() {
     setError(null);
 
     try {
-      const response = await fetch('/admin/api/config');
-      if (!response.ok) throw new Error('Failed to fetch configuration');
-
-      const data = await response.json() as {
+      const data = await getJson<{
         system_prompts?: {
           value: PromptsMap & {
             modality_presets?: Record<string, ModalityPreset>;
@@ -65,7 +63,7 @@ export default function SystemPrompts() {
           };
         };
         languages?: { value: { languages: Language[] } };
-      };
+      }>('/admin/api/config', { fallback: 'Failed to fetch configuration' });
 
       // Modality presets: saved config wins, otherwise the built-in defaults.
       const savedPresets = data.system_prompts?.value?.modality_presets;
@@ -73,11 +71,8 @@ export default function SystemPrompts() {
         setModalityPresets(savedPresets);
       } else {
         try {
-          const defaultsRes = await fetch('/admin/api/config/modality-defaults');
-          if (defaultsRes.ok) {
-            const defaults = await defaultsRes.json() as { presets: Record<string, ModalityPreset> };
-            setModalityPresets(defaults.presets);
-          }
+          const defaults = await getJson<{ presets: Record<string, ModalityPreset> }>('/admin/api/config/modality-defaults');
+          setModalityPresets(defaults.presets);
         } catch { /* modality editing just starts empty */ }
       }
       setActiveModality(data.system_prompts?.value?.active_modality || 'none');
@@ -145,22 +140,13 @@ export default function SystemPrompts() {
     setSaveSuccess(null);
 
     try {
-      const response = await fetch('/admin/api/config/system_prompts', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          value: {
-            ...prompts,
-            modality_presets: modalityPresets,
-            active_modality: activeModality === 'none' ? null : activeModality,
-          },
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json() as { error?: string };
-        throw new Error(errorData.error || 'Failed to save system prompts');
-      }
+      await postJson('/admin/api/config/system_prompts', {
+        value: {
+          ...prompts,
+          modality_presets: modalityPresets,
+          active_modality: activeModality === 'none' ? null : activeModality,
+        },
+      }, { method: 'PUT', fallback: 'Failed to save system prompts' });
 
       setSaveSuccess('System prompts saved successfully!');
       setHasChanges(false);
@@ -187,12 +173,10 @@ export default function SystemPrompts() {
   const fetchPreview = async () => {
     setPreviewLoading(true);
     try {
-      const response = await fetch(
-        `/admin/api/config/system-prompt-preview?sessionType=${activeTab}&language=${previewLanguage}`
+      const data = await getJson<{ prompt: string }>(
+        `/admin/api/config/system-prompt-preview?sessionType=${activeTab}&language=${previewLanguage}`,
+        { fallback: 'Failed to load preview' }
       );
-      if (!response.ok) throw new Error('Failed to load preview');
-
-      const data = await response.json() as { prompt: string };
       setPreviewContent(data.prompt);
     } catch (err: unknown) {
       setPreviewContent(`Error loading preview: ${err instanceof Error ? err.message : String(err)}`);

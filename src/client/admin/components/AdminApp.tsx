@@ -10,6 +10,7 @@ import {
   setAdminUsageView,
 } from "../utils/adminUsageTelemetry";
 import ToastContainer from "../../shared/components/Toast";
+import { getJson } from "../../shared/http";
 import DemoSwitcher from "../../shared/components/DemoSwitcher";
 import ErrorBoundary from "../../shared/components/ErrorBoundary";
 import BugReport from "../../main/components/BugReport";
@@ -119,8 +120,7 @@ export default function AdminApp() {
 
   useEffect(() => {
     installAdminUsageTracking();
-    fetch('/api/config/features')
-      .then(r => (r.ok ? r.json() : null))
+    getJson<{ telemetry_admin_usage?: boolean }>('/api/config/features')
       .then(data => {
         configureAdminUsageTelemetry(data?.telemetry_admin_usage === true);
         // Re-report the view that was active before the flag arrived (the
@@ -148,8 +148,7 @@ export default function AdminApp() {
   // Fetch the deployment mode once; anything but an explicit 'clinical' keeps
   // the research default (missing row, demo fixtures, fetch failure).
   useEffect(() => {
-    fetch('/admin/api/config/deployment_mode', { credentials: 'include' })
-      .then(r => (r.ok ? r.json() : null))
+    getJson<{ value?: { mode?: string } }>('/admin/api/config/deployment_mode')
       .then(data => {
         if (data?.value?.mode === 'clinical') setDeploymentMode('clinical');
       })
@@ -170,8 +169,7 @@ export default function AdminApp() {
 
   // Fetch AE deadline counts once on mount for the nav badge.
   useEffect(() => {
-    fetch('/admin/api/adverse-events?status=draft', { credentials: 'include' })
-      .then(r => (r.ok ? r.json() : null))
+    getJson<{ counts?: { overdue?: number; due_soon?: number } }>('/admin/api/adverse-events?status=draft')
       .then(data => {
         if (data?.counts) setAeReminderCount((data.counts.overdue ?? 0) + (data.counts.due_soon ?? 0));
       })
@@ -182,12 +180,10 @@ export default function AdminApp() {
   // on view changes so acting on items updates the counts without a reload.
   useEffect(() => {
     if (!isCareTeam) return;
-    fetch('/admin/api/escalations?count_only=1', { credentials: 'include' })
-      .then(r => (r.ok ? r.json() : null))
+    getJson<{ count?: number }>('/admin/api/escalations?count_only=1')
       .then(data => { if (typeof data?.count === 'number') setEscalationCount(data.count); })
       .catch(() => { /* nav badge is best-effort */ });
-    fetch('/api/admin/messaging/inbox', { credentials: 'include' })
-      .then(r => (r.ok ? r.json() : null))
+    getJson<{ unread_total?: number }>('/api/admin/messaging/inbox')
       .then(data => { if (typeof data?.unread_total === 'number') setMessagingUnread(data.unread_total); })
       .catch(() => { /* nav badge is best-effort */ });
   }, [isCareTeam, currentView]);
@@ -200,14 +196,12 @@ export default function AdminApp() {
     const cache = usernameCacheRef.current;
     if (!cache.has(clientId)) {
       try {
-        const r = await fetch('/admin/api/caseload', { credentials: 'include' });
-        if (r.ok) {
-          const data = await r.json();
-          for (const row of [...(data.clients ?? []), ...(data.assignments ?? [])]) {
-            const id = Number(row.userid ?? row.client_id);
-            const name = row.username ?? row.client_username;
-            if (Number.isInteger(id) && typeof name === 'string') cache.set(id, name);
-          }
+        type CaseloadRow = { userid?: number; client_id?: number; username?: string; client_username?: string };
+        const data = await getJson<{ clients?: CaseloadRow[]; assignments?: CaseloadRow[] }>('/admin/api/caseload');
+        for (const row of [...(data.clients ?? []), ...(data.assignments ?? [])]) {
+          const id = Number(row.userid ?? row.client_id);
+          const name = row.username ?? row.client_username;
+          if (Number.isInteger(id) && typeof name === 'string') cache.set(id, name);
         }
       } catch { /* fall through to the id-only label */ }
     }

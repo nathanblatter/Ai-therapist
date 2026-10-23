@@ -4,6 +4,7 @@
 // with the therapist/researcher review queue. Summaries tier by construction:
 // the form carries only the reporter's own narrative — never transcript text.
 import { useEffect, useState } from 'react';
+import { getJson, postJson, HttpError } from '../../shared/http';
 import { AlertTriangle, X } from 'react-feather';
 
 interface RosterClientLite {
@@ -47,9 +48,7 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/admin/api/caseworker/roster', { credentials: 'include' });
-        if (!res.ok) throw new Error(`roster load failed (${res.status})`);
-        const data: RosterResponse = await res.json();
+        const data = await getJson<RosterResponse>('/admin/api/caseworker/roster');
         const list = data.clients ?? data.members?.flatMap((m) => m.clients) ?? [];
         if (!cancelled) setClients(list);
       } catch {
@@ -67,27 +66,18 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
     setError(null);
     try {
       const actionLines = actions.split('\n').map((l) => l.trim()).filter((l) => l !== '');
-      const res = await fetch(`/admin/api/clients/${target}/adverse-events`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          summary: summary.trim(),
-          severity,
-          occurred_at: new Date(occurredAt).toISOString(),
-          actions_taken: actionLines,
-        }),
+      const report = await postJson<{ report_id: number }>(`/admin/api/clients/${target}/adverse-events`, {
+        summary: summary.trim(),
+        severity,
+        occurred_at: new Date(occurredAt).toISOString(),
+        actions_taken: actionLines,
       });
-      if (res.status === 404) throw new Error('Client not found on your caseload.');
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? `Filing failed (${res.status})`);
-      }
-      const report = await res.json();
       onFiled?.(report.report_id);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Filing failed.');
+      if (e instanceof HttpError && e.status === 404) setError('Client not found on your caseload.');
+      else if (e instanceof HttpError && !e.body?.error) setError(`Filing failed (${e.status})`);
+      else setError(e instanceof Error ? e.message : 'Filing failed.');
     } finally {
       setSubmitting(false);
     }

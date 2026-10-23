@@ -6,6 +6,7 @@
 // transcript and, for voice runs, the playable recording. Self-fetching;
 // EvalDriftPanel pattern.
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { getJson, postJson } from '../../shared/http';
 import { RefreshCw, CheckCircle, XCircle, ExternalLink, Cpu, Play, Clock, Save } from 'react-feather';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { toast } from '../../shared/components/Toast';
@@ -88,17 +89,15 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch('/admin/api/harness/runs', { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error('Failed to fetch simulation runs'); return r.json(); })
+    getJson<{ runs?: HarnessRun[] }>('/admin/api/harness/runs', { fallback: 'Failed to fetch simulation runs' })
       .then(data => { setRuns(data.runs ?? []); setError(null); })
       .catch(e => setError(e instanceof Error ? e.message : 'Unknown error'))
       .finally(() => setLoading(false));
   }, []);
 
   const loadStatus = useCallback(() => {
-    fetch('/admin/api/harness/status', { credentials: 'include' })
-      .then(r => (r.ok ? r.json() : null))
-      .then((s: RunnerStatus | null) => {
+    getJson<RunnerStatus>('/admin/api/harness/status')
+      .then(s => {
         if (!s) return;
         setStatus(s);
         if (s.schedule) setSchedule(prev => (savingSchedule ? prev : s.schedule!));
@@ -121,15 +120,8 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
 
   const startRun = () => {
     setStarting(true);
-    fetch('/admin/api/harness/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ suite: runSuite, variations: runVariations }),
-    })
-      .then(async r => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.error || 'Failed to start run');
+    postJson('/admin/api/harness/run', { suite: runSuite, variations: runVariations }, { fallback: 'Failed to start run' })
+      .then(() => {
         toast.success(`Started ${runSuite} run`);
         loadStatus();
       })
@@ -139,15 +131,8 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
 
   const saveSchedule = () => {
     setSavingSchedule(true);
-    fetch('/admin/api/harness/schedule', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(schedule),
-    })
-      .then(async r => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.error || 'Failed to save schedule');
+    postJson<{ schedule: HarnessSchedule }>('/admin/api/harness/schedule', schedule, { method: 'PUT', fallback: 'Failed to save schedule' })
+      .then(body => {
         setSchedule(body.schedule);
         toast.success(body.schedule.enabled
           ? `Nightly ${body.schedule.suite} run scheduled for ${String(body.schedule.hour_utc).padStart(2, '0')}:00 UTC`
@@ -160,8 +145,7 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
   useEffect(() => {
     if (selectedId == null) { setResults(null); return; }
     setResultsLoading(true);
-    fetch(`/admin/api/harness/runs/${selectedId}`, { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error('Failed to fetch run detail'); return r.json(); })
+    getJson<{ results?: HarnessScenarioResult[] }>(`/admin/api/harness/runs/${selectedId}`, { fallback: 'Failed to fetch run detail' })
       .then(data => setResults(data.results ?? []))
       .catch(() => setResults([]))
       .finally(() => setResultsLoading(false));

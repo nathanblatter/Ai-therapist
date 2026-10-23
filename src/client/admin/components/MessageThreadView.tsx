@@ -10,6 +10,7 @@
 // Messaging state (60s poll + focus refresh + hidden-tab pause, 409/429 send
 // handling, socket nudges) lives in the shared useThreadMessaging hook.
 import { useEffect, useRef, useState } from 'react';
+import { getJson, postJson, HttpError } from '../../shared/http';
 import { AlertTriangle, ArrowLeft, Lock, MessageSquare, Send } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
 import { useThreadMessaging, type ThreadBase, type ThreadMessageBase } from '../../shared/messaging/useThreadMessaging';
@@ -82,9 +83,11 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
     }
     if (clientId === undefined) return;
     let cancelled = false;
-    fetch(`/api/admin/messaging/clients/${clientId}/threads`, { credentials: 'include' })
-      .then(res => (res.ok ? res.json() : null))
-      .then((data: { threads: AdminThread[] } | null) => {
+    getJson<{ threads: AdminThread[] }>(`/api/admin/messaging/clients/${clientId}/threads`)
+      // A non-2xx resolves as "no thread yet" (the get-or-create offer shows);
+      // only a network failure is reported.
+      .catch((err: unknown) => { if (err instanceof HttpError) return null; throw err; })
+      .then(data => {
         if (cancelled) return;
         const own = data?.threads?.[0] ?? null;
         setResolved(true);
@@ -111,17 +114,7 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
     setCreating(true);
     setResolveError(null);
     try {
-      const res = await fetch('/api/admin/messaging/threads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ client_id: clientId }),
-      });
-      if (!res.ok) {
-        setResolveError('Could not start a conversation with this client.');
-        return;
-      }
-      const data = await res.json() as { thread: AdminThread };
+      const data = await postJson<{ thread: AdminThread }>('/api/admin/messaging/threads', { client_id: clientId });
       upsertThread(data.thread);
       // A brand-new thread has no messages yet; skip the initial load.
       selectThread(data.thread.thread_id, { skipLoad: true });

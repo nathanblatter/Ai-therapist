@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Clock, User, Calendar, RefreshCw, Trash2 } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
+import { deleteJson, getJson } from '../../shared/http';
 import { formatDateTime } from '../../shared/format';
 
 interface SessionCookie {
@@ -35,15 +36,7 @@ export default function UserSessions() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/admin/api/user-sessions', {
-        credentials: 'include'
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch user sessions');
-      }
-
-      const data = await response.json() as UserSession[];
+      const data = await getJson<UserSession[]>('/admin/api/user-sessions', { fallback: 'Failed to fetch user sessions' });
       setSessions(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -58,14 +51,7 @@ export default function UserSessions() {
     }
 
     try {
-      const response = await fetch(`/admin/api/user-sessions/${sid}`, {
-        method: 'DELETE',
-        credentials: 'include'
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete session');
-      }
+      await deleteJson(`/admin/api/user-sessions/${sid}`, undefined, { fallback: 'Failed to delete session' });
 
       // Refresh the sessions list
       fetchSessions();

@@ -11,6 +11,7 @@ import {
 import Panel from './ui/Panel';
 import StatCard from './ui/StatCard';
 import useAdminFetch from '../hooks/useAdminFetch';
+import { postJson } from '../../shared/http';
 import CatchUp from './CatchUp';
 import NotesPanel from './notes/NotesPanel';
 import HomeworkPanel from './HomeworkPanel';
@@ -203,13 +204,7 @@ function StudyParticipationPanel({ userId }: { userId: number }) {
     setBusy(true);
     setSaveError(false);
     try {
-      const res = await fetch(`/admin/api/users/${userId}/study-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ status }),
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      await postJson(`/admin/api/users/${userId}/study-status`, { status });
       statusFetch.refetch();
     } catch {
       setSaveError(true);
@@ -505,17 +500,12 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
   const toggleRiskContext = async () => {
     setRiskBusy(true);
     try {
-      const res = await fetch(`/admin/api/users/${user.userid}/risk-context`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ enabled: !riskShareEnabled }),
-      });
-      if (res.ok) {
-        setRiskShareEnabled(!riskShareEnabled);
-        // Prior-flag visibility follows the toggle — refresh the bundle.
-        if (!profileDenied) profileFetch.refetch();
-      }
+      await postJson(`/admin/api/users/${user.userid}/risk-context`, { enabled: !riskShareEnabled });
+      setRiskShareEnabled(!riskShareEnabled);
+      // Prior-flag visibility follows the toggle — refresh the bundle.
+      if (!profileDenied) profileFetch.refetch();
+    } catch {
+      /* a failed toggle leaves the switch where it was */
     } finally {
       setRiskBusy(false);
     }

@@ -6,6 +6,7 @@
 // event" filing form and renders the drawer read-only (review/sign-off stays
 // therapist+researcher).
 import { useState, useEffect, useCallback } from 'react';
+import { getJson, postJson, requestJson, HttpError } from '../../shared/http';
 import { AlertTriangle, Clock, FileText, Plus, X, Printer } from 'react-feather';
 import AdverseEventFileForm from './AdverseEventFileForm';
 import { formatDateTime } from '../../shared/format';
@@ -86,13 +87,11 @@ export default function AdverseEvents({ role }: AdverseEventsProps = {}) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/admin/api/adverse-events?status=${tab}`, { credentials: 'include' });
-      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-      const data = await res.json();
+      const data = await getJson<{ reports?: Report[]; counts?: Counts }>(`/admin/api/adverse-events?status=${tab}`);
       setReports(data.reports ?? []);
       setCounts(data.counts ?? { draft: 0, submitted: 0, overdue: 0, due_soon: 0 });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load');
+      setError(e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
@@ -101,22 +100,22 @@ export default function AdverseEvents({ role }: AdverseEventsProps = {}) {
   useEffect(() => { load(); }, [load]);
 
   const refreshSelected = async (id: number) => {
-    const res = await fetch(`/admin/api/adverse-events/${id}`, { credentials: 'include' });
-    if (res.ok) setSelected(await res.json());
+    try {
+      setSelected(await getJson<Report>(`/admin/api/adverse-events/${id}`));
+    } catch (e) {
+      // A non-2xx keeps the current drawer contents; a network failure propagates as before.
+      if (!(e instanceof HttpError)) throw e;
+    }
   };
 
   const saveDraft = async (summary: string, dueAt: string) => {
     if (!selected) return;
     setSaving(true);
     try {
-      const res = await fetch(`/admin/api/adverse-events/${selected.report_id}`, {
+      setSelected(await requestJson<Report>(`/admin/api/adverse-events/${selected.report_id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ summary, due_at: new Date(dueAt).toISOString() }),
-      });
-      if (!res.ok) throw new Error('save failed');
-      setSelected(await res.json());
+        body: { summary, due_at: new Date(dueAt).toISOString() },
+      }));
       await load();
     } catch {
       setError('Could not save the draft.');
@@ -129,9 +128,7 @@ export default function AdverseEvents({ role }: AdverseEventsProps = {}) {
     if (action === 'submit' && !confirm('Submit this report? The reporter identity and timestamp become the sign-off of record and edits are frozen.')) return;
     setSaving(true);
     try {
-      const res = await fetch(`/admin/api/adverse-events/${id}/${action}`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error('transition failed');
-      setSelected(await res.json());
+      setSelected(await postJson<Report>(`/admin/api/adverse-events/${id}/${action}`));
       await load();
     } catch {
       setError(`Could not ${action} the report.`);

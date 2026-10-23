@@ -5,6 +5,7 @@
 // publish a new one into either audience. Publishing with an immediate
 // effective date re-consents every participant that audience serves.
 import { useState, useEffect, useCallback } from 'react';
+import { getJson, postJson, HttpError } from '../../shared/http';
 import { CheckCircle, Clock, ChevronDown, ChevronUp } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
 
@@ -63,9 +64,12 @@ export default function ConsentVersions() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/admin/api/consent/versions', { credentials: 'include' });
-      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-      const data = await res.json();
+      const data = await getJson<{
+        versions?: Version[];
+        activeVersions?: { research?: string | null; clinical?: string | null };
+        activeVersion?: string | null;
+        audienceInEffect?: string;
+      }>('/admin/api/consent/versions');
       setVersions(data.versions ?? []);
       setActiveVersions({
         research: data.activeVersions?.research ?? data.activeVersion ?? null,
@@ -73,7 +77,7 @@ export default function ConsentVersions() {
       });
       setAudienceInEffect(data.audienceInEffect === 'clinical' ? 'clinical' : 'research');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load');
+      setError(e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
@@ -101,26 +105,17 @@ export default function ConsentVersions() {
     setPublishing(true);
     setError(null);
     try {
-      const res = await fetch('/admin/api/consent/versions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          version: newVersion.trim(),
-          body: newBody,
-          audience: tab,
-          ...(effectiveAt ? { effectiveAt: new Date(effectiveAt).toISOString() } : {}),
-        }),
+      await postJson('/admin/api/consent/versions', {
+        version: newVersion.trim(),
+        body: newBody,
+        audience: tab,
+        ...(effectiveAt ? { effectiveAt: new Date(effectiveAt).toISOString() } : {}),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Publish failed (${res.status})`);
-      }
       toast.success('Consent version published.');
       setShowForm(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Publish failed');
+      setError(e instanceof HttpError && !e.body?.error ? `Publish failed (${e.status})` : e instanceof Error ? e.message : 'Publish failed');
     } finally {
       setPublishing(false);
     }

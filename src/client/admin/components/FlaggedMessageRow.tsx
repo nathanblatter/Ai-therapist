@@ -11,6 +11,7 @@
 //   - FlaggedMessageRow: one row (icon, client, severity, factors, time,
 //     "View thread" action via onOpenThread)
 import { useCallback, useEffect, useState } from 'react';
+import { getJson } from '../../shared/http';
 import { AlertTriangle, MessageSquare } from 'react-feather';
 import { severityBadgeClass } from '../../shared/severity';
 import Badge from '../../shared/components/Badge';
@@ -41,11 +42,7 @@ export function useFlaggedMessageEvents(): {
 
   const refetch = useCallback(() => {
     setLoading(true);
-    fetch('/api/admin/messaging/flagged', { credentials: 'include' })
-      .then(res => {
-        if (!res.ok) throw new Error(`Request failed (${res.status})`);
-        return res.json() as Promise<{ events: FlaggedMessageEvent[] }>;
-      })
+    getJson<{ events: FlaggedMessageEvent[] }>('/api/admin/messaging/flagged')
       .then(data => {
         setEvents(data.events);
         setError(null);
