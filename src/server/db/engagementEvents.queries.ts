@@ -46,3 +46,48 @@ export async function getEngagementEventStats(days: number): Promise<EngagementE
   );
   return result.rows as EngagementEventKindStat[];
 }
+
+export interface SessionRhythmSummary {
+  sessions: number;
+  participants: number;
+  p50_duration_seconds: number | null;
+  p50_gap_seconds: number | null;
+  /** Sessions started per local-server hour (0-23); hours with no sessions are omitted. */
+  start_hours: Array<{ start_hour: number; sessions: number }>;
+}
+
+/**
+ * Habit metrics from the participant_session_rhythm view (migration 095):
+ * median session duration, median gap between a participant's consecutive
+ * sessions, and the start-hour histogram. Aggregate-only — the view carries
+ * user_id but nothing per-participant leaves this function.
+ */
+export async function getSessionRhythmSummary(days: number): Promise<SessionRhythmSummary> {
+  const [summary, hours] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int AS sessions,
+              COUNT(DISTINCT user_id)::int AS participants,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_seconds) AS p50_duration_seconds,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY seconds_since_prev_session) AS p50_gap_seconds
+       FROM participant_session_rhythm
+       WHERE started_at >= NOW() - make_interval(days => $1)`,
+      [days]
+    ),
+    pool.query(
+      `SELECT start_hour, COUNT(*)::int AS sessions
+       FROM participant_session_rhythm
+       WHERE started_at >= NOW() - make_interval(days => $1)
+       GROUP BY start_hour
+       ORDER BY start_hour`,
+      [days]
+    ),
+  ]);
+  const row = summary.rows[0] ?? {};
+  return {
+    sessions: Number(row.sessions ?? 0),
+    participants: Number(row.participants ?? 0),
+    p50_duration_seconds: row.p50_duration_seconds == null ? null : Number(row.p50_duration_seconds),
+    p50_gap_seconds: row.p50_gap_seconds == null ? null : Number(row.p50_gap_seconds),
+    start_hours: hours.rows as Array<{ start_hour: number; sessions: number }>,
+  };
+}

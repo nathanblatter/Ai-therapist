@@ -58,6 +58,7 @@ import logsRoutes from "./routes/public/logs.routes.js";
 import clientEventsRoutes from "./routes/public/clientEvents.routes.js";
 import engagementEventsRoutes from "./routes/public/engagementEvents.routes.js";
 import adminUsageRoutes from "./routes/admin/adminUsage.routes.js";
+import telemetryRoutes from "./routes/admin/telemetry.routes.js";
 import opsRoutes from "./routes/admin/ops.routes.js";
 import consentRoutes from "./routes/public/consent.routes.js";
 import progressRoutes from "./routes/public/progress.routes.js";
@@ -709,6 +710,9 @@ app.use(opsRoutes());
 
 // De-identified admin usage telemetry ingest -> routes/admin/adminUsage.routes.ts.
 app.use(adminUsageRoutes());
+
+// Telemetry read endpoints (admin usage, engagement, latency) -> routes/admin/telemetry.routes.ts.
+app.use(telemetryRoutes());
 
 // Study-ops dashboard (enrollment/arm-balance/deviations) -> routes/admin/studyOps.routes.ts.
 app.use(studyOpsRoutes());

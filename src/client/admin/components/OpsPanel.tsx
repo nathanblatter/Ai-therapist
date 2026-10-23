@@ -4,6 +4,8 @@
 // data comes from /admin/api/analytics/ops and /admin/api/analytics/funnel.
 import { Server, AlertTriangle, Clock, Cpu, Activity } from "react-feather";
 import useAdminFetch from "../hooks/useAdminFetch";
+import useAuth from "../hooks/useAuth";
+import TurnLatencyPanel from "./telemetry/TurnLatencyPanel";
 import Panel from "./ui/Panel";
 import StatCard from "./ui/StatCard";
 // Canonical funnel shape lives in the server data layer (type-only import,
@@ -86,6 +88,9 @@ function formatMs(ms: number | null): string {
 }
 
 export default function OpsPanel() {
+  // Measured turn latency reads a researcher-only endpoint; therapists and
+  // demo accounts keep the in-memory request metrics only.
+  const { isResearcher } = useAuth();
   const { data: ops, loading: opsLoading, error } = useAdminFetch<OpsData>('/admin/api/analytics/ops');
   // Funnel is best-effort: if it fails, the funnel section is simply omitted.
   const { data: funnel, loading: funnelLoading } = useAdminFetch<FunnelData>('/admin/api/analytics/funnel?days=30');
@@ -158,6 +163,8 @@ export default function OpsPanel() {
           </tbody>
         </table>
       </Panel>
+
+      {isResearcher && <TurnLatencyPanel />}
 
       <Panel title="Client Errors (Last 7 Days)" className="overflow-x-auto">
         <p className="text-sm text-gray-600 mb-3">

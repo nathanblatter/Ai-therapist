@@ -61,3 +61,34 @@ export async function getAdminViewReach(days: number): Promise<Array<{ view: str
   );
   return result.rows as Array<{ view: string; opens: number }>;
 }
+
+export interface AdminViewUsageRow {
+  view: string;
+  /** Coarse role cohort; 'unknown' when the ingest saw no role. */
+  role: string;
+  opens: number;
+  /** Summed view_heartbeat visible time, in milliseconds. */
+  visible_ms: number;
+}
+
+/**
+ * View usage split by role cohort over the trailing window: opens plus the
+ * summed visible time from heartbeats. Aggregate-only, like the other reads
+ * here — the row carries no identity to begin with.
+ */
+export async function getAdminViewUsageByRole(days: number): Promise<AdminViewUsageRow[]> {
+  const result = await pool.query(
+    `SELECT detail->>'view' AS view,
+            COALESCE(role, 'unknown') AS role,
+            COUNT(*) FILTER (WHERE kind = 'view_open')::int AS opens,
+            COALESCE(SUM((detail->>'visible_ms')::double precision) FILTER (WHERE kind = 'view_heartbeat'), 0)::double precision AS visible_ms
+     FROM admin_usage_events
+     WHERE kind IN ('view_open', 'view_heartbeat')
+       AND detail->>'view' IS NOT NULL
+       AND created_at >= NOW() - make_interval(days => $1)
+     GROUP BY detail->>'view', COALESCE(role, 'unknown')
+     ORDER BY opens DESC, view ASC`,
+    [days]
+  );
+  return result.rows as AdminViewUsageRow[];
+}
