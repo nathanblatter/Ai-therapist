@@ -85,7 +85,7 @@ Hot columns that **are** covered (no action): `therapy_sessions.status`,
 `session_llm_usage(session_id)`, `(purpose, created_at)`;
 `client_events(kind, created_at)`; `engagement_events(session_id)`.
 
-## 3. Proposed indexes (for prod cost review, not applied)
+## 3. Proposed indexes (applied as migration 111 on 2026-10-23; psql autocommit, CONCURRENTLY)
 
 Ordered by expected benefit. All are small btree indexes on low-cardinality
 tables; the write cost is negligible, so the review is really about whether
