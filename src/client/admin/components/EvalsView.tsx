@@ -5,6 +5,7 @@ import EvalCalibrationPanel from './EvalCalibrationPanel';
 import SimulationRunsPanel from './SimulationRunsPanel';
 import RatingQueuePanel from './RatingQueuePanel';
 import WeeklyDigestPanel from './WeeklyDigestPanel';
+import RiskCalibrationPanel from './RiskCalibrationPanel';
 
 // Thin research-only view composing the eval panels, moved out of the
 // Analytics single-scroll dashboard (ai-therapist-120). The panels own their
@@ -34,6 +35,7 @@ export default function EvalsView({ onViewSession }: { onViewSession?: (sessionI
           <PairwiseEvalPanel />
           <EvalCalibrationPanel />
           <WeeklyDigestPanel />
+          <RiskCalibrationPanel />
         </>
       )}
       {tab === 'rating-queue' && <RatingQueuePanel onViewSession={onViewSession} />}

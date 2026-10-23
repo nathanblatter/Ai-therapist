@@ -332,6 +332,56 @@ no adjudication notes.
   means done). Same `EVALS_ENABLED` gate as the nightly harness.
 - CLI: `npx tsx src/database/scripts/generateWeeklyDigest.ts [--week-ending YYYY-MM-DD] [--org slug|id] [--print]`.
 
+## Risk-score calibration (eval spec WP3, migration 116)
+
+- `riskCalibration.service.ts` grades the crisis pipeline's signal layers
+  against human ground truth. Per scored message (`risk_score_history`) it
+  reads the layers out of `score_factors` - keyword tier score, LLM assessor
+  score (rows the LLM never saw are omitted from that layer), the three
+  omni-moderation self-harm category probabilities (x100), the moderation
+  composite, the trajectory bonus - plus the composite the pipeline acted on,
+  and joins the crisis event the message raised (`crisis_events.message_id`)
+  to its `crisis_event_adjudications` verdicts.
+- Label rule: unanimously `confirmed` = positive; unanimously
+  `false_positive` = negative; `unclear`, disputed or unadjudicated events are
+  excluded. Scored messages that raised no event count as negative only when
+  `unflagged_as_negative` is on (the default) and the report states that next
+  to the adjudication coverage counts; the miss-rate sample is the check on
+  that assumption. With fewer than 5 positives or 5 negatives the run stores
+  the counts and `insufficient_labels: true` instead of metrics - on stage
+  today every run renders that way (0 adjudications).
+- Metrics: precision / recall / F1 at every threshold on a 0..100 step-5 grid
+  (score >= threshold predicts positive), performance at the live bands
+  (25 / 50 / 75), an F1-maximising threshold per layer next to the medium
+  band, and a layer-agreement matrix (pairwise Cohen's kappa with each layer
+  binarised at >= 50, over messages where both layers have a value; needs no
+  labels so it is always reported).
+- Miss-rate estimate: a seeded, proportionally stratified sample (stratum =
+  `session_type|scored-or-unscored`) of UNFLAGGED participant messages (no
+  crisis event, composite <= 24 or never scored) re-scored offline with the
+  same assessor prompt and model (`assessRiskOffline`, via `withFlex`; the
+  default gpt-4o-mini is not flex-eligible so it runs on the default tier)
+  from `content_redacted` plus up to 10 preceding redacted turns. Reports the
+  fraction that would now score >= 50 and >= 75, per stratum, with token
+  usage and spend under a hard cap of USD 0.50 per run (the run stops early
+  and says so). `--dry-run` / `dry_run` prints the sampled ids and makes no
+  calls. Raw `content` is never read.
+- Scope: the IRB packet's `SESSION_SCOPE` (demo + sandbox excluded, caller's
+  org, unattributed rows only for the irb-study org). Stored reports hold
+  aggregates and the sample's message ids only; no `data_access_log` row.
+- Archive: `risk_calibration_runs` (migration 116: org_id, started_at,
+  finished_at, params, report, recommended_thresholds, created_by).
+  `recommended_thresholds` is ADVISORY - nothing reads it back into the
+  pipeline; threshold changes stay a code change decided by Nathan.
+- Routes (researcher only, org-scoped, sandbox 404):
+  `GET /admin/api/risk-calibration/runs` (list + live bands + defaults),
+  `GET .../runs/:id` (full report), `POST .../runs`
+  (`{since?, until?, sample_size?, seed?, dry_run?, unflagged_as_negative?}`,
+  synchronous, one run at a time per process). UI: Evals view, "Risk
+  calibration" panel (coverage, P/R/F1 curves per layer, band table with
+  recommended vs current, kappa matrix, miss-rate sample, empty state).
+- CLI: `npx tsx src/database/scripts/runRiskCalibration.ts [--since ISO] [--until ISO] [--sample-size N] [--seed N] [--org slug|id] [--dry-run] [--print] [--no-unflagged-negative]`.
+
 ## Config keys (`system_config.evals`)
 
 ```sql

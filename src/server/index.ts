@@ -41,6 +41,7 @@ import analyticsRoutes from "./routes/admin/analytics.routes.js";
 import studyOpsRoutes from "./routes/admin/studyOps.routes.js";
 import irbPacketRoutes from "./routes/admin/irbPacket.routes.js";
 import weeklyDigestRoutes from "./routes/admin/weeklyDigest.routes.js";
+import riskCalibrationRoutes from "./routes/admin/riskCalibration.routes.js";
 import exportRoutes from "./routes/admin/export.routes.js";
 import adminRateLimitsRoutes from "./routes/admin/rateLimits.routes.js";
 import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
@@ -766,6 +767,9 @@ app.use(irbPacketRoutes());
 
 // Weekly PI digest (markdown + JSON archive, eval spec WP7) -> routes/admin/weeklyDigest.routes.ts.
 app.use(weeklyDigestRoutes());
+
+// Risk-score calibration runs (eval spec WP3) -> routes/admin/riskCalibration.routes.ts.
+app.use(riskCalibrationRoutes());
 
 
 // Research-data export (JSON/CSV) -> routes/admin/export.routes.ts.

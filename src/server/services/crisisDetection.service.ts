@@ -6,6 +6,7 @@ import { CRISIS_EVENT_ADJUDICATIONS_SQL } from '../db/crisisAdjudications.querie
 import { IRB_STUDY_ORG_ID_SQL } from '../db/organizations.queries.js';
 import { createLogger } from '../utils/logger.js';
 import type { HistoryMessage } from './minorSafeguard.service.js';
+import { withFlex } from '../utils/flexTier.js';
 
 const log = createLogger('crisisDetection');
 
@@ -278,6 +279,8 @@ interface LlmRiskAssessment {
   context: string;
   factors: string[];
   reasoning: string;
+  /** Token usage of the call, when the API reported it. */
+  usage?: { prompt_tokens: number; completion_tokens: number };
 }
 
 // Strict structured output (ai-therapist-179). json_object only guarantees
@@ -361,6 +364,7 @@ async function assessRiskWithLLM(
   latestContent: string,
   conversationHistory: HistoryMessage[],
   sessionId?: string,
+  extraParams: Record<string, string> = {},
 ): Promise<LlmRiskAssessment> {
   const client = await getClient();
 
@@ -392,6 +396,7 @@ async function assessRiskWithLLM(
     // application state on OpenAI's side.
     store: false,
     ...(safetyIdentifier ? { safety_identifier: safetyIdentifier } : {}),
+    ...extraParams,
     messages: [
       { role: 'system', content: RISK_ASSESSMENT_PROMPT },
       {
@@ -457,6 +462,48 @@ async function assessRiskWithLLM(
     context: typeof parsed.context === 'string' ? parsed.context : 'unclear',
     factors: Array.isArray(parsed.factors) ? parsed.factors.filter((f): f is string => typeof f === 'string').slice(0, 8) : [],
     reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning.slice(0, 400) : '',
+    ...(response.usage ? {
+      usage: { prompt_tokens: response.usage.prompt_tokens ?? 0, completion_tokens: response.usage.completion_tokens ?? 0 },
+    } : {}),
+  };
+}
+
+// ============================================
+// OFFLINE RE-SCORING (risk calibration harness, eval program WP3)
+// ============================================
+
+export interface OfflineRiskAssessment {
+  risk_score: number;
+  severity: 'none' | 'low' | 'medium' | 'high';
+  context: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+/**
+ * Re-score one message with the SAME assessor prompt, model and parsing the
+ * live pipeline uses, but offline: no session machinery (no sweep counter,
+ * no trajectory bonus, no risk_score_history write, no per-session cost row,
+ * no safety_identifier) and on the flex tier when the configured model is
+ * eligible (withFlex falls through to the default tier otherwise - gpt-4o-mini
+ * is not flex-eligible, so today this is a plain call). Callers pass redacted
+ * text only; this function never reads the database. Throws on failure so
+ * the harness can count failures instead of mistaking them for "no risk".
+ */
+export async function assessRiskOffline(
+  latestContent: string,
+  history: HistoryMessage[] = [],
+): Promise<OfflineRiskAssessment> {
+  const model = await resolveRiskModel();
+  const llm = await withFlex(model, extra => assessRiskWithLLM(latestContent, history, undefined, extra));
+  return {
+    risk_score: llm.risk_score,
+    severity: llm.severity,
+    context: llm.context,
+    model,
+    prompt_tokens: llm.usage?.prompt_tokens ?? 0,
+    completion_tokens: llm.usage?.completion_tokens ?? 0,
   };
 }
 

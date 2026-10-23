@@ -47,6 +47,7 @@ export * from './dataRetention.queries.js';
 export * from './studyOps.queries.js';
 export * from './irbPacket.queries.js';
 export * from './weeklyDigest.queries.js';
+export * from './riskCalibration.queries.js';
 export * from './rerank.queries.js';
 export * from './participantProfile.queries.js';
 export * from './progress.queries.js';
