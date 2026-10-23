@@ -19,6 +19,9 @@ export interface SessionEvalRow {
   judge_model: string;
   prompt_version: string;
   created_at: Date;
+  /** Per-dimension max-min score across the judge runs behind this consensus
+   *  row (migration 107); null for single-judge rows. */
+  judge_spread?: Record<string, number> | null;
 }
 
 /** Latest eval for a session (any prompt version), or null. */
@@ -48,20 +51,118 @@ export async function upsertSessionEval(
   rubric: EvalRubric,
   overallComments: string | null,
   judgeModel: string,
-  promptVersion: string
+  promptVersion: string,
+  judgeSpread: Record<string, number> | null = null
 ): Promise<SessionEvalRow> {
   const result = await pool.query<SessionEvalRow>(
-    `INSERT INTO session_evals (session_id, rubric, overall_comments, judge_model, prompt_version)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO session_evals (session_id, rubric, overall_comments, judge_model, prompt_version, judge_spread)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (session_id, prompt_version) DO UPDATE
        SET rubric = EXCLUDED.rubric,
            overall_comments = EXCLUDED.overall_comments,
            judge_model = EXCLUDED.judge_model,
+           judge_spread = EXCLUDED.judge_spread,
            created_at = CURRENT_TIMESTAMP
      RETURNING *`,
-    [sessionId, JSON.stringify(rubric), overallComments, judgeModel, promptVersion]
+    [sessionId, JSON.stringify(rubric), overallComments, judgeModel, promptVersion, judgeSpread ? JSON.stringify(judgeSpread) : null]
   );
   return result.rows[0];
+}
+
+// ---- Judge ensemble (migration 107) ----
+
+/** One raw judge run behind a consensus session_evals row. */
+export interface SessionEvalJudgeRow {
+  eval_judge_id: number;
+  session_id: string;
+  prompt_version: string;
+  judge_model: string;
+  run_index: number;
+  seed: number | null;
+  rubric: EvalRubric;
+  overall_comments: string | null;
+  created_at: Date;
+}
+
+export interface NewJudgeRun {
+  judgeModel: string;
+  runIndex: number;
+  seed: number | null;
+  rubric: EvalRubric;
+  overallComments: string | null;
+}
+
+/** Replace the per-judge runs for (session, prompt_version) wholesale, in one
+ *  transaction, so a forced re-run never leaves stale runs behind. */
+export async function replaceSessionEvalJudges(
+  sessionId: string,
+  promptVersion: string,
+  runs: NewJudgeRun[]
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'DELETE FROM session_eval_judges WHERE session_id = $1 AND prompt_version = $2',
+      [sessionId, promptVersion]
+    );
+    for (const run of runs) {
+      await client.query(
+        `INSERT INTO session_eval_judges
+           (session_id, prompt_version, judge_model, run_index, seed, rubric, overall_comments)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [sessionId, promptVersion, run.judgeModel, run.runIndex, run.seed, JSON.stringify(run.rubric), run.overallComments]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** All judge runs for a prompt version (newest sessions first), for the
+ *  inter-judge agreement report. Sandbox/demo filtering is not applied: the
+ *  rows only exist for sessions the judge was explicitly run on. */
+export async function getSessionEvalJudgeRuns(promptVersion: string, limit = 5000): Promise<SessionEvalJudgeRow[]> {
+  const result = await pool.query<SessionEvalJudgeRow>(
+    `SELECT * FROM session_eval_judges
+     WHERE prompt_version = $1
+     ORDER BY created_at DESC, session_id, judge_model, run_index
+     LIMIT $2`,
+    [promptVersion, limit]
+  );
+  return result.rows;
+}
+
+/** Judge runs behind one session's consensus row (any prompt version given). */
+export async function getSessionEvalJudgesForSession(sessionId: string, promptVersion: string): Promise<SessionEvalJudgeRow[]> {
+  const result = await pool.query<SessionEvalJudgeRow>(
+    `SELECT * FROM session_eval_judges
+     WHERE session_id = $1 AND prompt_version = $2
+     ORDER BY judge_model, run_index`,
+    [sessionId, promptVersion]
+  );
+  return result.rows;
+}
+
+/** Consensus rows with the largest judge disagreement for a prompt version
+ *  (max spread over dimensions, desc). Only rows with a spread recorded. */
+export async function getHighDisagreementEvals(
+  promptVersion: string,
+  limit = 10
+): Promise<Array<{ session_id: string; judge_spread: Record<string, number>; created_at: Date }>> {
+  const result = await pool.query<{ session_id: string; judge_spread: Record<string, number>; created_at: Date }>(
+    `SELECT session_id, judge_spread, created_at
+     FROM session_evals
+     WHERE prompt_version = $1 AND judge_spread IS NOT NULL
+     ORDER BY (SELECT MAX((v)::int) FROM jsonb_each_text(judge_spread) AS e(k, v)) DESC, created_at DESC
+     LIMIT $2`,
+    [promptVersion, limit]
+  );
+  return result.rows;
 }
 
 /** Ended sessions that have no eval for the given prompt version yet. */

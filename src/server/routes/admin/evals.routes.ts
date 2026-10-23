@@ -170,17 +170,19 @@ export default function evalsRoutes(): Router {
     }
   });
 
-  // GET /admin/api/evals/calibration?promptVersion=v1 - judge-vs-human agreement.
+  // GET /admin/api/evals/calibration?promptVersion=v1 - judge-vs-human
+  // agreement, plus judge-vs-judge agreement for the ensemble (migration 107).
   router.get('/admin/api/evals/calibration', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
-      const { computeCalibrationReport } = await import('../../services/evalCalibration.service.js');
+      const { computeCalibrationReport, computeJudgeAgreementReport } = await import('../../services/evalCalibration.service.js');
       const { EVAL_PROMPT_VERSION } = await import('../../services/sessionEval.service.js');
       const promptVersion = req.query.promptVersion ? String(req.query.promptVersion) : EVAL_PROMPT_VERSION;
-      const [report, availableVersions] = await Promise.all([
+      const [report, availableVersions, judgeAgreement] = await Promise.all([
         computeCalibrationReport(promptVersion),
         getCalibrationPromptVersions(),
+        computeJudgeAgreementReport(promptVersion),
       ]);
-      res.json({ report, available_prompt_versions: availableVersions });
+      res.json({ report, available_prompt_versions: availableVersions, judge_agreement: judgeAgreement });
     } catch (err) {
       console.error('Failed to compute calibration:', err);
       res.status(500).json({ error: 'Failed to compute calibration' });

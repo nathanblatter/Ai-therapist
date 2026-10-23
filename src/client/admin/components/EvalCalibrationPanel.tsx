@@ -2,7 +2,7 @@
 // kappa between human ratings and the LLM judge, per rubric dimension, with an
 // auto-run readiness badge. Self-fetching; follows the ToolUsagePanel pattern.
 import { useState, useEffect, useCallback } from 'react';
-import { CheckCircle, AlertTriangle } from 'react-feather';
+import { CheckCircle, AlertTriangle, Users } from 'react-feather';
 
 interface DimensionCalibration {
   dimension: string;
@@ -23,9 +23,44 @@ interface CalibrationReport {
   overall_kappa: number | null;
 }
 
+interface JudgePairDimension {
+  dimension: string;
+  n: number;
+  kappa: number | null;
+  exact_agreement_pct: number | null;
+  mean_bias: number | null;
+  major_disagreement_pct: number | null;
+}
+
+interface JudgePairAgreement {
+  judge_a: string;
+  judge_b: string;
+  n: number;
+  dimensions: JudgePairDimension[];
+  overall_kappa: number | null;
+}
+
+interface SelfConsistencyReport {
+  judge_model: string;
+  runs: number;
+  n: number;
+  dimensions: Array<{ dimension: string; n: number; exact_pct: number | null; mean_spread: number | null }>;
+}
+
+interface JudgeAgreementReport {
+  prompt_version: string;
+  judges: string[];
+  session_count: number;
+  pairs: JudgePairAgreement[];
+  self_consistency: SelfConsistencyReport[];
+  high_disagreement: Array<{ session_id: string; max_spread: number; judge_spread: Record<string, number> }>;
+}
+
 interface CalibrationData {
   report: CalibrationReport;
   available_prompt_versions: string[];
+  /** Absent on servers that predate migration 107. */
+  judge_agreement?: JudgeAgreementReport;
 }
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -93,7 +128,7 @@ export default function EvalCalibrationPanel() {
     );
   }
 
-  const { report, available_prompt_versions } = data;
+  const { report, available_prompt_versions, judge_agreement } = data;
   const calibrated = isCalibrated(report);
 
   return (
@@ -164,6 +199,8 @@ export default function EvalCalibrationPanel() {
         </table>
       </div>
 
+      {judge_agreement && <JudgeAgreementBlock agreement={judge_agreement} />}
+
       <div className="bg-white p-4 rounded-lg shadow">
         {calibrated ? (
           <span className="inline-flex items-center gap-2 text-green-700 font-semibold">
@@ -180,6 +217,122 @@ export default function EvalCalibrationPanel() {
           version. Until then, run evals manually and keep rating sessions.
         </p>
       </div>
+    </div>
+  );
+}
+
+/** Judge-vs-judge agreement for the ensemble (migration 107): one table per
+ *  judge pair, self-consistency per judge when runs > 1, and the sessions the
+ *  judges disagree on most (the best candidates for human rating). */
+function JudgeAgreementBlock({ agreement }: { agreement: JudgeAgreementReport }) {
+  const { judges, session_count, pairs, self_consistency, high_disagreement } = agreement;
+  return (
+    <div className="bg-white p-6 rounded-lg shadow space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h4 className="text-lg font-semibold flex items-center gap-2">
+          <Users size={18} /> Judge agreement (LLM vs LLM)
+        </h4>
+        <span className="text-sm text-gray-600">
+          {judges.length} judge{judges.length === 1 ? '' : 's'} · {session_count} session{session_count === 1 ? '' : 's'} with stored judge runs
+        </span>
+      </div>
+
+      {judges.length < 2 && (
+        <p className="text-sm text-gray-600">
+          Only one judge has stored runs for this prompt version. Set <code>evals.judge_models</code> to two or
+          more models (default: gpt-4o-mini + gpt-5-mini) and re-run evals to measure inter-judge agreement.
+        </p>
+      )}
+
+      {pairs.map(pair => (
+        <div key={`${pair.judge_a}|${pair.judge_b}`} className="overflow-x-auto">
+          <p className="text-sm font-medium mb-1">
+            <code>{pair.judge_a}</code> vs <code>{pair.judge_b}</code> · n = {pair.n} · overall κ{' '}
+            <span className={kappaClasses(pair.overall_kappa)}>
+              {pair.overall_kappa === null ? 'n/a' : pair.overall_kappa.toFixed(2)}
+            </span>
+          </p>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600 border-b">
+                <th className="py-1 pr-4">Dimension</th>
+                <th className="py-1 pr-4">n</th>
+                <th className="py-1 pr-4">Weighted κ</th>
+                <th className="py-1 pr-4">Exact</th>
+                <th className="py-1 pr-4">Differ by 2+</th>
+                <th className="py-1 pr-4">Bias (B − A)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pair.dimensions.map(d => (
+                <tr key={d.dimension} className="border-b last:border-0">
+                  <td className="py-1 pr-4">{DIMENSION_LABELS[d.dimension] ?? d.dimension}</td>
+                  <td className="py-1 pr-4">{d.n}</td>
+                  <td className={`py-1 pr-4 ${kappaClasses(d.kappa)}`}>
+                    {d.kappa === null ? `n/a` : `${d.kappa.toFixed(2)} (${kappaBand(d.kappa)})`}
+                  </td>
+                  <td className="py-1 pr-4">{d.exact_agreement_pct === null ? '—' : `${d.exact_agreement_pct.toFixed(0)}%`}</td>
+                  <td className="py-1 pr-4">{d.major_disagreement_pct === null ? '—' : `${d.major_disagreement_pct.toFixed(0)}%`}</td>
+                  <td className="py-1 pr-4">{d.mean_bias === null ? '—' : (d.mean_bias > 0 ? '+' : '') + d.mean_bias.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+
+      {self_consistency.length > 0 && (
+        <div className="overflow-x-auto">
+          <p className="text-sm font-medium mb-1">Self-consistency (same judge, repeated seeded runs)</p>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600 border-b">
+                <th className="py-1 pr-4">Judge</th>
+                <th className="py-1 pr-4">Runs</th>
+                <th className="py-1 pr-4">n</th>
+                {self_consistency[0].dimensions.map(d => (
+                  <th key={d.dimension} className="py-1 pr-4">{DIMENSION_LABELS[d.dimension] ?? d.dimension}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {self_consistency.map(sc => (
+                <tr key={sc.judge_model} className="border-b last:border-0">
+                  <td className="py-1 pr-4"><code>{sc.judge_model}</code></td>
+                  <td className="py-1 pr-4">{sc.runs}</td>
+                  <td className="py-1 pr-4">{sc.n}</td>
+                  {sc.dimensions.map(d => (
+                    <td key={d.dimension} className="py-1 pr-4">
+                      {d.exact_pct === null ? '—' : `${d.exact_pct.toFixed(0)}% identical`}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {high_disagreement.length > 0 && (
+        <div>
+          <p className="text-sm font-medium mb-1">Highest judge disagreement (candidates for human rating)</p>
+          <ul className="text-sm text-gray-700 space-y-1">
+            {high_disagreement.filter(h => h.max_spread > 0).map(h => (
+              <li key={h.session_id}>
+                <span className="font-mono text-xs">{h.session_id}</span>
+                {' '}· max spread {h.max_spread} ·{' '}
+                {Object.entries(h.judge_spread).filter(([, v]) => v > 0).map(([k, v]) => `${DIMENSION_LABELS[k] ?? k} ${v}`).join(', ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-600">
+        κ is quadratic-weighted Cohen&apos;s kappa between the two judges&apos; per-session scores (median over
+        self-consistency runs) under the same v1 prompt. Low κ with high human agreement for one judge means the
+        other judge is miscalibrated; low κ everywhere means the rubric wording is ambiguous on that dimension.
+      </p>
     </div>
   );
 }

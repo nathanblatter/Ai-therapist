@@ -121,3 +121,25 @@ export async function getHarnessRun(
   );
   return { run: rows[0], results: results.rows };
 }
+
+/** Most recent persisted run for a suite (real runs only, never dry runs),
+ *  with its scenario rows — the DB-backed baseline for `--baseline latest`.
+ *  `excludeRunId` lets the caller skip a run it just persisted itself. */
+export async function getLatestHarnessRunForSuite(
+  suite: string,
+  excludeRunId: number | null = null,
+): Promise<{ run: HarnessRunRow; results: HarnessScenarioResultRow[] } | null> {
+  const { rows } = await pool.query<HarnessRunRow>(
+    `SELECT * FROM harness_runs
+     WHERE suite = $1 AND dry_run = FALSE AND ($2::bigint IS NULL OR id <> $2)
+     ORDER BY started_at DESC
+     LIMIT 1`,
+    [suite, excludeRunId],
+  );
+  if (rows.length === 0) return null;
+  const results = await pool.query<HarnessScenarioResultRow>(
+    `SELECT * FROM harness_scenario_results WHERE run_id = $1 ORDER BY scenario_id, variation`,
+    [rows[0].id],
+  );
+  return { run: rows[0], results: results.rows };
+}

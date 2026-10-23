@@ -3,6 +3,9 @@ on:
   schedule:
     - cron: '0 8 * * *' # 02:00 America/Denver ≈ 08:00 UTC
   workflow_dispatch:
+permissions:
+  contents: read
+  actions: read # gh run download: previous nightly's artifact is the diff baseline
 jobs:
   redteam-full:
     runs-on: ubuntu-latest
@@ -32,10 +35,29 @@ jobs:
       - run: npm ci
       - name: Set up red-team DB (migrate + seed)
         run: bash scripts/redteam-db-setup.sh
+      - name: Download previous nightly results (diff baseline)
+        # actions/download-artifact cannot reach other workflow runs, so use the
+        # gh CLI. Best-effort: a missing baseline just means no diff tonight.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(gh run list --workflow redteam-nightly.yml --status success --limit 1 \
+                   --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "$prev" ]; then
+            echo "baseline: run $prev"
+            gh run download "$prev" --name redteam-full-results --dir redteam-baseline \
+              || echo "no redteam-full-results artifact on run $prev"
+          else
+            echo "no previous successful nightly run found"
+          fi
+          ls -la redteam-baseline 2>/dev/null || true
       - name: Red-team full suite
         # Non-gating for the nightly: report the result (visible in the run) but
-        # never fail the workflow — the smoke suite is the deploy gate.
-        run: npm run redteam:full -- --allow-fail
+        # never fail the workflow — the smoke suite is the deploy gate. The diff
+        # against last night's summary.json lands in the job summary
+        # ($GITHUB_STEP_SUMMARY) and in redteam-results/diff.md. Promotion to
+        # gating (--gate-diff / --gate-quality) is documented in docs/redteam.md.
+        run: npm run redteam:full -- --allow-fail --baseline redteam-baseline/summary.json
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4

@@ -6,6 +6,7 @@
 //
 // Flags: --suite smoke|full|quality|voice  --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
+//        --baseline <path|latest>  --gate-diff  --gate-quality
 import 'dotenv/config';
 
 // ---- env guards (MUST run before importing server modules) ----------------
@@ -28,7 +29,8 @@ import { makeClassifier } from './assertions.js';
 import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
 import { HarnessClient, type Agent } from './harnessClient.js';
-import { writeReports, printConsole, type RunSummary } from './report.js';
+import { writeReports, printConsole, buildSummaryJson, type RunSummary } from './report.js';
+import { diffRuns, formatDiffConsole, formatDiffMarkdown, normalizeHarnessRun, normalizeSummary, type NormalizedRun, type RunDiff } from './diff.js';
 import { selectSuite, type SuiteEntry } from './scenarios/index.js';
 import type {
   AssertionContext,
@@ -56,6 +58,8 @@ function parseArgs(argv: string[]): RedteamConfig {
     variations: DEFAULTS.variations,
     allowFail: DEFAULTS.allowFail,
     dryRun: DEFAULTS.dryRun,
+    gateDiff: DEFAULTS.gateDiff,
+    gateQuality: DEFAULTS.gateQuality,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -68,11 +72,14 @@ function parseArgs(argv: string[]): RedteamConfig {
       }
       case '--scenario': cfg.scenarioId = next(); break;
       case '--out': cfg.outDir = next(); break;
-      case '--judge-model': cfg.judgeModel = next(); break;
+      case '--judge-model': cfg.judgeModel = next(); cfg.judgeModelOverride = cfg.judgeModel; break;
       case '--seed': cfg.seed = Number(next()); break;
       case '--variations': cfg.variations = Math.max(1, Number(next()) || 1); break;
       case '--allow-fail': cfg.allowFail = true; break;
       case '--dry-run': cfg.dryRun = true; break;
+      case '--baseline': cfg.baseline = next(); break;
+      case '--gate-diff': cfg.gateDiff = true; break;
+      case '--gate-quality': cfg.gateQuality = true; break;
       default: break;
     }
   }
@@ -205,7 +212,8 @@ async function runChatScenario(
     const outcome = await runJudge(sessionId, scenario, cfg, cost);
     if (outcome) {
       judge = outcome.scores;
-      judgeBreaches = outcome.breaches.length > 0;
+      assertions.push(...outcome.floorAssertions);
+      judgeBreaches = outcome.floorAssertions.some(a => !a.passed && a.gating);
     }
   }
   return { assertions, judge, judgeBreaches, sessionId };
@@ -255,7 +263,8 @@ async function runRealtimeScenario(
     const outcome = await runJudge(sessionId, scenario, cfg, cost);
     if (outcome) {
       judge = outcome.scores;
-      judgeBreaches = outcome.breaches.length > 0;
+      assertions.push(...outcome.floorAssertions);
+      judgeBreaches = outcome.floorAssertions.some(a => !a.passed && a.gating);
     }
   }
   return { assertions, judge, judgeBreaches, sessionId };
@@ -358,12 +367,25 @@ async function main(): Promise<void> {
   }
   const finishedAt = new Date().toISOString();
 
+  let gitSha: string | null = process.env.GITHUB_SHA ?? null;
+  if (!gitSha) {
+    try {
+      const { execSync } = await import('node:child_process');
+      gitSha = execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch { /* not a git checkout */ }
+  }
+
+  // Judge label: what evaluateSession actually ran (the ensemble label from
+  // the first judged scenario), else the pinned/default model.
+  const judgeLabel = results.find(r => r.judge?.judgeModel)?.judge?.judgeModel ?? cfg.judgeModelOverride ?? cfg.judgeModel;
+
   const summary: RunSummary = {
     startedAt,
     finishedAt,
     suite: cfg.suite,
     seed: cfg.seed,
-    judgeModel: cfg.judgeModel,
+    judgeModel: judgeLabel,
+    gitSha,
     scenarios: results,
   };
   const { junitPath, summaryPath } = writeReports(cfg, summary);
@@ -372,21 +394,15 @@ async function main(): Promise<void> {
 
   // Persist the run for the admin Simulation Runs panel (phase 3). Best-effort:
   // a missing table (migration 063 not applied) or DB hiccup never fails a run.
+  let persistedRunId: number | null = null;
   try {
     const { insertHarnessRun } = await import('../server/db/index.js');
-    let gitSha: string | null = process.env.GITHUB_SHA ?? null;
-    if (!gitSha) {
-      try {
-        const { execSync } = await import('node:child_process');
-        gitSha = execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-      } catch { /* not a git checkout */ }
-    }
     const trigger = process.env.REDTEAM_TRIGGER
       ?? (process.env.GITHUB_ACTIONS ? (cfg.suite === 'smoke' ? 'ci-smoke' : 'ci-nightly') : 'manual');
-    const runId = await insertHarnessRun({
+    persistedRunId = await insertHarnessRun({
       startedAt, finishedAt,
       suite: cfg.suite, seed: cfg.seed, variations: cfg.variations,
-      judgeModel: cfg.judgeModel, gitSha, trigger, dryRun: cfg.dryRun,
+      judgeModel: judgeLabel, gitSha, trigger, dryRun: cfg.dryRun,
       scenarios: results.map(r => ({
         scenarioId: r.id.replace(/#v\d+$/, ''),
         variation: r.variation,
@@ -400,16 +416,78 @@ async function main(): Promise<void> {
         costUsd: r.costUsd,
       })),
     });
-    console.log(`[redteam] persisted as harness run #${runId}`);
+    console.log(`[redteam] persisted as harness run #${persistedRunId}`);
   } catch (err) {
     console.warn(`[redteam] run not persisted (${(err as Error).message}) — apply migration 063 to enable the Simulation Runs panel`);
+  }
+
+  // Diff against a baseline (eval spec G4): newly failing/passing assertions
+  // and judge-score drops >= 1.0, printed, written next to summary.json, and
+  // appended to the GitHub job summary when running in Actions.
+  let diffRegressions = false;
+  if (cfg.baseline) {
+    const diff = await runBaselineDiff(cfg, summary, persistedRunId);
+    if (diff) {
+      diffRegressions = diff.hasRegressions;
+      if (diffRegressions && cfg.gateDiff) console.log('[redteam] --gate-diff: regressions vs baseline -> exit 1');
+    } else if (cfg.gateDiff) {
+      console.warn('[redteam] --gate-diff: no baseline available, nothing to gate on');
+    }
   }
 
   // Don't pool.end() here: crisis detection runs fire-and-forget writes in
   // setImmediate (incl. best-effort LLM-usage recording) that may still be in
   // flight; ending the pool would make them log "pool after end". process.exit
   // tears everything down cleanly.
-  await flushAndExit(!passed && !cfg.allowFail ? 1 : 0);
+  const gateFailed = !passed && !cfg.allowFail;
+  const diffFailed = diffRegressions && cfg.gateDiff;
+  await flushAndExit(gateFailed || diffFailed ? 1 : 0);
+}
+
+/** Load the baseline named by --baseline: a summary.json path, or `latest`
+ *  (newest persisted non-dry run of the same suite, excluding this one). */
+async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): Promise<NormalizedRun | null> {
+  const fs = await import('node:fs');
+  if (cfg.baseline === 'latest') {
+    try {
+      const { getLatestHarnessRunForSuite } = await import('../server/db/index.js');
+      const latest = await getLatestHarnessRunForSuite(cfg.suite, persistedRunId);
+      if (!latest) { console.warn(`[redteam] no previous ${cfg.suite} run persisted in this DB — skipping diff`); return null; }
+      return normalizeHarnessRun(latest.run, latest.results);
+    } catch (err) {
+      console.warn(`[redteam] could not load latest run from DB (${(err as Error).message}) — skipping diff`);
+      return null;
+    }
+  }
+  const path = cfg.baseline as string;
+  if (!fs.existsSync(path)) { console.warn(`[redteam] baseline ${path} not found — skipping diff`); return null; }
+  try {
+    return normalizeSummary(JSON.parse(fs.readFileSync(path, 'utf8')), path);
+  } catch (err) {
+    console.warn(`[redteam] baseline ${path} unreadable (${(err as Error).message}) — skipping diff`);
+    return null;
+  }
+}
+
+async function runBaselineDiff(cfg: RedteamConfig, summary: RunSummary, persistedRunId: number | null): Promise<RunDiff | null> {
+  const baseline = await loadBaseline(cfg, persistedRunId);
+  if (!baseline) return null;
+  const current = normalizeSummary(buildSummaryJson(summary) as Parameters<typeof normalizeSummary>[0], 'this run');
+  const diff = diffRuns(baseline, current);
+
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const md = formatDiffMarkdown(diff);
+  const diffJsonPath = path.join(cfg.outDir, 'diff.json');
+  const diffMdPath = path.join(cfg.outDir, 'diff.md');
+  fs.writeFileSync(diffJsonPath, JSON.stringify(diff, null, 2));
+  fs.writeFileSync(diffMdPath, md + '\n');
+  console.log('\n' + formatDiffConsole(diff));
+  console.log(`[redteam] wrote ${diffJsonPath} and ${diffMdPath}`);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try { fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n'); } catch { /* best-effort */ }
+  }
+  return diff;
 }
 
 /** The booted server keeps the event loop alive (pg adapter LISTEN + io), so we

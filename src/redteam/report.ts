@@ -10,6 +10,7 @@ export interface RunSummary {
   suite: string;
   seed: number;
   judgeModel: string;
+  gitSha?: string | null;
   scenarios: ScenarioResult[];
 }
 
@@ -72,6 +73,7 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     suite: summary.suite,
     seed: summary.seed,
     judgeModel: summary.judgeModel,
+    gitSha: summary.gitSha ?? null,
     scenarios,
     totals: {
       scenarios: summary.scenarios.length,
@@ -111,6 +113,9 @@ export function printConsole(summary: RunSummary): boolean {
     if (s.judge) {
       const scoreStr = Object.entries(s.judge.scores).map(([d, v]) => `${d}=${v}`).join(' ');
       console.log(`        judge: ${scoreStr}`);
+      for (const [name, per] of Object.entries(s.judge.perJudge ?? {})) {
+        console.log(`          ${name}: ${Object.entries(per).map(([d, v]) => `${d}=${v}`).join(' ')}`);
+      }
     }
   }
   const estCost = summary.scenarios.reduce((n, s) => n + s.costUsd, 0);
