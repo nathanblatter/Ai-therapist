@@ -13,7 +13,7 @@ async function runMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n🔄 Starting database migration 011 - Crisis Management System...\n');
+    console.log('\n==> Starting database migration 011 - Crisis Management System...\n');
 
     // Read and execute the migration SQL
     const migrationPath = path.join(__dirname, '../migrations', '011_add_crisis_management.sql');

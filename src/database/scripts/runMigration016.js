@@ -23,12 +23,12 @@ async function runMigration() {
     await client.query(migrationSQL);
     await client.query('COMMIT');
 
-    console.log('✅ Migration 016 completed successfully!');
+    console.log('OK: Migration 016 completed successfully!');
     console.log('MFA columns added to users table');
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Migration 016 failed:', error);
+    console.error('FAIL: Migration 016 failed:', error);
     throw error;
   } finally {
     client.release();

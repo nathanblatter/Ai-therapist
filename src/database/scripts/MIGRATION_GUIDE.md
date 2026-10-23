@@ -44,9 +44,9 @@ This will:
 
 Expected output:
 ```
-🔄 Starting database migration to 3NF schema...
-📝 Executing migration script...
-✅ Migration completed successfully!
+==> Starting database migration to 3NF schema...
+Executing migration script...
+OK: Migration completed successfully!
 
 New tables created:
   - therapy_sessions
@@ -288,10 +288,10 @@ For issues or questions:
 ## Rollback Considerations
 
 Rolling back will:
-- ✅ Preserve `users` table
-- ✅ Preserve `conversation_logs` table
-- ❌ Delete all data in new tables
-- ❌ Require application restart
-- ❌ Break new features (session history, auto-naming, etc.)
+- KEEP: Preserve `users` table
+- KEEP: Preserve `conversation_logs` table
+- DROP: Delete all data in new tables
+- DROP: Require application restart
+- DROP: Break new features (session history, auto-naming, etc.)
 
 Only rollback if absolutely necessary!

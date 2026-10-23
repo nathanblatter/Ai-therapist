@@ -23,12 +23,12 @@ async function runMigration() {
     await client.query(migrationSQL);
     await client.query('COMMIT');
 
-    console.log('✅ Migration 017 completed successfully!');
+    console.log('OK: Migration 017 completed successfully!');
     console.log('Voice and language configurations updated to use rich metadata');
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Migration 017 failed:', error);
+    console.error('FAIL: Migration 017 failed:', error);
     throw error;
   } finally {
     client.release();

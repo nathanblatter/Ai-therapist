@@ -41,7 +41,7 @@ async function rollbackMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n🔄 Starting rollback...\n');
+    console.log('\n==> Starting rollback...\n');
 
     // Read and execute the rollback SQL
     const rollbackPath = path.join(__dirname, '../migrations', '003_normalize_schema_rollback.sql');

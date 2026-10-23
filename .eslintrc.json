@@ -20,6 +20,7 @@
   },
   "ignorePatterns": ["dist/", "node_modules/", "*.config.js", "*.config.ts", "postcss.config.cjs"],
   "rules": {
+    "no-emoji": "error",
     "react/react-in-jsx-scope": "off",
     "react/prop-types": "off",
     "react/no-unescaped-entities": "off",

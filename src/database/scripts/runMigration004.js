@@ -13,7 +13,7 @@ async function runMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n🔄 Starting migration 004: Change session_id to TEXT...\n');
+    console.log('\n==> Starting migration 004: Change session_id to TEXT...\n');
 
     // Read and execute the migration SQL
     const migrationPath = path.join(__dirname, '../migrations', '004_change_session_id_to_text.sql');

@@ -7,7 +7,7 @@ async function patchMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n🔧 Applying patch to crisis management migration 011...\n');
+    console.log('\n==> Applying patch to crisis management migration 011...\n');
 
     // Drop the existing constraint
     console.log('Dropping old constraint...');

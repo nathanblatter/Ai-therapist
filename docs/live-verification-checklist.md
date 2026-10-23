@@ -56,12 +56,12 @@ of `POST /api/live/session` and is valid immediately. See `docs/gpt-live.md`.
 ## B. Two-phase auto-terminate + goodbye (ai-therapist-53)
 
 1. Let the session run to `max_duration_minutes`. At the limit, server logs:
-   `⏰ Session <id> hit <N>min limit — asked model to wrap up (75s grace)`.
+   `Session <id> hit <N>min limit — asked model to wrap up (75s grace)`.
 2. The ASSISTANT should audibly say a brief goodbye (2-3 sentences, no new
    topics) and the session should END ITSELF within ~75s of the limit
    (client log: `end_session` tool → session teardown ~6s after the goodbye
    audio). The hard-end log
-   (`⏰ Auto-terminating session ... after N minutes (+grace)`) should **NOT**
+   (`Auto-terminating session ... after N minutes (+grace)`) should **NOT**
    appear — if it does, phase 1 failed and the backstop fired.
 3. The participant sees the session close normally (no abrupt cut mid-audio).
 

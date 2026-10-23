@@ -51,7 +51,7 @@ Multi-Factor Authentication (MFA) adds an extra layer of security to admin accou
 
 ### Step 5: Save Backup Codes
 
-✅ **CRITICAL: Save your backup codes immediately!**
+**CRITICAL: Save your backup codes immediately!**
 
 - You'll see 10 backup codes (8-character codes like "A1B2C3D4")
 - Each code can only be used once
@@ -103,7 +103,7 @@ If you've used some backup codes or want fresh ones:
 
 ### Disable MFA
 
-⚠️ **Not Recommended** - Only disable if absolutely necessary:
+**Not Recommended** - Only disable if absolutely necessary:
 
 1. Go to MFA settings
 2. Enter your password
@@ -213,11 +213,11 @@ last_mfa_verified_at TIMESTAMPTZ
 
 ### What We Protect
 
-✅ **Hashed:** Backup codes are bcrypt-hashed before storage
-✅ **Session-based:** MFA verification required per session
-✅ **Time-window:** TOTP codes accept ±60 second clock drift
-✅ **Single-use:** Backup codes are deleted after use
-✅ **Password-protected:** Disabling/regenerating requires password
+- **Hashed:** Backup codes are bcrypt-hashed before storage
+- **Session-based:** MFA verification required per session
+- **Time-window:** TOTP codes accept ±60 second clock drift
+- **Single-use:** Backup codes are deleted after use
+- **Password-protected:** Disabling/regenerating requires password
 
 ### What Admins Should Know
 

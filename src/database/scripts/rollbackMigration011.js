@@ -13,7 +13,7 @@ async function rollbackMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n🔄 Rolling back database migration 011 - Crisis Management System...\n');
+    console.log('\n==> Rolling back database migration 011 - Crisis Management System...\n');
 
     // Read and execute the rollback SQL
     const rollbackPath = path.join(__dirname, '../migrations', '011_add_crisis_management_rollback.sql');

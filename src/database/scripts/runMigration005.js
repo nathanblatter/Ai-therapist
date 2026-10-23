@@ -13,7 +13,7 @@ async function runMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n🔄 Starting migration 005: Add language to session_configurations...\n');
+    console.log('\n==> Starting migration 005: Add language to session_configurations...\n');
 
     // Read and execute the migration SQL
     const migrationPath = path.join(__dirname, '../migrations', '005_add_language_to_session_config.sql');

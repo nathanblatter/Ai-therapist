@@ -23,12 +23,12 @@ async function rollbackMigration() {
     await client.query(rollbackSQL);
     await client.query('COMMIT');
 
-    console.log('✅ Migration 016 rolled back successfully!');
+    console.log('OK: Migration 016 rolled back successfully!');
     console.log('MFA columns removed from users table');
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Rollback of migration 016 failed:', error);
+    console.error('FAIL: Rollback of migration 016 failed:', error);
     throw error;
   } finally {
     client.release();
