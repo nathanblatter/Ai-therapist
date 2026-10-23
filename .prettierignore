@@ -1,0 +1,18 @@
+# Generated / vendored / data. Docs and workflow YAML are deliberately not
+# formatted: IRB documents keep their hand wrapping, and the workflow files are
+# edited rarely enough that a formatter adds churn without value.
+dist/
+node_modules/
+coverage/
+redteam-results/
+*.min.js
+package-lock.json
+docs/
+.github/
+scripts/participant-sim/
+*.sql
+*.md
+*.html
+*.py
+*.sh
+*.plist
