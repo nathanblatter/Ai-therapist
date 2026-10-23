@@ -226,7 +226,15 @@ if (process.env.NODE_ENV === 'production') {
       directives: {
         'default-src': ["'self'"],
         'script-src': ["'self'"],
-        'style-src': ["'self'", "'unsafe-inline'"], // Tailwind/Recharts inline styles (TODO: migrate to nonces)
+        // 'unsafe-inline' for styles is a DECIDED exception (ai-therapist-211,
+        // 2026-10-23), not a TODO: CSP nonces and hashes cover <style>
+        // elements, never style="" ATTRIBUTES, and React (21 inline style props
+        // in the client) and Recharts (every chart element) set attributes at
+        // runtime. Removing it would require 'unsafe-hashes' plus a hash per
+        // dynamic value, which Recharts makes unbounded. Scripts stay strict
+        // (no 'unsafe-inline' in script-src), which is the clause that matters
+        // for XSS; inline-style injection cannot execute code here.
+        'style-src': ["'self'", "'unsafe-inline'"],
         'img-src': ["'self'", 'data:', 'blob:'],
         'media-src': ["'self'", 'blob:'],
         'font-src': ["'self'", 'data:'],

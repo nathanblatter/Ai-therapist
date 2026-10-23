@@ -310,3 +310,12 @@ Scoping is `EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $
   researcher sees everything; assignment CRUD is researcher-only; a consumed
   or expired invite is rejected; a fresh invite creates a participant
   assigned to the inviting therapist.
+
+### 2026-10-23 follow-up (ai-therapist-278)
+
+The last two loose clauses are closed: the export queries (`export.queries.ts`,
+metadata / anonymized / aggregated / full exports) and the Socket.io
+`admin:get-sideband-connections` handler now apply `ownerOrgScopeSql`, so
+anonymous (IRB-custody) sessions reach only irb-study researchers on every
+surface. `crisis.queries.getActiveCrisisSessions` (dead since the service took
+over) was deleted.
