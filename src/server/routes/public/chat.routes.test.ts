@@ -24,6 +24,7 @@ const dbMocks = vi.hoisted(() => ({
 }));
 const chatMocks = vi.hoisted(() => ({
   initializeChatSession: vi.fn(),
+  seedAssistantOpening: vi.fn(),
   sendMessage: vi.fn(),
 }));
 const helperMocks = vi.hoisted(() => ({
@@ -52,6 +53,7 @@ vi.mock('../../services/sessionName.service.js', () => ({
 }));
 vi.mock('../../services/chatTherapy.service.js', () => ({
   initializeChatSession: chatMocks.initializeChatSession,
+  seedAssistantOpening: chatMocks.seedAssistantOpening,
   sendMessage: chatMocks.sendMessage,
   injectGuidance: vi.fn(),
   endChatSession: vi.fn(),
@@ -164,6 +166,57 @@ describe('POST /api/chat/start', () => {
       .send({});
     expect(res.status).toBe(429);
     expect(dbMocks.createSession).not.toHaveBeenCalled();
+  });
+});
+
+// Server-authored opening line (ai-therapist-259 / 151): the disclaimer is a
+// persisted first assistant turn, not a client-side decoration the model and
+// the transcript never see.
+describe('POST /api/chat/start opening line', () => {
+  it('persists the opening as the first assistant turn, seeds the model history, and returns it', async () => {
+    dbMocks.insertMessagesBatch.mockResolvedValue([{ message_id: 1 }]);
+    const res = await request(makeApp()).post('/api/chat/start').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.opening).toMatch(/not a licensed therapist or doctor/);
+    expect(res.body.opening).toMatch(/I'm an AI/);
+
+    expect(dbMocks.insertMessagesBatch).toHaveBeenCalledTimes(1);
+    const [rows] = dbMocks.insertMessagesBatch.mock.calls[0];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      session_id: res.body.sessionId, role: 'assistant', message_type: 'text',
+      content: res.body.opening,
+      // Pre-redacted: machine-authored, PHI-free, must not cost a redaction call.
+      content_redacted: res.body.opening,
+      metadata: { opening_line: true },
+    });
+    expect(chatMocks.seedAssistantOpening).toHaveBeenCalledWith(res.body.sessionId, res.body.opening);
+  });
+
+  it('uses the configured crisis contact in the opening', async () => {
+    helperMocks.getSystemConfig.mockResolvedValue({
+      features: {},
+      crisis_contact: { enabled: true, hotline: 'Campus Line', phone: '555-0100', text: 'Text HELP to 12345' },
+    });
+    const res = await request(makeApp()).post('/api/chat/start').send({});
+    expect(res.body.opening).toContain('call the Campus Line crisis line at 555-0100 or text Text HELP to 12345');
+  });
+
+  it('skips the opening on a continuation of a terminated voice session', async () => {
+    dbMocks.getSessionAccessInfo.mockResolvedValue(null); // prior session not accessible -> fresh, but still a continuation
+    const res = await request(makeApp()).post('/api/chat/start').send({ continued_from: 'live_prior' });
+    expect(res.status).toBe(200);
+    expect(res.body.opening).toBeNull();
+    expect(dbMocks.insertMessagesBatch).not.toHaveBeenCalled();
+    expect(chatMocks.seedAssistantOpening).not.toHaveBeenCalled();
+  });
+
+  it('still starts the session when persisting the opening fails', async () => {
+    dbMocks.insertMessagesBatch.mockRejectedValue(new Error('db down'));
+    const res = await request(makeApp()).post('/api/chat/start').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.sessionId).toBeTruthy();
+    expect(res.body.opening).toBeNull();
   });
 });
 

@@ -20,6 +20,7 @@ import {
   upsertSessionConfig,
 } from '../../db/index.js';
 import { checkSessionLimits, getSystemPrompt, getSystemConfig, resolveProactiveOffering } from '../../utils/sessionHelpers.js';
+import { buildChatOpeningLine, OPENING_LINE_MESSAGE_TYPE, OPENING_LINE_METADATA } from '../../utils/openingLine.js';
 import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -191,6 +192,39 @@ export default function chatRoutes(): Router {
       // here, carrying the conversation so the participant never has to repeat
       // a disclosure they just made.
       const continuedFrom = typeof req.body?.continued_from === 'string' ? req.body.continued_from : null;
+
+      // Server-authored opening line (utils/openingLine.ts): persisted as the
+      // first assistant turn and seeded into the model history, so the AI
+      // disclosure is guaranteed by construction and the model does not
+      // disclaim a second time. A continuation of a terminated voice session
+      // skips it — the participant already heard it and must not be greeted
+      // as if starting over.
+      let opening: string | null = null;
+      if (!continuedFrom) {
+        try {
+          const cfg = await getSystemConfig();
+          opening = buildChatOpeningLine(cfg.crisis_contact as Parameters<typeof buildChatOpeningLine>[0]);
+          const { seedAssistantOpening } = await import('../../services/chatTherapy.service.js');
+          seedAssistantOpening(sessionId, opening);
+          // content_redacted is pre-filled: the text is machine-authored and
+          // PHI-free, so the redaction job must not spend a model call on it.
+          await insertMessagesBatch([
+            {
+              session_id: sessionId, role: 'assistant', message_type: OPENING_LINE_MESSAGE_TYPE,
+              content: opening, content_redacted: opening, metadata: { ...OPENING_LINE_METADATA },
+            },
+          ]);
+          if (global.io) {
+            global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'assistant', message: opening, timestamp: new Date() });
+          }
+        } catch (err) {
+          // The session must still start; the client falls back to its own
+          // copy of the preamble when `opening` is absent.
+          console.error('[ChatStart] Failed to persist opening line (non-fatal):', err);
+          opening = null;
+        }
+      }
+
       if (continuedFrom) {
         try {
           const { getSessionAccessInfo, getSessionMessages } = await import('../../db/index.js');
@@ -241,6 +275,7 @@ export default function chatRoutes(): Router {
       res.json({
         success: true, sessionId, sessionType: 'chat',
         continuedFrom: continuedFrom ?? null,
+        opening,
         message: 'Chat therapy session started',
       });
     } catch (error: unknown) {

@@ -427,6 +427,17 @@ export function injectGuidance(sessionId: string, guidance: string): void {
 }
 
 /**
+ * Seed the server-authored opening line as the session's first ASSISTANT turn
+ * (utils/openingLine.ts). The model then sees that the disclaimer has already
+ * been delivered and, per the system prompt's "once, at the start" rule, does
+ * not repeat it. Mirrors the persisted messages row, so a rehydrated history
+ * (rebuildHistory) has the same shape.
+ */
+export function seedAssistantOpening(sessionId: string, opening: string): void {
+  conversationHistory.get(sessionId)?.push({ role: 'assistant', content: opening });
+}
+
+/**
  * Get conversation history for a session
  * @param {string} sessionId
  * @returns {Array} Array of message objects

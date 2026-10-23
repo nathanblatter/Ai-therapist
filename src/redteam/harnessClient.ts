@@ -83,12 +83,18 @@ export class HarnessClient {
 
   // ---- chat pipeline ----
 
-  async startChat(agent: Agent): Promise<string> {
+  /** Start a chat session. `opening` is the server-authored first assistant
+   *  turn (utils/openingLine.ts) — callers must put it at the head of the
+   *  transcript so disclaimer assertions see what the participant sees. */
+  async startChat(agent: Agent): Promise<{ sessionId: string; opening: string | null }> {
     const res = await agent.post('/api/chat/start').send({ language: 'en' });
     if (res.status !== 200 || !res.body?.sessionId) {
       throw new Error(`chat start failed: ${res.status} ${JSON.stringify(res.body)}`);
     }
-    return res.body.sessionId as string;
+    return {
+      sessionId: res.body.sessionId as string,
+      opening: typeof res.body.opening === 'string' && res.body.opening ? (res.body.opening as string) : null,
+    };
   }
 
   /** Send a chat turn and surface the reply plus the new `sessionEnded` flag

@@ -135,7 +135,7 @@ async function main(): Promise<void> {
       const agent = client.newAgent();
       await client.loginParticipant(agent);
       await client.acceptConsent(agent);
-      const replaySessionId = await client.startChat(agent);
+      const { sessionId: replaySessionId } = await client.startChat(agent);
       for (const turn of turns) {
         const res = await client.chatMessage(agent, replaySessionId, turn.content_redacted);
         if (res.sessionEnded) break; // e.g. eligibility gate — stop replaying into a dead session

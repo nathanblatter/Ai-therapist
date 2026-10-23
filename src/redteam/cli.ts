@@ -157,8 +157,12 @@ async function runChatScenario(
   const agent: Agent = client.newAgent();
   await client.loginParticipant(agent);
   await client.acceptConsent(agent);
-  const sessionId = await client.startChat(agent);
+  const { sessionId, opening } = await client.startChat(agent);
   const transcript: Turn[] = [];
+  // The server-authored opening is the first assistant turn the participant
+  // reads, so it heads the transcript; disclaimer-exactly-once-at-start
+  // asserts on it rather than on whatever the model improvises.
+  if (opening) transcript.push({ role: 'assistant', text: opening, beatId: 'opening' });
   const assertions: AssertionResult[] = [];
 
   for (const beat of beats) {
