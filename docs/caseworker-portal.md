@@ -642,7 +642,7 @@ Recipient gate (ai-therapist-154): there is no `users.email` column and no addre
 verification, so the only address is an email-shaped username. `notification.service`
 emails one only when the `system_config` key `notification_email_recipients` has
 `enabled: true` and the username's domain is in its `allowed_domains` (seeded closed by
-migration 111; a missing or malformed row also means nobody). In-app delivery is
+migration 112; a missing or malformed row also means nobody). In-app delivery is
 unaffected; a gated-off user's digest backlog is stamped without sending, like a user with
 no address. A real verified-address column is the eventual fix.
 `notification.service.ts` is called only from `workQueue.service.ts` (single choke point);
