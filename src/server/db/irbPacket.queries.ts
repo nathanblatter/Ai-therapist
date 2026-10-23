@@ -23,18 +23,22 @@ export interface IrbWindow {
 }
 
 // $1 = from, $2 = to, $3 = orgId, $4 = includeUnattributed. Shared by every
-// therapy_sessions-based query; `ts` is the therapy_sessions alias.
-const SESSION_SCOPE = `ts.is_demo IS NOT TRUE
+// therapy_sessions-based query; `ts` is the therapy_sessions alias. Exported
+// (with SESSION_IN_WINDOW and irbWindowParams) so the weekly digest
+// (weeklyDigest.queries.ts) applies the identical scope rule instead of
+// re-deriving it.
+export const SESSION_SCOPE = `ts.is_demo IS NOT TRUE
   AND (ts.user_id IS NULL OR NOT EXISTS (
         SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))
   AND ((ts.user_id IS NULL AND $4::boolean)
        OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $3::int))`;
 
-const SESSION_IN_WINDOW = `ts.created_at >= $1::timestamptz AND ts.created_at <= $2::timestamptz`;
+export const SESSION_IN_WINDOW = `ts.created_at >= $1::timestamptz AND ts.created_at <= $2::timestamptz`;
 
-function params(w: IrbWindow): unknown[] {
+export function irbWindowParams(w: IrbWindow): unknown[] {
   return [w.from, w.to, w.orgId, w.includeUnattributed];
 }
+const params = irbWindowParams;
 
 const n = (v: string | number | null | undefined): number => {
   const x = typeof v === 'number' ? v : parseInt(v ?? '0', 10);

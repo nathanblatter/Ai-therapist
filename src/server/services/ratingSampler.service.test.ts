@@ -171,7 +171,7 @@ describe('getSecondRaterFraction', () => {
     expect(await getSecondRaterFraction()).toBe(0.5);
     configMock.getSystemConfig.mockResolvedValueOnce({ evals: { rating_second_rater_fraction: 7 } });
     expect(await getSecondRaterFraction()).toBe(1);
-    configMock.getSystemConfig.mockResolvedValueOnce({ evals: {} });
+    configMock.getSystemConfig.mockResolvedValueOnce({ evals: {} as never });
     expect(await getSecondRaterFraction()).toBe(0.2);
   });
 });

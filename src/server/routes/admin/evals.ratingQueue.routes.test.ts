@@ -105,7 +105,7 @@ describe('blind rating on GET /admin/api/sessions/:id/eval', () => {
   });
 
   it('is not blind once the queue row is rated or skipped', async () => {
-    dbMocks.getRatingQueueRowForSession.mockResolvedValue({ ...QUEUE_OPEN, status: 'rated' });
+    dbMocks.getRatingQueueRowForSession.mockResolvedValue({ ...QUEUE_OPEN, status: 'rated' } as never);
     const res = await request(appAs('researcher')).get('/admin/api/sessions/sess_1/eval');
     expect(res.body.blind).toBe(false);
     expect(dbMocks.hasHumanRating).not.toHaveBeenCalled();
@@ -114,8 +114,8 @@ describe('blind rating on GET /admin/api/sessions/:id/eval', () => {
 
 describe('blind rating on GET /admin/api/sessions/:id/human-ratings', () => {
   it('withholds other raters while blind and says so', async () => {
-    dbMocks.getRatingQueueRowForSession.mockResolvedValue(QUEUE_OPEN);
-    dbMocks.getSessionHumanRatings.mockResolvedValue([{ rating_id: 1, rater_user_id: 2, rubric: { empathy: { score: 5 } } }]);
+    dbMocks.getRatingQueueRowForSession.mockResolvedValue(QUEUE_OPEN as never);
+    dbMocks.getSessionHumanRatings.mockResolvedValue([{ rating_id: 1, rater_user_id: 2, rubric: { empathy: { score: 5 } } }] as never);
     const res = await request(appAs('researcher', 1)).get('/admin/api/sessions/sess_1/human-ratings');
     expect(res.status).toBe(200);
     expect(res.body.blind).toBe(true);
@@ -124,9 +124,9 @@ describe('blind rating on GET /admin/api/sessions/:id/human-ratings', () => {
   });
 
   it('returns everyone once the caller has rated', async () => {
-    dbMocks.getRatingQueueRowForSession.mockResolvedValue(QUEUE_OPEN);
+    dbMocks.getRatingQueueRowForSession.mockResolvedValue(QUEUE_OPEN as never);
     dbMocks.hasHumanRating.mockResolvedValue(true);
-    dbMocks.getSessionHumanRatings.mockResolvedValue([{ rating_id: 1, rater_user_id: 2 }, { rating_id: 2, rater_user_id: 1 }]);
+    dbMocks.getSessionHumanRatings.mockResolvedValue([{ rating_id: 1, rater_user_id: 2 }, { rating_id: 2, rater_user_id: 1 }] as never);
     const res = await request(appAs('researcher', 1)).get('/admin/api/sessions/sess_1/human-ratings');
     expect(res.body.blind).toBe(false);
     expect(res.body.ratings).toHaveLength(2);
@@ -135,7 +135,7 @@ describe('blind rating on GET /admin/api/sessions/:id/human-ratings', () => {
 
 describe('PUT /admin/api/sessions/:id/human-rating links the queue row', () => {
   it('calls linkRatingToQueue after the upsert and returns the row', async () => {
-    dbMocks.linkRatingToQueue.mockResolvedValue({ ...QUEUE_OPEN, status: 'rated' });
+    dbMocks.linkRatingToQueue.mockResolvedValue({ ...QUEUE_OPEN, status: 'rated' } as never);
     const rubric = Object.fromEntries(['safety_protocol', 'empathy', 'modality_fidelity', 'disclaimer_compliance', 'non_directiveness', 'clinical_claims'].map(d => [d, { score: 4 }]));
     const res = await request(appAs('therapist', 1)).put('/admin/api/sessions/sess_1/human-rating').send({ rubric });
     expect(res.status).toBe(200);
