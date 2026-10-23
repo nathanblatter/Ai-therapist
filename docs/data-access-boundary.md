@@ -133,6 +133,28 @@ codebook labels "treat as identifiable data." Neither is in the default export.
   and dataset exports are recorded in the append-only `data_access_log`
   (who, what, when, at which identifiability level), alongside the existing
   grant/deletion logs.
+- **The audit trails are readable, not write-only** (ai-therapist-197,
+  2026-10-22). Researchers review them in the admin **Data Access** view
+  (`src/client/admin/components/DataAccessAudit.tsx`), one tab per table:
+  `data_access_log`, `redaction_review_log`, `assistant_audit`,
+  `caseload_audit_log`, `content_wipe_log`. The read API lives in
+  `src/server/routes/admin/audit.routes.ts`:
+
+  | Route | Who | Scope |
+  | --- | --- | --- |
+  | `GET /admin/api/audit/data-access` (filters: participant, session, actor, action, date range; paginated with total) | researcher | own organization |
+  | `GET /admin/api/audit/data-access/participant/:userId` (all actors and actions touching any of that participant's sessions, with a per-actor rollup) | therapist, researcher | therapist: caseload only (404 otherwise); researcher: own organization |
+  | `GET /admin/api/audit/redaction-review` | researcher | all |
+  | `GET /admin/api/audit/assistant` | researcher | own organization |
+  | `GET /admin/api/caseload/audit`, `GET /admin/api/content-retention/log` (pre-existing) | researcher | own organization / all |
+
+  The per-participant history is also embedded in the participant profile
+  ("Access history" section, full-tier roles only) so "who has seen my
+  sessions?" is answerable from the participant's own record. Reading a
+  participant's history is itself an access and writes a `data_access_log`
+  row with `action = 'audit_log_view'`; the global list view is deliberately
+  not logged so the log does not recurse on itself. Caseworkers have no audit
+  read at all (the trail names full-tier content accesses).
 - **Caseworker isolation is structural, not just cosmetic**: caseworker
   websocket connections join only their own summary-tier channels, never the
   admin broadcast, therapist, or per-session rooms — a caseworker cannot receive

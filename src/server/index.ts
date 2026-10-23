@@ -63,6 +63,7 @@ import consentRoutes from "./routes/public/consent.routes.js";
 import progressRoutes from "./routes/public/progress.routes.js";
 import adminConsentRoutes from "./routes/admin/consent.routes.js";
 import caseloadRoutes from "./routes/admin/caseload.routes.js";
+import auditRoutes from "./routes/admin/audit.routes.js";
 import invitesRoutes from "./routes/admin/invites.routes.js";
 import joinRoutes from "./routes/join.routes.js";
 import joinStudyRoutes from "./routes/joinStudy.routes.js";
@@ -762,6 +763,9 @@ app.use(prepRoutes());
 
 // Therapist caseload assignments + management API -> routes/admin/caseload.routes.ts (docs/caseload-rbac.md)
 app.use(caseloadRoutes());
+
+// Audit-trail reads (data access, redaction review, assistant) -> routes/admin/audit.routes.ts (ai-therapist-197)
+app.use(auditRoutes());
 
 // Client invite links (therapist-generated, single-use) -> routes/admin/invites.routes.ts
 app.use(invitesRoutes());

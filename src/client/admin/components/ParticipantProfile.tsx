@@ -6,7 +6,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   X, User, Cpu, Shield, AlertTriangle, TrendingUp, TrendingDown, Minus,
-  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity, Clock,
+  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity, Clock, Eye,
 } from 'react-feather';
 import Panel from './ui/Panel';
 import StatCard from './ui/StatCard';
@@ -16,6 +16,7 @@ import NotesPanel from './notes/NotesPanel';
 import MyEscalations from './escalations/MyEscalations';
 import MessageThreadView from './MessageThreadView';
 import RiskCheckLadder from './RiskCheckLadder';
+import ParticipantAccessHistory from './ParticipantAccessHistory';
 import { formatDate, timeAgo } from '../../shared/format';
 import { severityBadgeClass } from '../../shared/severity';
 import { isCareTeamRole } from '../../../shared/roles';
@@ -677,6 +678,20 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
             {/* Resolves/creates only the viewing clinician's own thread with
                 this client (one thread per client-clinician pair). */}
             <MessageThreadView clientId={user.userid} clientName={user.username} />
+          </section>
+        )}
+
+        {/* Access history (ai-therapist-197): who has seen this participant's
+            data. Full-tier roles only — caseworkers are excluded server-side
+            (403), so do not fetch for them. Viewing it is itself logged. */}
+        {(userRole === 'therapist' || userRole === 'researcher') && (
+          <section aria-label="Access history">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <Eye size={15} className="text-gray-500" /> Access history
+            </h3>
+            <Panel>
+              <ParticipantAccessHistory userId={user.userid} pageSize={10} onViewSession={onViewSession} />
+            </Panel>
           </section>
         )}
 

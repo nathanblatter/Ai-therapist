@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { DollarSign, BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw, ExternalLink } from "react-feather";
+import { DollarSign, BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw, ExternalLink, Eye } from "react-feather";
 import AdminHeader from "./AdminHeader";
 import SandboxBanner from "./SandboxBanner";
 import useAuth from "../hooks/useAuth";
@@ -47,6 +47,7 @@ const SandboxInvites = lazy(() => import("./SandboxInvites"));
 const QualtricsSync = lazy(() => import("./QualtricsSync"));
 const SurveyData = lazy(() => import("./SurveyData"));
 const Assistant = lazy(() => import("./Assistant"));
+const DataAccessAudit = lazy(() => import("./DataAccessAudit"));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -277,6 +278,8 @@ export default function AdminApp() {
         { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
         { id: 'evals', label: 'Evals', icon: CheckSquare, researcherOnly: true },
         { id: 'redaction', label: 'Redaction Review', icon: EyeOff, researcherOnly: true },
+        // Audit-trail reads (ai-therapist-197): who has seen participant data.
+        { id: 'data-access', label: 'Data Access', icon: Eye, researcherOnly: true },
         { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'study-ops', label: 'Study Ops', icon: Clipboard, researcherOnly: true, researchOnly: true },
         { id: 'sandbox', label: 'Sandbox Invites', icon: Box, researcherOnly: true, researchOnly: true },
@@ -481,6 +484,7 @@ export default function AdminApp() {
               {currentView === 'assistant' && <Assistant role={userRole} />}
               {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
+              {currentView === 'data-access' && <DataAccessAudit onViewSession={handleViewSession} />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'costs' && <CostDashboard />}
             {currentView === 'config' && <SystemConfig />}

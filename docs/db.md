@@ -253,3 +253,24 @@ the row:
   `{"enabled": true, "backend": "auto"|"decisions"|"responses", "threshold": 0.5}`;
   absent row = defaults. No migration needed.
 
+
+## Audit tables and their read surfaces
+
+Four append-only accountability tables record who did what to participant
+data. None has FK cascades on actor columns, so rows survive account deletion.
+Since ai-therapist-197 (2026-10-22) every one of them is readable through the
+admin **Data Access** view (Research nav group, researcher-only) and the
+`/admin/api/audit/*` routes in `src/server/routes/admin/audit.routes.ts`; see
+`docs/data-access-boundary.md` section 6 for the role/scope table.
+
+| Table | Written by | Read by |
+| --- | --- | --- |
+| `data_access_log` (091) — transcript views, recording streams, exports, and `audit_log_view` self-audit rows | `logDataAccess` in `src/server/db/accessLog.queries.ts` (fire-and-forget) | `listDataAccessLog`, `getParticipantAccessHistory` (same module) |
+| `redaction_review_log` (091) — approved/corrected per sampled message | `updateRedactedContent`, `recordRedactionApproval` in `redaction.queries.ts` | `listRedactionReviewLog` (same module) |
+| `assistant_audit` (092) — one row per admin-assistant turn, tools + row counts, never payloads | `services/assistant.service.ts` | `listAssistantAudit` in `assistantAudit.queries.ts` |
+| `caseload_audit_log` — assignments, invites, work-queue actions | `insertCaseloadAudit` in `caseload.queries.ts` | `listCaseloadAudit` (same module) |
+
+`data_access_log.session_id` is TEXT while `therapy_sessions.session_id` is a
+UUID; the readers join on `ts.session_id::text` and resolve the participant as
+`COALESCE(dal.user_id, ts.user_id)` because recording-stream rows carry only
+the session id. No migration was needed for the read side.
