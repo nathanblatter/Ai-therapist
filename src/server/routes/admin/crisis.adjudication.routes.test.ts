@@ -91,7 +91,7 @@ describe('PUT /admin/api/crisis/events/:eventId/adjudication', () => {
 
 describe('GET /admin/api/crisis/events/:eventId/adjudications', () => {
   it('lists verdicts for an in-scope event and 404s otherwise', async () => {
-    dbMocks.getCrisisEventAdjudications.mockResolvedValue([{ adjudication_id: 1, verdict: 'unclear' }]);
+    dbMocks.getCrisisEventAdjudications.mockResolvedValue([{ adjudication_id: 1, verdict: 'unclear' }] as never);
     const ok = await request(appAs('therapist', 7)).get('/admin/api/crisis/events/12/adjudications');
     expect(ok.status).toBe(200);
     expect(ok.body.adjudications).toHaveLength(1);

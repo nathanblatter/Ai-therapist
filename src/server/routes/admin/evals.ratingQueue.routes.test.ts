@@ -86,7 +86,7 @@ describe('blind rating on GET /admin/api/sessions/:id/eval', () => {
   });
 
   it('strips rubric, rationale, comments and spread while the session is queued and the caller has not rated', async () => {
-    dbMocks.getRatingQueueRowForSession.mockResolvedValue(QUEUE_OPEN);
+    dbMocks.getRatingQueueRowForSession.mockResolvedValue(QUEUE_OPEN as never);
     const res = await request(appAs('researcher')).get('/admin/api/sessions/sess_1/eval');
     expect(res.status).toBe(200);
     expect(res.body.blind).toBe(true);
@@ -97,7 +97,7 @@ describe('blind rating on GET /admin/api/sessions/:id/eval', () => {
   });
 
   it('reveals the judge once the caller has stored a rating', async () => {
-    dbMocks.getRatingQueueRowForSession.mockResolvedValue(QUEUE_OPEN);
+    dbMocks.getRatingQueueRowForSession.mockResolvedValue(QUEUE_OPEN as never);
     dbMocks.hasHumanRating.mockResolvedValue(true);
     const res = await request(appAs('therapist')).get('/admin/api/sessions/sess_1/eval');
     expect(res.body.blind).toBe(false);
