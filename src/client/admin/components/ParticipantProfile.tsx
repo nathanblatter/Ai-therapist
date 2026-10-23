@@ -6,13 +6,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   X, User, Cpu, Shield, AlertTriangle, TrendingUp, TrendingDown, Minus,
-  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity, Clock, Eye,
+  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity, Clock, Eye, Target,
 } from 'react-feather';
 import Panel from './ui/Panel';
 import StatCard from './ui/StatCard';
 import useAdminFetch from '../hooks/useAdminFetch';
 import CatchUp from './CatchUp';
 import NotesPanel from './notes/NotesPanel';
+import HomeworkPanel from './HomeworkPanel';
 import MyEscalations from './escalations/MyEscalations';
 import MessageThreadView from './MessageThreadView';
 import RiskCheckLadder from './RiskCheckLadder';
@@ -649,6 +650,17 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
               clientLabel={user.username}
               sessionDates={Object.fromEntries((sessions ?? []).map(s => [s.session_id, s.start_time]))}
             />
+          </section>
+        )}
+
+        {/* Homework (ai-therapist-200): clinician-writable practice
+            assignments. Full-tier roles only; caseworkers are 403 server-side. */}
+        {(userRole === 'therapist' || userRole === 'researcher') && (
+          <section aria-label="Homework">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
+              <Target size={15} className="text-gray-500" /> Homework
+            </h3>
+            <HomeworkPanel clientId={user.userid} />
           </section>
         )}
 

@@ -56,6 +56,8 @@ interface AssignmentItem {
   assigned_at: string;
   completed_at: string | null;
   completion_note: string | null;
+  /** 'ai' = agreed in a conversation; 'therapist' = set by the care team. */
+  source?: 'ai' | 'therapist';
 }
 
 // ---------- small helpers ----------
@@ -174,7 +176,7 @@ function PracticeCard({ assignments, onCompleted }: {
       </div>
       {open.length > 0 && (
         <p className="text-sm text-gray-500 mb-2">
-          What you and your AI companion agreed to try between conversations.
+          What you agreed to try between conversations, with your AI companion or your therapist.
         </p>
       )}
       <ul className="divide-y divide-gray-100">
@@ -185,7 +187,7 @@ function PracticeCard({ assignments, onCompleted }: {
                 <p className="text-sm font-medium text-gray-800">{a.title}</p>
                 <p className="text-sm text-gray-500">{a.description}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  From your conversation {friendlyDay(a.assigned_at)}
+                  {a.source === 'therapist' ? 'From your therapist' : 'From your conversation'} {friendlyDay(a.assigned_at)}
                   {a.suggested_frequency ? ` · ${a.suggested_frequency}` : ''}
                 </p>
               </div>

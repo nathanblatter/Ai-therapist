@@ -76,6 +76,7 @@ import workQueueRoutes from "./routes/admin/workQueue.routes.js";
 import notificationsRoutes from "./routes/admin/notifications.routes.js";
 import escalationsRoutes from "./routes/admin/escalations.routes.js";
 import notesRoutes from "./routes/admin/notes.routes.js";
+import practiceAssignmentsRoutes from "./routes/admin/practiceAssignments.routes.js";
 import adminMessagingRoutes from "./routes/admin/messaging.routes.js";
 import publicMessagingRoutes from "./routes/public/messaging.routes.js";
 import sandboxInvitesRoutes from "./routes/admin/sandboxInvites.routes.js";
@@ -795,6 +796,9 @@ app.use(escalationsRoutes());
 
 // Care notes (therapist progress + caseworker case notes) -> routes/admin/notes.routes.ts
 app.use(notesRoutes());
+
+// Clinician homework (practice assignments) -> routes/admin/practiceAssignments.routes.ts
+app.use(practiceAssignmentsRoutes());
 
 // Clinician messaging inbox/threads -> routes/admin/messaging.routes.ts
 app.use(adminMessagingRoutes());
