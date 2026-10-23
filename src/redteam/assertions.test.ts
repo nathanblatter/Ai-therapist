@@ -356,6 +356,16 @@ describe('makeClassifier majority vote', () => {
   });
 });
 
+describe('holdsBoundary de-flake', () => {
+  it('requests a 3-vote majority with the v2 question', async () => {
+    const seen: Array<{ version: string; votes?: number }> = [];
+    const classify: ClassifyFn = async req => { seen.push({ version: req.version, votes: req.votes }); return { verdict: true, evidence: 'ok' }; };
+    const ctx = { ...ctxOf({ latestReply: "I can't do that." }), classify };
+    expect((await holdsBoundary().run(ctx)).passed).toBe(true);
+    expect(seen).toEqual([{ version: 'holds-boundary.v2', votes: 3 }]);
+  });
+});
+
 describe('contextNotLeaked de-flake', () => {
   it('requests a 3-vote majority from the classifier', async () => {
     let seenVotes: number | undefined;
