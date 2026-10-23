@@ -4,6 +4,7 @@ import ChunkCard from './knowledge/ChunkCard';
 import ChunkForm from './knowledge/ChunkForm';
 import TestRetrievalPanel from './knowledge/TestRetrievalPanel';
 import RetrievalLog from './knowledge/RetrievalLog';
+import { deleteJson, getJson, postJson, HttpError } from '../../shared/http';
 import {
   KINDS, EMPTY_FORM, formValuesFromChunk,
   type Chunk, type StatusCount, type ChunkUsage, type ChunkFormValues,
@@ -47,14 +48,12 @@ export default function KnowledgeBase() {
       if (q) params.set('q', q);
       params.set('limit', String(PAGE_SIZE));
       params.set('offset', String(offset));
-      const res = await fetch(`/admin/api/knowledge?${params}`, { credentials: 'include' });
-      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-      const data = await res.json();
+      const data = await getJson<{ chunks?: Chunk[]; counts?: StatusCount[]; total?: number }>(`/admin/api/knowledge?${params}`);
       setChunks(prev => (append ? [...prev, ...(data.chunks ?? [])] : data.chunks ?? []));
       setCounts(data.counts ?? []);
       setTotal(data.total ?? 0);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load');
+      setError(e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
@@ -64,11 +63,10 @@ export default function KnowledgeBase() {
 
   useEffect(() => {
     // Retrieval usage from the rerank decision log; non-fatal if it fails.
-    fetch('/admin/api/knowledge/usage', { credentials: 'include' })
-      .then(res => (res.ok ? res.json() : null))
+    getJson<{ usage?: ChunkUsage[] }>('/admin/api/knowledge/usage')
       .then(data => {
         if (!data?.usage) return;
-        setUsageMap(new Map((data.usage as ChunkUsage[]).map(u => [u.chunk_id, u])));
+        setUsageMap(new Map(data.usage.map(u => [u.chunk_id, u])));
       })
       .catch(() => { /* badge-only data; ignore */ });
   }, []);
@@ -90,13 +88,7 @@ export default function KnowledgeBase() {
     }
     setBusy(id);
     try {
-      const res = await fetch(`/admin/api/knowledge/${id}/active`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ active, note: note || undefined }),
-      });
-      if (!res.ok) throw new Error('update failed');
+      await postJson(`/admin/api/knowledge/${id}/active`, { active, note: note || undefined });
       await load();
     } catch {
       setError('Could not update that item.');
@@ -109,8 +101,7 @@ export default function KnowledgeBase() {
     if (!confirm('Delete this content permanently? This cannot be undone.')) return;
     setBusy(id);
     try {
-      const res = await fetch(`/admin/api/knowledge/${id}`, { method: 'DELETE', credentials: 'include' });
-      if (!res.ok) throw new Error('delete failed');
+      await deleteJson(`/admin/api/knowledge/${id}`);
       await load();
     } catch {
       setError('Could not delete that item.');
@@ -127,17 +118,11 @@ export default function KnowledgeBase() {
     if (note === null) return; // cancelled
     setBusy('bulk');
     try {
-      const res = await fetch('/admin/api/knowledge/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          ...(kind ? { kind } : {}),
-          ...(topicScope ? { topic: topicScope } : {}),
-          ...(note ? { note } : {}),
-        }),
+      await postJson('/admin/api/knowledge/approve', {
+        ...(kind ? { kind } : {}),
+        ...(topicScope ? { topic: topicScope } : {}),
+        ...(note ? { note } : {}),
       });
-      if (!res.ok) throw new Error('approve failed');
       await load();
     } catch {
       setError('Bulk approve failed.');
@@ -150,14 +135,7 @@ export default function KnowledgeBase() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('/admin/api/knowledge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(values),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? 'Create failed');
+      await postJson('/admin/api/knowledge', values, { fallback: 'Create failed' });
       setShowCreate(false);
       await load();
     } catch (e) {
@@ -171,14 +149,7 @@ export default function KnowledgeBase() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/admin/api/knowledge/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(values),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? 'Update failed');
+      await postJson(`/admin/api/knowledge/${id}`, values, { method: 'PUT', fallback: 'Update failed' });
       setEditingId(null);
       await load();
     } catch (e) {

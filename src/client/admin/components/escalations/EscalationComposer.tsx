@@ -4,6 +4,7 @@
 // per-client Escalate action, and from CrisisManagement with a pre-linked
 // crisis event (integration wiring).
 import { useEffect, useState } from "react";
+import { getJson, postJson } from "../../../shared/http";
 import { AlertTriangle, X } from "react-feather";
 // Subset of the canonical caseload row (server data layer, type-only import).
 import type { CaseloadClient as CaseloadClientRow } from "../../../../server/db/caseload.queries";
@@ -42,8 +43,7 @@ export default function EscalationComposer({
   useEffect(() => {
     if (clientId !== undefined) return;
     let cancelled = false;
-    fetch("/admin/api/caseload", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
+    getJson<{ clients?: CaseloadClient[] }>("/admin/api/caseload")
       .then((data) => {
         if (cancelled) return;
         const list: CaseloadClient[] = Array.isArray(data?.clients) ? data.clients : [];
@@ -71,23 +71,17 @@ export default function EscalationComposer({
     setSubmitting(true);
     setError(null);
     try {
-      const response = await fetch("/admin/api/escalations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
+      const data = await postJson<{ escalation: Parameters<NonNullable<typeof onCreated>>[0] }>(
+        "/admin/api/escalations",
+        {
           client_id: selectedClientId,
           reason: reason.trim(),
           urgency,
           session_id: sessionId ?? undefined,
           crisis_event_id: crisisEventId ?? undefined,
-        }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to create escalation");
-      }
-      const data = await response.json();
+        },
+        { fallback: "Failed to create escalation" }
+      );
       onCreated?.(data.escalation);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));

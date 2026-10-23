@@ -13,6 +13,7 @@ import {
   AlertTriangle,
 } from "react-feather";
 import useAdminFetch from "../hooks/useAdminFetch";
+import { postJson, requestJson } from "../../shared/http";
 import EscalationComposer from "./escalations/EscalationComposer";
 import { isCareTeamRole } from "../../../shared/roles";
 // Canonical caseload row shape lives in the server data layer (type-only
@@ -152,17 +153,11 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
     setCopiedLink(false);
     setCreatingInvite(true);
     try {
-      const response = await fetch("/admin/api/caseload/invites", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ label: inviteLabel.trim() || null }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to create invite");
-      }
-      const data = await response.json();
+      const data = await postJson<{ link?: string; url?: string; inviteUrl?: string }>(
+        "/admin/api/caseload/invites",
+        { label: inviteLabel.trim() || null },
+        { fallback: "Failed to create invite" }
+      );
       const link: string | undefined = data.link ?? data.url ?? data.inviteUrl;
       if (link) {
         setCreatedLink(toAbsoluteLink(link));
@@ -472,14 +467,10 @@ function ResearcherMatrix() {
     setActionError(null);
     setPendingClientId(clientId);
     try {
-      const response = await fetch(`/admin/api/caseload/${therapistId}/${clientId}`, {
+      await requestJson(`/admin/api/caseload/${therapistId}/${clientId}`, {
         method,
-        credentials: "include",
+        fallback: method === "POST" ? "Failed to assign client" : "Failed to unassign client",
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || (method === "POST" ? "Failed to assign client" : "Failed to unassign client"));
-      }
       refetchAssignments();
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : String(err));

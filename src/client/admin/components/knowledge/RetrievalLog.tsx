@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { getJson, HttpError } from '../../../shared/http';
 import { AlertTriangle } from 'react-feather';
 import { formatDateTime } from './types';
 
@@ -43,13 +44,11 @@ export default function RetrievalLog() {
       const params = new URLSearchParams();
       if (tool !== 'all') params.set('tool', tool);
       if (appliedSessionId) params.set('sessionId', appliedSessionId);
-      const res = await fetch(`/admin/api/knowledge/rerank-decisions?${params}`, { credentials: 'include' });
-      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-      const data = await res.json();
+      const data = await getJson<{ stats?: RerankStats | null; decisions?: Decision[] }>(`/admin/api/knowledge/rerank-decisions?${params}`);
       setStats(data.stats ?? null);
       setDecisions(data.decisions ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load retrieval log');
+      setError(e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load retrieval log');
     } finally {
       setLoading(false);
     }

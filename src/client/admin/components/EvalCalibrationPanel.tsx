@@ -2,6 +2,7 @@
 // kappa between human ratings and the LLM judge, per rubric dimension, with an
 // auto-run readiness badge. Self-fetching; follows the ToolUsagePanel pattern.
 import { useState, useEffect, useCallback } from 'react';
+import { getJson } from '../../shared/http';
 import { CheckCircle, AlertTriangle, Users } from 'react-feather';
 
 interface DimensionCalibration {
@@ -104,9 +105,8 @@ export default function EvalCalibrationPanel() {
   const load = useCallback((pv?: string) => {
     setLoading(true);
     const qs = pv ? `?promptVersion=${encodeURIComponent(pv)}` : '';
-    fetch(`/admin/api/evals/calibration${qs}`)
-      .then(r => { if (!r.ok) throw new Error('Failed to fetch calibration'); return r.json(); })
-      .then((d: CalibrationData) => { setData(d); setPromptVersion(d.report.prompt_version); })
+    getJson<CalibrationData>(`/admin/api/evals/calibration${qs}`, { fallback: 'Failed to fetch calibration' })
+      .then(d => { setData(d); setPromptVersion(d.report.prompt_version); })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
       .finally(() => setLoading(false));
   }, []);

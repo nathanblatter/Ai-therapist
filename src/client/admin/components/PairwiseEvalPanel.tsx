@@ -2,6 +2,7 @@
 // Wilson confidence intervals from the position-debiased judge. Self-fetching;
 // follows the ToolUsagePanel pattern.
 import { useState, useEffect } from 'react';
+import { getJson } from '../../shared/http';
 import { GitMerge } from 'react-feather';
 
 interface Comparison {
@@ -39,9 +40,8 @@ export default function PairwiseEvalPanel() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/admin/api/analytics/pairwise')
-      .then(r => { if (!r.ok) throw new Error('Failed to fetch pairwise analytics'); return r.json(); })
-      .then((d: PairwiseData) => setData(d))
+    getJson<PairwiseData>('/admin/api/analytics/pairwise', { fallback: 'Failed to fetch pairwise analytics' })
+      .then(d => setData(d))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
       .finally(() => setLoading(false));
   }, []);

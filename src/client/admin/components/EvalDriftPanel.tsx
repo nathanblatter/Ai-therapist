@@ -3,6 +3,7 @@
 // open-drift-alert banner with Acknowledge. Self-fetching; ToolUsagePanel
 // pattern. Scores are only comparable within a prompt_version.
 import { useState, useEffect, useCallback } from 'react';
+import { getJson, postJson } from '../../shared/http';
 import { AlertTriangle, TrendingDown } from 'react-feather';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { toast } from '../../shared/components/Toast';
@@ -56,9 +57,8 @@ export default function EvalDriftPanel() {
 
   const load = useCallback((w: number) => {
     setLoading(true);
-    fetch(`/admin/api/analytics/evals?weeks=${w}`)
-      .then(r => { if (!r.ok) throw new Error('Failed to fetch eval trend'); return r.json(); })
-      .then((d: EvalTrendData) => { setData(d); setAlerts(d.open_alerts ?? []); })
+    getJson<EvalTrendData>(`/admin/api/analytics/evals?weeks=${w}`, { fallback: 'Failed to fetch eval trend' })
+      .then(d => { setData(d); setAlerts(d.open_alerts ?? []); })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
       .finally(() => setLoading(false));
   }, []);
@@ -67,11 +67,7 @@ export default function EvalDriftPanel() {
 
   const acknowledge = async (alertId: number) => {
     try {
-      const res = await fetch(`/admin/api/evals/drift-alerts/${alertId}/ack`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await postJson(`/admin/api/evals/drift-alerts/${alertId}/ack`);
       setAlerts(prev => prev.filter(a => a.alert_id !== alertId));
       toast.success('Alert acknowledged');
     } catch (err) {
