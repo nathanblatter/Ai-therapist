@@ -25,6 +25,9 @@ export const CRISIS_EVENT_SUMMARY_FIELDS = [
   'event_type', 'severity', 'previous_severity', 'risk_score',
   'previous_risk_score', 'triggered_by', 'trigger_method', 'message_id',
   'created_at',
+  // WP2 adjudication verdicts (adjudicator id + verdict + timestamp; the
+  // free-text note never rides on the list query).
+  'adjudications',
 ] as const;
 
 /** risk_score_history rows — everything EXCEPT score_factors (stage-2 LLM

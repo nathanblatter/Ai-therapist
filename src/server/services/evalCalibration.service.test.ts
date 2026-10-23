@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { getCalibrationPairsMock, getJudgeRunsMock, getHighDisagreementMock } = vi.hoisted(() => ({
+const { getCalibrationPairsMock, getJudgeRunsMock, getHighDisagreementMock, getHumanRatingPairsMock } = vi.hoisted(() => ({
   getCalibrationPairsMock: vi.fn(),
   getJudgeRunsMock: vi.fn(),
   getHighDisagreementMock: vi.fn(),
+  getHumanRatingPairsMock: vi.fn(),
 }));
 vi.mock('../db/index.js', () => ({
   getCalibrationPairs: getCalibrationPairsMock,
   getSessionEvalJudgeRuns: getJudgeRunsMock,
   getHighDisagreementEvals: getHighDisagreementMock,
+  getHumanRatingPairs: getHumanRatingPairsMock,
 }));
 
 import {
@@ -16,7 +18,10 @@ import {
   computeCalibrationReport,
   computeJudgeAgreement,
   computeJudgeAgreementReport,
+  computeHumanAgreement,
+  computeHumanAgreementReport,
   validateHumanRubric,
+  CALIBRATION_MIN_PAIRS,
 } from './evalCalibration.service.js';
 import { EVAL_DIMENSIONS } from './sessionEval.service.js';
 
@@ -72,6 +77,72 @@ describe('computeCalibrationReport', () => {
     expect(safety.n).toBe(6);
     // mean_bias = llm_mean - human_mean = 5 - 4 = 1 (judge scores higher)
     expect(safety.mean_bias).toBeCloseTo(1, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Human-human agreement (eval program WP2)
+// ---------------------------------------------------------------------------
+
+describe('computeHumanAgreement', () => {
+  const full = (score: number, over: Record<string, number> = {}) =>
+    Object.fromEntries(EVAL_DIMENSIONS.map(d => [d, { score: over[d] ?? score }]));
+
+  it('reports per-dimension kappa, exact and major disagreement, with progress toward 20 sessions', () => {
+    // Six double-rated sessions: raters agree exactly on empathy (varying
+    // scores), rater b is one point higher on safety everywhere, and on s5
+    // they differ by 2 on clinical_claims.
+    const empathy = [1, 2, 3, 4, 5, 3];
+    const pairs = empathy.map((e, i) => ({
+      session_id: `s${i}`, rater_a: 1, rater_b: 2,
+      rubric_a: full(4, { empathy: e, safety_protocol: 3, clinical_claims: i === 5 ? 2 : 4 }),
+      rubric_b: full(4, { empathy: e, safety_protocol: 4, clinical_claims: 4 }),
+    }));
+    const report = computeHumanAgreement(pairs, 'v1');
+    expect(report.rubric_version).toBe('v1');
+    expect(report.pair_count).toBe(6);
+    expect(report.session_count).toBe(6);
+    expect(report.target_pairs).toBe(CALIBRATION_MIN_PAIRS);
+    expect(report.pairs_needed).toBe(14);
+    expect(report.dimensions.map(d => d.dimension)).toEqual([...EVAL_DIMENSIONS]);
+    const emp = report.dimensions.find(d => d.dimension === 'empathy')!;
+    expect(emp.n).toBe(6);
+    expect(emp.kappa).toBeCloseTo(1, 6);
+    expect(emp.exact_agreement_pct).toBe(100);
+    expect(emp.major_disagreement_pct).toBe(0);
+    const safety = report.dimensions.find(d => d.dimension === 'safety_protocol')!;
+    expect(safety.exact_agreement_pct).toBe(0);
+    expect(safety.kappa).toBeCloseTo(0, 6); // constant offset: no agreement beyond chance
+    const claims = report.dimensions.find(d => d.dimension === 'clinical_claims')!;
+    expect(claims.major_disagreement_pct).toBeCloseTo(100 / 6, 6);
+  });
+
+  it('counts every unordered rater pair on a triple-rated session and skips invalid scores', () => {
+    const pairs = [
+      { session_id: 's', rater_a: 1, rater_b: 2, rubric_a: full(3), rubric_b: full(3) },
+      { session_id: 's', rater_a: 1, rater_b: 3, rubric_a: full(3), rubric_b: full(3) },
+      { session_id: 's', rater_a: 2, rater_b: 3, rubric_a: full(3), rubric_b: { ...full(3), empathy: { score: 9 } } },
+    ];
+    const report = computeHumanAgreement(pairs, 'v1');
+    expect(report.pair_count).toBe(3);
+    expect(report.session_count).toBe(1);
+    expect(report.dimensions.find(d => d.dimension === 'empathy')!.n).toBe(2);
+    expect(report.dimensions.find(d => d.dimension === 'safety_protocol')!.n).toBe(3);
+  });
+
+  it('is empty-safe', () => {
+    const report = computeHumanAgreement([], 'v1');
+    expect(report.pair_count).toBe(0);
+    expect(report.pairs_needed).toBe(CALIBRATION_MIN_PAIRS);
+    expect(report.overall_kappa).toBeNull();
+    expect(report.dimensions.every(d => d.n === 0 && d.kappa === null)).toBe(true);
+  });
+
+  it('computeHumanAgreementReport fetches pairs for the current rubric version', async () => {
+    getHumanRatingPairsMock.mockResolvedValue([]);
+    const report = await computeHumanAgreementReport();
+    expect(getHumanRatingPairsMock).toHaveBeenCalledWith('v1');
+    expect(report.rubric_version).toBe('v1');
   });
 });
 

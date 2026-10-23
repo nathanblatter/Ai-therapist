@@ -4,7 +4,7 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
-import { requireSessionClientAccess, requireClientAccess, careTeamScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
+import { requireSessionClientAccess, requireClientAccess, careTeamScopeId, mayCareTeamAccessSession, researcherOrgAllows } from '../../middleware/caseload.js';
 import { orgIdFor } from '../../middleware/org.js';
 import {
   projectRows,
@@ -22,6 +22,12 @@ import {
   getCaseloadClientIds,
   getSessionRiskCheckLadder,
   getParticipantRiskCheckLadders,
+  getCrisisEventClientInfo,
+  isAssigned,
+  getCrisisEventAdjudications,
+  upsertCrisisEventAdjudication,
+  ADJUDICATION_VERDICTS,
+  type AdjudicationVerdict,
 } from '../../db/index.js';
 import type { RiskCheckLadder } from '../../db/index.js';
 
@@ -200,6 +206,74 @@ export default function crisisRoutes(): Router {
     } catch (err) {
       log.error({ err }, 'Failed to unflag session');
       res.status(500).json({ error: 'Failed to unflag session' });
+    }
+  });
+
+  // ---- Crisis adjudication (eval program WP2) ---------------------------
+
+  // 404-over-403 access to one crisis event: session-origin events follow the
+  // session rule (researcher org / therapist caseload, caseworkers denied -
+  // adjudication is a clinical verdict); thread-origin events resolve the
+  // owner via client_user_id.
+  async function mayAdjudicateEvent(req: Request, eventId: number): Promise<boolean> {
+    const info = await getCrisisEventClientInfo(eventId);
+    if (!info) return false;
+    const callerOrgId = await orgIdFor(req);
+    if (info.session_id) {
+      return mayCareTeamAccessSession(req.session.userRole, req.session.userId, info.session_id, {
+        caseworkerPolicy: 'deny',
+        callerOrgId,
+      });
+    }
+    const clientId = info.client_user_id === null ? null : Number(info.client_user_id);
+    if (req.session.userRole === 'researcher') return researcherOrgAllows(callerOrgId, clientId);
+    if (req.session.userRole === 'therapist') {
+      return clientId !== null && typeof req.session.userId === 'number' && isAssigned(req.session.userId, clientId);
+    }
+    return false;
+  }
+
+  function parseEventId(raw: string): number | null {
+    const id = Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }
+
+  // GET /admin/api/crisis/events/:eventId/adjudications - every verdict on an event.
+  router.get('/admin/api/crisis/events/:eventId/adjudications', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const eventId = parseEventId(req.params.eventId);
+      if (eventId === null) return res.status(400).json({ error: 'Invalid event id' });
+      if (!(await mayAdjudicateEvent(req, eventId))) return res.status(404).json({ error: 'Not found' });
+      res.json({ adjudications: await getCrisisEventAdjudications(eventId), my_user_id: req.session.userId });
+    } catch (err) {
+      log.error({ err }, 'Failed to fetch crisis adjudications');
+      res.status(500).json({ error: 'Failed to fetch crisis adjudications' });
+    }
+  });
+
+  // PUT /admin/api/crisis/events/:eventId/adjudication - upsert the caller's
+  // verdict. Body: { verdict: confirmed|false_positive|unclear, note? }.
+  router.put('/admin/api/crisis/events/:eventId/adjudication', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const eventId = parseEventId(req.params.eventId);
+      if (eventId === null) return res.status(400).json({ error: 'Invalid event id' });
+      const verdict = req.body?.verdict;
+      if (!ADJUDICATION_VERDICTS.includes(verdict)) {
+        return res.status(400).json({ error: `verdict must be one of ${ADJUDICATION_VERDICTS.join(', ')}` });
+      }
+      let note: string | null = null;
+      if (req.body?.note !== undefined && req.body.note !== null) {
+        if (typeof req.body.note !== 'string' || req.body.note.length > 2000) {
+          return res.status(400).json({ error: 'note must be a string of at most 2000 characters' });
+        }
+        note = req.body.note.trim() || null;
+      }
+      if (!(await mayAdjudicateEvent(req, eventId))) return res.status(404).json({ error: 'Not found' });
+      const adjudication = await upsertCrisisEventAdjudication(eventId, req.session.userId!, verdict as AdjudicationVerdict, note);
+      res.json({ adjudication });
+    } catch (err) {
+      log.error({ err }, 'Failed to save crisis adjudication');
+      res.status(500).json({ error: 'Failed to save crisis adjudication' });
     }
   });
 

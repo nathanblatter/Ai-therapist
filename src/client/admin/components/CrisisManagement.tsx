@@ -4,6 +4,7 @@ import { AlertTriangle, Activity, Users, FileText, TrendingUp, Clock, RefreshCw,
 import EscalationComposer from './escalations/EscalationComposer';
 import FlaggedMessageRow, { useFlaggedMessageEvents } from './FlaggedMessageRow';
 import RiskCheckLadder from './RiskCheckLadder';
+import CrisisAdjudication, { type AdjudicationSummary } from './CrisisAdjudication';
 import { formatDateTime } from '../../shared/format';
 import { severityBadgeClass, statusBadgeClass, riskScoreTextClass } from '../../shared/severity';
 
@@ -27,6 +28,8 @@ interface CrisisEvent {
   notes?: string;
   risk_factors?: unknown;
   intervention_details?: unknown;
+  /** WP2 adjudication verdicts (migration 114); absent on older servers. */
+  adjudications?: AdjudicationSummary[] | null;
 }
 
 interface ClinicalReview {
@@ -106,6 +109,15 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
   useEffect(() => {
     fetchCrisisData();
   }, []);
+
+  // Keep the adjudication widget's verdicts in the fetched copy after a save
+  // so a re-render (filters, expand/collapse) does not drop them.
+  const updateEventAdjudications = (eventId: string, next: AdjudicationSummary[]) => {
+    setData(prev => ({
+      ...prev,
+      crisisEvents: prev.crisisEvents.map(e => (e.event_id === eventId ? { ...e, adjudications: next } : e)),
+    }));
+  };
 
   const fetchCrisisData = async () => {
     setLoading(true);
@@ -367,6 +379,12 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                           {event.notes && (
                             <p className="text-sm text-gray-700 mt-2 italic">{event.notes}</p>
                           )}
+                          <CrisisAdjudication
+                            eventId={event.event_id}
+                            adjudications={event.adjudications}
+                            compact
+                            onSaved={next => updateEventAdjudications(event.event_id, next)}
+                          />
                         </div>
                       </div>
                     </div>
@@ -462,6 +480,12 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                               {event.notes && (
                                 <p className="mt-2 text-sm italic text-gray-700">{event.notes}</p>
                               )}
+
+                              <CrisisAdjudication
+                                eventId={event.event_id}
+                                adjudications={event.adjudications}
+                                onSaved={next => updateEventAdjudications(event.event_id, next)}
+                              />
 
                               <div className="mt-3">
                                 <button

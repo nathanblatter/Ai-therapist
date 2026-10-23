@@ -96,3 +96,29 @@ export async function getCalibrationPromptVersions(): Promise<string[]> {
   );
   return result.rows.map(r => r.prompt_version);
 }
+
+/** Two independent human ratings on the same session (eval program WP2):
+ *  every unordered rater pair per session under one rubric version, for
+ *  human-human agreement. Rater ids are opaque here; the report never names
+ *  them. */
+export interface HumanRatingPairRow {
+  session_id: string;
+  rater_a: number;
+  rater_b: number;
+  rubric_a: HumanRatingRubric;
+  rubric_b: HumanRatingRubric;
+}
+
+export async function getHumanRatingPairs(rubricVersion: string): Promise<HumanRatingPairRow[]> {
+  const result = await pool.query<HumanRatingPairRow>(
+    `SELECT a.session_id, a.rater_user_id AS rater_a, b.rater_user_id AS rater_b,
+            a.rubric AS rubric_a, b.rubric AS rubric_b
+     FROM session_human_ratings a
+     JOIN session_human_ratings b
+       ON b.session_id = a.session_id AND b.rater_user_id > a.rater_user_id
+     WHERE a.rubric_version = $1 AND b.rubric_version = $1
+     ORDER BY a.session_id, a.rater_user_id, b.rater_user_id`,
+    [rubricVersion]
+  );
+  return result.rows;
+}

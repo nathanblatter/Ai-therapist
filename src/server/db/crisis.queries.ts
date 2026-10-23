@@ -1,6 +1,7 @@
 // Data-access for crisis-management views and session crisis flags.
 import { pool } from '../config/db.js';
 import { ownerOrgScopeSql } from './organizations.queries.js';
+import { CRISIS_EVENT_ADJUDICATIONS_SQL } from './crisisAdjudications.queries.js';
 
 /** Anything that can run a parameterized query (the pool, or a transaction's
  *  PoolClient so callers can write the event atomically with other rows). */
@@ -203,7 +204,7 @@ export async function getAllCrisisData(
   }
   const [crisisEvents, interventionActions, riskScoreHistory] = await Promise.all([
     pool.query(`
-      SELECT ce.*, ts.session_name, ts.user_id, u.username
+      SELECT ce.*, ts.session_name, ts.user_id, u.username, ${CRISIS_EVENT_ADJUDICATIONS_SQL}
       FROM crisis_events ce
       LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
       LEFT JOIN users u ON u.userid = ts.user_id
@@ -363,7 +364,7 @@ export async function getAllCrisisEvents(
       AND ${ownerOrgScopeSql(`$${params.length}`, 'COALESCE(ts.user_id, ce.client_user_id)')}`;
   }
   const result = await pool.query(`
-    SELECT ce.*, ts.session_name, u.username
+    SELECT ce.*, ts.session_name, u.username, ${CRISIS_EVENT_ADJUDICATIONS_SQL}
     FROM crisis_events ce
     LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
     LEFT JOIN users u ON ts.user_id = u.userid
