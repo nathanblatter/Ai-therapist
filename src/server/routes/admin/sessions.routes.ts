@@ -26,6 +26,7 @@ import {
 } from '../../db/index.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { getSessionRecording } from '../../db/recording.queries.js';
+import { getParticipantRecordingForSession } from '../../db/acousticFeatures.queries.js';
 import { getObjectStream, headObject } from '../../config/objectStorage.js';
 
 import { createLogger } from '../../utils/logger.js';
@@ -217,12 +218,25 @@ export default function adminSessionsRoutes(): Router {
       if (!rec || rec.status !== 'ready') {
         return res.json({ available: false, status: rec?.status ?? 'none' });
       }
+      // Participant-only track (migration 086): what the acoustic extractor
+      // measures. Exposed so a human can listen to it for verification
+      // (ai-therapist-206). Best-effort: its absence must not hide the mix.
+      let participantTrack: { url: string } | null = null;
+      try {
+        const pt = await getParticipantRecordingForSession(sessionId);
+        if (pt?.objectKey && pt.status === 'ready') {
+          participantTrack = { url: `/admin/api/sessions/${sessionId}/recording?track=participant` };
+        }
+      } catch (err) {
+        log.warn({ err }, 'participant track lookup failed');
+      }
       res.json({
         available: true,
         status: rec.status,
         durationMs: rec.durationMs,
         sizeBytes: rec.sizeBytes,
         url: `/admin/api/sessions/${sessionId}/recording`,
+        participantTrack,
       });
     } catch (err) {
       log.error({ err }, 'Failed to fetch recording info');
@@ -235,10 +249,21 @@ export default function adminSessionsRoutes(): Router {
   router.get('/admin/api/sessions/:sessionId/recording', requireFullContent, requireSessionClientAccess(), async (req, res) => {
     const { sessionId } = req.params;
     try {
-      const rec = await getSessionRecording(sessionId);
-      if (!rec || rec.status !== 'ready') {
+      // `?track=participant` streams the participant-only track instead of the
+      // mix (ai-therapist-206); same access gate, same audit, track noted.
+      const track = req.query.track === 'participant' ? 'participant' : 'mixed';
+      let objectKey: string | null = null;
+      if (track === 'participant') {
+        const pt = await getParticipantRecordingForSession(sessionId);
+        objectKey = pt?.status === 'ready' ? pt.objectKey : null;
+      } else {
+        const rec = await getSessionRecording(sessionId);
+        objectKey = rec?.status === 'ready' ? rec.objectKey : null;
+      }
+      if (!objectKey) {
         return res.status(404).json({ error: 'No recording available' });
       }
+      const rec = { objectKey };
 
       const meta = await headObject(rec.objectKey);
       if (!meta) return res.status(404).json({ error: 'Recording object missing' });
@@ -256,14 +281,15 @@ export default function adminSessionsRoutes(): Router {
         role: req.session.userRole ?? null,
         action: isDownload ? 'recording_download' : 'recording_stream',
         sessionId,
-        detail: { range: req.headers.range ?? null },
+        detail: { range: req.headers.range ?? null, track },
       });
 
       const total = meta.contentLength;
       const rangeHeader = isDownload ? undefined : req.headers.range;
       if (isDownload) {
         const ext = meta.contentType === 'audio/wav' || meta.contentType === 'audio/x-wav' ? 'wav' : 'audio';
-        res.setHeader('Content-Disposition', `attachment; filename="session-${sessionId.replace(/[^A-Za-z0-9_-]/g, '')}.${ext}"`);
+        const suffix = track === 'participant' ? '-participant' : '';
+        res.setHeader('Content-Disposition', `attachment; filename="session-${sessionId.replace(/[^A-Za-z0-9_-]/g, '')}${suffix}.${ext}"`);
       }
 
       if (rangeHeader) {

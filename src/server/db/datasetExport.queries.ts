@@ -553,3 +553,41 @@ export async function getSemanticMetricsExport(asOf: string): Promise<DatasetRow
   );
   return rows;
 }
+
+/**
+ * Derived acoustic features per session (migration 095; ai-therapist-206).
+ * Non-identifying numeric measures from the participant-only track; the
+ * audio itself is never exported. One row per session that has a features
+ * row, including failed extractions (status = 'failed', measures empty) so
+ * coverage is auditable.
+ */
+export async function getAcousticFeaturesExport(asOf: string): Promise<DatasetRow[]> {
+  const { rows } = await pool.query(
+    `SELECT pp.pseudonym AS participant_id,
+            sp.pseudonym AS session_pseudo_id,
+            af.status,
+            af.computed_at,
+            (af.features->>'duration_ms')::float8            AS duration_ms,
+            (af.features->>'sample_rate')::int               AS sample_rate,
+            (af.features->>'frames')::int                    AS frames,
+            (af.features->>'rms_mean')::float8               AS rms_mean,
+            (af.features->>'rms_sd')::float8                 AS rms_sd,
+            (af.features->>'silence_ratio')::float8          AS silence_ratio,
+            (af.features->>'pause_count')::int               AS pause_count,
+            (af.features->>'pause_mean_ms')::float8          AS pause_mean_ms,
+            (af.features->>'speech_segments_per_min')::float8 AS speech_segments_per_min,
+            (af.features->>'voiced_fraction')::float8        AS voiced_fraction,
+            (af.features->>'f0_median_hz')::float8           AS f0_median_hz,
+            (af.features->>'f0_iqr_hz')::float8              AS f0_iqr_hz,
+            (af.features->>'zcr_mean')::float8               AS zcr_mean,
+            (af.features->>'zcr_sd')::float8                 AS zcr_sd
+     FROM session_acoustic_features af
+     JOIN therapy_sessions ts ON ts.session_id = af.session_id
+     JOIN research_pseudonyms sp ON sp.entity_type = 'session' AND sp.entity_key = af.session_id
+     LEFT JOIN research_pseudonyms pp ON pp.entity_type = 'participant' AND pp.entity_key = ts.user_id::text
+     WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1
+     ORDER BY sp.pseudonym`,
+    [asOf],
+  );
+  return rows;
+}

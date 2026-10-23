@@ -140,7 +140,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [flagSeverity, setFlagSeverity] = useState('medium');
   const [flagNotes, setFlagNotes] = useState('');
   const [flagging, setFlagging] = useState(false);
-  const [recording, setRecording] = useState<{ url: string; durationMs: number | null } | null>(null);
+  const [recording, setRecording] = useState<{ url: string; durationMs: number | null; participantTrack: { url: string } | null } | null>(null);
   const [redactionStatus, setRedactionStatus] = useState<{
     status: 'complete' | 'partial' | 'pending' | 'no_content';
     total: number;
@@ -207,7 +207,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         if (!res.ok) return;
         const info = await res.json();
         if (!cancelled) {
-          setRecording(info.available ? { url: info.url, durationMs: info.durationMs } : null);
+          setRecording(info.available ? { url: info.url, durationMs: info.durationMs, participantTrack: info.participantTrack ?? null } : null);
         }
       } catch {
         /* no recording yet */
@@ -887,6 +887,17 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                   <Download size={14} /> Download audio
                 </a>
               </div>
+              {recording.participantTrack && (
+                <div className="mt-3 border-t border-gray-200 pt-3">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs font-medium text-gray-700">Participant-only track</span>
+                    <span className="text-xs text-gray-500">What the acoustic feature extractor measures</span>
+                  </div>
+                  <audio controls preload="metadata" src={recording.participantTrack.url} className="w-full">
+                    Your browser does not support audio playback.
+                  </audio>
+                </div>
+              )}
             </div>
           )}
 
