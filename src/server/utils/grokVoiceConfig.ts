@@ -49,8 +49,15 @@ export function isGrokVoiceModel(model: string | null | undefined): boolean {
 /** The xAI realtime endpoint. The model travels as a query parameter. */
 export const GROK_REALTIME_URL = 'wss://api.x.ai/v1/realtime';
 
-export function grokRealtimeUrl(model: string): string {
-  return `${GROK_REALTIME_URL}?model=${encodeURIComponent(model)}`;
+/**
+ * With `conversationId`, the URL that resumes a cached conversation. Per
+ * docs.x.ai (Speech to Speech, "Session Resumption", read 2026-10-23):
+ * "Reopen the WebSocket with `?conversation_id=<id>` and opt in again." The
+ * id is the one xAI assigned in `conversation.created` on the first leg.
+ */
+export function grokRealtimeUrl(model: string, conversationId?: string | null): string {
+  const base = `${GROK_REALTIME_URL}?model=${encodeURIComponent(model)}`;
+  return conversationId ? `${base}&conversation_id=${encodeURIComponent(conversationId)}` : base;
 }
 
 export interface GrokVoice {
@@ -167,17 +174,30 @@ or mention them to the participant.
  *   reasoning_effort         'none' | 'high' (xAI default 'high'). 'none' trades
  *                            some depth for a faster first word.
  *   speed                    0.7–1.5 playback speed of the voice.
+ *
+ * One knob is ours, not xAI's:
+ *
+ *   reconnect_window_s       0–600, default 75. How long a session survives a
+ *                            lost socket (docs/grok-voice.md section 3): the
+ *                            browser may re-open its WebSocket within this
+ *                            window and continue the live xAI session, and an
+ *                            xAI-side drop is re-dialled with xAI's
+ *                            conversation cache (30 min server-side) inside the
+ *                            same window. Past it the session is ended (fail
+ *                            closed). 0 disables reconnection entirely.
  */
 export interface GrokVoiceTuning {
   vad: { threshold: number; silence_duration_ms: number; prefix_padding_ms: number };
   reasoning_effort: 'none' | 'high';
   speed: number;
+  reconnect_window_s: number;
 }
 
 export const GROK_DEFAULT_TUNING: GrokVoiceTuning = {
   vad: { threshold: 0.85, silence_duration_ms: 500, prefix_padding_ms: 333 },
   reasoning_effort: 'none',
   speed: 1.0,
+  reconnect_window_s: 75,
 };
 
 const clamp = (n: unknown, lo: number, hi: number, dflt: number): number => {
@@ -199,6 +219,7 @@ export function resolveGrokTuning(raw: unknown): GrokVoiceTuning {
     },
     reasoning_effort: r.reasoning_effort === 'high' ? 'high' : 'none',
     speed: clamp(r.speed, 0.7, 1.5, d.speed),
+    reconnect_window_s: Math.round(clamp(r.reconnect_window_s, 0, 600, d.reconnect_window_s)),
   };
 }
 
@@ -223,6 +244,15 @@ export interface GrokSessionConfigInput {
  * Verified against the live API on 2026-09-20: this exact shape is echoed back
  * in `session.updated`, tools are accepted in the flat OpenAI Realtime form,
  * and server VAD drives turn-taking with no further client events.
+ *
+ * `resumption.enabled` opts into xAI's server-side conversation cache
+ * (docs.x.ai, Speech to Speech, "Session Resumption", read 2026-10-23: "Opt in
+ * to Session Resumption: the server caches conversation turns keyed by
+ * `conversation_id` and replays them on reconnect so the model stays
+ * conditioned on prior context. Defaults to `false`." and "Opt-in both ways.
+ * No history replays unless the resuming session also sends
+ * `resumption.enabled: true`."). The same config object is sent on a re-dial,
+ * so both legs opt in.
  */
 export function buildGrokSessionConfig(input: GrokSessionConfigInput): Record<string, unknown> {
   const { voice, language, languageName, systemPrompt, toolDefs } = input;
@@ -253,6 +283,7 @@ export function buildGrokSessionConfig(input: GrokSessionConfigInput): Record<st
     },
     tools: toRealtimeTools(toolDefs),
     tool_choice: 'auto',
+    resumption: { enabled: true },
   };
 }
 

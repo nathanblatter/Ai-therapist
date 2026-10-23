@@ -30,8 +30,19 @@ export type GrokClientMessage =
 // ---- server -> browser -----------------------------------------------------
 
 export type GrokServerMessage =
-  /** Upstream session configured; audio may now flow. */
-  | { type: 'ready'; model: string }
+  /**
+   * Upstream session configured; audio may now flow. `resumed` is set when
+   * this socket re-attached to a session that was already under way (the
+   * browser reconnected within the window; docs/grok-voice.md section 3).
+   */
+  | { type: 'ready'; model: string; resumed?: boolean }
+  /**
+   * The server's own link to xAI dropped and is being re-dialled with xAI's
+   * conversation cache (`reconnecting`), or came back (`restored`). The
+   * browser socket itself is fine; the UI shows a brief reconnecting state and
+   * nothing the participant says in between reaches the model.
+   */
+  | { type: 'link'; state: 'reconnecting' | 'restored' }
   /**
    * A transcript update. `final: false` carries a delta (assistant speech
    * streams) or, for the participant, an in-progress cumulative text. `final:

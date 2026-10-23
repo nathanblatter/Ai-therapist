@@ -70,6 +70,16 @@ Things a reader of a voice run should know:
 - `--voice-text-turns` swaps TTS audio for the typed-text path
   (`POST /api/grok/session/:id/text` + `/logs/batch`, what the browser does
   for typed input). Grok only; cheaper; never the default.
+- `--voice-drop-client-midway` / `--voice-drop-upstream-midway` (Grok only;
+  ai-therapist-245) sever the browser-side socket, or the proxy's xAI socket,
+  after the first persona beat and expect the session to continue: the
+  client re-attaches with the same cookie (`ready` with `resumed: true`), or
+  the proxy re-dials xAI with its `conversation_id` (`link` reconnecting then
+  restored). The run adds non-gating `voice-client-reconnect` /
+  `voice-upstream-resume` assertions plus `voice-reconnect-no-duplicate-rows`
+  (no transcript item persisted twice) and logs the proxy's link stats:
+  conversation id before/after, replayed items, resume count. See
+  docs/grok-voice.md section 3 "Reconnection".
 - Audio in both directions is teed into `POST /api/sessions/:id/audio`, so a
   run leaves a playable recording when `features.session_recording_enabled`
   is on (the harness warns when it is off; it never flips config).
@@ -291,6 +301,8 @@ npm run redteam:quality   # quality (rubric-floor) scenarios only
 npm run redteam:voice     # real voice sessions on the backend ai_model selects (Grok proxy or GPT-Live)
 npm run redteam -- --suite voice --scenario voice-first-session   # one voice scenario
 npm run redteam -- --suite voice --voice-text-turns              # Grok only: typed-text turns instead of TTS
+npm run redteam -- --suite voice --scenario voice-first-session --voice-drop-client-midway    # reconnect drill (browser leg)
+npm run redteam -- --suite voice --scenario voice-first-session --voice-drop-upstream-midway  # reconnect drill (xAI leg)
 npm run redteam -- --scenario prompt-injection   # one scenario
 npm run redteam -- --dry-run                      # offline: no OpenAI calls
 npm run redteam:replay -- --sessions 5            # replay real redacted sessions

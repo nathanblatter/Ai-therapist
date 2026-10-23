@@ -67,7 +67,11 @@ describe('silencePcm / pcmDurationMs', () => {
 describe('parseGrokServerMessage — the proxy frame protocol', () => {
   it('maps ready, final transcripts, response_done, tools, close and errors', () => {
     expect(parseGrokServerMessage({ type: 'ready', model: 'grok-voice-3.0' }))
-      .toEqual({ kind: 'ready', model: 'grok-voice-3.0' });
+      .toEqual({ kind: 'ready', model: 'grok-voice-3.0', resumed: false });
+    expect(parseGrokServerMessage({ type: 'ready', model: 'grok-voice-3.0', resumed: true }))
+      .toEqual({ kind: 'ready', model: 'grok-voice-3.0', resumed: true });
+    expect(parseGrokServerMessage({ type: 'link', state: 'reconnecting' })).toEqual({ kind: 'link', state: 'reconnecting' });
+    expect(parseGrokServerMessage({ type: 'link', state: 'restored' })).toEqual({ kind: 'link', state: 'restored' });
     expect(parseGrokServerMessage({ type: 'transcript', role: 'user', itemId: 'u1', text: 'hello', final: true }))
       .toEqual({ kind: 'user-transcript', text: 'hello', itemId: 'u1' });
     expect(parseGrokServerMessage({ type: 'transcript', role: 'assistant', itemId: 'a1', text: 'hi there', final: true }))

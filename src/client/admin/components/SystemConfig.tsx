@@ -207,6 +207,7 @@ export default function SystemConfig() {
     vad: { threshold: 0.85, silence_duration_ms: 500, prefix_padding_ms: 333 },
     reasoning_effort: 'none' as 'none' | 'high',
     speed: 1.0,
+    reconnect_window_s: 75,
   });
 
   const [clientLogging, setClientLogging] = useState<ClientLogging>({
@@ -1420,6 +1421,13 @@ export default function SystemConfig() {
               <input type="number" min={0.7} max={1.5} step={0.05} value={grokTuning.speed}
                 onChange={e => setGrokTuning({ ...grokTuning, speed: Number(e.target.value) })}
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+            </label>
+            <label className="text-sm">
+              <span className="block font-medium text-gray-700">Reconnect window (s, 0–600)</span>
+              <input type="number" min={0} max={600} step={5} value={grokTuning.reconnect_window_s}
+                onChange={e => setGrokTuning({ ...grokTuning, reconnect_window_s: Number(e.target.value) })}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              <span className="block text-xs text-gray-500 mt-1">How long a dropped connection (participant or xAI side) may be recovered before the session ends. 0 ends it immediately. The xAI session keeps billing while it waits.</span>
             </label>
             <div className="text-sm sm:col-span-2">
               <span className="block font-medium text-gray-700 mb-1">Reasoning effort</span>

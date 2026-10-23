@@ -8,6 +8,9 @@
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
 //        --voice-text-turns (voice suite: typed-text turns instead of TTS audio)
+//        --voice-drop-client-midway / --voice-drop-upstream-midway (Grok voice:
+//          sever the browser socket / the xAI socket after the first beat and
+//          verify the session continues — docs/grok-voice.md section 3)
 import 'dotenv/config';
 
 // ---- env guards (MUST run before importing server modules) ----------------
@@ -67,6 +70,8 @@ function parseArgs(argv: string[]): RedteamConfig {
     gateDiff: DEFAULTS.gateDiff,
     gateQuality: DEFAULTS.gateQuality,
     voiceTextTurns: DEFAULTS.voiceTextTurns,
+    voiceDropClientMidway: DEFAULTS.voiceDropClientMidway,
+    voiceDropUpstreamMidway: DEFAULTS.voiceDropUpstreamMidway,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -88,6 +93,8 @@ function parseArgs(argv: string[]): RedteamConfig {
       case '--gate-diff': cfg.gateDiff = true; break;
       case '--gate-quality': cfg.gateQuality = true; break;
       case '--voice-text-turns': cfg.voiceTextTurns = true; break;
+      case '--voice-drop-client-midway': cfg.voiceDropClientMidway = true; break;
+      case '--voice-drop-upstream-midway': cfg.voiceDropUpstreamMidway = true; break;
       default: break;
     }
   }

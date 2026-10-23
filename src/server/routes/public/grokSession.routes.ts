@@ -254,6 +254,9 @@ export default function grokSessionRoutes(): Router {
           recoveryLine: buildGrokRefusalRecoveryLine(
             buildGrokCrisisPhrase(systemConfig.crisis_contact as CrisisContactLike | undefined),
           ),
+          // How long a lost socket (browser or xAI) may be recovered before
+          // the session fails closed (docs/grok-voice.md section 3).
+          reconnectWindowMs: tuning.reconnect_window_s * 1000,
         });
 
         if (limitCheck.limits?.max_duration_minutes && !limitCheck.bypass) {
