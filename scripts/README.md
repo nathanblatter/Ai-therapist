@@ -26,7 +26,7 @@ again. Re-copy after any change, then `launchctl unload` / `load` the plist.
 
 | Script | Run by | What it does |
 |---|---|---|
-| `redteam-db-setup.sh` | `deploy.yml`, `deploy-prod.yml`, `redteam-nightly.yml`; locally before `npm run redteam:*` | Migrates and seeds an EMPTY Postgres for the harness (`DATABASE_URL` required): 001 raw SQL, `runMigrationRange.js 003 NNN`, `002_insert_initial_user.js`, then `redteam-seed.sql`. |
+| `redteam-db-setup.sh` | `deploy.yml`, `deploy-prod.yml`, `redteam-nightly.yml`; locally before `npm run redteam:*` | Migrates and seeds an EMPTY Postgres for the harness (`DATABASE_URL` required): `src/database/scripts/migrateFromScratch.ts` (every migration, 001 to head), then `redteam-seed.sql` and `redteam-seed-user.mjs`. |
 | `redteam-seed.sql` | `redteam-db-setup.sh` | Idempotent `system_config` seed for the harness; forces `crisis_alert.enabled=false` so CI can never page a human. |
 | `redteam-seed-user.mjs` | `redteam-db-setup.sh` | Seeds the harness participant account (`REDTEAM_PARTICIPANT_USER` / `_PASS`). |
 

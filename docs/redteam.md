@@ -443,18 +443,17 @@ program spec working agreement):
 
 ### Ephemeral DB (CI + local)
 
-`scripts/redteam-db-setup.sh` migrates + seeds a **genuinely empty** Postgres.
-There is no single "migrate from scratch" command in the repo, so the script
-applies them in the only order that works:
+`scripts/redteam-db-setup.sh` migrates + seeds a **genuinely empty** Postgres:
 
-1. `001_create_users_table.sql` (raw SQL — `runMigrationRange` skips 001)
-2. a `conversation_logs` legacy-table shim (a pre-001 table that no migration
-   creates but `010` ALTERs and `036` drops)
-3. `runMigrationRange 003 020`, then `021` via `psql` (it uses
-   `CREATE INDEX CONCURRENTLY`, illegal inside the runner's transaction), then
-   `runMigrationRange 022 <newest number on disk>`
-4. `002_insert_initial_user.js`
-5. `redteam-seed.sql` (idempotent config; **forces `crisis_alert.enabled=false`**)
+1. `src/database/scripts/migrateFromScratch.ts`: every migration from 001 to
+   the current head, in one command. The ordering special cases (001 and 021
+   autocommit for `CREATE INDEX CONCURRENTLY`, the `conversation_logs` stub
+   that `010` ALTERs and `036` drops, `002_insert_initial_user.js` run last
+   because it needs the organisation row from 069) live in that script's
+   `OVERRIDES` table; see `docs/db.md`, "Bootstrapping from empty". It refuses
+   a database that already has tables.
+2. `redteam-seed.sql` (idempotent config; **forces `crisis_alert.enabled=false`**)
+3. `redteam-seed-user.mjs` (the harness participant account)
 
 ```bash
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam \
