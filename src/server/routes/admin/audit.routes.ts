@@ -5,7 +5,7 @@
 //   GET /admin/api/audit/data-access/participant/:id   therapist (caseload-
 //       scoped, 404-over-403) or researcher (org-scoped); self-audited with an
 //       'audit_log_view' data_access_log row
-//   GET /admin/api/audit/redaction-review              researcher
+//   GET /admin/api/audit/redaction-review              researcher, org-scoped
 //   GET /admin/api/audit/assistant                     researcher, org-scoped
 //
 // The two older audit reads stay where they are (GET /admin/api/caseload/audit,
@@ -133,6 +133,8 @@ export default function auditRoutes(): Router {
   );
 
   // GET /admin/api/audit/redaction-review - who approved/corrected what
+  // (org-scoped, ai-therapist-272: rows whose message has no session owner —
+  // anonymous session or deleted message — are irb-study custody)
   router.get('/admin/api/audit/redaction-review', requireRole('researcher'), async (req, res) => {
     const { limit, offset } = parsePagination(req.query, PAGING);
     const reviewedBy = optInt(req.query.reviewedBy);
@@ -142,7 +144,11 @@ export default function auditRoutes(): Router {
       return res.status(400).json({ error: 'Invalid action' });
     }
     try {
-      const page = await listRedactionReviewLog({ reviewedBy, action, limit, offset });
+      // Fail closed: null only for unauthenticated callers (impossible past
+      // requireRole); never let an unresolved org widen to an all-orgs read.
+      const orgId = await orgIdFor(req);
+      if (orgId === null) throw new Error('[audit] unauthenticated caller reached a scoped read');
+      const page = await listRedactionReviewLog({ reviewedBy, action, limit, offset }, orgId);
       res.json({ ...page, limit, offset });
     } catch (err) {
       log.error({ err }, 'Failed to fetch redaction review log');

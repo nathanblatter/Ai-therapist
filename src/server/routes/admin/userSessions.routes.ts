@@ -1,25 +1,36 @@
 // Admin view/management of persisted login sessions (researcher only).
 // Caseload RBAC review (ai-therapist-119): these routes are researcher-only
 // and login sessions are not a participant-scoped therapy surface, so no
-// requireClientAccess/therapistScopeId threading applies here. NOTE
-// (ai-therapist-269): this list is still GLOBAL across organizations — the
-// sess column is JSON, so org-scoping needs a users join on sess->>'userId'
-// plus a scoped DELETE; deliberately left for a follow-up.
-import { Router } from 'express';
+// requireClientAccess/therapistScopeId threading applies here.
+// Organization scoping (ai-therapist-272): both routes are scoped to the
+// caller's organization via a users join on sess->>'userId' inside the
+// queries; sessions with no userId are IRB-study custody (irb-study org
+// only). A session outside the scope reads as 404 — never 403.
+import { Router, type Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
+import { orgIdFor } from '../../middleware/org.js';
 import { getActiveUserSessions, deleteUserSession } from '../../db/index.js';
 
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('userSessionsRoutes');
 
+/** The caller's org; orgIdFor throws on lookup failure (-> 500), and null
+ *  (unauthenticated) cannot happen past requireRole — treat it as a failure
+ *  too rather than widening to an unscoped read. */
+async function callerOrgId(req: Request): Promise<number> {
+  const orgId = await orgIdFor(req);
+  if (orgId === null) throw new Error('[userSessions] unauthenticated caller reached a scoped read');
+  return orgId;
+}
+
 export default function userSessionsRoutes(): Router {
   const router = Router();
 
   // GET /admin/api/user-sessions - list sessions with decoded user info
-  router.get('/admin/api/user-sessions', requireRole('researcher'), async (_req, res) => {
+  router.get('/admin/api/user-sessions', requireRole('researcher'), async (req, res) => {
     try {
-      const rows = await getActiveUserSessions();
+      const rows = await getActiveUserSessions(await callerOrgId(req));
 
       const sessions = rows.map((row) => {
         let sessData: Record<string, unknown> = {};
@@ -52,7 +63,7 @@ export default function userSessionsRoutes(): Router {
   router.delete('/admin/api/user-sessions/:sid', requireRole('researcher'), async (req, res) => {
     const { sid } = req.params;
     try {
-      const deletedSid = await deleteUserSession(sid);
+      const deletedSid = await deleteUserSession(sid, await callerOrgId(req));
       if (!deletedSid) {
         return res.status(404).json({ error: 'Session not found' });
       }

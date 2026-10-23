@@ -25,6 +25,7 @@ import squawkAuthRoutes from "./routes/public/squawkAuth.routes.js";
 import magicLinkRoutes from "./routes/public/magicLink.routes.js";
 import demoRoutes from "./routes/demo.routes.js";
 import { canAdminAccessSessionLive } from "./middleware/caseload.js";
+import { orgIdFor } from "./middleware/org.js";
 import { getCaseloadClientIds } from "./db/index.js";
 import mfaRoutes from "./routes/public/mfa.routes.js";
 import usersRoutes from "./routes/public/users.routes.js";
@@ -109,6 +110,28 @@ interface AuthSocket extends Socket {
   userId?: number;
   username?: string;
   userRole?: string;
+}
+
+/**
+ * Live-monitoring gate for an admin socket (session:join, admin:sendMessage).
+ * One getSessionAccessInfo lookup gives the owner and the owner's org; the
+ * caller's org comes from the socket's express session via orgIdFor (stamped
+ * at login, lazily backfilled, cached on the session object). A missing
+ * session is a deny for every role. Throws propagate to the caller's catch
+ * (deny) — a failed org lookup must never widen to an all-orgs pass.
+ */
+async function adminMayAccessSessionLive(socket: AuthSocket, sessionId: string): Promise<boolean> {
+  const info = await getSessionAccessInfo(sessionId);
+  if (!info) return false;
+  const ownerId = info.user_id != null ? Number(info.user_id) : null;
+  const callerOrgId = await orgIdFor(socket.request as unknown as Request);
+  return canAdminAccessSessionLive(
+    socket.userRole,
+    socket.userId,
+    Number.isInteger(ownerId) ? ownerId : null,
+    callerOrgId,
+    info.owner_organization_id ?? null
+  );
 }
 
 // ES module-compatible __dirname replacement
@@ -422,24 +445,20 @@ io.on('connection', (socket: AuthSocket) => {
     if (typeof sessionId !== 'string' || !sessionId) return;
 
     if (isAdmin) {
-      // Caseload RBAC (docs/caseload-rbac.md): researchers join anything;
-      // therapists only assigned clients' sessions; caseworkers never
-      // (summaries tier — canAdminAccessSessionLive returns false). Same
-      // 404-style silence as the HTTP layer — deny without confirming
-      // existence.
-      if (socket.userRole !== 'researcher') {
-        try {
-          const info = await getSessionAccessInfo(sessionId);
-          const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
-          const ok = await canAdminAccessSessionLive(socket.userRole, socket.userId, Number.isInteger(ownerId) ? ownerId : null);
-          if (!ok) {
-            socketLog.warn(`Denied ${socket.userRole} session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not permitted)`);
-            return;
-          }
-        } catch (err) {
-          socketLog.error({ err }, 'caseload session:join check failed');
+      // Caseload RBAC (docs/caseload-rbac.md): researchers join sessions
+      // owned by participants in their organization (anonymous sessions:
+      // irb-study org only — ai-therapist-272); therapists only assigned
+      // clients' sessions; caseworkers never (summaries tier —
+      // canAdminAccessSessionLive returns false). Same 404-style silence as
+      // the HTTP layer — deny without confirming existence.
+      try {
+        if (!(await adminMayAccessSessionLive(socket, sessionId))) {
+          socketLog.warn(`Denied ${socket.userRole} session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not permitted)`);
           return;
         }
+      } catch (err) {
+        socketLog.error({ err }, 'caseload session:join check failed');
+        return;
       }
       socket.join(`session:${sessionId}`);
       return;
@@ -525,22 +544,19 @@ io.on('connection', (socket: AuthSocket) => {
       return;
     }
 
-    // Caseload RBAC (docs/caseload-rbac.md): therapists may only steer/message
-    // assigned clients' sessions; caseworkers never (summaries tier). Same
-    // silent-deny semantics as session:join.
-    if (socket.userRole !== 'researcher') {
-      try {
-        const info = await getSessionAccessInfo(sessionId);
-        const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
-        const ok = await canAdminAccessSessionLive(socket.userRole, socket.userId, Number.isInteger(ownerId) ? ownerId : null);
-        if (!ok) {
-          socketLog.warn(`Denied therapist admin:sendMessage for ${String(sessionId).substring(0, 12)}... (${socket.username}: not in caseload)`);
-          return;
-        }
-      } catch (err) {
-        socketLog.error({ err }, 'caseload admin:sendMessage check failed');
+    // Caseload RBAC (docs/caseload-rbac.md): researchers may only steer/message
+    // sessions owned by their organization's participants (anonymous:
+    // irb-study org only); therapists only assigned clients' sessions;
+    // caseworkers never (summaries tier). Same silent-deny semantics as
+    // session:join.
+    try {
+      if (!(await adminMayAccessSessionLive(socket, String(sessionId)))) {
+        socketLog.warn(`Denied ${socket.userRole} admin:sendMessage for ${String(sessionId).substring(0, 12)}... (${socket.username}: not permitted)`);
         return;
       }
+    } catch (err) {
+      socketLog.error({ err }, 'caseload admin:sendMessage check failed');
+      return;
     }
 
     socketLog.info(`Admin ${socket.username} sending ${messageType} message to session ${sessionId}`);

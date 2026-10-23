@@ -14,8 +14,11 @@ const dbMocks = vi.hoisted(() => ({
   logSidebandAction: vi.fn().mockResolvedValue(undefined),
   // Caseload middleware/guard deps (ai-therapist-119).
   isAssigned: vi.fn().mockResolvedValue(true),
-  getSessionAccessInfo: vi.fn().mockResolvedValue({ status: 'active', user_id: 42, session_type: 'realtime' }),
+  getSessionAccessInfo: vi.fn().mockResolvedValue({ status: 'active', user_id: 42, session_type: 'realtime', owner_organization_id: 1 }),
   getCaseloadClientIds: vi.fn().mockResolvedValue([42]),
+  // Researcher org scoping (ai-therapist-272): caller org resolved via orgIdFor.
+  getOrganizationIdForUser: vi.fn().mockResolvedValue(1),
+  getIrbStudyOrgId: vi.fn().mockResolvedValue(1),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
 
@@ -41,14 +44,15 @@ vi.mock('../../services/toolRegistry.service.js', () => ({ toolRegistry: registr
 
 import sidebandRoutes from './sideband.routes.js';
 
-function appAs(role: string | null) {
+function appAs(role: string | null, orgId = 1) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     // Mirrors the real login session shape (auth.routes.ts): username is
-    // stored directly on the session, NOT under a nested user object.
+    // stored directly on the session, NOT under a nested user object; orgId
+    // is stamped at login.
     req.session = role
-      ? ({ userId: 1, userRole: role, username: 'tester' } as unknown as typeof req.session)
+      ? ({ userId: 1, userRole: role, username: 'tester', orgId } as unknown as typeof req.session)
       : ({} as unknown as typeof req.session);
     next();
   });
@@ -64,8 +68,10 @@ beforeEach(() => {
   registryMocks.getEnabledToolDefinitions.mockClear();
   sidebandMocks.isConnected.mockReturnValue(true);
   dbMocks.isAssigned.mockResolvedValue(true);
-  dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, session_type: 'realtime' });
+  dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, session_type: 'realtime', owner_organization_id: 1 });
   dbMocks.getCaseloadClientIds.mockResolvedValue([42]);
+  dbMocks.getOrganizationIdForUser.mockResolvedValue(1);
+  dbMocks.getIrbStudyOrgId.mockResolvedValue(1);
 });
 
 describe('caseload enforcement (ai-therapist-119)', () => {
@@ -106,13 +112,34 @@ describe('caseload enforcement (ai-therapist-119)', () => {
     expect(dbMocks.isAssigned).not.toHaveBeenCalled();
   });
 
-  it('leaves researchers unscoped on body-addressed controls', async () => {
+  it('org-scopes researchers on body-addressed controls, caseload ignored (ai-therapist-272)', async () => {
     dbMocks.isAssigned.mockResolvedValue(false);
-    await request(appAs('researcher'))
+    await request(appAs('researcher', 1))
       .post('/admin/api/sideband/disconnect')
       .send({ sessionId: SESSION_ID })
       .expect(200);
-    expect(dbMocks.getSessionAccessInfo).not.toHaveBeenCalled();
+    expect(dbMocks.getSessionAccessInfo).toHaveBeenCalledWith(SESSION_ID);
+    expect(dbMocks.isAssigned).not.toHaveBeenCalled();
+
+    await request(appAs('researcher', 2))
+      .post('/admin/api/sideband/disconnect')
+      .send({ sessionId: SESSION_ID })
+      .expect(404);
+    expect(sidebandMocks.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('anonymous session: only an irb-study researcher may control it', async () => {
+    dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: null, session_type: 'realtime', owner_organization_id: null });
+    await request(appAs('researcher', 2))
+      .post('/admin/api/sideband/interrupt')
+      .send({ sessionId: SESSION_ID })
+      .expect(404);
+    expect(sidebandMocks.interrupt).not.toHaveBeenCalled();
+    await request(appAs('researcher', 1))
+      .post('/admin/api/sideband/interrupt')
+      .send({ sessionId: SESSION_ID })
+      .expect(200);
+    expect(sidebandMocks.interrupt).toHaveBeenCalledTimes(1);
   });
 
   it('filters the sideband status list to the therapist caseload', async () => {
