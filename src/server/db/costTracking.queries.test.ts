@@ -75,7 +75,8 @@ describe('getSessionCostSummary', () => {
           responses: '4', input_tokens: '1000000', output_tokens: '500000',
           input_audio_tokens: '500000', output_audio_tokens: '250000', cached_tokens: '0',
         }],
-      });
+      })
+      .mockResolvedValueOnce({ rows: [] });
 
     const summary = await getSessionCostSummary('sess-1');
 
@@ -87,19 +88,40 @@ describe('getSessionCostSummary', () => {
     expect(summary.realtime_responses).toBe(4);
     // 0.5M text-in*$4 + 0.5M audio-in*$32 + 0.25M text-out*$16 + 0.25M audio-out*$64
     expect(summary.realtime_cost_usd).toBeCloseTo(2 + 16 + 4 + 16, 4);
+    expect(summary.live_seconds).toBe(0);
+    expect(summary.live_cost_usd).toBe(0);
+    expect(summary.voice_cost_usd).toBeCloseTo(38, 4);
   });
 
   it('returns null realtime_minutes when the session has no duration row', async () => {
     queryMock
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce(EMPTY_REALTIME_ROLLUP);
+      .mockResolvedValueOnce(EMPTY_REALTIME_ROLLUP)
+      .mockResolvedValueOnce({ rows: [] });
 
     const summary = await getSessionCostSummary('sess-missing');
     expect(summary.realtime_minutes).toBeNull();
     expect(summary.calls_by_purpose).toEqual({ insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0, chat: 0, live_delegation: 0, grok_voice: 0 });
     expect(summary.realtime_responses).toBe(0);
     expect(summary.realtime_cost_usd).toBe(0);
+    expect(summary.voice_cost_usd).toBe(0);
+  });
+
+  // ai-therapist-221: GPT-Live sessions never wrote realtime_usage, so metered
+  // voice spend read $0 forever. live_usage must be priced and summed in.
+  it('prices a GPT-Live session from live_usage and sums both voice eras', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ minutes: 10 }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce(EMPTY_REALTIME_ROLLUP)
+      .mockResolvedValueOnce({ rows: [{ model: 'gpt-live-1', duration_seconds: 600 }] });
+
+    const summary = await getSessionCostSummary('sess-live');
+    expect(summary.realtime_cost_usd).toBe(0);
+    expect(summary.live_seconds).toBe(600);
+    expect(summary.live_cost_usd).toBeCloseTo(0.5, 4); // 10 min * $0.05
+    expect(summary.voice_cost_usd).toBeCloseTo(0.5, 4);
   });
 });
 
@@ -118,6 +140,12 @@ describe('getCostTotals', () => {
           responses: '10', input_tokens: '2000000', output_tokens: '1000000',
           input_audio_tokens: '1000000', output_audio_tokens: '500000', cached_tokens: '1000000',
         }],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { model: 'gpt-live-1', seconds: 1200 },          // 20 min * $0.05 = $1.00
+          { model: 'grok-voice-latest', seconds: 300 },    //  5 min * $0.08 = $0.40
+        ],
       });
 
     const totals = await getCostTotals();
@@ -131,6 +159,9 @@ describe('getCostTotals', () => {
     // text-in 0 (2M - 1M audio - 1M cached), cached 1M*$0.4, audio-in 1M*$32,
     // text-out 0.5M*$16, audio-out 0.5M*$64
     expect(totals.total_realtime_cost_usd).toBeCloseTo(0.4 + 32 + 8 + 32, 4);
+    expect(totals.total_live_seconds).toBe(1500);
+    expect(totals.total_live_cost_usd).toBeCloseTo(1.4, 4);
+    expect(totals.total_voice_cost_usd).toBeCloseTo(72.4 + 1.4, 4);
   });
 });
 
@@ -192,6 +223,9 @@ describe('getDailySpend', () => {
     const realtimeSql = queryMock.mock.calls[1][0] as string;
     expect(realtimeSql).toContain('DATE(created_at)::text AS date');
     expect(realtimeSql).toContain('FROM realtime_usage');
+    const liveSql = queryMock.mock.calls[2][0] as string;
+    expect(liveSql).toContain('DATE(created_at)::text AS date');
+    expect(liveSql).toContain('FROM live_usage');
   });
 
   it('merges rows for the same day and sorts descending by date string', async () => {
@@ -218,19 +252,33 @@ describe('getDailySpend', () => {
         },
       ],
     });
+    // GPT-Live spend on a realtime day plus a live-only day (ai-therapist-221).
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        { date: '2026-07-30', model: 'gpt-live-1', seconds: 600 },
+        { date: '2026-07-27', model: 'grok-voice-latest', seconds: 150 },
+      ],
+    });
 
     const rows = await getDailySpend(30);
 
-    expect(rows).toHaveLength(3);
-    expect(rows.map(r => r.date)).toEqual(['2026-07-30', '2026-07-29', '2026-07-28']);
+    expect(rows).toHaveLength(4);
+    expect(rows.map(r => r.date)).toEqual(['2026-07-30', '2026-07-29', '2026-07-28', '2026-07-27']);
     const day30 = rows.find(r => r.date === '2026-07-30')!;
     expect(day30.calls).toBe(3);
     expect(day30.tokens_in).toBe(2500);
     expect(day30.tokens_out).toBe(700);
     expect(day30.estimated_cost_usd).toBeGreaterThan(0);
     expect(day30.realtime_cost_usd).toBeCloseTo(32, 4); // 1M audio-in tokens
+    expect(day30.live_cost_usd).toBeCloseTo(0.5, 4);     // 10 min gpt-live-1
+    expect(day30.voice_cost_usd).toBeCloseTo(32.5, 4);
     const day28 = rows.find(r => r.date === '2026-07-28')!;
     expect(day28.calls).toBe(0);
     expect(day28.realtime_cost_usd).toBeCloseTo(64, 4); // 1M audio-out tokens
+    expect(day28.voice_cost_usd).toBeCloseTo(64, 4);
+    const day27 = rows.find(r => r.date === '2026-07-27')!;
+    expect(day27.realtime_cost_usd).toBe(0);
+    expect(day27.live_cost_usd).toBeCloseTo(0.2, 4);     // 2.5 min grok
+    expect(day27.voice_cost_usd).toBeCloseTo(0.2, 4);
   });
 });

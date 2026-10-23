@@ -591,23 +591,31 @@ io.on('connection', (socket: AuthSocket) => {
     }
   });
 
+  // Abandon detection runs on 'disconnecting', not 'disconnect': Socket.io
+  // empties socket.rooms BEFORE 'disconnect' fires, so a room scan there never
+  // finds the session room and the fast path silently never ran
+  // (ai-therapist-219) — abandoned sessions were only caught by the periodic
+  // sweeper. During 'disconnecting' the room set is still intact.
+  socket.on('disconnecting', () => {
+    if (isAdmin) return;
+    // Participant sockets over the tunnel are known to be flaky (reconnect
+    // storms, brief drops) — don't end the session on disconnect alone.
+    // Instead schedule a grace-window check: if there's no new activity
+    // (rejoin, audio chunk) for the session within the window, treat it as
+    // abandoned and finalize it. See sessionLifecycle.service.ts.
+    for (const room of socket.rooms) {
+      if (room.startsWith('session:')) {
+        const sessionId = room.slice('session:'.length);
+        scheduleAbandonCheck(sessionId);
+      }
+    }
+  });
+
   // Disconnect handler
   socket.on('disconnect', (reason) => {
     console.log(`[Socket.io] User disconnected: ${reason}`);
     if (isAdmin) {
       socket.to('admin-broadcast').emit('admin:left', { username: socket.username });
-    } else {
-      // Participant sockets over the tunnel are known to be flaky (reconnect
-      // storms, brief drops) — don't end the session on disconnect alone.
-      // Instead schedule a grace-window check: if there's no new activity
-      // (rejoin, audio chunk) for the session within the window, treat it as
-      // abandoned and finalize it. See sessionLifecycle.service.ts.
-      for (const room of socket.rooms) {
-        if (room.startsWith('session:')) {
-          const sessionId = room.slice('session:'.length);
-          scheduleAbandonCheck(sessionId);
-        }
-      }
     }
   });
 });

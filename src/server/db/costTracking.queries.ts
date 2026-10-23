@@ -4,9 +4,15 @@
 // migration 058): the sideband records response.usage from every response.done
 // into realtime_usage, priced with the gpt-realtime rates below; the old
 // wall-clock realtime-minutes figure is kept only as a legacy reference.
+// GPT-Live / Grok voice sessions (migration 098 onward) are metered by
+// duration in live_usage instead, priced via estimateLiveCostUsd. The two
+// eras SUM into the voice figures below (ai-therapist-221): Phase 1 sessions
+// live in realtime_usage, everything since the GPT-Live cutover in live_usage,
+// and reading only one table silently zeroed the other.
 // Logging is fire-and-forget from the calling service — a failure here must
 // never break the underlying feature.
 import { pool } from '../config/db.js';
+import { estimateLiveCostUsd } from './liveUsage.queries.js';
 
 export type LlmUsagePurpose = 'insights' | 'redaction' | 'crisis' | 'eligibility' | 'rerank' | 'chat' | 'live_delegation' | 'grok_voice';
 
@@ -129,12 +135,18 @@ export interface SessionCostSummary {
   tokens_out: number;
   estimated_cost_usd: number;
   realtime_responses: number;
+  /** Realtime-API era (token-metered) voice cost. */
   realtime_cost_usd: number;
+  /** GPT-Live / Grok era (duration-metered) voice seconds and cost. */
+  live_seconds: number;
+  live_cost_usd: number;
+  /** realtime_cost_usd + live_cost_usd — the figure to display. */
+  voice_cost_usd: number;
 }
 
 /** Per-session cost/usage rollup for the admin Session Detail panel. */
 export async function getSessionCostSummary(sessionId: string): Promise<SessionCostSummary> {
-  const [durationResult, usageResult, realtimeResult] = await Promise.all([
+  const [durationResult, usageResult, realtimeResult, liveResult] = await Promise.all([
     pool.query<{ minutes: number | null }>(
       `SELECT EXTRACT(EPOCH FROM (COALESCE(ended_at, CURRENT_TIMESTAMP) - created_at)) / 60 AS minutes
        FROM therapy_sessions WHERE session_id = $1`,
@@ -155,6 +167,10 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
               COALESCE(SUM(output_audio_tokens), 0) AS output_audio_tokens,
               COALESCE(SUM(cached_tokens), 0) AS cached_tokens
        FROM realtime_usage WHERE session_id = $1`,
+      [sessionId]
+    ),
+    pool.query<{ model: string | null; duration_seconds: number | null }>(
+      'SELECT model, duration_seconds::float8 AS duration_seconds FROM live_usage WHERE session_id = $1',
       [sessionId]
     ),
   ]);
@@ -181,6 +197,10 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
       })
     : 0;
 
+  const live = liveResult.rows[0];
+  const liveSeconds = live?.duration_seconds != null ? Number(live.duration_seconds) : 0;
+  const liveCost = live ? estimateLiveCostUsd(live.model, liveSeconds) : 0;
+
   const rawMinutes = durationResult.rows[0]?.minutes;
   return {
     session_id: sessionId,
@@ -190,9 +210,14 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
     tokens_out: tokensOut,
     estimated_cost_usd: Math.round(estimatedCost * 10000) / 10000,
     realtime_responses: rt ? parseInt(rt.responses, 10) : 0,
-    realtime_cost_usd: Math.round(realtimeCost * 10000) / 10000,
+    realtime_cost_usd: round4(realtimeCost),
+    live_seconds: Math.round(liveSeconds * 10) / 10,
+    live_cost_usd: round4(liveCost),
+    voice_cost_usd: round4(realtimeCost + liveCost),
   };
 }
+
+function round4(v: number): number { return Math.round(v * 10000) / 10000; }
 
 export interface DailySpendRow {
   date: string;
@@ -200,14 +225,19 @@ export interface DailySpendRow {
   tokens_in: number;
   tokens_out: number;
   estimated_cost_usd: number;
+  /** Realtime-API era voice cost (token-metered). */
   realtime_cost_usd: number;
+  /** GPT-Live / Grok era voice cost (duration-metered). */
+  live_cost_usd: number;
+  /** realtime_cost_usd + live_cost_usd. */
+  voice_cost_usd: number;
 }
 
-/** Daily estimated LLM spend (non-realtime + metered realtime) for the admin
- *  analytics view. */
+/** Daily estimated LLM spend (non-realtime + metered voice, both eras) for
+ *  the admin analytics view. */
 export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
   const safeDays = days;
-  const [result, realtimeResult] = await Promise.all([
+  const [result, realtimeResult, liveResult] = await Promise.all([
     pool.query<{
       date: string; purpose: LlmUsagePurpose; model: string | null;
       calls: string; tokens_in: string; tokens_out: string;
@@ -241,12 +271,22 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
        GROUP BY DATE(created_at)`,
       [safeDays]
     ),
+    pool.query<{ date: string; model: string | null; seconds: number | null }>(
+      // Grouped by model too: Grok and GPT-Live bill at different per-minute
+      // rates, so a single per-day sum could not be priced.
+      `SELECT DATE(created_at)::text AS date, model,
+              COALESCE(SUM(duration_seconds), 0)::float8 AS seconds
+       FROM live_usage
+       WHERE created_at >= CURRENT_DATE - ($1 || ' days')::INTERVAL
+       GROUP BY DATE(created_at), model`,
+      [safeDays]
+    ),
   ]);
 
   const byDate = new Map<string, DailySpendRow>();
   const dayFor = (date: string): DailySpendRow => {
     const existing = byDate.get(date) ??
-      { date, calls: 0, tokens_in: 0, tokens_out: 0, estimated_cost_usd: 0, realtime_cost_usd: 0 };
+      { date, calls: 0, tokens_in: 0, tokens_out: 0, estimated_cost_usd: 0, realtime_cost_usd: 0, live_cost_usd: 0, voice_cost_usd: 0 };
     byDate.set(date, existing);
     return existing;
   };
@@ -266,11 +306,16 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
       cachedTokens: parseInt(row.cached_tokens, 10),
     });
   }
+  for (const row of liveResult.rows) {
+    dayFor(row.date).live_cost_usd += estimateLiveCostUsd(row.model, Number(row.seconds ?? 0));
+  }
   return Array.from(byDate.values())
     .map(r => ({
       ...r,
-      estimated_cost_usd: Math.round(r.estimated_cost_usd * 10000) / 10000,
-      realtime_cost_usd: Math.round(r.realtime_cost_usd * 10000) / 10000,
+      estimated_cost_usd: round4(r.estimated_cost_usd),
+      realtime_cost_usd: round4(r.realtime_cost_usd),
+      live_cost_usd: round4(r.live_cost_usd),
+      voice_cost_usd: round4(r.realtime_cost_usd + r.live_cost_usd),
     }))
     .sort((a, b) => b.date.localeCompare(a.date));
 }
@@ -283,12 +328,18 @@ export interface CostTotals {
   /** Legacy wall-clock estimate — kept for reference alongside metered spend. */
   total_realtime_minutes: number;
   total_realtime_responses: number;
+  /** Realtime-API era voice cost (token-metered). */
   total_realtime_cost_usd: number;
+  /** GPT-Live / Grok era voice seconds and cost (duration-metered). */
+  total_live_seconds: number;
+  total_live_cost_usd: number;
+  /** total_realtime_cost_usd + total_live_cost_usd — the headline figure. */
+  total_voice_cost_usd: number;
 }
 
 /** All-time totals for the admin analytics headline stats. */
 export async function getCostTotals(): Promise<CostTotals> {
-  const [usageResult, durationResult, realtimeResult] = await Promise.all([
+  const [usageResult, durationResult, realtimeResult, liveResult] = await Promise.all([
     pool.query<{ purpose: LlmUsagePurpose; model: string | null; calls: string; tokens_in: string; tokens_out: string }>(
       `SELECT purpose, model, COUNT(*) AS calls,
               COALESCE(SUM(tokens_in), 0) AS tokens_in,
@@ -312,6 +363,11 @@ export async function getCostTotals(): Promise<CostTotals> {
               COALESCE(SUM(cached_tokens), 0) AS cached_tokens
        FROM realtime_usage`
     ),
+    pool.query<{ model: string | null; seconds: number | null }>(
+      `SELECT model, COALESCE(SUM(duration_seconds), 0)::float8 AS seconds
+       FROM live_usage
+       GROUP BY model`
+    ),
   ]);
 
   let totalCalls = 0, tokensIn = 0, tokensOut = 0, estimatedCost = 0;
@@ -333,6 +389,14 @@ export async function getCostTotals(): Promise<CostTotals> {
       })
     : 0;
 
+  let liveSeconds = 0;
+  let liveCost = 0;
+  for (const row of liveResult.rows) {
+    const seconds = Number(row.seconds ?? 0);
+    liveSeconds += seconds;
+    liveCost += estimateLiveCostUsd(row.model, seconds);
+  }
+
   return {
     total_calls: totalCalls,
     total_tokens_in: tokensIn,
@@ -340,6 +404,9 @@ export async function getCostTotals(): Promise<CostTotals> {
     total_estimated_cost_usd: Math.round(estimatedCost * 10000) / 10000,
     total_realtime_minutes: Math.round(Number(durationResult.rows[0]?.total_minutes ?? 0) * 10) / 10,
     total_realtime_responses: rt ? parseInt(rt.responses, 10) : 0,
-    total_realtime_cost_usd: Math.round(realtimeCost * 10000) / 10000,
+    total_realtime_cost_usd: round4(realtimeCost),
+    total_live_seconds: Math.round(liveSeconds * 10) / 10,
+    total_live_cost_usd: round4(liveCost),
+    total_voice_cost_usd: round4(realtimeCost + liveCost),
   };
 }

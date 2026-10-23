@@ -55,8 +55,11 @@ interface CostBucket {
 
 // Small in-process cache: the panel polls, the data updates daily, and the
 // endpoint is rate-limited more tightly than inference.
+// Keyed by window length: the dashboard now fetches two windows per render
+// (the chart range and the fixed month-to-date window, ai-therapist-218), and
+// a single-slot cache would have thrashed between them on every poll.
 const CACHE_TTL_MS = 10 * 60 * 1000;
-let cache: { at: number; days: number; value: CostsSummary } | null = null;
+const cache = new Map<number, { at: number; value: CostsSummary }>();
 
 /** Whether an admin key is present (drives the panel's empty state). */
 export function costsConfigured(): boolean {
@@ -73,8 +76,9 @@ export async function getCostsSummary(days = 30): Promise<CostsSummary> {
   if (!adminKey) return NOT_CONFIGURED;
 
   const bounded = Math.min(Math.max(Math.round(days), 1), 180);
-  if (cache && cache.days === bounded && Date.now() - cache.at < CACHE_TTL_MS) {
-    return cache.value;
+  const cached = cache.get(bounded);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return cached.value;
   }
 
   // start_time is required and is a Unix timestamp; align to a day boundary
@@ -138,7 +142,7 @@ export async function getCostsSummary(days = 30): Promise<CostsSummary> {
       fetchedAt: new Date().toISOString(),
     };
 
-    cache = { at: Date.now(), days: bounded, value: summary };
+    cache.set(bounded, { at: Date.now(), value: summary });
     return summary;
   } catch (err) {
     log.warn({ err }, 'OpenAI costs request errored');

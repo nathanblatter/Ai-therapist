@@ -26,6 +26,46 @@ const ITEMS = [
   { id: 12, content: 'I live in Provo' },
 ];
 
+describe('redactPHIBatch usage sink (ai-therapist-194)', () => {
+  beforeEach(() => {
+    createMock.mockReset();
+  });
+
+  it('records one measured-usage entry per model call, including the retry', async () => {
+    createMock
+      // first pass: malformed reply (billed), then a good retry
+      .mockResolvedValueOnce({ output_text: 'not json', usage: { input_tokens: 10, output_tokens: 1 } })
+      .mockResolvedValueOnce({
+        ...batchReply([{ i: 0, text: 'A' }, { i: 1, text: 'B' }]),
+        usage: { input_tokens: 120, output_tokens: 40 },
+      })
+      // second pass
+      .mockResolvedValueOnce({
+        ...batchReply([{ i: 0, text: 'A' }, { i: 1, text: 'B' }]),
+        usage: { input_tokens: 110, output_tokens: 35 },
+      });
+
+    const usage: Array<{ model: string; tokensIn: number | null; tokensOut: number | null }> = [];
+    await redactPHIBatch(ITEMS, { usage });
+
+    expect(usage).toEqual([
+      { model: 'gpt-5', tokensIn: 10, tokensOut: 1 },
+      { model: 'gpt-5', tokensIn: 120, tokensOut: 40 },
+      { model: 'gpt-5', tokensIn: 110, tokensOut: 35 },
+    ]);
+  });
+
+  it('records null tokens when the reply carries no usage block', async () => {
+    createMock
+      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A' }, { i: 1, text: 'B' }]))
+      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A' }, { i: 1, text: 'B' }]));
+    const usage: Array<{ model: string; tokensIn: number | null; tokensOut: number | null }> = [];
+    await redactPHIBatch(ITEMS, { usage });
+    expect(usage).toHaveLength(2);
+    expect(usage[0]).toEqual({ model: 'gpt-5', tokensIn: null, tokensOut: null });
+  });
+});
+
 describe('redactPHIBatch', () => {
   // Block body on purpose: `() => createMock.mockReset()` returns the mock
   // itself, and vitest inspects beforeEach return values — that stray return
