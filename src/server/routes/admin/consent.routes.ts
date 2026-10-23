@@ -19,6 +19,10 @@ import {
   sha256Hex,
 } from '../../utils/consent.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('adminConsentRoutes');
+
 export default function adminConsentRoutes(): Router {
   const router = Router();
   const canRead = requireRole('therapist', 'researcher');
@@ -45,7 +49,7 @@ export default function adminConsentRoutes(): Router {
         },
       });
     } catch (err) {
-      console.error('[Consent] list versions failed:', err);
+      log.error({ err }, 'list versions failed');
       res.status(500).json({ error: 'Failed to load consent versions' });
     }
   });
@@ -57,7 +61,7 @@ export default function adminConsentRoutes(): Router {
       if (!doc) return res.status(404).json({ error: 'version not found' });
       res.json(doc);
     } catch (err) {
-      console.error('[Consent] get version failed:', err);
+      log.error({ err }, 'get version failed');
       res.status(500).json({ error: 'Failed to load consent version' });
     }
   });
@@ -111,7 +115,7 @@ export default function adminConsentRoutes(): Router {
       if (pgErr.code === '23505') {
         return res.status(409).json({ error: 'version already exists' });
       }
-      console.error('[Consent] publish version failed:', err);
+      log.error({ err }, 'publish version failed');
       res.status(500).json({ error: 'Failed to publish consent version' });
     }
   });

@@ -4,6 +4,10 @@ import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import { getQuietHoursStatus } from '../../utils/quietHours.js';
 import { getAiModel, type VoicesConfig, type LanguagesConfig } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('configRoutes');
+
 export default function configRoutes(): Router {
   const router = Router();
 
@@ -19,7 +23,7 @@ export default function configRoutes(): Router {
       };
       res.json(crisisContact);
     } catch (err) {
-      console.error('Failed to fetch crisis contact:', err);
+      log.error({ err }, 'Failed to fetch crisis contact');
       res.status(500).json({ error: 'Failed to fetch crisis contact' });
     }
   });
@@ -47,7 +51,7 @@ export default function configRoutes(): Router {
       };
       res.json(features);
     } catch (err) {
-      console.error('Failed to fetch features config:', err);
+      log.error({ err }, 'Failed to fetch features config');
       res.status(500).json({ error: 'Failed to fetch features config' });
     }
   });
@@ -66,7 +70,7 @@ export default function configRoutes(): Router {
       const voice_backend = isGrokVoiceModel(model) ? 'grok' : isLiveModel(model) ? 'live' : 'unknown';
       res.json({ model, voice_backend });
     } catch (err) {
-      console.error('Failed to fetch AI model:', err);
+      log.error({ err }, 'Failed to fetch AI model');
       res.status(500).json({ error: 'Failed to fetch AI model configuration' });
     }
   });
@@ -78,7 +82,7 @@ export default function configRoutes(): Router {
       const clientLogging = config.client_logging || { enabled: false };
       res.json(clientLogging);
     } catch (err) {
-      console.error('Failed to fetch client logging config:', err);
+      log.error({ err }, 'Failed to fetch client logging config');
       res.status(500).json({ error: 'Failed to fetch client logging config' });
     }
   });
@@ -158,8 +162,8 @@ export default function configRoutes(): Router {
         });
 
       if (unknown.length > 0) {
-        console.warn(
-          `[Config] Dropping voice(s) not supported by GPT-Live: ${unknown.join(', ')}. ` +
+        log.warn(
+          `Dropping voice(s) not supported by GPT-Live: ${unknown.join(', ')}. ` +
           'Fix system_config.voices — these would fail at session creation.',
         );
       }
@@ -175,7 +179,7 @@ export default function configRoutes(): Router {
 
       res.json({ voices, default_voice: defaultVoice });
     } catch (err) {
-      console.error('Failed to fetch voices config:', err);
+      log.error({ err }, 'Failed to fetch voices config');
       res.status(500).json({ error: 'Failed to fetch voices config' });
     }
   });
@@ -197,7 +201,7 @@ export default function configRoutes(): Router {
 
       res.json({ languages: enabledLanguages, default_language: languagesConfig.default_language });
     } catch (err) {
-      console.error('Failed to fetch languages config:', err);
+      log.error({ err }, 'Failed to fetch languages config');
       res.status(500).json({ error: 'Failed to fetch languages config' });
     }
   });

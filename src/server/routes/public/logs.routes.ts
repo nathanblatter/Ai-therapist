@@ -17,6 +17,10 @@ import { getSystemPrompt } from '../../utils/sessionHelpers.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('logsRoutes');
+
 export default function logsRoutes(): Router {
   const router = Router();
 
@@ -59,11 +63,11 @@ export default function logsRoutes(): Router {
 
       const userId = req.session?.userId || null;
       if (sessionIds.size > 0) {
-        console.log('Processing batch logs with user context:', {
+        log.info({
           userId,
           username: req.session?.username,
           sessionCount: sessionIds.size,
-        });
+        }, 'Processing batch logs with user context');
       }
 
       // Ensure every referenced session exists (with a default configuration)
@@ -75,7 +79,7 @@ export default function logsRoutes(): Router {
         const existingSession = await getSession(sessionId);
         if (existingSession) {
           if (!canAccessSession(req, existingSession, sessionId)) {
-            console.warn(`[Logs] Rejected batch write to session ${sessionId.substring(0, 12)}... (not owner)`);
+            log.warn(`Rejected batch write to session ${sessionId.substring(0, 12)}... (not owner)`);
             return res.status(403).json({ error: 'Access denied' });
           }
         } else {
@@ -87,7 +91,7 @@ export default function logsRoutes(): Router {
             const { isQuietHoursActive } = await import('../../utils/quietHours.js');
             const role = req.session?.userRole ?? 'participant';
             if (role === 'participant' && req.session?.isSandbox !== true && isQuietHoursActive()) {
-              console.warn(`[Logs] Rejected overnight lazy session creation ${sessionId.substring(0, 12)}...`);
+              log.warn(`Rejected overnight lazy session creation ${sessionId.substring(0, 12)}...`);
               return res.status(403).json({ error: 'quiet_hours' });
             }
           }
@@ -98,7 +102,7 @@ export default function logsRoutes(): Router {
             isNonStudyUser(req.session?.userRole, req.session?.username) || req.session?.isSandbox === true,
           );
           recordSessionOwnership(req, sessionId);
-          console.log(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
+          log.info(`Created session ${sessionId.substring(0, 12)}... with user_id: ${userId}`);
 
           try {
             await upsertSessionConfig(sessionId, {
@@ -110,9 +114,9 @@ export default function logsRoutes(): Router {
               temperature: 0.8,
               max_response_output_tokens: 4096,
             });
-            console.log(`Session configuration created for session: ${sessionId.substring(0, 12)}...`);
+            log.info(`Session configuration created for session: ${sessionId.substring(0, 12)}...`);
           } catch (configError) {
-            console.error(`Failed to create session configuration for ${sessionId}:`, configError);
+            log.error({ err: configError }, `Failed to create session configuration for ${sessionId}`);
             // Configuration is not critical for message logging — continue.
           }
         }
@@ -132,10 +136,10 @@ export default function logsRoutes(): Router {
 
       setImmediate(() => {
         void processInsertedMessages(insertedMessages).catch(err =>
-          console.error('[Logs] post-persist crisis/emission processing failed:', err));
+          log.error({ err }, 'post-persist crisis/emission processing failed'));
       });
     } catch (err) {
-      console.error('Failed to insert batch logs into DB:', err);
+      log.error({ err }, 'Failed to insert batch logs into DB');
       res.sendStatus(500);
     }
   });

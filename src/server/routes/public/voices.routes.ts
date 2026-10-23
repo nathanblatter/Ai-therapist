@@ -4,6 +4,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('voicesRoutes');
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // src/server/routes/public -> repo root -> assets/audio/voices
 const VOICES_DIR = path.resolve(__dirname, '../../../../assets/audio/voices');
@@ -29,13 +33,13 @@ export default function voicesRoutes(): Router {
       const stream = fs.createReadStream(voiceFilePath);
       stream.pipe(res);
       stream.on('error', (err) => {
-        console.error('Error streaming voice preview:', err);
+        log.error({ err }, 'Error streaming voice preview');
         if (!res.headersSent) {
           res.status(500).json({ error: 'Failed to stream voice preview' });
         }
       });
     } catch (err) {
-      console.error('Failed to serve voice preview:', err);
+      log.error({ err }, 'Failed to serve voice preview');
       res.status(500).json({ error: 'Failed to serve voice preview' });
     }
   });

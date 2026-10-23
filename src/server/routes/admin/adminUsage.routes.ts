@@ -13,6 +13,10 @@ import { insertAdminUsageEvents } from '../../db/index.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import { capDetail } from '../public/clientEvents.routes.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('adminUsageRoutes');
+
 // Allowed detail keys per kind. Values are additionally length-capped.
 export const ADMIN_USAGE_KINDS: Record<string, ReadonlySet<string>> = {
   view_open: new Set(['view']),
@@ -104,7 +108,7 @@ export default function adminUsageRoutes(): Router {
         try {
           await insertAdminUsageEvents(accepted);
         } catch (err) {
-          console.error('admin usage-events insert failed:', err);
+          log.error({ err }, 'admin usage-events insert failed');
         }
       }
 

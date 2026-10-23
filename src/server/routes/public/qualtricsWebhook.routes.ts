@@ -17,6 +17,10 @@ import bcrypt from 'bcrypt';
 import rateLimit from 'express-rate-limit';
 import { handleResponseWebhook } from '../../services/qualtricsSync.service.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('qualtricsWebhookRoutes');
+
 async function secretMatches(
   req: { get(name: string): string | undefined },
   hash: string
@@ -66,7 +70,7 @@ export default function qualtricsWebhookRoutes(): Router {
           return res.status(503).json({ error: 'Response not available yet - retry' });
       }
     } catch (err) {
-      console.error('[QualtricsWebhook] failed:', err);
+      log.error({ err }, 'failed');
       res.status(500).json({ error: 'Webhook processing failed' });
     }
   });

@@ -14,6 +14,10 @@ import type { ToolDefinition } from '../services/toolRegistry.service.js';
 import { toRealtimeTools } from '../services/toolRegistry.service.js';
 import { GROK_SAMPLE_RATE } from '../../shared/grokVoiceProtocol.js';
 
+import { createLogger } from './logger.js';
+
+const log = createLogger('grokVoiceConfig');
+
 /** Model id prefix that routes a session to the Grok Voice backend. */
 const GROK_MODEL_PREFIX = 'grok-voice';
 
@@ -117,7 +121,7 @@ export function resolveGrokVoice(requested: string | null | undefined): string {
   const match = getGrokVoice(requested);
   if (match) return match.value;
   if (requested) {
-    console.warn(`[Grok] Voice '${requested}' is not a Grok voice; falling back to '${GROK_DEFAULT_VOICE}'.`);
+    log.warn(`Voice '${requested}' is not a Grok voice; falling back to '${GROK_DEFAULT_VOICE}'.`);
   }
   return GROK_DEFAULT_VOICE;
 }

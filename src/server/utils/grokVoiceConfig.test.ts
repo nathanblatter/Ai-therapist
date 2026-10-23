@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const logMock = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+vi.mock('./logger.js', () => ({ createLogger: () => logMock }));
+
 import {
   isGrokVoiceModel,
   resolveGrokVoice,
@@ -29,7 +32,7 @@ const TOOL_DEFS: ToolDefinition[] = [
 ];
 
 beforeEach(() => {
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  logMock.warn.mockClear();
 });
 
 describe('isGrokVoiceModel — the admin switch', () => {
@@ -70,7 +73,7 @@ describe('voice registry', () => {
     // A participant enrolled on GPT-Live keeps a saved 'marin'; forwarding it
     // would fail the session.update, so it falls back with a warning.
     expect(resolveGrokVoice('marin')).toBe(GROK_DEFAULT_VOICE);
-    expect(console.warn).toHaveBeenCalled();
+    expect(logMock.warn).toHaveBeenCalled();
     expect(resolveGrokVoice(undefined)).toBe(GROK_DEFAULT_VOICE);
   });
 });

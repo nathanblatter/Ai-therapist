@@ -104,9 +104,7 @@ describe('GET /admin/api/audit/data-access', () => {
 
   it('maps a query failure to 500', async () => {
     dbMocks.listDataAccessLog.mockRejectedValueOnce(new Error('db down'));
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect((await request(appAs('researcher')).get('/admin/api/audit/data-access')).status).toBe(500);
-    spy.mockRestore();
   });
 });
 

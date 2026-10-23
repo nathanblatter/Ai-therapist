@@ -14,6 +14,10 @@ import {
   isSandboxAccount,
 } from '../db/index.js';
 
+import { createLogger } from './logger.js';
+
+const log = createLogger('adminBroadcast');
+
 /** The slice of a socket.io Server we need (keeps tests trivial to mock). */
 export type AdminBroadcastIo = Pick<SocketIOServer, 'to'>;
 
@@ -70,7 +74,7 @@ async function isSandboxParticipant(participantUserId: number): Promise<boolean>
     sandboxUserCache.set(participantUserId, sandbox);
     return sandbox;
   } catch (err) {
-    console.error(`[AdminBroadcast] Sandbox lookup failed for user ${participantUserId}; treating as non-sandbox:`, err);
+    log.error({ err }, `Sandbox lookup failed for user ${participantUserId}; treating as non-sandbox`);
     return false; // do not cache failures
   }
 }
@@ -113,7 +117,7 @@ export async function broadcastAdminEvent(
   try {
     therapistIds = await getTherapistIdsForClient(participantUserId);
   } catch (err) {
-    console.error(`[AdminBroadcast] Caseload lookup failed for user ${participantUserId} (event ${event}); therapists skipped:`, err);
+    log.error({ err }, `Caseload lookup failed for user ${participantUserId} (event ${event}); therapists skipped`);
     therapistIds = [];
   }
   for (const therapistId of therapistIds) {
@@ -125,7 +129,7 @@ export async function broadcastAdminEvent(
   try {
     caseworkerIds = await getCaseworkerIdsForClient(participantUserId);
   } catch (err) {
-    console.error(`[AdminBroadcast] Caseworker lookup failed for user ${participantUserId} (event ${event}); caseworkers skipped:`, err);
+    log.error({ err }, `Caseworker lookup failed for user ${participantUserId} (event ${event}); caseworkers skipped`);
     return;
   }
   for (const caseworkerId of caseworkerIds) {
@@ -192,7 +196,7 @@ export async function broadcastAdminEventForSession(
         sessionUserCache.set(sessionId, userId);
       }
     } catch (err) {
-      console.error(`[AdminBroadcast] Session owner lookup failed for ${sessionId} (event ${event}); therapists skipped:`, err);
+      log.error({ err }, `Session owner lookup failed for ${sessionId} (event ${event}); therapists skipped`);
       userId = null; // fail closed, do not cache failures
     }
   }
@@ -222,11 +226,11 @@ export async function revokeTherapistSessionRooms(
           const ownerId = session && session.user_id != null ? Number(session.user_id) : null;
           if (ownerId === clientId) socket.leave(room);
         } catch (err) {
-          console.error(`[AdminBroadcast] revoke lookup failed for ${sessionId}:`, err);
+          log.error({ err }, `revoke lookup failed for ${sessionId}`);
         }
       }
     }
   } catch (err) {
-    console.error('[AdminBroadcast] revokeTherapistSessionRooms failed:', err);
+    log.error({ err }, 'revokeTherapistSessionRooms failed');
   }
 }

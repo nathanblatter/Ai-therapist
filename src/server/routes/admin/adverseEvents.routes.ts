@@ -37,6 +37,10 @@ import {
 import { enqueueWorkItem } from '../../services/workQueue.service.js';
 import { renderAdverseEventPrintHtml } from '../../utils/aePrintView.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('adverseEventsRoutes');
+
 /** Summaries-tier projection for caseworker reads: a reviewer may attach a
  *  (redacted) transcript excerpt to a caseworker-filed draft, and caseworkers
  *  never see transcript content — not even content_redacted. */
@@ -90,8 +94,8 @@ export default function adverseEventsRoutes(): Router {
    */
   const denySandbox = (req: Request, res: Response, next: NextFunction): void => {
     if (req.session?.isSandbox === true) {
-      console.warn(
-        `[AE] Blocked sandbox account '${req.session?.username ?? 'unknown'}' from reading the ` +
+      log.warn(
+        `Blocked sandbox account '${req.session?.username ?? 'unknown'}' from reading the ` +
         'adverse-event register.',
       );
       // 404, not 403 — existence of the register must not be confirmable,
@@ -129,7 +133,7 @@ export default function adverseEventsRoutes(): Router {
       const reports = req.session.userRole === 'caseworker' ? rows.map(scrubForCaseworker) : rows;
       res.json({ counts, reports });
     } catch (err) {
-      console.error('[AE] list failed:', err);
+      log.error({ err }, 'list failed');
       res.status(500).json({ error: 'Failed to load adverse events' });
     }
   });
@@ -145,7 +149,7 @@ export default function adverseEventsRoutes(): Router {
       if (!row) return res.status(404).json({ error: 'not found' });
       res.json(req.session.userRole === 'caseworker' ? scrubForCaseworker(row) : row);
     } catch (err) {
-      console.error('[AE] get failed:', err);
+      log.error({ err }, 'get failed');
       res.status(500).json({ error: 'Failed to load adverse event' });
     }
   });
@@ -159,7 +163,7 @@ export default function adverseEventsRoutes(): Router {
       if (!row) return res.status(404).send('not found');
       res.set('Content-Type', 'text/html; charset=utf-8').send(renderAdverseEventPrintHtml(row));
     } catch (err) {
-      console.error('[AE] print failed:', err);
+      log.error({ err }, 'print failed');
       res.status(500).send('Failed to render report');
     }
   });
@@ -190,7 +194,7 @@ export default function adverseEventsRoutes(): Router {
       if (!ok) return res.status(409).json({ error: 'report is not a draft' });
       res.json(await getAdverseEventById(id, scope));
     } catch (err) {
-      console.error('[AE] update failed:', err);
+      log.error({ err }, 'update failed');
       res.status(500).json({ error: 'Failed to update adverse event' });
     }
   });
@@ -208,7 +212,7 @@ export default function adverseEventsRoutes(): Router {
       if (!ok) return res.status(409).json({ error: 'report is not a draft' });
       res.json(await getAdverseEventById(id, scope));
     } catch (err) {
-      console.error('[AE] submit failed:', err);
+      log.error({ err }, 'submit failed');
       res.status(500).json({ error: 'Failed to submit adverse event' });
     }
   });
@@ -224,7 +228,7 @@ export default function adverseEventsRoutes(): Router {
       if (!ok) return res.status(409).json({ error: 'report is not submitted' });
       res.json(await getAdverseEventById(id, scope));
     } catch (err) {
-      console.error('[AE] reopen failed:', err);
+      log.error({ err }, 'reopen failed');
       res.status(500).json({ error: 'Failed to reopen adverse event' });
     }
   });
@@ -241,7 +245,7 @@ export default function adverseEventsRoutes(): Router {
       if (!ok) return res.status(409).json({ error: 'report is not submitted' });
       res.json(await getAdverseEventById(id, scope));
     } catch (err) {
-      console.error('[AE] close failed:', err);
+      log.error({ err }, 'close failed');
       res.status(500).json({ error: 'Failed to close adverse event' });
     }
   });
@@ -266,7 +270,7 @@ export default function adverseEventsRoutes(): Router {
       if (reportId == null) return res.status(422).json({ error: 'Could not draft an adverse event for this session' });
       res.status(201).json(await getAdverseEventById(reportId, scope));
     } catch (err) {
-      console.error('[AE] manual draft failed:', err);
+      log.error({ err }, 'manual draft failed');
       res.status(500).json({ error: 'Failed to file adverse event' });
     }
   });
@@ -368,7 +372,7 @@ export default function adverseEventsRoutes(): Router {
           created && req.session.userRole === 'caseworker' ? scrubForCaseworker(created) : created
         );
       } catch (err) {
-        console.error('[AE] caseworker filing failed:', err);
+        log.error({ err }, 'caseworker filing failed');
         res.status(500).json({ error: 'Failed to file adverse event' });
       }
     }

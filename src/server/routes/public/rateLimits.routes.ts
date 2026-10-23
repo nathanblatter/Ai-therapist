@@ -8,6 +8,10 @@ import { getSessionsToday } from '../../db/index.js';
 
 import type { SessionLimits } from '../../../shared/systemConfig.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('rateLimitsRoutes');
+
 // This surface only makes sense with a configured cap, so narrow the shared
 // (optional-field) blob type to require max_sessions_per_day, as the old
 // local declaration did.
@@ -49,7 +53,7 @@ export default function rateLimitsRoutes(): Router {
         exemption_reason: null,
       });
     } catch (err) {
-      console.error('Error fetching rate limit status:', err);
+      log.error({ err }, 'Error fetching rate limit status');
       res.status(500).json({ error: 'Failed to fetch rate limit status' });
     }
   });

@@ -26,6 +26,10 @@ import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('sessionsRoutes');
+
 export default function sessionsRoutes(): Router {
   const router = Router();
 
@@ -163,7 +167,7 @@ export default function sessionsRoutes(): Router {
 
       res.json({ success: true, scale: def.id, score, max_score: def.max_score, injected });
     } catch (err) {
-      console.error('Failed to store scale response:', err);
+      log.error({ err }, 'Failed to store scale response');
       res.status(500).json({ error: 'Failed to store scale response' });
     }
   });
@@ -213,7 +217,7 @@ export default function sessionsRoutes(): Router {
 
       res.json({ success: true, instance_id: draft.instance_id, injected });
     } catch (err) {
-      console.error('Failed to store worksheet response:', err);
+      log.error({ err }, 'Failed to store worksheet response');
       res.status(500).json({ error: 'Failed to store worksheet response' });
     }
   });
@@ -280,7 +284,7 @@ export default function sessionsRoutes(): Router {
 
       res.json({ success: true, injected });
     } catch (err) {
-      console.error('Failed to record tool event:', err);
+      log.error({ err }, 'Failed to record tool event');
       res.status(500).json({ error: 'Failed to record tool event' });
     }
   });
@@ -317,7 +321,7 @@ export default function sessionsRoutes(): Router {
       // Validation errors from upsertSessionFeedback (bad rating) are the
       // participant's fault, not a server error.
       const isValidationError = /must be an integer 1-5/.test(message);
-      console.error('Failed to store session feedback:', err);
+      log.error({ err }, 'Failed to store session feedback');
       res.status(isValidationError ? 400 : 500).json({ error: message });
     }
   });
@@ -354,7 +358,7 @@ export default function sessionsRoutes(): Router {
       recordSessionOwnership(req, session.session_id);
       res.json(session);
     } catch (err) {
-      console.error('Failed to create session:', err);
+      log.error({ err }, 'Failed to create session');
       res.status(500).json({ error: 'Failed to create session' });
     }
   });
@@ -365,7 +369,7 @@ export default function sessionsRoutes(): Router {
       const sessions = await getUserSessions(req.session.userId!);
       res.json(sessions);
     } catch (err) {
-      console.error('Failed to fetch sessions:', err);
+      log.error({ err }, 'Failed to fetch sessions');
       res.status(500).json({ error: 'Failed to fetch sessions' });
     }
   });
@@ -388,7 +392,7 @@ export default function sessionsRoutes(): Router {
 
       res.json({ session, messages, config });
     } catch (err) {
-      console.error('Failed to fetch session details:', err);
+      log.error({ err }, 'Failed to fetch session details');
       res.status(500).json({ error: 'Failed to fetch session details' });
     }
   });
@@ -407,7 +411,7 @@ export default function sessionsRoutes(): Router {
 
       // Idempotent end.
       if (session.status === 'ended') {
-        console.log(`Session ${sessionId} already ended, returning existing data (idempotent)`);
+        log.info(`Session ${sessionId} already ended, returning existing data (idempotent)`);
         return res.status(200).json({ ...session, alreadyEnded: true, message: 'Session was already ended' });
       }
 
@@ -426,7 +430,7 @@ export default function sessionsRoutes(): Router {
         );
         await sidebandManager.disconnect(sessionId);
       } catch (e) {
-        console.error('[Sideband] cleanup on session end failed:', e);
+        log.error({ err: e }, '[Sideband] cleanup on session end failed');
       }
 
       // Redact the whole session in one batched job (fire-and-forget), THEN
@@ -436,7 +440,7 @@ export default function sessionsRoutes(): Router {
       import('../../services/sessionRedaction.service.js')
         .then(m => m.redactSession(sessionId))
         .then(() => generateSessionNameAsync(sessionId))
-        .catch(e => console.error('[Redaction] session redaction/naming failed:', e));
+        .catch(e => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
 
       // Finalize the audio recording (wrap buffered PCM → WAV → object
       // storage), then derive acoustic features from the participant track —
@@ -445,24 +449,24 @@ export default function sessionsRoutes(): Router {
         .then(m => m.finalize(sessionId))
         .then(() => import('../../services/acousticFeatures.service.js'))
         .then(m => m.generateAcousticFeaturesAsync(sessionId))
-        .catch(e => console.error('[Recorder] finalize/acoustic failed:', e));
+        .catch(e => log.error({ err: e }, '[Recorder] finalize/acoustic failed'));
 
       // Memory summary + draft SOAP note (fire-and-forget).
       import('../../services/sessionInsights.service.js')
         .then(m => m.generateSessionInsightsAsync(sessionId))
-        .catch(e => console.error('[Insights] generation failed:', e));
+        .catch(e => log.error({ err: e }, '[Insights] generation failed'));
 
       // Quality eval (LLM judge) — no-op unless system_config.evals.auto_run_enabled.
       import('../../services/sessionEval.service.js')
         .then(m => m.maybeAutoEvalSession(sessionId))
-        .catch(e => console.error('[Evals] auto-eval failed:', e));
+        .catch(e => log.error({ err: e }, '[Evals] auto-eval failed'));
 
       void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' }, sessionId, 'summary');
       global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'user' });
 
       res.json({ ...updatedSession, message: 'Session ended successfully' });
     } catch (err) {
-      console.error('Failed to end session:', err);
+      log.error({ err }, 'Failed to end session');
       res.status(500).json({ error: 'Failed to end session' });
     }
   });

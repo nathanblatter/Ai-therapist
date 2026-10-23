@@ -28,6 +28,10 @@ import { generateSessionNameAsync } from '../../services/sessionName.service.js'
 import { getSessionRecording } from '../../db/recording.queries.js';
 import { getObjectStream, headObject } from '../../config/objectStorage.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('adminSessionsRoutes');
+
 // Split a comma-separated query param into a non-empty string[] (or null).
 function parseList(value: unknown): string[] | null {
   if (!value) return null;
@@ -47,7 +51,7 @@ export default function adminSessionsRoutes(): Router {
       const sessions = await getActiveSessions(scope, orgId);
       res.json({ sessions });
     } catch (err) {
-      console.error('Failed to fetch active sessions:', err);
+      log.error({ err }, 'Failed to fetch active sessions');
       res.status(500).json({ error: 'Failed to fetch active sessions' });
     }
   });
@@ -64,7 +68,7 @@ export default function adminSessionsRoutes(): Router {
 
       // Idempotent: ending an already-ended session returns the existing data.
       if (session.status === 'ended') {
-        console.log(`Admin: Session ${sessionId} already ended, returning existing data (idempotent)`);
+        log.info(`Admin: Session ${sessionId} already ended, returning existing data (idempotent)`);
         return res.status(200).json({ ...session, alreadyEnded: true, message: 'Session was already ended' });
       }
 
@@ -75,7 +79,7 @@ export default function adminSessionsRoutes(): Router {
         const { sidebandManager } = await import('../../services/sidebandManager.service.js');
         await sidebandManager.disconnect(sessionId);
       } catch (e) {
-        console.error('[Sideband] cleanup on admin session end failed:', e);
+        log.error({ err: e }, '[Sideband] cleanup on admin session end failed');
       }
 
       // Free the in-memory chat transcript (ai-therapist-224): an admin end
@@ -84,7 +88,7 @@ export default function adminSessionsRoutes(): Router {
         const { endChatSession } = await import('../../services/chatTherapy.service.js');
         endChatSession(sessionId);
       } catch (e) {
-        console.error('[ChatTherapy] cleanup on admin session end failed:', e);
+        log.error({ err: e }, '[ChatTherapy] cleanup on admin session end failed');
       }
 
       // Redact the whole session in one batched job (fire-and-forget), THEN
@@ -94,24 +98,24 @@ export default function adminSessionsRoutes(): Router {
       import('../../services/sessionRedaction.service.js')
         .then(m => m.redactSession(sessionId))
         .then(() => generateSessionNameAsync(sessionId))
-        .catch(e => console.error('[Redaction] session redaction/naming failed:', e));
+        .catch(e => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
 
       // Finalize the audio recording (wrap buffered PCM → WAV → object storage).
       import('../../services/recorder.service.js')
         .then(m => m.finalize(sessionId))
-        .catch(e => console.error('[Recorder] finalize failed:', e));
+        .catch(e => log.error({ err: e }, '[Recorder] finalize failed'));
 
       // Post-session insights (ai-therapist-256): an admin/crisis takeover end
       // skipped these, so sessions a researcher ended from the dashboard — the
       // most safety-relevant ones — had no summary in the catch-up view.
       import('../../services/sessionInsights.service.js')
         .then(m => m.generateSessionInsightsAsync(sessionId))
-        .catch(e => console.error('[Insights] generation failed:', e));
+        .catch(e => log.error({ err: e }, '[Insights] generation failed'));
 
       // Quality eval (LLM judge) — no-op unless system_config.evals.auto_run_enabled.
       import('../../services/sessionEval.service.js')
         .then(m => m.maybeAutoEvalSession(sessionId))
-        .catch(e => console.error('[Evals] auto-eval failed:', e));
+        .catch(e => log.error({ err: e }, '[Evals] auto-eval failed'));
 
       // Notify admin dashboards and the participant's own session room.
       void broadcastAdminEventForSession(global.io, 'session:ended', {
@@ -125,11 +129,11 @@ export default function adminSessionsRoutes(): Router {
         remoteTermination: true,
       });
 
-      console.log(`Admin ${req.session.username} remotely ended session ${sessionId}`);
+      log.info(`Admin ${req.session.username} remotely ended session ${sessionId}`);
 
       res.json({ ...updatedSession, message: 'Session ended successfully by admin', endedBy: req.session.username });
     } catch (err) {
-      console.error('Failed to end session:', err);
+      log.error({ err }, 'Failed to end session');
       res.status(500).json({ error: 'Failed to end session' });
     }
   });
@@ -180,7 +184,7 @@ export default function adminSessionsRoutes(): Router {
         pagination: { page: pageNum, limit: limitNum, totalCount },
       });
     } catch (err) {
-      console.error('Failed to fetch sessions:', err);
+      log.error({ err }, 'Failed to fetch sessions');
       res.status(500).json({ error: 'Failed to fetch sessions' });
     }
   });
@@ -200,7 +204,7 @@ export default function adminSessionsRoutes(): Router {
         allComplete: breakdown.pending === 0,
       });
     } catch (err) {
-      console.error('Failed to check redaction status:', err);
+      log.error({ err }, 'Failed to check redaction status');
       res.status(500).json({ error: 'Failed to check redaction status' });
     }
   });
@@ -221,7 +225,7 @@ export default function adminSessionsRoutes(): Router {
         url: `/admin/api/sessions/${sessionId}/recording`,
       });
     } catch (err) {
-      console.error('Failed to fetch recording info:', err);
+      log.error({ err }, 'Failed to fetch recording info');
       res.status(500).json({ error: 'Failed to fetch recording info' });
     }
   });
@@ -276,7 +280,7 @@ export default function adminSessionsRoutes(): Router {
       res.setHeader('Content-Type', meta.contentType);
       body.pipe(res);
     } catch (err) {
-      console.error('Failed to stream recording:', err);
+      log.error({ err }, 'Failed to stream recording');
       if (!res.headersSent) res.status(500).json({ error: 'Failed to stream recording' });
     }
   });
@@ -318,7 +322,7 @@ export default function adminSessionsRoutes(): Router {
             const { getSessionFeedback } = await import('../../db/index.js');
             return await getSessionFeedback(sessionId);
           } catch (err) {
-            console.error('Failed to fetch session feedback:', err);
+            log.error({ err }, 'Failed to fetch session feedback');
             return null;
           }
         })(),
@@ -327,7 +331,7 @@ export default function adminSessionsRoutes(): Router {
             const { getSessionCostSummary } = await import('../../db/index.js');
             return await getSessionCostSummary(sessionId);
           } catch (err) {
-            console.error('Failed to fetch session cost summary:', err);
+            log.error({ err }, 'Failed to fetch session cost summary');
             return null;
           }
         })(),
@@ -335,7 +339,7 @@ export default function adminSessionsRoutes(): Router {
 
       res.json({ session, messages, feedback, cost });
     } catch (err) {
-      console.error('Failed to fetch session details:', err);
+      log.error({ err }, 'Failed to fetch session details');
       res.status(500).json({ error: 'Failed to fetch session details' });
     }
   });
@@ -353,7 +357,7 @@ export default function adminSessionsRoutes(): Router {
       if (error instanceof Error && error.message === 'Session not found') {
         return res.status(404).json({ error: 'Session not found' });
       }
-      console.error('Failed to delete session:', error);
+      log.error({ err: error }, 'Failed to delete session');
       res.status(500).json({ error: 'Failed to delete session' });
     }
   });
@@ -399,7 +403,7 @@ export default function adminSessionsRoutes(): Router {
       if (error instanceof Error && error.message === 'Message not found') {
         return res.status(404).json({ error: 'Message not found' });
       }
-      console.error('Failed to update message:', error);
+      log.error({ err: error }, 'Failed to update message');
       res.status(500).json({ error: 'Failed to update message' });
     }
   });
@@ -417,7 +421,7 @@ export default function adminSessionsRoutes(): Router {
       if (error instanceof Error && error.message === 'Cannot delete the last message in a session') {
         return res.status(400).json({ error: 'Cannot delete the last message in a session' });
       }
-      console.error('Failed to delete message:', error);
+      log.error({ err: error }, 'Failed to delete message');
       res.status(500).json({ error: 'Failed to delete message' });
     }
   });

@@ -14,6 +14,10 @@ import { Router, json } from 'express';
 import rateLimit from 'express-rate-limit';
 import { insertClientEvent } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('clientEventsRoutes');
+
 export const CLIENT_EVENT_KINDS = [
   'js_error',
   'unhandled_rejection',
@@ -105,7 +109,7 @@ export default function clientEventsRoutes(): Router {
       });
     } catch (err) {
       // Telemetry must never surface errors to participants; log and move on.
-      console.error('client-event insert failed:', err);
+      log.error({ err }, 'client-event insert failed');
     }
 
     res.sendStatus(204);

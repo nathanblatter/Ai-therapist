@@ -15,6 +15,10 @@ import {
 import { updateSystemConfig } from '../../db/config.queries.js';
 import { parsePagination } from '../../utils/pagination.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('studyOpsRoutes');
+
 const MANUAL_CATEGORIES = ['technical_failure', 'enrollment', 'procedure', 'other'];
 const ALL_CATEGORIES = [
   'config_change_mid_study', 'arm_imbalance', 'session_limit_exceeded', 'consent_version_change',
@@ -31,7 +35,7 @@ export default function studyOpsRoutes(): Router {
     try {
       res.json(await getStudyOpsSummary());
     } catch (err) {
-      console.error('Failed to fetch study-ops summary:', err);
+      log.error({ err }, 'Failed to fetch study-ops summary');
       res.status(500).json({ error: 'Failed to fetch study-ops summary' });
     }
   });
@@ -43,7 +47,7 @@ export default function studyOpsRoutes(): Router {
     try {
       res.json({ deviations: await listDeviations(status, limit) });
     } catch (err) {
-      console.error('Failed to fetch deviations:', err);
+      log.error({ err }, 'Failed to fetch deviations');
       res.status(500).json({ error: 'Failed to fetch deviations' });
     }
   });
@@ -67,7 +71,7 @@ export default function studyOpsRoutes(): Router {
       });
       res.status(201).json({ deviation: row });
     } catch (err) {
-      console.error('Failed to create deviation:', err);
+      log.error({ err }, 'Failed to create deviation');
       res.status(500).json({ error: 'Failed to create deviation' });
     }
   });
@@ -88,7 +92,7 @@ export default function studyOpsRoutes(): Router {
       if (!row) return res.status(404).json({ error: 'deviation not found' });
       res.json({ deviation: row });
     } catch (err) {
-      console.error('Failed to update deviation:', err);
+      log.error({ err }, 'Failed to update deviation');
       res.status(500).json({ error: 'Failed to update deviation' });
     }
   });
@@ -102,7 +106,7 @@ export default function studyOpsRoutes(): Router {
       if (!ok) return res.status(404).json({ error: 'deviation not found or not deletable (auto-flagged rows cannot be deleted)' });
       res.json({ success: true });
     } catch (err) {
-      console.error('Failed to delete deviation:', err);
+      log.error({ err }, 'Failed to delete deviation');
       res.status(500).json({ error: 'Failed to delete deviation' });
     }
   });
@@ -113,7 +117,7 @@ export default function studyOpsRoutes(): Router {
       const { inserted } = await scanForDeviations();
       res.json({ success: true, inserted });
     } catch (err) {
-      console.error('Failed to run deviation scan:', err);
+      log.error({ err }, 'Failed to run deviation scan');
       res.status(500).json({ error: 'Failed to run deviation scan' });
     }
   });
@@ -147,7 +151,7 @@ export default function studyOpsRoutes(): Router {
       if (!row) return res.status(404).json({ error: 'study_protocol config missing (run migration 053)' });
       res.json({ success: true, protocol: row.config_value });
     } catch (err) {
-      console.error('Failed to update study protocol:', err);
+      log.error({ err }, 'Failed to update study protocol');
       res.status(500).json({ error: 'Failed to update study protocol' });
     }
   });

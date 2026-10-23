@@ -34,7 +34,7 @@ export default function studyStatusRoutes(): Router {
       if (!detail) return res.status(404).json({ error: 'User not found' });
       res.json(detail);
     } catch (err) {
-      console.error('Failed to fetch study status:', err);
+      log.error({ err }, 'Failed to fetch study status');
       res.status(500).json({ error: 'Failed to fetch study status' });
     }
   });
@@ -61,7 +61,7 @@ export default function studyStatusRoutes(): Router {
       }
       res.json({ success: true, study_status: status, changed });
     } catch (err) {
-      console.error('Failed to update study status:', err);
+      log.error({ err }, 'Failed to update study status');
       res.status(500).json({ error: 'Failed to update study status' });
     }
   });

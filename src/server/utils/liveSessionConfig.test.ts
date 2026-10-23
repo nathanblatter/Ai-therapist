@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const logMock = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+vi.mock('./logger.js', () => ({ createLogger: () => logMock }));
+
 import {
   isLiveModel,
   resolveLiveVoice,
@@ -36,7 +39,7 @@ function build(overrides: Partial<Parameters<typeof buildLiveSessionConfig>[0]> 
 }
 
 beforeEach(() => {
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  logMock.warn.mockClear();
 });
 
 afterEach(() => {
@@ -82,7 +85,7 @@ describe('resolveLiveVoice', () => {
   it('falls back for null / undefined without warning', () => {
     expect(resolveLiveVoice(null)).toBe('marin');
     expect(resolveLiveVoice(undefined)).toBe('marin');
-    expect(console.warn).not.toHaveBeenCalled();
+    expect(logMock.warn).not.toHaveBeenCalled();
   });
 });
 

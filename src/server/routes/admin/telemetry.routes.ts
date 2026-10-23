@@ -18,6 +18,10 @@ import {
 } from '../../db/index.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('telemetryRoutes');
+
 /** Phase 2 flags that gate the engagement stream (migration 095). */
 export const ENGAGEMENT_FLAGS = ['telemetry_interaction_timing', 'telemetry_engagement_events'] as const;
 
@@ -45,7 +49,7 @@ export default function telemetryRoutes(): Router {
       ]);
       res.json({ days, kinds, reach, byRole });
     } catch (err) {
-      console.error('Failed to fetch admin usage telemetry:', err);
+      log.error({ err }, 'Failed to fetch admin usage telemetry');
       res.status(500).json({ error: 'Failed to fetch admin usage telemetry' });
     }
   });
@@ -63,7 +67,7 @@ export default function telemetryRoutes(): Router {
         const features = (config.features as Record<string, unknown>) ?? {};
         for (const flag of ENGAGEMENT_FLAGS) flags[flag] = features[flag] === true;
       } catch (err) {
-        console.error('Failed to read telemetry flags:', err);
+        log.error({ err }, 'Failed to read telemetry flags');
         for (const flag of ENGAGEMENT_FLAGS) flags[flag] = false;
       }
       const [kinds, rhythm] = await Promise.all([
@@ -72,7 +76,7 @@ export default function telemetryRoutes(): Router {
       ]);
       res.json({ days, flags, kinds, rhythm });
     } catch (err) {
-      console.error('Failed to fetch engagement telemetry:', err);
+      log.error({ err }, 'Failed to fetch engagement telemetry');
       res.status(500).json({ error: 'Failed to fetch engagement telemetry' });
     }
   });
@@ -94,7 +98,7 @@ export default function telemetryRoutes(): Router {
       ]);
       res.json({ days, channels, drift, session: sessionId ? { sessionId, turns: session } : null });
     } catch (err) {
-      console.error('Failed to fetch latency telemetry:', err);
+      log.error({ err }, 'Failed to fetch latency telemetry');
       res.status(500).json({ error: 'Failed to fetch latency telemetry' });
     }
   });

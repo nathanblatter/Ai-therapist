@@ -40,6 +40,10 @@ import { emitSummaryEvent } from '../../utils/adminBroadcast.js';
 import { enqueueWorkItem } from '../../services/workQueue.service.js';
 import { isCareTeamRole, type CareTeamRole, type StaffCommsRole } from '../../../shared/roles.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('escalationsRoutes');
+
 const URGENCIES: readonly EscalationUrgency[] = ['routine', 'urgent', 'emergency'];
 const STATUSES: readonly EscalationStatus[] = ['open', 'acknowledged', 'resolved'];
 
@@ -207,7 +211,7 @@ export default function escalationsRoutes(): Router {
         emitEscalationEvent('escalation:created', escalation);
         res.status(201).json({ escalation });
       } catch (err) {
-        console.error('[Escalations] create failed:', err);
+        log.error({ err }, 'create failed');
         res.status(500).json({ error: 'Failed to create escalation' });
       }
     }
@@ -266,7 +270,7 @@ export default function escalationsRoutes(): Router {
         }
         res.json({ escalations });
       } catch (err) {
-        console.error('[Escalations] list failed:', err);
+        log.error({ err }, 'list failed');
         res.status(500).json({ error: 'Failed to list escalations' });
       }
     }
@@ -283,7 +287,7 @@ export default function escalationsRoutes(): Router {
         const events = await listEscalationEvents(escalation.escalation_id);
         res.json({ escalation, events });
       } catch (err) {
-        console.error('[Escalations] detail failed:', err);
+        log.error({ err }, 'detail failed');
         res.status(500).json({ error: 'Failed to fetch escalation' });
       }
     }
@@ -314,7 +318,7 @@ export default function escalationsRoutes(): Router {
         emitEscalationEvent('escalation:updated', updated);
         res.json({ escalation: updated });
       } catch (err) {
-        console.error('[Escalations] acknowledge failed:', err);
+        log.error({ err }, 'acknowledge failed');
         res.status(500).json({ error: 'Failed to acknowledge escalation' });
       }
     }
@@ -352,12 +356,12 @@ export default function escalationsRoutes(): Router {
             String(escalation.escalation_id),
           ]);
         } catch (err) {
-          console.error('[Escalations] expiring escalation_inbound work item failed:', err);
+          log.error({ err }, 'expiring escalation_inbound work item failed');
         }
         emitEscalationEvent('escalation:updated', updated);
         res.json({ escalation: updated });
       } catch (err) {
-        console.error('[Escalations] resolve failed:', err);
+        log.error({ err }, 'resolve failed');
         res.status(500).json({ error: 'Failed to resolve escalation' });
       }
     }
@@ -403,7 +407,7 @@ export default function escalationsRoutes(): Router {
         emitEscalationEvent('escalation:updated', updated);
         res.json({ escalation: updated });
       } catch (err) {
-        console.error('[Escalations] reopen failed:', err);
+        log.error({ err }, 'reopen failed');
         res.status(500).json({ error: 'Failed to reopen escalation' });
       }
     }
@@ -431,7 +435,7 @@ export default function escalationsRoutes(): Router {
         emitEscalationEvent('escalation:updated', escalation);
         res.status(201).json({ event });
       } catch (err) {
-        console.error('[Escalations] comment failed:', err);
+        log.error({ err }, 'comment failed');
         res.status(500).json({ error: 'Failed to add comment' });
       }
     }
@@ -468,7 +472,7 @@ export default function escalationsRoutes(): Router {
           });
         } catch (err) {
           if (!(err instanceof CaseloadRoleError)) throw err;
-          console.error('[Escalations] claim auto-assign rejected:', err.message);
+          log.error({ err }, 'claim auto-assign rejected');
         }
 
         await insertEscalationEvent({
@@ -480,7 +484,7 @@ export default function escalationsRoutes(): Router {
         emitEscalationEvent('escalation:updated', updated);
         res.json({ escalation: updated });
       } catch (err) {
-        console.error('[Escalations] claim failed:', err);
+        log.error({ err }, 'claim failed');
         res.status(500).json({ error: 'Failed to claim escalation' });
       }
     }

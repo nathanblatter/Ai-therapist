@@ -7,6 +7,10 @@ import { passwordPolicyError } from '../../utils/passwordPolicy.js';
 import { registerAccount } from '../../services/accounts.service.js';
 import { enabled as squawkEnabled } from '../../services/squawk.service.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('authRoutes');
+
 export default function authRoutes(): Router {
   const router = Router();
 
@@ -84,7 +88,7 @@ export default function authRoutes(): Router {
       };
       req.session.regenerate((regenErr) => {
         if (regenErr) {
-          console.error('Session regenerate error:', regenErr);
+          log.error({ err: regenErr }, 'Session regenerate error');
           return res.status(500).json({ error: 'Login failed' });
         }
         Object.assign(req.session, carried);
@@ -99,7 +103,7 @@ export default function authRoutes(): Router {
 
         req.session.save((err) => {
           if (err) {
-            console.error('Session save error:', err);
+            log.error({ err }, 'Session save error');
             return res.status(500).json({ error: 'Login failed' });
           }
           res.json({
@@ -109,7 +113,7 @@ export default function authRoutes(): Router {
         });
       });
     } catch (error) {
-      console.error('Login error:', error);
+      log.error({ err: error }, 'Login error');
       res.status(500).json({ error: 'Login failed' });
     }
   });
@@ -144,7 +148,7 @@ export default function authRoutes(): Router {
       if (error instanceof Error && error.name === 'ResearchOrgCaseworkerError') {
         return res.status(400).json({ error: error.message });
       }
-      console.error('Registration error:', error);
+      log.error({ err: error }, 'Registration error');
       res.status(500).json({ error: 'Registration failed' });
     }
   });
@@ -153,7 +157,7 @@ export default function authRoutes(): Router {
   router.post('/api/auth/logout', (req, res) => {
     req.session.destroy((err) => {
       if (err) {
-        console.error('Logout error:', err);
+        log.error({ err }, 'Logout error');
         return res.status(500).json({ error: 'Logout failed' });
       }
       res.json({ success: true });

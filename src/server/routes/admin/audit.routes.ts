@@ -26,6 +26,10 @@ import {
   getOrganizationIdForUser,
 } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('auditRoutes');
+
 const PAGING = { defaultLimit: 50, maxLimit: 500 };
 
 /** Optional non-empty query string, else null. */
@@ -79,7 +83,7 @@ export default function auditRoutes(): Router {
       );
       res.json({ ...page, limit, offset });
     } catch (err) {
-      console.error('Failed to fetch data access log:', err);
+      log.error({ err }, 'Failed to fetch data access log');
       res.status(500).json({ error: 'Failed to fetch data access log' });
     }
   });
@@ -122,7 +126,7 @@ export default function auditRoutes(): Router {
 
         res.json({ ...history, limit, offset });
       } catch (err) {
-        console.error('Failed to fetch participant access history:', err);
+        log.error({ err }, 'Failed to fetch participant access history');
         res.status(500).json({ error: 'Failed to fetch participant access history' });
       }
     }
@@ -141,7 +145,7 @@ export default function auditRoutes(): Router {
       const page = await listRedactionReviewLog({ reviewedBy, action, limit, offset });
       res.json({ ...page, limit, offset });
     } catch (err) {
-      console.error('Failed to fetch redaction review log:', err);
+      log.error({ err }, 'Failed to fetch redaction review log');
       res.status(500).json({ error: 'Failed to fetch redaction review log' });
     }
   });
@@ -161,7 +165,7 @@ export default function auditRoutes(): Router {
       );
       res.json({ ...page, limit, offset });
     } catch (err) {
-      console.error('Failed to fetch assistant audit log:', err);
+      log.error({ err }, 'Failed to fetch assistant audit log');
       res.status(500).json({ error: 'Failed to fetch assistant audit log' });
     }
   });

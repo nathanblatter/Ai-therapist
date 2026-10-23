@@ -14,6 +14,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { createLogger } from './logger.js';
+
+const log = createLogger('voicePreviews');
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // src/server/utils -> repo root -> assets/audio/voices
 const VOICES_DIR = path.resolve(__dirname, '../../../assets/audio/voices');
@@ -29,7 +33,7 @@ function loadPreviews(): Set<string> {
   } catch (err) {
     // A missing assets directory is not fatal: every voice simply reports no
     // preview and the picker hides the play controls.
-    console.warn('[Voices] Could not read voice preview directory:', err);
+    log.warn({ err }, 'Could not read voice preview directory');
   }
   return available;
 }

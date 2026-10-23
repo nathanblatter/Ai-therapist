@@ -20,6 +20,10 @@ import { userRoom } from '../../services/messageSafety.service.js';
 import { orgIdFor } from '../../middleware/org.js';
 import { isCareTeamRole, type CareTeamRole } from '../../../shared/roles.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('caseloadRoutes');
+
 export default function caseloadRoutes(): Router {
   const router = Router();
 
@@ -53,7 +57,7 @@ export default function caseloadRoutes(): Router {
       const assignments = await listAllAssignments(await orgIdFor(req));
       res.json({ assignments });
     } catch (err) {
-      console.error('Failed to fetch caseload:', err);
+      log.error({ err }, 'Failed to fetch caseload');
       res.status(500).json({ error: 'Failed to fetch caseload' });
     }
   });
@@ -68,7 +72,7 @@ export default function caseloadRoutes(): Router {
         .map(u => ({ userid: u.userid, username: u.username, created_at: u.created_at ?? null }));
       res.json({ therapists });
     } catch (err) {
-      console.error('Failed to fetch therapists:', err);
+      log.error({ err }, 'Failed to fetch therapists');
       res.status(500).json({ error: 'Failed to fetch therapists' });
     }
   });
@@ -81,7 +85,7 @@ export default function caseloadRoutes(): Router {
       const rows = await listCaseloadAudit(undefined, await orgIdFor(req));
       res.json({ audit: rows });
     } catch (err) {
-      console.error('Failed to fetch caseload audit log:', err);
+      log.error({ err }, 'Failed to fetch caseload audit log');
       res.status(500).json({ error: 'Failed to fetch caseload audit log' });
     }
   });
@@ -119,7 +123,7 @@ export default function caseloadRoutes(): Router {
       if (err instanceof CaseloadRoleError) {
         return res.status(400).json({ error: (err as Error).message });
       }
-      console.error('Failed to assign client:', err);
+      log.error({ err }, 'Failed to assign client');
       res.status(500).json({ error: 'Failed to assign client' });
     }
   });
@@ -158,7 +162,7 @@ export default function caseloadRoutes(): Router {
             }
           }
         } catch (err) {
-          console.error('Failed to freeze message threads on unassign:', err);
+          log.error({ err }, 'Failed to freeze message threads on unassign');
         }
         void insertCaseloadAudit({
           action: 'unassign', therapistId, clientId,
@@ -168,7 +172,7 @@ export default function caseloadRoutes(): Router {
       }
       res.json({ success: true, removed, therapistId, clientId });
     } catch (err) {
-      console.error('Failed to unassign client:', err);
+      log.error({ err }, 'Failed to unassign client');
       res.status(500).json({ error: 'Failed to unassign client' });
     }
   });

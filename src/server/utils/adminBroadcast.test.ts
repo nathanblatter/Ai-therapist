@@ -4,6 +4,9 @@
 // caseload; unattributable events and lookup failures fail closed.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const logMock = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+vi.mock('./logger.js', () => ({ createLogger: () => logMock }));
+
 const mocks = vi.hoisted(() => ({
   getTherapistIdsForClient: vi.fn(),
   getSessionAccessInfo: vi.fn(),
@@ -79,14 +82,13 @@ describe('broadcastAdminEvent', () => {
 
   it('fails closed (admin-broadcast only) and does not throw when the caseload lookup fails', async () => {
     const { io, to } = makeIo();
-    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    logMock.error.mockClear();
     mocks.getTherapistIdsForClient.mockRejectedValue(new Error('db down'));
 
     await expect(broadcastAdminEvent(io, 'session:crisis-detected', {}, 42)).resolves.toBeUndefined();
 
     expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
-    expect(consoleErr).toHaveBeenCalled();
-    consoleErr.mockRestore();
+    expect(logMock.error).toHaveBeenCalled();
   });
 
   it('never emits sandbox-participant events to admin-broadcast (C13), but still reaches their care team', async () => {
@@ -113,21 +115,20 @@ describe('broadcastAdminEvent', () => {
 
   it('keeps the researcher-room emit when the sandbox lookup fails (crisis alerting outweighs a metadata leak)', async () => {
     const { io, to } = makeIo();
-    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    logMock.error.mockClear();
     mocks.isSandboxAccount.mockRejectedValue(new Error('db down'));
     mocks.getTherapistIdsForClient.mockResolvedValue([7]);
 
     await broadcastAdminEvent(io, 'session:crisis-detected', {}, 42);
 
     expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
-    expect(consoleErr).toHaveBeenCalled();
+    expect(logMock.error).toHaveBeenCalled();
 
     // Failures are not cached: the next event retries the lookup.
     mocks.isSandboxAccount.mockResolvedValue(true);
     to.mockClear();
     await broadcastAdminEvent(io, 'session:crisis-detected', {}, 42);
     expect(to.mock.calls.map(c => c[0])).toEqual(['therapist:7']);
-    consoleErr.mockRestore();
   });
 });
 
@@ -181,7 +182,7 @@ describe('broadcastAdminEventForSession', () => {
 
   it('fails closed and does not throw or cache when the session lookup fails', async () => {
     const { io, to } = makeIo();
-    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    logMock.error.mockClear();
     mocks.getSessionAccessInfo.mockRejectedValueOnce(new Error('db down'));
 
     await expect(broadcastAdminEventForSession(io, 'sideband:transcript', {}, 'sess-1')).resolves.toBeUndefined();
@@ -194,6 +195,5 @@ describe('broadcastAdminEventForSession', () => {
     await broadcastAdminEventForSession(io, 'sideband:transcript', {}, 'sess-1');
     expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
 
-    consoleErr.mockRestore();
   });
 });

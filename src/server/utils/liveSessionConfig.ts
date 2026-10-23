@@ -14,6 +14,10 @@
 
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 
+import { createLogger } from './logger.js';
+
+const log = createLogger('liveSessionConfig');
+
 /** Model id prefix that routes a session to the GPT-Live backend. */
 const LIVE_MODEL_PREFIX = 'gpt-live';
 
@@ -120,7 +124,7 @@ export function getLiveVoice(value: string | null | undefined): LiveVoice | null
 export function resolveLiveVoice(requested: string | null | undefined): string {
   if (requested && LIVE_VOICE_INDEX.has(requested)) return requested;
   if (requested) {
-    console.warn(`[Live] Voice '${requested}' is not available on GPT-Live; falling back to '${LIVE_DEFAULT_VOICE}'.`);
+    log.warn(`Voice '${requested}' is not available on GPT-Live; falling back to '${LIVE_DEFAULT_VOICE}'.`);
   }
   return LIVE_DEFAULT_VOICE;
 }

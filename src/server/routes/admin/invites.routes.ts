@@ -13,6 +13,10 @@ import { requireRole } from '../../middleware/auth.js';
 import { createInvite, listInvites, insertCaseloadAudit } from '../../db/index.js';
 import type { ClientInviteRow } from '../../db/invites.queries.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('invitesRoutes');
+
 function inviteState(invite: ClientInviteRow): 'pending' | 'used' | 'expired' {
   if (invite.used_at) return 'used';
   if (new Date(invite.expires_at).getTime() <= Date.now()) return 'expired';
@@ -56,7 +60,7 @@ export default function invitesRoutes(): Router {
       });
       res.json({ link: `/join/${rawToken}`, invite: toApiInvite(invite) });
     } catch (error) {
-      console.error('Error creating client invite:', error);
+      log.error({ err: error }, 'Error creating client invite');
       res.status(500).json({ error: 'Failed to create invite' });
     }
   });
@@ -67,7 +71,7 @@ export default function invitesRoutes(): Router {
       const invites = await listInvites(req.session.userId as number);
       res.json({ invites: invites.map(toApiInvite) });
     } catch (error) {
-      console.error('Error listing client invites:', error);
+      log.error({ err: error }, 'Error listing client invites');
       res.status(500).json({ error: 'Failed to list invites' });
     }
   });

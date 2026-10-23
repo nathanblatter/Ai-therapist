@@ -16,6 +16,10 @@
 import { getSessionAccessInfo, updateSessionStatus } from '../db/index.js';
 import { broadcastAdminEventForSession } from './adminBroadcast.js';
 
+import { createLogger } from './logger.js';
+
+const log = createLogger('sessionAutoTerminate');
+
 /** How the model is steered. Returns false when the steer wasn't delivered. */
 export type SteerFn = (sessionId: string, text: string, respond: boolean) => Promise<boolean>;
 
@@ -49,35 +53,35 @@ const TIME_LIMIT_STEER =
  */
 async function hardEnd(opts: AutoTerminateOptions): Promise<void> {
   const { sessionId, maxDurationMinutes, teardown } = opts;
-  console.log(`⏰ Auto-terminating session ${sessionId} after ${maxDurationMinutes} minutes (+grace)`);
+  log.info(`Auto-terminating session ${sessionId} after ${maxDurationMinutes} minutes (+grace)`);
   await updateSessionStatus(sessionId, 'ended', 'system');
 
   try {
     await teardown(sessionId);
   } catch (e) {
-    console.error('[AutoTerminate] Backend teardown failed:', e);
+    log.error({ err: e }, 'Backend teardown failed');
   }
 
   // Free the in-memory chat transcript (ai-therapist-224). No-op for realtime.
   import('../services/chatTherapy.service.js')
     .then(m => m.endChatSession(sessionId))
-    .catch(e => console.error('[AutoTerminate] chat transcript cleanup failed:', e));
+    .catch(e => log.error({ err: e }, 'chat transcript cleanup failed'));
 
   import('../services/sessionRedaction.service.js')
     .then(m => m.redactSession(sessionId))
-    .catch(e => console.error('[Redaction] session redaction failed:', e));
+    .catch(e => log.error({ err: e }, '[Redaction] session redaction failed'));
 
   import('../services/recorder.service.js')
     .then(m => m.finalize(sessionId))
-    .catch(e => console.error('[Recorder] finalize failed:', e));
+    .catch(e => log.error({ err: e }, '[Recorder] finalize failed'));
 
   import('../services/sessionInsights.service.js')
     .then(m => m.generateSessionInsightsAsync(sessionId))
-    .catch(e => console.error('[Insights] generation failed:', e));
+    .catch(e => log.error({ err: e }, '[Insights] generation failed'));
 
   import('../services/sessionEval.service.js')
     .then(m => m.maybeAutoEvalSession(sessionId))
-    .catch(e => console.error('[Evals] auto-eval failed:', e));
+    .catch(e => log.error({ err: e }, '[Evals] auto-eval failed'));
 
   global.io?.to(`session:${sessionId}`).emit('session:status', {
     status: 'ended',
@@ -113,7 +117,7 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
         if (!current || current.status !== 'active') return;
         await steer(sessionId, WRAP_UP_NUDGE, false);
       } catch (err) {
-        console.error(`[AutoTerminate] T-60s wrap-up nudge failed for ${sessionId}:`, err);
+        log.error({ err }, `T-60s wrap-up nudge failed for ${sessionId}`);
       }
     }, durationMs - 60 * 1000);
     nudge.unref?.();
@@ -127,12 +131,12 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
       // Phase 1: ask the model to close out and end the session itself.
       try {
         await steer(sessionId, TIME_LIMIT_STEER, true);
-        console.log(
-          `⏰ Session ${sessionId} hit ${maxDurationMinutes}min limit — asked model to wrap up ` +
+        log.info(
+          `Session ${sessionId} hit ${maxDurationMinutes}min limit — asked model to wrap up ` +
           `(${graceMs / 1000}s grace)`,
         );
       } catch (e) {
-        console.error('[AutoTerminate] wrap-up steer failed, will hard-end after grace:', e);
+        log.error({ err: e }, 'wrap-up steer failed, will hard-end after grace');
       }
 
       // Phase 2: backstop if the model/client didn't end it in time.
@@ -141,17 +145,17 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
           const after = await getSessionAccessInfo(sessionId);
           if (after && after.status === 'active') await hardEnd(opts);
         } catch (err) {
-          console.error(`[AutoTerminate] Failed to hard-end session ${sessionId}:`, err);
+          log.error({ err }, `Failed to hard-end session ${sessionId}`);
         }
       }, graceMs);
       backstop.unref?.();
     } catch (err) {
-      console.error(`[AutoTerminate] Failed to auto-terminate session ${sessionId}:`, err);
+      log.error({ err }, `Failed to auto-terminate session ${sessionId}`);
     }
   }, durationMs);
   limit.unref?.();
 
-  console.log(
+  log.info(
     `Session ${sessionId} will auto-terminate in ${maxDurationMinutes} minutes (+${graceMs / 1000}s grace)`,
   );
 }

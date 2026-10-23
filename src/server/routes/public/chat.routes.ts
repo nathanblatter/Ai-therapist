@@ -29,6 +29,10 @@ import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
 import { broadcastAdminEvent, broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('chatRoutes');
+
 /**
  * Synthetic-account gate (caseworker portal, spec section 7 item 6): demo-role
  * magic-link accounts AND sandbox-org accounts both get behavioral safety
@@ -104,7 +108,7 @@ export default function chatRoutes(): Router {
       // Persist the language for next time (fire-and-forget).
       if (req.session?.userId) {
         setUserPreferredLanguage(userId, userLanguage).catch(err =>
-          console.error('[ChatStart] Failed to save user language preference:', err));
+          log.error({ err }, '[ChatStart] Failed to save user language preference'));
       }
 
       const sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -153,7 +157,7 @@ export default function chatRoutes(): Router {
       if (checkin) {
         const { setSessionCheckin } = await import('../../db/index.js');
         setSessionCheckin(sessionId, checkin).catch(err =>
-          console.error('[ChatStart] Failed to store check-in:', err));
+          log.error({ err }, '[ChatStart] Failed to store check-in'));
       }
 
       // Durable per-session consent record, linked to the consent this
@@ -166,7 +170,7 @@ export default function chatRoutes(): Router {
           consentVersion: req.session!.consentVersion!,
           recordingEnabled: (cfg.features?.session_recording_enabled as boolean | undefined) ?? false,
         }))
-        .catch(err => console.error('[Consent] Failed to record per-session consent:', err));
+        .catch(err => log.error({ err }, '[Consent] Failed to record per-session consent'));
 
       void broadcastAdminEvent(global.io, 'session:started', {
         sessionId,
@@ -234,7 +238,7 @@ export default function chatRoutes(): Router {
         } catch (err) {
           // The session must still start; the client falls back to its own
           // copy of the preamble when `opening` is absent.
-          console.error('[ChatStart] Failed to persist opening line (non-fatal):', err);
+          log.error({ err }, '[ChatStart] Failed to persist opening line (non-fatal)');
           opening = null;
         }
       }
@@ -269,22 +273,22 @@ export default function chatRoutes(): Router {
                 'safety protocol, and do not change the subject.\n\n' +
                 `Transcript of the voice conversation that was cut off:\n${recap}`,
               );
-              console.log(
+              log.info(
                 `[ChatStart] Seeded ${sessionId.substring(0, 12)}... as a continuation of terminated ` +
                 `voice session ${continuedFrom.substring(0, 12)}...`,
               );
             }
           } else {
-            console.warn(`[ChatStart] continued_from ${continuedFrom} not accessible; starting fresh.`);
+            log.warn(`[ChatStart] continued_from ${continuedFrom} not accessible; starting fresh.`);
           }
         } catch (err) {
           // Continuity is best-effort: a failure here must still leave the
           // participant with a working chat session rather than no session.
-          console.error('[ChatStart] Failed to seed continuation context:', err);
+          log.error({ err }, '[ChatStart] Failed to seed continuation context');
         }
       }
 
-      console.log(`Chat-only session started: ${sessionId.substring(0, 12)}... for user ${userId}`);
+      log.info(`Chat-only session started: ${sessionId.substring(0, 12)}... for user ${userId}`);
 
       res.json({
         success: true, sessionId, sessionType: 'chat',
@@ -293,7 +297,7 @@ export default function chatRoutes(): Router {
         message: 'Chat therapy session started',
       });
     } catch (error: unknown) {
-      console.error('Failed to start chat session:', error);
+      log.error({ err: error }, 'Failed to start chat session');
       res.status(500).json({
         error: 'Failed to start chat session',
         details: error instanceof Error ? error.message : String(error),
@@ -371,7 +375,7 @@ export default function chatRoutes(): Router {
                 'chat',
               );
             } catch (crisisErr) {
-              console.error('[MinorSafeguard] crisis screen on the minor path failed:', crisisErr);
+              log.error({ err: crisisErr }, '[MinorSafeguard] crisis screen on the minor path failed');
             }
 
             await insertMessagesBatch([
@@ -389,7 +393,7 @@ export default function chatRoutes(): Router {
             }, sessionId);
           }
         } catch (err) {
-          console.error('[MinorSafeguard] confirm failed (fail-open):', err);
+          log.error({ err }, '[MinorSafeguard] confirm failed (fail-open)');
         }
       }
 
@@ -418,12 +422,12 @@ export default function chatRoutes(): Router {
             'chat',
           )
             .then(r => { if (r.steeringGuidance) injectGuidance(sessionId, r.steeringGuidance); })
-            .catch(err => console.error('[ChatCrisis] deferred pipeline failed:', err)));
+            .catch(err => log.error({ err }, '[ChatCrisis] deferred pipeline failed')));
         }
       } catch (err) {
         // A crisis-pipeline error must degrade to "reply without steering",
         // never a 500. analyzeMessageRisk already zeros on internal error.
-        console.error('[ChatCrisis] inline pipeline failed (fail-open, no steering):', err);
+        log.error({ err }, '[ChatCrisis] inline pipeline failed (fail-open, no steering)');
       }
 
       // Model call, with steering injected BEFORE the turn when present.
@@ -440,7 +444,7 @@ export default function chatRoutes(): Router {
       global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
       global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'assistant', message: aiResponse, timestamp: new Date() });
 
-      console.log(`[ChatTherapy] Message exchanged for session ${sessionId.substring(0, 12)}...`);
+      log.info(`[ChatTherapy] Message exchanged for session ${sessionId.substring(0, 12)}...`);
 
       // toolEvents: overlay tools the model invoked this turn (resource card,
       // safety plan, thought record, ...). The chat client dispatches these
@@ -448,7 +452,7 @@ export default function chatRoutes(): Router {
       // overlays render identically in both modes (ai-therapist-118).
       res.json({ success: true, response: aiResponse, toolEvents, sessionId });
     } catch (error: unknown) {
-      console.error('Failed to process chat message:', error);
+      log.error({ err: error }, 'Failed to process chat message');
 
       // Blocked safety identifier (ai-therapist-186): permanent on the
       // provider's side, so answer with the dedicated code that drives the
@@ -458,13 +462,13 @@ export default function chatRoutes(): Router {
       // a client-actionable state ("start a new session"), not a server fault.
       const { isChatSessionUnavailableError } = await import('../../services/chatTherapy.service.js');
       if (isChatSessionUnavailableError(error)) {
-        console.warn(`[Chat] Session ${sessionId} unavailable for this turn: ${error.message}`);
+        log.warn(`[Chat] Session ${sessionId} unavailable for this turn: ${error.message}`);
         return res.status(409).json({ error: 'session_unavailable', message: error.participantMessage });
       }
 
       const { isIdentifierBlockedError } = await import('../../utils/safetyIdentifier.js');
       if (isIdentifierBlockedError(error)) {
-        console.error('[Chat] BLOCKED SAFETY IDENTIFIER — participant cannot send messages; study team must re-enroll or contact OpenAI.');
+        log.error('[Chat] BLOCKED SAFETY IDENTIFIER — participant cannot send messages; study team must re-enroll or contact OpenAI.');
         return res.status(403).json({ error: 'identifier_blocked' });
       }
 
@@ -496,7 +500,7 @@ export default function chatRoutes(): Router {
 
       // Idempotent end.
       if (session.status === 'ended') {
-        console.log(`Chat session ${sessionId} already ended, returning existing data (idempotent)`);
+        log.info(`Chat session ${sessionId} already ended, returning existing data (idempotent)`);
         return res.status(200).json({ ...session, alreadyEnded: true, message: 'Session was already ended' });
       }
 
@@ -516,21 +520,21 @@ export default function chatRoutes(): Router {
       import('../../services/sessionRedaction.service.js')
         .then(m => m.redactSession(sessionId))
         .then(() => generateSessionNameAsync(sessionId))
-        .catch(e => console.error('[Redaction] session redaction/naming failed:', e));
+        .catch(e => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
 
       // Memory summary + draft SOAP note (fire-and-forget).
       import('../../services/sessionInsights.service.js')
         .then(m => m.generateSessionInsightsAsync(sessionId))
-        .catch(e => console.error('[Insights] generation failed:', e));
+        .catch(e => log.error({ err: e }, '[Insights] generation failed'));
 
       void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'user', endedAt: new Date() }, sessionId, 'summary');
       global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt: new Date() });
 
-      console.log(`Chat session ${sessionId.substring(0, 12)}... ended by user`);
+      log.info(`Chat session ${sessionId.substring(0, 12)}... ended by user`);
 
       res.json({ success: true, message: 'Chat session ended', session: updatedSession });
     } catch (error: unknown) {
-      console.error('Failed to end chat session:', error);
+      log.error({ err: error }, 'Failed to end chat session');
       res.status(500).json({
         error: 'Failed to end session',
         details: error instanceof Error ? error.message : String(error),

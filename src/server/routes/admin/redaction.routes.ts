@@ -9,6 +9,10 @@ import {
   recordRedactionApproval,
 } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('redactionRoutes');
+
 export default function redactionRoutes(): Router {
   const router = Router();
 
@@ -22,7 +26,7 @@ export default function redactionRoutes(): Router {
       ]);
       res.json({ messages, flagged_unreviewed: flaggedUnreviewed });
     } catch (err) {
-      console.error('Failed to fetch redacted messages:', err);
+      log.error({ err }, 'Failed to fetch redacted messages');
       res.status(500).json({ error: 'Failed to fetch messages' });
     }
   });
@@ -45,7 +49,7 @@ export default function redactionRoutes(): Router {
       }
       res.json({ success: true });
     } catch (err) {
-      console.error('Failed to update redacted content:', err);
+      log.error({ err }, 'Failed to update redacted content');
       res.status(500).json({ error: 'Failed to update message' });
     }
   });
@@ -61,7 +65,7 @@ export default function redactionRoutes(): Router {
       }
       res.json({ success: true });
     } catch (err) {
-      console.error('Failed to record redaction approval:', err);
+      log.error({ err }, 'Failed to record redaction approval');
       res.status(500).json({ error: 'Failed to record approval' });
     }
   });

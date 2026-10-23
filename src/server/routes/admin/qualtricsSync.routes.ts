@@ -17,6 +17,10 @@ import {
 import { getSurveyDataOverview } from '../../services/surveyData.service.js';
 import { getQualtricsLinkageStats, getUnlinkedFinishedResponses } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('qualtricsSyncRoutes');
+
 export default function qualtricsSyncRoutes(): Router {
   const router = Router();
 
@@ -44,7 +48,7 @@ export default function qualtricsSyncRoutes(): Router {
           : undefined,
       });
     } catch (error) {
-      console.error('[QualtricsSync] sync run failed:', error);
+      log.error({ err: error }, 'sync run failed');
       res.status(500).json({ error: 'Sync failed' });
     }
   });
@@ -72,7 +76,7 @@ export default function qualtricsSyncRoutes(): Router {
         unlinked,
       });
     } catch (error) {
-      console.error('[QualtricsSync] status failed:', error);
+      log.error({ err: error }, 'status failed');
       res.status(500).json({ error: 'Status unavailable' });
     }
   });
@@ -103,7 +107,7 @@ export default function qualtricsSyncRoutes(): Router {
         );
         res.status(result.remoteFailed > 0 ? 207 : 200).json(result);
       } catch (error) {
-        console.error('[QualtricsDeletion] request failed:', error);
+        log.error({ err: error }, '[QualtricsDeletion] request failed');
         res.status(500).json({ error: 'Deletion failed' });
       }
     }
@@ -118,7 +122,7 @@ export default function qualtricsSyncRoutes(): Router {
     try {
       res.json(await getSurveyDataOverview());
     } catch (error) {
-      console.error('[QualtricsSync] data overview failed:', error);
+      log.error({ err: error }, 'data overview failed');
       res.status(500).json({ error: 'Survey data unavailable' });
     }
   });
