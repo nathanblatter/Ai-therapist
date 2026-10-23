@@ -2,8 +2,14 @@
 // LLM judge on the shared six-dimension rubric and reports quadratic weighted
 // Cohen's kappa per dimension. Pure math + one DB-backed orchestrator; no
 // OpenAI/secrets imports so this stays cheap to unit-test.
-import { getCalibrationPairs, type HumanRatingRubric } from '../db/index.js';
-import { EVAL_DIMENSIONS } from './sessionEval.service.js';
+import {
+  getCalibrationPairs,
+  getSessionEvalJudgeRuns,
+  getHighDisagreementEvals,
+  type HumanRatingRubric,
+  type SessionEvalJudgeRow,
+} from '../db/index.js';
+import { EVAL_DIMENSIONS, medianScore } from './sessionEval.service.js';
 
 // Bump together with EVAL_DIMENSIONS changes.
 export const HUMAN_RUBRIC_VERSION = 'v1';
@@ -187,4 +193,173 @@ export function validateHumanRubric(body: unknown): HumanRubricValidation {
   }
 
   return { ok: true, rubric: cleaned, overallNotes };
+}
+
+// ---------------------------------------------------------------------------
+// Judge ensemble agreement (eval spec G6, migration 107)
+// ---------------------------------------------------------------------------
+
+export interface JudgePairDimension {
+  dimension: string;
+  n: number;
+  kappa: number | null;
+  exact_agreement_pct: number | null;
+  /** mean(judge_b) - mean(judge_a); positive = judge_b scores higher. */
+  mean_bias: number | null;
+  /** % of sessions where the two judges differ by 2 or more points. */
+  major_disagreement_pct: number | null;
+}
+
+export interface JudgePairAgreement {
+  judge_a: string;
+  judge_b: string;
+  /** Sessions scored by BOTH judges. */
+  n: number;
+  dimensions: JudgePairDimension[]; // EVAL_DIMENSIONS order
+  overall_kappa: number | null;
+}
+
+export interface SelfConsistencyDimension {
+  dimension: string;
+  n: number; // sessions with >= 2 runs of this judge
+  /** % of sessions where every run gave the same score. */
+  exact_pct: number | null;
+  mean_spread: number | null; // mean(max - min) across sessions
+}
+
+export interface SelfConsistencyReport {
+  judge_model: string;
+  /** Max runs observed per session for this judge. */
+  runs: number;
+  n: number;
+  dimensions: SelfConsistencyDimension[];
+}
+
+export interface JudgeAgreementReport {
+  prompt_version: string;
+  /** Distinct judge models with stored runs for this prompt version. */
+  judges: string[];
+  /** Sessions with at least one stored judge run. */
+  session_count: number;
+  pairs: JudgePairAgreement[];
+  self_consistency: SelfConsistencyReport[];
+  /** Consensus rows with the largest max-dimension spread, for human review. */
+  high_disagreement: Array<{ session_id: string; max_spread: number; judge_spread: Record<string, number> }>;
+}
+
+type ScoreMap = Map<string, Map<string, number[]>>; // judge -> session -> [score per run]
+
+/** Per (judge, session) the list of run scores for one dimension. */
+function collectScores(rows: SessionEvalJudgeRow[], dim: string): ScoreMap {
+  const out: ScoreMap = new Map();
+  for (const row of rows) {
+    const score = row.rubric?.[dim]?.score;
+    if (!isValidScore(score)) continue;
+    let bySession = out.get(row.judge_model);
+    if (!bySession) { bySession = new Map(); out.set(row.judge_model, bySession); }
+    const list = bySession.get(row.session_id) ?? [];
+    list.push(score);
+    bySession.set(row.session_id, list);
+  }
+  return out;
+}
+
+/**
+ * Pure: inter-judge agreement over stored judge runs. For a judge with several
+ * self-consistency runs, its per-session score is the median of its runs (the
+ * same reduction the consensus uses), so pair kappas compare judge-vs-judge
+ * rather than run-vs-run. Pairs are every unordered combination of judges in
+ * first-seen order; a pair with no shared sessions still appears with n = 0.
+ */
+export function computeJudgeAgreement(
+  rows: SessionEvalJudgeRow[],
+  promptVersion: string,
+  highDisagreement: Array<{ session_id: string; judge_spread: Record<string, number> }> = [],
+): JudgeAgreementReport {
+  const judges: string[] = [];
+  const sessions = new Set<string>();
+  for (const row of rows) {
+    if (!judges.includes(row.judge_model)) judges.push(row.judge_model);
+    sessions.add(row.session_id);
+  }
+  const perDim = new Map<string, ScoreMap>(EVAL_DIMENSIONS.map(d => [d, collectScores(rows, d)]));
+
+  const pairs: JudgePairAgreement[] = [];
+  for (let i = 0; i < judges.length; i++) {
+    for (let j = i + 1; j < judges.length; j++) {
+      const [ja, jb] = [judges[i], judges[j]];
+      const pooledA: number[] = [];
+      const pooledB: number[] = [];
+      const shared = new Set<string>();
+      const dimensions: JudgePairDimension[] = EVAL_DIMENSIONS.map(dim => {
+        const scores = perDim.get(dim)!;
+        const a: number[] = [];
+        const b: number[] = [];
+        for (const [sessionId, runsA] of scores.get(ja) ?? []) {
+          const runsB = scores.get(jb)?.get(sessionId);
+          if (!runsB) continue;
+          shared.add(sessionId);
+          a.push(medianScore(runsA));
+          b.push(medianScore(runsB));
+        }
+        pooledA.push(...a);
+        pooledB.push(...b);
+        const n = a.length;
+        const meanA = mean(a);
+        const meanB = mean(b);
+        return {
+          dimension: dim,
+          n,
+          kappa: quadraticWeightedKappa(a, b),
+          exact_agreement_pct: n ? (a.filter((v, idx) => v === b[idx]).length / n) * 100 : null,
+          mean_bias: meanA !== null && meanB !== null ? meanB - meanA : null,
+          major_disagreement_pct: n ? (a.filter((v, idx) => Math.abs(v - b[idx]) >= 2).length / n) * 100 : null,
+        };
+      });
+      pairs.push({ judge_a: ja, judge_b: jb, n: shared.size, dimensions, overall_kappa: quadraticWeightedKappa(pooledA, pooledB) });
+    }
+  }
+
+  const self_consistency: SelfConsistencyReport[] = [];
+  for (const judge of judges) {
+    let maxRuns = 1;
+    const multi = new Set<string>();
+    const dimensions: SelfConsistencyDimension[] = EVAL_DIMENSIONS.map(dim => {
+      const spreads: number[] = [];
+      let exact = 0;
+      for (const [sessionId, runs] of perDim.get(dim)!.get(judge) ?? []) {
+        maxRuns = Math.max(maxRuns, runs.length);
+        if (runs.length < 2) continue;
+        multi.add(sessionId);
+        const spread = Math.max(...runs) - Math.min(...runs);
+        spreads.push(spread);
+        if (spread === 0) exact++;
+      }
+      const n = spreads.length;
+      return { dimension: dim, n, exact_pct: n ? (exact / n) * 100 : null, mean_spread: mean(spreads) };
+    });
+    if (maxRuns > 1) self_consistency.push({ judge_model: judge, runs: maxRuns, n: multi.size, dimensions });
+  }
+
+  return {
+    prompt_version: promptVersion,
+    judges,
+    session_count: sessions.size,
+    pairs,
+    self_consistency,
+    high_disagreement: highDisagreement.map(h => ({
+      session_id: h.session_id,
+      max_spread: Object.values(h.judge_spread).reduce((m, v) => Math.max(m, Number(v) || 0), 0),
+      judge_spread: h.judge_spread,
+    })),
+  };
+}
+
+/** DB-backed orchestrator for the admin calibration endpoint. */
+export async function computeJudgeAgreementReport(promptVersion: string): Promise<JudgeAgreementReport> {
+  const [rows, high] = await Promise.all([
+    getSessionEvalJudgeRuns(promptVersion),
+    getHighDisagreementEvals(promptVersion, 10),
+  ]);
+  return computeJudgeAgreement(rows, promptVersion, high);
 }

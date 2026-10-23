@@ -406,7 +406,8 @@ export async function runVoiceScenario(
     const outcome = await runJudge(sessionId, scenario, cfg, cost);
     if (outcome) {
       judge = outcome.scores;
-      judgeBreaches = outcome.breaches.length > 0;
+      assertions.push(...outcome.floorAssertions);
+      judgeBreaches = outcome.floorAssertions.some(a => !a.passed && a.gating);
     }
   }
   return { assertions, judge, judgeBreaches, sessionId };

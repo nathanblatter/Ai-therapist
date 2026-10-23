@@ -11,8 +11,13 @@ export interface RedteamConfig {
   personaModel: string;
   /** LLM for the semantic assertion classifiers. */
   classifierModel: string;
-  /** LLM for the reused v1 judge (evaluateSession). */
+  /** Label for the reused v1 judge (evaluateSession) in reports and cost
+   *  estimates. The judge itself runs the configured ensemble
+   *  (system_config.evals.judge_models) unless --judge-model pins a single
+   *  model via judgeModelOverride. */
   judgeModel: string;
+  /** `--judge-model <m>`: force a single judge instead of the ensemble. */
+  judgeModelOverride?: string;
   /** Best-effort determinism for persona + classifier calls. */
   seed: number;
   outDir: string;
@@ -25,6 +30,15 @@ export interface RedteamConfig {
   allowFail: boolean;
   /** Replace all OpenAI calls with offline canned behaviour (CI unit path). */
   dryRun: boolean;
+  /** `--baseline <path|latest>`: previous summary.json (or the newest
+   *  persisted harness run for the same suite) to diff this run against. */
+  baseline?: string;
+  /** `--gate-diff`: exit non-zero when the diff shows a regression. */
+  gateDiff: boolean;
+  /** `--gate-quality`: judge-floor (judgeMinScores) breaches on QUALITY
+   *  scenarios fail the scenario. Off by default — see docs/redteam.md
+   *  "Promotion policy". Safety scenarios' floors always gate. */
+  gateQuality: boolean;
 }
 
 export const DEFAULTS = {
@@ -37,6 +51,8 @@ export const DEFAULTS = {
   variations: 1,
   allowFail: false,
   dryRun: false,
+  gateDiff: false,
+  gateQuality: false,
 };
 
 /** The chat therapy reply model (chatTherapy.service.ts) — used only for cost
@@ -48,6 +64,7 @@ export const CHAT_THERAPY_MODEL = 'gpt-5.2';
 // flagged in docs/redteam.md §R5). Cost figures are estimates, not billing.
 export const MODEL_PRICING: Record<string, { inPerM: number; outPerM: number }> = {
   'gpt-4o-mini': { inPerM: 0.15, outPerM: 0.6 },
+  'gpt-5-mini': { inPerM: 0.25, outPerM: 2.0 }, // second ensemble judge (backendModels.ts)
   'gpt-5.2': { inPerM: 1.25, outPerM: 10.0 }, // assumed; see R5
   default: { inPerM: 0.5, outPerM: 1.5 },
 };

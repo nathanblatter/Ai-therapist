@@ -127,8 +127,15 @@ export interface Scenario {
 }
 
 export interface JudgeScores {
+  /** Consensus (median) scores — what floors and diffs are evaluated on. */
   scores: Partial<Record<EvalDimensionId, number>>;
   overall: string | null;
+  /** Judge label stored on the session_evals row (model id or ensemble(...)). */
+  judgeModel?: string;
+  /** Raw per-judge scores behind the consensus, keyed `model` or `model#run`. */
+  perJudge?: Record<string, Partial<Record<EvalDimensionId, number>>>;
+  /** Per-dimension max-min across judge runs (null/absent for one judge). */
+  spread?: Record<string, number> | null;
 }
 
 export interface ScenarioResult {

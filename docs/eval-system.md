@@ -47,12 +47,15 @@ Stored shape: `rubric` JSONB `{dimension: {score, rationale}}` plus
 
 ## Judge configuration
 
-- Default judge model: `gpt-4o-mini` (same client plumbing as the insights
-  pipeline; override per-run with `--judge-model` or persistently via
-  `system_config.evals.judge_model`).
-- `temperature: 0`, strict-JSON response format; responses failing rubric
-  validation (missing dimension, score out of 1-5) are rejected and the run
-  fails loudly rather than storing junk.
+- Default judges: the ensemble `gpt-4o-mini` + `gpt-5-mini` (see "Judge
+  ensemble" below). `--judge-model <m>` pins a single judge for one run;
+  `system_config.evals.judge_models` sets the ensemble persistently.
+- `temperature: 0`, strict-JSON response format on the 4.x generation;
+  reasoning-generation judges (gpt-5*, o*) reject `temperature`/`max_tokens`
+  and run with `reasoning_effort: low` + `max_completion_tokens` instead
+  (`judgeRequestParams`). Responses failing rubric validation (missing
+  dimension, score out of 1-5) are rejected and that judge run fails loudly
+  rather than storing junk.
 - Transcript source: original `content`, falling back to `content_redacted`
   after the retention wipe (same policy as insights). Only user/assistant
   turns are shown to the judge; tool rows are excluded.
@@ -87,11 +90,51 @@ Stored shape: `rubric` JSONB `{dimension: {score, rationale}}` plus
   `JUDGE_SYSTEM_PROMPT`, add labels in `SessionEvalPanel.tsx`, bump the
   version.
 
+## Judge ensemble + self-consistency (migration 107, eval spec G6)
+
+A single judge drifting or being systematically miscalibrated is invisible
+until human ratings catch it, so every evaluation now runs several judges
+under the **identical v1 prompt** (no rubric or `EVAL_PROMPT_VERSION` change):
+
+- **Config** (`system_config.evals`): `judge_models` — list of model ids,
+  default `["gpt-4o-mini", "gpt-5-mini"]` (two mini-class OpenAI models from
+  different families; `gpt-5-mini` is flex-eligible so it bills at batch rates);
+  `self_consistency_runs` — 1..5, default 1; when > 1 each judge runs that many
+  times with seeds `1000 + run_index`. Precedence: `--judge-models` /
+  `--self-consistency` CLI overrides > `--judge-model` (single judge) >
+  `judge_models` config > `[judge_model ?? gpt-4o-mini, gpt-5-mini]`.
+- **Storage.** Every raw run is a row in `session_eval_judges`
+  (`session_id, prompt_version, judge_model, run_index, seed, rubric,
+  overall_comments`; replaced wholesale on re-evaluation). The `session_evals`
+  row is the **consensus**: per-dimension median over all runs (an even-count
+  .5 tie rounds up, so scores stay integers 1-5), the primary judge's rationale
+  annotated with every run's score where they disagreed (`[judge scores:
+  gpt-4o-mini 4, gpt-5-mini 3]`), the primary judge's `overall_comments`, and
+  `judge_model` = the model id for one judge/one run, else
+  `ensemble(a,b)[xN]`. New column `session_evals.judge_spread` records
+  per-dimension max-min across runs (NULL for single-judge rows). Drift,
+  calibration, pairwise, export and the admin panels keep reading
+  `session_evals` unchanged.
+- **Failure policy.** A judge run that errors is logged and excluded; the
+  consensus is formed from the surviving runs (the label still records the
+  intended ensemble). Only when every run fails does the evaluation throw and
+  nothing is stored.
+- **Agreement.** `GET /admin/api/evals/calibration` now also returns
+  `judge_agreement`: for every judge pair, per-dimension quadratic-weighted κ
+  (same function as the human calibration), exact agreement %, % differing by
+  2+ points, mean bias (B − A), plus pooled κ; per-judge self-consistency
+  (% of sessions where repeated runs agree, mean spread) when runs > 1; and the
+  10 sessions with the largest `judge_spread` — the best candidates for human
+  rating. `EvalCalibrationPanel` renders this as the "Judge agreement" block.
+  Per-session scores are the median over a judge's own runs before pairing.
+- **CLI.** `runEvals.ts --session <id> --force [--judge-models a,b]
+  [--self-consistency k]` prints the consensus and every per-judge run.
+
 ## Cost note
 
-One judge call per session (~transcript + ~1.2k output tokens on
-`gpt-4o-mini`) — negligible next to the voice session itself, fine to
-auto-run once verified. (For scale: a GPT-Live voice session bills $0.05/min for
+One judge call per ensemble judge per session (~transcript + ~1.2k output
+tokens; default two judges, `gpt-5-mini` on flex) — negligible next to the
+voice session itself, fine to auto-run once verified. (For scale: a GPT-Live voice session bills $0.05/min for
 the voice layer plus the delegated backend's tokens — see `docs/gpt-live.md`.)
 
 ---
@@ -179,7 +222,9 @@ VALUES ('evals', '{
   "drift_baseline": 100,
   "drift_threshold": 0.5,
   "drift_min_window": 10,
-  "drift_page_enabled": false
-}', 'Session eval harness settings (v1 + v2)')
+  "drift_page_enabled": false,
+  "judge_models": ["gpt-4o-mini", "gpt-5-mini"],
+  "self_consistency_runs": 1
+}', 'Session eval harness settings (v1 + v2 + ensemble)')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value;
 ```

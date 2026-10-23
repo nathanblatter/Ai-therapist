@@ -11,6 +11,13 @@
 // Idempotent per (session, prompt_version): bump EVAL_PROMPT_VERSION whenever
 // the judge prompt or rubric changes so old scores stay comparable within
 // their version. See docs/eval-system.md.
+//
+// Judge ensemble (eval spec G6, migration 107): the SAME v1 prompt is sent to
+// every model in evals.judge_models, evals.self_consistency_runs times each
+// (seeded). Every raw run is stored in session_eval_judges; the session_evals
+// row is the per-dimension MEDIAN across all runs (the consensus) so existing
+// consumers keep working unchanged. Inter-judge agreement is reported by
+// evalCalibration.service.ts (computeJudgeAgreementReport).
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
 import {
@@ -22,10 +29,12 @@ import {
   hasSessionEval,
   isSandboxAccountSession,
   upsertSessionEval,
+  replaceSessionEvalJudges,
   getUnevaluatedEndedSessions,
   type EvalRubric,
   type EvalDimension,
   type SessionEvalRow,
+  type NewJudgeRun,
 } from '../db/index.js';
 import { getSystemConfig, DEFAULT_MODALITY_PRESETS } from '../utils/sessionHelpers.js';
 import { createLogger } from '../utils/logger.js';
@@ -36,6 +45,14 @@ const log = createLogger('sessionEval');
 export const EVAL_PROMPT_VERSION = 'v1';
 
 export const DEFAULT_JUDGE_MODEL = 'gpt-4o-mini'; // matches the insights pipeline
+/** Second ensemble judge: a different model family in the same mini-class
+ *  price band (flex-eligible, so it bills at batch rates offline). */
+export const DEFAULT_SECOND_JUDGE_MODEL = 'gpt-5-mini';
+export const DEFAULT_JUDGE_MODELS: readonly string[] = [DEFAULT_JUDGE_MODEL, DEFAULT_SECOND_JUDGE_MODEL];
+export const DEFAULT_SELF_CONSISTENCY_RUNS = 1;
+const MAX_SELF_CONSISTENCY_RUNS = 5;
+/** Base seed for self-consistency runs (run i uses SELF_CONSISTENCY_SEED + i). */
+export const SELF_CONSISTENCY_SEED = 1000;
 const MAX_TRANSCRIPT_CHARS = 24000;
 
 /** Rubric dimensions, in the order the judge is asked to score them. */
@@ -96,7 +113,117 @@ async function getClient(): Promise<OpenAI> {
 /** system_config.evals blob (shared with pairwiseEval.service). */
 export interface EvalsConfig {
   auto_run_enabled?: boolean;
+  /** Legacy single-judge key (still honoured by pairwiseEval and as the
+   *  primary judge when judge_models is unset). */
   judge_model?: string;
+  /** Ensemble: every model here judges every session with the same v1
+   *  prompt. Default DEFAULT_JUDGE_MODELS. */
+  judge_models?: string[];
+  /** Self-consistency: each judge runs this many times with distinct seeds
+   *  (1..5, default 1); the consensus is the median over all runs. */
+  self_consistency_runs?: number;
+}
+
+/** Resolved ensemble settings for one evaluation. */
+export interface JudgeEnsembleSettings {
+  models: string[];
+  runs: number;
+}
+
+/**
+ * Pick the judge models + run count for an evaluation. Precedence:
+ *   options.judgeModels > options.judgeModel (single judge, legacy override)
+ *   > config.judge_models > [config.judge_model ?? default primary, default second].
+ * Pure; exported for tests and for the red-team CLI's run label.
+ */
+export function resolveJudgeEnsemble(options: RunEvalOptions, config: EvalsConfig): JudgeEnsembleSettings {
+  const clean = (xs: unknown): string[] =>
+    Array.isArray(xs) ? Array.from(new Set(xs.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map(x => x.trim()))) : [];
+  let models = clean(options.judgeModels);
+  if (models.length === 0 && options.judgeModel) models = [options.judgeModel];
+  if (models.length === 0) models = clean(config.judge_models);
+  if (models.length === 0) {
+    const primary = config.judge_model || DEFAULT_JUDGE_MODEL;
+    models = Array.from(new Set([primary, ...DEFAULT_JUDGE_MODELS]));
+  }
+  const rawRuns = options.selfConsistencyRuns ?? config.self_consistency_runs ?? DEFAULT_SELF_CONSISTENCY_RUNS;
+  const runs = Number.isInteger(rawRuns) ? Math.min(MAX_SELF_CONSISTENCY_RUNS, Math.max(1, rawRuns as number)) : DEFAULT_SELF_CONSISTENCY_RUNS;
+  return { models, runs };
+}
+
+/** The judge_model label stored on the consensus row: the bare model id for a
+ *  single judge + single run (unchanged v1 behaviour), otherwise
+ *  `ensemble(a,b)` with an `xN` suffix for self-consistency runs. */
+export function ensembleLabel(settings: JudgeEnsembleSettings): string {
+  if (settings.models.length === 1 && settings.runs === 1) return settings.models[0];
+  const base = settings.models.length === 1 ? settings.models[0] : `ensemble(${settings.models.join(',')})`;
+  return settings.runs > 1 ? `${base}x${settings.runs}` : base;
+}
+
+/** One completed judge run (validated rubric). */
+export interface JudgeRun {
+  judgeModel: string;
+  runIndex: number;
+  seed: number | null;
+  rubric: EvalRubric;
+  overallComments: string | null;
+}
+
+/** Median of a non-empty integer list; an even-count .5 tie rounds UP so the
+ *  consensus stays an integer 1..5 like every single-judge score. */
+export function medianScore(scores: number[]): number {
+  const sorted = [...scores].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return Math.round(median);
+}
+
+/**
+ * Consensus rubric across judge runs: per-dimension median score; rationale
+ * from the first run (the primary judge), annotated with every run's score
+ * whenever the judges disagreed. Throws on an empty list.
+ */
+export function consensusRubric(runs: JudgeRun[]): EvalRubric {
+  if (runs.length === 0) throw new Error('consensusRubric requires at least one judge run');
+  const rubric: EvalRubric = {};
+  for (const dim of EVAL_DIMENSIONS) {
+    const scores = runs.map(r => r.rubric[dim].score);
+    const primary = runs[0].rubric[dim];
+    let rationale = primary.rationale;
+    if (runs.length > 1 && new Set(scores).size > 1) {
+      const detail = runs
+        .map(r => `${r.judgeModel}${r.runIndex > 0 ? `#${r.runIndex + 1}` : ''} ${r.rubric[dim].score}`)
+        .join(', ');
+      rationale = `${rationale} [judge scores: ${detail}]`.trim();
+    }
+    rubric[dim] = { score: medianScore(scores), rationale };
+  }
+  return rubric;
+}
+
+/** Per-dimension max-min across runs; null when there is only one run. */
+export function judgeSpread(runs: JudgeRun[]): Record<string, number> | null {
+  if (runs.length < 2) return null;
+  const spread: Record<string, number> = {};
+  for (const dim of EVAL_DIMENSIONS) {
+    const scores = runs.map(r => r.rubric[dim].score);
+    spread[dim] = Math.max(...scores) - Math.min(...scores);
+  }
+  return spread;
+}
+
+/**
+ * Chat-completions parameters that vary by model generation. The GPT-5
+ * generation onward rejects `max_tokens` and a non-default `temperature`
+ * (same finding as counterfactualEval.service.ts); the 4.x generation is the
+ * temp-0 v1 judge as shipped. Reasoning judges run at low effort: the rubric
+ * is a reading task, and the output budget must also cover reasoning tokens.
+ */
+export function judgeRequestParams(model: string): Record<string, unknown> {
+  const isReasoningGeneration = /^gpt-(5|6)/.test(model) || /^o\d/.test(model);
+  return isReasoningGeneration
+    ? { max_completion_tokens: 4000, reasoning_effort: 'low' }
+    : { temperature: 0, max_tokens: 1200 };
 }
 
 async function getEvalsConfig(): Promise<EvalsConfig> {
@@ -140,15 +267,40 @@ export function describeModality(modalityKey: string | null): string {
 export interface RunEvalOptions {
   /** Re-evaluate even if an eval for the current prompt version exists. */
   force?: boolean;
-  /** Override the judge model (defaults to system_config.evals.judge_model, else DEFAULT_JUDGE_MODEL). */
+  /** Single-judge override (legacy): judge with exactly this model. Ignored
+   *  when judgeModels is given. */
   judgeModel?: string;
+  /** Ensemble override: judge with exactly these models. */
+  judgeModels?: string[];
+  /** Self-consistency override (1..5). */
+  selfConsistencyRuns?: number;
+}
+
+/** evaluateSessionDetailed() result: the consensus row plus the raw runs. */
+export interface DetailedEvalResult {
+  row: SessionEvalRow;
+  settings: JudgeEnsembleSettings;
+  runs: JudgeRun[];
+  /** Judge runs that threw (API error / invalid JSON); the consensus excludes them. */
+  failed: Array<{ judgeModel: string; runIndex: number; error: string }>;
+  spread: Record<string, number> | null;
 }
 
 /**
- * Evaluate one session. Returns the stored row, or null when skipped
+ * Evaluate one session. Returns the stored consensus row, or null when skipped
  * (already evaluated, session missing/not ended, or empty transcript).
  */
 export async function evaluateSession(sessionId: string, options: RunEvalOptions = {}): Promise<SessionEvalRow | null> {
+  const detailed = await evaluateSessionDetailed(sessionId, options);
+  return detailed ? detailed.row : null;
+}
+
+/**
+ * Evaluate one session with the configured judge ensemble and return the
+ * consensus row together with every raw judge run (for callers that report
+ * per-judge scores, e.g. the red-team harness).
+ */
+export async function evaluateSessionDetailed(sessionId: string, options: RunEvalOptions = {}): Promise<DetailedEvalResult | null> {
   const session = await getSession(sessionId);
   if (!session) {
     log.warn(`Session ${sessionId} not found; skipping eval`);
@@ -168,7 +320,9 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
   }
   if (!options.force && (await hasSessionEval(sessionId, EVAL_PROMPT_VERSION))) {
     log.info(`Eval ${EVAL_PROMPT_VERSION} already exists for ${sessionId}; skipping (use force to re-run)`);
-    return getSessionEval(sessionId);
+    const existing = await getSessionEval(sessionId);
+    if (!existing) return null;
+    return { row: existing, settings: { models: [existing.judge_model], runs: 1 }, runs: [], failed: [], spread: existing.judge_spread ?? null };
   }
 
   // Transcript: prefer original content; fall back to redacted text after the
@@ -180,27 +334,72 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
   }
 
   const config = await getSessionConfig(sessionId);
-  const evalsConfig = await getEvalsConfig();
-  const judgeModel = options.judgeModel || evalsConfig.judge_model || DEFAULT_JUDGE_MODEL;
+  const settings = resolveJudgeEnsemble(options, await getEvalsConfig());
+  const userContent =
+    `Session context:\n${describeModality(config?.modality ?? null)}\n\n` +
+    `Transcript:\n${conversation}`;
 
+  // Every (model, run) pair is one independent judge call with the identical
+  // v1 prompt. Runs beyond the first carry a seed so self-consistency is
+  // best-effort reproducible; a single run keeps the exact v1 request shape.
+  const runs: JudgeRun[] = [];
+  const failed: DetailedEvalResult['failed'] = [];
+  for (const judgeModel of settings.models) {
+    for (let runIndex = 0; runIndex < settings.runs; runIndex++) {
+      const seed = settings.runs > 1 ? SELF_CONSISTENCY_SEED + runIndex : null;
+      try {
+        runs.push(await runJudgeOnce(judgeModel, runIndex, seed, userContent));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        failed.push({ judgeModel, runIndex, error: message });
+        log.error({ err }, `Judge ${judgeModel} run ${runIndex + 1}/${settings.runs} failed for ${sessionId}`);
+      }
+    }
+  }
+  if (runs.length === 0) {
+    throw new Error(`All judge runs failed for ${sessionId}: ${failed.map(f => `${f.judgeModel}: ${f.error}`).join('; ')}`);
+  }
+
+  const rubric = consensusRubric(runs);
+  const spread = judgeSpread(runs);
+  const overallComments = runs[0].overallComments;
+  const label = ensembleLabel(settings);
+
+  const row = await upsertSessionEval(sessionId, rubric, overallComments, label, EVAL_PROMPT_VERSION, spread);
+  const judgeRows: NewJudgeRun[] = runs.map(r => ({
+    judgeModel: r.judgeModel, runIndex: r.runIndex, seed: r.seed, rubric: r.rubric, overallComments: r.overallComments,
+  }));
+  await replaceSessionEvalJudges(sessionId, EVAL_PROMPT_VERSION, judgeRows);
+
+  const scores = EVAL_DIMENSIONS.map(d => `${d}=${rubric[d].score}`).join(' ');
+  log.info(`Eval stored for ${sessionId} [${label}/${EVAL_PROMPT_VERSION}]: ${scores}` +
+    (spread ? ` spread=${Object.values(spread).reduce((m, v) => Math.max(m, v), 0)}` : '') +
+    (failed.length ? ` (${failed.length} judge run(s) failed)` : ''));
+
+  // Drift check after every stored eval (fire-and-forget). Dynamic import keeps
+  // this free of a module-eval cycle with evalDrift.service.ts.
+  import('./evalDrift.service.js')
+    .then(m => m.maybeCheckEvalDrift())
+    .catch(err => log.error({ err }, 'Failed to schedule eval drift check'));
+
+  return { row, settings, runs, failed, spread };
+}
+
+/** One judge call: identical v1 system prompt, JSON mode, validated rubric. */
+async function runJudgeOnce(judgeModel: string, runIndex: number, seed: number | null, userContent: string): Promise<JudgeRun> {
   const client = await getClient();
   // Offline quality judging: flex halves the cost on eligible models.
   const { withFlex } = await import('../utils/flexTier.js');
   const response = await withFlex(judgeModel, (tierParams) => client.chat.completions.create({
     model: judgeModel,
     response_format: { type: 'json_object' },
-    temperature: 0, // deterministic-as-possible judging
-    max_tokens: 1200,
     store: false,
+    ...judgeRequestParams(judgeModel),
+    ...(seed !== null ? { seed } : {}),
     ...tierParams,
     messages: [
       { role: 'system', content: JUDGE_SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content:
-          `Session context:\n${describeModality(config?.modality ?? null)}\n\n` +
-          `Transcript:\n${conversation}`,
-      },
+      { role: 'user', content: userContent },
     ],
   }));
 
@@ -216,18 +415,7 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
 
   const rubric = validateRubric(parsed);
   const overallComments = typeof parsed.overall_comments === 'string' ? parsed.overall_comments : null;
-
-  const row = await upsertSessionEval(sessionId, rubric, overallComments, judgeModel, EVAL_PROMPT_VERSION);
-  const scores = EVAL_DIMENSIONS.map(d => `${d}=${rubric[d].score}`).join(' ');
-  log.info(`Eval stored for ${sessionId} [${judgeModel}/${EVAL_PROMPT_VERSION}]: ${scores}`);
-
-  // Drift check after every stored eval (fire-and-forget). Dynamic import keeps
-  // this free of a module-eval cycle with evalDrift.service.ts.
-  import('./evalDrift.service.js')
-    .then(m => m.maybeCheckEvalDrift())
-    .catch(err => log.error({ err }, 'Failed to schedule eval drift check'));
-
-  return row;
+  return { judgeModel, runIndex, seed, rubric, overallComments };
 }
 
 /** Validate + normalize the judge's JSON into an EvalRubric. Throws on missing/invalid dimensions. */
