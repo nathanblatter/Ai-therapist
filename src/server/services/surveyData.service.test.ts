@@ -86,9 +86,7 @@ describe('buildSurveyDataOverview', () => {
       weeklyRow(2, 8, 'r2', { QID8: 6 }), // bravo week 1
     ];
     const { weeklyAggregates } = buildSurveyDataOverview(ENROLLED, rows, NOW);
-    expect(weeklyAggregates).toEqual([
-      { week: 1, n: 2, avgMood: 4, avgStress: 2, avgHelpfulness: 3 },
-    ]);
+    expect(weeklyAggregates).toEqual([{ week: 1, n: 2, avgMood: 4, avgStress: 2, avgHelpfulness: 3 }]);
   });
 
   it('ignores linked responses from users without an enrollment anchor', () => {

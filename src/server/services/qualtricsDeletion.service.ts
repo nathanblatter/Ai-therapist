@@ -46,7 +46,7 @@ async function deleteRemoteResponse(surveyId: string, responseId: string): Promi
       method: 'DELETE',
       headers: { 'X-API-TOKEN': config.apiToken, Accept: 'application/json' },
       signal: AbortSignal.timeout(30_000),
-    }
+    },
   );
   // 404 = already gone remotely; that satisfies the request.
   return res.ok || res.status === 404;
@@ -57,15 +57,12 @@ async function deleteRemoteResponse(surveyId: string, responseId: string): Promi
  * blanked rows blank to the same skeleton, already-deleted remote responses
  * count as deleted.
  */
-export async function deleteParticipantSurveyData(
-  userId: number,
-  actor: string
-): Promise<SurveyDeletionResult> {
+export async function deleteParticipantSurveyData(userId: number, actor: string): Promise<SurveyDeletionResult> {
   const runId = randomUUID();
   const { rows } = await pool.query<ResponseRow>(
     `SELECT response_id, survey_id, survey_role, answers
        FROM qualtrics_responses WHERE user_id = $1`,
-    [userId]
+    [userId],
   );
 
   const result: SurveyDeletionResult = {
@@ -96,10 +93,10 @@ export async function deleteParticipantSurveyData(
         if (row.answers[key] !== undefined) keep[key] = row.answers[key];
       }
     }
-    await pool.query(
-      `UPDATE qualtrics_responses SET answers = $2, study_sid = NULL WHERE response_id = $1`,
-      [row.response_id, JSON.stringify(keep)]
-    );
+    await pool.query(`UPDATE qualtrics_responses SET answers = $2, study_sid = NULL WHERE response_id = $1`, [
+      row.response_id,
+      JSON.stringify(keep),
+    ]);
     result.localBlanked++;
 
     await insertDeletionLog({
@@ -119,7 +116,7 @@ export async function deleteParticipantSurveyData(
 
   console.log(
     `[QualtricsDeletion] user ${userId}: ${result.remoteDeleted}/${result.responses} remote deleted, ` +
-      `${result.localBlanked} local blanked (run ${runId}, by ${actor})`
+      `${result.localBlanked} local blanked (run ${runId}, by ${actor})`,
   );
   return result;
 }

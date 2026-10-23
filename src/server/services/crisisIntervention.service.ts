@@ -121,15 +121,29 @@ export async function maybeRequireRiskCheck(
     }
 
     await logInterventionAction(sessionId, 'risk_steering', {
-      riskScore, severity, channel, delivered,
+      riskScore,
+      severity,
+      channel,
+      delivered,
       trigger: 'risk_check_required',
       threshold: minScore,
     });
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'session:risk-check-required', {
-        sessionId, riskScore, severity, threshold: minScore, delivered, requiredAt: new Date(),
-      }, sessionId, 'summary');
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:risk-check-required',
+        {
+          sessionId,
+          riskScore,
+          severity,
+          threshold: minScore,
+          delivered,
+          requiredAt: new Date(),
+        },
+        sessionId,
+        'summary',
+      );
     }
 
     return channel === 'chat' ? RISK_CHECK_REQUIRED_GUIDANCE : null;
@@ -150,14 +164,14 @@ function steeringGuidance(riskScore: number, severity: string): string {
     `Slow your pace and keep responses short, warm, and grounded. Prioritize validation and reflective listening over problem-solving. ` +
     `Gently check how the participant is feeling right now.`;
   if (severity === 'high') {
-    return base +
+    return (
+      base +
       ` Calmly assess their immediate safety, and naturally work the crisis resources from your instructions into the conversation. ` +
       `Stay with them — the research team's monitoring dashboard has been alerted. ` +
-      RISK_CHECK_DIRECTIVE;
+      RISK_CHECK_DIRECTIVE
+    );
   }
-  return base +
-    ` If anything suggests thoughts of self-harm, follow your crisis protocol. ` +
-    RISK_CHECK_DIRECTIVE;
+  return base + ` If anything suggests thoughts of self-harm, follow your crisis protocol. ` + RISK_CHECK_DIRECTIVE;
 }
 
 /**
@@ -277,10 +291,13 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
         }
         console.warn(
           `[crisis] risk steering UNDELIVERABLE for ${sessionId.substring(0, 12)}… ` +
-          `(score ${riskScore}, ${severity}) — no live sideband connection`,
+            `(score ${riskScore}, ${severity}) — no live sideband connection`,
         );
         await logInterventionAction(sessionId, 'risk_steering', {
-          riskScore, severity, delivered: false, reason: 'no_sideband',
+          riskScore,
+          severity,
+          delivered: false,
+          reason: 'no_sideband',
         });
       }
       return;
@@ -292,12 +309,17 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
     await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity, delivered: true });
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'session:risk-steering', {
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:risk-steering',
+        {
+          sessionId,
+          riskScore,
+          severity,
+          steeredAt: new Date(),
+        },
         sessionId,
-        riskScore,
-        severity,
-        steeredAt: new Date(),
-      }, sessionId);
+      );
     }
     console.log(`Risk steering injected for session ${sessionId} (score ${riskScore}, ${severity})`);
   } catch (error) {
@@ -321,13 +343,14 @@ export async function injectManualFlagGuidance(
 ): Promise<boolean> {
   try {
     const { sidebandManager } = await import('./sidebandManager.service.js');
-    const guidance = severity === 'high'
-      ? SAFETY_PROTOCOL_GUIDANCE
-      : steeringGuidance(riskScore, severity);
+    const guidance = severity === 'high' ? SAFETY_PROTOCOL_GUIDANCE : steeringGuidance(riskScore, severity);
     const injected = await sidebandManager.tryInject(sessionId, 'system', guidance, false);
     if (injected) {
       await logInterventionAction(sessionId, severity === 'high' ? 'safety_protocol' : 'risk_steering', {
-        riskScore, severity, trigger: 'manual_flag', flaggedBy,
+        riskScore,
+        severity,
+        trigger: 'manual_flag',
+        flaggedBy,
       });
       console.log(`Manual-flag guidance injected for session ${sessionId} (${severity}, by ${flaggedBy})`);
     }
@@ -357,10 +380,7 @@ const CRISIS_WIND_DOWN_GUIDANCE =
 
 const WIND_DOWN_GRACE_MS = 75 * 1000;
 
-export async function initiateCrisisWindDown(
-  sessionId: string,
-  initiatedBy: string,
-): Promise<{ injected: boolean }> {
+export async function initiateCrisisWindDown(sessionId: string, initiatedBy: string): Promise<{ injected: boolean }> {
   const { sidebandManager } = await import('./sidebandManager.service.js');
   // The trailing `true` (respond-now) is INERT under GPT-Live and kept only for
   // signature compatibility. Realtime could force a reply with response.create;
@@ -382,8 +402,9 @@ export async function initiateCrisisWindDown(
   // nothing could be injected, skip the wait — end now.
   const graceMs = injected ? WIND_DOWN_GRACE_MS : 0;
   setTimeout(() => {
-    void hardEndCrisisSession(sessionId, initiatedBy).catch(err =>
-      console.error(`[CrisisWindDown] hard-end failed for ${sessionId}:`, err));
+    void hardEndCrisisSession(sessionId, initiatedBy).catch((err) =>
+      console.error(`[CrisisWindDown] hard-end failed for ${sessionId}:`, err),
+    );
   }, graceMs);
 
   return { injected };
@@ -464,10 +485,7 @@ const SAFETY_PROTOCOL_GUIDANCE =
  * session to link), the message is sent as-is with no suppression check or
  * intervention log — the caller owns its own sandbox short-circuit.
  */
-export async function pageOnCall(
-  message: string,
-  session?: { sessionId: string; riskScore: number },
-): Promise<void> {
+export async function pageOnCall(message: string, session?: { sessionId: string; riskScore: number }): Promise<void> {
   const { sendCrisisAlert } = await import('./crisisAlert.service.js');
   if (!session) {
     await sendCrisisAlert(message);
@@ -484,8 +502,10 @@ export async function pageOnCall(
   if (suppressed) {
     console.log(`[Crisis] SMS page suppressed for sandbox session ${sessionId}`);
     logInterventionAction(sessionId, 'external_api_called', {
-      suppressed: 'crisis_sms_alert', reason: 'sandbox', riskScore,
-    }).catch(err => console.error('[Crisis] failed to log sandbox SMS suppression:', err));
+      suppressed: 'crisis_sms_alert',
+      reason: 'sandbox',
+      riskScore,
+    }).catch((err) => console.error('[Crisis] failed to log sandbox SMS suppression:', err));
     return;
   }
   await sendCrisisAlert(message);
@@ -501,7 +521,7 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
   try {
     await logInterventionAction(sessionId, 'high_risk_emergency', {
       riskScore,
-      emergencyProtocol: 'activated'
+      emergencyProtocol: 'activated',
     });
 
     // Page a human — the dashboard socket alert only works if someone is
@@ -509,12 +529,11 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
     // lives in pageOnCall.
     // Deep-link straight to the session (AdminApp reads #session=<id> on
     // load); APP_BASE_URL keeps the link pointed at the right environment.
-    const adminBase = (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com')
-      .trim().replace(/\/+$/, '');
+    const adminBase = (process.env.APP_BASE_URL ?? 'https://ai-therapist.nathanblatter.com').trim().replace(/\/+$/, '');
     pageOnCall(
       `URGENT: AI-Therapist HIGH crisis flag\nSession ${sessionId.substring(0, 16)}… — risk ${riskScore}/100\n${adminBase}/admin#session=${encodeURIComponent(sessionId)}`,
       { sessionId, riskScore },
-    ).catch(err => console.error('Error sending crisis SMS:', err));
+    ).catch((err) => console.error('Error sending crisis SMS:', err));
 
     // Steer the live model into a structured safety assessment.
     try {
@@ -531,18 +550,23 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
     if (global.io) {
       global.io.to(`session:${sessionId}`).emit('session:crisis-emergency', {
         severity: 'high',
-        riskScore
+        riskScore,
       });
 
-      void broadcastAdminEventForSession(global.io, 'session:crisis-emergency', {
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:crisis-emergency',
+        {
+          sessionId,
+          severity: 'high',
+          riskScore,
+          priority: 'critical',
+          message: `CRITICAL: High-risk crisis detected - Immediate attention required`,
+          emergencyAt: new Date(),
+          requiresImmediateIntervention: true,
+        },
         sessionId,
-        severity: 'high',
-        riskScore,
-        priority: 'critical',
-        message: `CRITICAL: High-risk crisis detected - Immediate attention required`,
-        emergencyAt: new Date(),
-        requiresImmediateIntervention: true
-      }, sessionId);
+      );
     }
 
     await updateMonitoringFrequency(sessionId, 'critical');
@@ -566,12 +590,12 @@ async function updateMonitoringFrequency(sessionId: string, frequency: string): 
       `UPDATE therapy_sessions
        SET monitoring_frequency = $2
        WHERE session_id = $1`,
-      [sessionId, frequency]
+      [sessionId, frequency],
     );
 
     await logInterventionAction(sessionId, 'monitoring_increased', {
       previousFrequency: 'normal',
-      newFrequency: frequency
+      newFrequency: frequency,
     });
 
     console.log(`Monitoring frequency updated to ${frequency} for session ${sessionId}`);

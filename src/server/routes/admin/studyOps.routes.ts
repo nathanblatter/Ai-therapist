@@ -22,7 +22,10 @@ const log = createLogger('studyOpsRoutes');
 
 const MANUAL_CATEGORIES = ['technical_failure', 'enrollment', 'procedure', 'other'];
 const ALL_CATEGORIES = [
-  'config_change_mid_study', 'arm_imbalance', 'session_limit_exceeded', 'consent_version_change',
+  'config_change_mid_study',
+  'arm_imbalance',
+  'session_limit_exceeded',
+  'consent_version_change',
   ...MANUAL_CATEGORIES,
 ];
 const SEVERITIES = ['minor', 'major'];
@@ -67,8 +70,12 @@ export default function studyOpsRoutes(): Router {
     }
     try {
       const row = await createDeviation({
-        occurred_at: occurred_at ?? null, category, severity,
-        session_id: session_id ?? null, description, created_by: req.session.username!,
+        occurred_at: occurred_at ?? null,
+        category,
+        severity,
+        session_id: session_id ?? null,
+        description,
+        created_by: req.session.username!,
       });
       res.status(201).json({ deviation: row });
     } catch (err) {
@@ -104,7 +111,10 @@ export default function studyOpsRoutes(): Router {
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid id' });
     try {
       const ok = await deleteDeviation(id);
-      if (!ok) return res.status(404).json({ error: 'deviation not found or not deletable (auto-flagged rows cannot be deleted)' });
+      if (!ok)
+        return res
+          .status(404)
+          .json({ error: 'deviation not found or not deletable (auto-flagged rows cannot be deleted)' });
       res.json({ success: true });
     } catch (err) {
       log.error({ err }, 'Failed to delete deviation');

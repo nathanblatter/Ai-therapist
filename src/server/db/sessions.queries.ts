@@ -90,7 +90,10 @@ export interface SessionAccessInfo {
  * Create a therapy session. Accepts either a config object (preferred) or the
  * legacy (userId, sessionName) parameter form.
  */
-export async function createSession(userId: number | CreateSessionConfig | null = null, sessionName: string | null = null): Promise<SessionRow> {
+export async function createSession(
+  userId: number | CreateSessionConfig | null = null,
+  sessionName: string | null = null,
+): Promise<SessionRow> {
   if (typeof userId === 'object' && userId !== null) {
     const config = userId as CreateSessionConfig;
     const result = await pool.query<SessionRow>(
@@ -103,8 +106,8 @@ export async function createSession(userId: number | CreateSessionConfig | null 
         config.sessionName || null,
         config.status || 'active',
         config.sessionType || 'realtime',
-        config.isDemo ?? false
-      ]
+        config.isDemo ?? false,
+      ],
     );
     return result.rows[0];
   } else {
@@ -112,7 +115,7 @@ export async function createSession(userId: number | CreateSessionConfig | null 
       `INSERT INTO therapy_sessions (user_id, session_name, status, created_at, updated_at)
        VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
-      [userId, sessionName]
+      [userId, sessionName],
     );
     return result.rows[0];
   }
@@ -120,10 +123,7 @@ export async function createSession(userId: number | CreateSessionConfig | null 
 
 /** Get a session by id, or null. */
 export async function getSession(sessionId: string): Promise<SessionRow | null> {
-  const result = await pool.query<SessionRow>(
-    'SELECT * FROM therapy_sessions WHERE session_id = $1',
-    [sessionId]
-  );
+  const result = await pool.query<SessionRow>('SELECT * FROM therapy_sessions WHERE session_id = $1', [sessionId]);
   return result.rows[0] || null;
 }
 
@@ -136,7 +136,7 @@ export async function getActiveSessionForUser(userId: number | string): Promise<
      WHERE user_id = $1 AND status = 'active'
      ORDER BY created_at DESC
      LIMIT 1`,
-    [userId]
+    [userId],
   );
   return result.rows[0] || null;
 }
@@ -153,7 +153,11 @@ export async function getUserSessions(userId: number | string, status: string | 
 }
 
 /** Update a session's status (idempotent); stamps ended_at/by when ending. */
-export async function updateSessionStatus(sessionId: string, status: string, endedBy: string | null = null): Promise<SessionRow> {
+export async function updateSessionStatus(
+  sessionId: string,
+  status: string,
+  endedBy: string | null = null,
+): Promise<SessionRow> {
   const currentSession = await getSession(sessionId);
   if (!currentSession) {
     throw new Error('Session not found');
@@ -168,11 +172,11 @@ export async function updateSessionStatus(sessionId: string, status: string, end
     `UPDATE therapy_sessions
      SET status = $1,
          updated_at = CURRENT_TIMESTAMP,
-         ended_at = ${status === 'ended' ? "CURRENT_TIMESTAMP" : 'ended_at'},
+         ended_at = ${status === 'ended' ? 'CURRENT_TIMESTAMP' : 'ended_at'},
          ended_by = ${status === 'ended' && endedBy ? '$3' : 'ended_by'}
      WHERE session_id = $2
      RETURNING *`,
-    status === 'ended' && endedBy ? [status, sessionId, endedBy] : [status, sessionId]
+    status === 'ended' && endedBy ? [status, sessionId, endedBy] : [status, sessionId],
   );
   return result.rows[0];
 }
@@ -184,7 +188,7 @@ export async function updateSessionName(sessionId: string, sessionName: string):
      SET session_name = $1, updated_at = CURRENT_TIMESTAMP
      WHERE session_id = $2
      RETURNING *`,
-    [sessionName, sessionId]
+    [sessionName, sessionId],
   );
   return result.rows[0];
 }
@@ -195,10 +199,9 @@ export async function deleteSession(sessionId: string): Promise<SessionRow> {
   try {
     await client.query('BEGIN');
 
-    const sessionResult = await client.query<SessionRow>(
-      'SELECT * FROM therapy_sessions WHERE session_id = $1',
-      [sessionId]
-    );
+    const sessionResult = await client.query<SessionRow>('SELECT * FROM therapy_sessions WHERE session_id = $1', [
+      sessionId,
+    ]);
 
     if (sessionResult.rows.length === 0) {
       throw new Error('Session not found');
@@ -221,7 +224,10 @@ export async function deleteSession(sessionId: string): Promise<SessionRow> {
 }
 
 /** Create or update a session's realtime configuration. */
-export async function upsertSessionConfig(sessionId: string, config: UpsertSessionConfigInput): Promise<SessionConfigRow> {
+export async function upsertSessionConfig(
+  sessionId: string,
+  config: UpsertSessionConfigInput,
+): Promise<SessionConfigRow> {
   const {
     voice = 'alloy',
     modalities = ['text', 'audio'],
@@ -236,7 +242,7 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
     transcription_model = null,
     live_backend_model = null,
     theme = 'default',
-    proactive_offering = null
+    proactive_offering = null,
   } = config;
 
   // JSONB fields: stringify when present, otherwise pass null.
@@ -267,17 +273,32 @@ export async function upsertSessionConfig(sessionId: string, config: UpsertSessi
        theme = EXCLUDED.theme,
        proactive_offering = EXCLUDED.proactive_offering
      RETURNING *`,
-    [sessionId, voice, modalities, instructions, turnDetectionJson, toolsJson, temperature, max_response_output_tokens, language, modality, ai_model, transcription_model, theme, proactive_offering, live_backend_model]
+    [
+      sessionId,
+      voice,
+      modalities,
+      instructions,
+      turnDetectionJson,
+      toolsJson,
+      temperature,
+      max_response_output_tokens,
+      language,
+      modality,
+      ai_model,
+      transcription_model,
+      theme,
+      proactive_offering,
+      live_backend_model,
+    ],
   );
   return result.rows[0];
 }
 
 /** A session's realtime configuration, or null. */
 export async function getSessionConfig(sessionId: string): Promise<SessionConfigRow | null> {
-  const result = await pool.query<SessionConfigRow>(
-    'SELECT * FROM session_configurations WHERE session_id = $1',
-    [sessionId]
-  );
+  const result = await pool.query<SessionConfigRow>('SELECT * FROM session_configurations WHERE session_id = $1', [
+    sessionId,
+  ]);
   return result.rows[0] || null;
 }
 
@@ -288,17 +309,14 @@ export async function getSessionAccessInfo(sessionId: string): Promise<SessionAc
      FROM therapy_sessions ts
      LEFT JOIN users u ON u.userid = ts.user_id
      WHERE ts.session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0] ?? null;
 }
 
 /** Attach the OpenAI realtime call id to a session (used by register-call). */
 export async function setSessionCallId(sessionId: string, callId: string): Promise<void> {
-  await pool.query(
-    'UPDATE therapy_sessions SET openai_call_id = $1 WHERE session_id = $2',
-    [callId, sessionId]
-  );
+  await pool.query('UPDATE therapy_sessions SET openai_call_id = $1 WHERE session_id = $2', [callId, sessionId]);
 }
 
 /**
@@ -312,10 +330,10 @@ export async function setSessionCallId(sessionId: string, callId: string): Promi
  * kept no record of which live session it failed to attach to.
  */
 export async function setLiveSessionId(sessionId: string, liveSessionId: string): Promise<void> {
-  await pool.query(
-    'UPDATE therapy_sessions SET openai_live_session_id = $1 WHERE session_id = $2',
-    [liveSessionId, sessionId]
-  );
+  await pool.query('UPDATE therapy_sessions SET openai_live_session_id = $1 WHERE session_id = $2', [
+    liveSessionId,
+    sessionId,
+  ]);
 }
 
 /**
@@ -332,7 +350,7 @@ export async function markSidebandUnmonitored(sessionId: string, reason: string)
     `UPDATE therapy_sessions
         SET sideband_connected = FALSE, sideband_error = $1
       WHERE session_id = $2`,
-    [reason, sessionId]
+    [reason, sessionId],
   );
 }
 
@@ -340,13 +358,13 @@ export async function markSidebandUnmonitored(sessionId: string, reason: string)
 export async function createActiveRealtimeSession(
   sessionId: string,
   userId: number | string | null,
-  isDemo = false
+  isDemo = false,
 ): Promise<void> {
   await pool.query(
     `INSERT INTO therapy_sessions (session_id, user_id, status, is_demo, created_at, updated_at)
      VALUES ($1, $2, 'active', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
      ON CONFLICT (session_id) DO NOTHING`,
-    [sessionId, userId, isDemo]
+    [sessionId, userId, isDemo],
   );
 }
 
@@ -356,10 +374,9 @@ export async function createActiveRealtimeSession(
  * non-demo (fail safe toward normal processing).
  */
 export async function getSessionIsDemo(sessionId: string): Promise<boolean> {
-  const result = await pool.query<{ is_demo: boolean }>(
-    'SELECT is_demo FROM therapy_sessions WHERE session_id = $1',
-    [sessionId]
-  );
+  const result = await pool.query<{ is_demo: boolean }>('SELECT is_demo FROM therapy_sessions WHERE session_id = $1', [
+    sessionId,
+  ]);
   return result.rows[0]?.is_demo ?? false;
 }
 
@@ -376,7 +393,7 @@ export async function isDemoAccountSession(sessionId: string): Promise<boolean> 
     `SELECT u.role FROM therapy_sessions ts
      LEFT JOIN users u ON u.userid = ts.user_id
      WHERE ts.session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0]?.role === 'demo';
 }
@@ -390,7 +407,7 @@ export async function getActiveSessionIdsAmong(sessionIds: string[]): Promise<st
   if (sessionIds.length === 0) return [];
   const result = await pool.query<{ session_id: string }>(
     `SELECT session_id FROM therapy_sessions WHERE session_id = ANY($1::text[]) AND status = 'active'`,
-    [sessionIds]
+    [sessionIds],
   );
-  return result.rows.map(r => r.session_id);
+  return result.rows.map((r) => r.session_id);
 }

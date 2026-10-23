@@ -47,9 +47,7 @@ beforeEach(() => {
 
 describe('demo write guard on /api/users (defense-in-depth)', () => {
   it('swallows a demo self-edit PUT without touching the db', async () => {
-    const res = await request(appAs('demo'))
-      .put('/api/users/4242')
-      .send({ username: 'persisted_evil' });
+    const res = await request(appAs('demo')).put('/api/users/4242').send({ username: 'persisted_evil' });
     expect(res.status).toBe(200);
     expect(res.body.demo).toBe(true);
     expect(dbMocks.updateUser).not.toHaveBeenCalled();
@@ -78,17 +76,13 @@ describe('demo write guard on /api/users (defense-in-depth)', () => {
   });
 
   it('lets demo preference writes through (harmless, intentionally real)', async () => {
-    const res = await request(appAs('demo'))
-      .put('/api/users/preferences/theme')
-      .send({ theme: 'dark' });
+    const res = await request(appAs('demo')).put('/api/users/preferences/theme').send({ theme: 'dark' });
     expect(res.status).toBe(200);
     expect(dbMocks.setUserPreferredTheme).toHaveBeenCalledWith(4242, 'dark');
   });
 
   it('does not affect non-demo writes (researcher edit reaches the real handler)', async () => {
-    const res = await request(appAs('researcher', 1))
-      .put('/api/users/4242')
-      .send({ username: 'renamed' });
+    const res = await request(appAs('researcher', 1)).put('/api/users/4242').send({ username: 'renamed' });
     expect(res.status).toBe(200);
     expect(dbMocks.updateUser).toHaveBeenCalledWith('4242', { username: 'renamed' });
   });
@@ -97,9 +91,7 @@ describe('demo write guard on /api/users (defense-in-depth)', () => {
 describe('PUT /api/users/:userid role validation', () => {
   it('rejects a role outside the assignable allowlist (same list as POST)', async () => {
     for (const bad of ['demo', 'admin', 'superuser', '']) {
-      const res = await request(appAs('researcher', 1))
-        .put('/api/users/4242')
-        .send({ role: bad });
+      const res = await request(appAs('researcher', 1)).put('/api/users/4242').send({ role: bad });
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('Invalid role');
     }
@@ -108,9 +100,7 @@ describe('PUT /api/users/:userid role validation', () => {
 
   it('accepts a valid role change from a researcher', async () => {
     dbMocks.updateUser.mockResolvedValue({ userid: 4242, username: 'u', role: 'caseworker' });
-    const res = await request(appAs('researcher', 1))
-      .put('/api/users/4242')
-      .send({ role: 'caseworker' });
+    const res = await request(appAs('researcher', 1)).put('/api/users/4242').send({ role: 'caseworker' });
     expect(res.status).toBe(200);
     expect(dbMocks.updateUser).toHaveBeenCalledWith('4242', { role: 'caseworker' });
   });

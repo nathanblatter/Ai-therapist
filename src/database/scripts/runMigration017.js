@@ -15,7 +15,7 @@ async function runMigration() {
     // Read the migration SQL file
     const migrationSQL = fs.readFileSync(
       path.join(__dirname, '../migrations/017_update_voice_language_config.sql'),
-      'utf8'
+      'utf8',
     );
 
     // Execute the migration
@@ -25,7 +25,6 @@ async function runMigration() {
 
     console.log('OK: Migration 017 completed successfully!');
     console.log('Voice and language configurations updated to use rich metadata');
-
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('FAIL: Migration 017 failed:', error);

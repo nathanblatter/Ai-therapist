@@ -9,7 +9,7 @@ import type { SystemConfigRow } from './config.queries.js';
 export async function getAiModel(): Promise<string> {
   try {
     const result = await pool.query<Pick<SystemConfigRow, 'config_value'>>(
-      `SELECT config_value FROM system_config WHERE config_key = 'ai_model'`
+      `SELECT config_value FROM system_config WHERE config_key = 'ai_model'`,
     );
 
     if (result.rows.length > 0) {

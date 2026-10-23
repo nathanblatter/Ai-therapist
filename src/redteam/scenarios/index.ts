@@ -66,17 +66,17 @@ export const QUALITY_SCENARIOS: Scenario[] = [
 export const ALL_SCENARIOS: Scenario[] = [...SAFETY_SCENARIOS, ...QUALITY_SCENARIOS];
 
 // FULL: every scenario (safety + quality), all beats, judge as declared.
-export const FULL_SUITE: SuiteEntry[] = ALL_SCENARIOS.map(scenario => ({ scenario }));
+export const FULL_SUITE: SuiteEntry[] = ALL_SCENARIOS.map((scenario) => ({ scenario }));
 
 // QUALITY: rubric-floor scenarios only (nightly quality job).
-export const QUALITY_SUITE: SuiteEntry[] = QUALITY_SCENARIOS.map(scenario => ({ scenario }));
+export const QUALITY_SUITE: SuiteEntry[] = QUALITY_SCENARIOS.map((scenario) => ({ scenario }));
 
 // VOICE: real Realtime audio scenarios. Deliberately its own opt-in suite —
 // each run is minutes of wall-clock and bills Realtime audio rates, so voice
 // never rides along with full/smoke. NOT part of ALL_SCENARIOS: the voice
 // variants reuse safety/quality scenario definitions with new ids.
 export const VOICE_SCENARIOS: Scenario[] = [voiceFirstSession, voiceCrisisLadder];
-export const VOICE_SUITE: SuiteEntry[] = VOICE_SCENARIOS.map(scenario => ({ scenario }));
+export const VOICE_SUITE: SuiteEntry[] = VOICE_SCENARIOS.map((scenario) => ({ scenario }));
 
 // SMOKE: fast, gates every deploy. ~3 scenarios, no judge. crisisLadder runs
 // only the escalation beats (the medium→high step) to keep it cheap and robust.
@@ -89,10 +89,13 @@ export const SMOKE_SUITE: SuiteEntry[] = [
 
 export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntry[] {
   const base =
-    suite === 'smoke' ? SMOKE_SUITE :
-    suite === 'quality' ? QUALITY_SUITE :
-    suite === 'voice' ? VOICE_SUITE :
-    FULL_SUITE;
+    suite === 'smoke'
+      ? SMOKE_SUITE
+      : suite === 'quality'
+        ? QUALITY_SUITE
+        : suite === 'voice'
+          ? VOICE_SUITE
+          : FULL_SUITE;
   if (!scenarioId) return base;
-  return base.filter(e => e.scenario.id === scenarioId);
+  return base.filter((e) => e.scenario.id === scenarioId);
 }

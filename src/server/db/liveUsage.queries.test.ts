@@ -49,7 +49,9 @@ describe('estimateLiveCostUsd', () => {
 describe('recordLiveUsage', () => {
   it('upserts one row per session with the snapshot and flags', async () => {
     await recordLiveUsage('s-1', 'gpt-live-1', 118, {
-      finalized: true, closeReason: 'client_closed', contextRatio: 0.42,
+      finalized: true,
+      closeReason: 'client_closed',
+      contextRatio: 0.42,
     });
 
     expect(queryMock).toHaveBeenCalledTimes(1);
@@ -102,7 +104,10 @@ describe('getLiveUsageTotals', () => {
   it('is safe on an empty window', async () => {
     queryMock.mockResolvedValue({ rows: [] });
     expect(await getLiveUsageTotals(30)).toEqual({
-      sessions: 0, unfinalized_sessions: 0, total_seconds: 0, estimated_cost_usd: 0,
+      sessions: 0,
+      unfinalized_sessions: 0,
+      total_seconds: 0,
+      estimated_cost_usd: 0,
     });
   });
 });

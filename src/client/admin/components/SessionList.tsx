@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
-import FilterBar from "./FilterBar";
-import { formatDateTime } from "../../shared/format";
-import { deleteJson, getJson } from "../../shared/http";
+import { useState, useEffect } from 'react';
+import FilterBar from './FilterBar';
+import { formatDateTime } from '../../shared/format';
+import { deleteJson, getJson } from '../../shared/http';
 
 interface Session {
   session_id: string;
@@ -58,12 +58,12 @@ export default function SessionList({ onViewSession }: SessionListProps) {
       const params = new URLSearchParams({
         page: String(pagination.page),
         limit: String(pagination.limit),
-        ...Object.fromEntries(
-          Object.entries(filters).filter(([_, v]) => v !== '' && v !== null)
-        )
+        ...Object.fromEntries(Object.entries(filters).filter(([_, v]) => v !== '' && v !== null)),
       });
 
-      const data = await getJson<{ sessions: Session[]; pagination: Pagination }>(`/admin/api/sessions?${params}`, { fallback: 'Failed to fetch sessions' });
+      const data = await getJson<{ sessions: Session[]; pagination: Pagination }>(`/admin/api/sessions?${params}`, {
+        fallback: 'Failed to fetch sessions',
+      });
       setSessions(data.sessions);
       setPagination(data.pagination);
     } catch (err: unknown) {
@@ -75,7 +75,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
 
   // Reset to page 1 when filters change
   useEffect(() => {
-    setPagination(prev => ({ ...prev, page: 1 }));
+    setPagination((prev) => ({ ...prev, page: 1 }));
   }, [filters]);
 
   // Fetch sessions when filters or page changes
@@ -93,7 +93,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
   const formatDate = formatDateTime;
 
   const handlePageChange = (newPage: number) => {
-    setPagination(prev => ({ ...prev, page: newPage }));
+    setPagination((prev) => ({ ...prev, page: newPage }));
   };
 
   const handleDelete = async (sessionId: string, sessionName: string | null | undefined) => {
@@ -130,9 +130,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
       )}
 
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">
-          Error: {error}
-        </div>
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">Error: {error}</div>
       )}
 
       {!loading && !error && sessions.length === 0 && (
@@ -161,7 +159,10 @@ export default function SessionList({ onViewSession }: SessionListProps) {
               </thead>
               <tbody>
                 {sessions.map((session, idx) => (
-                  <tr key={session.session_id} className={`hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                  <tr
+                    key={session.session_id}
+                    className={`hover:bg-gray-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
+                  >
                     <td className="px-4 py-3">
                       {session.username ? (
                         <span className="font-medium text-gray-900">{session.username}</span>
@@ -171,34 +172,44 @@ export default function SessionList({ onViewSession }: SessionListProps) {
                     </td>
                     <td className="px-4 py-3">
                       <span className="font-medium text-gray-900">
-                        {session.session_name || <span className="italic text-gray-400">Unnamed: Session Named after completion</span>}
+                        {session.session_name || (
+                          <span className="italic text-gray-400">Unnamed: Session Named after completion</span>
+                        )}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">{session.session_id}</td>
                     <td className="px-4 py-3 text-sm">{formatDate(session.start_time)}</td>
                     <td className="px-4 py-3 text-sm">
-                      {session.end_time ? formatDate(session.end_time) : <span className="italic text-gray-400">Session Still Active</span>}
+                      {session.end_time ? (
+                        formatDate(session.end_time)
+                      ) : (
+                        <span className="italic text-gray-400">Session Still Active</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {session.ended_by ? (
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${
-                          session.ended_by === 'user'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-purple-100 text-purple-800'
-                        }`}>
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-medium ${
+                            session.ended_by === 'user' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+                          }`}
+                        >
                           {session.ended_by === 'user' ? 'User' : session.ended_by}
                         </span>
                       ) : (
                         <span className="italic text-gray-400">-</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm">{formatDuration(session.duration_seconds) } </td>
+                    <td className="px-4 py-3 text-sm">{formatDuration(session.duration_seconds)} </td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        session.status === 'active' ? 'bg-green-100 text-green-800' :
-                        session.status === 'ended' ? 'bg-gray-100 text-gray-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
+                      <span
+                        className={`px-2 py-1 text-xs rounded-full ${
+                          session.status === 'active'
+                            ? 'bg-green-100 text-green-800'
+                            : session.status === 'ended'
+                              ? 'bg-gray-100 text-gray-800'
+                              : 'bg-blue-100 text-blue-800'
+                        }`}
+                      >
                         {session.status}
                       </span>
                     </td>
@@ -238,7 +249,8 @@ export default function SessionList({ onViewSession }: SessionListProps) {
 
           <div className="mt-4 flex justify-between items-center">
             <div className="text-sm text-gray-600">
-              Showing {Math.min((pagination.page - 1) * pagination.limit + 1, pagination.totalCount)} - {Math.min(pagination.page * pagination.limit, pagination.totalCount)} of {pagination.totalCount} sessions
+              Showing {Math.min((pagination.page - 1) * pagination.limit + 1, pagination.totalCount)} -{' '}
+              {Math.min(pagination.page * pagination.limit, pagination.totalCount)} of {pagination.totalCount} sessions
             </div>
             <div className="flex gap-2">
               <button

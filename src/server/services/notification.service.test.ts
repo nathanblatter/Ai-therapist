@@ -52,7 +52,10 @@ const {
 } = await import('./notification.service.js');
 
 /** The recipient gate (ai-therapist-154) as an admin would open it. */
-const OPEN_GATE_ROW = { config_key: 'notification_email_recipients', config_value: { enabled: true, allowed_domains: ['example.com'] } };
+const OPEN_GATE_ROW = {
+  config_key: 'notification_email_recipients',
+  config_value: { enabled: true, allowed_domains: ['example.com'] },
+};
 
 const DEFAULT_PREFS = {
   user_id: 9,
@@ -76,8 +79,11 @@ function workItem(overrides: Record<string, unknown> = {}) {
     source_table: 'crisis_events',
     source_id: '7',
     status: 'open',
-    acked_by: null, acked_at: null,
-    resolved_by: null, resolved_at: null, resolution_note: null,
+    acked_by: null,
+    acked_at: null,
+    resolved_by: null,
+    resolved_at: null,
+    resolution_note: null,
     is_sandbox: false,
     created_at: '2026-08-27T12:00:00Z',
     ...overrides,
@@ -90,9 +96,15 @@ beforeEach(() => {
   getUserByIdMock.mockResolvedValue({ userid: 9, username: 'cw@example.com', role: 'caseworker', is_sandbox: false });
   getNotificationPreferencesMock.mockResolvedValue({ ...DEFAULT_PREFS });
   insertNotificationMock.mockResolvedValue({
-    notification_id: 501, user_id: 9, work_item_id: 11, kind: 'crisis_flag',
-    title: 'Crisis flag for client jane.doe', body: null,
-    read_at: null, emailed_at: null, created_at: '2026-08-27T12:00:00Z',
+    notification_id: 501,
+    user_id: 9,
+    work_item_id: 11,
+    kind: 'crisis_flag',
+    title: 'Crisis flag for client jane.doe',
+    body: null,
+    read_at: null,
+    emailed_at: null,
+    created_at: '2026-08-27T12:00:00Z',
   });
   markNotificationsEmailedMock.mockResolvedValue(undefined);
   getSandboxWorkItemIdsMock.mockResolvedValue([]);
@@ -109,7 +121,13 @@ describe('emailPolicyFor', () => {
     expect(emailPolicyFor('escalation_inbound', 'info')).toBe('per_mode');
     expect(emailPolicyFor('adverse_event', 'warning')).toBe('per_mode');
     expect(emailPolicyFor('escalation_response', 'info')).toBe('per_mode');
-    for (const kind of ['inactivity', 'screener_worsening', 'note_awaiting_signature', 'message_unread_stale', 'note_shared']) {
+    for (const kind of [
+      'inactivity',
+      'screener_worsening',
+      'note_awaiting_signature',
+      'message_unread_stale',
+      'note_shared',
+    ]) {
       expect(emailPolicyFor(kind, 'info')).toBe('digest_only');
     }
   });
@@ -128,7 +146,9 @@ describe('recipient gate (ai-therapist-154: no users.email column, no verificati
     await expect(loadNotificationEmailGate()).resolves.toEqual({ enabled: true, allowedDomains: ['example.com'] });
     expect(getSystemConfigByKeyMock).toHaveBeenCalledWith('notification_email_recipients');
 
-    getSystemConfigByKeyMock.mockResolvedValue({ config_value: { enabled: true, allowed_domains: [' Clinic.ORG ', 7, ''] } });
+    getSystemConfigByKeyMock.mockResolvedValue({
+      config_value: { enabled: true, allowed_domains: [' Clinic.ORG ', 7, ''] },
+    });
     await expect(loadNotificationEmailGate()).resolves.toEqual({ enabled: true, allowedDomains: ['clinic.org'] });
 
     getSystemConfigByKeyMock.mockResolvedValue(null);
@@ -155,7 +175,10 @@ describe('recipient gate (ai-therapist-154: no users.email column, no verificati
 
   it('notifyWorkItem reads the gate once per call and emails nobody when it is closed (in-app still delivered)', async () => {
     getSystemConfigByKeyMock.mockResolvedValue(null);
-    await notifyWorkItem(workItem(), [{ userId: 9, role: 'caseworker' }, { userId: 9, role: 'caseworker' }]);
+    await notifyWorkItem(workItem(), [
+      { userId: 9, role: 'caseworker' },
+      { userId: 9, role: 'caseworker' },
+    ]);
     expect(getSystemConfigByKeyMock).toHaveBeenCalledTimes(1);
     expect(insertNotificationMock).toHaveBeenCalledTimes(2);
     expect(sendEmailMock).not.toHaveBeenCalled();
@@ -163,7 +186,12 @@ describe('recipient gate (ai-therapist-154: no users.email column, no verificati
   });
 
   it('notifyWorkItem skips email for an email-shaped username whose domain is not allowlisted', async () => {
-    getUserByIdMock.mockResolvedValue({ userid: 9, username: 'cw@unlisted.org', role: 'caseworker', is_sandbox: false });
+    getUserByIdMock.mockResolvedValue({
+      userid: 9,
+      username: 'cw@unlisted.org',
+      role: 'caseworker',
+      is_sandbox: false,
+    });
     await notifyWorkItem(workItem(), [{ userId: 9, role: 'caseworker' }]);
     expect(insertNotificationMock).toHaveBeenCalled();
     expect(sendEmailMock).not.toHaveBeenCalled();
@@ -174,13 +202,16 @@ describe('notifyWorkItem', () => {
   it('inserts an in-app row and emails urgent items immediately, stamping emailed_at', async () => {
     await notifyWorkItem(workItem(), [{ userId: 9, role: 'caseworker' }]);
     expect(insertNotificationMock).toHaveBeenCalledWith({
-      userId: 9, workItemId: 11, kind: 'crisis_flag', title: 'Crisis flag for client jane.doe',
+      userId: 9,
+      workItemId: 11,
+      kind: 'crisis_flag',
+      title: 'Crisis flag for client jane.doe',
     });
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
     expect(markNotificationsEmailedMock).toHaveBeenCalledWith([501]);
   });
 
-  it("does NOT stamp emailed_at when the send is skipped (no SMTP) — digest must retry it", async () => {
+  it('does NOT stamp emailed_at when the send is skipped (no SMTP) — digest must retry it', async () => {
     sendEmailMock.mockResolvedValue('skipped');
     await notifyWorkItem(workItem(), [{ userId: 9, role: 'caseworker' }]);
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
@@ -253,7 +284,7 @@ describe('notifyWorkItem', () => {
       .mockRejectedValueOnce(new Error('db down'))
       .mockResolvedValueOnce({ userid: 10, username: 'ok@example.com', role: 'therapist', is_sandbox: false });
     await expect(
-      notifyWorkItem(workItem(), [{ userId: 9 }, { userId: 10, role: 'therapist' }])
+      notifyWorkItem(workItem(), [{ userId: 9 }, { userId: 10, role: 'therapist' }]),
     ).resolves.toBeUndefined();
     expect(insertNotificationMock).toHaveBeenCalledTimes(1);
   });
@@ -262,9 +293,39 @@ describe('notifyWorkItem', () => {
 describe('runDigestSweep', () => {
   const NOW = new Date('2026-08-27T15:30:00Z');
   const pending = [
-    { notification_id: 1, user_id: 9, kind: 'inactivity', title: 't', body: null, work_item_id: 1, read_at: null, emailed_at: null, created_at: 'x' },
-    { notification_id: 2, user_id: 9, kind: 'inactivity', title: 't', body: null, work_item_id: 2, read_at: null, emailed_at: null, created_at: 'x' },
-    { notification_id: 3, user_id: 9, kind: 'screener_worsening', title: 't', body: null, work_item_id: 3, read_at: null, emailed_at: null, created_at: 'x' },
+    {
+      notification_id: 1,
+      user_id: 9,
+      kind: 'inactivity',
+      title: 't',
+      body: null,
+      work_item_id: 1,
+      read_at: null,
+      emailed_at: null,
+      created_at: 'x',
+    },
+    {
+      notification_id: 2,
+      user_id: 9,
+      kind: 'inactivity',
+      title: 't',
+      body: null,
+      work_item_id: 2,
+      read_at: null,
+      emailed_at: null,
+      created_at: 'x',
+    },
+    {
+      notification_id: 3,
+      user_id: 9,
+      kind: 'screener_worsening',
+      title: 't',
+      body: null,
+      work_item_id: 3,
+      read_at: null,
+      emailed_at: null,
+      created_at: 'x',
+    },
   ];
 
   beforeEach(() => {
@@ -282,14 +343,21 @@ describe('runDigestSweep', () => {
   });
 
   it('does nothing outside the user digest hour', async () => {
-    getNotificationPreferencesMock.mockResolvedValue({ ...DEFAULT_PREFS, digest_hour_local: (localHour(NOW) + 1) % 24 });
+    getNotificationPreferencesMock.mockResolvedValue({
+      ...DEFAULT_PREFS,
+      digest_hour_local: (localHour(NOW) + 1) % 24,
+    });
     await runDigestSweep(NOW);
     expect(sendEmailMock).not.toHaveBeenCalled();
     expect(markNotificationsEmailedMock).not.toHaveBeenCalled();
   });
 
   it('stamps without sending for email_mode=off users', async () => {
-    getNotificationPreferencesMock.mockResolvedValue({ ...DEFAULT_PREFS, email_mode: 'off', digest_hour_local: (localHour(NOW) + 5) % 24 });
+    getNotificationPreferencesMock.mockResolvedValue({
+      ...DEFAULT_PREFS,
+      email_mode: 'off',
+      digest_hour_local: (localHour(NOW) + 5) % 24,
+    });
     await runDigestSweep(NOW);
     expect(sendEmailMock).not.toHaveBeenCalled();
     expect(markNotificationsEmailedMock).toHaveBeenCalledWith([1, 2, 3]);

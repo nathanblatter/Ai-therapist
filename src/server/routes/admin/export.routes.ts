@@ -23,8 +23,8 @@ const log = createLogger('exportRoutes');
 // Serialise rows to CSV using the given header order; quote/escape every cell.
 function toCsv(headers: string[], rows: ExportRow[]): string {
   const csvRows = [headers.join(',')];
-  rows.forEach(row => {
-    const values = headers.map(header => {
+  rows.forEach((row) => {
+    const values = headers.map((header) => {
       const value = row[header];
       if (value === null || value === undefined) return '';
       if (typeof value === 'object') return JSON.stringify(value).replace(/"/g, '""');
@@ -66,9 +66,7 @@ export default function exportRoutes(): Router {
         const info = await getSessionAccessInfo(String(sessionId));
         const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
         const allowed =
-          ownerId != null &&
-          Number.isInteger(ownerId) &&
-          (await isAssigned(req.session.userId as number, ownerId));
+          ownerId != null && Number.isInteger(ownerId) && (await isAssigned(req.session.userId as number, ownerId));
         if (!allowed) return res.status(404).json({ error: 'Not found' });
       }
 
@@ -122,17 +120,13 @@ export default function exportRoutes(): Router {
         const headers = sessionId
           ? ['id', 'session_id', 'role', 'message_type', 'message', 'extras', 'created_at']
           : ['id', 'session_id', 'session_name', 'username', 'role', 'message_type', 'message', 'extras', 'created_at'];
-        const filename = sessionId
-          ? `session-${sessionId}-export.csv`
-          : `all-sessions-export-${dateStamp}.csv`;
+        const filename = sessionId ? `session-${sessionId}-export.csv` : `all-sessions-export-${dateStamp}.csv`;
 
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(toCsv(headers, rows));
       } else {
-        const filename = sessionId
-          ? `session-${sessionId}-export.json`
-          : `all-sessions-export-${dateStamp}.json`;
+        const filename = sessionId ? `session-${sessionId}-export.json` : `all-sessions-export-${dateStamp}.json`;
 
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

@@ -41,11 +41,25 @@ function appAs(role: string | null, userId = 1, orgId?: number) {
 }
 
 const ITEM = {
-  item_id: 5, org_id: 1, client_id: 42, assignee_id: null, assignee_role: null,
-  item_type: 'crisis_flag', severity: 'urgent', title: 'Crisis flag', detail: null,
-  source_table: 'crisis_events', source_id: '7', status: 'open',
-  acked_by: null, acked_at: null, resolved_by: null, resolved_at: null,
-  resolution_note: null, is_sandbox: false, created_at: 'now',
+  item_id: 5,
+  org_id: 1,
+  client_id: 42,
+  assignee_id: null,
+  assignee_role: null,
+  item_type: 'crisis_flag',
+  severity: 'urgent',
+  title: 'Crisis flag',
+  detail: null,
+  source_table: 'crisis_events',
+  source_id: '7',
+  status: 'open',
+  acked_by: null,
+  acked_at: null,
+  resolved_by: null,
+  resolved_at: null,
+  resolution_note: null,
+  is_sandbox: false,
+  created_at: 'now',
 };
 
 beforeEach(() => {
@@ -127,7 +141,7 @@ describe('POST /admin/api/work-items/:itemId/ack', () => {
         actorUserId: 8,
         actorUsername: 'tester',
         detail: expect.objectContaining({ item_id: 5, item_type: 'crisis_flag' }),
-      })
+      }),
     );
   });
 
@@ -197,7 +211,7 @@ describe('POST /admin/api/work-items/:itemId/resolve', () => {
         therapistId: 7,
         clientId: 42,
         detail: expect.objectContaining({ item_id: 5, has_resolution_note: true }),
-      })
+      }),
     );
   });
 

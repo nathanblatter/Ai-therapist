@@ -70,8 +70,8 @@ export function scheduleAbandonCheck(sessionId: string, delayMs = DISCONNECT_GRA
   if (pendingChecks.has(sessionId)) return; // already scheduled
   const timer = setTimeout(() => {
     pendingChecks.delete(sessionId);
-    void checkAndFinalizeIfAbandoned(sessionId).catch(err =>
-      log.error({ err }, `abandon check failed for ${sessionId}`)
+    void checkAndFinalizeIfAbandoned(sessionId).catch((err) =>
+      log.error({ err }, `abandon check failed for ${sessionId}`),
     );
   }, delayMs);
   pendingChecks.set(sessionId, timer);
@@ -96,7 +96,7 @@ async function checkAndFinalizeIfAbandoned(sessionId: string): Promise<void> {
 async function getIdleDurationMs(sessionId: string, createdAt: Date): Promise<number> {
   const result = await pool.query<{ last_at: Date | null }>(
     `SELECT MAX(created_at) AS last_at FROM messages WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   const lastMessageAt = result.rows[0]?.last_at;
   const lastKnown = lastMessageAt && lastMessageAt > createdAt ? lastMessageAt : createdAt;
@@ -129,18 +129,18 @@ export async function serverEndSession(
   await dropChatTranscript(sessionId, 'serverEnd');
 
   import('./sessionRedaction.service.js')
-    .then(m => m.redactSession(sessionId))
-    .then(() => import('./sessionName.service.js').then(m => m.generateSessionNameAsync(sessionId)))
-    .catch(err => log.error({ err }, `[serverEnd] redaction/naming failed for ${sessionId}`));
+    .then((m) => m.redactSession(sessionId))
+    .then(() => import('./sessionName.service.js').then((m) => m.generateSessionNameAsync(sessionId)))
+    .catch((err) => log.error({ err }, `[serverEnd] redaction/naming failed for ${sessionId}`));
   import('./recorder.service.js')
-    .then(m => m.finalize(sessionId))
-    .catch(err => log.error({ err }, `[serverEnd] recorder finalize failed for ${sessionId}`));
+    .then((m) => m.finalize(sessionId))
+    .catch((err) => log.error({ err }, `[serverEnd] recorder finalize failed for ${sessionId}`));
   import('./sessionInsights.service.js')
-    .then(m => m.generateSessionInsightsAsync(sessionId))
-    .catch(err => log.error({ err }, `[serverEnd] insights failed for ${sessionId}`));
+    .then((m) => m.generateSessionInsightsAsync(sessionId))
+    .catch((err) => log.error({ err }, `[serverEnd] insights failed for ${sessionId}`));
   import('./sessionEval.service.js')
-    .then(m => m.maybeAutoEvalSession(sessionId))
-    .catch(err => log.error({ err }, `[serverEnd] auto-eval failed for ${sessionId}`));
+    .then((m) => m.maybeAutoEvalSession(sessionId))
+    .catch((err) => log.error({ err }, `[serverEnd] auto-eval failed for ${sessionId}`));
 
   if (global.io) {
     global.io.to(`session:${sessionId}`).emit('session:status', {
@@ -150,9 +150,18 @@ export async function serverEndSession(
       ...(opts.message ? { message: opts.message } : {}),
       remoteTermination: true,
     });
-    void broadcastAdminEventForSession(global.io, 'session:ended', {
-      sessionId, endedAt: new Date(), endedBy: opts.endedBy, reason: opts.reason,
-    }, sessionId, 'summary');
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:ended',
+      {
+        sessionId,
+        endedAt: new Date(),
+        endedBy: opts.endedBy,
+        reason: opts.reason,
+      },
+      sessionId,
+      'summary',
+    );
   }
   return true;
 }
@@ -185,10 +194,10 @@ async function finalizeAbandonedSession(sessionId: string): Promise<void> {
   await dropChatTranscript(sessionId, 'abandon-finalize');
 
   const { redactSession } = await import('./sessionRedaction.service.js');
-  redactSession(sessionId).catch(err => log.error({ err }, `[Redaction] abandon-finalize failed for ${sessionId}`));
+  redactSession(sessionId).catch((err) => log.error({ err }, `[Redaction] abandon-finalize failed for ${sessionId}`));
 
   const { finalize } = await import('./recorder.service.js');
-  finalize(sessionId).catch(err => log.error({ err }, `[Recorder] abandon-finalize failed for ${sessionId}`));
+  finalize(sessionId).catch((err) => log.error({ err }, `[Recorder] abandon-finalize failed for ${sessionId}`));
 
   // ai-therapist-256: abandoned sessions (dropped tunnel, closed tab — the
   // common ending for a voice session) used to be the one end path that
@@ -202,8 +211,16 @@ async function finalizeAbandonedSession(sessionId: string): Promise<void> {
   }
 
   if (global.io) {
-    void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'system', reason: 'abandoned' }, sessionId, 'summary');
-    global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'system', reason: 'abandoned' });
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:ended',
+      { sessionId, endedAt: new Date(), endedBy: 'system', reason: 'abandoned' },
+      sessionId,
+      'summary',
+    );
+    global.io
+      .to(`session:${sessionId}`)
+      .emit('session:status', { status: 'ended', endedBy: 'system', reason: 'abandoned' });
   }
 }
 
@@ -218,7 +235,7 @@ export async function sweepAbandonedSessions(): Promise<{ finalized: number }> {
         AND ts.is_demo IS NOT TRUE
       GROUP BY ts.session_id, ts.created_at
      HAVING GREATEST(ts.created_at, COALESCE(MAX(m.created_at), ts.created_at)) < $1`,
-    [cutoff]
+    [cutoff],
   );
 
   for (const row of result.rows) {
@@ -248,7 +265,7 @@ export async function sweepAbandonedSessions(): Promise<{ finalized: number }> {
 export function startAbandonedSessionSweeper(): void {
   if (sweepTimer) return;
   sweepTimer = setInterval(() => {
-    sweepAbandonedSessions().catch(err => log.error({ err }, 'abandoned-session sweep failed'));
+    sweepAbandonedSessions().catch((err) => log.error({ err }, 'abandoned-session sweep failed'));
   }, SWEEP_INTERVAL_MS);
   // Node timers otherwise keep the process alive during tests/scripts.
   sweepTimer.unref?.();

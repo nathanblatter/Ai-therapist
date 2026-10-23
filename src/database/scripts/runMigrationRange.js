@@ -18,9 +18,13 @@ if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) {
   process.exit(1);
 }
 
-const files = fs.readdirSync(MIG_DIR)
-  .filter(f => /^\d{3}_.*\.sql$/.test(f) && !f.includes('_rollback'))
-  .filter(f => { const n = Number(f.slice(0, 3)); return n >= from && n <= to; })
+const files = fs
+  .readdirSync(MIG_DIR)
+  .filter((f) => /^\d{3}_.*\.sql$/.test(f) && !f.includes('_rollback'))
+  .filter((f) => {
+    const n = Number(f.slice(0, 3));
+    return n >= from && n <= to;
+  })
   .sort();
 
 async function main() {

@@ -108,10 +108,17 @@ describe('POST /admin/api/harness/run', () => {
 
   it('starts a run and echoes pid/suite', async () => {
     runnerMocks.startHarnessRun.mockResolvedValueOnce({ pid: 123, suite: 'voice' });
-    const res = await request(appAs('researcher')).post('/admin/api/harness/run').send({ suite: 'voice', variations: 2 });
+    const res = await request(appAs('researcher'))
+      .post('/admin/api/harness/run')
+      .send({ suite: 'voice', variations: 2 });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ started: true, pid: 123, suite: 'voice' });
-    expect(runnerMocks.startHarnessRun).toHaveBeenCalledWith({ suite: 'voice', scenarioId: undefined, variations: 2, trigger: 'admin' });
+    expect(runnerMocks.startHarnessRun).toHaveBeenCalledWith({
+      suite: 'voice',
+      scenarioId: undefined,
+      variations: 2,
+      trigger: 'admin',
+    });
   });
 
   it('409s when a run is already in progress', async () => {
@@ -136,9 +143,18 @@ describe('GET /admin/api/harness/status + PUT schedule', () => {
   });
 
   it('schedule saves are researcher-only and echo the normalized schedule', async () => {
-    expect((await request(appAs('therapist')).put('/admin/api/harness/schedule').send({ enabled: true })).status).toBe(403);
-    runnerMocks.setHarnessSchedule.mockResolvedValueOnce({ enabled: true, suite: 'quality', hour_utc: 8, variations: 2 });
-    const res = await request(appAs('researcher')).put('/admin/api/harness/schedule').send({ enabled: true, suite: 'quality', hour_utc: 8, variations: 2 });
+    expect((await request(appAs('therapist')).put('/admin/api/harness/schedule').send({ enabled: true })).status).toBe(
+      403,
+    );
+    runnerMocks.setHarnessSchedule.mockResolvedValueOnce({
+      enabled: true,
+      suite: 'quality',
+      hour_utc: 8,
+      variations: 2,
+    });
+    const res = await request(appAs('researcher'))
+      .put('/admin/api/harness/schedule')
+      .send({ enabled: true, suite: 'quality', hour_utc: 8, variations: 2 });
     expect(res.status).toBe(200);
     expect(res.body.schedule.enabled).toBe(true);
   });

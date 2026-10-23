@@ -28,7 +28,7 @@ export interface UserCaseProfileRow {
 export async function getUserCaseProfile(userId: number): Promise<UserCaseProfileRow | null> {
   const result = await pool.query<UserCaseProfileRow>(
     'SELECT user_id, profile, updated_at FROM user_case_profiles WHERE user_id = $1',
-    [userId]
+    [userId],
   );
   return result.rows[0] ?? null;
 }
@@ -40,6 +40,6 @@ export async function upsertUserCaseProfile(userId: number, profile: CaseProfile
      VALUES ($1, $2, CURRENT_TIMESTAMP)
      ON CONFLICT (user_id) DO UPDATE
        SET profile = EXCLUDED.profile, updated_at = CURRENT_TIMESTAMP`,
-    [userId, JSON.stringify(profile)]
+    [userId, JSON.stringify(profile)],
   );
 }

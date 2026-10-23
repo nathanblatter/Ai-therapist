@@ -6,7 +6,11 @@ import { pool } from '../config/db.js';
 import { ownerOrgScopeSql } from './organizations.queries.js';
 
 export type AdjudicationVerdict = 'confirmed' | 'false_positive' | 'unclear';
-export const ADJUDICATION_VERDICTS: readonly AdjudicationVerdict[] = ['confirmed', 'false_positive', 'unclear'] as const;
+export const ADJUDICATION_VERDICTS: readonly AdjudicationVerdict[] = [
+  'confirmed',
+  'false_positive',
+  'unclear',
+] as const;
 
 export interface CrisisEventAdjudicationRow {
   adjudication_id: number;
@@ -27,7 +31,7 @@ export async function getCrisisEventAdjudications(eventId: number): Promise<Cris
      LEFT JOIN users u ON u.userid = a.adjudicator_id
      WHERE a.crisis_event_id = $1
      ORDER BY a.adjudicated_at DESC`,
-    [eventId]
+    [eventId],
   );
   return result.rows;
 }
@@ -37,7 +41,7 @@ export async function upsertCrisisEventAdjudication(
   eventId: number,
   adjudicatorId: number,
   verdict: AdjudicationVerdict,
-  note: string | null
+  note: string | null,
 ): Promise<CrisisEventAdjudicationRow> {
   const result = await pool.query<CrisisEventAdjudicationRow>(
     `INSERT INTO crisis_event_adjudications (crisis_event_id, adjudicator_id, verdict, note)
@@ -47,7 +51,7 @@ export async function upsertCrisisEventAdjudication(
            note = EXCLUDED.note,
            adjudicated_at = CURRENT_TIMESTAMP
      RETURNING *`,
-    [eventId, adjudicatorId, verdict, note]
+    [eventId, adjudicatorId, verdict, note],
   );
   return result.rows[0];
 }
@@ -59,7 +63,7 @@ export async function upsertCrisisEventAdjudication(
  */
 export async function countUnadjudicatedCrisisEvents(
   scopeTherapistId?: number | null,
-  orgId?: number | null
+  orgId?: number | null,
 ): Promise<number> {
   const params: unknown[] = [];
   let clause = '';
@@ -79,7 +83,7 @@ export async function countUnadjudicatedCrisisEvents(
      LEFT JOIN therapy_sessions ts ON ts.session_id = ce.session_id
      WHERE ts.is_demo IS NOT TRUE
        AND NOT EXISTS (SELECT 1 FROM crisis_event_adjudications a WHERE a.crisis_event_id = ce.event_id)${clause}`,
-    params
+    params,
   );
   return result.rows[0]?.n ?? 0;
 }
@@ -89,8 +93,7 @@ export async function countUnadjudicatedCrisisEvents(
  * never the note) to a crisis_events row aliased `ce`. Shared by the crisis
  * dashboard queries so every event card can render the widget state.
  */
-export const CRISIS_EVENT_ADJUDICATIONS_SQL =
-  `(SELECT COALESCE(jsonb_agg(jsonb_build_object(
+export const CRISIS_EVENT_ADJUDICATIONS_SQL = `(SELECT COALESCE(jsonb_agg(jsonb_build_object(
        'adjudicator_id', a.adjudicator_id, 'verdict', a.verdict, 'adjudicated_at', a.adjudicated_at
      ) ORDER BY a.adjudicated_at DESC), '[]'::jsonb)
     FROM crisis_event_adjudications a WHERE a.crisis_event_id = ce.event_id) AS adjudications`;

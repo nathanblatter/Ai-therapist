@@ -70,7 +70,7 @@ describe('GET /demo/:token', () => {
     expect(state.body).toEqual({ userId: 900, userRole: 'demo', orgId: null });
   });
 
-  it('rotates the session and drops a previous login\'s orgId', async () => {
+  it("rotates the session and drops a previous login's orgId", async () => {
     const agent = request.agent(makeApp());
     await agent.post('/test/seed');
     const res = await agent.get(`/demo/${TOKEN}`);

@@ -62,11 +62,7 @@ describe('broadcastAdminEvent tier routing', () => {
   it("tier='summary' additionally fans out to caseworker rooms", async () => {
     const { io, to, emit } = makeIo();
     await broadcastAdminEvent(io, 'session:ended', { sessionId: 's1' }, 42, 'summary');
-    expect(to.mock.calls.map((c) => c[0])).toEqual([
-      'admin-broadcast',
-      'therapist:7',
-      'caseworker:21',
-    ]);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'therapist:7', 'caseworker:21']);
     expect(emit).toHaveBeenCalledTimes(3);
     expect(mocks.getCaseworkerIdsForClient).toHaveBeenCalledWith(42);
   });
@@ -81,9 +77,7 @@ describe('broadcastAdminEvent tier routing', () => {
   it('a caseworker lookup failure skips caseworker rooms without throwing', async () => {
     const { io, to } = makeIo();
     mocks.getCaseworkerIdsForClient.mockRejectedValue(new Error('db down'));
-    await expect(
-      broadcastAdminEvent(io, 'session:ended', {}, 42, 'summary')
-    ).resolves.toBeUndefined();
+    await expect(broadcastAdminEvent(io, 'session:ended', {}, 42, 'summary')).resolves.toBeUndefined();
     expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
   });
 
@@ -107,11 +101,7 @@ describe('broadcastAdminEventForSession tier passthrough', () => {
     const { io, to } = makeIo();
     mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, session_type: 'chat' });
     await broadcastAdminEventForSession(io, 'session:ended', {}, 'sess-1', 'summary');
-    expect(to.mock.calls.map((c) => c[0])).toEqual([
-      'admin-broadcast',
-      'therapist:7',
-      'caseworker:21',
-    ]);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'therapist:7', 'caseworker:21']);
   });
 
   it('defaults to full when no tier is given', async () => {

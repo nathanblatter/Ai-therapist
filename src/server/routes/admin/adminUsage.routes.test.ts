@@ -124,7 +124,10 @@ describe('POST /admin/api/usage-events', () => {
   it('skips unknown kinds silently', async () => {
     await request(appAs('researcher'))
       .post('/admin/api/usage-events')
-      .send({ usageSessionId: USAGE_ID, events: [{ kind: 'keystrokes' }, { kind: 'overlay_open', detail: { overlay: 'session_detail' } }] });
+      .send({
+        usageSessionId: USAGE_ID,
+        events: [{ kind: 'keystrokes' }, { kind: 'overlay_open', detail: { overlay: 'session_detail' } }],
+      });
     const rows = insertAdminUsageEventsMock.mock.calls[0][0];
     expect(rows).toHaveLength(1);
     expect(rows[0].kind).toBe('overlay_open');

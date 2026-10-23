@@ -9,7 +9,9 @@ const dbMocks = vi.hoisted(() => ({
   insertRatingQueueRows: vi.fn(),
 }));
 vi.mock('../db/index.js', () => dbMocks);
-const configMock = vi.hoisted(() => ({ getSystemConfig: vi.fn(async () => ({ evals: { rating_second_rater_fraction: 0.5 } })) }));
+const configMock = vi.hoisted(() => ({
+  getSystemConfig: vi.fn(async () => ({ evals: { rating_second_rater_fraction: 0.5 } })),
+}));
 vi.mock('../utils/sessionHelpers.js', () => configMock);
 
 import {
@@ -81,12 +83,14 @@ describe('stratum keys', () => {
 
 describe('stratifySample', () => {
   it('is deterministic for a seed and differs across seeds', () => {
-    const pool = Array.from({ length: 40 }, (_, i) => candidate(`s${String(i).padStart(2, '0')}`, { max_risk_score: (i * 7) % 100 }));
+    const pool = Array.from({ length: 40 }, (_, i) =>
+      candidate(`s${String(i).padStart(2, '0')}`, { max_risk_score: (i * 7) % 100 }),
+    );
     const a = stratifySample(pool, { size: 10, seed: 42 });
     const b = stratifySample(pool, { size: 10, seed: 42 });
     const c = stratifySample(pool, { size: 10, seed: 43 });
     expect(a).toEqual(b);
-    expect(a.picks.map(p => p.session_id)).not.toEqual(c.picks.map(p => p.session_id));
+    expect(a.picks.map((p) => p.session_id)).not.toEqual(c.picks.map((p) => p.session_id));
   });
 
   it('covers every non-empty stratum before allocating proportionally, never exceeding size', () => {
@@ -98,12 +102,17 @@ describe('stratifySample', () => {
     ];
     const { picks, allocations } = stratifySample(pool, { size: 8, seed: 1 });
     expect(picks).toHaveLength(8);
-    expect(allocations.map(a => a.stratum)).toEqual(['chat|high|2026-W42', 'chat|none|2026-W42', 'chat|none|2026-W43', 'voice|none|2026-W42']);
+    expect(allocations.map((a) => a.stratum)).toEqual([
+      'chat|high|2026-W42',
+      'chat|none|2026-W42',
+      'chat|none|2026-W43',
+      'voice|none|2026-W42',
+    ]);
     for (const a of allocations) expect(a.allocated).toBeGreaterThanOrEqual(1);
-    expect(allocations.find(a => a.stratum === 'chat|none|2026-W42')!.allocated).toBeGreaterThan(
-      allocations.find(a => a.stratum === 'voice|none|2026-W42')!.allocated
+    expect(allocations.find((a) => a.stratum === 'chat|none|2026-W42')!.allocated).toBeGreaterThan(
+      allocations.find((a) => a.stratum === 'voice|none|2026-W42')!.allocated,
     );
-    expect(new Set(picks.map(p => p.session_id)).size).toBe(8);
+    expect(new Set(picks.map((p) => p.session_id)).size).toBe(8);
   });
 
   it('never allocates more than a stratum holds and never picks beyond the pool', () => {
@@ -117,11 +126,13 @@ describe('stratifySample', () => {
     // Two equally sized strata; one is entirely crisis-adjacent.
     const pool = [
       ...Array.from({ length: 10 }, (_, i) => candidate(`calm-${i}`)),
-      ...Array.from({ length: 10 }, (_, i) => candidate(`hot-${i}`, { session_type: 'realtime', crisis_flagged: true })),
+      ...Array.from({ length: 10 }, (_, i) =>
+        candidate(`hot-${i}`, { session_type: 'realtime', crisis_flagged: true }),
+      ),
     ];
     const { allocations } = stratifySample(pool, { size: 8, seed: 5, crisisOversample: 3 });
-    const calm = allocations.find(a => a.stratum.startsWith('chat'))!.allocated;
-    const hot = allocations.find(a => a.stratum.startsWith('voice'))!.allocated;
+    const calm = allocations.find((a) => a.stratum.startsWith('chat'))!.allocated;
+    const hot = allocations.find((a) => a.stratum.startsWith('voice'))!.allocated;
     expect(hot).toBeGreaterThan(calm);
     expect(hot + calm).toBe(8);
   });
@@ -132,7 +143,7 @@ describe('stratifySample', () => {
     let hits = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const { picks } = stratifySample(pool, { size: 4, seed, crisisOversample: 10 });
-      hits += picks.filter(p => p.crisis_adjacent).length;
+      hits += picks.filter((p) => p.crisis_adjacent).length;
     }
     // 2 of 20 at weight 10 vs 18 at weight 1: expect well above the 0.4/draw base rate.
     expect(hits).toBeGreaterThan(20);
@@ -140,9 +151,15 @@ describe('stratifySample', () => {
 
   it('marks the configured fraction for a second rater (0 and 1 are exact)', () => {
     const pool = Array.from({ length: 30 }, (_, i) => candidate(`s${i}`));
-    expect(stratifySample(pool, { size: 30, seed: 2, secondRaterFraction: 0 }).picks.every(p => !p.needs_second_rater)).toBe(true);
-    expect(stratifySample(pool, { size: 30, seed: 2, secondRaterFraction: 1 }).picks.every(p => p.needs_second_rater)).toBe(true);
-    const some = stratifySample(pool, { size: 30, seed: 2, secondRaterFraction: 0.3 }).picks.filter(p => p.needs_second_rater).length;
+    expect(
+      stratifySample(pool, { size: 30, seed: 2, secondRaterFraction: 0 }).picks.every((p) => !p.needs_second_rater),
+    ).toBe(true);
+    expect(
+      stratifySample(pool, { size: 30, seed: 2, secondRaterFraction: 1 }).picks.every((p) => p.needs_second_rater),
+    ).toBe(true);
+    const some = stratifySample(pool, { size: 30, seed: 2, secondRaterFraction: 0.3 }).picks.filter(
+      (p) => p.needs_second_rater,
+    ).length;
     expect(some).toBeGreaterThan(0);
     expect(some).toBeLessThan(30);
   });
@@ -185,7 +202,7 @@ describe('enqueueStratifiedSample', () => {
     expect(dbMocks.insertRatingQueueRows).not.toHaveBeenCalled();
 
     const real = await enqueueStratifiedSample({ size: 2, seed: 3, enqueuedBy: 9 });
-    expect(real.picks.map(p => p.session_id)).toEqual(dry.picks.map(p => p.session_id));
+    expect(real.picks.map((p) => p.session_id)).toEqual(dry.picks.map((p) => p.session_id));
     const [rows, by] = dbMocks.insertRatingQueueRows.mock.calls[0];
     expect(by).toBe(9);
     expect(rows.every((r: { source: string }) => r.source === 'stratified')).toBe(true);
@@ -200,7 +217,13 @@ describe('enqueueSessions', () => {
     expect(result.skipped).toEqual(['missing']);
     const [rows] = dbMocks.insertRatingQueueRows.mock.calls[0];
     expect(rows).toEqual([
-      { session_id: 'ok', stratum: 'chat|moderate|2026-W42', source: 'disagreement', crisis_adjacent: true, needs_second_rater: false },
+      {
+        session_id: 'ok',
+        stratum: 'chat|moderate|2026-W42',
+        source: 'disagreement',
+        crisis_adjacent: true,
+        needs_second_rater: false,
+      },
     ]);
   });
 });

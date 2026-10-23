@@ -143,7 +143,8 @@ export default function knowledgeRoutes(): Router {
   // reranking earns its latency before building a fuller eval.
   router.get('/admin/api/knowledge/rerank-decisions', canRead, async (req, res) => {
     const toolName = typeof req.query.tool === 'string' && req.query.tool ? req.query.tool : null;
-    const sessionId = typeof req.query.sessionId === 'string' && req.query.sessionId.trim() ? req.query.sessionId.trim() : null;
+    const sessionId =
+      typeof req.query.sessionId === 'string' && req.query.sessionId.trim() ? req.query.sessionId.trim() : null;
     const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
     try {
       const [stats, decisions] = await Promise.all([
@@ -245,7 +246,7 @@ export default function knowledgeRoutes(): Router {
           similarity: c.similarity,
           content_preview: c.content.slice(0, 300),
         })),
-        chosen: rerank.chunks.map(c => c.chunk_id),
+        chosen: rerank.chunks.map((c) => c.chunk_id),
         used_fallback: rerank.usedFallback,
         latency_ms: rerank.latencyMs,
       });

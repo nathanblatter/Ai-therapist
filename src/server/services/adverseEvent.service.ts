@@ -38,10 +38,10 @@ async function buildRedactedExcerpt(sessionId: string): Promise<string | null> {
   // Redact any messages that lack a stored redacted form.
   const needRedaction = messages
     .map((m, idx) => ({ idx, content: m.content ?? null, hasRedacted: !!m.content_redacted }))
-    .filter(m => !m.hasRedacted && m.content);
+    .filter((m) => !m.hasRedacted && m.content);
   let redactedById = new Map<number, string>();
   if (needRedaction.length > 0) {
-    redactedById = await redactPHIBatch(needRedaction.map(m => ({ id: m.idx, content: m.content })));
+    redactedById = await redactPHIBatch(needRedaction.map((m) => ({ id: m.idx, content: m.content })));
   }
 
   const lines = messages.map((m, idx) => {
@@ -120,7 +120,7 @@ export async function draftAdverseEventFromCrisis(sessionId: string, opts: Draft
     }
     timeline.sort((x, y) => (x.at ?? '').localeCompare(y.at ?? ''));
 
-    const actionsTaken: AdverseEventActionEntry[] = actions.map(a => ({
+    const actionsTaken: AdverseEventActionEntry[] = actions.map((a) => ({
       at: toIso(a.performed_at),
       action: a.action_type,
       by: a.performed_by,
@@ -134,9 +134,10 @@ export async function draftAdverseEventFromCrisis(sessionId: string, opts: Draft
       ? (snapshot.crisis_severity as 'low' | 'medium' | 'high')
       : 'high';
     const participantRef = snapshot.user_id != null ? `user ${snapshot.user_id}` : 'anonymous';
-    const summary = triggerSource === 'manual'
-      ? `Manually filed adverse-event report at ${new Date().toISOString()}. Review and complete.`
-      : `Auto-drafted from high-severity crisis flag at ${occurredAt.toISOString()}, risk score ${snapshot.crisis_risk_score ?? 'n/a'}. Review and complete.`;
+    const summary =
+      triggerSource === 'manual'
+        ? `Manually filed adverse-event report at ${new Date().toISOString()}. Review and complete.`
+        : `Auto-drafted from high-severity crisis flag at ${occurredAt.toISOString()}, risk score ${snapshot.crisis_risk_score ?? 'n/a'}. Review and complete.`;
 
     const reportId = await insertAdverseEventDraft({
       sessionId,
@@ -209,14 +210,14 @@ export async function draftAdverseEventFromEligibility(
 
     const actions = await getSessionInterventionActions(sessionId);
 
-    const timeline: AdverseEventTimelineEntry[] = actions.map(a => ({
+    const timeline: AdverseEventTimelineEntry[] = actions.map((a) => ({
       at: toIso(a.performed_at),
       kind: 'intervention',
       detail: a.action_type,
     }));
     timeline.sort((x, y) => (x.at ?? '').localeCompare(y.at ?? ''));
 
-    const actionsTaken: AdverseEventActionEntry[] = actions.map(a => ({
+    const actionsTaken: AdverseEventActionEntry[] = actions.map((a) => ({
       at: toIso(a.performed_at),
       action: a.action_type,
       by: a.performed_by,

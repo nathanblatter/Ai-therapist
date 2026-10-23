@@ -45,8 +45,13 @@ describe('createCareNote', () => {
   it('inserts a draft with JSON-stringified content', async () => {
     queryMock.mockResolvedValueOnce({ rows: [DRAFT] });
     const note = await createCareNote({
-      orgId: 1, clientId: 42, authorId: 7, authorName: 'dr_t',
-      authorRole: 'therapist', noteType: 'progress', content: { subjective: 's' },
+      orgId: 1,
+      clientId: 42,
+      authorId: 7,
+      authorName: 'dr_t',
+      authorRole: 'therapist',
+      noteType: 'progress',
+      content: { subjective: 's' },
     });
     expect(note).toEqual(DRAFT);
     const params = queryMock.mock.calls[0][1] as unknown[];
@@ -93,7 +98,7 @@ describe('draft guards', () => {
     queryMock.mockResolvedValueOnce({ rows: [] });
     await updateCareNoteDraft(5, 7, { content: { a: 1 } });
     const params = queryMock.mock.calls[0][1] as unknown[];
-    expect(params[3]).toBeNull();  // kind value unused...
+    expect(params[3]).toBeNull(); // kind value unused...
     expect(params[4]).toBe(false); // ...because the set flag is off
   });
 
@@ -111,10 +116,10 @@ describe('draft guards', () => {
 describe('signCareNote', () => {
   it('signs a draft in a transaction and computes a sign hash', async () => {
     clientQueryMock
-      .mockResolvedValueOnce({ rows: [] })                    // BEGIN
-      .mockResolvedValueOnce({ rows: [DRAFT] })               // SELECT ... FOR UPDATE
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [DRAFT] }) // SELECT ... FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ ...DRAFT, status: 'signed', sign_hash: 'h' }] }) // UPDATE
-      .mockResolvedValueOnce({ rows: [] });                   // COMMIT
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
     const signed = await signCareNote(5, 7);
     expect(signed?.status).toBe('signed');
     const sqls = clientQueryMock.mock.calls.map((c) => String(c[0]));
@@ -129,9 +134,9 @@ describe('signCareNote', () => {
 
   it('rolls back and returns null when the note is not a signable draft', async () => {
     clientQueryMock
-      .mockResolvedValueOnce({ rows: [] })   // BEGIN
-      .mockResolvedValueOnce({ rows: [] })   // SELECT miss
-      .mockResolvedValueOnce({ rows: [] });  // ROLLBACK
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // SELECT miss
+      .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
     await expect(signCareNote(5, 7)).resolves.toBeNull();
     expect(String(clientQueryMock.mock.calls[2][0])).toBe('ROLLBACK');
   });
@@ -139,11 +144,11 @@ describe('signCareNote', () => {
   it('flips the amended original to amended in the same transaction', async () => {
     const amendment = { ...DRAFT, note_id: 6, amends_note_id: 5 };
     clientQueryMock
-      .mockResolvedValueOnce({ rows: [] })                          // BEGIN
-      .mockResolvedValueOnce({ rows: [amendment] })                 // SELECT
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [amendment] }) // SELECT
       .mockResolvedValueOnce({ rows: [{ ...amendment, status: 'signed' }] }) // UPDATE sign
-      .mockResolvedValueOnce({ rows: [] })                          // UPDATE original -> amended
-      .mockResolvedValueOnce({ rows: [] });                         // COMMIT
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE original -> amended
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
     await signCareNote(6, 7);
     const flip = clientQueryMock.mock.calls[3];
     expect(String(flip[0])).toContain(`'amended'`);
@@ -153,12 +158,12 @@ describe('signCareNote', () => {
   it('carries the original session_id onto the signed amendment (live-note linkage preserved)', async () => {
     const amendment = { ...DRAFT, note_id: 6, amends_note_id: 5, session_id: null };
     clientQueryMock
-      .mockResolvedValueOnce({ rows: [] })                                     // BEGIN
-      .mockResolvedValueOnce({ rows: [amendment] })                            // SELECT ... FOR UPDATE
-      .mockResolvedValueOnce({ rows: [{ ...amendment, status: 'signed' }] })   // UPDATE sign
-      .mockResolvedValueOnce({ rows: [{ session_id: 'sess-1' }] })             // flip original -> amended
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [amendment] }) // SELECT ... FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ ...amendment, status: 'signed' }] }) // UPDATE sign
+      .mockResolvedValueOnce({ rows: [{ session_id: 'sess-1' }] }) // flip original -> amended
       .mockResolvedValueOnce({ rows: [{ ...amendment, status: 'signed', session_id: 'sess-1' }] }) // carry
-      .mockResolvedValueOnce({ rows: [] });                                    // COMMIT
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
     const signed = await signCareNote(6, 7);
     expect(signed?.session_id).toBe('sess-1');
     const carry = clientQueryMock.mock.calls[4];
@@ -172,11 +177,11 @@ describe('signCareNote', () => {
   it('skips the carry when the original has no session linkage', async () => {
     const amendment = { ...DRAFT, note_id: 6, amends_note_id: 5, session_id: null };
     clientQueryMock
-      .mockResolvedValueOnce({ rows: [] })                                     // BEGIN
-      .mockResolvedValueOnce({ rows: [amendment] })                            // SELECT
-      .mockResolvedValueOnce({ rows: [{ ...amendment, status: 'signed' }] })   // UPDATE sign
-      .mockResolvedValueOnce({ rows: [{ session_id: null }] })                 // flip
-      .mockResolvedValueOnce({ rows: [] });                                    // COMMIT
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [amendment] }) // SELECT
+      .mockResolvedValueOnce({ rows: [{ ...amendment, status: 'signed' }] }) // UPDATE sign
+      .mockResolvedValueOnce({ rows: [{ session_id: null }] }) // flip
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
     await signCareNote(6, 7);
     expect(String(clientQueryMock.mock.calls[4][0])).toBe('COMMIT');
   });
@@ -185,8 +190,12 @@ describe('signCareNote', () => {
 describe('computeSignHash', () => {
   it('is deterministic regardless of content key order', () => {
     const base = {
-      note_id: 1, client_id: 2, author_id: 3, author_name: 'a',
-      note_type: 'case', signed_at: '2026-08-27T00:00:00.000Z',
+      note_id: 1,
+      client_id: 2,
+      author_id: 3,
+      author_name: 'a',
+      note_type: 'case',
+      signed_at: '2026-08-27T00:00:00.000Z',
     };
     const h1 = computeSignHash({ ...base, content: { x: 1, y: { b: 2, a: 1 } } });
     const h2 = computeSignHash({ ...base, content: { y: { a: 1, b: 2 }, x: 1 } });
@@ -196,11 +205,14 @@ describe('computeSignHash', () => {
 
   it('changes when content changes', () => {
     const base = {
-      note_id: 1, client_id: 2, author_id: 3, author_name: 'a',
-      note_type: 'case', signed_at: '2026-08-27T00:00:00.000Z',
+      note_id: 1,
+      client_id: 2,
+      author_id: 3,
+      author_name: 'a',
+      note_type: 'case',
+      signed_at: '2026-08-27T00:00:00.000Z',
     };
-    expect(computeSignHash({ ...base, content: { x: 1 } }))
-      .not.toBe(computeSignHash({ ...base, content: { x: 2 } }));
+    expect(computeSignHash({ ...base, content: { x: 1 } })).not.toBe(computeSignHash({ ...base, content: { x: 2 } }));
   });
 });
 

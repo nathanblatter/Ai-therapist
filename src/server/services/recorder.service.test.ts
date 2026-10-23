@@ -77,12 +77,15 @@ describe('recorder.service', () => {
     expect((body as Buffer).length).toBe(44 + 24576); // header + data
 
     // duration = 12288 samples / 48000 Hz = 256ms
-    expect(setRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({
-      objectKey: `sessions/${sessionId}/recording.wav`,
-      status: 'ready',
-      durationMs: 256,
-      sampleRate,
-    }));
+    expect(setRecordingMock).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        objectKey: `sessions/${sessionId}/recording.wav`,
+        status: 'ready',
+        durationMs: 256,
+        sampleRate,
+      }),
+    );
 
     // Buffer is cleared after finalize.
     expect(hasRecording(sessionId)).toBe(false);
@@ -120,10 +123,13 @@ describe('recorder.service', () => {
     // Exactly one upload happened, and its duration reflects only the first
     // chunk (8192 bytes / 2 / 48000 = ~85ms), not the straggler.
     expect(putObjectMock).toHaveBeenCalledOnce();
-    expect(setRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({
-      status: 'ready',
-      durationMs: 85,
-    }));
+    expect(setRecordingMock).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        status: 'ready',
+        durationMs: 85,
+      }),
+    );
   });
 
   it('abort discards the buffer without uploading', async () => {
@@ -148,21 +154,24 @@ describe('recorder.service', () => {
     await finalize(sessionId);
 
     const keys = putObjectMock.mock.calls.map((c) => c[0]).sort();
-    expect(keys).toEqual([
-      `sessions/${sessionId}/participant.wav`,
-      `sessions/${sessionId}/recording.wav`,
-    ]);
+    expect(keys).toEqual([`sessions/${sessionId}/participant.wav`, `sessions/${sessionId}/recording.wav`]);
     // mixed: 8192 samples / 48000 = ~171ms; participant: 4096 / 48000 = ~85ms
-    expect(setRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({
-      objectKey: `sessions/${sessionId}/recording.wav`,
-      status: 'ready',
-      durationMs: 171,
-    }));
-    expect(setParticipantRecordingMock).toHaveBeenCalledWith(sessionId, expect.objectContaining({
-      objectKey: `sessions/${sessionId}/participant.wav`,
-      status: 'ready',
-      durationMs: 85,
-    }));
+    expect(setRecordingMock).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        objectKey: `sessions/${sessionId}/recording.wav`,
+        status: 'ready',
+        durationMs: 171,
+      }),
+    );
+    expect(setParticipantRecordingMock).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        objectKey: `sessions/${sessionId}/participant.wav`,
+        status: 'ready',
+        durationMs: 85,
+      }),
+    );
     expect(hasRecording(sessionId)).toBe(false);
   });
 

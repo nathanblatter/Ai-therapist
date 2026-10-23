@@ -63,7 +63,10 @@ export class HarnessClient {
     if (this.baseUrl) return this.baseUrl;
     await new Promise<void>((resolve, reject) => {
       httpServer.once('error', reject);
-      httpServer.listen(0, '127.0.0.1', () => { httpServer.off('error', reject); resolve(); });
+      httpServer.listen(0, '127.0.0.1', () => {
+        httpServer.off('error', reject);
+        resolve();
+      });
     });
     const addr = httpServer.address() as AddressInfo;
     this.baseUrl = `http://127.0.0.1:${addr.port}`;
@@ -98,11 +101,17 @@ export class HarnessClient {
     const deadline = Date.now() + 10_000;
     for (;;) {
       const status = await agent.get('/api/auth/status');
-      if (status.status === 200 && status.body?.authenticated === true && typeof status.body?.user?.userid === 'number') {
+      if (
+        status.status === 200 &&
+        status.body?.authenticated === true &&
+        typeof status.body?.user?.userid === 'number'
+      ) {
         return;
       }
       if (Date.now() > deadline) {
-        throw new Error(`participant login did not persist to the session store within 10s (last status: ${JSON.stringify(status.body)})`);
+        throw new Error(
+          `participant login did not persist to the session store within 10s (last status: ${JSON.stringify(status.body)})`,
+        );
       }
       await sleep(100);
     }
@@ -119,11 +128,17 @@ export class HarnessClient {
     const deadline = Date.now() + 10_000;
     for (;;) {
       const status = await agent.get('/api/auth/status');
-      if (status.status === 200 && status.body?.authenticated === true && typeof status.body?.user?.userid === 'number') {
+      if (
+        status.status === 200 &&
+        status.body?.authenticated === true &&
+        typeof status.body?.user?.userid === 'number'
+      ) {
         return status.body.user.userid as number;
       }
       if (Date.now() > deadline) {
-        throw new Error(`staff login for ${username} did not persist to the session store within 10s (last status: ${JSON.stringify(status.body)})`);
+        throw new Error(
+          `staff login for ${username} did not persist to the session store within 10s (last status: ${JSON.stringify(status.body)})`,
+        );
       }
       await sleep(100);
     }
@@ -191,11 +206,7 @@ export class HarnessClient {
   /** Send a chat turn WITHOUT throwing on a non-200, returning the raw status +
    *  body. Used by beats that expect the message to be rejected (e.g. the
    *  eligibility gate already ended the session → 400 "not active"). */
-  async chatMessageRaw(
-    agent: Agent,
-    sessionId: string,
-    message: string,
-  ): Promise<{ status: number; body: unknown }> {
+  async chatMessageRaw(agent: Agent, sessionId: string, message: string): Promise<{ status: number; body: unknown }> {
     const res = await agent.post('/api/chat/message').send({ sessionId, message });
     return { status: res.status, body: res.body };
   }
@@ -231,7 +242,9 @@ export class HarnessClient {
   ): Promise<void> {
     const before = this.emissions.length;
     const res = await agent.post('/logs/batch').send({
-      records: [{ timestamp: new Date().toISOString(), sessionId, role, type: 'text', message, extras: extras ?? null }],
+      records: [
+        { timestamp: new Date().toISOString(), sessionId, role, type: 'text', message, extras: extras ?? null },
+      ],
     });
     if (res.status !== 200) throw new Error(`/logs/batch failed: ${res.status} ${res.text}`);
     await this.waitForBatchProcessed(sessionId, before);
@@ -248,7 +261,7 @@ export class HarnessClient {
     while (Date.now() < deadline) {
       const done = this.emissions
         .slice(sinceIndex)
-        .some(e => e.event === 'session:activity' && this.emissionMatchesSession(e, sessionId));
+        .some((e) => e.event === 'session:activity' && this.emissionMatchesSession(e, sessionId));
       if (done) return;
       await sleep(150);
     }
@@ -267,17 +280,23 @@ export class HarnessClient {
 /** Normalise the assistant endpoint's body: `answer` plus a `toolCalls`
  *  trail of {name, rowCount}; anything malformed in the trail is dropped
  *  rather than crashing the run (the audit table is the durable record). */
-export function parseAssistantReply(body: unknown): { answer: string; toolCalls: Array<{ name: string; rowCount: number }> } {
+export function parseAssistantReply(body: unknown): {
+  answer: string;
+  toolCalls: Array<{ name: string; rowCount: number }>;
+} {
   const b = (body ?? {}) as { answer?: unknown; toolCalls?: unknown };
   const answer = typeof b.answer === 'string' ? b.answer : '';
   const toolCalls = Array.isArray(b.toolCalls)
     ? b.toolCalls
-        .filter((t): t is { name: string; rowCount?: unknown } => !!t && typeof t === 'object' && typeof (t as { name?: unknown }).name === 'string')
-        .map(t => ({ name: t.name, rowCount: typeof t.rowCount === 'number' ? t.rowCount : 0 }))
+        .filter(
+          (t): t is { name: string; rowCount?: unknown } =>
+            !!t && typeof t === 'object' && typeof (t as { name?: unknown }).name === 'string',
+        )
+        .map((t) => ({ name: t.name, rowCount: typeof t.rowCount === 'number' ? t.rowCount : 0 }))
     : [];
   return { answer, toolCalls };
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }

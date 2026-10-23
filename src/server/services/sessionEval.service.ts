@@ -138,7 +138,11 @@ export interface JudgeEnsembleSettings {
  */
 export function resolveJudgeEnsemble(options: RunEvalOptions, config: EvalsConfig): JudgeEnsembleSettings {
   const clean = (xs: unknown): string[] =>
-    Array.isArray(xs) ? Array.from(new Set(xs.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map(x => x.trim()))) : [];
+    Array.isArray(xs)
+      ? Array.from(
+          new Set(xs.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim())),
+        )
+      : [];
   let models = clean(options.judgeModels);
   if (models.length === 0 && options.judgeModel) models = [options.judgeModel];
   if (models.length === 0) models = clean(config.judge_models);
@@ -147,7 +151,9 @@ export function resolveJudgeEnsemble(options: RunEvalOptions, config: EvalsConfi
     models = Array.from(new Set([primary, ...DEFAULT_JUDGE_MODELS]));
   }
   const rawRuns = options.selfConsistencyRuns ?? config.self_consistency_runs ?? DEFAULT_SELF_CONSISTENCY_RUNS;
-  const runs = Number.isInteger(rawRuns) ? Math.min(MAX_SELF_CONSISTENCY_RUNS, Math.max(1, rawRuns as number)) : DEFAULT_SELF_CONSISTENCY_RUNS;
+  const runs = Number.isInteger(rawRuns)
+    ? Math.min(MAX_SELF_CONSISTENCY_RUNS, Math.max(1, rawRuns as number))
+    : DEFAULT_SELF_CONSISTENCY_RUNS;
   return { models, runs };
 }
 
@@ -187,12 +193,12 @@ export function consensusRubric(runs: JudgeRun[]): EvalRubric {
   if (runs.length === 0) throw new Error('consensusRubric requires at least one judge run');
   const rubric: EvalRubric = {};
   for (const dim of EVAL_DIMENSIONS) {
-    const scores = runs.map(r => r.rubric[dim].score);
+    const scores = runs.map((r) => r.rubric[dim].score);
     const primary = runs[0].rubric[dim];
     let rationale = primary.rationale;
     if (runs.length > 1 && new Set(scores).size > 1) {
       const detail = runs
-        .map(r => `${r.judgeModel}${r.runIndex > 0 ? `#${r.runIndex + 1}` : ''} ${r.rubric[dim].score}`)
+        .map((r) => `${r.judgeModel}${r.runIndex > 0 ? `#${r.runIndex + 1}` : ''} ${r.rubric[dim].score}`)
         .join(', ');
       rationale = `${rationale} [judge scores: ${detail}]`.trim();
     }
@@ -206,7 +212,7 @@ export function judgeSpread(runs: JudgeRun[]): Record<string, number> | null {
   if (runs.length < 2) return null;
   const spread: Record<string, number> = {};
   for (const dim of EVAL_DIMENSIONS) {
-    const scores = runs.map(r => r.rubric[dim].score);
+    const scores = runs.map((r) => r.rubric[dim].score);
     spread[dim] = Math.max(...scores) - Math.min(...scores);
   }
   return spread;
@@ -240,14 +246,14 @@ async function getEvalsConfig(): Promise<EvalsConfig> {
  */
 export async function buildJudgeTranscript(
   sessionId: string,
-  maxChars: number = MAX_TRANSCRIPT_CHARS
+  maxChars: number = MAX_TRANSCRIPT_CHARS,
 ): Promise<string | null> {
   const messages = await getSessionMessages(sessionId, false);
   const conversation = messages
-    .filter(m => m.role === 'user' || m.role === 'assistant')
-    .map(m => ({ role: m.role, text: (m.content ?? m.content_redacted ?? '').trim() }))
-    .filter(m => m.text)
-    .map(m => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.text}`)
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, text: (m.content ?? m.content_redacted ?? '').trim() }))
+    .filter((m) => m.text)
+    .map((m) => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.text}`)
     .join('\n');
   if (!conversation) return null;
   return conversation.substring(0, maxChars);
@@ -300,7 +306,10 @@ export async function evaluateSession(sessionId: string, options: RunEvalOptions
  * consensus row together with every raw judge run (for callers that report
  * per-judge scores, e.g. the red-team harness).
  */
-export async function evaluateSessionDetailed(sessionId: string, options: RunEvalOptions = {}): Promise<DetailedEvalResult | null> {
+export async function evaluateSessionDetailed(
+  sessionId: string,
+  options: RunEvalOptions = {},
+): Promise<DetailedEvalResult | null> {
   const session = await getSession(sessionId);
   if (!session) {
     log.warn(`Session ${sessionId} not found; skipping eval`);
@@ -322,7 +331,13 @@ export async function evaluateSessionDetailed(sessionId: string, options: RunEva
     log.info(`Eval ${EVAL_PROMPT_VERSION} already exists for ${sessionId}; skipping (use force to re-run)`);
     const existing = await getSessionEval(sessionId);
     if (!existing) return null;
-    return { row: existing, settings: { models: [existing.judge_model], runs: 1 }, runs: [], failed: [], spread: existing.judge_spread ?? null };
+    return {
+      row: existing,
+      settings: { models: [existing.judge_model], runs: 1 },
+      runs: [],
+      failed: [],
+      spread: existing.judge_spread ?? null,
+    };
   }
 
   // Transcript: prefer original content; fall back to redacted text after the
@@ -336,8 +351,7 @@ export async function evaluateSessionDetailed(sessionId: string, options: RunEva
   const config = await getSessionConfig(sessionId);
   const settings = resolveJudgeEnsemble(options, await getEvalsConfig());
   const userContent =
-    `Session context:\n${describeModality(config?.modality ?? null)}\n\n` +
-    `Transcript:\n${conversation}`;
+    `Session context:\n${describeModality(config?.modality ?? null)}\n\n` + `Transcript:\n${conversation}`;
 
   // Every (model, run) pair is one independent judge call with the identical
   // v1 prompt. Runs beyond the first carry a seed so self-consistency is
@@ -357,7 +371,9 @@ export async function evaluateSessionDetailed(sessionId: string, options: RunEva
     }
   }
   if (runs.length === 0) {
-    throw new Error(`All judge runs failed for ${sessionId}: ${failed.map(f => `${f.judgeModel}: ${f.error}`).join('; ')}`);
+    throw new Error(
+      `All judge runs failed for ${sessionId}: ${failed.map((f) => `${f.judgeModel}: ${f.error}`).join('; ')}`,
+    );
   }
 
   const rubric = consensusRubric(runs);
@@ -366,42 +382,55 @@ export async function evaluateSessionDetailed(sessionId: string, options: RunEva
   const label = ensembleLabel(settings);
 
   const row = await upsertSessionEval(sessionId, rubric, overallComments, label, EVAL_PROMPT_VERSION, spread);
-  const judgeRows: NewJudgeRun[] = runs.map(r => ({
-    judgeModel: r.judgeModel, runIndex: r.runIndex, seed: r.seed, rubric: r.rubric, overallComments: r.overallComments,
+  const judgeRows: NewJudgeRun[] = runs.map((r) => ({
+    judgeModel: r.judgeModel,
+    runIndex: r.runIndex,
+    seed: r.seed,
+    rubric: r.rubric,
+    overallComments: r.overallComments,
   }));
   await replaceSessionEvalJudges(sessionId, EVAL_PROMPT_VERSION, judgeRows);
 
-  const scores = EVAL_DIMENSIONS.map(d => `${d}=${rubric[d].score}`).join(' ');
-  log.info(`Eval stored for ${sessionId} [${label}/${EVAL_PROMPT_VERSION}]: ${scores}` +
-    (spread ? ` spread=${Object.values(spread).reduce((m, v) => Math.max(m, v), 0)}` : '') +
-    (failed.length ? ` (${failed.length} judge run(s) failed)` : ''));
+  const scores = EVAL_DIMENSIONS.map((d) => `${d}=${rubric[d].score}`).join(' ');
+  log.info(
+    `Eval stored for ${sessionId} [${label}/${EVAL_PROMPT_VERSION}]: ${scores}` +
+      (spread ? ` spread=${Object.values(spread).reduce((m, v) => Math.max(m, v), 0)}` : '') +
+      (failed.length ? ` (${failed.length} judge run(s) failed)` : ''),
+  );
 
   // Drift check after every stored eval (fire-and-forget). Dynamic import keeps
   // this free of a module-eval cycle with evalDrift.service.ts.
   import('./evalDrift.service.js')
-    .then(m => m.maybeCheckEvalDrift())
-    .catch(err => log.error({ err }, 'Failed to schedule eval drift check'));
+    .then((m) => m.maybeCheckEvalDrift())
+    .catch((err) => log.error({ err }, 'Failed to schedule eval drift check'));
 
   return { row, settings, runs, failed, spread };
 }
 
 /** One judge call: identical v1 system prompt, JSON mode, validated rubric. */
-async function runJudgeOnce(judgeModel: string, runIndex: number, seed: number | null, userContent: string): Promise<JudgeRun> {
+async function runJudgeOnce(
+  judgeModel: string,
+  runIndex: number,
+  seed: number | null,
+  userContent: string,
+): Promise<JudgeRun> {
   const client = await getClient();
   // Offline quality judging: flex halves the cost on eligible models.
   const { withFlex } = await import('../utils/flexTier.js');
-  const response = await withFlex(judgeModel, (tierParams) => client.chat.completions.create({
-    model: judgeModel,
-    response_format: { type: 'json_object' },
-    store: false,
-    ...judgeRequestParams(judgeModel),
-    ...(seed !== null ? { seed } : {}),
-    ...tierParams,
-    messages: [
-      { role: 'system', content: JUDGE_SYSTEM_PROMPT },
-      { role: 'user', content: userContent },
-    ],
-  }));
+  const response = await withFlex(judgeModel, (tierParams) =>
+    client.chat.completions.create({
+      model: judgeModel,
+      response_format: { type: 'json_object' },
+      store: false,
+      ...judgeRequestParams(judgeModel),
+      ...(seed !== null ? { seed } : {}),
+      ...tierParams,
+      messages: [
+        { role: 'system', content: JUDGE_SYSTEM_PROMPT },
+        { role: 'user', content: userContent },
+      ],
+    }),
+  );
 
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error('Empty eval response from judge model');
@@ -436,11 +465,15 @@ export function validateRubric(parsed: Record<string, unknown>): EvalRubric {
 }
 
 /** Evaluate every ended session missing a current-version eval. */
-export async function evaluateAllEnded(options: RunEvalOptions = {}): Promise<{ evaluated: number; skipped: number; failed: number }> {
+export async function evaluateAllEnded(
+  options: RunEvalOptions = {},
+): Promise<{ evaluated: number; skipped: number; failed: number }> {
   // With force, query against a prompt version no row can have so EVERY ended
   // session is returned; evaluateSession then re-judges each one.
   const sessionIds = await getUnevaluatedEndedSessions(options.force ? '__none__' : EVAL_PROMPT_VERSION);
-  let evaluated = 0, skipped = 0, failed = 0;
+  let evaluated = 0,
+    skipped = 0,
+    failed = 0;
   for (const sessionId of sessionIds) {
     try {
       const row = await evaluateSession(sessionId, options);
@@ -465,7 +498,7 @@ export function maybeAutoEvalSession(sessionId: string): void {
   // an admin enables auto_run in config. Explicit paths still work everywhere.
   if (process.env.EVALS_ENABLED !== 'true') return;
   getEvalsConfig()
-    .then(async cfg => {
+    .then(async (cfg) => {
       if (cfg.auto_run_enabled !== true) return;
       // Skip the auto-enqueue for is_demo sessions (demo accounts, eval
       // harness, sandbox seeds — caseworker portal spec section 7 item 5):
@@ -477,5 +510,5 @@ export function maybeAutoEvalSession(sessionId: string): void {
       }
       await evaluateSession(sessionId);
     })
-    .catch(err => log.error({ err }, `Auto-eval failed for ${sessionId}`));
+    .catch((err) => log.error({ err }, `Auto-eval failed for ${sessionId}`));
 }

@@ -47,7 +47,9 @@ describe('upsertSessionInsights', () => {
     const curve = [{ turn: 1, valence: -0.2, arousal: 0.4, label: 'flat' }];
     await upsertSessionInsights('s1', 42, summary, soap, 'gpt-5.2', curve);
     const [sql, params] = lastCall();
-    expect(sql).toMatch(/INSERT INTO session_insights \(session_id, user_id, summary, soap_note, model, affect_curve\)\s+VALUES \(\$1, \$2, \$3, \$4, \$5, \$6\)/);
+    expect(sql).toMatch(
+      /INSERT INTO session_insights \(session_id, user_id, summary, soap_note, model, affect_curve\)\s+VALUES \(\$1, \$2, \$3, \$4, \$5, \$6\)/,
+    );
     expect(sql).toContain('ON CONFLICT (session_id) DO UPDATE');
     for (const col of ['summary', 'soap_note', 'model', 'affect_curve']) {
       expect(sql).toContain(`${col} = EXCLUDED.${col}`);
@@ -114,7 +116,10 @@ describe('setSessionCheckin', () => {
   it('stores the check-in as JSON against the session', async () => {
     const checkin = { mood: 3, topic: 'work', goal: 'calm', submitted_at: '2026-01-01T00:00:00Z' };
     await setSessionCheckin('s1', checkin);
-    expect(lastCall()).toEqual(['UPDATE therapy_sessions SET checkin = $2 WHERE session_id = $1', ['s1', JSON.stringify(checkin)]]);
+    expect(lastCall()).toEqual([
+      'UPDATE therapy_sessions SET checkin = $2 WHERE session_id = $1',
+      ['s1', JSON.stringify(checkin)],
+    ]);
   });
 });
 
@@ -151,8 +156,22 @@ describe('therapist notes for the next session', () => {
 
   it('getLatestClinicianNote takes the newest non-empty note across the user sessions', async () => {
     const created = new Date('2026-01-05T00:00:00Z');
-    queryMock.mockResolvedValueOnce({ rows: [{ session_id: 's9', notes_for_next_session: 'Follow up on sleep', notes_author: 'dr_t', notes_created_at: created }] });
-    await expect(getLatestClinicianNote(42)).resolves.toEqual({ notes: 'Follow up on sleep', author: 'dr_t', created_at: created, session_id: 's9' });
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        {
+          session_id: 's9',
+          notes_for_next_session: 'Follow up on sleep',
+          notes_author: 'dr_t',
+          notes_created_at: created,
+        },
+      ],
+    });
+    await expect(getLatestClinicianNote(42)).resolves.toEqual({
+      notes: 'Follow up on sleep',
+      author: 'dr_t',
+      created_at: created,
+      session_id: 's9',
+    });
     const [sql, params] = lastCall();
     expect(sql).toContain("WHERE user_id = $1 AND notes_for_next_session IS NOT NULL AND notes_for_next_session != ''");
     expect(sql).toMatch(/ORDER BY notes_created_at DESC\s+LIMIT 1/);

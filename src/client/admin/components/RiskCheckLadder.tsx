@@ -65,19 +65,23 @@ const BAND_CLASS: Record<RiskBand, string> = {
 };
 
 function bandClass(band: RiskBand | null): string {
-  return band ? BAND_CLASS[band] ?? 'bg-gray-100 text-gray-600' : 'bg-gray-100 text-gray-600';
+  return band ? (BAND_CLASS[band] ?? 'bg-gray-100 text-gray-600') : 'bg-gray-100 text-gray-600';
 }
 
 /** The rung track: which core questions were asked, in order. */
 function LadderTrack({ steps }: { steps: LadderStep[] }) {
-  const asked = new Map(steps.map(s => [s.step, s]));
+  const asked = new Map(steps.map((s) => [s.step, s]));
   return (
     <div className="flex flex-wrap items-center gap-1">
       {LADDER_ORDER.map((rung, i) => {
         const hit = asked.get(rung);
         return (
           <span key={rung} className="flex items-center gap-1">
-            {i > 0 && <span className="text-gray-300" aria-hidden="true">&rarr;</span>}
+            {i > 0 && (
+              <span className="text-gray-300" aria-hidden="true">
+                &rarr;
+              </span>
+            )}
             <span
               className={`px-1.5 py-0.5 rounded text-xs font-medium ${
                 hit ? bandClass(hit.risk_band) : 'bg-white text-gray-400 border border-dashed border-gray-300'
@@ -93,7 +97,7 @@ function LadderTrack({ steps }: { steps: LadderStep[] }) {
 }
 
 function LadderBody({ ladder, onViewSession }: { ladder: Ladder; onViewSession?: (id: string) => void }) {
-  const protective = ladder.steps.filter(s => s.step === 'protective_factors');
+  const protective = ladder.steps.filter((s) => s.step === 'protective_factors');
   return (
     <div className="bg-white rounded p-3 space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
@@ -101,10 +105,14 @@ function LadderBody({ ladder, onViewSession }: { ladder: Ladder; onViewSession?:
           resolved: {ladder.resolved_band ?? 'unrated'}
         </span>
         <span className="text-xs text-gray-500">
-          {ladder.completed ? 'ladder completed through intent' : `reached ${STEP_LABEL[ladder.furthest_step ?? ''] ?? 'no core rung'}`}
+          {ladder.completed
+            ? 'ladder completed through intent'
+            : `reached ${STEP_LABEL[ladder.furthest_step ?? ''] ?? 'no core rung'}`}
         </span>
         {protective.length > 0 && (
-          <span className="text-xs text-gray-500">{protective.length} protective-factor note{protective.length === 1 ? '' : 's'}</span>
+          <span className="text-xs text-gray-500">
+            {protective.length} protective-factor note{protective.length === 1 ? '' : 's'}
+          </span>
         )}
         {onViewSession && (
           <button
@@ -119,16 +127,22 @@ function LadderBody({ ladder, onViewSession }: { ladder: Ladder; onViewSession?:
       <LadderTrack steps={ladder.steps} />
 
       <ol className="space-y-1.5 pt-1">
-        {ladder.steps.map(step => (
+        {ladder.steps.map((step) => (
           <li key={step.check_step_id} className="border-b border-gray-100 last:border-0 pb-1.5 last:pb-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-medium text-gray-700">{step.sequence}. {STEP_LABEL[step.step] ?? step.step}</span>
-              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${bandClass(step.risk_band)}`}>{step.risk_band}</span>
+              <span className="text-xs font-medium text-gray-700">
+                {step.sequence}. {STEP_LABEL[step.step] ?? step.step}
+              </span>
+              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${bandClass(step.risk_band)}`}>
+                {step.risk_band}
+              </span>
               <span className="text-xs text-gray-400 ml-auto">{new Date(step.created_at).toLocaleString()}</span>
             </div>
-            {step.answer
-              ? <p className="text-xs text-gray-600 mt-0.5">&ldquo;{step.answer}&rdquo;</p>
-              : <p className="text-xs text-gray-400 mt-0.5 italic">Answer text is restricted at your access level.</p>}
+            {step.answer ? (
+              <p className="text-xs text-gray-600 mt-0.5">&ldquo;{step.answer}&rdquo;</p>
+            ) : (
+              <p className="text-xs text-gray-400 mt-0.5 italic">Answer text is restricted at your access level.</p>
+            )}
           </li>
         ))}
       </ol>
@@ -137,14 +151,16 @@ function LadderBody({ ladder, onViewSession }: { ladder: Ladder; onViewSession?:
 }
 
 export default function RiskCheckLadder(props: Props) {
-  const { sessionId, userId, onViewSession } = props as { sessionId?: string; userId?: number; onViewSession?: (id: string) => void };
+  const { sessionId, userId, onViewSession } = props as {
+    sessionId?: string;
+    userId?: number;
+    onViewSession?: (id: string) => void;
+  };
   const [expanded, setExpanded] = useState(false);
   const [ladders, setLadders] = useState<Ladder[] | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const url = sessionId
-    ? `/admin/api/sessions/${sessionId}/risk-check`
-    : `/admin/api/users/${userId}/risk-checks`;
+  const url = sessionId ? `/admin/api/sessions/${sessionId}/risk-check` : `/admin/api/users/${userId}/risk-checks`;
 
   const fetchLadders = useCallback(async () => {
     setLoading(true);
@@ -152,7 +168,7 @@ export default function RiskCheckLadder(props: Props) {
       const data = await getJson<{ ladder?: Ladder; ladders?: Ladder[] }>(url);
       const list = data.ladders ?? (data.ladder ? [data.ladder] : []);
       // A session with no ladder still returns an (empty) summary object.
-      setLadders(list.filter(l => l.steps.length > 0));
+      setLadders(list.filter((l) => l.steps.length > 0));
     } catch {
       setLadders([]);
     } finally {
@@ -162,7 +178,9 @@ export default function RiskCheckLadder(props: Props) {
 
   // The panel can be re-pointed at another session/participant without
   // remounting (AdminApp reuses mounted instances) — drop stale data.
-  useEffect(() => { setLadders(null); }, [url]);
+  useEffect(() => {
+    setLadders(null);
+  }, [url]);
 
   useEffect(() => {
     if (expanded && ladders === null) void fetchLadders();
@@ -201,12 +219,12 @@ export default function RiskCheckLadder(props: Props) {
           {!loading && ladders !== null && ladders.length === 0 && (
             <p className="text-gray-500 text-xs">
               No structured assessment (run_risk_check) was logged
-              {sessionId ? ' in this session' : ' for this participant'}. The automatic keyword/LLM
-              risk pipeline is unaffected &mdash; see the risk timeline.
+              {sessionId ? ' in this session' : ' for this participant'}. The automatic keyword/LLM risk pipeline is
+              unaffected &mdash; see the risk timeline.
             </p>
           )}
 
-          {(ladders ?? []).map(ladder => (
+          {(ladders ?? []).map((ladder) => (
             <LadderBody
               key={ladder.session_id}
               ladder={ladder}

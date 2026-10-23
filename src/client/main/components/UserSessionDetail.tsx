@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
-import { X } from "react-feather";
-import { formatDateTime, timeLabel } from "../../shared/format";
+import { useState, useEffect } from 'react';
+import { X } from 'react-feather';
+import { formatDateTime, timeLabel } from '../../shared/format';
 
 interface SessionMessage {
   role: string;
@@ -58,25 +58,23 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
       <div className="bg-white w-full max-w-4xl h-5/6 rounded-lg shadow-xl flex flex-col">
         <header className="bg-navy text-white p-4 flex justify-between items-start rounded-t-lg">
           <div className="flex-1">
-            <h2 className="text-xl font-bold">
-              {session?.session_name || 'Session Details'}
-            </h2>
+            <h2 className="text-xl font-bold">{session?.session_name || 'Session Details'}</h2>
             <p className="text-xs text-gray-300 mt-1 font-mono">{sessionId}</p>
             {session && (
               <div className="text-sm text-lightBlue mt-2 space-y-1">
-                <div>Status: <span className={`font-semibold ${session.status === 'ended' ? 'text-gray-300' : 'text-green-300'}`}>{session.status}</span></div>
+                <div>
+                  Status:{' '}
+                  <span className={`font-semibold ${session.status === 'ended' ? 'text-gray-300' : 'text-green-300'}`}>
+                    {session.status}
+                  </span>
+                </div>
                 <div>Started: {formatDate(session.created_at)}</div>
-                {session.ended_at && (
-                  <div>Ended: {formatDate(session.ended_at)}</div>
-                )}
+                {session.ended_at && <div>Ended: {formatDate(session.ended_at)}</div>}
                 <div>{messages.length} messages</div>
               </div>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white hover:bg-opacity-20 rounded transition"
-          >
+          <button onClick={onClose} className="p-2 hover:bg-white hover:bg-opacity-20 rounded transition">
             <X size={24} />
           </button>
         </header>
@@ -89,9 +87,7 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
           )}
 
           {error && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-              Error: {error}
-            </div>
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">Error: {error}</div>
           )}
 
           {!loading && !error && messages.length === 0 && (
@@ -107,17 +103,21 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
                   key={index}
                   className={`flex w-full ${msg.role === 'user' ? 'justify-end' : msg.role === 'assistant' ? 'justify-start' : 'justify-center'}`}
                 >
-                  <div className={`max-w-xl px-4 py-3 rounded-2xl ${
-                    msg.role === 'user'
-                      ? 'bg-royal text-white rounded-br-none'
-                      : msg.role === 'assistant'
-                      ? 'bg-lightBlue text-black rounded-bl-none'
-                      : 'bg-gray-200 text-gray-700 rounded-none'
-                  }`}>
+                  <div
+                    className={`max-w-xl px-4 py-3 rounded-2xl ${
+                      msg.role === 'user'
+                        ? 'bg-royal text-white rounded-br-none'
+                        : msg.role === 'assistant'
+                          ? 'bg-lightBlue text-black rounded-bl-none'
+                          : 'bg-gray-200 text-gray-700 rounded-none'
+                    }`}
+                  >
                     <div className="text-xs opacity-70 mb-1">
                       {msg.role.toUpperCase()} | {formatTime(msg.created_at)}
                     </div>
-                    <div className="whitespace-pre-line">{msg.content || msg.content_redacted || '(No message content)'}</div>
+                    <div className="whitespace-pre-line">
+                      {msg.content || msg.content_redacted || '(No message content)'}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -126,10 +126,7 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
         </div>
 
         <footer className="border-t p-4 flex gap-2 bg-white rounded-b-lg">
-          <button
-            onClick={onClose}
-            className="bg-royal text-white px-4 py-2 rounded hover:bg-navy transition ml-auto"
-          >
+          <button onClick={onClose} className="bg-royal text-white px-4 py-2 rounded hover:bg-navy transition ml-auto">
             Close
           </button>
         </footer>

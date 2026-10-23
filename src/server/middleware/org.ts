@@ -42,7 +42,7 @@ export async function orgIdFor(req: Request): Promise<number | null> {
 
   throw new Error(
     `[org] Could not resolve an organization for user ${session.userId}: ` +
-      'no organization_id on the user row and no irb-study org (pre-069 schema?)'
+      'no organization_id on the user row and no irb-study org (pre-069 schema?)',
   );
 }
 
@@ -55,7 +55,7 @@ export async function orgIdFor(req: Request): Promise<number | null> {
  */
 export async function resolveClientOrgId(
   client: { organization_id?: number | null },
-  req: Request
+  req: Request,
 ): Promise<number | null> {
   return client.organization_id ?? (await orgIdFor(req));
 }

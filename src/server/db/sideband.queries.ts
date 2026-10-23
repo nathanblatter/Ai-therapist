@@ -17,7 +17,8 @@ export async function getActiveSidebandSessions(orgId?: number | null): Promise<
     ? `
       AND ${ownerOrgScopeSql('$1', 'ts.user_id')}`
     : '';
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT
       ts.session_id,
       ts.openai_call_id,
@@ -30,7 +31,9 @@ export async function getActiveSidebandSessions(orgId?: number | null): Promise<
     FROM therapy_sessions ts
     WHERE ts.status = 'active'${orgClause}
     ORDER BY ts.created_at DESC
-  `, orgScoped ? [orgId] : []);
+  `,
+    orgScoped ? [orgId] : [],
+  );
   return result.rows;
 }
 
@@ -38,13 +41,17 @@ export async function getActiveSidebandSessions(orgId?: number | null): Promise<
  *  orgId (ai-therapist-278): same researcher organization rule as
  *  getActiveSidebandSessions; null/undefined is unscoped (care-team callers
  *  are caseload-filtered by the socket handler). */
-export async function getSidebandConnectionsByIds(sessionIds: string[], orgId?: number | null): Promise<SidebandSessionRow[]> {
+export async function getSidebandConnectionsByIds(
+  sessionIds: string[],
+  orgId?: number | null,
+): Promise<SidebandSessionRow[]> {
   const orgScoped = orgId !== null && orgId !== undefined;
   const orgClause = orgScoped
     ? `
       AND ${ownerOrgScopeSql('$2', 'ts.user_id')}`
     : '';
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT
       ts.session_id,
       ts.openai_call_id,
@@ -55,7 +62,9 @@ export async function getSidebandConnectionsByIds(sessionIds: string[], orgId?: 
     FROM therapy_sessions ts
     WHERE ts.session_id = ANY($1)${orgClause}
     ORDER BY ts.sideband_connected_at DESC
-  `, orgScoped ? [sessionIds, orgId] : [sessionIds]);
+  `,
+    orgScoped ? [sessionIds, orgId] : [sessionIds],
+  );
   return result.rows;
 }
 
@@ -63,10 +72,13 @@ export async function getSidebandConnectionsByIds(sessionIds: string[], orgId?: 
 export async function logSidebandAction(
   sessionId: string,
   message: string,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
 ): Promise<void> {
-  await pool.query(`
+  await pool.query(
+    `
     INSERT INTO messages (session_id, role, message_type, content, content_redacted, metadata, created_at)
     VALUES ($1, 'system', 'admin_action', $2, NULL, $3, CURRENT_TIMESTAMP)
-  `, [sessionId, message, JSON.stringify(metadata)]);
+  `,
+    [sessionId, message, JSON.stringify(metadata)],
+  );
 }

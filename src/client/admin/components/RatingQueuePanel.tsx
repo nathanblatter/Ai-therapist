@@ -87,7 +87,9 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
       const qs = new URLSearchParams();
       if (mine) qs.set('scope', 'mine');
       if (status !== 'all') qs.set('status', status);
-      const d = await getJson<QueueResponse>(`/admin/api/evals/rating-queue?${qs.toString()}`, { fallback: 'Failed to load rating queue' });
+      const d = await getJson<QueueResponse>(`/admin/api/evals/rating-queue?${qs.toString()}`, {
+        fallback: 'Failed to load rating queue',
+      });
       setData(d);
       setError(null);
     } catch (err) {
@@ -97,12 +99,18 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
     }
   }, [mine, status]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const act = async (item: QueueItem, action: 'claim' | 'skip') => {
     setBusyId(item.queue_id);
     try {
-      await postJson(`/admin/api/evals/rating-queue/${item.queue_id}/${action}`, {}, { fallback: `Failed to ${action}` });
+      await postJson(
+        `/admin/api/evals/rating-queue/${item.queue_id}/${action}`,
+        {},
+        { fallback: `Failed to ${action}` },
+      );
       toast.success(action === 'claim' ? 'Claimed' : 'Skipped');
       await load();
     } catch (err) {
@@ -122,7 +130,11 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
   const sample = async (dryRun: boolean) => {
     setSampling(true);
     try {
-      const result = await postJson<SampleResult>('/admin/api/evals/rating-queue/sample', { size: sampleSize, dry_run: dryRun }, { fallback: 'Sampling failed' });
+      const result = await postJson<SampleResult>(
+        '/admin/api/evals/rating-queue/sample',
+        { size: sampleSize, dry_run: dryRun },
+        { fallback: 'Sampling failed' },
+      );
       if (dryRun) {
         setPreview(result);
       } else {
@@ -140,14 +152,24 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
   const enqueueDisagreement = async () => {
     setSampling(true);
     try {
-      const cal = await getJson<{ judge_agreement?: { high_disagreement: Array<{ session_id: string; max_spread: number }> } }>('/admin/api/evals/calibration');
-      const ids = (cal.judge_agreement?.high_disagreement ?? []).filter(h => h.max_spread > 0).map(h => h.session_id);
+      const cal = await getJson<{
+        judge_agreement?: { high_disagreement: Array<{ session_id: string; max_spread: number }> };
+      }>('/admin/api/evals/calibration');
+      const ids = (cal.judge_agreement?.high_disagreement ?? [])
+        .filter((h) => h.max_spread > 0)
+        .map((h) => h.session_id);
       if (ids.length === 0) {
         toast.info('No judge-disagreement sessions to enqueue');
         return;
       }
-      const result = await postJson<{ inserted: unknown[]; skipped: string[] }>('/admin/api/evals/rating-queue/enqueue', { session_ids: ids, source: 'disagreement' }, { fallback: 'Enqueue failed' });
-      toast.success(`Enqueued ${result.inserted.length} disagreement session${result.inserted.length === 1 ? '' : 's'}`);
+      const result = await postJson<{ inserted: unknown[]; skipped: string[] }>(
+        '/admin/api/evals/rating-queue/enqueue',
+        { session_ids: ids, source: 'disagreement' },
+        { fallback: 'Enqueue failed' },
+      );
+      toast.success(
+        `Enqueued ${result.inserted.length} disagreement session${result.inserted.length === 1 ? '' : 's'}`,
+      );
       await load();
     } catch (err) {
       toast.error(err instanceof HttpError ? err.message : 'Enqueue failed');
@@ -164,7 +186,11 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
         <h3 className="text-xl font-bold flex items-center gap-2">
           <List size={20} /> Rating queue
         </h3>
-        <button onClick={load} className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-navy" disabled={loading}>
+        <button
+          onClick={load}
+          className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-navy"
+          disabled={loading}
+        >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
         </button>
       </div>
@@ -183,8 +209,12 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
               <p className="text-2xl font-bold text-navy mt-1">{n}</p>
             </div>
           ))}
-          <div className={`p-4 rounded-lg shadow ${data && data.unadjudicated_crisis_events > 0 ? 'bg-yellow-50' : 'bg-white'}`}>
-            <p className="text-xs text-gray-600 inline-flex items-center gap-1"><AlertTriangle size={12} /> Unadjudicated crisis events</p>
+          <div
+            className={`p-4 rounded-lg shadow ${data && data.unadjudicated_crisis_events > 0 ? 'bg-yellow-50' : 'bg-white'}`}
+          >
+            <p className="text-xs text-gray-600 inline-flex items-center gap-1">
+              <AlertTriangle size={12} /> Unadjudicated crisis events
+            </p>
             <p className="text-2xl font-bold text-navy mt-1">{data?.unadjudicated_crisis_events ?? 0}</p>
           </div>
         </div>
@@ -200,21 +230,34 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
               min={1}
               max={500}
               value={sampleSize}
-              onChange={e => setSampleSize(Math.max(1, Math.min(500, Number(e.target.value) || 1)))}
+              onChange={(e) => setSampleSize(Math.max(1, Math.min(500, Number(e.target.value) || 1)))}
               className="w-20 border border-gray-300 rounded px-2 py-1"
             />
           </label>
-          <button onClick={() => sample(true)} disabled={sampling} className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 min-h-[36px]">
+          <button
+            onClick={() => sample(true)}
+            disabled={sampling}
+            className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 min-h-[36px]"
+          >
             Preview allocation
           </button>
-          <button onClick={() => sample(false)} disabled={sampling} className="px-3 py-1.5 bg-royal text-white rounded hover:bg-navy disabled:opacity-50 min-h-[36px]">
+          <button
+            onClick={() => sample(false)}
+            disabled={sampling}
+            className="px-3 py-1.5 bg-royal text-white rounded hover:bg-navy disabled:opacity-50 min-h-[36px]"
+          >
             Draw stratified sample
           </button>
-          <button onClick={enqueueDisagreement} disabled={sampling} className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 min-h-[36px]">
+          <button
+            onClick={enqueueDisagreement}
+            disabled={sampling}
+            className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 min-h-[36px]"
+          >
             Enqueue judge-disagreement sessions
           </button>
           <span className="text-xs text-gray-500">
-            Stratified by modality × risk band × ISO week, crisis-adjacent oversampled; {data ? Math.round(data.second_rater_fraction * 100) : 20}% get a second rater.
+            Stratified by modality × risk band × ISO week, crisis-adjacent oversampled;{' '}
+            {data ? Math.round(data.second_rater_fraction * 100) : 20}% get a second rater.
           </span>
         </div>
       )}
@@ -222,19 +265,26 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
       {preview && (
         <div className="bg-white p-4 rounded-lg shadow text-sm">
           <p className="font-medium mb-2">
-            Preview: {preview.picks.length} of {preview.candidate_count} candidates would be enqueued
-            {' '}({preview.picks.filter(p => p.crisis_adjacent).length} crisis-adjacent, {preview.picks.filter(p => p.needs_second_rater).length} with a second rater)
+            Preview: {preview.picks.length} of {preview.candidate_count} candidates would be enqueued (
+            {preview.picks.filter((p) => p.crisis_adjacent).length} crisis-adjacent,{' '}
+            {preview.picks.filter((p) => p.needs_second_rater).length} with a second rater)
           </p>
           <table className="min-w-full text-xs">
             <thead>
               <tr className="text-left text-gray-600 border-b">
-                <th className="py-1 pr-4">Stratum</th><th className="py-1 pr-4">Candidates</th><th className="py-1 pr-4">Crisis-adjacent</th><th className="py-1 pr-4">Allocated</th>
+                <th className="py-1 pr-4">Stratum</th>
+                <th className="py-1 pr-4">Candidates</th>
+                <th className="py-1 pr-4">Crisis-adjacent</th>
+                <th className="py-1 pr-4">Allocated</th>
               </tr>
             </thead>
             <tbody>
-              {preview.allocations.map(a => (
+              {preview.allocations.map((a) => (
                 <tr key={a.stratum} className="border-b last:border-0">
-                  <td className="py-1 pr-4 font-mono">{a.stratum}</td><td className="py-1 pr-4">{a.candidates}</td><td className="py-1 pr-4">{a.crisis_adjacent}</td><td className="py-1 pr-4">{a.allocated}</td>
+                  <td className="py-1 pr-4 font-mono">{a.stratum}</td>
+                  <td className="py-1 pr-4">{a.candidates}</td>
+                  <td className="py-1 pr-4">{a.crisis_adjacent}</td>
+                  <td className="py-1 pr-4">{a.allocated}</td>
                 </tr>
               ))}
             </tbody>
@@ -244,9 +294,13 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
 
       <div className="flex items-center gap-4 text-sm flex-wrap">
         <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={mine} onChange={e => setMine(e.target.checked)} /> My queue
+          <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> My queue
         </label>
-        <select value={status} onChange={e => setStatus(e.target.value as typeof status)} className="border border-gray-300 rounded px-2 py-1">
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value as typeof status)}
+          className="border border-gray-300 rounded px-2 py-1"
+        >
           <option value="open">Open (queued + in progress)</option>
           <option value="rated">Rated</option>
           <option value="skipped">Skipped</option>
@@ -273,7 +327,7 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
               </tr>
             </thead>
             <tbody>
-              {data.items.map(item => (
+              {data.items.map((item) => (
                 <tr key={item.queue_id} className="border-b last:border-0 align-top">
                   <td className="py-2 px-3 font-mono text-xs">
                     {item.session_id}
@@ -293,11 +347,25 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
                   <td className="py-2 px-3 text-xs text-gray-700">
                     {item.assigned_to_username ?? (item.assigned_to ? `user ${item.assigned_to}` : '—')}
                     {item.needs_second_rater && (
-                      <> + {item.second_rater_username ?? (item.second_rater_id ? `user ${item.second_rater_id}` : <span className="text-gray-400">2nd rater open</span>)}</>
+                      <>
+                        {' '}
+                        +{' '}
+                        {item.second_rater_username ??
+                          (item.second_rater_id ? (
+                            `user ${item.second_rater_id}`
+                          ) : (
+                            <span className="text-gray-400">2nd rater open</span>
+                          ))}
+                      </>
                     )}
-                    <div className="text-gray-500">{item.rating_count} rating{item.rating_count === 1 ? '' : 's'}{item.rated_by_me ? ' · yours saved' : ''}</div>
+                    <div className="text-gray-500">
+                      {item.rating_count} rating{item.rating_count === 1 ? '' : 's'}
+                      {item.rated_by_me ? ' · yours saved' : ''}
+                    </div>
                   </td>
-                  <td className="py-2 px-3 text-xs text-gray-600">{item.ended_at ? new Date(item.ended_at).toLocaleDateString() : '—'}</td>
+                  <td className="py-2 px-3 text-xs text-gray-600">
+                    {item.ended_at ? new Date(item.ended_at).toLocaleDateString() : '—'}
+                  </td>
                   <td className="py-2 px-3">
                     <div className="flex items-center gap-2 flex-wrap">
                       {canRate(item, userId) && (
@@ -307,7 +375,8 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
                           className="inline-flex items-center gap-1 px-2 py-1 bg-royal text-white rounded hover:bg-navy text-xs disabled:opacity-50 min-h-[28px]"
                           title="Claim and open the session in blind mode"
                         >
-                          <UserCheck size={12} /> {item.assigned_to === userId || item.second_rater_id === userId ? 'Rate' : 'Claim and rate'}
+                          <UserCheck size={12} />{' '}
+                          {item.assigned_to === userId || item.second_rater_id === userId ? 'Rate' : 'Claim and rate'}
                         </button>
                       )}
                       <button
@@ -335,8 +404,9 @@ export default function RatingQueuePanel({ onViewSession }: { onViewSession?: (s
       </div>
 
       <p className="text-xs text-gray-600">
-        Ratings are blind: opening a queued session hides the judge&apos;s scores and rationale (and other raters&apos; scores)
-        until your rating is saved, then both appear side by side. Reading the transcript is recorded in the Data Access audit as usual.
+        Ratings are blind: opening a queued session hides the judge&apos;s scores and rationale (and other raters&apos;
+        scores) until your rating is saved, then both appear side by side. Reading the transcript is recorded in the
+        Data Access audit as usual.
       </p>
     </div>
   );

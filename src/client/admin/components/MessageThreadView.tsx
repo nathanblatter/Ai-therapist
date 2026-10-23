@@ -86,8 +86,11 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
     getJson<{ threads: AdminThread[] }>(`/api/admin/messaging/clients/${clientId}/threads`)
       // A non-2xx resolves as "no thread yet" (the get-or-create offer shows);
       // only a network failure is reported.
-      .catch((err: unknown) => { if (err instanceof HttpError) return null; throw err; })
-      .then(data => {
+      .catch((err: unknown) => {
+        if (err instanceof HttpError) return null;
+        throw err;
+      })
+      .then((data) => {
         if (cancelled) return;
         const own = data?.threads?.[0] ?? null;
         setResolved(true);
@@ -102,7 +105,9 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
           setResolveError('Could not load messaging for this client.');
         }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [threadId, clientId, selectThread, upsertThread]);
 
   useEffect(() => {
@@ -141,9 +146,7 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
     return (
       <div className="text-center py-8">
         <MessageSquare size={24} className="mx-auto text-gray-300 mb-2" aria-hidden="true" />
-        <p className="text-sm text-gray-500 mb-3">
-          No message conversation with {clientName || 'this client'} yet.
-        </p>
+        <p className="text-sm text-gray-500 mb-3">No message conversation with {clientName || 'this client'} yet.</p>
         {clientId !== undefined && (
           <button
             onClick={() => void startConversation()}
@@ -153,7 +156,11 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
             {creating ? 'Starting…' : 'Start conversation'}
           </button>
         )}
-        {error && <p className="text-sm text-red-600 mt-3" role="alert">{error}</p>}
+        {error && (
+          <p className="text-sm text-red-600 mt-3" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     );
   }
@@ -165,11 +172,7 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
     <div className="flex flex-col h-full min-h-[300px]">
       <div className="flex items-center gap-2 pb-3 border-b border-gray-100 mb-3">
         {onBack && (
-          <button
-            onClick={onBack}
-            className="p-1.5 rounded hover:bg-gray-100 text-gray-500"
-            aria-label="Back to inbox"
-          >
+          <button onClick={onBack} className="p-1.5 rounded hover:bg-gray-100 text-gray-500" aria-label="Back to inbox">
             <ArrowLeft size={16} aria-hidden="true" />
           </button>
         )}
@@ -188,7 +191,7 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
         ) : messages.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-6">No messages yet.</p>
         ) : (
-          messages.map(m => {
+          messages.map((m) => {
             const mine = m.sender_role !== 'participant';
             return (
               <div key={m.message_id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -213,7 +216,11 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
         <div ref={bottomRef} />
       </div>
 
-      {error && <p className="text-sm text-red-600 mt-2" role="alert">{error}</p>}
+      {error && (
+        <p className="text-sm text-red-600 mt-2" role="alert">
+          {error}
+        </p>
+      )}
 
       {frozen ? (
         <p className="text-xs text-gray-500 mt-3 flex items-center gap-1.5">
@@ -224,8 +231,8 @@ export default function MessageThreadView({ threadId, clientId, clientName, onBa
         <div className="flex items-end gap-2 mt-3">
           <textarea
             value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => {
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 void send();

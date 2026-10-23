@@ -30,7 +30,7 @@ describe('getCrisisEventsExport', () => {
     expect(sql).toContain('ce.session_id IS NOT NULL AND sess.session_id IS NOT NULL');
     // Participant pseudonym resolves through the session owner or the
     // thread-origin client.
-    expect(sql).toContain("pp.entity_key = COALESCE(sess.user_id, ce.client_user_id)::text");
+    expect(sql).toContain('pp.entity_key = COALESCE(sess.user_id, ce.client_user_id)::text');
     // Determinism: total order even with empty session pseudonyms.
     expect(sql).toContain("ORDER BY COALESCE(sess.session_pseudo_id, ''), ce.created_at, ce.event_id");
     expect(queryMock.mock.calls[0][1]).toEqual(['2026-08-27T00:00:00Z']);

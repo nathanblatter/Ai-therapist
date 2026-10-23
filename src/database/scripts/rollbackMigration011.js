@@ -39,7 +39,6 @@ async function rollbackMigration() {
     console.log('  - crisis_unflagged_at');
     console.log('  - crisis_unflagged_by');
     console.log('  - monitoring_frequency\n');
-
   } catch (error) {
     console.error('\nRollback failed:', error.message);
     throw error;

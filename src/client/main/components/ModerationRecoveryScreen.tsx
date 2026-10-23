@@ -46,11 +46,7 @@ function dialable(value: string, fallback: string): string {
   return digits.length > 0 ? digits : fallback;
 }
 
-export default function ModerationRecoveryScreen({
-  stage,
-  crisisContact,
-  onRetry,
-}: ModerationRecoveryScreenProps) {
+export default function ModerationRecoveryScreen({ stage, crisisContact, onRetry }: ModerationRecoveryScreenProps) {
   // The admin-configured contact wins when it is enabled; otherwise (and for any
   // blank field) the national defaults are used. A crisis screen must never
   // render without a number on it.
@@ -92,8 +88,7 @@ export default function ModerationRecoveryScreen({
           {stage === 'text' && (
             <p className="text-sm text-gray-700 mb-4 flex items-center gap-2" role="status">
               <Loader size={14} className="animate-spin text-indigo-600 flex-shrink-0" aria-hidden="true" />
-              The call won&apos;t hold right now, so I&apos;m bringing us back in writing instead.
-              Stay with me.
+              The call won&apos;t hold right now, so I&apos;m bringing us back in writing instead. Stay with me.
             </p>
           )}
 
@@ -102,9 +97,8 @@ export default function ModerationRecoveryScreen({
               <p className="text-sm text-amber-900 flex items-start gap-2">
                 <AlertTriangle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
                 <span>
-                  I couldn&apos;t get us reconnected just now. You haven&apos;t done anything wrong.
-                  You can try again below — and the numbers underneath are staffed right now, tonight,
-                  whatever time it is.
+                  I couldn&apos;t get us reconnected just now. You haven&apos;t done anything wrong. You can try again
+                  below — and the numbers underneath are staffed right now, tonight, whatever time it is.
                 </span>
               </p>
             </div>
@@ -115,8 +109,8 @@ export default function ModerationRecoveryScreen({
               <p className="text-sm text-amber-900 flex items-start gap-2">
                 <AlertTriangle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
                 <span>
-                  I can&apos;t continue this conversation here right now. Please use one of the
-                  numbers below — a real person will pick up, any time of day.
+                  I can&apos;t continue this conversation here right now. Please use one of the numbers below — a real
+                  person will pick up, any time of day.
                 </span>
               </p>
             </div>
@@ -149,7 +143,9 @@ export default function ModerationRecoveryScreen({
                 <Phone size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
                   If you are in immediate danger, call{' '}
-                  <a href="tel:911" className="font-semibold underline">911</a>
+                  <a href="tel:911" className="font-semibold underline">
+                    911
+                  </a>
                 </span>
               </li>
             </ul>

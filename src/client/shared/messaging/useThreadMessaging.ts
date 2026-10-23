@@ -95,10 +95,10 @@ export function useThreadMessaging<
 
   /** Merge a thread row into the list (upsert: single-thread views start empty). */
   const upsertThread = useCallback((thread: TThread) => {
-    setThreads(prev =>
-      prev.some(t => t.thread_id === thread.thread_id)
-        ? prev.map(t => (t.thread_id === thread.thread_id ? { ...t, ...thread } : t))
-        : [...prev, thread]
+    setThreads((prev) =>
+      prev.some((t) => t.thread_id === thread.thread_id)
+        ? prev.map((t) => (t.thread_id === thread.thread_id ? { ...t, ...thread } : t))
+        : [...prev, thread],
     );
   }, []);
 
@@ -110,7 +110,7 @@ export function useThreadMessaging<
         setThreadsError({ status: res.status });
         return;
       }
-      const data = await res.json() as { threads: TThread[]; unread_total?: number };
+      const data = (await res.json()) as { threads: TThread[]; unread_total?: number };
       setThreads(data.threads);
       if (typeof data.unread_total === 'number') setUnreadTotal(data.unread_total);
       setThreadsError(null);
@@ -121,81 +121,94 @@ export function useThreadMessaging<
     }
   }, [threadsUrl]);
 
-  const loadMessages = useCallback(async (threadId: number) => {
-    setLoadingMessages(true);
-    setError(null);
-    try {
-      const res = await fetch(`${basePath}/threads/${threadId}/messages`, { credentials: 'include' });
-      if (!res.ok) {
+  const loadMessages = useCallback(
+    async (threadId: number) => {
+      setLoadingMessages(true);
+      setError(null);
+      try {
+        const res = await fetch(`${basePath}/threads/${threadId}/messages`, { credentials: 'include' });
+        if (!res.ok) {
+          setError('Could not load this conversation.');
+          return;
+        }
+        const data = (await res.json()) as { thread: TThread; messages: TMessage[] };
+        setMessages(data.messages);
+        // Keep the thread row (status/frozen) fresh alongside its messages.
+        upsertThread(data.thread);
+        // Mark read up to the newest visible message (fire-and-forget).
+        const newest = data.messages[data.messages.length - 1];
+        if (newest) {
+          void fetch(`${basePath}/threads/${threadId}/read`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ last_read_message_id: newest.message_id }),
+          })
+            .then(() => refreshThreads())
+            .catch(() => {
+              /* retried on next open */
+            });
+        }
+      } catch {
         setError('Could not load this conversation.');
-        return;
+      } finally {
+        setLoadingMessages(false);
       }
-      const data = await res.json() as { thread: TThread; messages: TMessage[] };
-      setMessages(data.messages);
-      // Keep the thread row (status/frozen) fresh alongside its messages.
-      upsertThread(data.thread);
-      // Mark read up to the newest visible message (fire-and-forget).
-      const newest = data.messages[data.messages.length - 1];
-      if (newest) {
-        void fetch(`${basePath}/threads/${threadId}/read`, {
+    },
+    [basePath, refreshThreads, upsertThread],
+  );
+
+  const selectThread = useCallback(
+    (threadId: number | null, opts?: { skipLoad?: boolean }) => {
+      setSelectedThreadId(threadId);
+      setMessages([]);
+      setError(null);
+      if (threadId !== null && !opts?.skipLoad) void loadMessages(threadId);
+    },
+    [loadMessages],
+  );
+
+  const sendMessage = useCallback(
+    async (body: string): Promise<boolean> => {
+      const threadId = selectedRef.current;
+      if (threadId === null || !body.trim()) return false;
+      setSending(true);
+      setError(null);
+      try {
+        const res = await fetch(`${basePath}/threads/${threadId}/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ last_read_message_id: newest.message_id }),
-        }).then(() => refreshThreads()).catch(() => { /* retried on next open */ });
-      }
-    } catch {
-      setError('Could not load this conversation.');
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, [basePath, refreshThreads, upsertThread]);
-
-  const selectThread = useCallback((threadId: number | null, opts?: { skipLoad?: boolean }) => {
-    setSelectedThreadId(threadId);
-    setMessages([]);
-    setError(null);
-    if (threadId !== null && !opts?.skipLoad) void loadMessages(threadId);
-  }, [loadMessages]);
-
-  const sendMessage = useCallback(async (body: string): Promise<boolean> => {
-    const threadId = selectedRef.current;
-    if (threadId === null || !body.trim()) return false;
-    setSending(true);
-    setError(null);
-    try {
-      const res = await fetch(`${basePath}/threads/${threadId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ body: body.trim() }),
-      });
-      if (res.status === 409) {
-        setError('This conversation is closed and no longer accepts new messages.');
-        // Refresh so the frozen state renders (thread row + banner).
+          body: JSON.stringify({ body: body.trim() }),
+        });
+        if (res.status === 409) {
+          setError('This conversation is closed and no longer accepts new messages.');
+          // Refresh so the frozen state renders (thread row + banner).
+          void refreshThreads();
+          void loadMessages(threadId);
+          return false;
+        }
+        if (res.status === 429) {
+          setError('You have sent a lot of messages recently. Please wait a bit and try again.');
+          return false;
+        }
+        if (!res.ok) {
+          setError('Your message could not be sent. Please try again.');
+          return false;
+        }
+        const data = (await res.json()) as { message: TMessage };
+        setMessages((prev) => [...prev, data.message]);
         void refreshThreads();
-        void loadMessages(threadId);
-        return false;
-      }
-      if (res.status === 429) {
-        setError('You have sent a lot of messages recently. Please wait a bit and try again.');
-        return false;
-      }
-      if (!res.ok) {
+        return true;
+      } catch {
         setError('Your message could not be sent. Please try again.');
         return false;
+      } finally {
+        setSending(false);
       }
-      const data = await res.json() as { message: TMessage };
-      setMessages(prev => [...prev, data.message]);
-      void refreshThreads();
-      return true;
-    } catch {
-      setError('Your message could not be sent. Please try again.');
-      return false;
-    } finally {
-      setSending(false);
-    }
-  }, [basePath, refreshThreads, loadMessages]);
+    },
+    [basePath, refreshThreads, loadMessages],
+  );
 
   // Initial load + polling while active + focus/visibility refresh. Hidden
   // tabs skip the poll tick and catch up when the tab is shown again.
@@ -264,7 +277,7 @@ export function useThreadMessaging<
     };
   }, [socket, getSocket, refreshThreads, loadMessages, reloadOnAnyScanVerdict]);
 
-  const selectedThread = threads.find(t => t.thread_id === selectedThreadId) ?? null;
+  const selectedThread = threads.find((t) => t.thread_id === selectedThreadId) ?? null;
 
   return {
     threads,

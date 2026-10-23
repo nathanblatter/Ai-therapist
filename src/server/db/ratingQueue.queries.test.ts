@@ -43,7 +43,18 @@ describe('insertRatingQueueRows', () => {
   it('skips the query for an empty batch and uses ON CONFLICT DO NOTHING otherwise', async () => {
     expect(await insertRatingQueueRows([], 1)).toEqual([]);
     expect(queryMock).not.toHaveBeenCalled();
-    await insertRatingQueueRows([{ session_id: 's', stratum: 'chat|none|2026-W42', source: 'manual', needs_second_rater: false, crisis_adjacent: false }], 1);
+    await insertRatingQueueRows(
+      [
+        {
+          session_id: 's',
+          stratum: 'chat|none|2026-W42',
+          source: 'manual',
+          needs_second_rater: false,
+          crisis_adjacent: false,
+        },
+      ],
+      1,
+    );
     const [sql, params] = queryMock.mock.calls[0];
     expect(sql).toContain('ON CONFLICT (session_id) DO NOTHING');
     expect(JSON.parse(params[0])[0].session_id).toBe('s');
@@ -87,7 +98,9 @@ describe('listRatingQueue scoping', () => {
 
 describe('getRatingQueueCounts', () => {
   it('applies the org scope and returns the aggregate row', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ queued: 2, in_progress: 1, rated: 0, skipped: 0, awaiting_second_rater: 1, double_rated: 0 }] });
+    queryMock.mockResolvedValueOnce({
+      rows: [{ queued: 2, in_progress: 1, rated: 0, skipped: 0, awaiting_second_rater: 1, double_rated: 0 }],
+    });
     const counts = await getRatingQueueCounts({ orgId: 3 });
     expect(counts.queued).toBe(2);
     const [sql, params] = queryMock.mock.calls[0];
@@ -135,7 +148,9 @@ describe('crisis adjudications', () => {
     queryMock.mockResolvedValueOnce({ rows: [{ n: 4 }] });
     expect(await countUnadjudicatedCrisisEvents(7, 3)).toBe(4);
     const [sql, params] = queryMock.mock.calls[0];
-    expect(sql).toContain('NOT EXISTS (SELECT 1 FROM crisis_event_adjudications a WHERE a.crisis_event_id = ce.event_id)');
+    expect(sql).toContain(
+      'NOT EXISTS (SELECT 1 FROM crisis_event_adjudications a WHERE a.crisis_event_id = ce.event_id)',
+    );
     expect(sql).toContain('tc.client_id = COALESCE(ts.user_id, ce.client_user_id)');
     expect(sql).toContain('ou.userid = COALESCE(ts.user_id, ce.client_user_id) AND ou.organization_id = $2');
     expect(sql).toContain('ts.is_demo IS NOT TRUE');

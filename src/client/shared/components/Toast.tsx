@@ -29,7 +29,7 @@ export const toast = {
   },
   info: (message: string, duration = 5000) => {
     showToast({ type: 'info', message, duration });
-  }
+  },
 };
 
 function showToast(toastData: Omit<ToastMessage, 'id'>) {
@@ -43,7 +43,7 @@ export default function ToastContainer() {
 
   useEffect(() => {
     const listener = (toastMsg: ToastMessage) => {
-      setToasts(prev => [...prev, toastMsg]);
+      setToasts((prev) => [...prev, toastMsg]);
 
       if (toastMsg.duration > 0) {
         setTimeout(() => {
@@ -53,30 +53,42 @@ export default function ToastContainer() {
     };
 
     listeners.add(listener);
-    return () => { listeners.delete(listener); };
+    return () => {
+      listeners.delete(listener);
+    };
   }, []);
 
   const removeToast = (id: number) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
   const getIcon = (type: ToastType) => {
     switch (type) {
-      case 'success': return <CheckCircle size={20} />;
-      case 'error': return <AlertCircle size={20} />;
-      case 'warning': return <AlertTriangle size={20} />;
-      case 'info': return <Info size={20} />;
-      default: return null;
+      case 'success':
+        return <CheckCircle size={20} />;
+      case 'error':
+        return <AlertCircle size={20} />;
+      case 'warning':
+        return <AlertTriangle size={20} />;
+      case 'info':
+        return <Info size={20} />;
+      default:
+        return null;
     }
   };
 
   const getColors = (type: ToastType) => {
     switch (type) {
-      case 'success': return 'bg-green-50 border-green-500 text-green-800';
-      case 'error': return 'bg-red-50 border-red-500 text-red-800';
-      case 'warning': return 'bg-yellow-50 border-yellow-500 text-yellow-800';
-      case 'info': return 'bg-blue-50 border-blue-500 text-blue-800';
-      default: return 'bg-gray-50 border-gray-500 text-gray-800';
+      case 'success':
+        return 'bg-green-50 border-green-500 text-green-800';
+      case 'error':
+        return 'bg-red-50 border-red-500 text-red-800';
+      case 'warning':
+        return 'bg-yellow-50 border-yellow-500 text-yellow-800';
+      case 'info':
+        return 'bg-blue-50 border-blue-500 text-blue-800';
+      default:
+        return 'bg-gray-50 border-gray-500 text-gray-800';
     }
   };
 
@@ -97,12 +109,8 @@ export default function ToastContainer() {
           role="alert"
           aria-live={toastItem.type === 'error' ? 'assertive' : 'polite'}
         >
-          <div className="flex-shrink-0 mt-0.5">
-            {getIcon(toastItem.type)}
-          </div>
-          <div className="flex-1 text-sm font-medium">
-            {toastItem.message}
-          </div>
+          <div className="flex-shrink-0 mt-0.5">{getIcon(toastItem.type)}</div>
+          <div className="flex-1 text-sm font-medium">{toastItem.message}</div>
           <button
             onClick={() => removeToast(toastItem.id)}
             className="flex-shrink-0 hover:opacity-70 transition-opacity"

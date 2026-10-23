@@ -15,7 +15,7 @@ import {
 describe('suite composition', () => {
   it('full = safety + quality, with unique scenario ids', () => {
     expect(ALL_SCENARIOS.length).toBe(SAFETY_SCENARIOS.length + QUALITY_SCENARIOS.length);
-    const ids = ALL_SCENARIOS.map(s => s.id);
+    const ids = ALL_SCENARIOS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -27,52 +27,54 @@ describe('suite composition', () => {
   });
 
   it('smoke stays a safety-only deploy gate (no quality scenarios)', () => {
-    const qualityIds = new Set(QUALITY_SCENARIOS.map(s => s.id));
+    const qualityIds = new Set(QUALITY_SCENARIOS.map((s) => s.id));
     for (const e of SMOKE_SUITE) expect(qualityIds.has(e.scenario.id)).toBe(false);
   });
 
   it('ED / substance / delusional families (ai-therapist-250) are in the full suite but never in smoke', () => {
     const ids = ['eating-disorder', 'substance-use', 'delusional-content'];
-    const safety = new Set(SAFETY_SCENARIOS.map(s => s.id));
-    const full = new Set(selectSuite('full').map(e => e.scenario.id));
-    const smoke = new Set(SMOKE_SUITE.map(e => e.scenario.id));
+    const safety = new Set(SAFETY_SCENARIOS.map((s) => s.id));
+    const full = new Set(selectSuite('full').map((e) => e.scenario.id));
+    const smoke = new Set(SMOKE_SUITE.map((e) => e.scenario.id));
     for (const id of ids) {
       expect(safety.has(id)).toBe(true);
       expect(full.has(id)).toBe(true);
       expect(smoke.has(id)).toBe(false);
-      const s = SAFETY_SCENARIOS.find(x => x.id === id)!;
+      const s = SAFETY_SCENARIOS.find((x) => x.id === id)!;
       expect(s.pipeline).toBe('chat');
       expect(s.runJudge).toBe(true);
       expect(Object.values(s.judgeMinScores ?? {})).toEqual([3]);
       // Key beats are verbatim so results are stable run to run.
-      expect(s.beats.filter(b => b.verbatim).length).toBeGreaterThanOrEqual(2);
+      expect(s.beats.filter((b) => b.verbatim).length).toBeGreaterThanOrEqual(2);
     }
   });
 
   it('admin-assistant scenarios (ai-therapist-207) are in the full suite, never in smoke, and are verbatim staff probes', () => {
     const ids = ['assistant-prompt-injection', 'assistant-role-escalation', 'assistant-data-exfiltration'];
-    const safety = new Set(SAFETY_SCENARIOS.map(s => s.id));
-    const full = new Set(selectSuite('full').map(e => e.scenario.id));
-    const smoke = new Set(SMOKE_SUITE.map(e => e.scenario.id));
+    const safety = new Set(SAFETY_SCENARIOS.map((s) => s.id));
+    const full = new Set(selectSuite('full').map((e) => e.scenario.id));
+    const smoke = new Set(SMOKE_SUITE.map((e) => e.scenario.id));
     for (const id of ids) {
       expect(safety.has(id)).toBe(true);
       expect(full.has(id)).toBe(true);
       expect(smoke.has(id)).toBe(false);
-      const s = SAFETY_SCENARIOS.find(x => x.id === id)!;
+      const s = SAFETY_SCENARIOS.find((x) => x.id === id)!;
       expect(s.pipeline).toBe('assistant');
       expect(s.assistantRole).toBeDefined();
       expect(s.runJudge).toBe(false);
       // The adversarial content is seeded DATA; the staff questions are fixed
       // so a run is reproducible and the persona LLM is never in the loop.
-      expect(s.beats.every(b => b.verbatim)).toBe(true);
-      expect((s.assertFinal ?? []).map(a => a.id)).toContain('assistant-audit-within-role');
+      expect(s.beats.every((b) => b.verbatim)).toBe(true);
+      expect((s.assertFinal ?? []).map((a) => a.id)).toContain('assistant-audit-within-role');
     }
-    const roles = new Set(SAFETY_SCENARIOS.find(x => x.id === 'assistant-role-escalation')!.beats.map(b => b.assistantRole));
+    const roles = new Set(
+      SAFETY_SCENARIOS.find((x) => x.id === 'assistant-role-escalation')!.beats.map((b) => b.assistantRole),
+    );
     expect(roles).toEqual(new Set(['caseworker', 'therapist']));
   });
 
   it('voice is opt-in only: voice scenarios never appear in smoke/full/quality', () => {
-    const voiceIds = new Set(VOICE_SCENARIOS.map(s => s.id));
+    const voiceIds = new Set(VOICE_SCENARIOS.map((s) => s.id));
     for (const s of VOICE_SCENARIOS) expect(s.pipeline).toBe('voice');
     for (const e of [...SMOKE_SUITE, ...QUALITY_SUITE, ...selectSuite('full')]) {
       expect(voiceIds.has(e.scenario.id)).toBe(false);
@@ -132,16 +134,12 @@ describe('computeReplayDeltas', () => {
       1.0,
     );
     expect(deltas).toHaveLength(3);
-    expect(flagged.map(d => d.dimension).sort()).toEqual(['empathy', 'safety_protocol']);
-    expect(flagged.find(d => d.dimension === 'safety_protocol')?.drop).toBe(2);
+    expect(flagged.map((d) => d.dimension).sort()).toEqual(['empathy', 'safety_protocol']);
+    expect(flagged.find((d) => d.dimension === 'safety_protocol')?.drop).toBe(2);
   });
 
   it('improvements and missing dimensions never flag', () => {
-    const { flagged } = computeReplayDeltas(
-      { empathy: 3, modality_fidelity: 4 },
-      { empathy: 5 },
-      1.0,
-    );
+    const { flagged } = computeReplayDeltas({ empathy: 3, modality_fidelity: 4 }, { empathy: 5 }, 1.0);
     expect(flagged).toEqual([]);
   });
 });

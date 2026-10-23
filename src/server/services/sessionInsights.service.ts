@@ -96,8 +96,7 @@ export function sanitizeAffectCurve(raw: unknown): AffectPoint[] | null {
   return points.slice(0, 60);
 }
 
-const timeOf = (at: Date | string | null): string =>
-  at ? new Date(at).toISOString().slice(11, 16) : 'unknown time';
+const timeOf = (at: Date | string | null): string => (at ? new Date(at).toISOString().slice(11, 16) : 'unknown time');
 
 /** The SAFETY EVENTS block handed to the summarizer (ai-therapist-256).
  *  Empty string when nothing safety-relevant happened in the session. */
@@ -105,17 +104,25 @@ export function buildSafetyBlock(ctx: SessionSafetyContext): string {
   if (!hasSafetyContext(ctx)) return '';
   const lines: string[] = [];
   for (const e of ctx.crisisEvents) {
-    lines.push(`- ${timeOf(e.created_at)} crisis event: ${e.event_type}${e.severity ? ` (severity: ${e.severity})` : ''}`);
+    lines.push(
+      `- ${timeOf(e.created_at)} crisis event: ${e.event_type}${e.severity ? ` (severity: ${e.severity})` : ''}`,
+    );
   }
   for (const e of ctx.escalations) {
     const via = e.source === 'tool' ? 'escalate_to_human tool call' : 'escalation raised';
-    lines.push(`- ${timeOf(e.created_at)} ${via}: ${e.reason}${e.urgency ? ` (urgency: ${e.urgency})` : ''}${e.status ? ` [${e.status}]` : ''}`);
+    lines.push(
+      `- ${timeOf(e.created_at)} ${via}: ${e.reason}${e.urgency ? ` (urgency: ${e.urgency})` : ''}${e.status ? ` [${e.status}]` : ''}`,
+    );
   }
   for (const c of ctx.resourceCards) {
-    lines.push(`- ${timeOf(c.created_at)} shown to participant: ${c.tool_name}${c.resource_type ? ` (${c.resource_type})` : ''}`);
+    lines.push(
+      `- ${timeOf(c.created_at)} shown to participant: ${c.tool_name}${c.resource_type ? ` (${c.resource_type})` : ''}`,
+    );
   }
   for (const a of ctx.adverseEvents) {
-    lines.push(`- ${timeOf(a.created_at)} adverse-event report #${a.report_id} (${a.category}, severity: ${a.severity}, ${a.status}): ${a.summary}`);
+    lines.push(
+      `- ${timeOf(a.created_at)} adverse-event report #${a.report_id} (${a.category}, severity: ${a.severity}, ${a.status}): ${a.summary}`,
+    );
   }
   return `SAFETY EVENTS recorded during this session (these DID happen — the "safety" field is REQUIRED and the summary must reflect them):\n${lines.join('\n')}\n\n`;
 }
@@ -125,17 +132,21 @@ export function buildSafetyBlock(ctx: SessionSafetyContext): string {
  *  event just because the LLM did. */
 export function fallbackSafetyLine(ctx: SessionSafetyContext): string {
   const parts: string[] = [];
-  const worst = ctx.crisisEvents.find(e => e.severity === 'high')?.severity
-    ?? ctx.crisisEvents.find(e => e.severity)?.severity ?? null;
+  const worst =
+    ctx.crisisEvents.find((e) => e.severity === 'high')?.severity ??
+    ctx.crisisEvents.find((e) => e.severity)?.severity ??
+    null;
   if (ctx.crisisEvents.length > 0) {
     parts.push(`${ctx.crisisEvents.length} crisis event(s)${worst ? `, highest severity ${worst}` : ''}`);
   }
   if (ctx.escalations.length > 0) parts.push(`${ctx.escalations.length} escalation(s) to a human`);
   if (ctx.resourceCards.length > 0) {
-    parts.push(`crisis/safety resources shown (${[...new Set(ctx.resourceCards.map(c => c.tool_name))].join(', ')})`);
+    parts.push(`crisis/safety resources shown (${[...new Set(ctx.resourceCards.map((c) => c.tool_name))].join(', ')})`);
   }
   if (ctx.adverseEvents.length > 0) {
-    parts.push(`${ctx.adverseEvents.length} adverse-event draft(s) (#${ctx.adverseEvents.map(a => a.report_id).join(', #')})`);
+    parts.push(
+      `${ctx.adverseEvents.length} adverse-event draft(s) (#${ctx.adverseEvents.map((a) => a.report_id).join(', #')})`,
+    );
   }
   return `Safety: this session recorded ${parts.join('; ')}. Review the session record.`;
 }
@@ -166,10 +177,10 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
   // redacted text for regeneration after the retention wipe has cleared it.
   const messages = await getSessionMessages(sessionId, false);
   const conversation = messages
-    .filter(m => m.role === 'user' || m.role === 'assistant')
-    .map(m => ({ role: m.role, text: (m.content ?? m.content_redacted ?? '').trim() }))
-    .filter(m => m.text)
-    .map(m => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.text}`)
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, text: (m.content ?? m.content_redacted ?? '').trim() }))
+    .filter((m) => m.text)
+    .map((m) => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.text}`)
     .join('\n');
 
   if (!conversation) {
@@ -203,26 +214,36 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
   // Post-session job: flex halves the cost where the model supports it
   // (a no-op on gpt-4o-mini, which is not flex-eligible — see flexTier.ts).
   const { withFlex } = await import('../utils/flexTier.js');
-  const response = await withFlex(INSIGHTS_MODEL, (tierParams) => client.chat.completions.create({
-    model: INSIGHTS_MODEL,
-    response_format: { type: 'json_object' },
-    temperature: 0.3,
-    max_tokens: 1400, // affect array (ai-therapist-86) adds ~30 compact entries
-    store: false,
-    ...tierParams,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `${checkinLine}${priorProfileLine}${safetyBlock}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}` },
-    ],
-  }));
+  const response = await withFlex(INSIGHTS_MODEL, (tierParams) =>
+    client.chat.completions.create({
+      model: INSIGHTS_MODEL,
+      response_format: { type: 'json_object' },
+      temperature: 0.3,
+      max_tokens: 1400, // affect array (ai-therapist-86) adds ~30 compact entries
+      store: false,
+      ...tierParams,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `${checkinLine}${priorProfileLine}${safetyBlock}Transcript:\n${conversation.substring(0, MAX_TRANSCRIPT_CHARS)}`,
+        },
+      ],
+    }),
+  );
 
   // Cost tracking (ai-therapist-25c): best-effort, never blocks insights generation.
   import('../db/index.js')
-    .then(({ recordLlmUsage }) => recordLlmUsage(
-      sessionId, 'insights', INSIGHTS_MODEL,
-      response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
-    ))
-    .catch(err => log.error({ err }, 'Failed to record LLM usage (non-fatal)'));
+    .then(({ recordLlmUsage }) =>
+      recordLlmUsage(
+        sessionId,
+        'insights',
+        INSIGHTS_MODEL,
+        response.usage?.prompt_tokens ?? null,
+        response.usage?.completion_tokens ?? null,
+      ),
+    )
+    .catch((err) => log.error({ err }, 'Failed to record LLM usage (non-fatal)'));
 
   const raw = response.choices[0]?.message?.content;
   if (!raw) throw new Error('Empty insights response from model');
@@ -250,9 +271,7 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
   }
 
   const affectCurve = sanitizeAffectCurve(parsed.affect);
-  await upsertSessionInsights(
-    sessionId, session.user_id ?? null, summary, parsed.soap, INSIGHTS_MODEL, affectCurve
-  );
+  await upsertSessionInsights(sessionId, session.user_id ?? null, summary, parsed.soap, INSIGHTS_MODEL, affectCurve);
   log.info(`Insights stored for ${sessionId} ("${parsed.summary.headline ?? ''}")`);
 
   if (caseProfileEnabled && userId && parsed.case_profile) {
@@ -268,6 +287,5 @@ export async function generateSessionInsights(sessionId: string): Promise<void> 
 
 /** Fire-and-forget wrapper used by the session-end paths. */
 export function generateSessionInsightsAsync(sessionId: string): void {
-  generateSessionInsights(sessionId).catch(err =>
-    log.error({ err }, `Failed to generate insights for ${sessionId}`));
+  generateSessionInsights(sessionId).catch((err) => log.error({ err }, `Failed to generate insights for ${sessionId}`));
 }

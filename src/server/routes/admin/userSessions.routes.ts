@@ -35,9 +35,10 @@ export default function userSessionsRoutes(): Router {
       const sessions = rows.map((row) => {
         let sessData: Record<string, unknown> = {};
         try {
-          sessData = typeof row.sess === 'string'
-            ? (JSON.parse(row.sess) as Record<string, unknown>)
-            : (row.sess as Record<string, unknown>);
+          sessData =
+            typeof row.sess === 'string'
+              ? (JSON.parse(row.sess) as Record<string, unknown>)
+              : (row.sess as Record<string, unknown>);
         } catch (err) {
           log.error({ err }, 'Failed to parse session data');
         }

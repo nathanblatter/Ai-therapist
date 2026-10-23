@@ -18,7 +18,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  *  some slack for a late cycle). */
 const MAX_WINDOW_DAYS = 400;
 
-interface Window { from: string; to: string }
+interface Window {
+  from: string;
+  to: string;
+}
 
 /** Parse ?from&to. Defaults: to = now, from = to - 365 days. Dates are
  *  accepted as YYYY-MM-DD (a bare date `to` is widened to the end of that
@@ -71,7 +74,11 @@ export default function irbPacketRoutes(): Router {
     return buildIrbPacket({ from: w.from, to: w.to, orgId });
   }
 
-  function audit(req: Request, packet: { meta: { period: { from: string; to: string } } }, format: 'html' | 'zip'): void {
+  function audit(
+    req: Request,
+    packet: { meta: { period: { from: string; to: string } } },
+    format: 'html' | 'zip',
+  ): void {
     void logDataAccess({
       accessedBy: req.session.userId ?? null,
       role: req.session.userRole ?? null,

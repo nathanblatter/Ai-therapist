@@ -10,10 +10,7 @@
 // current PAIRWISE_PROMPT_VERSION are skipped. Requires OPENAI_API_KEY and a
 // reachable database.
 import { pool } from '../../server/config/db.js';
-import {
-  runPairwiseBatch,
-  PAIRWISE_PROMPT_VERSION,
-} from '../../server/services/pairwiseEval.service.js';
+import { runPairwiseBatch, PAIRWISE_PROMPT_VERSION } from '../../server/services/pairwiseEval.service.js';
 import { getPairwiseAggregates } from '../../server/db/index.js';
 import type { ComparisonAxis } from '../../server/db/index.js';
 
@@ -29,7 +26,7 @@ async function main() {
 
   if (axis !== 'ai_model' && axis !== 'proactive_offering') {
     console.log(
-      'Usage: npx tsx src/database/scripts/runPairwiseEvals.ts --axis <ai_model|proactive_offering> [--limit N] [--judge-model <model>]'
+      'Usage: npx tsx src/database/scripts/runPairwiseEvals.ts --axis <ai_model|proactive_offering> [--limit N] [--judge-model <model>]',
     );
     process.exitCode = 1;
     return;
@@ -40,16 +37,14 @@ async function main() {
 
   const result = await runPairwiseBatch(axis, { limit, judgeModel });
   console.log(
-    `[Pairwise] done: ${result.paired} matched, ${result.judged} judged, ${result.skipped} skipped, ${result.failed} failed`
+    `[Pairwise] done: ${result.paired} matched, ${result.judged} judged, ${result.skipped} skipped, ${result.failed} failed`,
   );
 
   // Show current aggregate standings for this axis + prompt version.
-  const aggregates = (await getPairwiseAggregates(PAIRWISE_PROMPT_VERSION)).filter(
-    a => a.comparison_axis === axis
-  );
+  const aggregates = (await getPairwiseAggregates(PAIRWISE_PROMPT_VERSION)).filter((a) => a.comparison_axis === axis);
   for (const a of aggregates) {
     console.log(
-      `  ${a.arm_x} vs ${a.arm_y}: ${a.wins_x}-${a.wins_y} (ties ${a.ties}, incons ${a.inconsistent}, n=${a.total})`
+      `  ${a.arm_x} vs ${a.arm_y}: ${a.wins_x}-${a.wins_y} (ties ${a.ties}, incons ${a.inconsistent}, n=${a.total})`,
     );
   }
 
@@ -57,7 +52,7 @@ async function main() {
 }
 
 main()
-  .catch(err => {
+  .catch((err) => {
     console.error('[Pairwise] fatal:', err);
     process.exitCode = 1;
   })

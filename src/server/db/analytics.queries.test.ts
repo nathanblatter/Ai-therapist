@@ -31,7 +31,9 @@ describe('getDashboardAnalytics', () => {
 
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(params).toEqual(['2026-01-01', '2026-02-01', ['alloy'], ['en'], ['voice'], ['ended'], ['user'], false]);
-    expect(sql).toMatch(/FROM therapy_sessions ts\s+LEFT JOIN session_configurations sc ON ts\.session_id = sc\.session_id\s+WHERE\s+ts\.is_demo IS NOT TRUE/);
+    expect(sql).toMatch(
+      /FROM therapy_sessions ts\s+LEFT JOIN session_configurations sc ON ts\.session_id = sc\.session_id\s+WHERE\s+ts\.is_demo IS NOT TRUE/,
+    );
     expect(sql).toContain('($1::TIMESTAMP IS NULL OR ts.created_at >= $1)');
     expect(sql).toContain('($2::TIMESTAMP IS NULL OR ts.created_at <= $2)');
     expect(sql).toContain('($3::TEXT[] IS NULL OR sc.voice = ANY($3))');
@@ -48,7 +50,9 @@ describe('getDashboardAnalytics', () => {
     queryMock.mockResolvedValue({ rows: [{}] });
     await getDashboardAnalytics(FILTERS);
     const [sql] = queryMock.mock.calls[0] as [string];
-    expect(sql).toMatch(/date_filtered_messages AS \(\s+SELECT m\.\* FROM messages m\s+INNER JOIN date_filtered_sessions ts ON m\.session_id = ts\.session_id\s+\)/);
+    expect(sql).toMatch(
+      /date_filtered_messages AS \(\s+SELECT m\.\* FROM messages m\s+INNER JOIN date_filtered_sessions ts ON m\.session_id = ts\.session_id\s+\)/,
+    );
     // Every later CTE reads from the filtered views, not the base tables. The
     // one deliberate exception is the sideband reliability KPI: a fixed 7-day
     // window independent of the dashboard filters, with its own demo exclusion.
@@ -56,14 +60,22 @@ describe('getDashboardAnalytics', () => {
     expect(afterCtes).not.toMatch(/FROM messages\b/);
     const baseSessionReads = afterCtes.match(/FROM therapy_sessions\b/g) ?? [];
     expect(baseSessionReads).toHaveLength(1);
-    expect(afterCtes).toMatch(/sideband_reliability AS \([\s\S]*?FROM therapy_sessions\s+WHERE is_demo IS NOT TRUE\s+AND session_type = 'realtime'\s+AND created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'/);
+    expect(afterCtes).toMatch(
+      /sideband_reliability AS \([\s\S]*?FROM therapy_sessions\s+WHERE is_demo IS NOT TRUE\s+AND session_type = 'realtime'\s+AND created_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'/,
+    );
   });
 
   it('passes nulls through so a blank filter matches everything', async () => {
     queryMock.mockResolvedValue({ rows: [{}] });
     await getDashboardAnalytics({
-      startDate: null, endDate: null, voices: null, languages: null,
-      sessionTypes: null, statuses: null, endedBy: null, crisisFlagged: null,
+      startDate: null,
+      endDate: null,
+      voices: null,
+      languages: null,
+      sessionTypes: null,
+      statuses: null,
+      endedBy: null,
+      crisisFlagged: null,
     });
     expect(queryMock.mock.calls[0][1]).toEqual([null, null, null, null, null, null, null, null]);
   });

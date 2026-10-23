@@ -69,7 +69,7 @@ function instance(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  Object.values(dbMocks).forEach(m => m.mockClear());
+  Object.values(dbMocks).forEach((m) => m.mockClear());
   embedText.mockClear();
   dbMocks.listWorksheetInstancesForReview.mockResolvedValue({ rows: [{ instance_id: 7 }], total: 1 });
   dbMocks.getWorksheetInstanceForReview.mockResolvedValue(instance());
@@ -79,10 +79,10 @@ beforeEach(() => {
 
 describe('role matrix', () => {
   const cases: Array<[string, (app: express.Express) => request.Test]> = [
-    ['GET queue', app => request(app).get('/admin/api/worksheets/review')],
-    ['GET detail', app => request(app).get('/admin/api/worksheets/review/7')],
-    ['POST promote', app => request(app).post('/admin/api/worksheets/review/7/promote').send({ content: 'x' })],
-    ['POST reject', app => request(app).post('/admin/api/worksheets/review/7/reject').send({ note: 'x' })],
+    ['GET queue', (app) => request(app).get('/admin/api/worksheets/review')],
+    ['GET detail', (app) => request(app).get('/admin/api/worksheets/review/7')],
+    ['POST promote', (app) => request(app).post('/admin/api/worksheets/review/7/promote').send({ content: 'x' })],
+    ['POST reject', (app) => request(app).post('/admin/api/worksheets/review/7/reject').send({ note: 'x' })],
   ];
   for (const [name, call] of cases) {
     it(`${name}: researcher only`, async () => {
@@ -116,8 +116,12 @@ describe('GET /admin/api/worksheets/review/:id (detail)', () => {
     expect(res.body.template.content).not.toContain('Priya');
     expect(dbMocks.logDataAccess).toHaveBeenCalledTimes(1);
     expect(dbMocks.logDataAccess).toHaveBeenCalledWith({
-      accessedBy: 5, role: 'researcher', action: 'worksheet_review',
-      sessionId: 'sess-1', userId: 42, detail: { instance_id: 7 },
+      accessedBy: 5,
+      role: 'researcher',
+      action: 'worksheet_review',
+      sessionId: 'sess-1',
+      userId: 42,
+      detail: { instance_id: 7 },
     });
   });
 
@@ -130,7 +134,8 @@ describe('GET /admin/api/worksheets/review/:id (detail)', () => {
 });
 
 describe('POST /admin/api/worksheets/review/:id/promote', () => {
-  const CLEAN = 'Worksheet template: Evidence list\n\nSections (2):\n1. [textarea] What happened?\n2. [scale] How strongly do you believe it now?';
+  const CLEAN =
+    'Worksheet template: Evidence list\n\nSections (2):\n1. [textarea] What happened?\n2. [scale] How strongly do you believe it now?';
 
   it('embeds the confirmed template and promotes with provenance inputs', async () => {
     const res = await request(appAs('researcher'))
@@ -141,10 +146,19 @@ describe('POST /admin/api/worksheets/review/:id/promote', () => {
     expect(embedText).toHaveBeenCalledWith(CLEAN);
     const input = dbMocks.promoteWorksheetToKnowledgeChunk.mock.calls[0][0];
     expect(input).toMatchObject({
-      instanceId: 7, reviewer: 'reviewer', note: 'good general form',
-      title: 'Evidence list (general)', content: CLEAN, embedding: [0.1, 0.2, 0.3],
-      topic: 'anxiety', template_kind: 'vetted_template',
-      metadata: { sections: [{ type: 'textarea' }, { type: 'scale' }], render_tool: 'show_journaling_prompt', template_chunk_id: 21 },
+      instanceId: 7,
+      reviewer: 'reviewer',
+      note: 'good general form',
+      title: 'Evidence list (general)',
+      content: CLEAN,
+      embedding: [0.1, 0.2, 0.3],
+      topic: 'anxiety',
+      template_kind: 'vetted_template',
+      metadata: {
+        sections: [{ type: 'textarea' }, { type: 'scale' }],
+        render_tool: 'show_journaling_prompt',
+        template_chunk_id: 21,
+      },
     });
     expect(input.content_hash).toMatch(/^[0-9a-f]{32}$/);
   });
@@ -168,8 +182,13 @@ describe('POST /admin/api/worksheets/review/:id/promote', () => {
   });
 
   it('labels a custom (template-less) instance as custom_worksheet', async () => {
-    dbMocks.getWorksheetInstanceForReview.mockResolvedValueOnce(instance({ template_chunk_id: null, template_metadata: null, template_topic: null }));
-    await request(appAs('researcher')).post('/admin/api/worksheets/review/7/promote').send({ content: CLEAN }).expect(201);
+    dbMocks.getWorksheetInstanceForReview.mockResolvedValueOnce(
+      instance({ template_chunk_id: null, template_metadata: null, template_topic: null }),
+    );
+    await request(appAs('researcher'))
+      .post('/admin/api/worksheets/review/7/promote')
+      .send({ content: CLEAN })
+      .expect(201);
     const input = dbMocks.promoteWorksheetToKnowledgeChunk.mock.calls[0][0];
     expect(input.template_kind).toBe('custom_worksheet');
     expect(input.title).toBe('Evidence list for the report criticism'); // falls back to the instance title
@@ -179,7 +198,10 @@ describe('POST /admin/api/worksheets/review/:id/promote', () => {
   it('maps query outcomes: already_promoted 200, duplicate 409, not_pending 409', async () => {
     const app = appAs('researcher');
     dbMocks.promoteWorksheetToKnowledgeChunk.mockResolvedValueOnce({ outcome: 'already_promoted', chunk_id: 99 });
-    const again = await request(app).post('/admin/api/worksheets/review/7/promote').send({ content: CLEAN }).expect(200);
+    const again = await request(app)
+      .post('/admin/api/worksheets/review/7/promote')
+      .send({ content: CLEAN })
+      .expect(200);
     expect(again.body).toEqual({ success: true, chunk_id: 99, already_promoted: true });
     dbMocks.promoteWorksheetToKnowledgeChunk.mockResolvedValueOnce({ outcome: 'duplicate_content' });
     await request(app).post('/admin/api/worksheets/review/7/promote').send({ content: CLEAN }).expect(409);
@@ -189,17 +211,29 @@ describe('POST /admin/api/worksheets/review/:id/promote', () => {
 
   it('409s an instance that is not completed or already reviewed, without embedding', async () => {
     dbMocks.getWorksheetInstanceForReview.mockResolvedValueOnce(instance({ review_status: 'rejected' }));
-    await request(appAs('researcher')).post('/admin/api/worksheets/review/7/promote').send({ content: CLEAN }).expect(409);
+    await request(appAs('researcher'))
+      .post('/admin/api/worksheets/review/7/promote')
+      .send({ content: CLEAN })
+      .expect(409);
     dbMocks.getWorksheetInstanceForReview.mockResolvedValueOnce(instance({ status: 'draft' }));
-    await request(appAs('researcher')).post('/admin/api/worksheets/review/7/promote').send({ content: CLEAN }).expect(409);
+    await request(appAs('researcher'))
+      .post('/admin/api/worksheets/review/7/promote')
+      .send({ content: CLEAN })
+      .expect(409);
     expect(embedText).not.toHaveBeenCalled();
   });
 
   it('400s a missing content body or an unidentified admin; 404s an unknown instance', async () => {
     await request(appAs('researcher')).post('/admin/api/worksheets/review/7/promote').send({}).expect(400);
-    await request(appAs('researcher', null)).post('/admin/api/worksheets/review/7/promote').send({ content: CLEAN }).expect(400);
+    await request(appAs('researcher', null))
+      .post('/admin/api/worksheets/review/7/promote')
+      .send({ content: CLEAN })
+      .expect(400);
     dbMocks.getWorksheetInstanceForReview.mockResolvedValueOnce(null);
-    await request(appAs('researcher')).post('/admin/api/worksheets/review/7/promote').send({ content: CLEAN }).expect(404);
+    await request(appAs('researcher'))
+      .post('/admin/api/worksheets/review/7/promote')
+      .send({ content: CLEAN })
+      .expect(404);
     expect(dbMocks.promoteWorksheetToKnowledgeChunk).not.toHaveBeenCalled();
   });
 });
@@ -209,7 +243,10 @@ describe('POST /admin/api/worksheets/review/:id/reject', () => {
     await request(appAs('researcher')).post('/admin/api/worksheets/review/7/reject').send({}).expect(400);
     await request(appAs('researcher')).post('/admin/api/worksheets/review/7/reject').send({ note: '   ' }).expect(400);
     expect(dbMocks.markWorksheetRejected).not.toHaveBeenCalled();
-    const res = await request(appAs('researcher')).post('/admin/api/worksheets/review/7/reject').send({ note: ' too specific ' }).expect(200);
+    const res = await request(appAs('researcher'))
+      .post('/admin/api/worksheets/review/7/reject')
+      .send({ note: ' too specific ' })
+      .expect(200);
     expect(res.body).toEqual({ success: true, id: 7, review_status: 'rejected' });
     expect(dbMocks.markWorksheetRejected).toHaveBeenCalledWith(7, 'reviewer', 'too specific');
   });

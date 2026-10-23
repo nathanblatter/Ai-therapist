@@ -10,13 +10,13 @@ async function main() {
   const result = await enforceRetention('manual', 'cli');
   console.log(
     `[Retention] run ${result.runId}: ${result.recordingsDeleted} aged-out, ` +
-    `${result.graceDeleted} grace, ${result.failures} failures`
+      `${result.graceDeleted} grace, ${result.failures} failures`,
   );
   if (result.failures > 0) process.exitCode = 1;
 }
 
 main()
-  .catch(err => {
+  .catch((err) => {
     console.error('[Retention] fatal:', err);
     process.exitCode = 1;
   })

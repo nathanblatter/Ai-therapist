@@ -35,7 +35,13 @@ describe('getActiveConsentDocument', () => {
 describe('recordConsent', () => {
   it('persists the body_hash alongside the acceptance', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ consent_id: 1 }] });
-    await recordConsent({ sessionId: null, userId: 42, consentVersion: '2026-07-30.1', recordingEnabled: false, bodyHash: 'deadbeef' });
+    await recordConsent({
+      sessionId: null,
+      userId: 42,
+      consentVersion: '2026-07-30.1',
+      recordingEnabled: false,
+      bodyHash: 'deadbeef',
+    });
     const params = queryMock.mock.calls[0][1] as unknown[];
     expect(params).toEqual([null, 42, '2026-07-30.1', false, 'deadbeef']);
   });
@@ -49,7 +55,7 @@ describe('recordConsent', () => {
 });
 
 describe('isRecordingConsentedForSession (086 enforcement)', () => {
-  it('returns false when the owner\'s latest consent snapshot disables recording', async () => {
+  it("returns false when the owner's latest consent snapshot disables recording", async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ recording_enabled: false }] });
     expect(await isRecordingConsentedForSession('sess1')).toBe(false);
     const sql = queryMock.mock.calls[0][0] as string;
@@ -71,7 +77,13 @@ describe('isRecordingConsentedForSession (086 enforcement)', () => {
 describe('insertConsentDocument', () => {
   it('inserts version/body/hash and defaults effective_at to now when null', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ document_id: 3, version: 'v2' }] });
-    await insertConsentDocument({ version: 'v2', body: 'copy', bodyHash: 'hash', effectiveAt: null, publishedBy: 'nathan' });
+    await insertConsentDocument({
+      version: 'v2',
+      body: 'copy',
+      bodyHash: 'hash',
+      effectiveAt: null,
+      publishedBy: 'nathan',
+    });
     const [sql, params] = queryMock.mock.calls[0];
     expect(sql).toContain('COALESCE($4, CURRENT_TIMESTAMP)');
     expect(params).toEqual(['v2', 'copy', 'hash', null, 'nathan']);

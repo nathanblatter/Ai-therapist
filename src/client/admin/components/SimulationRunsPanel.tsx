@@ -65,7 +65,7 @@ interface HarnessScenarioResult {
 
 function judgeSummary(scores: Record<string, number> | null): string {
   if (!scores) return '—';
-  const vals = Object.values(scores).filter(v => typeof v === 'number');
+  const vals = Object.values(scores).filter((v) => typeof v === 'number');
   if (vals.length === 0) return '—';
   const min = Math.min(...vals);
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
@@ -85,34 +85,51 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
   const [runVariations, setRunVariations] = useState(1);
   const [starting, setStarting] = useState(false);
   const [status, setStatus] = useState<RunnerStatus | null>(null);
-  const [schedule, setSchedule] = useState<HarnessSchedule>({ enabled: false, suite: 'voice', hour_utc: 9, variations: 1, extra_suites: [] });
+  const [schedule, setSchedule] = useState<HarnessSchedule>({
+    enabled: false,
+    suite: 'voice',
+    hour_utc: 9,
+    variations: 1,
+    extra_suites: [],
+  });
   const [savingSchedule, setSavingSchedule] = useState(false);
   const wasRunning = useRef(false);
 
   const load = useCallback(() => {
     setLoading(true);
     getJson<{ runs?: HarnessRun[] }>('/admin/api/harness/runs', { fallback: 'Failed to fetch simulation runs' })
-      .then(data => { setRuns(data.runs ?? []); setError(null); })
-      .catch(e => setError(e instanceof Error ? e.message : 'Unknown error'))
+      .then((data) => {
+        setRuns(data.runs ?? []);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Unknown error'))
       .finally(() => setLoading(false));
   }, []);
 
   const loadStatus = useCallback(() => {
     getJson<RunnerStatus>('/admin/api/harness/status')
-      .then(s => {
+      .then((s) => {
         if (!s) return;
         setStatus(s);
-        if (s.schedule) setSchedule(prev => (savingSchedule ? prev : s.schedule!));
+        if (s.schedule) setSchedule((prev) => (savingSchedule ? prev : s.schedule!));
       })
-      .catch(() => { /* status is best-effort */ });
+      .catch(() => {
+        /* status is best-effort */
+      });
   }, [savingSchedule]);
 
-  useEffect(() => { load(); loadStatus(); }, [load, loadStatus]);
+  useEffect(() => {
+    load();
+    loadStatus();
+  }, [load, loadStatus]);
 
   // Poll status every 3s while a run is live; refresh the run list when it ends.
   useEffect(() => {
     if (!status?.running) {
-      if (wasRunning.current) { wasRunning.current = false; load(); }
+      if (wasRunning.current) {
+        wasRunning.current = false;
+        load();
+      }
       return;
     }
     wasRunning.current = true;
@@ -122,43 +139,57 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
 
   const startRun = () => {
     setStarting(true);
-    postJson('/admin/api/harness/run', { suite: runSuite, variations: runVariations }, { fallback: 'Failed to start run' })
+    postJson(
+      '/admin/api/harness/run',
+      { suite: runSuite, variations: runVariations },
+      { fallback: 'Failed to start run' },
+    )
       .then(() => {
         toast.success(`Started ${runSuite} run`);
         loadStatus();
       })
-      .catch(e => toast.error(e instanceof Error ? e.message : 'Failed to start run'))
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to start run'))
       .finally(() => setStarting(false));
   };
 
   const saveSchedule = () => {
     setSavingSchedule(true);
-    postJson<{ schedule: HarnessSchedule }>('/admin/api/harness/schedule', schedule, { method: 'PUT', fallback: 'Failed to save schedule' })
-      .then(body => {
+    postJson<{ schedule: HarnessSchedule }>('/admin/api/harness/schedule', schedule, {
+      method: 'PUT',
+      fallback: 'Failed to save schedule',
+    })
+      .then((body) => {
         setSchedule(body.schedule);
-        toast.success(body.schedule.enabled
-          ? `Nightly ${body.schedule.suite} run scheduled for ${String(body.schedule.hour_utc).padStart(2, '0')}:00 UTC`
-          : 'Nightly run disabled');
+        toast.success(
+          body.schedule.enabled
+            ? `Nightly ${body.schedule.suite} run scheduled for ${String(body.schedule.hour_utc).padStart(2, '0')}:00 UTC`
+            : 'Nightly run disabled',
+        );
       })
-      .catch(e => toast.error(e instanceof Error ? e.message : 'Failed to save schedule'))
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to save schedule'))
       .finally(() => setSavingSchedule(false));
   };
 
   useEffect(() => {
-    if (selectedId == null) { setResults(null); return; }
+    if (selectedId == null) {
+      setResults(null);
+      return;
+    }
     setResultsLoading(true);
-    getJson<{ results?: HarnessScenarioResult[] }>(`/admin/api/harness/runs/${selectedId}`, { fallback: 'Failed to fetch run detail' })
-      .then(data => setResults(data.results ?? []))
+    getJson<{ results?: HarnessScenarioResult[] }>(`/admin/api/harness/runs/${selectedId}`, {
+      fallback: 'Failed to fetch run detail',
+    })
+      .then((data) => setResults(data.results ?? []))
       .catch(() => setResults([]))
       .finally(() => setResultsLoading(false));
   }, [selectedId]);
 
   // Oldest-to-newest pass-rate trend, live (non-dry) runs only.
   const trend = runs
-    .filter(r => !r.dry_run)
+    .filter((r) => !r.dry_run)
     .slice()
     .reverse()
-    .map(r => ({
+    .map((r) => ({
       label: `#${r.id}`,
       passRate: r.scenario_count > 0 ? Math.round((r.pass_count / r.scenario_count) * 100) : 0,
     }));
@@ -192,16 +223,23 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={runSuite}
-              onChange={e => setRunSuite(e.target.value as Suite)}
+              onChange={(e) => setRunSuite(e.target.value as Suite)}
               className="border rounded-lg px-2 py-1.5 text-sm"
             >
-              {SUITES.map(s => <option key={s} value={s}>{s}</option>)}
+              {SUITES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
             <label className="text-sm text-gray-600 flex items-center gap-1">
               variations
               <input
-                type="number" min={1} max={5} value={runVariations}
-                onChange={e => setRunVariations(Math.max(1, Math.min(5, Number(e.target.value) || 1)))}
+                type="number"
+                min={1}
+                max={5}
+                value={runVariations}
+                onChange={(e) => setRunVariations(Math.max(1, Math.min(5, Number(e.target.value) || 1)))}
                 className="w-14 border rounded-lg px-2 py-1.5 text-sm"
                 disabled={runSuite === 'replay'}
               />
@@ -216,14 +254,15 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
             </button>
           </div>
           <p className="mt-2 text-xs text-gray-500">
-            Voice runs open real Realtime sessions (a few minutes, real API spend) and leave playable recordings.
-            Replay re-drives recent redacted sessions through the current pipeline.
+            Voice runs open real Realtime sessions (a few minutes, real API spend) and leave playable recordings. Replay
+            re-drives recent redacted sessions through the current pipeline.
           </p>
           {status?.running && (
             <div className="mt-3">
               <p className="text-sm text-gray-700 flex items-center gap-2">
                 <RefreshCw size={13} className="animate-spin" />
-                {status.suite} run ({status.trigger}) since {status.startedAt ? new Date(status.startedAt).toLocaleTimeString() : ''}
+                {status.suite} run ({status.trigger}) since{' '}
+                {status.startedAt ? new Date(status.startedAt).toLocaleTimeString() : ''}
               </p>
               {status.logTail.length > 0 && (
                 <pre className="mt-2 max-h-36 overflow-y-auto bg-gray-900 text-gray-100 text-xs rounded p-2">
@@ -250,22 +289,31 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
               <input
                 type="checkbox"
                 checked={schedule.enabled}
-                onChange={e => setSchedule({ ...schedule, enabled: e.target.checked })}
+                onChange={(e) => setSchedule({ ...schedule, enabled: e.target.checked })}
               />
               enabled
             </label>
             <select
               value={schedule.suite}
-              onChange={e => setSchedule({ ...schedule, suite: e.target.value as Suite })}
+              onChange={(e) => setSchedule({ ...schedule, suite: e.target.value as Suite })}
               className="border rounded-lg px-2 py-1.5 text-sm"
             >
-              {SUITES.map(s => <option key={s} value={s}>{s}</option>)}
+              {SUITES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
             <label className="text-sm text-gray-600 flex items-center gap-1">
               at
               <input
-                type="number" min={0} max={23} value={schedule.hour_utc}
-                onChange={e => setSchedule({ ...schedule, hour_utc: Math.max(0, Math.min(23, Number(e.target.value) || 0)) })}
+                type="number"
+                min={0}
+                max={23}
+                value={schedule.hour_utc}
+                onChange={(e) =>
+                  setSchedule({ ...schedule, hour_utc: Math.max(0, Math.min(23, Number(e.target.value) || 0)) })
+                }
                 className="w-14 border rounded-lg px-2 py-1.5 text-sm"
               />
               :00 UTC
@@ -273,8 +321,13 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
             <label className="text-sm text-gray-600 flex items-center gap-1">
               variations
               <input
-                type="number" min={1} max={5} value={schedule.variations}
-                onChange={e => setSchedule({ ...schedule, variations: Math.max(1, Math.min(5, Number(e.target.value) || 1)) })}
+                type="number"
+                min={1}
+                max={5}
+                value={schedule.variations}
+                onChange={(e) =>
+                  setSchedule({ ...schedule, variations: Math.max(1, Math.min(5, Number(e.target.value) || 1)) })
+                }
                 className="w-14 border rounded-lg px-2 py-1.5 text-sm"
               />
             </label>
@@ -289,16 +342,17 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
             <span className="text-gray-600">Then also run:</span>
-            {SUITES.filter(s => s !== schedule.suite).map(s => {
+            {SUITES.filter((s) => s !== schedule.suite).map((s) => {
               const on = (schedule.extra_suites ?? []).includes(s);
               return (
                 <label key={s} className="flex items-center gap-1">
                   <input
                     type="checkbox"
                     checked={on}
-                    onChange={e => {
+                    onChange={(e) => {
                       const next = new Set(schedule.extra_suites ?? []);
-                      if (e.target.checked) next.add(s); else next.delete(s);
+                      if (e.target.checked) next.add(s);
+                      else next.delete(s);
                       setSchedule({ ...schedule, extra_suites: [...next] });
                     }}
                   />
@@ -310,7 +364,9 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
           <p className="mt-2 text-xs text-gray-500">
             {schedule.enabled
               ? `Runs the ${schedule.suite} suite nightly at ${String(schedule.hour_utc).padStart(2, '0')}:00 UTC (${new Date(Date.UTC(2000, 0, 1, schedule.hour_utc)).toLocaleTimeString([], { hour: 'numeric' })} local)` +
-                ((schedule.extra_suites ?? []).length ? `, then ${(schedule.extra_suites ?? []).join(', ')} one after another within the following three hours.` : '.')
+                ((schedule.extra_suites ?? []).length
+                  ? `, then ${(schedule.extra_suites ?? []).join(', ')} one after another within the following three hours.`
+                  : '.')
               : 'Disabled — runs only when started manually or by CI.'}
           </p>
         </div>
@@ -329,7 +385,7 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
-              <Tooltip formatter={value => [`${Number(value)}%`, 'pass rate']} />
+              <Tooltip formatter={(value) => [`${Number(value)}%`, 'pass rate']} />
               <Line type="monotone" dataKey="passRate" stroke="#0047BA" strokeWidth={2} dot={{ r: 3 }} />
             </LineChart>
           </ResponsiveContainer>
@@ -351,21 +407,31 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
               </tr>
             </thead>
             <tbody>
-              {runs.map(run => (
+              {runs.map((run) => (
                 <tr
                   key={run.id}
                   onClick={() => setSelectedId(selectedId === run.id ? null : run.id)}
                   className={`border-b cursor-pointer transition ${selectedId === run.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
                 >
-                  <td className="py-2 pr-4 font-mono">#{run.id}{run.dry_run ? ' (dry)' : ''}</td>
+                  <td className="py-2 pr-4 font-mono">
+                    #{run.id}
+                    {run.dry_run ? ' (dry)' : ''}
+                  </td>
                   <td className="py-2 pr-4">{new Date(run.started_at).toLocaleString()}</td>
-                  <td className="py-2 pr-4">{run.suite}{run.variations > 1 ? ` ×${run.variations}` : ''}</td>
+                  <td className="py-2 pr-4">
+                    {run.suite}
+                    {run.variations > 1 ? ` ×${run.variations}` : ''}
+                  </td>
                   <td className="py-2 pr-4">{run.trigger}</td>
-                  <td className={`py-2 pr-4 font-medium ${run.pass_count === run.scenario_count ? 'text-green-700' : 'text-red-700'}`}>
+                  <td
+                    className={`py-2 pr-4 font-medium ${run.pass_count === run.scenario_count ? 'text-green-700' : 'text-red-700'}`}
+                  >
                     {run.pass_count}/{run.scenario_count}
                   </td>
                   <td className="py-2 pr-4">${Number(run.est_cost_usd).toFixed(4)}</td>
-                  <td className="py-2 pr-4 font-mono text-xs text-gray-500">{run.git_sha ? run.git_sha.slice(0, 8) : '—'}</td>
+                  <td className="py-2 pr-4 font-mono text-xs text-gray-500">
+                    {run.git_sha ? run.git_sha.slice(0, 8) : '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -391,22 +457,35 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
                   </tr>
                 </thead>
                 <tbody>
-                  {results.map(r => (
+                  {results.map((r) => (
                     <tr key={r.id} className="border-b align-top">
                       <td className="py-2 pr-4">
-                        <span className="font-mono">{r.scenario_id}{r.variation > 0 ? `#v${r.variation + 1}` : ''}</span>
+                        <span className="font-mono">
+                          {r.scenario_id}
+                          {r.variation > 0 ? `#v${r.variation + 1}` : ''}
+                        </span>
                         {r.assertion_failures.length > 0 && (
                           <ul className="mt-1 text-xs text-red-700 list-disc pl-4">
-                            {r.assertion_failures.map(f => <li key={f.id}>{f.id}: {f.detail}</li>)}
+                            {r.assertion_failures.map((f) => (
+                              <li key={f.id}>
+                                {f.id}: {f.detail}
+                              </li>
+                            ))}
                           </ul>
                         )}
                         {r.error && <p className="mt-1 text-xs text-red-700">error: {r.error}</p>}
                       </td>
                       <td className="py-2 pr-4">{r.pipeline}</td>
                       <td className="py-2 pr-4">
-                        {r.passed
-                          ? <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle size={14} /> pass</span>
-                          : <span className="inline-flex items-center gap-1 text-red-700"><XCircle size={14} /> fail</span>}
+                        {r.passed ? (
+                          <span className="inline-flex items-center gap-1 text-green-700">
+                            <CheckCircle size={14} /> pass
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-red-700">
+                            <XCircle size={14} /> fail
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 pr-4 text-xs text-gray-600">{judgeSummary(r.judge_scores)}</td>
                       <td className="py-2 pr-4">

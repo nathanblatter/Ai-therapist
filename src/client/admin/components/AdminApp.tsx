@@ -1,54 +1,84 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
-import { DollarSign, BarChart2, List, Download, Users, Activity, Settings, AlertCircle, Key, AlertTriangle, CheckSquare, FileText, Trash2, BookOpen, Clipboard, FilePlus, X, EyeOff, UserCheck, Target, Inbox, ArrowUpCircle, MessageSquare, MessageCircle, Box, Info, RefreshCw, ExternalLink, Eye } from "react-feather";
-import AdminHeader from "./AdminHeader";
-import SandboxBanner from "./SandboxBanner";
-import useAuth from "../hooks/useAuth";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import {
+  DollarSign,
+  BarChart2,
+  List,
+  Download,
+  Users,
+  Activity,
+  Settings,
+  AlertCircle,
+  Key,
+  AlertTriangle,
+  CheckSquare,
+  FileText,
+  Trash2,
+  BookOpen,
+  Clipboard,
+  FilePlus,
+  X,
+  EyeOff,
+  UserCheck,
+  Target,
+  Inbox,
+  ArrowUpCircle,
+  MessageSquare,
+  MessageCircle,
+  Box,
+  Info,
+  RefreshCw,
+  ExternalLink,
+  Eye,
+} from 'react-feather';
+import AdminHeader from './AdminHeader';
+import SandboxBanner from './SandboxBanner';
+import useAuth from '../hooks/useAuth';
 import {
   configureAdminUsageTelemetry,
   installAdminUsageTracking,
   recordAdminUsage,
   setAdminUsageView,
-} from "../utils/adminUsageTelemetry";
-import ToastContainer from "../../shared/components/Toast";
-import { getJson } from "../../shared/http";
-import DemoSwitcher from "../../shared/components/DemoSwitcher";
-import ErrorBoundary from "../../shared/components/ErrorBoundary";
-import BugReport from "../../main/components/BugReport";
+} from '../utils/adminUsageTelemetry';
+import ToastContainer from '../../shared/components/Toast';
+import { getJson } from '../../shared/http';
+import DemoSwitcher from '../../shared/components/DemoSwitcher';
+import ErrorBoundary from '../../shared/components/ErrorBoundary';
+import BugReport from '../../main/components/BugReport';
 
 // Heavy, independently-navigable views are code-split so the initial admin
 // bundle stays small.
-const SessionList = lazy(() => import("./SessionList"));
-const SessionDetail = lazy(() => import("./SessionDetail"));
-const Analytics = lazy(() => import("./Analytics"));
-const ExportPanel = lazy(() => import("./ExportPanel"));
-const UserManagement = lazy(() => import("./UserManagement"));
-const LiveMonitoring = lazy(() => import("./LiveMonitoring"));
-const SystemConfig = lazy(() => import("./SystemConfig"));
-const CostDashboard = lazy(() => import("./CostDashboard"));
-const SystemPrompts = lazy(() => import("./SystemPrompts"));
-const RateLimitedUsers = lazy(() => import("./RateLimitedUsers"));
-const UserSessions = lazy(() => import("./UserSessions"));
-const CrisisManagement = lazy(() => import("./CrisisManagement"));
-const MFASetup = lazy(() => import("./MFASetup"));
-const DataRetention = lazy(() => import("./DataRetention"));
-const KnowledgeBase = lazy(() => import("./KnowledgeBase"));
-const ConsentVersions = lazy(() => import("./ConsentVersions"));
-const AdverseEvents = lazy(() => import("./AdverseEvents"));
-const StudyOps = lazy(() => import("./StudyOps"));
-const EvalsView = lazy(() => import("./EvalsView"));
-const ParticipantProfile = lazy(() => import("./ParticipantProfile"));
-const RedactionReview = lazy(() => import("./RedactionReview"));
-const CaseloadView = lazy(() => import("./CaseloadView"));
-const CaseworkerDashboard = lazy(() => import("./CaseworkerDashboard"));
-const WorkQueue = lazy(() => import("./WorkQueue"));
-const NotificationPreferences = lazy(() => import("./NotificationPreferences"));
-const EscalationInbox = lazy(() => import("./escalations/EscalationInbox"));
-const MessagingInbox = lazy(() => import("./MessagingInbox"));
-const SandboxInvites = lazy(() => import("./SandboxInvites"));
-const QualtricsSync = lazy(() => import("./QualtricsSync"));
-const SurveyData = lazy(() => import("./SurveyData"));
-const Assistant = lazy(() => import("./Assistant"));
-const DataAccessAudit = lazy(() => import("./DataAccessAudit"));
+const SessionList = lazy(() => import('./SessionList'));
+const SessionDetail = lazy(() => import('./SessionDetail'));
+const Analytics = lazy(() => import('./Analytics'));
+const ExportPanel = lazy(() => import('./ExportPanel'));
+const UserManagement = lazy(() => import('./UserManagement'));
+const LiveMonitoring = lazy(() => import('./LiveMonitoring'));
+const SystemConfig = lazy(() => import('./SystemConfig'));
+const CostDashboard = lazy(() => import('./CostDashboard'));
+const SystemPrompts = lazy(() => import('./SystemPrompts'));
+const RateLimitedUsers = lazy(() => import('./RateLimitedUsers'));
+const UserSessions = lazy(() => import('./UserSessions'));
+const CrisisManagement = lazy(() => import('./CrisisManagement'));
+const MFASetup = lazy(() => import('./MFASetup'));
+const DataRetention = lazy(() => import('./DataRetention'));
+const KnowledgeBase = lazy(() => import('./KnowledgeBase'));
+const ConsentVersions = lazy(() => import('./ConsentVersions'));
+const AdverseEvents = lazy(() => import('./AdverseEvents'));
+const StudyOps = lazy(() => import('./StudyOps'));
+const EvalsView = lazy(() => import('./EvalsView'));
+const ParticipantProfile = lazy(() => import('./ParticipantProfile'));
+const RedactionReview = lazy(() => import('./RedactionReview'));
+const CaseloadView = lazy(() => import('./CaseloadView'));
+const CaseworkerDashboard = lazy(() => import('./CaseworkerDashboard'));
+const WorkQueue = lazy(() => import('./WorkQueue'));
+const NotificationPreferences = lazy(() => import('./NotificationPreferences'));
+const EscalationInbox = lazy(() => import('./escalations/EscalationInbox'));
+const MessagingInbox = lazy(() => import('./MessagingInbox'));
+const SandboxInvites = lazy(() => import('./SandboxInvites'));
+const QualtricsSync = lazy(() => import('./QualtricsSync'));
+const SurveyData = lazy(() => import('./SurveyData'));
+const Assistant = lazy(() => import('./Assistant'));
+const DataAccessAudit = lazy(() => import('./DataAccessAudit'));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -93,7 +123,11 @@ export default function AdminApp() {
   // sandbox account is synthetic).
   const { role: userRole, username, isSandbox, isCareTeam, loading: authLoading } = useAuth();
   const [sandboxCalloutDismissed, setSandboxCalloutDismissed] = useState(() => {
-    try { return localStorage.getItem('sandbox-onboarding-dismissed') === '1'; } catch { return false; }
+    try {
+      return localStorage.getItem('sandbox-onboarding-dismissed') === '1';
+    } catch {
+      return false;
+    }
   });
   // Deployment posture (migration 060): 'research' shows every study surface;
   // 'clinical' (therapist pilot) hides the research-only nav items. UI framing
@@ -121,13 +155,15 @@ export default function AdminApp() {
   useEffect(() => {
     installAdminUsageTracking();
     getJson<{ telemetry_admin_usage?: boolean }>('/api/config/features')
-      .then(data => {
+      .then((data) => {
         configureAdminUsageTelemetry(data?.telemetry_admin_usage === true);
         // Re-report the view that was active before the flag arrived (the
         // module drops events while disabled, including the landing view).
         setAdminUsageView(currentViewRef.current);
       })
-      .catch(() => { /* stays disabled */ });
+      .catch(() => {
+        /* stays disabled */
+      });
   }, []);
 
   useEffect(() => {
@@ -142,17 +178,19 @@ export default function AdminApp() {
   // shell never wedges on ViewLoading.
   useEffect(() => {
     if (authLoading) return;
-    setCurrentViewState(prev => prev ?? landingViewFor(userRole));
+    setCurrentViewState((prev) => prev ?? landingViewFor(userRole));
   }, [authLoading, userRole]);
 
   // Fetch the deployment mode once; anything but an explicit 'clinical' keeps
   // the research default (missing row, demo fixtures, fetch failure).
   useEffect(() => {
     getJson<{ value?: { mode?: string } }>('/admin/api/config/deployment_mode')
-      .then(data => {
+      .then((data) => {
         if (data?.value?.mode === 'clinical') setDeploymentMode('clinical');
       })
-      .catch(() => { /* keep research default */ });
+      .catch(() => {
+        /* keep research default */
+      });
   }, []);
 
   // Session deep link: crisis SMS pages link to /admin#session=<id> so the
@@ -170,10 +208,12 @@ export default function AdminApp() {
   // Fetch AE deadline counts once on mount for the nav badge.
   useEffect(() => {
     getJson<{ counts?: { overdue?: number; due_soon?: number } }>('/admin/api/adverse-events?status=draft')
-      .then(data => {
+      .then((data) => {
         if (data?.counts) setAeReminderCount((data.counts.overdue ?? 0) + (data.counts.due_soon ?? 0));
       })
-      .catch(() => { /* nav badge is best-effort */ });
+      .catch(() => {
+        /* nav badge is best-effort */
+      });
   }, []);
 
   // Open-escalations + unread-messages badges for care-team roles. Refreshed
@@ -181,11 +221,19 @@ export default function AdminApp() {
   useEffect(() => {
     if (!isCareTeam) return;
     getJson<{ count?: number }>('/admin/api/escalations?count_only=1')
-      .then(data => { if (typeof data?.count === 'number') setEscalationCount(data.count); })
-      .catch(() => { /* nav badge is best-effort */ });
+      .then((data) => {
+        if (typeof data?.count === 'number') setEscalationCount(data.count);
+      })
+      .catch(() => {
+        /* nav badge is best-effort */
+      });
     getJson<{ unread_total?: number }>('/api/admin/messaging/inbox')
-      .then(data => { if (typeof data?.unread_total === 'number') setMessagingUnread(data.unread_total); })
-      .catch(() => { /* nav badge is best-effort */ });
+      .then((data) => {
+        if (typeof data?.unread_total === 'number') setMessagingUnread(data.unread_total);
+      })
+      .catch(() => {
+        /* nav badge is best-effort */
+      });
   }, [isCareTeam, currentView]);
 
   // Open a participant profile from views that only know the client id
@@ -203,7 +251,9 @@ export default function AdminApp() {
           const name = row.username ?? row.client_username;
           if (Number.isInteger(id) && typeof name === 'string') cache.set(id, name);
         }
-      } catch { /* fall through to the id-only label */ }
+      } catch {
+        /* fall through to the id-only label */
+      }
     }
     setSelectedUser({
       userid: clientId,
@@ -227,7 +277,15 @@ export default function AdminApp() {
   // pilot framing). demoVisible opens a researcher-gated item to magic-link
   // demo accounts, whose entire admin API is served synthetic fixtures
   // (demo.routes.ts). MFA Security lives in the header account area, not here.
-  type NavItem = { id: string; label: string; icon: typeof Activity; researcherOnly?: boolean; researchOnly?: boolean; demoVisible?: boolean; roles?: string[] };
+  type NavItem = {
+    id: string;
+    label: string;
+    icon: typeof Activity;
+    researcherOnly?: boolean;
+    researchOnly?: boolean;
+    demoVisible?: boolean;
+    roles?: string[];
+  };
   const navGroups: Array<{ label: string; items: NavItem[] }> = [
     {
       label: 'Operations',
@@ -249,9 +307,24 @@ export default function AdminApp() {
       items: [
         // Roles mirror the crisis routes (crisis.routes.ts): caseworkers can
         // flag and read the register; wind-down/unflag stay therapist+researcher.
-        { id: 'crisis', label: 'Crisis Management', icon: AlertTriangle, roles: ['therapist', 'caseworker', 'researcher'] },
-        { id: 'escalations', label: 'Escalations', icon: ArrowUpCircle, roles: ['therapist', 'caseworker', 'researcher'] },
-        { id: 'adverse-events', label: 'Adverse Events', icon: FilePlus, roles: ['therapist', 'caseworker', 'researcher', 'demo'] },
+        {
+          id: 'crisis',
+          label: 'Crisis Management',
+          icon: AlertTriangle,
+          roles: ['therapist', 'caseworker', 'researcher'],
+        },
+        {
+          id: 'escalations',
+          label: 'Escalations',
+          icon: ArrowUpCircle,
+          roles: ['therapist', 'caseworker', 'researcher'],
+        },
+        {
+          id: 'adverse-events',
+          label: 'Adverse Events',
+          icon: FilePlus,
+          roles: ['therapist', 'caseworker', 'researcher', 'demo'],
+        },
       ],
     },
     {
@@ -261,7 +334,13 @@ export default function AdminApp() {
         // Caseload RBAC (ai-therapist-119): therapist sees own clients +
         // invites; researcher sees the assignment matrix. Hidden from demo
         // accounts for MVP (demoVisible: false).
-        { id: 'caseload', label: 'Caseload', icon: UserCheck, roles: ['therapist', 'caseworker', 'researcher'], demoVisible: false },
+        {
+          id: 'caseload',
+          label: 'Caseload',
+          icon: UserCheck,
+          roles: ['therapist', 'caseworker', 'researcher'],
+          demoVisible: false,
+        },
         { id: 'messages', label: 'Messages', icon: MessageSquare, roles: ['therapist', 'caseworker', 'researcher'] },
         { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
         { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle, roles: ['therapist', 'researcher', 'demo'] },
@@ -300,9 +379,9 @@ export default function AdminApp() {
   // Filter nav items based on user role and deployment posture; drop groups
   // left empty for this user.
   const visibleGroups = navGroups
-    .map(group => ({
+    .map((group) => ({
       ...group,
-      items: group.items.filter(item => {
+      items: group.items.filter((item) => {
         if (item.researchOnly && deploymentMode === 'clinical') {
           return false;
         }
@@ -322,7 +401,7 @@ export default function AdminApp() {
         return true;
       }),
     }))
-    .filter(group => group.items.length > 0);
+    .filter((group) => group.items.length > 0);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -360,13 +439,11 @@ export default function AdminApp() {
             </button>
           </div>
           <nav className="p-4 pt-0 md:pt-4 overflow-y-auto h-full">
-            {visibleGroups.map(group => (
+            {visibleGroups.map((group) => (
               <div key={group.label} className="mb-4">
-                <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
-                  {group.label}
-                </p>
+                <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">{group.label}</p>
                 <div className="space-y-1">
-                  {group.items.map(item => {
+                  {group.items.map((item) => {
                     const Icon = item.icon;
                     return (
                       <button
@@ -376,9 +453,7 @@ export default function AdminApp() {
                           setIsSidebarOpen(false);
                         }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition ${
-                          currentView === item.id
-                            ? 'bg-royal text-white'
-                            : 'text-gray-700 hover:bg-gray-100'
+                          currentView === item.id ? 'bg-royal text-white' : 'text-gray-700 hover:bg-gray-100'
                         }`}
                       >
                         <Icon size={20} />
@@ -429,15 +504,19 @@ export default function AdminApp() {
               <div className="text-sm text-sky-900 flex-1">
                 <p className="font-semibold">Welcome to your sandbox</p>
                 <p className="mt-1">
-                  A synthetic caseload has been assembled for you: browse the triage roster, work the
-                  queue, review notes and escalations, and try messaging. Everything here is fake data —
-                  nothing you do reaches real participants or the on-call pager.
+                  A synthetic caseload has been assembled for you: browse the triage roster, work the queue, review
+                  notes and escalations, and try messaging. Everything here is fake data — nothing you do reaches real
+                  participants or the on-call pager.
                 </p>
               </div>
               <button
                 onClick={() => {
                   setSandboxCalloutDismissed(true);
-                  try { localStorage.setItem('sandbox-onboarding-dismissed', '1'); } catch { /* best-effort */ }
+                  try {
+                    localStorage.setItem('sandbox-onboarding-dismissed', '1');
+                  } catch {
+                    /* best-effort */
+                  }
                 }}
                 className="p-1 text-sky-500 hover:text-sky-800"
                 aria-label="Dismiss sandbox welcome"
@@ -486,7 +565,7 @@ export default function AdminApp() {
               {currentView === 'data-access' && <DataAccessAudit onViewSession={handleViewSession} />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'costs' && <CostDashboard />}
-            {currentView === 'config' && <SystemConfig />}
+              {currentView === 'config' && <SystemConfig />}
               {currentView === 'export' && <ExportPanel />}
             </Suspense>
           </ErrorBoundary>
@@ -510,11 +589,7 @@ export default function AdminApp() {
 
       {selectedSessionId && (
         <Suspense fallback={null}>
-          <SessionDetail
-            sessionId={selectedSessionId}
-            onClose={handleCloseSession}
-            isEditMode={isEditMode}
-          />
+          <SessionDetail sessionId={selectedSessionId} onClose={handleCloseSession} isEditMode={isEditMode} />
         </Suspense>
       )}
 

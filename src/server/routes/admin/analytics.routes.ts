@@ -65,11 +65,9 @@ export default function analyticsRoutes(): Router {
   router.get('/admin/api/analytics/tools', requireRole('therapist', 'researcher'), async (_req, res) => {
     try {
       const { toolRegistry } = await import('../../services/toolRegistry.service.js');
-      const {
-        getToolInvocationStats,
-        getToolsPerSessionDistribution,
-        getToolUsageSessionCounts,
-      } = await import('../../db/index.js');
+      const { getToolInvocationStats, getToolsPerSessionDistribution, getToolUsageSessionCounts } = await import(
+        '../../db/index.js'
+      );
 
       const [stats, distribution, sessionCounts] = await Promise.all([
         getToolInvocationStats(),
@@ -77,22 +75,17 @@ export default function analyticsRoutes(): Router {
         getToolUsageSessionCounts(),
       ]);
 
-      const invokedNames = new Set(stats.map(s => s.tool_name));
-      const deadTools = toolRegistry.getAllToolDefinitions()
-        .map(def => def.name)
-        .filter(name => !invokedNames.has(name));
+      const invokedNames = new Set(stats.map((s) => s.tool_name));
+      const deadTools = toolRegistry
+        .getAllToolDefinitions()
+        .map((def) => def.name)
+        .filter((name) => !invokedNames.has(name));
 
-      const zeroToolSessions = Math.max(
-        0,
-        sessionCounts.total_sessions - sessionCounts.sessions_with_tool_use
-      );
+      const zeroToolSessions = Math.max(0, sessionCounts.total_sessions - sessionCounts.sessions_with_tool_use);
 
       res.json({
         tool_stats: stats,
-        distinct_tools_per_session: [
-          { distinct_tool_count: 0, session_count: zeroToolSessions },
-          ...distribution,
-        ],
+        distinct_tools_per_session: [{ distinct_tool_count: 0, session_count: zeroToolSessions }, ...distribution],
         dead_tools: deadTools,
         registered_tool_count: toolRegistry.getAllToolDefinitions().length,
         sessions_with_tool_use: sessionCounts.sessions_with_tool_use,
@@ -133,7 +126,7 @@ export default function analyticsRoutes(): Router {
       const promptVersion = req.query.promptVersion ? String(req.query.promptVersion) : PAIRWISE_PROMPT_VERSION;
 
       const aggregates = await getPairwiseAggregates(promptVersion);
-      const comparisons = aggregates.map(a => {
+      const comparisons = aggregates.map((a) => {
         const nDecisive = a.wins_x + a.wins_y;
         const ci = wilsonInterval(a.wins_x, nDecisive);
         const winRateX = ci ? ci.p : null;

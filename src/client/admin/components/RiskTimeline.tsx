@@ -37,11 +37,35 @@ function Sparkline({ scores }: { scores: number[] }) {
   const points = scores.map((s, i) => `${(i * step).toFixed(1)},${(h - (s / 100) * h).toFixed(1)}`).join(' ');
   return (
     <svg width={w} height={h} className="block" aria-label="Risk score sparkline">
-      <line x1={0} y1={h - (75 / 100) * h} x2={w} y2={h - (75 / 100) * h} stroke="#fecaca" strokeWidth={1} strokeDasharray="3,3" />
-      <line x1={0} y1={h - (50 / 100) * h} x2={w} y2={h - (50 / 100) * h} stroke="#fde68a" strokeWidth={1} strokeDasharray="3,3" />
+      <line
+        x1={0}
+        y1={h - (75 / 100) * h}
+        x2={w}
+        y2={h - (75 / 100) * h}
+        stroke="#fecaca"
+        strokeWidth={1}
+        strokeDasharray="3,3"
+      />
+      <line
+        x1={0}
+        y1={h - (50 / 100) * h}
+        x2={w}
+        y2={h - (50 / 100) * h}
+        stroke="#fde68a"
+        strokeWidth={1}
+        strokeDasharray="3,3"
+      />
       <polyline points={points} fill="none" stroke="#6366f1" strokeWidth={1.5} />
       {scores.map((s, i) =>
-        s > 0 ? <circle key={i} cx={i * step} cy={h - (s / 100) * h} r={2.5} fill={s >= 75 ? '#dc2626' : s >= 50 ? '#d97706' : s >= 25 ? '#16a34a' : '#9ca3af'} /> : null
+        s > 0 ? (
+          <circle
+            key={i}
+            cx={i * step}
+            cy={h - (s / 100) * h}
+            r={2.5}
+            fill={s >= 75 ? '#dc2626' : s >= 50 ? '#d97706' : s >= 25 ? '#16a34a' : '#9ca3af'}
+          />
+        ) : null,
       )}
     </svg>
   );
@@ -76,8 +100,8 @@ export default function RiskTimeline({ sessionId }: RiskTimelineProps) {
     if (expanded && history === null) void fetchHistory();
   }, [expanded, history, fetchHistory]);
 
-  const scored = (history ?? []).filter(e => e.risk_score > 0);
-  const maxScore = Math.max(0, ...(history ?? []).map(e => e.risk_score));
+  const scored = (history ?? []).filter((e) => e.risk_score > 0);
+  const maxScore = Math.max(0, ...(history ?? []).map((e) => e.risk_score));
 
   return (
     <div className="mb-4 border border-gray-200 bg-gray-50 rounded-lg">
@@ -106,27 +130,35 @@ export default function RiskTimeline({ sessionId }: RiskTimelineProps) {
 
           {history !== null && history.length >= 2 && (
             <div className="bg-white rounded p-3">
-              <Sparkline scores={history.map(e => e.risk_score)} />
-              <p className="text-xs text-gray-400 mt-1">{history.length} scored messages · dashed lines at 50 (medium) and 75 (high)</p>
+              <Sparkline scores={history.map((e) => e.risk_score)} />
+              <p className="text-xs text-gray-400 mt-1">
+                {history.length} scored messages · dashed lines at 50 (medium) and 75 (high)
+              </p>
             </div>
           )}
 
           {scored.length > 0 && (
             <div className="bg-white rounded p-3 space-y-2">
-              {scored.map(e => {
+              {scored.map((e) => {
                 const f = e.score_factors ?? {};
                 return (
                   <div key={e.history_id} className="border-b border-gray-100 last:border-0 pb-2 last:pb-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`font-bold ${scoreColor(e.risk_score)}`}>{e.risk_score}</span>
-                      {e.severity && <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{e.severity}</span>}
+                      {e.severity && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{e.severity}</span>
+                      )}
                       {f.method && <span className="text-xs font-mono text-gray-400">{f.method}</span>}
                       {f.llm_context && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${f.llm_context === 'genuine' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded font-medium ${f.llm_context === 'genuine' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}
+                        >
                           {f.llm_context}
                         </span>
                       )}
-                      <span className="text-xs text-gray-400 ml-auto">{new Date(e.calculated_at).toLocaleTimeString()}</span>
+                      <span className="text-xs text-gray-400 ml-auto">
+                        {new Date(e.calculated_at).toLocaleTimeString()}
+                      </span>
                     </div>
                     {f.llm_reasoning && <p className="text-xs text-gray-600 mt-0.5">{f.llm_reasoning}</p>}
                     {f.keywords && f.keywords.length > 0 && (

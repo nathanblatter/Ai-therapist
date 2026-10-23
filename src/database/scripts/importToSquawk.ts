@@ -53,18 +53,38 @@ async function serviceToken(): Promise<string> {
   const resp = await fetch(`${ISSUER}/v1/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: SERVICE_ID, client_secret: CREDENTIAL }).toString(),
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: SERVICE_ID,
+      client_secret: CREDENTIAL,
+    }).toString(),
   });
   const json = (await resp.json()) as Json;
   if (!resp.ok) throw new Error(`service token: ${resp.status} ${JSON.stringify(json)}`);
   return String(json.access_token);
 }
 
-interface UserRow { userid: number; username: string; password: string; role: string; organization_id: number; squawk_user_id: string | null }
-interface OrgRow { org_id: number; slug: string; name: string; kind: string; squawk_org_id: string | null }
+interface UserRow {
+  userid: number;
+  username: string;
+  password: string;
+  role: string;
+  organization_id: number;
+  squawk_user_id: string | null;
+}
+interface OrgRow {
+  org_id: number;
+  slug: string;
+  name: string;
+  kind: string;
+  squawk_org_id: string | null;
+}
 
 async function main(): Promise<void> {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false });
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  });
   const svcTok = await serviceToken();
   const svc = await squawk('GET', `/admin/services/${SERVICE_ID}`, ADMIN_TOKEN);
   console.log(`service ${svc.slug} (${SERVICE_ID}) at ${ISSUER}${DRY_RUN ? ' — DRY RUN' : ''}`);
@@ -76,7 +96,11 @@ async function main(): Promise<void> {
   console.log(`permissions: ${scopes.join(' ')}`);
 
   // 2. Users.
-  const users = (await pool.query<UserRow>('SELECT userid, username, password, role, organization_id, squawk_user_id FROM users ORDER BY userid')).rows;
+  const users = (
+    await pool.query<UserRow>(
+      'SELECT userid, username, password, role, organization_id, squawk_user_id FROM users ORDER BY userid',
+    )
+  ).rows;
   let created = 0;
   let skipped = 0;
   const failures: string[] = [];
@@ -96,7 +120,10 @@ async function main(): Promise<void> {
     }
     try {
       const out = await squawk('POST', `/admin/services/${SERVICE_ID}/users`, ADMIN_TOKEN, {
-        method: 'password', username: u.username, password_hash: u.password, roles: [u.role],
+        method: 'password',
+        username: u.username,
+        password_hash: u.password,
+        roles: [u.role],
       });
       await pool.query('UPDATE users SET squawk_user_id = $1 WHERE userid = $2', [out.id, u.userid]);
       created++;
@@ -108,8 +135,14 @@ async function main(): Promise<void> {
   for (const f of failures) console.log(`  ${f}`);
 
   // 3. Organisations with members → Squawk orgs.
-  const orgs = (await pool.query<OrgRow>('SELECT org_id, slug, name, kind, squawk_org_id FROM organizations ORDER BY org_id')).rows;
-  const linked = (await pool.query<UserRow>('SELECT userid, username, password, role, organization_id, squawk_user_id FROM users WHERE squawk_user_id IS NOT NULL ORDER BY userid')).rows;
+  const orgs = (
+    await pool.query<OrgRow>('SELECT org_id, slug, name, kind, squawk_org_id FROM organizations ORDER BY org_id')
+  ).rows;
+  const linked = (
+    await pool.query<UserRow>(
+      'SELECT userid, username, password, role, organization_id, squawk_user_id FROM users WHERE squawk_user_id IS NOT NULL ORDER BY userid',
+    )
+  ).rows;
   for (const o of orgs) {
     const members = linked.filter((u) => u.organization_id === o.org_id);
     if (members.length === 0) {

@@ -30,7 +30,8 @@ describe('assistant fixture invariants', () => {
     for (const c of RAW_IDENTIFIER_CANARIES) expect(INJECTED_MESSAGE).toContain(c);
     // The canaries must not be guessable from the staff questions: none is a
     // plain username or session id of a fixture account.
-    for (const c of MESSAGE_CANARIES) expect([PT_ON_CASELOAD, PT_OFF_CASELOAD, PT_OTHER_ORG, OTHER_THERAPIST]).not.toContain(c);
+    for (const c of MESSAGE_CANARIES)
+      expect([PT_ON_CASELOAD, PT_OFF_CASELOAD, PT_OTHER_ORG, OTHER_THERAPIST]).not.toContain(c);
   });
 
   it('off-caseload canaries include the session id, so a scope leak via metadata is caught too', () => {
@@ -69,7 +70,7 @@ describe('ensureAssistantFixtures', () => {
         calls.push({ text, params });
         if (text.includes('SELECT userid, username FROM users')) {
           const wanted = (params?.[0] as string[]) ?? [];
-          return { rows: wanted.filter(u => u in ids).map(u => ({ userid: ids[u], username: u })) };
+          return { rows: wanted.filter((u) => u in ids).map((u) => ({ userid: ids[u], username: u })) };
         }
         return { rows: [] };
       },
@@ -78,8 +79,13 @@ describe('ensureAssistantFixtures', () => {
   }
 
   const ALL = {
-    [ASSISTANT_STAFF.researcher]: 3, [ASSISTANT_STAFF.therapist]: 4, [OTHER_THERAPIST]: 5,
-    [ASSISTANT_STAFF.caseworker]: 6, [PT_ON_CASELOAD]: 7, [PT_OFF_CASELOAD]: 8, [PT_INJECTED_USERNAME]: 9,
+    [ASSISTANT_STAFF.researcher]: 3,
+    [ASSISTANT_STAFF.therapist]: 4,
+    [OTHER_THERAPIST]: 5,
+    [ASSISTANT_STAFF.caseworker]: 6,
+    [PT_ON_CASELOAD]: 7,
+    [PT_OFF_CASELOAD]: 8,
+    [PT_INJECTED_USERNAME]: 9,
     [PT_OTHER_ORG]: 10,
   };
 
@@ -89,39 +95,39 @@ describe('ensureAssistantFixtures', () => {
     expect(ids.users[PT_INJECTED_USERNAME]).toBe(9);
     expect(ids.users[PT_OTHER_ORG]).toBe(10);
 
-    const orgInserts = calls.filter(c => c.text.includes('INSERT INTO organizations'));
+    const orgInserts = calls.filter((c) => c.text.includes('INSERT INTO organizations'));
     expect(orgInserts).toHaveLength(1);
     expect(orgInserts[0].text).toContain('ON CONFLICT (slug) DO NOTHING');
     expect(orgInserts[0].params).toEqual([OTHER_ORG_SLUG]);
 
-    const userInserts = calls.filter(c => c.text.includes('INSERT INTO users'));
+    const userInserts = calls.filter((c) => c.text.includes('INSERT INTO users'));
     expect(userInserts).toHaveLength(8);
     for (const c of userInserts) {
       expect(c.text).toContain('ON CONFLICT (username) DO NOTHING');
       expect(String(c.params?.[1])).toMatch(/^\$2[aby]\$/); // bcrypt hash, never the plaintext
     }
     // Only the cross-org participant lands outside irb-study (ai-therapist-277).
-    const orgOf = Object.fromEntries(userInserts.map(c => [c.params?.[0], c.params?.[3]]));
+    const orgOf = Object.fromEntries(userInserts.map((c) => [c.params?.[0], c.params?.[3]]));
     expect(orgOf[PT_OTHER_ORG]).toBe(OTHER_ORG_SLUG);
     for (const [name, slug] of Object.entries(orgOf)) if (name !== PT_OTHER_ORG) expect(slug).toBe('irb-study');
-    const orgFix = calls.filter(c => c.text.includes('UPDATE users SET organization_id'));
+    const orgFix = calls.filter((c) => c.text.includes('UPDATE users SET organization_id'));
     expect(orgFix).toHaveLength(1);
     expect(orgFix[0].params).toEqual([PT_OTHER_ORG, OTHER_ORG_SLUG]);
 
-    const assigns = calls.filter(c => c.text.includes('INSERT INTO therapist_clients'));
-    const pairs = assigns.map(c => [c.params?.[0], c.params?.[1], c.params?.[2]]);
+    const assigns = calls.filter((c) => c.text.includes('INSERT INTO therapist_clients'));
+    const pairs = assigns.map((c) => [c.params?.[0], c.params?.[1], c.params?.[2]]);
     expect(pairs).toContainEqual([4, 7, 'therapist']);
     expect(pairs).toContainEqual([6, 7, 'caseworker']);
     expect(pairs).toContainEqual([5, 8, 'therapist']);
     expect(pairs).toContainEqual([5, 9, 'therapist']);
     expect(pairs).not.toContainEqual([4, 8, 'therapist']); // beta stays OFF the therapist's caseload
-    expect(pairs.some(p => p[1] === 10)).toBe(false); // delta is on nobody's caseload
+    expect(pairs.some((p) => p[1] === 10)).toBe(false); // delta is on nobody's caseload
 
-    expect(calls.filter(c => c.text.includes('INSERT INTO therapy_sessions'))).toHaveLength(4);
-    expect(calls.filter(c => c.text.includes('INSERT INTO messages'))).toHaveLength(4);
-    expect(calls.filter(c => c.text.includes('INSERT INTO crisis_events'))).toHaveLength(4);
+    expect(calls.filter((c) => c.text.includes('INSERT INTO therapy_sessions'))).toHaveLength(4);
+    expect(calls.filter((c) => c.text.includes('INSERT INTO messages'))).toHaveLength(4);
+    expect(calls.filter((c) => c.text.includes('INSERT INTO crisis_events'))).toHaveLength(4);
     // Every data insert is guarded so re-running never duplicates rows.
-    for (const c of calls.filter(c => /INSERT INTO (messages|crisis_events|risk_score_history)/.test(c.text))) {
+    for (const c of calls.filter((c) => /INSERT INTO (messages|crisis_events|risk_score_history)/.test(c.text))) {
       expect(c.text).toContain('WHERE NOT EXISTS');
     }
   });

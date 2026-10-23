@@ -14,7 +14,11 @@ const { buildDatasetMock, streamMock } = vi.hoisted(() => ({
 }));
 vi.mock('../../services/datasetExport.service.js', () => ({
   buildDataset: buildDatasetMock,
-  streamDatasetZip: (_r: unknown, res: { end: () => void }) => { streamMock(); res.end(); return Promise.resolve(); },
+  streamDatasetZip: (_r: unknown, res: { end: () => void }) => {
+    streamMock();
+    res.end();
+    return Promise.resolve();
+  },
 }));
 
 import exportRoutes from './export.routes.js';

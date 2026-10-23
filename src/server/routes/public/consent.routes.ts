@@ -34,9 +34,8 @@ export default function consentRoutes(): Router {
         if (latest && latest.consent_version === active.version) {
           req.session.consentAccepted = true;
           req.session.consentVersion = latest.consent_version;
-          req.session.consentAcceptedAt = latest.accepted_at instanceof Date
-            ? latest.accepted_at.toISOString()
-            : String(latest.accepted_at);
+          req.session.consentAcceptedAt =
+            latest.accepted_at instanceof Date ? latest.accepted_at.toISOString() : String(latest.accepted_at);
         }
       }
 

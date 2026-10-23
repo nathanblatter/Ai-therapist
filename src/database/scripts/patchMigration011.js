@@ -33,7 +33,6 @@ async function patchMigration() {
     console.log('Added action types:');
     console.log('  - auto_flag (for automatic detection)');
     console.log('  - manual_flag (for manual admin flagging)\n');
-
   } catch (error) {
     console.error('\nPatch failed:', error.message);
     throw error;

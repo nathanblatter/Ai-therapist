@@ -58,8 +58,8 @@ async function main(): Promise<void> {
 
   console.error(
     `[RiskCalibration] org ${orgId}, window ${params.since} .. ${params.until}, sample ${params.sample_size}, ` +
-    `seed ${params.seed}, unflagged_as_negative=${params.unflagged_as_negative}, ` +
-    `${dryRun ? 'DRY RUN (no LLM calls, nothing stored)' : `live re-score capped at $${MISS_RATE_BUDGET_USD}`}`,
+      `seed ${params.seed}, unflagged_as_negative=${params.unflagged_as_negative}, ` +
+      `${dryRun ? 'DRY RUN (no LLM calls, nothing stored)' : `live re-score capped at $${MISS_RATE_BUDGET_USD}`}`,
   );
 
   if (dryRun || print) {
@@ -70,17 +70,19 @@ async function main(): Promise<void> {
       const l = report.labels;
       console.log(
         `[RiskCalibration] labels: ${l.scored_messages} scored messages, ${l.with_event} with a crisis event, ` +
-        `${l.positives} positive, ${l.negatives} negative (${l.negatives_assumed_unflagged} assumed from no event), ` +
-        `${l.excluded_unadjudicated} unadjudicated, ${l.excluded_unclear + l.excluded_disputed} unclear/disputed` +
-        ` -> ${l.insufficient_labels ? 'INSUFFICIENT LABELS (need >= ' + l.min_labels_per_class + ' per class)' : 'metrics computed'}`,
+          `${l.positives} positive, ${l.negatives} negative (${l.negatives_assumed_unflagged} assumed from no event), ` +
+          `${l.excluded_unadjudicated} unadjudicated, ${l.excluded_unclear + l.excluded_disputed} unclear/disputed` +
+          ` -> ${l.insufficient_labels ? 'INSUFFICIENT LABELS (need >= ' + l.min_labels_per_class + ' per class)' : 'metrics computed'}`,
       );
       console.log(
         `[RiskCalibration] adjudication coverage: ${l.coverage.adjudicated_events}/${l.coverage.flagged_events} flagged events adjudicated ` +
-        `(${l.coverage.confirmed} confirmed, ${l.coverage.false_positive} false_positive, ${l.coverage.unclear} unclear)`,
+          `(${l.coverage.confirmed} confirmed, ${l.coverage.false_positive} false_positive, ${l.coverage.unclear} unclear)`,
       );
       const m = report.miss_rate;
       if (m) {
-        console.log(`[RiskCalibration] miss-rate sample: ${m.sampled} of ${m.candidates} unflagged candidates would be re-scored`);
+        console.log(
+          `[RiskCalibration] miss-rate sample: ${m.sampled} of ${m.candidates} unflagged candidates would be re-scored`,
+        );
         for (const s of m.by_stratum) console.log(`  ${s.stratum}: ${s.sampled} of ${s.candidates}`);
         console.log(`  message ids: ${m.sampled_message_ids.join(', ') || '(none)'}`);
       }
@@ -90,19 +92,28 @@ async function main(): Promise<void> {
 
   const user = process.env.USER || process.env.USERNAME || 'unknown';
   const row = await runAndStoreRiskCalibration({ orgId, params, createdBy: `cli:${user}` });
-  const report = row.report as { labels: { insufficient_labels: boolean; positives: number; negatives: number }; miss_rate: { scored: number; sampled: number; spend_usd: number; fraction_ge_50: number | null; fraction_ge_75: number | null } | null };
+  const report = row.report as {
+    labels: { insufficient_labels: boolean; positives: number; negatives: number };
+    miss_rate: {
+      scored: number;
+      sampled: number;
+      spend_usd: number;
+      fraction_ge_50: number | null;
+      fraction_ge_75: number | null;
+    } | null;
+  };
   console.log(
     `[RiskCalibration] stored run #${row.run_id} for org ${orgId}: ` +
-    `${report.labels.positives}+/${report.labels.negatives}- ` +
-    `(${report.labels.insufficient_labels ? 'insufficient labels' : 'metrics computed'}); ` +
-    (report.miss_rate
-      ? `miss-rate ${report.miss_rate.scored}/${report.miss_rate.sampled} scored, >=50: ${report.miss_rate.fraction_ge_50 ?? 'n/a'}, >=75: ${report.miss_rate.fraction_ge_75 ?? 'n/a'}, spend $${report.miss_rate.spend_usd}`
-      : 'no miss-rate sample'),
+      `${report.labels.positives}+/${report.labels.negatives}- ` +
+      `(${report.labels.insufficient_labels ? 'insufficient labels' : 'metrics computed'}); ` +
+      (report.miss_rate
+        ? `miss-rate ${report.miss_rate.scored}/${report.miss_rate.sampled} scored, >=50: ${report.miss_rate.fraction_ge_50 ?? 'n/a'}, >=75: ${report.miss_rate.fraction_ge_75 ?? 'n/a'}, spend $${report.miss_rate.spend_usd}`
+        : 'no miss-rate sample'),
   );
 }
 
 main()
-  .catch(err => {
+  .catch((err) => {
     console.error('[RiskCalibration] failed:', err instanceof Error ? err.message : err);
     process.exitCode = 1;
   })

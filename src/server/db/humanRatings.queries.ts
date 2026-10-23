@@ -30,7 +30,7 @@ export async function getSessionHumanRatings(sessionId: string): Promise<Session
      LEFT JOIN users u ON u.userid = hr.rater_user_id
      WHERE hr.session_id = $1
      ORDER BY hr.updated_at DESC`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows;
 }
@@ -42,7 +42,7 @@ export async function upsertSessionHumanRating(
   raterUserId: number,
   rubric: HumanRatingRubric,
   overallNotes: string | null,
-  rubricVersion: string
+  rubricVersion: string,
 ): Promise<SessionHumanRatingRow> {
   const result = await pool.query<SessionHumanRatingRow>(
     `INSERT INTO session_human_ratings (session_id, rater_user_id, rubric, overall_notes, rubric_version)
@@ -53,7 +53,7 @@ export async function upsertSessionHumanRating(
            rubric_version = EXCLUDED.rubric_version,
            updated_at = CURRENT_TIMESTAMP
      RETURNING *`,
-    [sessionId, raterUserId, JSON.stringify(rubric), overallNotes, rubricVersion]
+    [sessionId, raterUserId, JSON.stringify(rubric), overallNotes, rubricVersion],
   );
   return result.rows[0];
 }
@@ -69,10 +69,7 @@ export interface CalibrationPairRow {
   prompt_version: string;
 }
 
-export async function getCalibrationPairs(
-  promptVersion: string,
-  rubricVersion: string
-): Promise<CalibrationPairRow[]> {
+export async function getCalibrationPairs(promptVersion: string, rubricVersion: string): Promise<CalibrationPairRow[]> {
   const result = await pool.query<CalibrationPairRow>(
     `SELECT hr.session_id, hr.rater_user_id, hr.rubric AS human_rubric,
             se.rubric AS llm_rubric, se.prompt_version
@@ -81,7 +78,7 @@ export async function getCalibrationPairs(
        ON se.session_id = hr.session_id AND se.prompt_version = $1
      WHERE hr.rubric_version = $2
      ORDER BY hr.session_id, hr.rater_user_id`,
-    [promptVersion, rubricVersion]
+    [promptVersion, rubricVersion],
   );
   return result.rows;
 }
@@ -92,9 +89,9 @@ export async function getCalibrationPromptVersions(): Promise<string[]> {
     `SELECT DISTINCT se.prompt_version
      FROM session_evals se
      JOIN session_human_ratings hr ON hr.session_id = se.session_id
-     ORDER BY se.prompt_version`
+     ORDER BY se.prompt_version`,
   );
-  return result.rows.map(r => r.prompt_version);
+  return result.rows.map((r) => r.prompt_version);
 }
 
 /** Two independent human ratings on the same session (eval program WP2):
@@ -118,7 +115,7 @@ export async function getHumanRatingPairs(rubricVersion: string): Promise<HumanR
        ON b.session_id = a.session_id AND b.rater_user_id > a.rater_user_id
      WHERE a.rubric_version = $1 AND b.rubric_version = $1
      ORDER BY a.session_id, a.rater_user_id, b.rater_user_id`,
-    [rubricVersion]
+    [rubricVersion],
   );
   return result.rows;
 }

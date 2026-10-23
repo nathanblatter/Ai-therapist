@@ -67,8 +67,8 @@ export default function TestRetrievalPanel() {
     <div className="space-y-4">
       <div className="bg-white rounded-lg shadow p-4">
         <p className="text-sm text-gray-600 mb-3">
-          Run a query through the live retrieval pipeline (embed, vector search, rerank) to see exactly
-          what a session would get. Test runs are <strong>not</strong> logged to the retrieval log.
+          Run a query through the live retrieval pipeline (embed, vector search, rerank) to see exactly what a session
+          would get. Test runs are <strong>not</strong> logged to the retrieval log.
         </p>
         <form onSubmit={run} className="flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[240px]">
@@ -76,32 +76,50 @@ export default function TestRetrievalPanel() {
             <input
               type="text"
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={(e) => setQuery(e.target.value)}
               placeholder="e.g. why do I feel a tight chest when anxious?"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
             />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Kind</label>
-            <select value={kind} onChange={e => setKind(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
-              {KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+            <select
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            >
+              {KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
             </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Topic (optional)</label>
-            <input type="text" value={topic} onChange={e => setTopic(e.target.value)} placeholder="any"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32" />
+            <input
+              type="text"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="any"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-32"
+            />
           </div>
           <label className="flex items-center gap-2 text-sm text-gray-700 pb-2">
-            <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} />
+            <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} />
             Include pending
           </label>
-          <button type="submit" disabled={running || !query.trim()}
-            className="px-4 py-2 bg-royal text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 inline-flex items-center gap-2">
+          <button
+            type="submit"
+            disabled={running || !query.trim()}
+            className="px-4 py-2 bg-royal text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 inline-flex items-center gap-2"
+          >
             <Search size={14} /> {running ? 'Running…' : 'Test retrieval'}
           </button>
         </form>
-        {error && <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+        {error && (
+          <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
+        )}
       </div>
 
       {result && (
@@ -121,7 +139,9 @@ export default function TestRetrievalPanel() {
           </div>
 
           {result.candidates.length === 0 ? (
-            <p className="text-sm text-gray-500">No candidates matched. Check kind/topic, or the corpus may have no active content here.</p>
+            <p className="text-sm text-gray-500">
+              No candidates matched. Check kind/topic, or the corpus may have no active content here.
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -135,16 +155,20 @@ export default function TestRetrievalPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {result.candidates.map(c => {
+                  {result.candidates.map((c) => {
                     const rr = chosenRank(c.chunk_id);
                     const isWinner = rr === 0;
                     return (
-                      <tr key={c.chunk_id} className={`border-b last:border-0 align-top ${isWinner ? 'bg-emerald-50' : rr >= 0 ? 'bg-sky-50/50' : ''}`}>
+                      <tr
+                        key={c.chunk_id}
+                        className={`border-b last:border-0 align-top ${isWinner ? 'bg-emerald-50' : rr >= 0 ? 'bg-sky-50/50' : ''}`}
+                      >
                         <td className="py-2 pr-3 text-gray-600">#{c.vec_rank + 1}</td>
                         <td className="py-2 pr-3">
                           {rr >= 0 ? (
                             <span className={`font-semibold ${isWinner ? 'text-emerald-700' : 'text-sky-700'}`}>
-                              #{rr + 1}{isWinner && ' (winner)'}
+                              #{rr + 1}
+                              {isWinner && ' (winner)'}
                             </span>
                           ) : (
                             <span className="text-gray-400">dropped</span>
@@ -156,7 +180,9 @@ export default function TestRetrievalPanel() {
                           <div className="text-xs text-gray-500 flex items-center gap-1 flex-wrap">
                             <span>id {c.chunk_id}</span>
                             {c.topic && <span>· {c.topic}</span>}
-                            {!c.active && <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">pending</span>}
+                            {!c.active && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">pending</span>
+                            )}
                           </div>
                         </td>
                         <td className="py-2 text-xs text-gray-600 max-w-md">{c.content_preview}</td>

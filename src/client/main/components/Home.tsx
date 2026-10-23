@@ -8,7 +8,19 @@
 // the main participant bundle doesn't ship Recharts today (only the admin
 // client does), and these tiny labeled small-multiples don't justify adding it.
 import { useEffect, useState } from 'react';
-import { TrendingUp, FileText, Shield, ChevronRight, Phone, Target, CheckCircle, MessageSquare, Clipboard, ExternalLink, X } from 'react-feather';
+import {
+  TrendingUp,
+  FileText,
+  Shield,
+  ChevronRight,
+  Phone,
+  Target,
+  CheckCircle,
+  MessageSquare,
+  Clipboard,
+  ExternalLink,
+  X,
+} from 'react-feather';
 import { Shell, SafetyPlanCard, type SafetyPlanData, type CustomWorksheetSection } from './ToolOverlays';
 
 // ---------- server payload shapes (dates arrive as ISO strings) ----------
@@ -110,8 +122,20 @@ function Sparkline({ values, min, max }: { values: number[]; min: number; max: n
 
 /** One labeled trend row: name + sparkline + latest value (text stays in ink
  *  tokens; the mark alone carries the series). Values are oldest -> newest. */
-function TrendRow({ label, values, min, max, latestLabel, dateRange }: {
-  label: string; values: number[]; min: number; max: number; latestLabel: string; dateRange: string;
+function TrendRow({
+  label,
+  values,
+  min,
+  max,
+  latestLabel,
+  dateRange,
+}: {
+  label: string;
+  values: number[];
+  min: number;
+  max: number;
+  latestLabel: string;
+  dateRange: string;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -131,7 +155,10 @@ function TrendRow({ label, values, min, max, latestLabel, dateRange }: {
 
 /** Open practice with a "Mark done" flow (+ optional short note); anything
  *  completed in the last week stays visible, checked, for the small win. */
-function PracticeCard({ assignments, onCompleted }: {
+function PracticeCard({
+  assignments,
+  onCompleted,
+}: {
   assignments: AssignmentItem[];
   onCompleted: (updated: AssignmentItem) => void;
 }) {
@@ -139,10 +166,10 @@ function PracticeCard({ assignments, onCompleted }: {
   const [noteText, setNoteText] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  const open = assignments.filter(a => a.status === 'assigned');
+  const open = assignments.filter((a) => a.status === 'assigned');
   const weekAgo = Date.now() - 7 * 86_400_000;
   const doneThisWeek = assignments.filter(
-    a => a.status === 'completed' && a.completed_at !== null && new Date(a.completed_at).getTime() >= weekAgo
+    (a) => a.status === 'completed' && a.completed_at !== null && new Date(a.completed_at).getTime() >= weekAgo,
   );
   if (open.length === 0 && doneThisWeek.length === 0) return null;
 
@@ -156,7 +183,7 @@ function PracticeCard({ assignments, onCompleted }: {
         body: JSON.stringify(note.trim() ? { note: note.trim() } : {}),
       });
       if (res.ok) {
-        const data = await res.json() as { assignment: AssignmentItem };
+        const data = (await res.json()) as { assignment: AssignmentItem };
         onCompleted(data.assignment);
         setNoteFor(null);
         setNoteText('');
@@ -180,20 +207,24 @@ function PracticeCard({ assignments, onCompleted }: {
         </p>
       )}
       <ul className="divide-y divide-gray-100">
-        {open.map(a => (
+        {open.map((a) => (
           <li key={a.id} className="py-3 space-y-2">
             <div className="flex items-start gap-3">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-800">{a.title}</p>
                 <p className="text-sm text-gray-500">{a.description}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {a.source === 'therapist' ? 'From your therapist' : 'From your conversation'} {friendlyDay(a.assigned_at)}
+                  {a.source === 'therapist' ? 'From your therapist' : 'From your conversation'}{' '}
+                  {friendlyDay(a.assigned_at)}
                   {a.suggested_frequency ? ` · ${a.suggested_frequency}` : ''}
                 </p>
               </div>
               {noteFor !== a.id && (
                 <button
-                  onClick={() => { setNoteFor(a.id); setNoteText(''); }}
+                  onClick={() => {
+                    setNoteFor(a.id);
+                    setNoteText('');
+                  }}
                   disabled={busyId !== null}
                   className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white min-h-[36px]"
                 >
@@ -206,7 +237,7 @@ function PracticeCard({ assignments, onCompleted }: {
                 <input
                   type="text"
                   value={noteText}
-                  onChange={e => setNoteText(e.target.value)}
+                  onChange={(e) => setNoteText(e.target.value)}
                   maxLength={500}
                   placeholder="How did it go? (optional)"
                   className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700"
@@ -220,7 +251,10 @@ function PracticeCard({ assignments, onCompleted }: {
                     {busyId === a.id ? 'Saving…' : 'Done'}
                   </button>
                   <button
-                    onClick={() => { setNoteFor(null); setNoteText(''); }}
+                    onClick={() => {
+                      setNoteFor(null);
+                      setNoteText('');
+                    }}
                     disabled={busyId !== null}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg text-gray-500 hover:bg-gray-50 min-h-[36px]"
                   >
@@ -231,7 +265,7 @@ function PracticeCard({ assignments, onCompleted }: {
             )}
           </li>
         ))}
-        {doneThisWeek.map(a => (
+        {doneThisWeek.map((a) => (
           <li key={a.id} className="py-3 flex items-start gap-3">
             <CheckCircle size={16} className="text-green-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
             <div className="flex-1 min-w-0">
@@ -324,56 +358,74 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
     // Fail-soft loading: each fetch is independent; an error simply leaves
     // that card hidden. Nothing here gates the Start controls below.
     fetch('/api/auth/status', { credentials: 'include' })
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => {
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
         if (cancelled) return;
         const isAuthed = Boolean(data?.authenticated);
         setAuthenticated(isAuthed);
         if (!isAuthed) return;
 
         fetch('/api/me/progress', { credentials: 'include' })
-          .then(res => (res.ok ? res.json() : null))
-          .then((p: OwnProgress | null) => { if (!cancelled && p) setProgress(p); })
-          .catch(() => { /* card stays hidden */ });
+          .then((res) => (res.ok ? res.json() : null))
+          .then((p: OwnProgress | null) => {
+            if (!cancelled && p) setProgress(p);
+          })
+          .catch(() => {
+            /* card stays hidden */
+          });
 
         fetch('/api/me/assignments', { credentials: 'include' })
-          .then(res => (res.ok ? res.json() : null))
+          .then((res) => (res.ok ? res.json() : null))
           .then((d: { assignments: AssignmentItem[] } | null) => {
             if (!cancelled && d && Array.isArray(d.assignments)) setAssignments(d.assignments);
           })
-          .catch(() => { /* card stays hidden */ });
+          .catch(() => {
+            /* card stays hidden */
+          });
 
         fetch('/api/me/worksheets', { credentials: 'include' })
-          .then(res => (res.ok ? res.json() : null))
+          .then((res) => (res.ok ? res.json() : null))
           .then((d: { worksheets: WorksheetItem[] } | null) => {
             if (!cancelled && d && Array.isArray(d.worksheets)) setWorksheets(d.worksheets);
           })
-          .catch(() => { /* card stays hidden */ });
+          .catch(() => {
+            /* card stays hidden */
+          });
 
         fetch('/api/messaging/threads', { credentials: 'include' })
-          .then(res => (res.ok ? res.json() : null))
+          .then((res) => (res.ok ? res.json() : null))
           .then((d: { threads: unknown[] } | null) => {
             if (!cancelled && d && Array.isArray(d.threads)) setThreadCount(d.threads.length);
           })
-          .catch(() => { /* card stays hidden */ });
+          .catch(() => {
+            /* card stays hidden */
+          });
 
         fetch('/api/surveys/due', { credentials: 'include' })
-          .then(res => (res.ok ? res.json() : null))
+          .then((res) => (res.ok ? res.json() : null))
           .then((d: { due: DueSurvey[] } | null) => {
             if (!cancelled && d && Array.isArray(d.due)) setDueSurveys(d.due);
           })
-          .catch(() => { /* card stays hidden */ });
+          .catch(() => {
+            /* card stays hidden */
+          });
 
         fetch('/api/me/safety-plan', { credentials: 'include' })
-          .then(res => (res.ok ? res.json() : null))
+          .then((res) => (res.ok ? res.json() : null))
           .then((d: { safety_plan: { plan: SafetyPlanData } | null } | null) => {
             if (!cancelled && d?.safety_plan?.plan) setSafetyPlan(d.safety_plan.plan);
           })
-          .catch(() => { /* card stays hidden */ });
+          .catch(() => {
+            /* card stays hidden */
+          });
       })
-      .catch(() => { if (!cancelled) setAuthenticated(false); });
+      .catch(() => {
+        if (!cancelled) setAuthenticated(false);
+      });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Anonymous participants (and the brief auth check) keep the existing
@@ -392,16 +444,22 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
 
   // Trend rows, oldest -> newest for left-to-right time.
   const phq = progress
-    ? progress.scale_history.filter(p => p.scale.toLowerCase().includes('phq')).slice().reverse()
+    ? progress.scale_history
+        .filter((p) => p.scale.toLowerCase().includes('phq'))
+        .slice()
+        .reverse()
     : [];
   const gad = progress
-    ? progress.scale_history.filter(p => p.scale.toLowerCase().includes('gad')).slice().reverse()
+    ? progress.scale_history
+        .filter((p) => p.scale.toLowerCase().includes('gad'))
+        .slice()
+        .reverse()
     : [];
   const mood = progress ? progress.mood_trajectory.slice().reverse() : [];
   const hasTrends = phq.length >= 2 || gad.length >= 2 || mood.length >= 2;
   const isFirstTime = progress !== null && progress.session_count === 0;
   const recentWeeks = progress ? progress.weekly_sessions.slice(-8) : [];
-  const maxWeekly = Math.max(1, ...recentWeeks.map(w => w.sessions));
+  const maxWeekly = Math.max(1, ...recentWeeks.map((w) => w.sessions));
 
   const rangeLabel = (first: string, last: string) => `${shortDate(first)} – ${shortDate(last)}`;
 
@@ -425,36 +483,38 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
           calendar (/api/surveys/due). Dismissal hides a card until the next
           page load; completing the survey clears it for good after the next
           response sync. */}
-      {dueSurveys.filter(s => !dismissedSurveys.includes(s.role)).map(survey => (
-        <div
-          key={survey.role}
-          className="w-full bg-amber-50 border border-amber-200 rounded-2xl shadow p-5 sm:p-6 flex items-center gap-3"
-        >
-          <Clipboard size={20} className="text-amber-600 shrink-0" aria-hidden="true" />
-          <div className="flex-1 min-w-0">
-            <p className="text-base font-semibold text-gray-800">{survey.label} is ready</p>
-            <p className="text-sm text-gray-600">
-              A short study survey is due — it opens in a new tab and takes just a few minutes.
-            </p>
+      {dueSurveys
+        .filter((s) => !dismissedSurveys.includes(s.role))
+        .map((survey) => (
+          <div
+            key={survey.role}
+            className="w-full bg-amber-50 border border-amber-200 rounded-2xl shadow p-5 sm:p-6 flex items-center gap-3"
+          >
+            <Clipboard size={20} className="text-amber-600 shrink-0" aria-hidden="true" />
+            <div className="flex-1 min-w-0">
+              <p className="text-base font-semibold text-gray-800">{survey.label} is ready</p>
+              <p className="text-sm text-gray-600">
+                A short study survey is due — it opens in a new tab and takes just a few minutes.
+              </p>
+            </div>
+            <a
+              href={survey.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-2 rounded-lg flex items-center gap-2 shrink-0"
+            >
+              Take survey
+              <ExternalLink size={14} aria-hidden="true" />
+            </a>
+            <button
+              onClick={() => setDismissedSurveys((prev) => [...prev, survey.role])}
+              className="text-gray-400 hover:text-gray-600 shrink-0 p-1"
+              aria-label={`Dismiss ${survey.label} reminder`}
+            >
+              <X size={16} />
+            </button>
           </div>
-          <a
-            href={survey.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-2 rounded-lg flex items-center gap-2 shrink-0"
-          >
-            Take survey
-            <ExternalLink size={14} aria-hidden="true" />
-          </a>
-          <button
-            onClick={() => setDismissedSurveys(prev => [...prev, survey.role])}
-            className="text-gray-400 hover:text-gray-600 shrink-0 p-1"
-            aria-label={`Dismiss ${survey.label} reminder`}
-          >
-            <X size={16} />
-          </button>
-        </div>
-      ))}
+        ))}
 
       {/* Messages card (caseworker portal): shown only when the care team has
           opened at least one thread with this participant. */}
@@ -487,8 +547,8 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
         <div className="bg-white rounded-2xl shadow p-6 text-center">
           <p className="text-gray-700 font-medium">This space is yours.</p>
           <p className="text-sm text-gray-500 mt-1">
-            After your first conversation, you&apos;ll see your progress here — how you&apos;ve been
-            feeling over time, anything you work on, and tools you can come back to.
+            After your first conversation, you&apos;ll see your progress here — how you&apos;ve been feeling over time,
+            anything you work on, and tools you can come back to.
           </p>
           <p className="text-sm text-gray-500 mt-3">
             New here?{' '}
@@ -506,7 +566,7 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
       )}
 
       {/* Your progress */}
-      {progress && progress.session_count > 0 && (hasTrends || recentWeeks.some(w => w.sessions > 0)) && (
+      {progress && progress.session_count > 0 && (hasTrends || recentWeeks.some((w) => w.sessions > 0)) && (
         <div className="bg-white rounded-2xl shadow p-5 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp size={18} className="text-blue-600" aria-hidden="true" />
@@ -516,7 +576,7 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
             {phq.length >= 2 && (
               <TrendRow
                 label="Mood check-in"
-                values={phq.map(p => p.score)}
+                values={phq.map((p) => p.score)}
                 min={0}
                 max={6}
                 latestLabel={`${phq[phq.length - 1].score}/6`}
@@ -526,7 +586,7 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
             {gad.length >= 2 && (
               <TrendRow
                 label="Worry check-in"
-                values={gad.map(p => p.score)}
+                values={gad.map((p) => p.score)}
                 min={0}
                 max={6}
                 latestLabel={`${gad[gad.length - 1].score}/6`}
@@ -536,19 +596,22 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
             {mood.length >= 2 && (
               <TrendRow
                 label="How you felt"
-                values={mood.map(p => p.mood)}
+                values={mood.map((p) => p.mood)}
                 min={1}
                 max={10}
                 latestLabel={`${mood[mood.length - 1].mood}/10`}
                 dateRange={rangeLabel(mood[0].date, mood[mood.length - 1].date)}
               />
             )}
-            {recentWeeks.some(w => w.sessions > 0) && (
+            {recentWeeks.some((w) => w.sessions > 0) && (
               <div className="pt-1">
                 <p className="text-sm font-medium text-gray-700 mb-1.5">Recent weeks</p>
-                <div className="flex items-end gap-1.5 h-8" role="img"
-                  aria-label={`Conversations per week over the last ${recentWeeks.length} weeks`}>
-                  {recentWeeks.map(w => (
+                <div
+                  className="flex items-end gap-1.5 h-8"
+                  role="img"
+                  aria-label={`Conversations per week over the last ${recentWeeks.length} weeks`}
+                >
+                  {recentWeeks.map((w) => (
                     <div
                       key={w.week_start}
                       title={`Week of ${shortDate(w.week_start)}: ${w.sessions} conversation${w.sessions === 1 ? '' : 's'}`}
@@ -561,9 +624,7 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
               </div>
             )}
           </div>
-          <p className="text-xs text-gray-400 mt-4">
-            These are brief check-ins over time, not a diagnosis or a grade.
-          </p>
+          <p className="text-xs text-gray-400 mt-4">These are brief check-ins over time, not a diagnosis or a grade.</p>
         </div>
       )}
 
@@ -571,8 +632,8 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
       {assignments !== null && (
         <PracticeCard
           assignments={assignments}
-          onCompleted={updated =>
-            setAssignments(prev => (prev ? prev.map(a => (a.id === updated.id ? updated : a)) : prev))
+          onCompleted={(updated) =>
+            setAssignments((prev) => (prev ? prev.map((a) => (a.id === updated.id ? updated : a)) : prev))
           }
         />
       )}
@@ -585,7 +646,7 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
             <h3 className="text-base font-semibold text-gray-800">Your worksheets</h3>
           </div>
           <ul className="divide-y divide-gray-100">
-            {worksheets.map(w => (
+            {worksheets.map((w) => (
               <li key={w.instance_id}>
                 <button
                   onClick={() => setOpenWorksheet(w)}
@@ -595,9 +656,11 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
                     <p className="text-sm font-medium text-gray-800 truncate">{w.title}</p>
                     <p className="text-xs text-gray-400">{shortDate(w.created_at)}</p>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
-                    w.status === 'completed' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
-                  }`}>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
+                      w.status === 'completed' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
+                    }`}
+                  >
                     {w.status === 'completed' ? 'Completed' : 'Draft'}
                   </span>
                   <ChevronRight size={16} className="text-gray-300 flex-shrink-0" aria-hidden="true" />
@@ -629,18 +692,17 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
       <div className="bg-red-50 rounded-2xl p-4 flex items-center gap-3">
         <Phone size={16} className="text-red-500 flex-shrink-0" aria-hidden="true" />
         <p className="text-sm text-red-900">
-          If things feel unsafe, call or text <a href="tel:988" className="font-semibold underline">988</a> — the
-          Suicide &amp; Crisis Lifeline — any time, day or night.
+          If things feel unsafe, call or text{' '}
+          <a href="tel:988" className="font-semibold underline">
+            988
+          </a>{' '}
+          — the Suicide &amp; Crisis Lifeline — any time, day or night.
         </p>
       </div>
 
       {/* Read-only overlays */}
-      {openWorksheet && (
-        <WorksheetReadOnly worksheet={openWorksheet} onClose={() => setOpenWorksheet(null)} />
-      )}
-      {showSafetyPlan && safetyPlan && (
-        <SafetyPlanCard plan={safetyPlan} onClose={() => setShowSafetyPlan(false)} />
-      )}
+      {openWorksheet && <WorksheetReadOnly worksheet={openWorksheet} onClose={() => setOpenWorksheet(null)} />}
+      {showSafetyPlan && safetyPlan && <SafetyPlanCard plan={safetyPlan} onClose={() => setShowSafetyPlan(false)} />}
     </div>
   );
 }

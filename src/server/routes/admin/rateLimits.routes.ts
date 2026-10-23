@@ -24,14 +24,17 @@ export default function adminRateLimitsRoutes(): Router {
   router.get('/admin/api/rate-limits/users', requireRole('therapist', 'researcher'), async (_req, res) => {
     try {
       const config = await getSystemConfig();
-      const limits = (config.session_limits as RateLimitConfig | undefined) ?? { enabled: false, max_sessions_per_day: 0 };
+      const limits = (config.session_limits as RateLimitConfig | undefined) ?? {
+        enabled: false,
+        max_sessions_per_day: 0,
+      };
 
       if (!limits.enabled) {
         return res.json({ rateLimitedUsers: [], config: limits });
       }
 
       const rows = await getRateLimitedParticipants(getStartOfTodaySLC(), limits.max_sessions_per_day);
-      const rateLimitedUsers = rows.map(row => ({
+      const rateLimitedUsers = rows.map((row) => ({
         userid: row.userid,
         username: row.username,
         role: row.role,

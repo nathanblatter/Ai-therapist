@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
-import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter, Info, Eye, Cpu } from "react-feather";
-import { deleteJson, getJson, postJson } from "../../shared/http";
+import { useState, useEffect, useRef } from 'react';
+import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter, Info, Eye, Cpu } from 'react-feather';
+import { deleteJson, getJson, postJson } from '../../shared/http';
 
 const VOICE_OPTIONS = [
   { value: 'alloy', label: 'Alloy' },
@@ -12,7 +12,7 @@ const VOICE_OPTIONS = [
   { value: 'marin', label: 'Marin' },
   { value: 'sage', label: 'Sage' },
   { value: 'shimmer', label: 'Shimmer' },
-  { value: 'verse', label: 'Verse' }
+  { value: 'verse', label: 'Verse' },
 ];
 
 const LANGUAGE_OPTIONS = [
@@ -30,13 +30,13 @@ const LANGUAGE_OPTIONS = [
   { value: 'ko', label: 'Korean' },
   { value: 'ar', label: 'Arabic' },
   { value: 'hi', label: 'Hindi' },
-  { value: 'ru', label: 'Russian' }
+  { value: 'ru', label: 'Russian' },
 ];
 
 const ROLE_OPTIONS = [
   { value: 'participant', label: 'Participant' },
   { value: 'therapist', label: 'Therapist' },
-  { value: 'researcher', label: 'Researcher' }
+  { value: 'researcher', label: 'Researcher' },
 ];
 
 interface User {
@@ -58,8 +58,8 @@ interface UserManagementProps {
 
 const RISK_CONTEXT_EXPLANATION =
   "When on, a brief note about this participant's prior crisis flags is shared " +
-  "with the AI at the start of their future sessions so it can be appropriately " +
-  "attentive. Off by default; enable only after clinical review.";
+  'with the AI at the start of their future sessions so it can be appropriately ' +
+  'attentive. Off by default; enable only after clinical review.';
 
 interface UserUpdates {
   username: string;
@@ -102,7 +102,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     roles: [],
     voices: [],
     languages: [],
-    mfaStatus: '' // '', 'enabled', 'disabled'
+    mfaStatus: '', // '', 'enabled', 'disabled'
   });
   const [showFilters, setShowFilters] = useState(false);
 
@@ -112,7 +112,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
 
   const generateSecurePassword = (): string => {
     const length = 16;
-    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?";
+    const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
     const array = new Uint8Array(length);
     crypto.getRandomValues(array);
     let password = '';
@@ -184,7 +184,11 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
 
   const toggleRiskContext = async (userid: number, enabled: boolean) => {
     try {
-      await postJson(`/admin/api/users/${userid}/risk-context`, { enabled }, { fallback: 'Failed to update risk-context sharing' });
+      await postJson(
+        `/admin/api/users/${userid}/risk-context`,
+        { enabled },
+        { fallback: 'Failed to update risk-context sharing' },
+      );
       await fetchUsers();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -195,7 +199,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     const [editData, setEditData] = useState<UserUpdates>({
       username: user.username,
       role: user.role,
-      password: ''
+      password: '',
     });
     const usernameInputRef = useRef<HTMLInputElement>(null);
 
@@ -228,11 +232,22 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     };
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="edit-user-modal-title">
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-user-modal-title"
+      >
         <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
           <div className="flex justify-between items-center mb-4">
-            <h2 id="edit-user-modal-title" className="text-xl font-bold">Edit User</h2>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-700 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Close edit user dialog">
+            <h2 id="edit-user-modal-title" className="text-xl font-bold">
+              Edit User
+            </h2>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-700 min-h-[44px] min-w-[44px] flex items-center justify-center"
+              aria-label="Close edit user dialog"
+            >
               <X size={24} />
             </button>
           </div>
@@ -247,7 +262,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                 id="edit-username"
                 type="text"
                 value={editData.username}
-                onChange={(e) => setEditData(prev => ({ ...prev, username: e.target.value }))}
+                onChange={(e) => setEditData((prev) => ({ ...prev, username: e.target.value }))}
                 aria-label="Username"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                 required
@@ -261,7 +276,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
               <select
                 id="edit-role"
                 value={editData.role}
-                onChange={(e) => setEditData(prev => ({ ...prev, role: e.target.value }))}
+                onChange={(e) => setEditData((prev) => ({ ...prev, role: e.target.value }))}
                 aria-label="User role"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
               >
@@ -280,7 +295,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                   id="edit-password"
                   type="text"
                   value={editData.password ?? ''}
-                  onChange={(e) => setEditData(prev => ({ ...prev, password: e.target.value }))}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, password: e.target.value }))}
                   aria-label="New password (optional)"
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                   placeholder="Leave blank to keep current password"
@@ -289,7 +304,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                   type="button"
                   onClick={() => {
                     const newPassword = generateSecurePassword();
-                    setEditData(prev => ({ ...prev, password: newPassword }));
+                    setEditData((prev) => ({ ...prev, password: newPassword }));
                   }}
                   className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-1 whitespace-nowrap min-h-[44px]"
                   aria-label="Generate secure password"
@@ -301,7 +316,9 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
             </div>
 
             {formError && (
-              <div className="text-red-600 text-sm" role="alert">{formError}</div>
+              <div className="text-red-600 text-sm" role="alert">
+                {formError}
+              </div>
             )}
 
             <div className="flex gap-2 justify-end">
@@ -351,109 +368,122 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     }, []);
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="add-user-modal-title">
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-user-modal-title"
+      >
         <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
           <div className="flex justify-between items-center mb-4">
-            <h2 id="add-user-modal-title" className="text-xl font-bold">Add New User</h2>
-            <button onClick={() => setShowAddModal(false)} className="text-gray-500 hover:text-gray-700 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Close add user dialog">
+            <h2 id="add-user-modal-title" className="text-xl font-bold">
+              Add New User
+            </h2>
+            <button
+              onClick={() => setShowAddModal(false)}
+              className="text-gray-500 hover:text-gray-700 min-h-[44px] min-w-[44px] flex items-center justify-center"
+              aria-label="Close add user dialog"
+            >
               <X size={24} />
             </button>
           </div>
 
-        <form onSubmit={handleAddUser} className="space-y-4">
-          <div>
-            <label htmlFor="add-username" className="block text-sm font-medium text-gray-700 mb-1">
-              Username
-            </label>
-            <input
-              ref={addUsernameInputRef}
-              id="add-username"
-              type="text"
-              value={formData.username}
-              onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
-              aria-label="New user username"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="add-password" className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
-            <div className="flex gap-2">
+          <form onSubmit={handleAddUser} className="space-y-4">
+            <div>
+              <label htmlFor="add-username" className="block text-sm font-medium text-gray-700 mb-1">
+                Username
+              </label>
               <input
-                id="add-password"
+                ref={addUsernameInputRef}
+                id="add-username"
                 type="text"
-                value={formData.password}
-                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                aria-label="New user password"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
+                value={formData.username}
+                onChange={(e) => setFormData((prev) => ({ ...prev, username: e.target.value }))}
+                aria-label="New user username"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                 required
               />
+            </div>
+
+            <div>
+              <label htmlFor="add-password" className="block text-sm font-medium text-gray-700 mb-1">
+                Password
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="add-password"
+                  type="text"
+                  value={formData.password}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
+                  aria-label="New user password"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newPassword = generateSecurePassword();
+                    setFormData((prev) => ({ ...prev, password: newPassword }));
+                  }}
+                  className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-1 whitespace-nowrap min-h-[44px]"
+                  aria-label="Generate secure random password"
+                >
+                  <Key size={16} aria-hidden="true" />
+                  Generate
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">Click "Generate" to create a secure random password</p>
+            </div>
+
+            <div>
+              <label htmlFor="add-role" className="block text-sm font-medium text-gray-700 mb-1">
+                Role
+              </label>
+              <select
+                id="add-role"
+                value={formData.role}
+                onChange={(e) => setFormData((prev) => ({ ...prev, role: e.target.value }))}
+                aria-label="New user role"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
+              >
+                <option value="participant">Participant</option>
+                <option value="therapist">Therapist</option>
+                <option value="researcher">Researcher</option>
+              </select>
+            </div>
+
+            {formError && (
+              <div className="text-red-600 text-sm" role="alert">
+                {formError}
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
               <button
                 type="button"
-                onClick={() => {
-                  const newPassword = generateSecurePassword();
-                  setFormData(prev => ({ ...prev, password: newPassword }));
-                }}
-                className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-1 whitespace-nowrap min-h-[44px]"
-                aria-label="Generate secure random password"
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 min-h-[44px]"
+                aria-label="Cancel adding user"
               >
-                <Key size={16} aria-hidden="true" />
-                Generate
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-royal text-white rounded-md hover:bg-blue-700 flex items-center gap-2 min-h-[44px]"
+                aria-label="Submit new user"
+              >
+                <Plus size={16} aria-hidden="true" />
+                Add User
               </button>
             </div>
-            <p className="mt-1 text-xs text-gray-500">Click "Generate" to create a secure random password</p>
-          </div>
-
-          <div>
-            <label htmlFor="add-role" className="block text-sm font-medium text-gray-700 mb-1">
-              Role
-            </label>
-            <select
-              id="add-role"
-              value={formData.role}
-              onChange={(e) => setFormData(prev => ({ ...prev, role: e.target.value }))}
-              aria-label="New user role"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
-            >
-              <option value="participant">Participant</option>
-              <option value="therapist">Therapist</option>
-              <option value="researcher">Researcher</option>
-            </select>
-          </div>
-
-          {formError && (
-            <div className="text-red-600 text-sm" role="alert">{formError}</div>
-          )}
-
-          <div className="flex gap-2 justify-end">
-            <button
-              type="button"
-              onClick={() => setShowAddModal(false)}
-              className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 min-h-[44px]"
-              aria-label="Cancel adding user"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-royal text-white rounded-md hover:bg-blue-700 flex items-center gap-2 min-h-[44px]"
-              aria-label="Submit new user"
-            >
-              <Plus size={16} aria-hidden="true" />
-              Add User
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
-    </div>
     );
   };
 
   // Filter users based on current filters
-  const filteredUsers = users.filter(user => {
+  const filteredUsers = users.filter((user) => {
     // Search filter (username or userid)
     if (filters.search) {
       const searchLower = filters.search.toLowerCase();
@@ -491,7 +521,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
   });
 
   const toggleFilter = (filterKey: keyof Pick<Filters, 'roles' | 'voices' | 'languages'>, value: string) => {
-    setFilters(prev => {
+    setFilters((prev) => {
       const currentValues = prev[filterKey];
       const newValues = currentValues.includes(value)
         ? currentValues.filter((v: string) => v !== value)
@@ -506,7 +536,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
       roles: [],
       voices: [],
       languages: [],
-      mfaStatus: ''
+      mfaStatus: '',
     });
   };
 
@@ -544,11 +574,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
         </button>
       </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-          {error}
-        </div>
-      )}
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">{error}</div>}
 
       {/* Filters */}
       <div className="mb-4 space-y-4">
@@ -560,7 +586,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
               type="text"
               placeholder="Search by username or user ID..."
               value={filters.search}
-              onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+              onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
           </div>
@@ -581,10 +607,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
             )}
           </button>
           {activeFilterCount > 0 && (
-            <button
-              onClick={clearFilters}
-              className="text-sm text-gray-600 hover:text-gray-800 underline"
-            >
+            <button onClick={clearFilters} className="text-sm text-gray-600 hover:text-gray-800 underline">
               Clear all
             </button>
           )}
@@ -597,7 +620,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
               <div className="space-y-2">
-                {ROLE_OPTIONS.map(role => (
+                {ROLE_OPTIONS.map((role) => (
                   <label key={role.value} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -615,7 +638,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Voice</label>
               <div className="space-y-2 max-h-32 overflow-y-auto">
-                {VOICE_OPTIONS.map(voice => (
+                {VOICE_OPTIONS.map((voice) => (
                   <label key={voice.value} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -633,7 +656,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Language</label>
               <div className="space-y-2 max-h-32 overflow-y-auto">
-                {LANGUAGE_OPTIONS.map(lang => (
+                {LANGUAGE_OPTIONS.map((lang) => (
                   <label key={lang.value} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -656,7 +679,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                     type="radio"
                     name="mfaStatus"
                     checked={filters.mfaStatus === ''}
-                    onChange={() => setFilters(prev => ({ ...prev, mfaStatus: '' }))}
+                    onChange={() => setFilters((prev) => ({ ...prev, mfaStatus: '' }))}
                     className="border-gray-300 text-royal focus:ring-royal"
                   />
                   <span className="text-sm text-gray-700">All</span>
@@ -666,7 +689,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                     type="radio"
                     name="mfaStatus"
                     checked={filters.mfaStatus === 'enabled'}
-                    onChange={() => setFilters(prev => ({ ...prev, mfaStatus: 'enabled' }))}
+                    onChange={() => setFilters((prev) => ({ ...prev, mfaStatus: 'enabled' }))}
                     className="border-gray-300 text-royal focus:ring-royal"
                   />
                   <span className="text-sm text-gray-700">MFA Enabled</span>
@@ -676,7 +699,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                     type="radio"
                     name="mfaStatus"
                     checked={filters.mfaStatus === 'disabled'}
-                    onChange={() => setFilters(prev => ({ ...prev, mfaStatus: 'disabled' }))}
+                    onChange={() => setFilters((prev) => ({ ...prev, mfaStatus: 'disabled' }))}
                     className="border-gray-300 text-royal focus:ring-royal"
                   />
                   <span className="text-sm text-gray-700">MFA Disabled</span>
@@ -691,40 +714,77 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
         <table className="min-w-full divide-y divide-gray-200" role="table">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 User ID
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 Username
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 Role
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 Preferred Voice
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 Language
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 MFA Status
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
-                <span className="inline-flex items-center gap-1" title="Whether this participant has opted into cross-session AI memory.">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
+                <span
+                  className="inline-flex items-center gap-1"
+                  title="Whether this participant has opted into cross-session AI memory."
+                >
                   Memory
-                  <Info size={13} className="text-gray-400" aria-label="Whether this participant has opted into cross-session AI memory." />
+                  <Info
+                    size={13}
+                    className="text-gray-400"
+                    aria-label="Whether this participant has opted into cross-session AI memory."
+                  />
                 </span>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 <span className="inline-flex items-center gap-1" title={RISK_CONTEXT_EXPLANATION}>
                   Risk context
                   <Info size={13} className="text-gray-400" aria-label={RISK_CONTEXT_EXPLANATION} />
                 </span>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 Created At
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 Actions
               </th>
             </tr>
@@ -732,9 +792,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
           <tbody className="bg-white divide-y divide-gray-200">
             {filteredUsers.map((user) => (
               <tr key={user.userid} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {user.userid}
-                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.userid}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                   {onViewUser ? (
                     <button
@@ -749,22 +807,24 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                    user.role === 'researcher' ? 'bg-purple-100 text-purple-800' :
-                    user.role === 'therapist' ? 'bg-blue-100 text-blue-800' :
-                    'bg-green-100 text-green-800'
-                  }`}>
+                  <span
+                    className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                      user.role === 'researcher'
+                        ? 'bg-purple-100 text-purple-800'
+                        : user.role === 'therapist'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-green-100 text-green-800'
+                    }`}
+                  >
                     {user.role}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                   <span className="capitalize">{user.preferred_voice || 'cedar'}</span>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                  {user.preferred_language || 'en'}
-                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{user.preferred_language || 'en'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  {(user.role === 'therapist' || user.role === 'researcher') ? (
+                  {user.role === 'therapist' || user.role === 'researcher' ? (
                     user.mfa_enabled ? (
                       <span className="flex items-center gap-1 text-green-700">
                         <Shield size={16} className="text-green-600" />
@@ -782,14 +842,18 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   {user.role === 'participant' ? (
-                    <span className={`px-2 py-1 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${
-                      user.memory_enabled ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-500'
-                    }`}>
+                    <span
+                      className={`px-2 py-1 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full ${
+                        user.memory_enabled ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
                       <Cpu size={12} />
                       {user.memory_enabled ? 'On' : 'Off'}
                     </span>
                   ) : (
-                    <span className="text-gray-400 text-xs" aria-hidden="true">—</span>
+                    <span className="text-gray-400 text-xs" aria-hidden="true">
+                      —
+                    </span>
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -806,11 +870,15 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                       }`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full ${user.risk_context_share_enabled ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${user.risk_context_share_enabled ? 'bg-emerald-500' : 'bg-gray-400'}`}
+                      />
                       {user.risk_context_share_enabled ? 'On' : 'Off'}
                     </button>
                   ) : (
-                    <span className="text-gray-400 text-xs" aria-hidden="true">—</span>
+                    <span className="text-gray-400 text-xs" aria-hidden="true">
+                      —
+                    </span>
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -860,13 +928,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
       </div>
 
       {showAddModal && <AddUserModal />}
-      {editingUser && (
-        <EditModal
-          user={editingUser}
-          onClose={() => setEditingUser(null)}
-          onSave={handleEditUser}
-        />
-      )}
+      {editingUser && <EditModal user={editingUser} onClose={() => setEditingUser(null)} onSave={handleEditUser} />}
     </div>
   );
 }

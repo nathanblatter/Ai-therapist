@@ -70,10 +70,7 @@ export default function telemetryRoutes(): Router {
         log.error({ err }, 'Failed to read telemetry flags');
         for (const flag of ENGAGEMENT_FLAGS) flags[flag] = false;
       }
-      const [kinds, rhythm] = await Promise.all([
-        getEngagementEventStats(days),
-        getSessionRhythmSummary(days),
-      ]);
+      const [kinds, rhythm] = await Promise.all([getEngagementEventStats(days), getSessionRhythmSummary(days)]);
       res.json({ days, flags, kinds, rhythm });
     } catch (err) {
       log.error({ err }, 'Failed to fetch engagement telemetry');

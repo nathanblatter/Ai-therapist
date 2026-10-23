@@ -97,8 +97,8 @@ export async function confirmMinorDisclosure(
   const client = await getClient();
 
   const transcript = history
-    .filter(m => (m.role === 'user' || m.role === 'assistant') && (m.content ?? m.content_redacted))
-    .map(m => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.content ?? m.content_redacted}`)
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && (m.content ?? m.content_redacted))
+    .map((m) => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.content ?? m.content_redacted}`)
     .join('\n')
     .slice(-6000);
 
@@ -146,20 +146,25 @@ export async function confirmMinorDisclosure(
 
   // Cost tracking: best-effort, never blocks the verdict.
   recordLlmUsage(
-    sessionId, 'eligibility', CONFIRM_MODEL,
-    response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
-  ).catch(err => log.error({ err }, '[minor] failed to record LLM usage (non-fatal)'));
+    sessionId,
+    'eligibility',
+    CONFIRM_MODEL,
+    response.usage?.prompt_tokens ?? null,
+    response.usage?.completion_tokens ?? null,
+  ).catch((err) => log.error({ err }, '[minor] failed to record LLM usage (non-fatal)'));
 
   const parsed = JSON.parse(response.choices[0]?.message?.content ?? '{}') as Partial<{
-    is_minor: boolean; stated_age: number | null; confidence: string; reasoning: string;
+    is_minor: boolean;
+    stated_age: number | null;
+    confidence: string;
+    reasoning: string;
   }>;
 
   const confidence = (['low', 'medium', 'high'] as const).includes(parsed.confidence as 'low')
     ? (parsed.confidence as MinorVerdict['confidence'])
     : 'low';
-  const statedAge = typeof parsed.stated_age === 'number' && Number.isFinite(parsed.stated_age)
-    ? parsed.stated_age
-    : null;
+  const statedAge =
+    typeof parsed.stated_age === 'number' && Number.isFinite(parsed.stated_age) ? parsed.stated_age : null;
 
   return {
     isMinor: parsed.is_minor === true,
@@ -228,9 +233,17 @@ export async function handleConfirmedMinor(opts: HandleConfirmedMinorOpts): Prom
 
     const endedAt = new Date();
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'session:eligibility-violation', {
-        sessionId, statedAge, channel, endedAt,
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:eligibility-violation',
+        {
+          sessionId,
+          statedAge,
+          channel,
+          endedAt,
+        },
+        sessionId,
+      );
     }
 
     if (channel === 'chat') {
@@ -249,11 +262,13 @@ export async function handleConfirmedMinor(opts: HandleConfirmedMinorOpts): Prom
       }
       setTimeout(() => {
         void import('./sessionLifecycle.service.js')
-          .then(m => m.serverEndSession(sessionId, {
-            endedBy: 'system',
-            reason: 'eligibility_minor_end',
-          }))
-          .catch(err => console.error('[MinorSafeguard] realtime end failed:', err));
+          .then((m) =>
+            m.serverEndSession(sessionId, {
+              endedBy: 'system',
+              reason: 'eligibility_minor_end',
+            }),
+          )
+          .catch((err) => console.error('[MinorSafeguard] realtime end failed:', err));
       }, REALTIME_END_GRACE_MS);
     }
   } catch (err) {
@@ -276,17 +291,23 @@ async function endSessionNow(sessionId: string): Promise<void> {
 
   const endedAt = new Date();
   if (global.io) {
-    void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'system', endedAt }, sessionId, 'summary');
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:ended',
+      { sessionId, endedBy: 'system', endedAt },
+      sessionId,
+      'summary',
+    );
     global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt });
   }
 
   // Same fire-and-forget post-end jobs as /api/chat/end.
   import('./sessionRedaction.service.js')
-    .then(m => m.redactSession(sessionId))
+    .then((m) => m.redactSession(sessionId))
     .then(() => import('./sessionName.service.js'))
-    .then(m => m.generateSessionNameAsync(sessionId))
-    .catch(e => console.error('[MinorSafeguard] redaction/naming failed:', e));
+    .then((m) => m.generateSessionNameAsync(sessionId))
+    .catch((e) => console.error('[MinorSafeguard] redaction/naming failed:', e));
   import('./sessionInsights.service.js')
-    .then(m => m.generateSessionInsightsAsync(sessionId))
-    .catch(e => console.error('[MinorSafeguard] insights generation failed:', e));
+    .then((m) => m.generateSessionInsightsAsync(sessionId))
+    .catch((e) => console.error('[MinorSafeguard] insights generation failed:', e));
 }

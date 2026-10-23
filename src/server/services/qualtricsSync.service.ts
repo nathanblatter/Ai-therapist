@@ -57,7 +57,7 @@ async function api(
   config: QualtricsSyncConfig,
   method: 'GET' | 'POST',
   path: string,
-  body?: unknown
+  body?: unknown,
 ): Promise<Response> {
   return fetch(`https://${config.datacenter}.qualtrics.com/API/v3${path}`, {
     method,
@@ -74,7 +74,7 @@ async function api(
 /** Run the create-poll-download export flow for one survey; returns responses. */
 export async function fetchAllResponses(
   config: QualtricsSyncConfig,
-  surveyId: string
+  surveyId: string,
 ): Promise<QualtricsExportedResponse[]> {
   const start = await api(config, 'POST', `/surveys/${surveyId}/export-responses`, {
     format: 'json',
@@ -132,13 +132,9 @@ export function extractTypedStudyId(values: Record<string, unknown>): string | n
  *   week12  QID10 (lasting effects, 2 = mostly negative / 3 = both) + QID11_TEXT
  * Returns the triggering keys (never the text itself) or null when clean.
  */
-export function detectAdverseReport(
-  surveyRole: QualtricsSurveyRole,
-  values: Record<string, unknown>
-): string[] | null {
+export function detectAdverseReport(surveyRole: QualtricsSurveyRole, values: Record<string, unknown>): string[] | null {
   const triggers: string[] = [];
-  const hasText = (key: string) =>
-    typeof values[key] === 'string' && (values[key] as string).trim().length > 0;
+  const hasText = (key: string) => typeof values[key] === 'string' && (values[key] as string).trim().length > 0;
   if (surveyRole === 'weekly') {
     if (values.QID10 === 2) triggers.push('QID10');
     if (hasText('QID11_TEXT')) triggers.push('QID11_TEXT');
@@ -180,7 +176,7 @@ const WITHDRAWAL_FELT_WORSE_CHOICE = 3;
 async function applyWithdrawalResponse(
   responseId: string,
   userId: number,
-  values: Record<string, unknown>
+  values: Record<string, unknown>,
 ): Promise<void> {
   const status: StudyStatus = values[WITHDRAWAL_KEYS.scope] === 2 ? 'paused' : 'withdrawn';
   const requestsDeletion = values[WITHDRAWAL_KEYS.dataUse] === 2;
@@ -225,10 +221,9 @@ async function draftAdverseEventFromSurvey(
   responseId: string,
   userId: number | null,
   triggers: string[],
-  values: Record<string, unknown>
+  values: Record<string, unknown>,
 ): Promise<number | null> {
-  const recordedAt =
-    typeof values.recordedDate === 'string' ? new Date(values.recordedDate) : new Date();
+  const recordedAt = typeof values.recordedDate === 'string' ? new Date(values.recordedDate) : new Date();
   const excerpt = triggers
     .filter((k) => k.endsWith('_TEXT'))
     .map((k) => (typeof values[k] === 'string' ? (values[k] as string).trim() : ''))
@@ -246,7 +241,11 @@ async function draftAdverseEventFromSurvey(
     category: 'survey_report',
     summary: `Participant reported an adverse experience in the ${surveyRole} survey (${triggers.join(', ')}).`,
     timeline: [
-      { at: recordedAt.toISOString(), kind: 'survey_response', detail: `${surveyRole} survey response ${responseId} recorded` },
+      {
+        at: recordedAt.toISOString(),
+        kind: 'survey_response',
+        detail: `${surveyRole} survey response ${responseId} recorded`,
+      },
       { at: new Date().toISOString(), kind: 'auto_flag', detail: `Flagged by sync (triggers: ${triggers.join(', ')})` },
     ],
     transcriptExcerpt: excerpt || null,
@@ -273,7 +272,7 @@ export interface SurveySyncResult {
 export async function processExportedResponse(
   surveyRole: QualtricsSurveyRole,
   surveyId: string,
-  response: QualtricsExportedResponse
+  response: QualtricsExportedResponse,
 ): Promise<{ linked: boolean }> {
   const values = response.values ?? {};
   const finishedRaw = values.finished;
@@ -323,9 +322,7 @@ export async function processExportedResponse(
       // surface, the AE draft is what actually gets reviewed and filed.
       let reportId: number | null = null;
       try {
-        reportId = await draftAdverseEventFromSurvey(
-          surveyRole, response.responseId, userId, triggers, values
-        );
+        reportId = await draftAdverseEventFromSurvey(surveyRole, response.responseId, userId, triggers, values);
       } catch (err) {
         console.error('[QualtricsSync] AE draft from survey failed:', err);
       }
@@ -347,7 +344,7 @@ export async function processExportedResponse(
 async function syncSurvey(
   config: QualtricsSyncConfig,
   surveyRole: QualtricsSurveyRole,
-  surveyId: string
+  surveyId: string,
 ): Promise<SurveySyncResult> {
   const result: SurveySyncResult = { surveyRole, surveyId, fetched: 0, upserted: 0, linked: 0 };
   const responses = await fetchAllResponses(config, surveyId);
@@ -370,12 +367,12 @@ async function syncSurvey(
  */
 export async function handleResponseWebhook(
   surveyId: string,
-  responseId: string
+  responseId: string,
 ): Promise<'ok' | 'disabled' | 'unknown-survey' | 'not-found'> {
   const config = getQualtricsSyncConfig();
   if (!config) return 'disabled';
   const surveyRole = (Object.entries(config.surveys) as Array<[QualtricsSurveyRole, string]>).find(
-    ([, id]) => id === surveyId
+    ([, id]) => id === surveyId,
   )?.[0];
   if (!surveyRole) return 'unknown-survey';
 
@@ -423,9 +420,7 @@ export function getSyncRunStatus(): SyncRunStatus {
  * say "a sync is already running" instead of passing off the PREVIOUS run's
  * results as fresh. Returns null when the integration is unconfigured.
  */
-export async function runSync(
-  trigger: 'manual' | 'scheduled'
-): Promise<SurveySyncResult[] | null | 'busy'> {
+export async function runSync(trigger: 'manual' | 'scheduled'): Promise<SurveySyncResult[] | null | 'busy'> {
   const config = getQualtricsSyncConfig();
   if (!config) return null;
   if (running) return 'busy';
@@ -435,9 +430,7 @@ export async function runSync(
     runStatus.lastRunAt = new Date().toISOString();
     runStatus.lastRunTrigger = trigger;
     runStatus.lastResults = results;
-    runStatus.lastError = results.every((r) => r.error)
-      ? 'all surveys failed'
-      : null;
+    runStatus.lastError = results.every((r) => r.error) ? 'all surveys failed' : null;
     const unlinked = results.reduce((n, r) => n + (r.fetched - r.linked), 0);
     if (unlinked > 0) {
       console.warn(`[QualtricsSync] ${trigger} run: ${unlinked} response(s) not linked to a participant`);

@@ -60,7 +60,9 @@ describe('createSandboxInviteBatch', () => {
       rows: [{ invite_id: 1 }, { invite_id: 2 }, { invite_id: 3 }],
     });
     const { batchId, invites } = await createSandboxInviteBatch({
-      count: 3, inviteRole: 'caseworker', createdBy: 1,
+      count: 3,
+      inviteRole: 'caseworker',
+      createdBy: 1,
     });
     expect(batchId).toMatch(/^[0-9a-f-]{36}$/);
     expect(invites).toHaveLength(3);
@@ -74,12 +76,12 @@ describe('createSandboxInviteBatch', () => {
   });
 
   it('rejects counts outside 1..500 before touching the db', async () => {
-    await expect(
-      createSandboxInviteBatch({ count: 0, inviteRole: 'therapist', createdBy: 1 })
-    ).rejects.toThrow('between 1 and 500');
-    await expect(
-      createSandboxInviteBatch({ count: 501, inviteRole: 'therapist', createdBy: 1 })
-    ).rejects.toThrow('between 1 and 500');
+    await expect(createSandboxInviteBatch({ count: 0, inviteRole: 'therapist', createdBy: 1 })).rejects.toThrow(
+      'between 1 and 500',
+    );
+    await expect(createSandboxInviteBatch({ count: 501, inviteRole: 'therapist', createdBy: 1 })).rejects.toThrow(
+      'between 1 and 500',
+    );
     expect(queryMock).not.toHaveBeenCalled();
   });
 });

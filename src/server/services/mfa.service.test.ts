@@ -113,7 +113,12 @@ describe('persistence', () => {
   it('disableMFA clears every MFA column', async () => {
     await disableMFA(7);
     const [sql, params] = queryMock.mock.calls[0];
-    for (const col of ['mfa_secret = NULL', 'mfa_backup_codes = NULL', 'mfa_enabled_at = NULL', 'last_mfa_verified_at = NULL']) {
+    for (const col of [
+      'mfa_secret = NULL',
+      'mfa_backup_codes = NULL',
+      'mfa_enabled_at = NULL',
+      'last_mfa_verified_at = NULL',
+    ]) {
       expect(sql).toContain(col);
     }
     expect(params).toEqual([7]);
@@ -128,15 +133,35 @@ describe('persistence', () => {
 
   it('getMFAStatus maps the row and counts remaining codes; unknown user throws', async () => {
     const enabledAt = new Date('2026-01-01T00:00:00Z');
-    queryMock.mockResolvedValueOnce({ rows: [{
-      mfa_enabled: true, mfa_secret: 'S', mfa_backup_codes: ['a', 'b', 'c'], mfa_enabled_at: enabledAt, last_mfa_verified_at: null,
-    }] });
-    expect(await getMFAStatus(7)).toEqual({
-      enabled: true, enabledAt, lastVerifiedAt: null, backupCodesRemaining: 3, secret: 'S',
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        {
+          mfa_enabled: true,
+          mfa_secret: 'S',
+          mfa_backup_codes: ['a', 'b', 'c'],
+          mfa_enabled_at: enabledAt,
+          last_mfa_verified_at: null,
+        },
+      ],
     });
-    queryMock.mockResolvedValueOnce({ rows: [{
-      mfa_enabled: false, mfa_secret: null, mfa_backup_codes: null, mfa_enabled_at: null, last_mfa_verified_at: null,
-    }] });
+    expect(await getMFAStatus(7)).toEqual({
+      enabled: true,
+      enabledAt,
+      lastVerifiedAt: null,
+      backupCodesRemaining: 3,
+      secret: 'S',
+    });
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        {
+          mfa_enabled: false,
+          mfa_secret: null,
+          mfa_backup_codes: null,
+          mfa_enabled_at: null,
+          last_mfa_verified_at: null,
+        },
+      ],
+    });
     expect((await getMFAStatus(8)).backupCodesRemaining).toBe(0);
     queryMock.mockResolvedValueOnce({ rows: [] });
     await expect(getMFAStatus(9)).rejects.toThrow('User not found');

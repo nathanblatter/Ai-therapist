@@ -35,7 +35,7 @@ const log = createLogger('clientChartRoutes');
  */
 async function resolveClient(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<{ userid: number; username: string; callerOrgId: number | null } | null> {
   const clientId = parseInt(req.params.userId, 10);
   if (!Number.isInteger(clientId) || clientId <= 0) {
@@ -76,7 +76,7 @@ export default function clientChartRoutes(): Router {
         const chart = await buildClientChart(
           { userid: resolved.userid, username: resolved.username },
           { userId: req.session.userId as number, username: String(req.session.username ?? ''), role },
-          { orgId: resolved.callerOrgId }
+          { orgId: resolved.callerOrgId },
         );
 
         // Access audit (091): one row per export, naming the bundle contents.
@@ -94,14 +94,17 @@ export default function clientChartRoutes(): Router {
         });
 
         res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', `attachment; filename="${chartZipFilename(chart.client, chart.generatedAt)}"`);
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="${chartZipFilename(chart.client, chart.generatedAt)}"`,
+        );
         await streamChartZip(chart, res);
       } catch (err) {
         log.error({ err }, 'Failed to build client chart bundle');
         if (!res.headersSent) res.status(500).json({ error: 'Failed to build chart bundle' });
         else res.end();
       }
-    }
+    },
   );
 
   return router;

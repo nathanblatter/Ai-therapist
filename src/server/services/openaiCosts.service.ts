@@ -84,8 +84,7 @@ export async function getCostsSummary(days = 30): Promise<CostsSummary> {
   // start_time is required and is a Unix timestamp; align to a day boundary
   // so bucket starts are stable across polls.
   const startTime = Math.floor((Date.now() - bounded * 24 * 60 * 60 * 1000) / 1000);
-  const url =
-    `${COSTS_URL}?start_time=${startTime}&bucket_width=1d&limit=${bounded}&group_by=line_item`;
+  const url = `${COSTS_URL}?start_time=${startTime}&bucket_width=1d&limit=${bounded}&group_by=line_item`;
 
   try {
     const controller = new AbortController();
@@ -101,10 +100,7 @@ export async function getCostsSummary(days = 30): Promise<CostsSummary> {
     }
 
     if (!response.ok) {
-      log.warn(
-        { status: response.status },
-        'OpenAI costs request failed (is OPENAI_ADMIN_KEY an *admin* key?)'
-      );
+      log.warn({ status: response.status }, 'OpenAI costs request failed (is OPENAI_ADMIN_KEY an *admin* key?)');
       return NOT_CONFIGURED;
     }
 

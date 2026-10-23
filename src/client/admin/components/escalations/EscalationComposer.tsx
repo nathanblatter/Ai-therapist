@@ -3,13 +3,13 @@
 // from the inbox (client picked from my caseload), from CaseloadView's
 // per-client Escalate action, and from CrisisManagement with a pre-linked
 // crisis event (integration wiring).
-import { useEffect, useState } from "react";
-import { getJson, postJson } from "../../../shared/http";
-import { AlertTriangle, X } from "react-feather";
+import { useEffect, useState } from 'react';
+import { getJson, postJson } from '../../../shared/http';
+import { AlertTriangle, X } from 'react-feather';
 // Subset of the canonical caseload row (server data layer, type-only import).
-import type { CaseloadClient as CaseloadClientRow } from "../../../../server/db/caseload.queries";
+import type { CaseloadClient as CaseloadClientRow } from '../../../../server/db/caseload.queries';
 
-type CaseloadClient = Pick<CaseloadClientRow, "userid" | "username">;
+type CaseloadClient = Pick<CaseloadClientRow, 'userid' | 'username'>;
 
 interface EscalationComposerProps {
   /** Preselected client (CaseloadView / CrisisManagement entry points). */
@@ -32,8 +32,8 @@ export default function EscalationComposer({
 }: EscalationComposerProps) {
   const [clients, setClients] = useState<CaseloadClient[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(clientId ?? null);
-  const [reason, setReason] = useState("");
-  const [urgency, setUrgency] = useState<"routine" | "urgent" | "emergency">("routine");
+  const [reason, setReason] = useState('');
+  const [urgency, setUrgency] = useState<'routine' | 'urgent' | 'emergency'>('routine');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +43,7 @@ export default function EscalationComposer({
   useEffect(() => {
     if (clientId !== undefined) return;
     let cancelled = false;
-    getJson<{ clients?: CaseloadClient[] }>("/admin/api/caseload")
+    getJson<{ clients?: CaseloadClient[] }>('/admin/api/caseload')
       .then((data) => {
         if (cancelled) return;
         const list: CaseloadClient[] = Array.isArray(data?.clients) ? data.clients : [];
@@ -61,18 +61,18 @@ export default function EscalationComposer({
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (selectedClientId === null) {
-      setError("Pick a client to escalate about.");
+      setError('Pick a client to escalate about.');
       return;
     }
     if (!reason.trim()) {
-      setError("Describe why you are escalating.");
+      setError('Describe why you are escalating.');
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
       const data = await postJson<{ escalation: Parameters<NonNullable<typeof onCreated>>[0] }>(
-        "/admin/api/escalations",
+        '/admin/api/escalations',
         {
           client_id: selectedClientId,
           reason: reason.trim(),
@@ -80,7 +80,7 @@ export default function EscalationComposer({
           session_id: sessionId ?? undefined,
           crisis_event_id: crisisEventId ?? undefined,
         },
-        { fallback: "Failed to create escalation" }
+        { fallback: 'Failed to create escalation' },
       );
       onCreated?.(data.escalation);
     } catch (err: unknown) {
@@ -103,12 +103,7 @@ export default function EscalationComposer({
             <AlertTriangle size={18} className="text-amber-500" aria-hidden="true" />
             Escalate to the care team
           </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-2"
-            aria-label="Close"
-          >
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2" aria-label="Close">
             <X size={18} aria-hidden="true" />
           </button>
         </div>
@@ -125,7 +120,7 @@ export default function EscalationComposer({
               </label>
               <select
                 id="escalation-client"
-                value={selectedClientId ?? ""}
+                value={selectedClientId ?? ''}
                 onChange={(e) => setSelectedClientId(Number(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
               >
@@ -140,9 +135,7 @@ export default function EscalationComposer({
                   </option>
                 ))}
               </select>
-              {clients.length === 0 && (
-                <p className="text-xs text-gray-500 mt-1">No clients on your caseload yet.</p>
-              )}
+              {clients.length === 0 && <p className="text-xs text-gray-500 mt-1">No clients on your caseload yet.</p>}
             </div>
           )}
 
@@ -153,7 +146,7 @@ export default function EscalationComposer({
             <select
               id="escalation-urgency"
               value={urgency}
-              onChange={(e) => setUrgency(e.target.value as "routine" | "urgent" | "emergency")}
+              onChange={(e) => setUrgency(e.target.value as 'routine' | 'urgent' | 'emergency')}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
             >
               <option value="routine">Routine — review when you can</option>
@@ -177,9 +170,7 @@ export default function EscalationComposer({
             />
           </div>
 
-          {crisisEventId != null && (
-            <p className="text-xs text-gray-500">Linked to crisis event #{crisisEventId}.</p>
-          )}
+          {crisisEventId != null && <p className="text-xs text-gray-500">Linked to crisis event #{crisisEventId}.</p>}
 
           {error && (
             <div className="text-red-600 text-sm" role="alert">
@@ -200,7 +191,7 @@ export default function EscalationComposer({
               disabled={submitting}
               className="px-4 py-2 bg-royal text-white rounded-md hover:bg-blue-700 disabled:opacity-50 min-h-[44px]"
             >
-              {submitting ? "Escalating..." : "Raise escalation"}
+              {submitting ? 'Escalating...' : 'Raise escalation'}
             </button>
           </div>
         </form>

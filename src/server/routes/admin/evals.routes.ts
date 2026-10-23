@@ -42,7 +42,10 @@ const log = createLogger('evalsRoutes');
  * gate is server-side so the UI cannot leak it; once the caller's rating is
  * saved (or the queue row is rated/skipped) everything is returned.
  */
-async function blindStateFor(sessionId: string, userId: number): Promise<{ queue: RatingQueueRow | null; blind: boolean }> {
+async function blindStateFor(
+  sessionId: string,
+  userId: number,
+): Promise<{ queue: RatingQueueRow | null; blind: boolean }> {
   const queue = await getRatingQueueRowForSession(sessionId);
   if (!queue || (queue.status !== 'queued' && queue.status !== 'in_progress')) return { queue, blind: false };
   return { queue, blind: !(await hasHumanRating(sessionId, userId)) };
@@ -139,112 +142,136 @@ export default function evalsRoutes(): Router {
   });
 
   // GET /admin/api/sessions/:sessionId/eval - latest eval for a session
-  router.get('/admin/api/sessions/:sessionId/eval', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
-    try {
-      const evalRow = await getSessionEval(req.params.sessionId);
-      if (!evalRow) return res.status(404).json({ error: 'No eval for this session yet' });
-      const { blind, queue } = await blindStateFor(req.params.sessionId, req.session.userId!);
-      if (blind) {
-        // Scores, rationale, comments and judge spread stay server-side until
-        // the caller's own rating is stored.
-        const { eval_id, session_id, judge_model, prompt_version, created_at } = evalRow;
-        return res.json({ eval: { eval_id, session_id, judge_model, prompt_version, created_at }, blind: true, queue });
+  router.get(
+    '/admin/api/sessions/:sessionId/eval',
+    requireRole('therapist', 'researcher'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const evalRow = await getSessionEval(req.params.sessionId);
+        if (!evalRow) return res.status(404).json({ error: 'No eval for this session yet' });
+        const { blind, queue } = await blindStateFor(req.params.sessionId, req.session.userId!);
+        if (blind) {
+          // Scores, rationale, comments and judge spread stay server-side until
+          // the caller's own rating is stored.
+          const { eval_id, session_id, judge_model, prompt_version, created_at } = evalRow;
+          return res.json({
+            eval: { eval_id, session_id, judge_model, prompt_version, created_at },
+            blind: true,
+            queue,
+          });
+        }
+        res.json({ eval: evalRow, blind: false, queue });
+      } catch (err) {
+        log.error({ err }, 'Failed to fetch session eval');
+        res.status(500).json({ error: 'Failed to fetch session eval' });
       }
-      res.json({ eval: evalRow, blind: false, queue });
-    } catch (err) {
-      log.error({ err }, 'Failed to fetch session eval');
-      res.status(500).json({ error: 'Failed to fetch session eval' });
-    }
-  });
+    },
+  );
 
   // POST /admin/api/sessions/:sessionId/eval - run (or re-run with force) the
   // LLM judge for an ended session. Synchronous: the judge call takes a few
   // seconds and the admin UI wants the fresh scores back.
-  router.post('/admin/api/sessions/:sessionId/eval', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
-    const { sessionId } = req.params;
-    const force = req.body?.force === true;
-    try {
-      const { evaluateSession } = await import('../../services/sessionEval.service.js');
-      const row = await evaluateSession(sessionId, { force });
-      if (!row) {
-        return res.status(400).json({
-          error: 'Session could not be evaluated (not found, not ended, or empty transcript)',
+  router.post(
+    '/admin/api/sessions/:sessionId/eval',
+    requireRole('therapist', 'researcher'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      const { sessionId } = req.params;
+      const force = req.body?.force === true;
+      try {
+        const { evaluateSession } = await import('../../services/sessionEval.service.js');
+        const row = await evaluateSession(sessionId, { force });
+        if (!row) {
+          return res.status(400).json({
+            error: 'Session could not be evaluated (not found, not ended, or empty transcript)',
+          });
+        }
+        res.json({ eval: row });
+      } catch (err) {
+        log.error({ err }, `Eval run failed for ${sessionId}`);
+        res.status(500).json({
+          error: 'Eval run failed',
+          details: err instanceof Error ? err.message : String(err),
         });
       }
-      res.json({ eval: row });
-    } catch (err) {
-      log.error({ err }, `Eval run failed for ${sessionId}`);
-      res.status(500).json({
-        error: 'Eval run failed',
-        details: err instanceof Error ? err.message : String(err),
-      });
-    }
-  });
+    },
+  );
 
   // GET /admin/api/sessions/:sessionId/human-ratings - all human ratings for a
   // session (+ my_user_id so the UI can locate "my" rating).
-  router.get('/admin/api/sessions/:sessionId/human-ratings', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
-    try {
-      const userId = req.session.userId!;
-      const [ratings, state] = await Promise.all([
-        getSessionHumanRatings(req.params.sessionId),
-        blindStateFor(req.params.sessionId, userId),
-      ]);
-      // Blind: other raters' scores are withheld until the caller has rated,
-      // so the second rating stays independent of the first.
-      const visible = state.blind ? ratings.filter(r => r.rater_user_id === userId) : ratings;
-      res.json({
-        ratings: visible,
-        my_user_id: userId,
-        blind: state.blind,
-        others_hidden: state.blind && visible.length < ratings.length,
-        queue: state.queue,
-      });
-    } catch (err) {
-      log.error({ err }, 'Failed to fetch human ratings');
-      res.status(500).json({ error: 'Failed to fetch human ratings' });
-    }
-  });
+  router.get(
+    '/admin/api/sessions/:sessionId/human-ratings',
+    requireRole('therapist', 'researcher'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const userId = req.session.userId!;
+        const [ratings, state] = await Promise.all([
+          getSessionHumanRatings(req.params.sessionId),
+          blindStateFor(req.params.sessionId, userId),
+        ]);
+        // Blind: other raters' scores are withheld until the caller has rated,
+        // so the second rating stays independent of the first.
+        const visible = state.blind ? ratings.filter((r) => r.rater_user_id === userId) : ratings;
+        res.json({
+          ratings: visible,
+          my_user_id: userId,
+          blind: state.blind,
+          others_hidden: state.blind && visible.length < ratings.length,
+          queue: state.queue,
+        });
+      } catch (err) {
+        log.error({ err }, 'Failed to fetch human ratings');
+        res.status(500).json({ error: 'Failed to fetch human ratings' });
+      }
+    },
+  );
 
   // PUT /admin/api/sessions/:sessionId/human-rating - upsert the calling rater's
   // rating on the six-dimension rubric for an ended session.
-  router.put('/admin/api/sessions/:sessionId/human-rating', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
-    const { sessionId } = req.params;
-    try {
-      const session = await getSession(sessionId);
-      if (!session) return res.status(400).json({ error: 'Session not found' });
-      if (session.status !== 'ended') {
-        return res.status(400).json({ error: 'Only ended sessions can be rated' });
+  router.put(
+    '/admin/api/sessions/:sessionId/human-rating',
+    requireRole('therapist', 'researcher'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      const { sessionId } = req.params;
+      try {
+        const session = await getSession(sessionId);
+        if (!session) return res.status(400).json({ error: 'Session not found' });
+        if (session.status !== 'ended') {
+          return res.status(400).json({ error: 'Only ended sessions can be rated' });
+        }
+
+        const { validateHumanRubric, HUMAN_RUBRIC_VERSION } = await import('../../services/evalCalibration.service.js');
+        const validation = validateHumanRubric(req.body);
+        if (!validation.ok) return res.status(400).json({ error: validation.error });
+
+        const rating = await upsertSessionHumanRating(
+          sessionId,
+          req.session.userId!,
+          validation.rubric!,
+          validation.overallNotes ?? null,
+          HUMAN_RUBRIC_VERSION,
+        );
+        // Queue link (WP2): the rater takes a free slot and the row becomes
+        // `rated` once every required rater has submitted.
+        const queue = await linkRatingToQueue(sessionId, req.session.userId!);
+        res.json({ rating, queue });
+      } catch (err) {
+        log.error({ err }, `Failed to save human rating for ${sessionId}`);
+        res.status(500).json({ error: 'Failed to save human rating' });
       }
-
-      const { validateHumanRubric, HUMAN_RUBRIC_VERSION } = await import(
-        '../../services/evalCalibration.service.js'
-      );
-      const validation = validateHumanRubric(req.body);
-      if (!validation.ok) return res.status(400).json({ error: validation.error });
-
-      const rating = await upsertSessionHumanRating(
-        sessionId,
-        req.session.userId!,
-        validation.rubric!,
-        validation.overallNotes ?? null,
-        HUMAN_RUBRIC_VERSION
-      );
-      // Queue link (WP2): the rater takes a free slot and the row becomes
-      // `rated` once every required rater has submitted.
-      const queue = await linkRatingToQueue(sessionId, req.session.userId!);
-      res.json({ rating, queue });
-    } catch (err) {
-      log.error({ err }, `Failed to save human rating for ${sessionId}`);
-      res.status(500).json({ error: 'Failed to save human rating' });
-    }
-  });
+    },
+  );
 
   // GET /admin/api/evals/calibration?promptVersion=v1 - judge-vs-human
   // agreement, plus judge-vs-judge agreement for the ensemble (migration 107).
   router.get('/admin/api/evals/calibration', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
-      const { computeCalibrationReport, computeJudgeAgreementReport, computeHumanAgreementReport } = await import('../../services/evalCalibration.service.js');
+      const { computeCalibrationReport, computeJudgeAgreementReport, computeHumanAgreementReport } = await import(
+        '../../services/evalCalibration.service.js'
+      );
       const { EVAL_PROMPT_VERSION } = await import('../../services/sessionEval.service.js');
       const promptVersion = req.query.promptVersion ? String(req.query.promptVersion) : EVAL_PROMPT_VERSION;
       const [report, availableVersions, judgeAgreement, humanAgreement] = await Promise.all([
@@ -274,13 +301,20 @@ export default function evalsRoutes(): Router {
   router.get('/admin/api/evals/rating-queue', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
       const scope = await queueScopeFor(req);
-      const statusParam = typeof req.query.status === 'string' && QUEUE_STATUSES.has(req.query.status)
-        ? (req.query.status as RatingQueueStatus | 'open')
-        : undefined;
+      const statusParam =
+        typeof req.query.status === 'string' && QUEUE_STATUSES.has(req.query.status)
+          ? (req.query.status as RatingQueueStatus | 'open')
+          : undefined;
       const { limit } = parsePagination(req.query, { defaultLimit: 200, maxLimit: 1000 });
       const { getSecondRaterFraction } = await import('../../services/ratingSampler.service.js');
       const [items, counts, unadjudicated, secondRaterFraction] = await Promise.all([
-        listRatingQueue({ ...scope, userId: req.session.userId!, mine: req.query.scope === 'mine', status: statusParam, limit }),
+        listRatingQueue({
+          ...scope,
+          userId: req.session.userId!,
+          mine: req.query.scope === 'mine',
+          status: statusParam,
+          limit,
+        }),
         getRatingQueueCounts(scope),
         countUnadjudicatedCrisisEvents(scope.scopeTherapistId, scope.orgId),
         getSecondRaterFraction(),
@@ -313,7 +347,8 @@ export default function evalsRoutes(): Router {
         if (Number.isNaN(since.getTime())) return res.status(400).json({ error: 'since must be a date' });
       }
       const seed = body.seed === undefined || body.seed === null ? undefined : Number(body.seed);
-      if (seed !== undefined && !Number.isInteger(seed)) return res.status(400).json({ error: 'seed must be an integer' });
+      if (seed !== undefined && !Number.isInteger(seed))
+        return res.status(400).json({ error: 'seed must be an integer' });
       const { enqueueStratifiedSample } = await import('../../services/ratingSampler.service.js');
       const result = await enqueueStratifiedSample({
         size,
@@ -339,14 +374,22 @@ export default function evalsRoutes(): Router {
       const source = body.source === 'disagreement' ? 'disagreement' : body.source === 'manual' ? 'manual' : null;
       if (!source) return res.status(400).json({ error: "source must be 'disagreement' or 'manual'" });
       const ids: unknown = body.session_ids;
-      if (!Array.isArray(ids) || ids.length === 0 || ids.length > 200 || !ids.every(id => typeof id === 'string' && id)) {
+      if (
+        !Array.isArray(ids) ||
+        ids.length === 0 ||
+        ids.length > 200 ||
+        !ids.every((id) => typeof id === 'string' && id)
+      ) {
         return res.status(400).json({ error: 'session_ids must be 1..200 session ids' });
       }
       const callerOrgId = await orgIdFor(req);
       const allowed: string[] = [];
       const denied: string[] = [];
       for (const id of ids as string[]) {
-        const ok = await mayCareTeamAccessSession(req.session.userRole, req.session.userId, id, { caseworkerPolicy: 'deny', callerOrgId });
+        const ok = await mayCareTeamAccessSession(req.session.userRole, req.session.userId, id, {
+          caseworkerPolicy: 'deny',
+          callerOrgId,
+        });
         (ok ? allowed : denied).push(id);
       }
       const { enqueueSessions } = await import('../../services/ratingSampler.service.js');
@@ -367,7 +410,10 @@ export default function evalsRoutes(): Router {
       const row = await getRatingQueueRow(id);
       if (!row || !(await mayAccessQueueRow(req, row))) return res.status(404).json({ error: 'Not found' });
       const claimed = await claimRatingQueueRow(id, req.session.userId!);
-      if (!claimed) return res.status(409).json({ error: 'Queue item is not claimable (already rated, skipped, or fully assigned)' });
+      if (!claimed)
+        return res
+          .status(409)
+          .json({ error: 'Queue item is not claimable (already rated, skipped, or fully assigned)' });
       res.json({ item: claimed });
     } catch (err) {
       log.error({ err }, 'Failed to claim rating queue item');
@@ -392,16 +438,20 @@ export default function evalsRoutes(): Router {
   });
 
   // POST /admin/api/evals/drift-alerts/:alertId/ack - acknowledge a drift alert.
-  router.post('/admin/api/evals/drift-alerts/:alertId/ack', requireRole('therapist', 'researcher'), async (req, res) => {
-    try {
-      const alert = await acknowledgeDriftAlert(Number(req.params.alertId), req.session.userId!);
-      if (!alert) return res.status(404).json({ error: 'Alert not found or already acknowledged' });
-      res.json({ alert });
-    } catch (err) {
-      log.error({ err }, 'Failed to acknowledge drift alert');
-      res.status(500).json({ error: 'Failed to acknowledge drift alert' });
-    }
-  });
+  router.post(
+    '/admin/api/evals/drift-alerts/:alertId/ack',
+    requireRole('therapist', 'researcher'),
+    async (req, res) => {
+      try {
+        const alert = await acknowledgeDriftAlert(Number(req.params.alertId), req.session.userId!);
+        if (!alert) return res.status(404).json({ error: 'Alert not found or already acknowledged' });
+        res.json({ alert });
+      } catch (err) {
+        log.error({ err }, 'Failed to acknowledge drift alert');
+        res.status(500).json({ error: 'Failed to acknowledge drift alert' });
+      }
+    },
+  );
 
   return router;
 }

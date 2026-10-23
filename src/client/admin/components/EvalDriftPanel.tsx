@@ -58,17 +58,22 @@ export default function EvalDriftPanel() {
   const load = useCallback((w: number) => {
     setLoading(true);
     getJson<EvalTrendData>(`/admin/api/analytics/evals?weeks=${w}`, { fallback: 'Failed to fetch eval trend' })
-      .then(d => { setData(d); setAlerts(d.open_alerts ?? []); })
+      .then((d) => {
+        setData(d);
+        setAlerts(d.open_alerts ?? []);
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { load(weeks); }, [load, weeks]);
+  useEffect(() => {
+    load(weeks);
+  }, [load, weeks]);
 
   const acknowledge = async (alertId: number) => {
     try {
       await postJson(`/admin/api/evals/drift-alerts/${alertId}/ack`);
-      setAlerts(prev => prev.filter(a => a.alert_id !== alertId));
+      setAlerts((prev) => prev.filter((a) => a.alert_id !== alertId));
       toast.success('Alert acknowledged');
     } catch (err) {
       console.error('Failed to acknowledge alert:', err);
@@ -93,14 +98,14 @@ export default function EvalDriftPanel() {
 
   // Build chart data for the selected dimension: pivot rows into
   // { week, [group]: mean_score } with one series per (ai_model · prompt_version).
-  const rows = data.trend.filter(r => r.dimension === dimension);
+  const rows = data.trend.filter((r) => r.dimension === dimension);
   const groupKey = (r: EvalTrendRow) => `${r.ai_model ?? 'unknown'} · ${r.prompt_version}`;
   const groups = Array.from(new Set(rows.map(groupKey))).sort();
-  const weeksSorted = Array.from(new Set(rows.map(r => r.week))).sort();
+  const weeksSorted = Array.from(new Set(rows.map((r) => r.week))).sort();
   const nByGroupWeek = new Map<string, number>();
-  const chartData = weeksSorted.map(week => {
+  const chartData = weeksSorted.map((week) => {
     const point: Record<string, string | number> = { week };
-    for (const r of rows.filter(x => x.week === week)) {
+    for (const r of rows.filter((x) => x.week === week)) {
       point[groupKey(r)] = r.mean_score;
       nByGroupWeek.set(`${groupKey(r)}|${week}`, r.n);
     }
@@ -115,14 +120,17 @@ export default function EvalDriftPanel() {
 
       {alerts.length > 0 && (
         <div className="space-y-2">
-          {alerts.map(a => (
-            <div key={a.alert_id} className="bg-white border-2 border-red-400 rounded-lg p-4 flex items-start justify-between gap-4">
+          {alerts.map((a) => (
+            <div
+              key={a.alert_id}
+              className="bg-white border-2 border-red-400 rounded-lg p-4 flex items-start justify-between gap-4"
+            >
               <div className="flex items-start gap-2">
                 <AlertTriangle size={18} className="text-red-600 mt-0.5 shrink-0" />
                 <p className="text-sm text-gray-800">
-                  <span className="font-semibold">{a.dimension}</span> dropped {a.drop_amount} pts
-                  (rolling {a.rolling_mean} vs baseline {a.baseline_mean}, n={a.window_n}) — model{' '}
-                  {a.ai_model ?? 'unknown'} · prompt {a.prompt_version} · {new Date(a.created_at).toLocaleString()}
+                  <span className="font-semibold">{a.dimension}</span> dropped {a.drop_amount} pts (rolling{' '}
+                  {a.rolling_mean} vs baseline {a.baseline_mean}, n={a.window_n}) — model {a.ai_model ?? 'unknown'} ·
+                  prompt {a.prompt_version} · {new Date(a.created_at).toLocaleString()}
                 </p>
               </div>
               <button
@@ -142,20 +150,24 @@ export default function EvalDriftPanel() {
           <div className="flex gap-2">
             <select
               value={dimension}
-              onChange={e => setDimension(e.target.value)}
+              onChange={(e) => setDimension(e.target.value)}
               className="border border-gray-300 rounded px-2 py-1 text-sm"
             >
               {DIMENSIONS.map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
+                <option key={key} value={key}>
+                  {label}
+                </option>
               ))}
             </select>
             <select
               value={weeks}
-              onChange={e => setWeeks(Number(e.target.value))}
+              onChange={(e) => setWeeks(Number(e.target.value))}
               className="border border-gray-300 rounded px-2 py-1 text-sm"
             >
-              {[4, 12, 26, 52].map(w => (
-                <option key={w} value={w}>{w} weeks</option>
+              {[4, 12, 26, 52].map((w) => (
+                <option key={w} value={w}>
+                  {w} weeks
+                </option>
               ))}
             </select>
           </div>
@@ -178,7 +190,15 @@ export default function EvalDriftPanel() {
               />
               <Legend />
               {groups.map((g, i) => (
-                <Line key={g} type="monotone" dataKey={g} name={g} stroke={COLORS[i % COLORS.length]} dot={{ r: 2 }} connectNulls />
+                <Line
+                  key={g}
+                  type="monotone"
+                  dataKey={g}
+                  name={g}
+                  stroke={COLORS[i % COLORS.length]}
+                  dot={{ r: 2 }}
+                  connectNulls
+                />
               ))}
             </LineChart>
           </ResponsiveContainer>
@@ -186,11 +206,10 @@ export default function EvalDriftPanel() {
       </div>
 
       <p className="text-xs text-gray-500">
-        Scores are only comparable within a prompt_version. Alerts fire when a dimension's rolling mean
-        (last <code>drift_window</code>, default 20) drops ≥ <code>drift_threshold</code> (default 0.5)
-        below the prior baseline (default 100). Configure via system_config key <code>evals</code>{' '}
-        (<code>drift_window</code> / <code>drift_baseline</code> / <code>drift_threshold</code> /{' '}
-        <code>drift_page_enabled</code>).
+        Scores are only comparable within a prompt_version. Alerts fire when a dimension's rolling mean (last{' '}
+        <code>drift_window</code>, default 20) drops ≥ <code>drift_threshold</code> (default 0.5) below the prior
+        baseline (default 100). Configure via system_config key <code>evals</code> (<code>drift_window</code> /{' '}
+        <code>drift_baseline</code> / <code>drift_threshold</code> / <code>drift_page_enabled</code>).
       </p>
     </div>
   );

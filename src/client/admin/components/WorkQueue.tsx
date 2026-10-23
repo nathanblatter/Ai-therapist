@@ -23,12 +23,11 @@ export default function WorkQueue({ role, onSelectClient }: WorkQueueProps) {
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
 
   const openCount = items.filter((i) => i.status === 'open').length;
-  const urgentCount = items.filter((i) => i.severity === 'urgent' && i.status !== 'resolved' && i.status !== 'expired').length;
+  const urgentCount = items.filter(
+    (i) => i.severity === 'urgent' && i.status !== 'resolved' && i.status !== 'expired',
+  ).length;
 
-  const types = useMemo(
-    () => Array.from(new Set(items.map((i) => i.item_type))).sort(),
-    [items]
-  );
+  const types = useMemo(() => Array.from(new Set(items.map((i) => i.item_type))).sort(), [items]);
   const visible = typeFilter ? items.filter((i) => i.item_type === typeFilter) : items;
 
   return (

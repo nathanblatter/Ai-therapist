@@ -49,8 +49,13 @@ export async function createCounterfactualRun(input: {
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [
-      input.sessionId, input.mode, input.decisionPoint, input.probeText,
-      input.probeReason, input.baselineModel, input.createdBy,
+      input.sessionId,
+      input.mode,
+      input.decisionPoint,
+      input.probeText,
+      input.probeReason,
+      input.baselineModel,
+      input.createdBy,
     ],
   );
   return result.rows[0];
@@ -83,9 +88,15 @@ export async function recordCounterfactualResponse(input: {
        latency_ms = EXCLUDED.latency_ms,
        error = EXCLUDED.error`,
     [
-      input.runId, input.model, input.responseText ?? null, input.spokenText ?? null,
-      input.tokensIn ?? null, input.tokensOut ?? null, input.estimatedCostUsd ?? null,
-      input.latencyMs ?? null, input.error ?? null,
+      input.runId,
+      input.model,
+      input.responseText ?? null,
+      input.spokenText ?? null,
+      input.tokensIn ?? null,
+      input.tokensOut ?? null,
+      input.estimatedCostUsd ?? null,
+      input.latencyMs ?? null,
+      input.error ?? null,
     ],
   );
 }
@@ -120,9 +131,7 @@ export async function finishCounterfactualRun(
 export async function getCounterfactualRun(
   runId: number,
 ): Promise<{ run: CounterfactualRunRow; responses: CounterfactualResponseRow[] } | null> {
-  const runResult = await pool.query<CounterfactualRunRow>(
-    'SELECT * FROM counterfactual_runs WHERE id = $1', [runId],
-  );
+  const runResult = await pool.query<CounterfactualRunRow>('SELECT * FROM counterfactual_runs WHERE id = $1', [runId]);
   const run = runResult.rows[0];
   if (!run) return null;
 
@@ -140,7 +149,8 @@ export async function getCounterfactualRun(
 
 export async function listCounterfactualRuns(limit = 50): Promise<CounterfactualRunRow[]> {
   const result = await pool.query<CounterfactualRunRow>(
-    'SELECT * FROM counterfactual_runs ORDER BY created_at DESC LIMIT $1', [limit],
+    'SELECT * FROM counterfactual_runs ORDER BY created_at DESC LIMIT $1',
+    [limit],
   );
   return result.rows;
 }

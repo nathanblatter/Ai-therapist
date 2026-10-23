@@ -36,7 +36,8 @@ function orgClause(orgId: number | null | undefined, paramIndex: number): string
 
 /** Per-session metadata, no message content. */
 export async function getMetadataExport(f: ExportFilters, orgId?: number | null): Promise<ExportRow[]> {
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT
       ts.session_id,
       ts.session_name,
@@ -60,15 +61,22 @@ export async function getMetadataExport(f: ExportFilters, orgId?: number | null)
       AND ($4::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)${orgClause(orgId, 5)}
     GROUP BY ts.session_id, ts.session_name, u.username, ts.session_type, ts.created_at, ts.ended_at, ts.crisis_flagged, ts.crisis_severity, ts.crisis_risk_score
     ORDER BY ts.created_at DESC
-  `, orgId === null || orgId === undefined
-    ? [f.sessionId, f.startDate, f.endDate, f.crisisOnly]
-    : [f.sessionId, f.startDate, f.endDate, f.crisisOnly, orgId]);
+  `,
+    orgId === null || orgId === undefined
+      ? [f.sessionId, f.startDate, f.endDate, f.crisisOnly]
+      : [f.sessionId, f.startDate, f.endDate, f.crisisOnly, orgId],
+  );
   return result.rows;
 }
 
 /** Messages with per-user research IDs in place of identities. */
-export async function getAnonymizedExport(f: ExportFilters, contentColumn: ExportContentColumn, orgId?: number | null): Promise<ExportRow[]> {
-  const result = await pool.query(`
+export async function getAnonymizedExport(
+  f: ExportFilters,
+  contentColumn: ExportContentColumn,
+  orgId?: number | null,
+): Promise<ExportRow[]> {
+  const result = await pool.query(
+    `
     SELECT
       m.message_id as id,
       m.session_id,
@@ -90,9 +98,11 @@ export async function getAnonymizedExport(f: ExportFilters, contentColumn: Expor
       AND ($3::TIMESTAMP IS NULL OR ts.created_at <= $3)
       AND ($4::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)${orgClause(orgId, 5)}
     ORDER BY m.created_at ASC
-  `, orgId === null || orgId === undefined
-    ? [f.sessionId, f.startDate, f.endDate, f.crisisOnly]
-    : [f.sessionId, f.startDate, f.endDate, f.crisisOnly, orgId]);
+  `,
+    orgId === null || orgId === undefined
+      ? [f.sessionId, f.startDate, f.endDate, f.crisisOnly]
+      : [f.sessionId, f.startDate, f.endDate, f.crisisOnly, orgId],
+  );
   // Redacted content column == a role that may not see raw participant text,
   // so metadata drops to the telemetry allowlist too (ai-therapist-217).
   return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
@@ -102,12 +112,11 @@ export async function getAnonymizedExport(f: ExportFilters, contentColumn: Expor
 export async function getAggregatedExport(
   f: ExportFilters,
   aggregationPeriod: string,
-  orgId?: number | null
+  orgId?: number | null,
 ): Promise<ExportRow[]> {
-  const dateFormat = aggregationPeriod === 'day' ? 'YYYY-MM-DD'
-    : aggregationPeriod === 'week' ? 'IYYY-IW'
-      : 'YYYY-MM';
-  const result = await pool.query(`
+  const dateFormat = aggregationPeriod === 'day' ? 'YYYY-MM-DD' : aggregationPeriod === 'week' ? 'IYYY-IW' : 'YYYY-MM';
+  const result = await pool.query(
+    `
     SELECT
       TO_CHAR(ts.created_at, '${dateFormat}') as period,
       COUNT(DISTINCT ts.session_id) as total_sessions,
@@ -125,20 +134,27 @@ export async function getAggregatedExport(
       AND ($3::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)${orgClause(orgId, 4)}
     GROUP BY TO_CHAR(ts.created_at, '${dateFormat}')
     ORDER BY period
-  `, orgId === null || orgId === undefined
-    ? [f.startDate, f.endDate, f.crisisOnly]
-    : [f.startDate, f.endDate, f.crisisOnly, orgId]);
+  `,
+    orgId === null || orgId === undefined
+      ? [f.startDate, f.endDate, f.crisisOnly]
+      : [f.startDate, f.endDate, f.crisisOnly, orgId],
+  );
   return result.rows;
 }
 
 /** Full message export. A single session skips the session/user joins. */
-export async function getFullExport(f: ExportFilters, contentColumn: ExportContentColumn, orgId?: number | null): Promise<ExportRow[]> {
+export async function getFullExport(
+  f: ExportFilters,
+  contentColumn: ExportContentColumn,
+  orgId?: number | null,
+): Promise<ExportRow[]> {
   if (f.sessionId) {
     // Org scoping must hold on the single-session fast path too: without the
     // EXISTS guard an org-scoped researcher could export any org's session by
     // naming its id. Same owner-org predicate as orgClause (anonymous sessions
     // are irb-study custody); the $2::int cast types the parameter.
-    const result = await pool.query(`
+    const result = await pool.query(
+      `
       SELECT
         m.message_id as id,
         m.session_id,
@@ -154,11 +170,14 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
           WHERE ts.session_id = m.session_id
             AND ${ownerOrgScopeSql('$2', 'ts.user_id')}))
       ORDER BY m.created_at ASC
-    `, [f.sessionId, orgId ?? null]);
+    `,
+      [f.sessionId, orgId ?? null],
+    );
     return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
   }
 
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT
       m.message_id as id,
       m.session_id,
@@ -178,8 +197,10 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
       AND ($2::TIMESTAMP IS NULL OR ts.created_at <= $2)
       AND ($3::BOOLEAN IS FALSE OR ts.crisis_flagged = TRUE)${orgClause(orgId, 4)}
     ORDER BY m.created_at ASC
-  `, orgId === null || orgId === undefined
-    ? [f.startDate, f.endDate, f.crisisOnly]
-    : [f.startDate, f.endDate, f.crisisOnly, orgId]);
+  `,
+    orgId === null || orgId === undefined
+      ? [f.startDate, f.endDate, f.crisisOnly]
+      : [f.startDate, f.endDate, f.crisisOnly, orgId],
+  );
   return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
 }

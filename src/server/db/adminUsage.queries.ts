@@ -24,7 +24,7 @@ export async function insertAdminUsageEvents(events: AdminUsageEventRow[]): Prom
   await pool.query(
     `INSERT INTO admin_usage_events (usage_session_id, seq, role, kind, detail)
      VALUES ${rows.join(', ')}`,
-    values
+    values,
   );
 }
 
@@ -42,7 +42,7 @@ export async function getAdminUsageStats(days: number): Promise<AdminUsageKindSt
      WHERE created_at >= NOW() - make_interval(days => $1)
      GROUP BY kind
      ORDER BY count DESC`,
-    [days]
+    [days],
   );
   return result.rows as AdminUsageKindStat[];
 }
@@ -57,7 +57,7 @@ export async function getAdminViewReach(days: number): Promise<Array<{ view: str
        AND created_at >= NOW() - make_interval(days => $1)
      GROUP BY detail->>'view'
      ORDER BY opens DESC`,
-    [days]
+    [days],
   );
   return result.rows as Array<{ view: string; opens: number }>;
 }
@@ -88,7 +88,7 @@ export async function getAdminViewUsageByRole(days: number): Promise<AdminViewUs
        AND created_at >= NOW() - make_interval(days => $1)
      GROUP BY detail->>'view', COALESCE(role, 'unknown')
      ORDER BY opens DESC, view ASC`,
-    [days]
+    [days],
   );
   return result.rows as AdminViewUsageRow[];
 }

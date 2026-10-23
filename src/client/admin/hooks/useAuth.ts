@@ -36,7 +36,7 @@ function fetchAuthUser(): Promise<AuthUser | null> {
   if (cachedUser !== undefined) return Promise.resolve(cachedUser);
   if (!inflight) {
     inflight = getJson<{ authenticated?: boolean; user?: AuthUser }>('/api/auth/status')
-      .then(data => {
+      .then((data) => {
         cachedUser = data?.authenticated && data.user ? data.user : null;
         return cachedUser;
       })
@@ -57,7 +57,7 @@ export default function useAuth(): AuthState {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchAuthUser().then(u => {
+    void fetchAuthUser().then((u) => {
       if (!cancelled) {
         setUser(u);
         setLoading(false);

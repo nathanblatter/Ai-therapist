@@ -24,21 +24,59 @@ const INCLUDE_DEMO = process.env.SIGNAL_CHECK_INCLUDE_DEMO === '1';
 // words carry the clinical signal analyses depend on and should essentially
 // never be redacted (they are not PHI).
 const AFFECT_TERMS = [
-  'anxious', 'anxiety', 'sad', 'sadness', 'depressed', 'depression', 'stress',
-  'stressed', 'worried', 'worry', 'afraid', 'fear', 'scared', 'angry', 'anger',
-  'lonely', 'alone', 'hopeless', 'hopeful', 'hope', 'tired', 'exhausted',
-  'overwhelmed', 'panic', 'calm', 'better', 'worse', 'happy', 'grateful',
-  'cry', 'crying', 'sleep', 'hurt', 'pain', 'guilt', 'ashamed', 'shame',
+  'anxious',
+  'anxiety',
+  'sad',
+  'sadness',
+  'depressed',
+  'depression',
+  'stress',
+  'stressed',
+  'worried',
+  'worry',
+  'afraid',
+  'fear',
+  'scared',
+  'angry',
+  'anger',
+  'lonely',
+  'alone',
+  'hopeless',
+  'hopeful',
+  'hope',
+  'tired',
+  'exhausted',
+  'overwhelmed',
+  'panic',
+  'calm',
+  'better',
+  'worse',
+  'happy',
+  'grateful',
+  'cry',
+  'crying',
+  'sleep',
+  'hurt',
+  'pain',
+  'guilt',
+  'ashamed',
+  'shame',
 ];
 
 function affectTerms(text) {
   const lower = ` ${text.toLowerCase()} `;
-  return AFFECT_TERMS.filter(t => lower.includes(` ${t}`));
+  return AFFECT_TERMS.filter((t) => lower.includes(` ${t}`));
 }
 
 function cosine(a, b) {
-  let dot = 0, na = 0, nb = 0;
-  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  let dot = 0,
+    na = 0,
+    nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
@@ -55,22 +93,24 @@ const { rows } = await pool.query(
       AND (ts.is_demo IS NOT TRUE OR $2)
     ORDER BY m.created_at DESC
     LIMIT $1`,
-  [SAMPLE_LIMIT, INCLUDE_DEMO]
+  [SAMPLE_LIMIT, INCLUDE_DEMO],
 );
 
 if (rows.length === 0) {
-  console.log('No messages with both raw and redacted content in the window — run again after fresh (non-demo) sessions.');
+  console.log(
+    'No messages with both raw and redacted content in the window — run again after fresh (non-demo) sessions.',
+  );
   process.exit(0);
 }
 
 console.log(`Comparing ${rows.length} raw/redacted pairs...`);
-const rawVecs = await embedTextBatch(rows.map(r => r.content));
-const redVecs = await embedTextBatch(rows.map(r => r.content_redacted));
+const rawVecs = await embedTextBatch(rows.map((r) => r.content));
+const redVecs = await embedTextBatch(rows.map((r) => r.content_redacted));
 
 const results = rows.map((r, i) => {
   const sim = cosine(rawVecs[i], redVecs[i]);
   const rawTerms = affectTerms(r.content);
-  const kept = rawTerms.filter(t => affectTerms(r.content_redacted).includes(t));
+  const kept = rawTerms.filter((t) => affectTerms(r.content_redacted).includes(t));
   return {
     id: r.message_id,
     role: r.role,
@@ -81,14 +121,12 @@ const results = rows.map((r, i) => {
   };
 });
 
-const mean = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
-const sims = results.map(r => r.sim).sort((a, b) => a - b);
-const pct = p => sims[Math.min(sims.length - 1, Math.floor(p * sims.length))];
-const withAffect = results.filter(r => r.nAffectRaw > 0);
-const affectRetention = withAffect.length
-  ? mean(withAffect.map(r => r.nAffectKept / r.nAffectRaw))
-  : null;
-const lowSim = results.filter(r => r.sim < 0.85);
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+const sims = results.map((r) => r.sim).sort((a, b) => a - b);
+const pct = (p) => sims[Math.min(sims.length - 1, Math.floor(p * sims.length))];
+const withAffect = results.filter((r) => r.nAffectRaw > 0);
+const affectRetention = withAffect.length ? mean(withAffect.map((r) => r.nAffectKept / r.nAffectRaw)) : null;
+const lowSim = results.filter((r) => r.sim < 0.85);
 
 const date = new Date().toISOString().slice(0, 10);
 const report = `# Redaction signal-retention check — ${date}
@@ -99,7 +137,7 @@ this report.
 
 ## Semantic retention (embedding cosine similarity, raw vs redacted)
 - mean: ${mean(sims).toFixed(4)}
-- p10: ${pct(0.10).toFixed(4)}  median: ${pct(0.5).toFixed(4)}  p90: ${pct(0.90).toFixed(4)}
+- p10: ${pct(0.1).toFixed(4)}  median: ${pct(0.5).toFixed(4)}  p90: ${pct(0.9).toFixed(4)}
 - pairs below 0.85: ${lowSim.length} (${((lowSim.length / results.length) * 100).toFixed(1)}%)
 
 ## Affect-lexicon retention
@@ -107,10 +145,10 @@ this report.
 - mean fraction of affect terms surviving redaction: ${affectRetention == null ? 'n/a' : (affectRetention * 100).toFixed(1) + '%'}
 
 ## Length ratio (redacted/raw)
-- mean: ${mean(results.map(r => r.lengthRatio)).toFixed(3)}
+- mean: ${mean(results.map((r) => r.lengthRatio)).toFixed(3)}
 
 ## Flagged (similarity < 0.85 — inspect in admin transcript view while raw text survives)
-${lowSim.length === 0 ? '- none' : lowSim.map(r => `- ${r.id} (role=${r.role}, sim=${r.sim.toFixed(3)}, affect kept ${r.nAffectKept}/${r.nAffectRaw})`).join('\n')}
+${lowSim.length === 0 ? '- none' : lowSim.map((r) => `- ${r.id} (role=${r.role}, sim=${r.sim.toFixed(3)}, affect kept ${r.nAffectKept}/${r.nAffectRaw})`).join('\n')}
 
 Interpretation guide: redaction replaces PHI spans only, so cosine similarity
 should sit near 1.0 and affect retention near 100%. If either drops materially,

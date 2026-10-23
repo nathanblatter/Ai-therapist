@@ -10,11 +10,7 @@
 // Caseworkers author case notes only (400 + DB CHECK).
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import {
-  requireClientAccess,
-  requireNoteAccess,
-  requireSessionClientAccess,
-} from '../../middleware/caseload.js';
+import { requireClientAccess, requireNoteAccess, requireSessionClientAccess } from '../../middleware/caseload.js';
 import { resolveClientOrgId } from '../../middleware/org.js';
 import {
   createCareNote,
@@ -42,13 +38,7 @@ import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('notesRoutes');
 
-const CASE_NOTE_KINDS: readonly CaseNoteKind[] = [
-  'contact',
-  'referral',
-  'coordination',
-  'safety_check',
-  'other',
-];
+const CASE_NOTE_KINDS: readonly CaseNoteKind[] = ['contact', 'referral', 'coordination', 'safety_check', 'other'];
 const SOAP_FIELDS = ['subjective', 'objective', 'assessment', 'plan'] as const;
 const MAX_FIELD = 8000;
 
@@ -144,9 +134,7 @@ export default function notesRoutes(): Router {
         if (sessionId !== null) {
           const sessionInfo = await getSessionAccessInfo(sessionId);
           const sessionOwner =
-            sessionInfo?.user_id === null || sessionInfo?.user_id === undefined
-              ? null
-              : Number(sessionInfo.user_id);
+            sessionInfo?.user_id === null || sessionInfo?.user_id === undefined ? null : Number(sessionInfo.user_id);
           if (sessionOwner === null || sessionOwner !== clientId) {
             return res.status(400).json({ error: 'session_id does not belong to this client' });
           }
@@ -178,7 +166,7 @@ export default function notesRoutes(): Router {
         log.error({ err }, 'create failed');
         res.status(500).json({ error: 'Failed to create note' });
       }
-    }
+    },
   );
 
   // GET /admin/api/users/:userId/notes - the client's notes visible to me
@@ -199,7 +187,7 @@ export default function notesRoutes(): Router {
         log.error({ err }, 'list failed');
         res.status(500).json({ error: 'Failed to list notes' });
       }
-    }
+    },
   );
 
   // GET /admin/api/notes/:noteId - one note (visibility via requireNoteAccess)
@@ -423,7 +411,7 @@ export default function notesRoutes(): Router {
         log.error({ err }, 'from-insights seed failed');
         res.status(500).json({ error: 'Failed to seed note from insights' });
       }
-    }
+    },
   );
 
   return router;

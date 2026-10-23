@@ -3,21 +3,37 @@
 // and total turn time, within-session drift by turn position, and one
 // session's turn series on demand. Rendered inside OpsPanel for researchers;
 // reads /admin/api/telemetry/latency (researcher-only).
-import { useState, type FormEvent } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { Clock, Search } from "react-feather";
-import useAdminFetch from "../../hooks/useAdminFetch";
-import Panel from "../ui/Panel";
-import { formatMs, SERIES_PRIMARY, SERIES_SECONDARY, GRID_STROKE, AXIS_TICK } from "./telemetryFormat";
+import { useState, type FormEvent } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Clock, Search } from 'react-feather';
+import useAdminFetch from '../../hooks/useAdminFetch';
+import Panel from '../ui/Panel';
+import { formatMs, SERIES_PRIMARY, SERIES_SECONDARY, GRID_STROKE, AXIS_TICK } from './telemetryFormat';
 
 type Channel = 'realtime' | 'chat';
 interface ChannelRow {
-  channel: Channel; turns: number;
-  p50_ttfa_ms: number | null; p95_ttfa_ms: number | null;
-  p50_total_ms: number | null; p95_total_ms: number | null;
+  channel: Channel;
+  turns: number;
+  p50_ttfa_ms: number | null;
+  p95_ttfa_ms: number | null;
+  p50_total_ms: number | null;
+  p95_total_ms: number | null;
 }
-interface DriftRow { channel: Channel; bucket: string; bucket_start: number; turns: number; p50_ttfa_ms: number | null; p50_total_ms: number | null }
-interface TurnRow { turn_index: number | null; user_done_at: string; ttfa_ms: number | null; total_ms: number | null; channel: Channel }
+interface DriftRow {
+  channel: Channel;
+  bucket: string;
+  bucket_start: number;
+  turns: number;
+  p50_ttfa_ms: number | null;
+  p50_total_ms: number | null;
+}
+interface TurnRow {
+  turn_index: number | null;
+  user_done_at: string;
+  ttfa_ms: number | null;
+  total_ms: number | null;
+  channel: Channel;
+}
 interface LatencyData {
   days: number;
   channels: ChannelRow[];
@@ -50,25 +66,31 @@ export default function TurnLatencyPanel() {
   };
 
   if (loading && !data) {
-    return <Panel title="Turn Latency" icon={Clock}><p className="text-gray-500 text-sm py-2">Loading turn latency...</p></Panel>;
+    return (
+      <Panel title="Turn Latency" icon={Clock}>
+        <p className="text-gray-500 text-sm py-2">Loading turn latency...</p>
+      </Panel>
+    );
   }
   if (error || !data) {
-    return <Panel title="Turn Latency" icon={Clock}><p className="text-red-600 text-sm py-2">{error || 'No turn latency available'}</p></Panel>;
+    return (
+      <Panel title="Turn Latency" icon={Clock}>
+        <p className="text-red-600 text-sm py-2">{error || 'No turn latency available'}</p>
+      </Panel>
+    );
   }
 
-  const driftChannels = Array.from(new Set(data.drift.map(d => d.channel))) as Channel[];
-  const driftData = BUCKET_ORDER
-    .map(bucket => {
-      const row: Record<string, number | string | null> = { bucket };
-      for (const ch of driftChannels) {
-        const hit = data.drift.find(d => d.channel === ch && d.bucket === bucket);
-        row[`${ch}_ttfa`] = hit ? num(hit.p50_ttfa_ms) : null;
-        row[`${ch}_total`] = hit ? num(hit.p50_total_ms) : null;
-        row[`${ch}_turns`] = hit ? hit.turns : 0;
-      }
-      return row;
-    })
-    .filter(row => driftChannels.some(ch => row[`${ch}_turns`] !== 0));
+  const driftChannels = Array.from(new Set(data.drift.map((d) => d.channel))) as Channel[];
+  const driftData = BUCKET_ORDER.map((bucket) => {
+    const row: Record<string, number | string | null> = { bucket };
+    for (const ch of driftChannels) {
+      const hit = data.drift.find((d) => d.channel === ch && d.bucket === bucket);
+      row[`${ch}_ttfa`] = hit ? num(hit.p50_ttfa_ms) : null;
+      row[`${ch}_total`] = hit ? num(hit.p50_total_ms) : null;
+      row[`${ch}_turns`] = hit ? hit.turns : 0;
+    }
+    return row;
+  }).filter((row) => driftChannels.some((ch) => row[`${ch}_turns`] !== 0));
 
   const sessionTurns = (data.session?.turns ?? []).map((t, i) => ({
     turn: t.turn_index ?? i + 1,
@@ -81,11 +103,11 @@ export default function TurnLatencyPanel() {
     <Panel title="Turn Latency" icon={Clock}>
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <p className="text-sm text-gray-600">
-          Ground-truth per-turn timing from the sideband and chat loop over the last {data.days} days.
-          Realtime TTFA is user turn end to first audio; chat is non-streaming, so first token equals total.
+          Ground-truth per-turn timing from the sideband and chat loop over the last {data.days} days. Realtime TTFA is
+          user turn end to first audio; chat is non-streaming, so first token equals total.
         </p>
         <div className="flex gap-1" role="group" aria-label="Window">
-          {WINDOWS.map(w => (
+          {WINDOWS.map((w) => (
             <button
               key={w}
               type="button"
@@ -115,10 +137,14 @@ export default function TurnLatencyPanel() {
               </tr>
             </thead>
             <tbody>
-              {data.channels.map(c => (
+              {data.channels.map((c) => (
                 <tr key={c.channel} className="border-b last:border-0">
                   <td className="py-2 pr-4 flex items-center gap-2">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CHANNEL_COLOR[c.channel] }} aria-hidden="true" />
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-full"
+                      style={{ backgroundColor: CHANNEL_COLOR[c.channel] }}
+                      aria-hidden="true"
+                    />
                     {CHANNEL_LABEL[c.channel] ?? c.channel}
                   </td>
                   <td className="py-2 pr-4 text-right">{c.turns}</td>
@@ -135,8 +161,8 @@ export default function TurnLatencyPanel() {
 
       <h4 className="text-sm font-semibold text-gray-800 mt-5 mb-1">Within-session drift</h4>
       <p className="text-xs text-gray-500 mb-2">
-        Median total turn time by position in the session. A rising line means later turns get slower
-        (growing context); a flat one means latency is stable across a session.
+        Median total turn time by position in the session. A rising line means later turns get slower (growing context);
+        a flat one means latency is stable across a session.
       </p>
       {driftData.length === 0 ? (
         <p className="text-gray-500 text-sm py-2">Not enough indexed turns to show drift.</p>
@@ -144,14 +170,32 @@ export default function TurnLatencyPanel() {
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={driftData} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
             <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-            <XAxis dataKey="bucket" tick={AXIS_TICK} axisLine={false} tickLine={false} label={{ value: 'Turn position', position: 'insideBottomRight', offset: -4, fill: '#6B7280', fontSize: 11 }} />
-            <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} width={56} tickFormatter={(v: number) => formatMs(v)} />
+            <XAxis
+              dataKey="bucket"
+              tick={AXIS_TICK}
+              axisLine={false}
+              tickLine={false}
+              label={{
+                value: 'Turn position',
+                position: 'insideBottomRight',
+                offset: -4,
+                fill: '#6B7280',
+                fontSize: 11,
+              }}
+            />
+            <YAxis
+              tick={AXIS_TICK}
+              axisLine={false}
+              tickLine={false}
+              width={56}
+              tickFormatter={(v: number) => formatMs(v)}
+            />
             <Tooltip
               formatter={(v, name) => [formatMs(typeof v === 'number' ? v : null), String(name)]}
               labelFormatter={(label) => `Turns ${String(label)}`}
             />
             {driftChannels.length > 1 && <Legend />}
-            {driftChannels.map(ch => (
+            {driftChannels.map((ch) => (
               <Line
                 key={ch}
                 type="monotone"
@@ -169,39 +213,65 @@ export default function TurnLatencyPanel() {
 
       <h4 className="text-sm font-semibold text-gray-800 mt-5 mb-1">One session</h4>
       <form onSubmit={submitSession} className="flex gap-2 items-center mb-2">
-        <label htmlFor="latency-session-id" className="sr-only">Session id</label>
+        <label htmlFor="latency-session-id" className="sr-only">
+          Session id
+        </label>
         <input
           id="latency-session-id"
           type="text"
           value={sessionInput}
-          onChange={e => setSessionInput(e.target.value)}
+          onChange={(e) => setSessionInput(e.target.value)}
           placeholder="sess_... session id"
           className="border rounded px-3 py-1.5 text-sm font-mono flex-1 max-w-md"
         />
-        <button type="submit" className="px-3 py-1.5 text-sm rounded bg-royal text-white hover:bg-navy flex items-center gap-1.5">
+        <button
+          type="submit"
+          className="px-3 py-1.5 text-sm rounded bg-royal text-white hover:bg-navy flex items-center gap-1.5"
+        >
           <Search size={14} aria-hidden="true" /> Show turns
         </button>
       </form>
-      {data.session && (
-        sessionTurns.length === 0 ? (
+      {data.session &&
+        (sessionTurns.length === 0 ? (
           <p className="text-gray-500 text-sm py-2">No measured turns for {data.session.sessionId}.</p>
         ) : (
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={sessionTurns} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
               <CartesianGrid vertical={false} stroke={GRID_STROKE} />
               <XAxis dataKey="turn" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} width={56} tickFormatter={(v: number) => formatMs(v)} />
+              <YAxis
+                tick={AXIS_TICK}
+                axisLine={false}
+                tickLine={false}
+                width={56}
+                tickFormatter={(v: number) => formatMs(v)}
+              />
               <Tooltip
                 formatter={(v, name) => [formatMs(typeof v === 'number' ? v : null), String(name)]}
                 labelFormatter={(label) => `Turn ${String(label)}`}
               />
               <Legend />
-              <Line type="monotone" dataKey="ttfa" name="First output" stroke={SERIES_SECONDARY} strokeWidth={2} dot={{ r: 3 }} connectNulls />
-              <Line type="monotone" dataKey="total" name="Total" stroke={SERIES_PRIMARY} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              <Line
+                type="monotone"
+                dataKey="ttfa"
+                name="First output"
+                stroke={SERIES_SECONDARY}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                connectNulls
+              />
+              <Line
+                type="monotone"
+                dataKey="total"
+                name="Total"
+                stroke={SERIES_PRIMARY}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                connectNulls
+              />
             </LineChart>
           </ResponsiveContainer>
-        )
-      )}
+        ))}
     </Panel>
   );
 }

@@ -8,7 +8,7 @@ async function addClientLoggingConfig() {
       `INSERT INTO system_config (config_key, config_value, description)
        VALUES ($1, $2, $3)
        ON CONFLICT (config_key) DO NOTHING`,
-      ['client_logging', JSON.stringify({ enabled: false }), 'Enable client-side console logging for debugging']
+      ['client_logging', JSON.stringify({ enabled: false }), 'Enable client-side console logging for debugging'],
     );
 
     console.log('Client logging config added successfully');

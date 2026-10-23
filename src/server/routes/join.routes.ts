@@ -289,8 +289,16 @@ export default function joinRoutes(): Router {
         });
       } catch (grantErr) {
         log.error({ err: grantErr }, 'Invite grant failed; rolling back registration');
-        try { await removeAccount(user.userid); } catch (e) { log.error({ err: e }, 'orphan cleanup failed'); }
-        try { await releaseInvite(invite.invite_id); } catch (e) { log.error({ err: e }, 'invite release failed'); }
+        try {
+          await removeAccount(user.userid);
+        } catch (e) {
+          log.error({ err: e }, 'orphan cleanup failed');
+        }
+        try {
+          await releaseInvite(invite.invite_id);
+        } catch (e) {
+          log.error({ err: e }, 'invite release failed');
+        }
         // The inviting member changed role between consume and grant: the
         // invite is dead (410). Anything else is an outage: 500.
         // Name check (not instanceof): route tests mock db/index.js wholesale.
@@ -330,9 +338,7 @@ export default function joinRoutes(): Router {
       if (!isLiveInvite(invite)) {
         return res.status(410).type('html').send(gonePage('Ask whoever sent it for a new one.'));
       }
-      res.type('html').send(
-        registrationPage({ ...SANDBOX_PAGE_OPTIONS, intro: sandboxIntro(invite!.invite_role) })
-      );
+      res.type('html').send(registrationPage({ ...SANDBOX_PAGE_OPTIONS, intro: sandboxIntro(invite!.invite_role) }));
     } catch (error) {
       log.error({ err: error }, 'Error loading sandbox invite page');
       res.status(500).json({ error: 'Failed to load invite' });
@@ -391,7 +397,7 @@ export default function joinRoutes(): Router {
         });
       } catch (error: unknown) {
         await deleteSandboxOrganization(org.org_id).catch((e: unknown) =>
-          log.error({ err: e }, 'sandbox org cleanup failed')
+          log.error({ err: e }, 'sandbox org cleanup failed'),
         );
         await release();
         if (error instanceof Error && error.message === 'Username already exists') {
@@ -415,8 +421,16 @@ export default function joinRoutes(): Router {
         });
       } catch (seedErr) {
         log.error({ err: seedErr }, 'Sandbox seeding failed; rolling back signup');
-        try { await removeAccount(user.userid); } catch (e) { log.error({ err: e }, 'sandbox owner cleanup failed'); }
-        try { await deleteSandboxOrganization(org.org_id); } catch (e) { log.error({ err: e }, 'sandbox org cleanup failed'); }
+        try {
+          await removeAccount(user.userid);
+        } catch (e) {
+          log.error({ err: e }, 'sandbox owner cleanup failed');
+        }
+        try {
+          await deleteSandboxOrganization(org.org_id);
+        } catch (e) {
+          log.error({ err: e }, 'sandbox org cleanup failed');
+        }
         await release();
         return res.status(500).json({ error: 'Could not assemble the sandbox. Please try again.' });
       }
@@ -443,10 +457,22 @@ export default function joinRoutes(): Router {
         // the owner, then the org, then the invite.
         log.error({ err: markErr }, 'Sandbox invite bookkeeping failed; rolling back signup');
         for (const seededId of seeded.seededUserIds) {
-          try { await removeAccount(seededId); } catch (e) { log.error({ err: e }, 'seeded user cleanup failed'); }
+          try {
+            await removeAccount(seededId);
+          } catch (e) {
+            log.error({ err: e }, 'seeded user cleanup failed');
+          }
         }
-        try { await removeAccount(user.userid); } catch (e) { log.error({ err: e }, 'sandbox owner cleanup failed'); }
-        try { await deleteSandboxOrganization(org.org_id); } catch (e) { log.error({ err: e }, 'sandbox org cleanup failed'); }
+        try {
+          await removeAccount(user.userid);
+        } catch (e) {
+          log.error({ err: e }, 'sandbox owner cleanup failed');
+        }
+        try {
+          await deleteSandboxOrganization(org.org_id);
+        } catch (e) {
+          log.error({ err: e }, 'sandbox org cleanup failed');
+        }
         await release();
         return res.status(500).json({ error: 'Could not assemble the sandbox. Please try again.' });
       }

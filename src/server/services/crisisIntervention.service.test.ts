@@ -61,7 +61,7 @@ const waitForCall = async (spy: { mock: { calls: unknown[] } }, times = 1, label
     if (Date.now() > deadline) {
       throw new Error(
         `Timed out after 2000ms waiting for ${label} to be called ${times} time(s); ` +
-        `it was called ${spy.mock.calls.length} time(s).`,
+          `it was called ${spy.mock.calls.length} time(s).`,
       );
     }
     await new Promise((r) => setTimeout(r, 5));
@@ -100,8 +100,11 @@ describe('executeGraduatedResponse — high-risk paging', () => {
     await executeGraduatedResponse('sbx-1', 'high', 90);
     await settle();
     expect(sendCrisisAlertMock).not.toHaveBeenCalled();
-    expect(logInterventionActionMock).toHaveBeenCalledWith('sbx-1', 'external_api_called',
-      expect.objectContaining({ suppressed: 'crisis_sms_alert', reason: 'sandbox' }));
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'sbx-1',
+      'external_api_called',
+      expect.objectContaining({ suppressed: 'crisis_sms_alert', reason: 'sandbox' }),
+    );
   });
 
   it('FAILS TOWARD PAGING: a throwing sandbox lookup still sends the real page', async () => {
@@ -126,7 +129,6 @@ describe('executeGraduatedResponse — high-risk paging', () => {
   });
 });
 
-
 // Crisis steering is delivered over the sideband. When no sideband is attached
 // the guidance cannot reach the model — that used to be a bare `return`, so an
 // audit of "did we intervene?" counted a steer that never happened. These pin
@@ -141,7 +143,8 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
 
     expect(sidebandManagerMock.injectMessage).not.toHaveBeenCalled();
     expect(logInterventionActionMock).toHaveBeenCalledWith(
-      SESSION, 'risk_steering',
+      SESSION,
+      'risk_steering',
       expect.objectContaining({ delivered: false, reason: 'no_sideband', riskScore: 80 }),
     );
   });
@@ -154,7 +157,7 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
     await maybeSteerSession(s, 85, 'high');
     await maybeSteerSession(s, 90, 'high');
 
-    const calls = logInterventionActionMock.mock.calls.filter(c => c[0] === s);
+    const calls = logInterventionActionMock.mock.calls.filter((c) => c[0] === s);
     expect(calls).toHaveLength(1);
   });
 
@@ -167,7 +170,9 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
 
     expect(sidebandManagerMock.injectMessage).toHaveBeenCalled();
     expect(logInterventionActionMock).toHaveBeenCalledWith(
-      s, 'risk_steering', expect.objectContaining({ delivered: true }),
+      s,
+      'risk_steering',
+      expect.objectContaining({ delivered: true }),
     );
   });
 

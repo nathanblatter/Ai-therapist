@@ -25,7 +25,7 @@ beforeEach(() => {
 describe('ownerOrgScopeSql (ai-therapist-276)', () => {
   it('is the by-id gate rule: owner in the caller org, or ownerless and caller is irb-study', () => {
     expect(ownerOrgScopeSql('$2', 'ts.user_id')).toBe(
-      `(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $2) OR (ts.user_id IS NULL AND $2 = ${IRB_STUDY_ORG_ID_SQL}))`
+      `(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $2) OR (ts.user_id IS NULL AND $2 = ${IRB_STUDY_ORG_ID_SQL}))`,
     );
   });
 

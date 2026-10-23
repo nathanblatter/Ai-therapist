@@ -75,10 +75,10 @@ export interface BuildResult {
 // as true/false; null/undefined render as an empty (unquoted) field.
 // ---------------------------------------------------------------------------
 export function toCsv(columns: DatasetColumn[], rows: DatasetRow[]): string {
-  const header = columns.map(c => c.name);
+  const header = columns.map((c) => c.name);
   const lines = [header.join(',')];
   for (const row of rows) {
-    const cells = columns.map(col => {
+    const cells = columns.map((col) => {
       const value = row[col.name];
       if (value === null || value === undefined) return '';
       if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -100,23 +100,93 @@ export const DATASET_FILES: DatasetFileSpec[] = [
     fetch: getParticipantsExport,
     columns: [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', values: 'P001, P002, ...' },
-      { name: 'enrolled_month', type: 'string', source: 'users.created_at', values: 'YYYY-MM', notes: 'Month precision only, to reduce re-identifiability.' },
+      {
+        name: 'enrolled_month',
+        type: 'string',
+        source: 'users.created_at',
+        values: 'YYYY-MM',
+        notes: 'Month precision only, to reduce re-identifiability.',
+      },
       { name: 'memory_enabled', type: 'bool', source: 'users.memory_enabled' },
-      { name: 'study_status', type: 'string', source: 'users.study_status', values: 'active, paused, withdrawn', notes: 'Stamped by the withdrawal survey or an admin (migration 087).' },
-      { name: 'consent_version_first', type: 'string', source: 'participant_consents.consent_version', notes: 'Earliest by accepted_at.' },
-      { name: 'consent_version_last', type: 'string', source: 'participant_consents.consent_version', notes: 'Latest by accepted_at.' },
-      { name: 'n_sessions', type: 'int', source: 'therapy_sessions', notes: 'Non-demo sessions with created_at <= as_of.' },
+      {
+        name: 'study_status',
+        type: 'string',
+        source: 'users.study_status',
+        values: 'active, paused, withdrawn',
+        notes: 'Stamped by the withdrawal survey or an admin (migration 087).',
+      },
+      {
+        name: 'consent_version_first',
+        type: 'string',
+        source: 'participant_consents.consent_version',
+        notes: 'Earliest by accepted_at.',
+      },
+      {
+        name: 'consent_version_last',
+        type: 'string',
+        source: 'participant_consents.consent_version',
+        notes: 'Latest by accepted_at.',
+      },
+      {
+        name: 'n_sessions',
+        type: 'int',
+        source: 'therapy_sessions',
+        notes: 'Non-demo sessions with created_at <= as_of.',
+      },
       { name: 'n_sessions_ended', type: 'int', source: "therapy_sessions.status = 'ended'" },
-      { name: 'total_session_minutes', type: 'float', source: 'SUM(ended_at - created_at)/60', notes: 'Rounded to 1 decimal.' },
+      {
+        name: 'total_session_minutes',
+        type: 'float',
+        source: 'SUM(ended_at - created_at)/60',
+        notes: 'Rounded to 1 decimal.',
+      },
       { name: 'first_session_at', type: 'timestamp', source: 'MIN(therapy_sessions.created_at)' },
       { name: 'last_session_at', type: 'timestamp', source: 'MAX(therapy_sessions.created_at)' },
-      { name: 'phq2_first', type: 'int', source: 'scale_responses(scale=phq2).score', values: '0-6', notes: 'Earliest; empty if no PHQ-2 response.' },
-      { name: 'phq2_last', type: 'int', source: 'scale_responses(scale=phq2).score', values: '0-6', notes: 'Latest; empty if no PHQ-2 response.' },
-      { name: 'phq2_delta', type: 'int', source: 'phq2_last - phq2_first', notes: 'Empty if fewer than 2 PHQ-2 responses.' },
-      { name: 'gad2_first', type: 'int', source: 'scale_responses(scale=gad2).score', values: '0-6', notes: 'Earliest; empty if no GAD-2 response.' },
-      { name: 'gad2_last', type: 'int', source: 'scale_responses(scale=gad2).score', values: '0-6', notes: 'Latest; empty if no GAD-2 response.' },
-      { name: 'gad2_delta', type: 'int', source: 'gad2_last - gad2_first', notes: 'Empty if fewer than 2 GAD-2 responses.' },
-      { name: 'n_crisis_events', type: 'int', source: 'crisis_events (via sessions + thread-origin via client_user_id)' },
+      {
+        name: 'phq2_first',
+        type: 'int',
+        source: 'scale_responses(scale=phq2).score',
+        values: '0-6',
+        notes: 'Earliest; empty if no PHQ-2 response.',
+      },
+      {
+        name: 'phq2_last',
+        type: 'int',
+        source: 'scale_responses(scale=phq2).score',
+        values: '0-6',
+        notes: 'Latest; empty if no PHQ-2 response.',
+      },
+      {
+        name: 'phq2_delta',
+        type: 'int',
+        source: 'phq2_last - phq2_first',
+        notes: 'Empty if fewer than 2 PHQ-2 responses.',
+      },
+      {
+        name: 'gad2_first',
+        type: 'int',
+        source: 'scale_responses(scale=gad2).score',
+        values: '0-6',
+        notes: 'Earliest; empty if no GAD-2 response.',
+      },
+      {
+        name: 'gad2_last',
+        type: 'int',
+        source: 'scale_responses(scale=gad2).score',
+        values: '0-6',
+        notes: 'Latest; empty if no GAD-2 response.',
+      },
+      {
+        name: 'gad2_delta',
+        type: 'int',
+        source: 'gad2_last - gad2_first',
+        notes: 'Empty if fewer than 2 GAD-2 responses.',
+      },
+      {
+        name: 'n_crisis_events',
+        type: 'int',
+        source: 'crisis_events (via sessions + thread-origin via client_user_id)',
+      },
       { name: 'any_crisis_flagged', type: 'bool', source: 'therapy_sessions.crisis_flagged' },
     ],
   },
@@ -130,27 +200,67 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'is_anonymous', type: 'bool', source: 'therapy_sessions.user_id IS NULL' },
       { name: 'started_at', type: 'timestamp', source: 'therapy_sessions.created_at' },
       { name: 'ended_at', type: 'timestamp', source: 'therapy_sessions.ended_at' },
-      { name: 'duration_minutes', type: 'float', source: 'ended_at - created_at', notes: 'Rounded to 1 decimal; empty if not ended.' },
+      {
+        name: 'duration_minutes',
+        type: 'float',
+        source: 'ended_at - created_at',
+        notes: 'Rounded to 1 decimal; empty if not ended.',
+      },
       { name: 'status', type: 'string', source: 'therapy_sessions.status', values: 'active, ended, archived' },
       { name: 'ended_by', type: 'string', source: 'therapy_sessions.ended_by' },
       { name: 'session_type', type: 'string', source: 'therapy_sessions.session_type', values: 'realtime, chat' },
-      { name: 'modality_condition', type: 'string', source: 'session_configurations.modality', values: 'cbt, act, mi, supportive' },
-      { name: 'proactive_offering', type: 'string', source: 'session_configurations.proactive_offering', values: "true, false, '' (not evaluated)" },
-      { name: 'theme', type: 'string', source: 'session_configurations.theme', values: 'default, sage, ocean, dusk, dark' },
+      {
+        name: 'modality_condition',
+        type: 'string',
+        source: 'session_configurations.modality',
+        values: 'cbt, act, mi, supportive',
+      },
+      {
+        name: 'proactive_offering',
+        type: 'string',
+        source: 'session_configurations.proactive_offering',
+        values: "true, false, '' (not evaluated)",
+      },
+      {
+        name: 'theme',
+        type: 'string',
+        source: 'session_configurations.theme',
+        values: 'default, sage, ocean, dusk, dark',
+      },
       { name: 'language', type: 'string', source: 'session_configurations.language' },
       { name: 'voice', type: 'string', source: 'session_configurations.voice' },
-      { name: 'ai_model', type: 'string', source: 'session_configurations.ai_model', notes: 'Resolved model snapshot at /token time.' },
+      {
+        name: 'ai_model',
+        type: 'string',
+        source: 'session_configurations.ai_model',
+        notes: 'Resolved model snapshot at /token time.',
+      },
       { name: 'transcription_model', type: 'string', source: 'session_configurations.transcription_model' },
       { name: 'temperature', type: 'float', source: 'session_configurations.temperature' },
       { name: 'checkin_mood', type: 'int', source: "therapy_sessions.checkin->>'mood'", values: '1-10' },
-      { name: 'had_recording', type: 'bool', source: 'therapy_sessions.recording_object_key IS NOT NULL', notes: 'The object key itself is never exported.' },
-      { name: 'recording_duration_s', type: 'float', source: 'recording_duration_ms/1000', notes: 'Rounded to 1 decimal.' },
+      {
+        name: 'had_recording',
+        type: 'bool',
+        source: 'therapy_sessions.recording_object_key IS NOT NULL',
+        notes: 'The object key itself is never exported.',
+      },
+      {
+        name: 'recording_duration_s',
+        type: 'float',
+        source: 'recording_duration_ms/1000',
+        notes: 'Rounded to 1 decimal.',
+      },
       { name: 'n_messages', type: 'int', source: 'messages' },
       { name: 'n_user_messages', type: 'int', source: "messages.role = 'user'" },
       { name: 'n_assistant_messages', type: 'int', source: "messages.role = 'assistant'" },
       { name: 'n_tool_invocations', type: 'int', source: 'tool_invocations' },
       { name: 'crisis_flagged', type: 'bool', source: 'therapy_sessions.crisis_flagged' },
-      { name: 'crisis_severity', type: 'string', source: 'therapy_sessions.crisis_severity', values: 'low, medium, high' },
+      {
+        name: 'crisis_severity',
+        type: 'string',
+        source: 'therapy_sessions.crisis_severity',
+        values: 'low, medium, high',
+      },
       { name: 'crisis_max_risk_score', type: 'int', source: 'MAX(crisis_events.risk_score)', values: '0-100' },
       { name: 'n_crisis_events', type: 'int', source: 'crisis_events' },
       { name: 'n_crisis_events_auto', type: 'int', source: "crisis_events.trigger_method = 'auto'" },
@@ -168,11 +278,21 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Empty for anonymous sessions.' },
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
       { name: 'scale', type: 'string', source: 'scale_responses.scale', values: 'phq2, gad2' },
-      { name: 'item_scores', type: 'json', source: 'scale_responses.answers', notes: 'JSON array of per-item integer scores (0-3 each).' },
+      {
+        name: 'item_scores',
+        type: 'json',
+        source: 'scale_responses.answers',
+        notes: 'JSON array of per-item integer scores (0-3 each).',
+      },
       { name: 'score', type: 'int', source: 'scale_responses.score', values: '0-6' },
       { name: 'screen_positive', type: 'bool', source: 'score >= 3', notes: 'Conventional screen-positive cutoff.' },
       { name: 'administered_at', type: 'timestamp', source: 'scale_responses.created_at' },
-      { name: 'occasion_index', type: 'int', source: 'ROW_NUMBER() per participant+scale by created_at', notes: 'Anonymous responses are not linked across sessions.' },
+      {
+        name: 'occasion_index',
+        type: 'int',
+        source: 'ROW_NUMBER() per participant+scale by created_at',
+        notes: 'Anonymous responses are not linked across sessions.',
+      },
     ],
   },
   {
@@ -182,14 +302,15 @@ export const DATASET_FILES: DatasetFileSpec[] = [
     columns: [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Empty for anonymous sessions.' },
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
-      { name: 'source', type: 'string', source: "checkin | log_mood", values: 'checkin, log_mood' },
+      { name: 'source', type: 'string', source: 'checkin | log_mood', values: 'checkin, log_mood' },
       { name: 'mood', type: 'int', source: "checkin->>'mood' or log_mood arguments->>'score'", values: '1-10' },
       { name: 'recorded_at', type: 'timestamp', source: 'therapy_sessions.created_at or tool_invocations.created_at' },
     ],
   },
   {
     file: 'feedback.csv',
-    description: 'One row per post-session feedback submission (numeric ratings only; free-text comment presence flagged, comment excluded).',
+    description:
+      'One row per post-session feedback submission (numeric ratings only; free-text comment presence flagged, comment excluded).',
     fetch: getFeedbackExport,
     columns: [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Empty for anonymous sessions.' },
@@ -197,76 +318,192 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       { name: 'helpfulness_rating', type: 'int', source: 'session_feedback.helpfulness_rating', values: '1-5' },
       { name: 'ease_rating', type: 'int', source: 'session_feedback.ease_rating', values: '1-5' },
       { name: 'would_return_rating', type: 'int', source: 'session_feedback.would_return_rating', values: '1-5' },
-      { name: 'has_comments', type: 'bool', source: 'session_feedback.comments IS NOT NULL', notes: 'Comment text is participant-authored and only in the opt-in transcript artifact.' },
+      {
+        name: 'has_comments',
+        type: 'bool',
+        source: 'session_feedback.comments IS NOT NULL',
+        notes: 'Comment text is participant-authored and only in the opt-in transcript artifact.',
+      },
       { name: 'submitted_at', type: 'timestamp', source: 'session_feedback.created_at' },
     ],
   },
   {
     file: 'evals.csv',
-    description: 'One row per automated session evaluation (LLM-judge rubric scores; rationales excluded as they quote transcript text).',
+    description:
+      'One row per automated session evaluation (LLM-judge rubric scores; rationales excluded as they quote transcript text).',
     fetch: getEvalsExport,
     columns: [
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
       { name: 'prompt_version', type: 'string', source: 'session_evals.prompt_version' },
       { name: 'judge_model', type: 'string', source: 'session_evals.judge_model' },
-      { name: 'safety_protocol_score', type: 'int', source: "session_evals.rubric->'safety_protocol'->>'score'", values: '1-5' },
+      {
+        name: 'safety_protocol_score',
+        type: 'int',
+        source: "session_evals.rubric->'safety_protocol'->>'score'",
+        values: '1-5',
+      },
       { name: 'empathy_score', type: 'int', source: "session_evals.rubric->'empathy'->>'score'", values: '1-5' },
-      { name: 'modality_fidelity_score', type: 'int', source: "session_evals.rubric->'modality_fidelity'->>'score'", values: '1-5' },
-      { name: 'disclaimer_compliance_score', type: 'int', source: "session_evals.rubric->'disclaimer_compliance'->>'score'", values: '1-5' },
-      { name: 'non_directiveness_score', type: 'int', source: "session_evals.rubric->'non_directiveness'->>'score'", values: '1-5' },
-      { name: 'clinical_claims_score', type: 'int', source: "session_evals.rubric->'clinical_claims'->>'score'", values: '1-5' },
+      {
+        name: 'modality_fidelity_score',
+        type: 'int',
+        source: "session_evals.rubric->'modality_fidelity'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'disclaimer_compliance_score',
+        type: 'int',
+        source: "session_evals.rubric->'disclaimer_compliance'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'non_directiveness_score',
+        type: 'int',
+        source: "session_evals.rubric->'non_directiveness'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'clinical_claims_score',
+        type: 'int',
+        source: "session_evals.rubric->'clinical_claims'->>'score'",
+        values: '1-5',
+      },
       { name: 'evaluated_at', type: 'timestamp', source: 'session_evals.created_at' },
     ],
   },
   {
     file: 'crisis_events.csv',
-    description: 'One row per crisis event, both session-origin and thread-origin (message-scan) rows (no notes/risk_factors/intervention_details JSON, which can quote content).',
+    description:
+      'One row per crisis event, both session-origin and thread-origin (message-scan) rows (no notes/risk_factors/intervention_details JSON, which can quote content).',
     fetch: getCrisisEventsExport,
     columns: [
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
-      { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Via session owner, or crisis_events.client_user_id for thread-origin rows; empty when no pseudonym (e.g. anonymous session).' },
-      { name: 'thread_origin', type: 'bool', source: 'crisis_events.session_id IS NULL', notes: "Message-scan events (origin='thread_message'); session_pseudo_id empty. Included in participants.csv n_crisis_events; excluded from sessions.csv per-session counts." },
+      {
+        name: 'participant_id',
+        type: 'string',
+        source: 'research_pseudonyms',
+        notes:
+          'Via session owner, or crisis_events.client_user_id for thread-origin rows; empty when no pseudonym (e.g. anonymous session).',
+      },
+      {
+        name: 'thread_origin',
+        type: 'bool',
+        source: 'crisis_events.session_id IS NULL',
+        notes:
+          "Message-scan events (origin='thread_message'); session_pseudo_id empty. Included in participants.csv n_crisis_events; excluded from sessions.csv per-session counts.",
+      },
       { name: 'event_type', type: 'string', source: 'crisis_events.event_type' },
       { name: 'severity', type: 'string', source: 'crisis_events.severity', values: 'low, medium, high' },
       { name: 'risk_score', type: 'int', source: 'crisis_events.risk_score', values: '0-100' },
-      { name: 'trigger_method', type: 'string', source: 'crisis_events.trigger_method', values: 'auto, manual, system' },
+      {
+        name: 'trigger_method',
+        type: 'string',
+        source: 'crisis_events.trigger_method',
+        values: 'auto, manual, system',
+      },
       { name: 'occurred_at', type: 'timestamp', source: 'crisis_events.created_at' },
     ],
   },
   {
     file: 'human_ratings.csv',
-    description: 'One row per (session, rater) human rubric rating on the same six dimensions as evals.csv (eval program WP2). Raters appear as role + per-session ordinal only; per-dimension and overall notes are excluded.',
+    description:
+      'One row per (session, rater) human rubric rating on the same six dimensions as evals.csv (eval program WP2). Raters appear as role + per-session ordinal only; per-dimension and overall notes are excluded.',
     fetch: getHumanRatingsExport,
     columns: [
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
-      { name: 'rater_role', type: 'string', source: 'users.role (via session_human_ratings.rater_user_id)', values: 'therapist, researcher' },
-      { name: 'rater_seq', type: 'int', source: 'ROW_NUMBER() per session by rating_id', notes: 'Distinguishes raters within a session only; not stable across sessions.' },
+      {
+        name: 'rater_role',
+        type: 'string',
+        source: 'users.role (via session_human_ratings.rater_user_id)',
+        values: 'therapist, researcher',
+      },
+      {
+        name: 'rater_seq',
+        type: 'int',
+        source: 'ROW_NUMBER() per session by rating_id',
+        notes: 'Distinguishes raters within a session only; not stable across sessions.',
+      },
       { name: 'rubric_version', type: 'string', source: 'session_human_ratings.rubric_version' },
-      { name: 'safety_protocol_score', type: 'int', source: "session_human_ratings.rubric->'safety_protocol'->>'score'", values: '1-5' },
-      { name: 'empathy_score', type: 'int', source: "session_human_ratings.rubric->'empathy'->>'score'", values: '1-5' },
-      { name: 'modality_fidelity_score', type: 'int', source: "session_human_ratings.rubric->'modality_fidelity'->>'score'", values: '1-5' },
-      { name: 'disclaimer_compliance_score', type: 'int', source: "session_human_ratings.rubric->'disclaimer_compliance'->>'score'", values: '1-5' },
-      { name: 'non_directiveness_score', type: 'int', source: "session_human_ratings.rubric->'non_directiveness'->>'score'", values: '1-5' },
-      { name: 'clinical_claims_score', type: 'int', source: "session_human_ratings.rubric->'clinical_claims'->>'score'", values: '1-5' },
-      { name: 'queue_source', type: 'string', source: 'eval_rating_queue.source', values: 'stratified, disagreement, manual; empty when rated outside the queue' },
-      { name: 'stratum', type: 'string', source: 'eval_rating_queue.stratum', values: 'modality|risk_band|ISO-week; empty when rated outside the queue' },
+      {
+        name: 'safety_protocol_score',
+        type: 'int',
+        source: "session_human_ratings.rubric->'safety_protocol'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'empathy_score',
+        type: 'int',
+        source: "session_human_ratings.rubric->'empathy'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'modality_fidelity_score',
+        type: 'int',
+        source: "session_human_ratings.rubric->'modality_fidelity'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'disclaimer_compliance_score',
+        type: 'int',
+        source: "session_human_ratings.rubric->'disclaimer_compliance'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'non_directiveness_score',
+        type: 'int',
+        source: "session_human_ratings.rubric->'non_directiveness'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'clinical_claims_score',
+        type: 'int',
+        source: "session_human_ratings.rubric->'clinical_claims'->>'score'",
+        values: '1-5',
+      },
+      {
+        name: 'queue_source',
+        type: 'string',
+        source: 'eval_rating_queue.source',
+        values: 'stratified, disagreement, manual; empty when rated outside the queue',
+      },
+      {
+        name: 'stratum',
+        type: 'string',
+        source: 'eval_rating_queue.stratum',
+        values: 'modality|risk_band|ISO-week; empty when rated outside the queue',
+      },
       { name: 'rated_at', type: 'timestamp', source: 'session_human_ratings.updated_at' },
     ],
   },
   {
     file: 'crisis_adjudications.csv',
-    description: 'One row per (crisis event, adjudicator) human verdict (eval program WP2). Event columns mirror crisis_events.csv so rows join on (session_pseudo_id, occurred_at); the adjudicator note is excluded.',
+    description:
+      'One row per (crisis event, adjudicator) human verdict (eval program WP2). Event columns mirror crisis_events.csv so rows join on (session_pseudo_id, occurred_at); the adjudicator note is excluded.',
     fetch: getCrisisAdjudicationsExport,
     columns: [
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
-      { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Via session owner, or crisis_events.client_user_id for thread-origin rows; empty when no pseudonym.' },
+      {
+        name: 'participant_id',
+        type: 'string',
+        source: 'research_pseudonyms',
+        notes: 'Via session owner, or crisis_events.client_user_id for thread-origin rows; empty when no pseudonym.',
+      },
       { name: 'thread_origin', type: 'bool', source: 'crisis_events.session_id IS NULL' },
       { name: 'event_type', type: 'string', source: 'crisis_events.event_type' },
       { name: 'severity', type: 'string', source: 'crisis_events.severity', values: 'low, medium, high' },
       { name: 'risk_score', type: 'int', source: 'crisis_events.risk_score', values: '0-100' },
       { name: 'occurred_at', type: 'timestamp', source: 'crisis_events.created_at' },
-      { name: 'adjudicator_role', type: 'string', source: 'users.role (via crisis_event_adjudications.adjudicator_id)', values: 'therapist, researcher' },
-      { name: 'verdict', type: 'string', source: 'crisis_event_adjudications.verdict', values: 'confirmed, false_positive, unclear' },
+      {
+        name: 'adjudicator_role',
+        type: 'string',
+        source: 'users.role (via crisis_event_adjudications.adjudicator_id)',
+        values: 'therapist, researcher',
+      },
+      {
+        name: 'verdict',
+        type: 'string',
+        source: 'crisis_event_adjudications.verdict',
+        values: 'confirmed, false_positive, unclear',
+      },
       { name: 'adjudicated_at', type: 'timestamp', source: 'crisis_event_adjudications.adjudicated_at' },
     ],
   },
@@ -277,7 +514,12 @@ export const DATASET_FILES: DatasetFileSpec[] = [
     fetch: getSurveyResponsesExport,
     columns: [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', values: 'P001, P002, ...' },
-      { name: 'survey_role', type: 'string', source: 'qualtrics_responses.survey_role', values: 'baseline, weekly, exit, week12' },
+      {
+        name: 'survey_role',
+        type: 'string',
+        source: 'qualtrics_responses.survey_role',
+        values: 'baseline, weekly, exit, week12',
+      },
       { name: 'finished', type: 'bool', source: 'qualtrics_responses.finished' },
       { name: 'recorded_at', type: 'timestamp', source: 'qualtrics_responses.recorded_at' },
     ],
@@ -313,22 +555,85 @@ export const DATASET_FILES: DatasetFileSpec[] = [
       }),
     columns: [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', values: 'P001, P002, ...' },
-      { name: 'survey_role', type: 'string', source: 'qualtrics_responses.survey_role', values: 'baseline, weekly, exit, week12' },
+      {
+        name: 'survey_role',
+        type: 'string',
+        source: 'qualtrics_responses.survey_role',
+        values: 'baseline, weekly, exit, week12',
+      },
       { name: 'recorded_at', type: 'timestamp', source: 'qualtrics_responses.recorded_at' },
-      { name: 'completion_seconds', type: 'int', source: "answers->>'duration'", notes: 'Qualtrics-reported time spent in the survey.' },
-      { name: 'speeder', type: 'bool', source: 'derived: completion_seconds below the per-role plausibility floor', notes: 'Flag for analysis-time exclusion decisions (baseline<120s, weekly<20s, exit<90s, week12<45s, withdrawal<10s); never auto-excluded.' },
-      { name: 'phq2', type: 'int', source: 'derived: PHQ-2 item sum (raw-1 each)', values: '0-6; empty for weekly/unscorable' },
-      { name: 'gad2', type: 'int', source: 'derived: GAD-2 item sum (raw-1 each)', values: '0-6; empty for weekly/unscorable' },
+      {
+        name: 'completion_seconds',
+        type: 'int',
+        source: "answers->>'duration'",
+        notes: 'Qualtrics-reported time spent in the survey.',
+      },
+      {
+        name: 'speeder',
+        type: 'bool',
+        source: 'derived: completion_seconds below the per-role plausibility floor',
+        notes:
+          'Flag for analysis-time exclusion decisions (baseline<120s, weekly<20s, exit<90s, week12<45s, withdrawal<10s); never auto-excluded.',
+      },
+      {
+        name: 'phq2',
+        type: 'int',
+        source: 'derived: PHQ-2 item sum (raw-1 each)',
+        values: '0-6; empty for weekly/unscorable',
+      },
+      {
+        name: 'gad2',
+        type: 'int',
+        source: 'derived: GAD-2 item sum (raw-1 each)',
+        values: '0-6; empty for weekly/unscorable',
+      },
       { name: 'phq2_positive', type: 'bool', source: 'derived: phq2 >= 3' },
       { name: 'gad2_positive', type: 'bool', source: 'derived: gad2 >= 3' },
-      { name: 'weekly_mood', type: 'int', source: 'derived: weekly QID8', values: '1-6, higher = better; empty for non-weekly' },
+      {
+        name: 'weekly_mood',
+        type: 'int',
+        source: 'derived: weekly QID8',
+        values: '1-6, higher = better; empty for non-weekly',
+      },
       { name: 'weekly_stress', type: 'int', source: 'derived: weekly QID9', values: '1-5, higher = more stressed' },
-      { name: 'weekly_helpfulness', type: 'int', source: 'derived: weekly QID6', values: "1-5; empty when unanswered or 'did not use'" },
-      { name: 'weekly_usage', type: 'string', source: 'derived: weekly QID4 bucket', values: '0, 1, 2-3, 4-6, 7 or more' },
-      { name: 'weekly_alliance_task', type: 'float', source: 'derived: mean of the 4 WAI-SR Task items', values: '1-5; empty for non-weekly or incomplete matrix' },
-      { name: 'weekly_alliance_bond', type: 'float', source: 'derived: mean of the 4 WAI-SR Bond items', values: '1-5' },
-      { name: 'weekly_alliance_goal', type: 'float', source: 'derived: mean of the 4 WAI-SR Goal items', values: '1-5' },
-      { name: 'weekly_alliance_total', type: 'float', source: 'derived: mean of all 12 WAI-SR items', values: '1-5', notes: 'WAI-SR (Hatcher & Gillaspy 2006) adapted to the AI support agent; items copyright Adam Horvath; used by permission of the Society for Psychotherapy Research (2026).' },
+      {
+        name: 'weekly_helpfulness',
+        type: 'int',
+        source: 'derived: weekly QID6',
+        values: "1-5; empty when unanswered or 'did not use'",
+      },
+      {
+        name: 'weekly_usage',
+        type: 'string',
+        source: 'derived: weekly QID4 bucket',
+        values: '0, 1, 2-3, 4-6, 7 or more',
+      },
+      {
+        name: 'weekly_alliance_task',
+        type: 'float',
+        source: 'derived: mean of the 4 WAI-SR Task items',
+        values: '1-5; empty for non-weekly or incomplete matrix',
+      },
+      {
+        name: 'weekly_alliance_bond',
+        type: 'float',
+        source: 'derived: mean of the 4 WAI-SR Bond items',
+        values: '1-5',
+      },
+      {
+        name: 'weekly_alliance_goal',
+        type: 'float',
+        source: 'derived: mean of the 4 WAI-SR Goal items',
+        values: '1-5',
+      },
+      {
+        name: 'weekly_alliance_total',
+        type: 'float',
+        source: 'derived: mean of all 12 WAI-SR items',
+        values: '1-5',
+        notes:
+          'WAI-SR (Hatcher & Gillaspy 2006) adapted to the AI support agent; items copyright Adam Horvath; used by permission of the Society for Psychotherapy Research (2026).',
+      },
     ],
   },
   {
@@ -339,10 +644,30 @@ export const DATASET_FILES: DatasetFileSpec[] = [
     columns: [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Empty for anonymous sessions.' },
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
-      { name: 'n_embedded_turns', type: 'int', source: 'messages.embedding IS NOT NULL', notes: 'User+assistant turns with an embedding; unredacted turns are not yet counted.' },
-      { name: 'mean_adjacent_similarity', type: 'float', source: 'derived: AVG(1 - cosine distance) over consecutive embedded turns', values: '~0-1, higher = more topically coherent; empty when <2 embedded turns' },
-      { name: 'mean_user_adjacent_similarity', type: 'float', source: 'derived: same, user turns only', notes: 'Participant topical coherence, ignoring assistant turns.' },
-      { name: 'first_last_similarity', type: 'float', source: 'derived: 1 - cosine distance between first and last embedded turn', notes: 'Low values suggest within-session topic drift.' },
+      {
+        name: 'n_embedded_turns',
+        type: 'int',
+        source: 'messages.embedding IS NOT NULL',
+        notes: 'User+assistant turns with an embedding; unredacted turns are not yet counted.',
+      },
+      {
+        name: 'mean_adjacent_similarity',
+        type: 'float',
+        source: 'derived: AVG(1 - cosine distance) over consecutive embedded turns',
+        values: '~0-1, higher = more topically coherent; empty when <2 embedded turns',
+      },
+      {
+        name: 'mean_user_adjacent_similarity',
+        type: 'float',
+        source: 'derived: same, user turns only',
+        notes: 'Participant topical coherence, ignoring assistant turns.',
+      },
+      {
+        name: 'first_last_similarity',
+        type: 'float',
+        source: 'derived: 1 - cosine distance between first and last embedded turn',
+        notes: 'Low values suggest within-session topic drift.',
+      },
     ],
   },
   {
@@ -353,19 +678,50 @@ export const DATASET_FILES: DatasetFileSpec[] = [
     columns: [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Empty for anonymous sessions.' },
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
-      { name: 'status', type: 'string', source: 'session_acoustic_features.status', values: 'complete, failed', notes: 'failed rows carry empty measures; kept so extraction coverage is auditable.' },
+      {
+        name: 'status',
+        type: 'string',
+        source: 'session_acoustic_features.status',
+        values: 'complete, failed',
+        notes: 'failed rows carry empty measures; kept so extraction coverage is auditable.',
+      },
       { name: 'computed_at', type: 'timestamp', source: 'session_acoustic_features.computed_at' },
-      { name: 'duration_ms', type: 'float', source: 'features.duration_ms', notes: 'Participant-track length analysed.' },
+      {
+        name: 'duration_ms',
+        type: 'float',
+        source: 'features.duration_ms',
+        notes: 'Participant-track length analysed.',
+      },
       { name: 'sample_rate', type: 'int', source: 'features.sample_rate' },
       { name: 'frames', type: 'int', source: 'features.frames', notes: 'Analysis frames (fixed hop).' },
-      { name: 'rms_mean', type: 'float', source: 'features.rms_mean', notes: 'Mean frame RMS energy (loudness proxy).' },
+      {
+        name: 'rms_mean',
+        type: 'float',
+        source: 'features.rms_mean',
+        notes: 'Mean frame RMS energy (loudness proxy).',
+      },
       { name: 'rms_sd', type: 'float', source: 'features.rms_sd' },
       { name: 'silence_ratio', type: 'float', source: 'features.silence_ratio', values: '0-1' },
-      { name: 'pause_count', type: 'int', source: 'features.pause_count', notes: 'Silence runs above the pause threshold.' },
+      {
+        name: 'pause_count',
+        type: 'int',
+        source: 'features.pause_count',
+        notes: 'Silence runs above the pause threshold.',
+      },
       { name: 'pause_mean_ms', type: 'float', source: 'features.pause_mean_ms' },
-      { name: 'speech_segments_per_min', type: 'float', source: 'features.speech_segments_per_min', notes: 'Speaking-rate proxy.' },
+      {
+        name: 'speech_segments_per_min',
+        type: 'float',
+        source: 'features.speech_segments_per_min',
+        notes: 'Speaking-rate proxy.',
+      },
       { name: 'voiced_fraction', type: 'float', source: 'features.voiced_fraction', values: '0-1' },
-      { name: 'f0_median_hz', type: 'float', source: 'features.f0_median_hz', notes: 'Autocorrelation pitch over voiced frames; empty when no voiced frames.' },
+      {
+        name: 'f0_median_hz',
+        type: 'float',
+        source: 'features.f0_median_hz',
+        notes: 'Autocorrelation pitch over voiced frames; empty when no voiced frames.',
+      },
       { name: 'f0_iqr_hz', type: 'float', source: 'features.f0_iqr_hz' },
       { name: 'zcr_mean', type: 'float', source: 'features.zcr_mean', notes: 'Zero-crossing rate (spectral proxy).' },
       { name: 'zcr_sd', type: 'float', source: 'features.zcr_sd' },
@@ -379,21 +735,28 @@ export const DATASET_FILES: DatasetFileSpec[] = [
 export const TRANSCRIPT_FILES: DatasetFileSpec[] = [
   {
     file: 'transcripts.csv',
-    description: 'REDACTED turn text only (content_redacted). Original content is NEVER exported. Rows pending redaction export empty text with redaction_pending=true.',
+    description:
+      'REDACTED turn text only (content_redacted). Original content is NEVER exported. Rows pending redaction export empty text with redaction_pending=true.',
     fetch: getTranscriptsExport,
     columns: [
       { name: 'session_pseudo_id', type: 'string', source: 'research_pseudonyms' },
       { name: 'turn_index', type: 'int', source: 'ROW_NUMBER() per session by created_at' },
       { name: 'role', type: 'string', source: 'messages.role', values: 'user, assistant' },
       { name: 'message_type', type: 'string', source: 'messages.message_type' },
-      { name: 'content_redacted', type: 'string', source: 'messages.content_redacted', notes: 'Redacted text only; empty when redaction has not run.' },
+      {
+        name: 'content_redacted',
+        type: 'string',
+        source: 'messages.content_redacted',
+        notes: 'Redacted text only; empty when redaction has not run.',
+      },
       { name: 'redaction_pending', type: 'bool', source: 'messages.content_redacted IS NULL' },
       { name: 'created_at', type: 'timestamp', source: 'messages.created_at' },
     ],
   },
   {
     file: 'feedback_comments.csv',
-    description: 'WARNING: participant-authored free text, exported verbatim (no content_redacted equivalent exists for feedback comments). Handle as identifiable data.',
+    description:
+      'WARNING: participant-authored free text, exported verbatim (no content_redacted equivalent exists for feedback comments). Handle as identifiable data.',
     fetch: getFeedbackCommentsExport,
     columns: [
       { name: 'participant_id', type: 'string', source: 'research_pseudonyms', notes: 'Empty for anonymous sessions.' },
@@ -449,14 +812,18 @@ function renderCodebook(
   lines.push('- Anonymous participants (user_id IS NULL) cannot be linked across sessions: the att_pid');
   lines.push('  browser cookie is deliberately not persisted server-side. Screener deltas and');
   lines.push('  sessions-per-participant therefore under-count anonymous traffic.');
-  lines.push('- All timestamps are ISO-8601 UTC. Given the same as_of and unchanged source rows, every CSV is byte-identical across runs.');
+  lines.push(
+    '- All timestamps are ISO-8601 UTC. Given the same as_of and unchanged source rows, every CSV is byte-identical across runs.',
+  );
   lines.push('');
   lines.push('## Screening instruments (PHQ-2 / GAD-2)');
   lines.push('');
   lines.push('PHQ-2 and GAD-2 are brief, public-domain SCREENERS (Kroenke, Spitzer, Williams), NOT diagnoses.');
   for (const key of Object.keys(SCALES)) {
     const s = SCALES[key];
-    lines.push(`- ${s.name}: ${s.items.length} items, each 0-3 ("not at all" … "nearly every day"), score = item sum (0-${s.max_score}); screen-positive cutoff >= ${s.cutoff}.`);
+    lines.push(
+      `- ${s.name}: ${s.items.length} items, each 0-3 ("not at all" … "nearly every day"), score = item sum (0-${s.max_score}); screen-positive cutoff >= ${s.cutoff}.`,
+    );
   }
   lines.push('');
   for (const note of extraNotes) {
@@ -489,13 +856,20 @@ export async function buildDataset(asOf: string, opts: BuildOptions = {}): Promi
   }
   main.push({
     name: 'codebook.md',
-    content: renderCodebook('AI-Therapist de-identified research dataset', DATASET_FILES, rowCounts,
+    content: renderCodebook(
+      'AI-Therapist de-identified research dataset',
+      DATASET_FILES,
+      rowCounts,
       { asOf, generatedAt, gitSha: sha },
-      ['## Exclusions', '',
+      [
+        '## Exclusions',
+        '',
         'These fields are intentionally NOT exported (they are LLM-generated from, or quote, content):',
         'session_name, checkin topic/goal, session_goal, instructions, recording_object_key, usernames,',
         'message content, eval rationales/overall_comments, crisis notes/risk_factors/intervention JSON,',
-        'and the research_pseudonyms mapping itself.']),
+        'and the research_pseudonyms mapping itself.',
+      ],
+    ),
   });
 
   let transcripts: BuiltFile[] | null = null;
@@ -508,12 +882,19 @@ export async function buildDataset(asOf: string, opts: BuildOptions = {}): Promi
     }
     transcripts.push({
       name: 'codebook.md',
-      content: renderCodebook('AI-Therapist OPT-IN transcript artifact', TRANSCRIPT_FILES, rowCounts,
+      content: renderCodebook(
+        'AI-Therapist OPT-IN transcript artifact',
+        TRANSCRIPT_FILES,
+        rowCounts,
         { asOf, generatedAt, gitSha: sha },
-        ['## Sensitivity warning', '',
+        [
+          '## Sensitivity warning',
+          '',
           'transcripts.csv contains REDACTED text only (content_redacted). feedback_comments.csv contains',
           'VERBATIM participant free text with no redaction applied — treat it as identifiable data and',
-          'store/share accordingly.']),
+          'store/share accordingly.',
+        ],
+      ),
     });
   }
 

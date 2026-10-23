@@ -15,7 +15,10 @@ const CALLBACK_ERRORS: Record<string, string> = {
   server_error: 'The sign-in service is unavailable. Try again shortly.',
 };
 
-interface SquawkConfig { enabled: boolean; owner: boolean }
+interface SquawkConfig {
+  enabled: boolean;
+  owner: boolean;
+}
 
 interface LoginBody {
   username: string;
@@ -118,7 +121,12 @@ export default function Login() {
         credentials: 'include',
         body: JSON.stringify({ login_challenge: loginChallenge }),
       });
-      const begin = (await beginResp.json()) as { challenge_id?: string; options?: { publicKey: Parameters<typeof decodeAssertionOptions>[0] }; error?: string; code?: string };
+      const begin = (await beginResp.json()) as {
+        challenge_id?: string;
+        options?: { publicKey: Parameters<typeof decodeAssertionOptions>[0] };
+        error?: string;
+        code?: string;
+      };
       if (!beginResp.ok || !begin.challenge_id || !begin.options) {
         if (begin.code === 'not_found') {
           window.location.assign('/api/auth/squawk/start');
@@ -132,13 +140,22 @@ export default function Login() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ challenge_id: begin.challenge_id, credential: encodeAssertion(cred as PublicKeyCredential) }),
+        body: JSON.stringify({
+          challenge_id: begin.challenge_id,
+          credential: encodeAssertion(cred as PublicKeyCredential),
+        }),
       });
       const finish = (await finishResp.json()) as { redirect_to?: string; error?: string };
       if (!finishResp.ok || !finish.redirect_to) throw new Error(finish.error || 'Passkey sign-in failed.');
       window.location.assign(finish.redirect_to);
     } catch (err) {
-      setError(isCancelled(err) ? 'Passkey prompt was cancelled.' : err instanceof Error ? err.message : 'Passkey sign-in failed.');
+      setError(
+        isCancelled(err)
+          ? 'Passkey prompt was cancelled.'
+          : err instanceof Error
+            ? err.message
+            : 'Passkey sign-in failed.',
+      );
       setLoading(false);
     }
   };
@@ -229,9 +246,7 @@ export default function Login() {
       <div className="max-w-md w-full mx-4">
         <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-8">
           <div className="text-center">
-            <h1 className="text-4xl font-bold text-navy mb-2">
-              AI Therapist Assistant
-            </h1>
+            <h1 className="text-4xl font-bold text-navy mb-2">AI Therapist Assistant</h1>
             <p className="text-lg text-gray-600">
               {mfaRequired ? 'Two-Factor Authentication' : 'Sign in to start your session'}
             </p>
@@ -326,12 +341,8 @@ export default function Login() {
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
                 <Shield className="text-royal flex-shrink-0 mt-0.5" size={20} />
                 <div>
-                  <p className="text-sm text-blue-900 font-medium">
-                    Two-factor authentication is enabled
-                  </p>
-                  <p className="text-xs text-blue-700 mt-1">
-                    Enter the verification code from your authenticator app
-                  </p>
+                  <p className="text-sm text-blue-900 font-medium">Two-factor authentication is enabled</p>
+                  <p className="text-xs text-blue-700 mt-1">Enter the verification code from your authenticator app</p>
                 </div>
               </div>
 
@@ -384,7 +395,9 @@ export default function Login() {
 
                 <button
                   type="submit"
-                  disabled={loading || (!useBackupCode && mfaToken.length !== 6) || (useBackupCode && backupCode.length !== 8)}
+                  disabled={
+                    loading || (!useBackupCode && mfaToken.length !== 6) || (useBackupCode && backupCode.length !== 8)
+                  }
                   className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-royal hover:bg-navy focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-royal transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                 >
                   {loading ? 'Verifying...' : 'Verify & Sign In'}

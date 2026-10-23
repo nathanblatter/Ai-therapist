@@ -44,20 +44,28 @@ describe('POST /api/bug-report', () => {
   });
 
   it('caps an oversized url and non-string urls', async () => {
-    await request(makeApp()).post('/api/bug-report').send({ message: 'm', url: 'https://x/' + 'a'.repeat(5000) });
+    await request(makeApp())
+      .post('/api/bug-report')
+      .send({ message: 'm', url: 'https://x/' + 'a'.repeat(5000) });
     expect((forwardedBody().url as string).length).toBe(2048);
 
     fetchMock.mockClear();
-    await request(makeApp()).post('/api/bug-report').send({ message: 'm', url: { evil: true } });
+    await request(makeApp())
+      .post('/api/bug-report')
+      .send({ message: 'm', url: { evil: true } });
     expect(forwardedBody().url).toBe('');
   });
 
   it('replaces an oversized meta blob with a size marker', async () => {
-    await request(makeApp()).post('/api/bug-report').send({ message: 'm', meta: { blob: 'x'.repeat(20_000) } });
+    await request(makeApp())
+      .post('/api/bug-report')
+      .send({ message: 'm', meta: { blob: 'x'.repeat(20_000) } });
     expect(forwardedBody().meta).toMatchObject({ truncated: true });
 
     fetchMock.mockClear();
-    await request(makeApp()).post('/api/bug-report').send({ message: 'm', meta: ['not', 'an', 'object'] });
+    await request(makeApp())
+      .post('/api/bug-report')
+      .send({ message: 'm', meta: ['not', 'an', 'object'] });
     expect(forwardedBody().meta).toEqual({});
   });
 
@@ -65,7 +73,9 @@ describe('POST /api/bug-report', () => {
     const app = makeApp();
     let lastStatus = 0;
     for (let i = 0; i < 11; i++) {
-      const res = await request(app).post('/api/bug-report').send({ message: 'spam ' + i });
+      const res = await request(app)
+        .post('/api/bug-report')
+        .send({ message: 'spam ' + i });
       lastStatus = res.status;
     }
     expect(lastStatus).toBe(429);
@@ -79,9 +89,7 @@ describe('POST /api/bug-report/:id/screenshots', () => {
     let lastStatus = 0;
     for (let i = 0; i < 11; i++) {
       // Invalid content-type -> rejected early; still counts for the limiter.
-      const res = await request(app)
-        .post('/api/bug-report/11111111-2222-3333-4444-555555555555/screenshots')
-        .send({});
+      const res = await request(app).post('/api/bug-report/11111111-2222-3333-4444-555555555555/screenshots').send({});
       lastStatus = res.status;
     }
     expect(lastStatus).toBe(429);

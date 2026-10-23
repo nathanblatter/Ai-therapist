@@ -7,16 +7,16 @@ export function useConfiguration() {
     hotline: '988 Suicide & Crisis Lifeline',
     phone: '988',
     text: 'HOME to 741741',
-    enabled: true
+    enabled: true,
   });
   const [features, setFeatures] = useState({
-    output_modalities: ["audio"],
+    output_modalities: ['audio'],
     voice_enabled: true,
-    chat_enabled: true
+    chat_enabled: true,
   });
   const [sessionSettings, setSessionSettings] = useState({
     voice: 'cedar',
-    language: 'en'
+    language: 'en',
   });
 
   useEffect(() => {
@@ -27,35 +27,35 @@ export function useConfiguration() {
 
     // Fetch crisis contact info
     fetch('/api/config/crisis')
-      .then(res => res.json())
-      .then(data => setCrisisContact(data))
-      .catch(err => console.error('Failed to fetch crisis contact:', err));
+      .then((res) => res.json())
+      .then((data) => setCrisisContact(data))
+      .catch((err) => console.error('Failed to fetch crisis contact:', err));
 
     // Fetch features config
     fetch('/api/config/features')
-      .then(res => res.json())
-      .then(data => setFeatures(data))
-      .catch(err => console.error('Failed to fetch features config:', err));
+      .then((res) => res.json())
+      .then((data) => setFeatures(data))
+      .catch((err) => console.error('Failed to fetch features config:', err));
 
     // Fetch user preferences (voice and language)
     fetch('/api/users/preferences', {
-      credentials: 'include'
+      credentials: 'include',
     })
-      .then(res => {
+      .then((res) => {
         if (res.ok) {
           return res.json();
         }
         // If not authenticated or error, use defaults
         return { voice: 'cedar', language: 'en' };
       })
-      .then(prefs => {
+      .then((prefs) => {
         setSessionSettings({
           voice: prefs.voice || 'cedar',
-          language: prefs.language || 'en'
+          language: prefs.language || 'en',
         });
         console.log('Loaded user preferences:', prefs);
       })
-      .catch(err => {
+      .catch((err) => {
         console.error('Failed to fetch user preferences:', err);
         // Keep defaults on error
       });
@@ -66,6 +66,6 @@ export function useConfiguration() {
     crisisContact,
     features,
     sessionSettings,
-    setSessionSettings
+    setSessionSettings,
   };
 }

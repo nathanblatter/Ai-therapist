@@ -78,7 +78,7 @@ async function callJudge(
   client: OpenAI,
   judgeModel: string,
   first: { modality: string | null; transcript: string },
-  second: { modality: string | null; transcript: string }
+  second: { modality: string | null; transcript: string },
 ): Promise<{ winner: Winner; rationale: string }> {
   const userMessage =
     `Session 1 context:\n${describeModality(first.modality)}\n\n` +
@@ -114,10 +114,7 @@ async function callJudge(
 }
 
 /** Merge the two canonical-term verdicts into a final verdict. */
-export function mergeVerdicts(
-  ab: 'a' | 'b' | 'tie',
-  ba: 'a' | 'b' | 'tie'
-): 'a' | 'b' | 'tie' | 'inconsistent' {
+export function mergeVerdicts(ab: 'a' | 'b' | 'tie', ba: 'a' | 'b' | 'tie'): 'a' | 'b' | 'tie' | 'inconsistent' {
   if (ab === ba) return ab;
   if (ab === 'tie') return ba; // one tie + one side → that side (half-win)
   if (ba === 'tie') return ab;
@@ -129,7 +126,7 @@ export async function judgePair(
   a: PairCandidateRow,
   b: PairCandidateRow,
   axis: ComparisonAxis,
-  judgeModel: string
+  judgeModel: string,
 ): Promise<EvalPairRow> {
   if (!(a.session_id < b.session_id)) {
     throw new Error(`judgePair requires canonical order (a < b): ${a.session_id}, ${b.session_id}`);
@@ -144,10 +141,7 @@ export async function judgePair(
     throw new Error(`Missing transcript for pair ${a.session_id} / ${b.session_id}`);
   }
   // Modality is a shared stratum key, but read each session's own for the prompt.
-  const [configA, configB] = await Promise.all([
-    getSessionConfig(a.session_id),
-    getSessionConfig(b.session_id),
-  ]);
+  const [configA, configB] = await Promise.all([getSessionConfig(a.session_id), getSessionConfig(b.session_id)]);
   const sideA = { modality: configA?.modality ?? null, transcript: transcriptA };
   const sideB = { modality: configB?.modality ?? null, transcript: transcriptB };
 
@@ -214,8 +208,7 @@ export function matchPairs(candidates: PairCandidateRow[], limit: number): Match
         const y = [...buckets.get(arms[j])!].sort((p, q) => q.created_at.getTime() - p.created_at.getTime());
         const n = Math.min(x.length, y.length);
         for (let k = 0; k < n; k++) {
-          const [a, b] =
-            x[k].session_id < y[k].session_id ? [x[k], y[k]] : [y[k], x[k]];
+          const [a, b] = x[k].session_id < y[k].session_id ? [x[k], y[k]] : [y[k], x[k]];
           pairs.push({ a, b });
         }
       }
@@ -227,14 +220,14 @@ export function matchPairs(candidates: PairCandidateRow[], limit: number): Match
 /** Match + judge a batch. Returns counts. */
 export async function runPairwiseBatch(
   axis: ComparisonAxis,
-  options: PairwiseRunOptions = {}
+  options: PairwiseRunOptions = {},
 ): Promise<{ paired: number; judged: number; skipped: number; failed: number }> {
   const limit = options.limit ?? 20;
   const judgeModel = await resolveJudgeModel(options.judgeModel);
 
   const allCandidates = await getPairCandidates(axis);
   const alreadyPaired = await getPairedSessionIds(axis, PAIRWISE_PROMPT_VERSION);
-  const candidates = allCandidates.filter(c => !alreadyPaired.has(c.session_id));
+  const candidates = allCandidates.filter((c) => !alreadyPaired.has(c.session_id));
 
   const matched = matchPairs(candidates, limit);
 
@@ -249,7 +242,7 @@ export async function runPairwiseBatch(
       used.add(b.session_id);
       judged++;
       log.info(
-        `Pair #${row.pair_id} ${row.arm_a} vs ${row.arm_b} [${row.modality ?? '∅'}/${row.duration_band}] -> ${row.final_verdict}`
+        `Pair #${row.pair_id} ${row.arm_a} vs ${row.arm_b} [${row.modality ?? '∅'}/${row.duration_band}] -> ${row.final_verdict}`,
       );
     } catch (err) {
       failed++;

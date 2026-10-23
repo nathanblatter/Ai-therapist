@@ -22,14 +22,16 @@ describe('assertSafeOutputPath (spec §7)', () => {
   });
 
   it('allows a path under ~/docker-services', () => {
-    expect(() => assertSafeOutputPath(path.join(os.homedir(), 'docker-services', 'ai-therapist-exports'))).not.toThrow();
+    expect(() =>
+      assertSafeOutputPath(path.join(os.homedir(), 'docker-services', 'ai-therapist-exports')),
+    ).not.toThrow();
   });
 });
 
 describe('backup script', () => {
   it('passes bash syntax check (bash -n)', () => {
     expect(() =>
-      execSync(`bash -n ${path.join(repoRoot, 'scripts/backup-ai-therapist.sh')}`, { stdio: 'pipe' })
+      execSync(`bash -n ${path.join(repoRoot, 'scripts/backup-ai-therapist.sh')}`, { stdio: 'pipe' }),
     ).not.toThrow();
   });
 });

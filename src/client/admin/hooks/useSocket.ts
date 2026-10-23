@@ -19,7 +19,7 @@ function getSocket(): Socket {
       // The dashboard socket lives for the whole admin visit. The old finite
       // cap (5) meant one bad minute of network permanently killed live
       // monitoring/crisis events until a full page reload.
-      reconnectionAttempts: Infinity
+      reconnectionAttempts: Infinity,
     });
 
     socketInstance.on('connect', () => {

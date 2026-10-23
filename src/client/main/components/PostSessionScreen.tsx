@@ -85,9 +85,11 @@ function buildPrintableHtml(data: PostSessionData): string {
     ? `<section>
         <h2>Session Recap</h2>
         <p><strong>We talked about:</strong> ${escapeHtml(data.recap.focus)}</p>
-        ${data.recap.techniques && data.recap.techniques.length > 0
-          ? `<p><strong>Things we tried:</strong> ${data.recap.techniques.map(escapeHtml).join(', ')}</p>`
-          : ''}
+        ${
+          data.recap.techniques && data.recap.techniques.length > 0
+            ? `<p><strong>Things we tried:</strong> ${data.recap.techniques.map(escapeHtml).join(', ')}</p>`
+            : ''
+        }
         <p><strong>Worth keeping:</strong> ${escapeHtml(data.recap.takeaway)}</p>
       </section>`
     : '';
@@ -101,11 +103,13 @@ function buildPrintableHtml(data: PostSessionData): string {
   const safetyPlanHtml = data.safetyPlan
     ? `<section>
         <h2>My Safety Plan</h2>
-        ${planSections.map(({ key, label }) => {
-          const items = data.safetyPlan?.[key];
-          if (!items || items.length === 0) return '';
-          return `<p><strong>${escapeHtml(label)}:</strong></p><ul>${items.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
-        }).join('')}
+        ${planSections
+          .map(({ key, label }) => {
+            const items = data.safetyPlan?.[key];
+            if (!items || items.length === 0) return '';
+            return `<p><strong>${escapeHtml(label)}:</strong></p><ul>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
+          })
+          .join('')}
         <p><strong>If you're in crisis:</strong></p>
         <ul>
           <li>988 Suicide &amp; Crisis Lifeline (call or text 988)</li>
@@ -115,16 +119,18 @@ function buildPrintableHtml(data: PostSessionData): string {
       </section>`
     : '';
 
-  const writeupsHtml = data.writeups.length > 0
-    ? `<section>
+  const writeupsHtml =
+    data.writeups.length > 0
+      ? `<section>
         <h2>What I Worked On</h2>
-        ${data.writeups.map(w => `<div class="writeup"><h3>${escapeHtml(w.label)}</h3><p>${escapeHtml(w.summary).replace(/\n/g, '<br/>')}</p></div>`).join('')}
+        ${data.writeups.map((w) => `<div class="writeup"><h3>${escapeHtml(w.label)}</h3><p>${escapeHtml(w.summary).replace(/\n/g, '<br/>')}</p></div>`).join('')}
       </section>`
-    : '';
+      : '';
 
-  const body = recapHtml || safetyPlanHtml || writeupsHtml
-    ? `${recapHtml}${safetyPlanHtml}${writeupsHtml}`
-    : `<p>No recap, safety plan, or shared exercises were saved for this session.</p>`;
+  const body =
+    recapHtml || safetyPlanHtml || writeupsHtml
+      ? `${recapHtml}${safetyPlanHtml}${writeupsHtml}`
+      : `<p>No recap, safety plan, or shared exercises were saved for this session.</p>`;
 
   return `<!doctype html>
 <html>
@@ -267,7 +273,9 @@ export default function PostSessionScreen({ data, onDismiss }: PostSessionScreen
                 </button>
                 <button
                   onClick={submitFeedback}
-                  disabled={submitting || (helpfulness === null && ease === null && wouldReturn === null && !comments.trim())}
+                  disabled={
+                    submitting || (helpfulness === null && ease === null && wouldReturn === null && !comments.trim())
+                  }
                   className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-5 py-2.5 rounded-lg"
                 >
                   {submitting ? 'Submitting...' : 'Submit feedback'}

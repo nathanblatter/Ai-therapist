@@ -12,10 +12,7 @@ async function rollbackMigration() {
   try {
     console.log('Rolling back migration 030: restore prior models...');
 
-    const sql = fs.readFileSync(
-      path.join(__dirname, '../migrations/030_bump_models_rollback.sql'),
-      'utf8'
-    );
+    const sql = fs.readFileSync(path.join(__dirname, '../migrations/030_bump_models_rollback.sql'), 'utf8');
 
     await client.query(sql);
 

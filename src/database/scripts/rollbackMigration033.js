@@ -10,7 +10,10 @@ async function rollback() {
   const client = await pool.connect();
   try {
     console.log('Rolling back migration 033...');
-    const sql = fs.readFileSync(path.join(__dirname, '../migrations/033_add_model_to_session_config_rollback.sql'), 'utf8');
+    const sql = fs.readFileSync(
+      path.join(__dirname, '../migrations/033_add_model_to_session_config_rollback.sql'),
+      'utf8',
+    );
     await client.query(sql);
     console.log('Rollback 033 completed.');
   } catch (err) {

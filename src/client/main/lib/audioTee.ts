@@ -77,7 +77,9 @@ export function startMixedTee(
   // The context is created during async WebRTC negotiation (not directly in the
   // click handler), so it starts suspended and would never fire onaudioprocess.
   // A prior user gesture exists (starting the session), so resume() succeeds.
-  const ensureRunning = () => { if (ctx.state === 'suspended') void ctx.resume(); };
+  const ensureRunning = () => {
+    if (ctx.state === 'suspended') void ctx.resume();
+  };
   ensureRunning();
   // Belt-and-suspenders: also resume on the next user interaction.
   const onGesture = () => ensureRunning();

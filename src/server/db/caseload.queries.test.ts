@@ -35,7 +35,7 @@ const VALID_PAIR = { therapist_role: 'therapist', client_role: 'participant', me
 describe('assignClientAudited (grant + audit in one transaction, ai-therapist-145)', () => {
   it('validates, inserts the edge and the audit row, then COMMITs on one client', async () => {
     clientQueryMock.mockImplementation(async (sql: string) =>
-      /SELECT/.test(sql) ? { rows: [VALID_PAIR] } : { rows: [], rowCount: 1 }
+      /SELECT/.test(sql) ? { rows: [VALID_PAIR] } : { rows: [], rowCount: 1 },
     );
     await assignClientAudited(1, 2, 1, { actorUserId: 1, actorUsername: 'dr_t', detail: { via: 'x' } });
     expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'INSERT', 'INSERT', 'COMMIT']);
@@ -52,20 +52,19 @@ describe('assignClientAudited (grant + audit in one transaction, ai-therapist-14
       if (/caseload_audit_log/.test(sql)) throw new Error('audit down');
       return { rows: [], rowCount: 1 };
     });
-    await expect(
-      assignClientAudited(1, 2, 1, { actorUserId: 1, actorUsername: 'dr_t' })
-    ).rejects.toThrow('audit down');
+    await expect(assignClientAudited(1, 2, 1, { actorUserId: 1, actorUsername: 'dr_t' })).rejects.toThrow('audit down');
     expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'INSERT', 'INSERT', 'ROLLBACK']);
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });
 
   it('ROLLBACKs before writing anything on a role violation', async () => {
     clientQueryMock.mockResolvedValue({ rows: [] });
-    clientQueryMock.mockResolvedValueOnce({ rows: [] }) // BEGIN
+    clientQueryMock
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
       .mockResolvedValueOnce({ rows: [{ ...VALID_PAIR, client_role: 'therapist' }] });
-    await expect(
-      assignClientAudited(1, 2, 1, { actorUserId: 1, actorUsername: 'dr_t' })
-    ).rejects.toBeInstanceOf(CaseloadRoleError);
+    await expect(assignClientAudited(1, 2, 1, { actorUserId: 1, actorUsername: 'dr_t' })).rejects.toBeInstanceOf(
+      CaseloadRoleError,
+    );
     expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'ROLLBACK']);
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });
@@ -200,17 +199,17 @@ describe('CaseloadRoleError', () => {
 describe('assignClient research-org caseworker invariant', () => {
   it('rejects a caseworker assignment when the member org is a research org', async () => {
     queryMock.mockResolvedValueOnce({
-      rows: [{
-        therapist_role: 'caseworker',
-        client_role: 'participant',
-        member_org: 1,
-        client_org: 1,
-        member_org_kind: 'research',
-      }],
+      rows: [
+        {
+          therapist_role: 'caseworker',
+          client_role: 'participant',
+          member_org: 1,
+          client_org: 1,
+          member_org_kind: 'research',
+        },
+      ],
     });
-    await expect(assignClient(1, 2, null, 'caseworker')).rejects.toThrow(
-      /research organization/
-    );
+    await expect(assignClient(1, 2, null, 'caseworker')).rejects.toThrow(/research organization/);
     // Fails before any INSERT.
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
@@ -218,13 +217,15 @@ describe('assignClient research-org caseworker invariant', () => {
   it('allows a caseworker assignment inside a practice org', async () => {
     queryMock
       .mockResolvedValueOnce({
-        rows: [{
-          therapist_role: 'caseworker',
-          client_role: 'participant',
-          member_org: 2,
-          client_org: 2,
-          member_org_kind: 'practice',
-        }],
+        rows: [
+          {
+            therapist_role: 'caseworker',
+            client_role: 'participant',
+            member_org: 2,
+            client_org: 2,
+            member_org_kind: 'practice',
+          },
+        ],
       })
       .mockResolvedValueOnce({ rowCount: 1, rows: [] });
     await expect(assignClient(1, 2, null, 'caseworker')).resolves.toBeUndefined();
@@ -234,13 +235,15 @@ describe('assignClient research-org caseworker invariant', () => {
   it('does not block therapist assignments inside the research org', async () => {
     queryMock
       .mockResolvedValueOnce({
-        rows: [{
-          therapist_role: 'therapist',
-          client_role: 'participant',
-          member_org: 1,
-          client_org: 1,
-          member_org_kind: 'research',
-        }],
+        rows: [
+          {
+            therapist_role: 'therapist',
+            client_role: 'participant',
+            member_org: 1,
+            client_org: 1,
+            member_org_kind: 'research',
+          },
+        ],
       })
       .mockResolvedValueOnce({ rowCount: 1, rows: [] });
     await expect(assignClient(1, 2, null)).resolves.toBeUndefined();

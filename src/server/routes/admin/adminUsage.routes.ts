@@ -113,7 +113,7 @@ export default function adminUsageRoutes(): Router {
       }
 
       res.sendStatus(204);
-    }
+    },
   );
 
   return router;

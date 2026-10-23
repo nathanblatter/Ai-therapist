@@ -58,86 +58,97 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // POST /admin/api/sessions/:sessionId/end - remotely terminate a session
-  router.post('/admin/api/sessions/:sessionId/end', requireFullContent, requireSessionClientAccess(), async (req, res) => {
-    try {
-      const { sessionId } = req.params;
-
-      const session = await getSession(sessionId);
-      if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
-      }
-
-      // Idempotent: ending an already-ended session returns the existing data.
-      if (session.status === 'ended') {
-        log.info(`Admin: Session ${sessionId} already ended, returning existing data (idempotent)`);
-        return res.status(200).json({ ...session, alreadyEnded: true, message: 'Session was already ended' });
-      }
-
-      const updatedSession = await updateSessionStatus(sessionId, 'ended', req.session.username);
-
-      // Tear down the sideband observer cleanly on remote end.
+  router.post(
+    '/admin/api/sessions/:sessionId/end',
+    requireFullContent,
+    requireSessionClientAccess(),
+    async (req, res) => {
       try {
-        const { sidebandManager } = await import('../../services/sidebandManager.service.js');
-        await sidebandManager.disconnect(sessionId);
-      } catch (e) {
-        log.error({ err: e }, '[Sideband] cleanup on admin session end failed');
+        const { sessionId } = req.params;
+
+        const session = await getSession(sessionId);
+        if (!session) {
+          return res.status(404).json({ error: 'Session not found' });
+        }
+
+        // Idempotent: ending an already-ended session returns the existing data.
+        if (session.status === 'ended') {
+          log.info(`Admin: Session ${sessionId} already ended, returning existing data (idempotent)`);
+          return res.status(200).json({ ...session, alreadyEnded: true, message: 'Session was already ended' });
+        }
+
+        const updatedSession = await updateSessionStatus(sessionId, 'ended', req.session.username);
+
+        // Tear down the sideband observer cleanly on remote end.
+        try {
+          const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+          await sidebandManager.disconnect(sessionId);
+        } catch (e) {
+          log.error({ err: e }, '[Sideband] cleanup on admin session end failed');
+        }
+
+        // Free the in-memory chat transcript (ai-therapist-224): an admin end
+        // never went through /api/chat/end, so it stayed resident, unredacted.
+        try {
+          const { endChatSession } = await import('../../services/chatTherapy.service.js');
+          endChatSession(sessionId);
+        } catch (e) {
+          log.error({ err: e }, '[ChatTherapy] cleanup on admin session end failed');
+        }
+
+        // Redact the whole session in one batched job (fire-and-forget), THEN
+        // auto-name from the redacted transcript. Naming must run after redaction
+        // completes, else content_redacted is null and the namer sees a blank
+        // transcript and produces junk (wave1 bug 1).
+        import('../../services/sessionRedaction.service.js')
+          .then((m) => m.redactSession(sessionId))
+          .then(() => generateSessionNameAsync(sessionId))
+          .catch((e) => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
+
+        // Finalize the audio recording (wrap buffered PCM → WAV → object storage).
+        import('../../services/recorder.service.js')
+          .then((m) => m.finalize(sessionId))
+          .catch((e) => log.error({ err: e }, '[Recorder] finalize failed'));
+
+        // Post-session insights (ai-therapist-256): an admin/crisis takeover end
+        // skipped these, so sessions a researcher ended from the dashboard — the
+        // most safety-relevant ones — had no summary in the catch-up view.
+        import('../../services/sessionInsights.service.js')
+          .then((m) => m.generateSessionInsightsAsync(sessionId))
+          .catch((e) => log.error({ err: e }, '[Insights] generation failed'));
+
+        // Quality eval (LLM judge) — no-op unless system_config.evals.auto_run_enabled.
+        import('../../services/sessionEval.service.js')
+          .then((m) => m.maybeAutoEvalSession(sessionId))
+          .catch((e) => log.error({ err: e }, '[Evals] auto-eval failed'));
+
+        // Notify admin dashboards and the participant's own session room.
+        void broadcastAdminEventForSession(
+          global.io,
+          'session:ended',
+          {
+            sessionId,
+            endedAt: new Date(),
+            endedBy: req.session.username,
+          },
+          sessionId,
+          'summary',
+        );
+        global.io.to(`session:${sessionId}`).emit('session:status', {
+          status: 'ended',
+          endedBy: req.session.username,
+          remoteTermination: true,
+        });
+
+        log.info(`Admin ${req.session.username} remotely ended session ${sessionId}`);
+
+        res.json({ ...updatedSession, message: 'Session ended successfully by admin', endedBy: req.session.username });
+      } catch (err) {
+        log.error({ err }, 'Failed to end session');
+        res.status(500).json({ error: 'Failed to end session' });
       }
-
-      // Free the in-memory chat transcript (ai-therapist-224): an admin end
-      // never went through /api/chat/end, so it stayed resident, unredacted.
-      try {
-        const { endChatSession } = await import('../../services/chatTherapy.service.js');
-        endChatSession(sessionId);
-      } catch (e) {
-        log.error({ err: e }, '[ChatTherapy] cleanup on admin session end failed');
-      }
-
-      // Redact the whole session in one batched job (fire-and-forget), THEN
-      // auto-name from the redacted transcript. Naming must run after redaction
-      // completes, else content_redacted is null and the namer sees a blank
-      // transcript and produces junk (wave1 bug 1).
-      import('../../services/sessionRedaction.service.js')
-        .then(m => m.redactSession(sessionId))
-        .then(() => generateSessionNameAsync(sessionId))
-        .catch(e => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
-
-      // Finalize the audio recording (wrap buffered PCM → WAV → object storage).
-      import('../../services/recorder.service.js')
-        .then(m => m.finalize(sessionId))
-        .catch(e => log.error({ err: e }, '[Recorder] finalize failed'));
-
-      // Post-session insights (ai-therapist-256): an admin/crisis takeover end
-      // skipped these, so sessions a researcher ended from the dashboard — the
-      // most safety-relevant ones — had no summary in the catch-up view.
-      import('../../services/sessionInsights.service.js')
-        .then(m => m.generateSessionInsightsAsync(sessionId))
-        .catch(e => log.error({ err: e }, '[Insights] generation failed'));
-
-      // Quality eval (LLM judge) — no-op unless system_config.evals.auto_run_enabled.
-      import('../../services/sessionEval.service.js')
-        .then(m => m.maybeAutoEvalSession(sessionId))
-        .catch(e => log.error({ err: e }, '[Evals] auto-eval failed'));
-
-      // Notify admin dashboards and the participant's own session room.
-      void broadcastAdminEventForSession(global.io, 'session:ended', {
-        sessionId,
-        endedAt: new Date(),
-        endedBy: req.session.username,
-      }, sessionId, 'summary');
-      global.io.to(`session:${sessionId}`).emit('session:status', {
-        status: 'ended',
-        endedBy: req.session.username,
-        remoteTermination: true,
-      });
-
-      log.info(`Admin ${req.session.username} remotely ended session ${sessionId}`);
-
-      res.json({ ...updatedSession, message: 'Session ended successfully by admin', endedBy: req.session.username });
-    } catch (err) {
-      log.error({ err }, 'Failed to end session');
-      res.status(500).json({ error: 'Failed to end session' });
-    }
-  });
+    },
+  );
 
   // GET /admin/api/sessions - filtered, paginated session list.
   // Caseworker-allowed: rows are per-session metadata/aggregates only.
@@ -146,9 +157,19 @@ export default function adminSessionsRoutes(): Router {
   // is safe for the summaries tier unmodified.
   router.get('/admin/api/sessions', requireRole('therapist', 'researcher', 'caseworker'), async (req, res) => {
     const {
-      search, startDate, endDate, minMessages, maxMessages,
-      voices, languages, durations, sessionTypes, statuses, endedBy,
-      crisisFlagged, crisisSeverity,
+      search,
+      startDate,
+      endDate,
+      minMessages,
+      maxMessages,
+      voices,
+      languages,
+      durations,
+      sessionTypes,
+      statuses,
+      endedBy,
+      crisisFlagged,
+      crisisSeverity,
     } = req.query;
 
     try {
@@ -193,132 +214,150 @@ export default function adminSessionsRoutes(): Router {
   // GET /admin/api/sessions/:sessionId/redaction-status - redaction progress:
   // complete/partial/pending/no_content, plus raw counts (ai-therapist-22).
   // Registered before /:sessionId for clarity (paths don't actually overlap).
-  router.get('/admin/api/sessions/:sessionId/redaction-status', requireFullContent, requireSessionClientAccess(), async (req, res) => {
-    const { sessionId } = req.params;
-    try {
-      const breakdown = await getRedactionStatusBreakdown(sessionId);
-      res.json({
-        sessionId,
-        ...breakdown,
-        // Kept for backward compatibility with any existing caller of this endpoint.
-        pendingCount: breakdown.pending,
-        allComplete: breakdown.pending === 0,
-      });
-    } catch (err) {
-      log.error({ err }, 'Failed to check redaction status');
-      res.status(500).json({ error: 'Failed to check redaction status' });
-    }
-  });
+  router.get(
+    '/admin/api/sessions/:sessionId/redaction-status',
+    requireFullContent,
+    requireSessionClientAccess(),
+    async (req, res) => {
+      const { sessionId } = req.params;
+      try {
+        const breakdown = await getRedactionStatusBreakdown(sessionId);
+        res.json({
+          sessionId,
+          ...breakdown,
+          // Kept for backward compatibility with any existing caller of this endpoint.
+          pendingCount: breakdown.pending,
+          allComplete: breakdown.pending === 0,
+        });
+      } catch (err) {
+        log.error({ err }, 'Failed to check redaction status');
+        res.status(500).json({ error: 'Failed to check redaction status' });
+      }
+    },
+  );
 
   // GET /admin/api/sessions/:sessionId/recording-info - playback availability
-  router.get('/admin/api/sessions/:sessionId/recording-info', requireFullContent, requireSessionClientAccess(), async (req, res) => {
-    const { sessionId } = req.params;
-    try {
-      const rec = await getSessionRecording(sessionId);
-      if (!rec || rec.status !== 'ready') {
-        return res.json({ available: false, status: rec?.status ?? 'none' });
-      }
-      // Participant-only track (migration 086): what the acoustic extractor
-      // measures. Exposed so a human can listen to it for verification
-      // (ai-therapist-206). Best-effort: its absence must not hide the mix.
-      let participantTrack: { url: string } | null = null;
+  router.get(
+    '/admin/api/sessions/:sessionId/recording-info',
+    requireFullContent,
+    requireSessionClientAccess(),
+    async (req, res) => {
+      const { sessionId } = req.params;
       try {
-        const pt = await getParticipantRecordingForSession(sessionId);
-        if (pt?.objectKey && pt.status === 'ready') {
-          participantTrack = { url: `/admin/api/sessions/${sessionId}/recording?track=participant` };
+        const rec = await getSessionRecording(sessionId);
+        if (!rec || rec.status !== 'ready') {
+          return res.json({ available: false, status: rec?.status ?? 'none' });
         }
+        // Participant-only track (migration 086): what the acoustic extractor
+        // measures. Exposed so a human can listen to it for verification
+        // (ai-therapist-206). Best-effort: its absence must not hide the mix.
+        let participantTrack: { url: string } | null = null;
+        try {
+          const pt = await getParticipantRecordingForSession(sessionId);
+          if (pt?.objectKey && pt.status === 'ready') {
+            participantTrack = { url: `/admin/api/sessions/${sessionId}/recording?track=participant` };
+          }
+        } catch (err) {
+          log.warn({ err }, 'participant track lookup failed');
+        }
+        res.json({
+          available: true,
+          status: rec.status,
+          durationMs: rec.durationMs,
+          sizeBytes: rec.sizeBytes,
+          url: `/admin/api/sessions/${sessionId}/recording`,
+          participantTrack,
+        });
       } catch (err) {
-        log.warn({ err }, 'participant track lookup failed');
+        log.error({ err }, 'Failed to fetch recording info');
+        res.status(500).json({ error: 'Failed to fetch recording info' });
       }
-      res.json({
-        available: true,
-        status: rec.status,
-        durationMs: rec.durationMs,
-        sizeBytes: rec.sizeBytes,
-        url: `/admin/api/sessions/${sessionId}/recording`,
-        participantTrack,
-      });
-    } catch (err) {
-      log.error({ err }, 'Failed to fetch recording info');
-      res.status(500).json({ error: 'Failed to fetch recording info' });
-    }
-  });
+    },
+  );
 
   // GET /admin/api/sessions/:sessionId/recording - stream the WAV (Range-aware,
   // proxied from object storage so the browser never talks to MinIO directly).
-  router.get('/admin/api/sessions/:sessionId/recording', requireFullContent, requireSessionClientAccess(), async (req, res) => {
-    const { sessionId } = req.params;
-    try {
-      // `?track=participant` streams the participant-only track instead of the
-      // mix (ai-therapist-206); same access gate, same audit, track noted.
-      const track = req.query.track === 'participant' ? 'participant' : 'mixed';
-      let objectKey: string | null = null;
-      if (track === 'participant') {
-        const pt = await getParticipantRecordingForSession(sessionId);
-        objectKey = pt?.status === 'ready' ? pt.objectKey : null;
-      } else {
-        const rec = await getSessionRecording(sessionId);
-        objectKey = rec?.status === 'ready' ? rec.objectKey : null;
-      }
-      if (!objectKey) {
-        return res.status(404).json({ error: 'No recording available' });
-      }
-      const rec = { objectKey };
-
-      const meta = await headObject(rec.objectKey);
-      if (!meta) return res.status(404).json({ error: 'Recording object missing' });
-
-      // `?download=1` serves the whole object as an attachment (ai-therapist-199
-      // item 4): the clinician egress path for audio. Distinguished in the
-      // audit log from a playback stream because a download leaves the system.
-      const isDownload = req.query.download === '1' || req.query.download === 'true';
-
-      // Access audit (091, fire-and-forget): who streamed this recording.
-      // Range requests during playback produce multiple rows for one listen;
-      // the range detail lets analysis collapse them.
-      void logDataAccess({
-        accessedBy: req.session.userId ?? null,
-        role: req.session.userRole ?? null,
-        action: isDownload ? 'recording_download' : 'recording_stream',
-        sessionId,
-        detail: { range: req.headers.range ?? null, track },
-      });
-
-      const total = meta.contentLength;
-      const rangeHeader = isDownload ? undefined : req.headers.range;
-      if (isDownload) {
-        const ext = meta.contentType === 'audio/wav' || meta.contentType === 'audio/x-wav' ? 'wav' : 'audio';
-        const suffix = track === 'participant' ? '-participant' : '';
-        res.setHeader('Content-Disposition', `attachment; filename="session-${sessionId.replace(/[^A-Za-z0-9_-]/g, '')}${suffix}.${ext}"`);
-      }
-
-      if (rangeHeader) {
-        const match = /bytes=(\d+)-(\d*)/.exec(rangeHeader);
-        const start = match ? parseInt(match[1], 10) : 0;
-        const end = match && match[2] ? parseInt(match[2], 10) : total - 1;
-        if (start >= total || end >= total) {
-          res.status(416).setHeader('Content-Range', `bytes */${total}`);
-          return res.end();
+  router.get(
+    '/admin/api/sessions/:sessionId/recording',
+    requireFullContent,
+    requireSessionClientAccess(),
+    async (req, res) => {
+      const { sessionId } = req.params;
+      try {
+        // `?track=participant` streams the participant-only track instead of the
+        // mix (ai-therapist-206); same access gate, same audit, track noted.
+        const track = req.query.track === 'participant' ? 'participant' : 'mixed';
+        let objectKey: string | null = null;
+        if (track === 'participant') {
+          const pt = await getParticipantRecordingForSession(sessionId);
+          objectKey = pt?.status === 'ready' ? pt.objectKey : null;
+        } else {
+          const rec = await getSessionRecording(sessionId);
+          objectKey = rec?.status === 'ready' ? rec.objectKey : null;
         }
-        const { body } = await getObjectStream(rec.objectKey, { start, end });
-        res.status(206);
-        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Length', end - start + 1);
-        res.setHeader('Content-Type', meta.contentType);
-        return body.pipe(res);
-      }
+        if (!objectKey) {
+          return res.status(404).json({ error: 'No recording available' });
+        }
+        const rec = { objectKey };
 
-      const { body } = await getObjectStream(rec.objectKey);
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Content-Length', total);
-      res.setHeader('Content-Type', meta.contentType);
-      body.pipe(res);
-    } catch (err) {
-      log.error({ err }, 'Failed to stream recording');
-      if (!res.headersSent) res.status(500).json({ error: 'Failed to stream recording' });
-    }
-  });
+        const meta = await headObject(rec.objectKey);
+        if (!meta) return res.status(404).json({ error: 'Recording object missing' });
+
+        // `?download=1` serves the whole object as an attachment (ai-therapist-199
+        // item 4): the clinician egress path for audio. Distinguished in the
+        // audit log from a playback stream because a download leaves the system.
+        const isDownload = req.query.download === '1' || req.query.download === 'true';
+
+        // Access audit (091, fire-and-forget): who streamed this recording.
+        // Range requests during playback produce multiple rows for one listen;
+        // the range detail lets analysis collapse them.
+        void logDataAccess({
+          accessedBy: req.session.userId ?? null,
+          role: req.session.userRole ?? null,
+          action: isDownload ? 'recording_download' : 'recording_stream',
+          sessionId,
+          detail: { range: req.headers.range ?? null, track },
+        });
+
+        const total = meta.contentLength;
+        const rangeHeader = isDownload ? undefined : req.headers.range;
+        if (isDownload) {
+          const ext = meta.contentType === 'audio/wav' || meta.contentType === 'audio/x-wav' ? 'wav' : 'audio';
+          const suffix = track === 'participant' ? '-participant' : '';
+          res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="session-${sessionId.replace(/[^A-Za-z0-9_-]/g, '')}${suffix}.${ext}"`,
+          );
+        }
+
+        if (rangeHeader) {
+          const match = /bytes=(\d+)-(\d*)/.exec(rangeHeader);
+          const start = match ? parseInt(match[1], 10) : 0;
+          const end = match && match[2] ? parseInt(match[2], 10) : total - 1;
+          if (start >= total || end >= total) {
+            res.status(416).setHeader('Content-Range', `bytes */${total}`);
+            return res.end();
+          }
+          const { body } = await getObjectStream(rec.objectKey, { start, end });
+          res.status(206);
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Content-Length', end - start + 1);
+          res.setHeader('Content-Type', meta.contentType);
+          return body.pipe(res);
+        }
+
+        const { body } = await getObjectStream(rec.objectKey);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', total);
+        res.setHeader('Content-Type', meta.contentType);
+        body.pipe(res);
+      } catch (err) {
+        log.error({ err }, 'Failed to stream recording');
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to stream recording' });
+      }
+    },
+  );
 
   // GET /admin/api/sessions/:sessionId - full session transcript
   router.get('/admin/api/sessions/:sessionId', requireFullContent, requireSessionClientAccess(), async (req, res) => {
@@ -380,22 +419,27 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // DELETE /admin/api/sessions/:sessionId - delete a session and its data
-  router.delete('/admin/api/sessions/:sessionId', requireFullContent, requireSessionClientAccess(), async (req, res) => {
-    const { sessionId } = req.params;
-    try {
-      const deletedSession = await deleteSession(sessionId);
-      res.json({
-        success: true,
-        message: `Session ${deletedSession.session_name || sessionId} deleted successfully`,
-      });
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'Session not found') {
-        return res.status(404).json({ error: 'Session not found' });
+  router.delete(
+    '/admin/api/sessions/:sessionId',
+    requireFullContent,
+    requireSessionClientAccess(),
+    async (req, res) => {
+      const { sessionId } = req.params;
+      try {
+        const deletedSession = await deleteSession(sessionId);
+        res.json({
+          success: true,
+          message: `Session ${deletedSession.session_name || sessionId} deleted successfully`,
+        });
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'Session not found') {
+          return res.status(404).json({ error: 'Session not found' });
+        }
+        log.error({ err: error }, 'Failed to delete session');
+        res.status(500).json({ error: 'Failed to delete session' });
       }
-      log.error({ err: error }, 'Failed to delete session');
-      res.status(500).json({ error: 'Failed to delete session' });
-    }
-  });
+    },
+  );
 
   // PUT /admin/api/messages/:messageId - edit a message's content
   router.put('/admin/api/messages/:messageId', requireFullContent, requireMessageClientAccess(), async (req, res) => {
@@ -427,9 +471,8 @@ export default function adminSessionsRoutes(): Router {
         // Same allowlist as the transcript read path (ai-therapist-217): a
         // researcher editing the redacted column must not get raw participant
         // text echoed back in metadata.
-        extras: fieldToUpdate === 'content_redacted'
-          ? projectSafeMetadata(updatedMessage.metadata)
-          : updatedMessage.metadata,
+        extras:
+          fieldToUpdate === 'content_redacted' ? projectSafeMetadata(updatedMessage.metadata) : updatedMessage.metadata,
         created_at: updatedMessage.created_at,
       };
 
@@ -444,22 +487,27 @@ export default function adminSessionsRoutes(): Router {
   });
 
   // DELETE /admin/api/messages/:messageId - delete a message
-  router.delete('/admin/api/messages/:messageId', requireFullContent, requireMessageClientAccess(), async (req, res) => {
-    const { messageId } = req.params;
-    try {
-      const deletedMessage = await deleteMessage(messageId);
-      res.json({ success: true, message: 'Message deleted successfully', deletedMessage });
-    } catch (error: unknown) {
-      if (error instanceof Error && error.message === 'Message not found') {
-        return res.status(404).json({ error: 'Message not found' });
+  router.delete(
+    '/admin/api/messages/:messageId',
+    requireFullContent,
+    requireMessageClientAccess(),
+    async (req, res) => {
+      const { messageId } = req.params;
+      try {
+        const deletedMessage = await deleteMessage(messageId);
+        res.json({ success: true, message: 'Message deleted successfully', deletedMessage });
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'Message not found') {
+          return res.status(404).json({ error: 'Message not found' });
+        }
+        if (error instanceof Error && error.message === 'Cannot delete the last message in a session') {
+          return res.status(400).json({ error: 'Cannot delete the last message in a session' });
+        }
+        log.error({ err: error }, 'Failed to delete message');
+        res.status(500).json({ error: 'Failed to delete message' });
       }
-      if (error instanceof Error && error.message === 'Cannot delete the last message in a session') {
-        return res.status(400).json({ error: 'Cannot delete the last message in a session' });
-      }
-      log.error({ err: error }, 'Failed to delete message');
-      res.status(500).json({ error: 'Failed to delete message' });
-    }
-  });
+    },
+  );
 
   return router;
 }

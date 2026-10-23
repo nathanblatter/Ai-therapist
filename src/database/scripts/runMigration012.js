@@ -41,7 +41,7 @@ async function runMigration() {
     `);
 
     console.log('Verified columns:');
-    columnsResult.rows.forEach(row => {
+    columnsResult.rows.forEach((row) => {
       console.log(`  ${row.column_name} (${row.data_type})`);
     });
     console.log();
@@ -56,11 +56,10 @@ async function runMigration() {
     `);
 
     console.log('Verified indexes:');
-    indexesResult.rows.forEach(row => {
+    indexesResult.rows.forEach((row) => {
       console.log(`  ${row.indexname}`);
     });
     console.log();
-
   } catch (error) {
     console.error('\nMigration failed:', error.message);
     console.error('\nYou can rollback using: node src/database/scripts/rollbackMigration012.js\n');

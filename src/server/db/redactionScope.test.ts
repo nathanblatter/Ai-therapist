@@ -45,7 +45,10 @@ describe('redactableRowsSql', () => {
 // still raw. These assert the copies are gone — every one of those queries is
 // built from the shared fragment.
 describe('redaction-scope agreement across call sites', () => {
-  async function sqlOf(run: () => Promise<unknown>, rows: Record<string, string>[] = [{ total: '0', redacted: '0', pending_count: '0' }]): Promise<string> {
+  async function sqlOf(
+    run: () => Promise<unknown>,
+    rows: Record<string, string>[] = [{ total: '0', redacted: '0', pending_count: '0' }],
+  ): Promise<string> {
     queryMock.mockResolvedValue({ rows });
     await run();
     return String(queryMock.mock.calls[0][0]);

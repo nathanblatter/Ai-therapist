@@ -28,11 +28,7 @@ import {
   type MoodPoint,
   type ThoughtRecordEntry,
 } from './returningContext.queries.js';
-import {
-  getUserRiskContextEnabled,
-  getUserPriorCrisisFlags,
-  type PriorCrisisFlag,
-} from './crisis.queries.js';
+import { getUserRiskContextEnabled, getUserPriorCrisisFlags, type PriorCrisisFlag } from './crisis.queries.js';
 
 export interface ParticipantProfileBundle {
   /** Participant's own memory-consent flag. */
@@ -80,7 +76,7 @@ const DEFAULTS: Required<Omit<ProfileBundleOptions, 'sessionId'>> = {
 /** Everything the system remembers about one participant, fetched in parallel. */
 export async function getUserProfileBundle(
   userId: number,
-  options: ProfileBundleOptions = {}
+  options: ProfileBundleOptions = {},
 ): Promise<ParticipantProfileBundle> {
   const opts = { ...DEFAULTS, ...options };
   const sessionId = options.sessionId ?? null;
@@ -148,7 +144,11 @@ export interface SessionScoreExtras {
  */
 export async function getSessionScoreExtras(sessionIds: string[]): Promise<SessionScoreExtras[]> {
   if (sessionIds.length === 0) return [];
-  const result = await pool.query<{ session_id: string; rubric: Record<string, { score?: number }> | null; helpfulness_rating: number | null }>(
+  const result = await pool.query<{
+    session_id: string;
+    rubric: Record<string, { score?: number }> | null;
+    helpfulness_rating: number | null;
+  }>(
     `SELECT s.session_id,
             e.rubric,
             f.helpfulness_rating
@@ -160,13 +160,13 @@ export async function getSessionScoreExtras(sessionIds: string[]): Promise<Sessi
        LIMIT 1
      ) e ON TRUE
      LEFT JOIN session_feedback f ON f.session_id = s.session_id`,
-    [sessionIds]
+    [sessionIds],
   );
-  return result.rows.map(row => {
+  return result.rows.map((row) => {
     let evalScore: number | null = null;
     if (row.rubric) {
       const scores = Object.values(row.rubric)
-        .map(d => (typeof d?.score === 'number' ? d.score : null))
+        .map((d) => (typeof d?.score === 'number' ? d.score : null))
         .filter((s): s is number => s !== null);
       if (scores.length > 0) {
         evalScore = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;

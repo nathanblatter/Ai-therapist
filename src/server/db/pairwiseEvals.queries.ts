@@ -58,7 +58,7 @@ export async function getPairCandidates(axis: ComparisonAxis, limit = 1000): Pro
        AND EXISTS (SELECT 1 FROM messages m WHERE m.session_id = ts.session_id AND m.role = 'assistant')
      ORDER BY ts.created_at DESC
      LIMIT $2`,
-    [axis, limit]
+    [axis, limit],
   );
   return result.rows;
 }
@@ -71,9 +71,9 @@ export async function getPairedSessionIds(axis: string, promptVersion: string): 
      UNION
      SELECT session_b AS session_id FROM session_eval_pairs
        WHERE comparison_axis = $1 AND prompt_version = $2`,
-    [axis, promptVersion]
+    [axis, promptVersion],
   );
-  return new Set(result.rows.map(r => r.session_id));
+  return new Set(result.rows.map((r) => r.session_id));
 }
 
 export async function insertEvalPair(row: Omit<EvalPairRow, 'pair_id' | 'created_at'>): Promise<EvalPairRow> {
@@ -84,10 +84,21 @@ export async function insertEvalPair(row: Omit<EvalPairRow, 'pair_id' | 'created
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING *`,
     [
-      row.session_a, row.session_b, row.comparison_axis, row.arm_a, row.arm_b,
-      row.modality, row.duration_band, row.judge_model, row.prompt_version,
-      row.verdict_ab, row.verdict_ba, row.rationale_ab, row.rationale_ba, row.final_verdict,
-    ]
+      row.session_a,
+      row.session_b,
+      row.comparison_axis,
+      row.arm_a,
+      row.arm_b,
+      row.modality,
+      row.duration_band,
+      row.judge_model,
+      row.prompt_version,
+      row.verdict_ab,
+      row.verdict_ba,
+      row.rationale_ab,
+      row.rationale_ba,
+      row.final_verdict,
+    ],
   );
   return result.rows[0];
 }
@@ -129,9 +140,9 @@ export async function getPairwiseAggregates(promptVersion: string): Promise<Pair
      WHERE prompt_version = $1
      GROUP BY 1, 2, 3
      ORDER BY 1, 2, 3`,
-    [promptVersion]
+    [promptVersion],
   );
-  return result.rows.map(r => ({
+  return result.rows.map((r) => ({
     comparison_axis: r.comparison_axis,
     arm_x: r.arm_x,
     arm_y: r.arm_y,

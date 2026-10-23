@@ -32,7 +32,8 @@ export async function buildPhaseNudgeSchedule(sessionId: string): Promise<PhaseN
   if (!limits.enabled || !limits.max_duration_minutes) return [];
 
   const result = await pool.query<{ created_at: Date }>(
-    'SELECT created_at FROM therapy_sessions WHERE session_id = $1', [sessionId],
+    'SELECT created_at FROM therapy_sessions WHERE session_id = $1',
+    [sessionId],
   );
   const createdAt = result.rows[0]?.created_at;
   if (!createdAt) return [];
@@ -46,13 +47,21 @@ export async function buildPhaseNudgeSchedule(sessionId: string): Promise<PhaseN
 
   const phases: Array<{ at: number; text: string }> =
     modalityPhases && modalityPhases.length > 0
-      ? modalityPhases.map(p => ({
+      ? modalityPhases.map((p) => ({
           at: p.at,
-          text: p.guidance + (p.at >= 0.8 ? ` About ${minutesLeftAt(p.at)} minutes remain — close warmly as this phase finishes.` : ''),
+          text:
+            p.guidance +
+            (p.at >= 0.8 ? ` About ${minutesLeftAt(p.at)} minutes remain — close warmly as this phase finishes.` : ''),
         }))
       : [
-          { at: 0.6, text: 'The session is past its halfway point. Begin gently consolidating: reflect the main themes so far rather than opening new topics.' },
-          { at: 0.85, text: `About ${minutesLeftAt(0.85)} minutes remain. Begin winding down: summarize what was discussed, invite final thoughts, and close warmly.` },
+          {
+            at: 0.6,
+            text: 'The session is past its halfway point. Begin gently consolidating: reflect the main themes so far rather than opening new topics.',
+          },
+          {
+            at: 0.85,
+            text: `About ${minutesLeftAt(0.85)} minutes remain. Begin winding down: summarize what was discussed, invite final thoughts, and close warmly.`,
+          },
         ];
   phases.sort((a, b) => a.at - b.at);
 

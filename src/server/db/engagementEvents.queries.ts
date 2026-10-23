@@ -24,7 +24,7 @@ export async function insertEngagementEvents(events: EngagementEventRow[]): Prom
   await pool.query(
     `INSERT INTO engagement_events (session_id, user_id, kind, detail)
      VALUES ${rows.join(', ')}`,
-    values
+    values,
   );
 }
 
@@ -42,7 +42,7 @@ export async function getEngagementEventStats(days: number): Promise<EngagementE
      WHERE created_at >= NOW() - make_interval(days => $1)
      GROUP BY kind
      ORDER BY count DESC`,
-    [days]
+    [days],
   );
   return result.rows as EngagementEventKindStat[];
 }
@@ -71,7 +71,7 @@ export async function getSessionRhythmSummary(days: number): Promise<SessionRhyt
               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY seconds_since_prev_session) AS p50_gap_seconds
        FROM participant_session_rhythm
        WHERE started_at >= NOW() - make_interval(days => $1)`,
-      [days]
+      [days],
     ),
     pool.query(
       `SELECT start_hour, COUNT(*)::int AS sessions
@@ -79,7 +79,7 @@ export async function getSessionRhythmSummary(days: number): Promise<SessionRhyt
        WHERE started_at >= NOW() - make_interval(days => $1)
        GROUP BY start_hour
        ORDER BY start_hour`,
-      [days]
+      [days],
     ),
   ]);
   const row = summary.rows[0] ?? {};

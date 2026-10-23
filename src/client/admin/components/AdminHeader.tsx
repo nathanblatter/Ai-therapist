@@ -39,7 +39,7 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
   };
 
   const capitalizeFirst = (str: string | null) => {
-    if (!str || typeof str !== "string") return str;
+    if (!str || typeof str !== 'string') return str;
     return str.charAt(0).toUpperCase() + str.slice(1);
   };
 
@@ -57,10 +57,13 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
             </button>
           )}
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-2xl md:text-4xl font-bold leading-tight">AI Therapist Research & Therapist Audit Portal</h1>
+            <h1 className="text-lg sm:text-2xl md:text-4xl font-bold leading-tight">
+              AI Therapist Research & Therapist Audit Portal
+            </h1>
             {username && (
               <p className="text-lightBlue mt-1 md:mt-2 text-sm md:text-lg truncate">
-                Welcome, {capitalizeFirst(username)} {userRole && <span className="text-xs md:text-sm">({userRole})</span>}
+                Welcome, {capitalizeFirst(username)}{' '}
+                {userRole && <span className="text-xs md:text-sm">({userRole})</span>}
               </p>
             )}
           </div>
@@ -69,9 +72,7 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
           {/* In-app notification bell (caseworker portal). Hidden for demo
               accounts — their /admin/api/* is fixture-intercepted and has no
               notifications surface. */}
-          {userRole && userRole !== 'demo' && (
-            <NotificationBell onNavigate={() => onNotificationNavigate?.()} />
-          )}
+          {userRole && userRole !== 'demo' && <NotificationBell onNavigate={() => onNotificationNavigate?.()} />}
           {onMfaClick && (
             <button
               onClick={onMfaClick}
@@ -104,7 +105,13 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
           >
             {isDark ? <Sun size={20} /> : <Moon size={20} />}
           </button>
-          <button onClick={handleLogout} className="bg-gray-700 hover:bg-gray-600 px-3 md:px-4 py-2 rounded-full text-sm font-semibold text-center" title="Logout">Logout</button>
+          <button
+            onClick={handleLogout}
+            className="bg-gray-700 hover:bg-gray-600 px-3 md:px-4 py-2 rounded-full text-sm font-semibold text-center"
+            title="Logout"
+          >
+            Logout
+          </button>
         </div>
       </div>
     </header>

@@ -26,10 +26,7 @@ export const SCALES: Record<string, ScaleDefinition> = {
     id: 'phq2',
     name: 'PHQ-2 (mood check)',
     intro: 'Over the last two weeks, how often have you been bothered by the following?',
-    items: [
-      'Little interest or pleasure in doing things',
-      'Feeling down, depressed, or hopeless',
-    ],
+    items: ['Little interest or pleasure in doing things', 'Feeling down, depressed, or hopeless'],
     options: RESPONSE_OPTIONS,
     max_score: 6,
     cutoff: 3,
@@ -38,10 +35,7 @@ export const SCALES: Record<string, ScaleDefinition> = {
     id: 'gad2',
     name: 'GAD-2 (anxiety check)',
     intro: 'Over the last two weeks, how often have you been bothered by the following?',
-    items: [
-      'Feeling nervous, anxious, or on edge',
-      'Not being able to stop or control worrying',
-    ],
+    items: ['Feeling nervous, anxious, or on edge', 'Not being able to stop or control worrying'],
     options: RESPONSE_OPTIONS,
     max_score: 6,
     cutoff: 3,

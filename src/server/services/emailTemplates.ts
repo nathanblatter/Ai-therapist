@@ -42,9 +42,7 @@ export function kindLabel(kind: string): string {
 
 function loginLine(): string {
   const base = (process.env.APP_BASE_URL ?? '').trim().replace(/\/+$/, '');
-  return base
-    ? `Log in to review: ${base}/admin`
-    : 'Log in to the care dashboard to review.';
+  return base ? `Log in to review: ${base}/admin` : 'Log in to the care dashboard to review.';
 }
 
 /**
@@ -72,9 +70,7 @@ export function immediateEmail(kind: string, severity: string): EmailContent {
 export function digestEmail(countsByKind: Record<string, number>): EmailContent {
   const entries = Object.entries(countsByKind).filter(([, count]) => count > 0);
   const total = entries.reduce((sum, [, count]) => sum + count, 0);
-  const lines = entries
-    .sort((a, b) => b[1] - a[1])
-    .map(([kind, count]) => `- ${kindLabel(kind)}: ${count}`);
+  const lines = entries.sort((a, b) => b[1] - a[1]).map(([kind, count]) => `- ${kindLabel(kind)}: ${count}`);
   return {
     subject: `Care team daily digest: ${total} new notification${total === 1 ? '' : 's'}`,
     text: [

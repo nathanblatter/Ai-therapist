@@ -1,6 +1,6 @@
 // db.js
 import pkg from 'pg';
-import "dotenv/config";
+import 'dotenv/config';
 const { Pool } = pkg;
 
 // Connection comes from DATABASE_URL (e.g. the shared Postgres instance in

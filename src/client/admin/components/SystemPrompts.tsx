@@ -71,9 +71,13 @@ export default function SystemPrompts() {
         setModalityPresets(savedPresets);
       } else {
         try {
-          const defaults = await getJson<{ presets: Record<string, ModalityPreset> }>('/admin/api/config/modality-defaults');
+          const defaults = await getJson<{ presets: Record<string, ModalityPreset> }>(
+            '/admin/api/config/modality-defaults',
+          );
           setModalityPresets(defaults.presets);
-        } catch { /* modality editing just starts empty */ }
+        } catch {
+          /* modality editing just starts empty */
+        }
       }
       setActiveModality(data.system_prompts?.value?.active_modality || 'none');
 
@@ -84,8 +88,12 @@ export default function SystemPrompts() {
       } else {
         // Initialize with empty prompts if not in database yet
         const defaultPrompts: PromptsMap = {
-          realtime: { prompt: '', description: 'System prompt for realtime voice therapy sessions', last_modified: null },
-          chat: { prompt: '', description: 'System prompt for chat-only text therapy sessions', last_modified: null }
+          realtime: {
+            prompt: '',
+            description: 'System prompt for realtime voice therapy sessions',
+            last_modified: null,
+          },
+          chat: { prompt: '', description: 'System prompt for chat-only text therapy sessions', last_modified: null },
         };
         setPrompts(defaultPrompts);
         setOriginalPrompts(JSON.parse(JSON.stringify(defaultPrompts)) as PromptsMap);
@@ -105,14 +113,14 @@ export default function SystemPrompts() {
   };
 
   const handlePromptChange = (sessionType: string, value: string) => {
-    setPrompts(prev => {
+    setPrompts((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
         [sessionType]: {
           ...prev[sessionType],
-          prompt: value
-        }
+          prompt: value,
+        },
       };
     });
     setHasChanges(true);
@@ -120,14 +128,14 @@ export default function SystemPrompts() {
   };
 
   const handleDescriptionChange = (sessionType: string, value: string) => {
-    setPrompts(prev => {
+    setPrompts((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
         [sessionType]: {
           ...prev[sessionType],
-          description: value
-        }
+          description: value,
+        },
       };
     });
     setHasChanges(true);
@@ -140,13 +148,17 @@ export default function SystemPrompts() {
     setSaveSuccess(null);
 
     try {
-      await postJson('/admin/api/config/system_prompts', {
-        value: {
-          ...prompts,
-          modality_presets: modalityPresets,
-          active_modality: activeModality === 'none' ? null : activeModality,
+      await postJson(
+        '/admin/api/config/system_prompts',
+        {
+          value: {
+            ...prompts,
+            modality_presets: modalityPresets,
+            active_modality: activeModality === 'none' ? null : activeModality,
+          },
         },
-      }, { method: 'PUT', fallback: 'Failed to save system prompts' });
+        { method: 'PUT', fallback: 'Failed to save system prompts' },
+      );
 
       setSaveSuccess('System prompts saved successfully!');
       setHasChanges(false);
@@ -175,7 +187,7 @@ export default function SystemPrompts() {
     try {
       const data = await getJson<{ prompt: string }>(
         `/admin/api/config/system-prompt-preview?sessionType=${activeTab}&language=${previewLanguage}`,
-        { fallback: 'Failed to load preview' }
+        { fallback: 'Failed to load preview' },
       );
       setPreviewContent(data.prompt);
     } catch (err: unknown) {
@@ -208,17 +220,13 @@ export default function SystemPrompts() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">System Prompts</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Configure the AI system prompts for different session types
-          </p>
+          <p className="text-sm text-gray-600 mt-1">Configure the AI system prompts for different session types</p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowPreview(!showPreview)}
             className={`flex items-center gap-2 px-4 py-2 border rounded-lg transition ${
-              showPreview
-                ? 'bg-blue-50 border-blue-300 text-blue-700'
-                : 'border-gray-300 hover:bg-gray-50'
+              showPreview ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-300 hover:bg-gray-50'
             }`}
           >
             <Eye size={16} />
@@ -278,8 +286,9 @@ export default function SystemPrompts() {
           <div>
             <p className="text-sm font-semibold text-blue-800">Available Variables</p>
             <p className="text-sm text-blue-700 mt-1">
-              Use <code className="bg-blue-100 px-1 rounded">{"{{crisis_text}}"}</code> to insert the configured crisis contact information dynamically.
-              This will be replaced with the current crisis hotline, phone, and text line when the prompt is used.
+              Use <code className="bg-blue-100 px-1 rounded">{'{{crisis_text}}'}</code> to insert the configured crisis
+              contact information dynamically. This will be replaced with the current crisis hotline, phone, and text
+              line when the prompt is used.
             </p>
           </div>
         </div>
@@ -332,8 +341,8 @@ export default function SystemPrompts() {
           <div>
             <h3 className="text-sm font-semibold text-gray-800 mb-1">Active modality</h3>
             <p className="text-xs text-gray-500 mb-3">
-              The selected approach is appended to the base prompt for every new session
-              and recorded on the session&apos;s configuration — treat it as the study condition.
+              The selected approach is appended to the base prompt for every new session and recorded on the
+              session&apos;s configuration — treat it as the study condition.
             </p>
             <div className="space-y-2">
               <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
@@ -341,7 +350,11 @@ export default function SystemPrompts() {
                   type="radio"
                   name="active-modality"
                   checked={activeModality === 'none'}
-                  onChange={() => { setActiveModality('none'); setHasChanges(true); setSaveSuccess(null); }}
+                  onChange={() => {
+                    setActiveModality('none');
+                    setHasChanges(true);
+                    setSaveSuccess(null);
+                  }}
                 />
                 <span className="text-sm font-medium text-gray-700">None (base prompt only)</span>
               </label>
@@ -352,12 +365,19 @@ export default function SystemPrompts() {
                       type="radio"
                       name="active-modality"
                       checked={activeModality === key}
-                      onChange={() => { setActiveModality(key); setHasChanges(true); setSaveSuccess(null); }}
+                      onChange={() => {
+                        setActiveModality(key);
+                        setHasChanges(true);
+                        setSaveSuccess(null);
+                      }}
                     />
                     <span className="text-sm font-medium text-gray-700 flex-1">{preset.label}</span>
                     <button
                       type="button"
-                      onClick={(e) => { e.preventDefault(); setEditingModality(editingModality === key ? null : key); }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setEditingModality(editingModality === key ? null : key);
+                      }}
                       className="text-xs text-royal hover:underline px-2 py-1"
                     >
                       {editingModality === key ? 'Close' : 'Edit'}
@@ -371,8 +391,9 @@ export default function SystemPrompts() {
                           type="text"
                           value={preset.label}
                           onChange={(e) => {
-                            setModalityPresets(prev => ({ ...prev, [key]: { ...prev[key], label: e.target.value } }));
-                            setHasChanges(true); setSaveSuccess(null);
+                            setModalityPresets((prev) => ({ ...prev, [key]: { ...prev[key], label: e.target.value } }));
+                            setHasChanges(true);
+                            setSaveSuccess(null);
                           }}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-royal"
                         />
@@ -384,8 +405,12 @@ export default function SystemPrompts() {
                         <textarea
                           value={preset.addition}
                           onChange={(e) => {
-                            setModalityPresets(prev => ({ ...prev, [key]: { ...prev[key], addition: e.target.value } }));
-                            setHasChanges(true); setSaveSuccess(null);
+                            setModalityPresets((prev) => ({
+                              ...prev,
+                              [key]: { ...prev[key], addition: e.target.value },
+                            }));
+                            setHasChanges(true);
+                            setSaveSuccess(null);
                           }}
                           rows={6}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-royal resize-y"
@@ -399,108 +424,103 @@ export default function SystemPrompts() {
           </div>
         </div>
       ) : (
-      <div className="flex gap-6">
-        {/* Editor Panel */}
-        <div className={`${showPreview ? 'w-1/2' : 'w-full'} transition-all`}>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Description
-              </label>
-              <input
-                type="text"
-                value={prompts?.[activeTab]?.description || ''}
-                onChange={(e) => handleDescriptionChange(activeTab, e.target.value)}
-                placeholder="Brief description of this prompt..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium text-gray-700">
-                  System Prompt
-                </label>
-                <span className="text-xs text-gray-500">
-                  {getCharacterCount(prompts?.[activeTab]?.prompt)} characters
-                  {getCharacterCount(prompts?.[activeTab]?.prompt) < 100 && (
-                    <span className="text-red-500 ml-2">(min 100 required)</span>
-                  )}
-                </span>
-              </div>
-              <textarea
-                value={prompts?.[activeTab]?.prompt || ''}
-                onChange={(e) => handlePromptChange(activeTab, e.target.value)}
-                placeholder="Enter the system prompt..."
-                rows={20}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal font-mono text-sm resize-y"
-                style={{ minHeight: '400px' }}
-              />
-            </div>
-
-            {prompts?.[activeTab]?.last_modified && (
-              <p className="text-xs text-gray-500 mt-3">
-                Last modified: {new Date(prompts[activeTab].last_modified as string).toLocaleString('en-US', {
-                  month: 'numeric',
-                  day: 'numeric',
-                  year: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit',
-                  hour12: true
-                })}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Preview Panel */}
-        {showPreview && (
-          <div className="w-1/2">
-            <div className="bg-white rounded-lg shadow p-6 sticky top-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Preview</h3>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-gray-600">Language:</label>
-                  <select
-                    value={previewLanguage}
-                    onChange={(e) => setPreviewLanguage(e.target.value)}
-                    className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-royal"
-                  >
-                    <option value="en">English</option>
-                    {languages.map(lang => (
-                      <option key={lang.value} value={lang.value}>
-                        {lang.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+        <div className="flex gap-6">
+          {/* Editor Panel */}
+          <div className={`${showPreview ? 'w-1/2' : 'w-full'} transition-all`}>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <input
+                  type="text"
+                  value={prompts?.[activeTab]?.description || ''}
+                  onChange={(e) => handleDescriptionChange(activeTab, e.target.value)}
+                  placeholder="Brief description of this prompt..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
+                />
               </div>
 
-              <div className="mb-3 p-2 bg-gray-100 rounded text-xs text-gray-600">
-                This preview shows how the prompt will appear after variable interpolation
-                and language additions are applied.
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700">System Prompt</label>
+                  <span className="text-xs text-gray-500">
+                    {getCharacterCount(prompts?.[activeTab]?.prompt)} characters
+                    {getCharacterCount(prompts?.[activeTab]?.prompt) < 100 && (
+                      <span className="text-red-500 ml-2">(min 100 required)</span>
+                    )}
+                  </span>
+                </div>
+                <textarea
+                  value={prompts?.[activeTab]?.prompt || ''}
+                  onChange={(e) => handlePromptChange(activeTab, e.target.value)}
+                  placeholder="Enter the system prompt..."
+                  rows={20}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal font-mono text-sm resize-y"
+                  style={{ minHeight: '400px' }}
+                />
               </div>
 
-              {previewLoading ? (
-                <div className="flex items-center justify-center h-64">
-                  <p className="text-gray-500">Loading preview...</p>
-                </div>
-              ) : (
-                <div
-                  className="bg-gray-50 border border-gray-200 rounded-lg p-4 font-mono text-sm whitespace-pre-wrap overflow-auto"
-                  style={{ maxHeight: '500px' }}
-                >
-                  {previewContent || 'No preview available. Save changes first to see the interpolated prompt.'}
-                </div>
+              {prompts?.[activeTab]?.last_modified && (
+                <p className="text-xs text-gray-500 mt-3">
+                  Last modified:{' '}
+                  {new Date(prompts[activeTab].last_modified as string).toLocaleString('en-US', {
+                    month: 'numeric',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true,
+                  })}
+                </p>
               )}
-
-              <p className="text-xs text-gray-500 mt-3">
-                Preview character count: {previewContent?.length || 0}
-              </p>
             </div>
           </div>
-        )}
-      </div>
+
+          {/* Preview Panel */}
+          {showPreview && (
+            <div className="w-1/2">
+              <div className="bg-white rounded-lg shadow p-6 sticky top-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Preview</h3>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-600">Language:</label>
+                    <select
+                      value={previewLanguage}
+                      onChange={(e) => setPreviewLanguage(e.target.value)}
+                      className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-royal"
+                    >
+                      <option value="en">English</option>
+                      {languages.map((lang) => (
+                        <option key={lang.value} value={lang.value}>
+                          {lang.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mb-3 p-2 bg-gray-100 rounded text-xs text-gray-600">
+                  This preview shows how the prompt will appear after variable interpolation and language additions are
+                  applied.
+                </div>
+
+                {previewLoading ? (
+                  <div className="flex items-center justify-center h-64">
+                    <p className="text-gray-500">Loading preview...</p>
+                  </div>
+                ) : (
+                  <div
+                    className="bg-gray-50 border border-gray-200 rounded-lg p-4 font-mono text-sm whitespace-pre-wrap overflow-auto"
+                    style={{ maxHeight: '500px' }}
+                  >
+                    {previewContent || 'No preview available. Save changes first to see the interpolated prompt.'}
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-500 mt-3">Preview character count: {previewContent?.length || 0}</p>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

@@ -54,31 +54,24 @@ export default function useNotifications(limit = 30) {
     };
   }, [socket, refetch]);
 
-  const markRead = useCallback(
-    async (notificationId: number) => {
-      try {
-        await postJson(`/admin/api/notifications/${notificationId}/read`);
-        setNotifications((prev) =>
-          prev.map((n) =>
-            n.notification_id === notificationId && !n.read_at
-              ? { ...n, read_at: new Date().toISOString() }
-              : n
-          )
-        );
-        setUnreadCount((count) => Math.max(0, count - 1));
-      } catch {
-        // Best-effort: the next refetch reconciles.
-      }
-    },
-    []
-  );
+  const markRead = useCallback(async (notificationId: number) => {
+    try {
+      await postJson(`/admin/api/notifications/${notificationId}/read`);
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.notification_id === notificationId && !n.read_at ? { ...n, read_at: new Date().toISOString() } : n,
+        ),
+      );
+      setUnreadCount((count) => Math.max(0, count - 1));
+    } catch {
+      // Best-effort: the next refetch reconciles.
+    }
+  }, []);
 
   const markAllRead = useCallback(async () => {
     try {
       await postJson('/admin/api/notifications/read-all');
-      setNotifications((prev) =>
-        prev.map((n) => (n.read_at ? n : { ...n, read_at: new Date().toISOString() }))
-      );
+      setNotifications((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: new Date().toISOString() })));
       setUnreadCount(0);
     } catch {
       // Best-effort: the next refetch reconciles.
@@ -102,12 +95,10 @@ export async function fetchNotificationPreferences(): Promise<NotificationPrefer
 }
 
 export async function saveNotificationPreferences(
-  prefs: Partial<NotificationPreferences>
+  prefs: Partial<NotificationPreferences>,
 ): Promise<NotificationPreferences> {
-  const data = await postJson<{ preferences: NotificationPreferences }>(
-    '/admin/api/notifications/preferences',
-    prefs,
-    { method: 'PUT' }
-  );
+  const data = await postJson<{ preferences: NotificationPreferences }>('/admin/api/notifications/preferences', prefs, {
+    method: 'PUT',
+  });
   return data.preferences;
 }

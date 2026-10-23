@@ -103,9 +103,24 @@ describe('GET /api/auth/squawk/callback', () => {
     const { sid, state } = await startedSession(app);
     await request(app).post('/test/seed').set('Cookie', sid);
     squawkMocks.exchangeCode.mockResolvedValue({ access_token: 'tok' });
-    squawkMocks.verifyAccessToken.mockResolvedValue({ iss: 'https://squawk.test', sub: 'usr:abc', aud: 'svc_test', scope: 'role:therapist', preferred_username: 'p0042', iat: 1, exp: 2 });
+    squawkMocks.verifyAccessToken.mockResolvedValue({
+      iss: 'https://squawk.test',
+      sub: 'usr:abc',
+      aud: 'svc_test',
+      scope: 'role:therapist',
+      preferred_username: 'p0042',
+      iat: 1,
+      exp: 2,
+    });
     dbMocks.getUserBySquawkId.mockResolvedValue(null);
-    dbMocks.getUserByUsernameForLogin.mockResolvedValue({ userid: 7, username: 'p0042', role: 'participant', organization_id: 3, is_sandbox: false, squawk_user_id: null });
+    dbMocks.getUserByUsernameForLogin.mockResolvedValue({
+      userid: 7,
+      username: 'p0042',
+      role: 'participant',
+      organization_id: 3,
+      is_sandbox: false,
+      squawk_user_id: null,
+    });
 
     const res = await request(app).get(`/api/auth/squawk/callback?code=c1&state=${state}`).set('Cookie', sid);
     expect(res.status).toBe(302);
@@ -117,15 +132,37 @@ describe('GET /api/auth/squawk/callback', () => {
     const newSid = sidOf(res.headers['set-cookie']);
     expect(newSid).not.toBe(sid);
     const s = await request(app).get('/test/session').set('Cookie', newSid);
-    expect(s.body).toMatchObject({ userId: 7, username: 'p0042', userRole: 'therapist', orgId: 3, isSandbox: false, consentAccepted: true, mfaVerified: true });
+    expect(s.body).toMatchObject({
+      userId: 7,
+      username: 'p0042',
+      userRole: 'therapist',
+      orgId: 3,
+      isSandbox: false,
+      consentAccepted: true,
+      mfaVerified: true,
+    });
   });
 
   it('maps the owner passkey to the configured researcher account', async () => {
     const app = makeApp();
     const { sid, state } = await startedSession(app);
     squawkMocks.exchangeCode.mockResolvedValue({ access_token: 'tok' });
-    squawkMocks.verifyAccessToken.mockResolvedValue({ iss: 'https://squawk.test', sub: 'owner', aud: 'svc_test', scope: 'role:therapist role:researcher', iat: 1, exp: 2 });
-    dbMocks.getUserByUsernameForLogin.mockResolvedValue({ userid: 1, username: 'nathan', role: 'researcher', organization_id: 1, is_sandbox: false, squawk_user_id: null });
+    squawkMocks.verifyAccessToken.mockResolvedValue({
+      iss: 'https://squawk.test',
+      sub: 'owner',
+      aud: 'svc_test',
+      scope: 'role:therapist role:researcher',
+      iat: 1,
+      exp: 2,
+    });
+    dbMocks.getUserByUsernameForLogin.mockResolvedValue({
+      userid: 1,
+      username: 'nathan',
+      role: 'researcher',
+      organization_id: 1,
+      is_sandbox: false,
+      squawk_user_id: null,
+    });
     const res = await request(app).get(`/api/auth/squawk/callback?code=c1&state=${state}`).set('Cookie', sid);
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/admin');
@@ -151,7 +188,14 @@ describe('GET /api/auth/squawk/callback', () => {
     expect(res.headers.location).toBe('/login?error=invalid_token');
 
     const third = await startedSession(app);
-    squawkMocks.verifyAccessToken.mockResolvedValue({ iss: 'https://squawk.test', sub: 'usr:zzz', aud: 'svc_test', preferred_username: 'ghost', iat: 1, exp: 2 });
+    squawkMocks.verifyAccessToken.mockResolvedValue({
+      iss: 'https://squawk.test',
+      sub: 'usr:zzz',
+      aud: 'svc_test',
+      preferred_username: 'ghost',
+      iat: 1,
+      exp: 2,
+    });
     dbMocks.getUserBySquawkId.mockResolvedValue(null);
     dbMocks.getUserByUsernameForLogin.mockResolvedValue(null);
     res = await request(app).get(`/api/auth/squawk/callback?code=c1&state=${third.state}`).set('Cookie', third.sid);
@@ -171,24 +215,36 @@ describe('ceremony proxies', () => {
   it('relays the password ceremony and maps refusals', async () => {
     const app = makeApp();
     const { SquawkError } = await import('../../services/squawk.service.js');
-    squawkMocks.loginPassword.mockResolvedValue({ redirect_to: 'https://app.test/api/auth/squawk/callback?code=x&state=y' });
-    let res = await request(app).post('/api/auth/squawk/password').send({ login_challenge: 'lc', username: 'p0042', password: 'pw' });
+    squawkMocks.loginPassword.mockResolvedValue({
+      redirect_to: 'https://app.test/api/auth/squawk/callback?code=x&state=y',
+    });
+    let res = await request(app)
+      .post('/api/auth/squawk/password')
+      .send({ login_challenge: 'lc', username: 'p0042', password: 'pw' });
     expect(res.status).toBe(200);
     expect(res.body.redirect_to).toContain('code=x');
     expect(squawkMocks.loginPassword).toHaveBeenCalledWith('lc', 'p0042', 'pw');
 
-    squawkMocks.loginPassword.mockRejectedValue(new SquawkError(401, 'password_rejected', 'wrong username or password'));
-    res = await request(app).post('/api/auth/squawk/password').send({ login_challenge: 'lc', username: 'p0042', password: 'pw' });
+    squawkMocks.loginPassword.mockRejectedValue(
+      new SquawkError(401, 'password_rejected', 'wrong username or password'),
+    );
+    res = await request(app)
+      .post('/api/auth/squawk/password')
+      .send({ login_challenge: 'lc', username: 'p0042', password: 'pw' });
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: 'Invalid username or password', code: 'password_rejected' });
 
     squawkMocks.loginPassword.mockRejectedValue(new SquawkError(429, 'too_many_attempts', '', 60));
-    res = await request(app).post('/api/auth/squawk/password').send({ login_challenge: 'lc', username: 'p0042', password: 'pw' });
+    res = await request(app)
+      .post('/api/auth/squawk/password')
+      .send({ login_challenge: 'lc', username: 'p0042', password: 'pw' });
     expect(res.status).toBe(429);
     expect(res.headers['retry-after']).toBe('60');
 
     squawkMocks.loginPassword.mockRejectedValue(new SquawkError(500, 'server_error'));
-    res = await request(app).post('/api/auth/squawk/password').send({ login_challenge: 'lc', username: 'p0042', password: 'pw' });
+    res = await request(app)
+      .post('/api/auth/squawk/password')
+      .send({ login_challenge: 'lc', username: 'p0042', password: 'pw' });
     expect(res.status).toBe(502);
 
     res = await request(app).post('/api/auth/squawk/password').send({ username: 'p0042' });

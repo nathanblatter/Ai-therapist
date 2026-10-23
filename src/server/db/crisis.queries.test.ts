@@ -19,8 +19,7 @@ beforeEach(() => {
 // caller's org, OR ownerless and the caller is the irb-study org (never
 // "anonymous is visible to every org").
 const CRISIS_OWNER = 'COALESCE(ts.user_id, ce.client_user_id)';
-const CRISIS_ORG_CLAUSE =
-  `(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ${CRISIS_OWNER} AND ou.organization_id = $1) OR (${CRISIS_OWNER} IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))`;
+const CRISIS_ORG_CLAUSE = `(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ${CRISIS_OWNER} AND ou.organization_id = $1) OR (${CRISIS_OWNER} IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))`;
 const SESSION_ORG_CLAUSE =
   "(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $1) OR (ts.user_id IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))";
 

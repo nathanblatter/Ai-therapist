@@ -112,7 +112,7 @@ export class TranscriptAssembler {
     const ordered = [...this.fragments].sort((a, b) => a.start_ms - b.start_ms);
     this.fragments = [];
 
-    const text = ordered.map(f => f.delta).join('');
+    const text = ordered.map((f) => f.delta).join('');
     if (!text.trim()) return;
 
     this.onTurn(text, ordered[0].start_ms, ordered[ordered.length - 1].end_ms);
@@ -303,7 +303,9 @@ export class SidebandManager {
     try {
       const { safetyIdentifierForSession } = await import('../utils/safetyIdentifier.js');
       safetyIdentifier = await safetyIdentifierForSession(sessionId);
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
 
     const ws = new WebSocket(wsUrl, {
       headers: {
@@ -319,9 +321,11 @@ export class SidebandManager {
       model: opts.model,
       backendModel: opts.backendModel,
       userTranscript: new TranscriptAssembler(this.turnGapMs, (text, startMs, endMs) =>
-        this.onUserTurn(sessionId, text, startMs, endMs)),
+        this.onUserTurn(sessionId, text, startMs, endMs),
+      ),
       assistantTranscript: new TranscriptAssembler(this.turnGapMs, (text, startMs, endMs) =>
-        this.onAssistantTurn(sessionId, text, startMs, endMs)),
+        this.onAssistantTurn(sessionId, text, startMs, endMs),
+      ),
       pendingCalls: new Map(),
       meteredResponses: new Set(),
       lastUsageSeconds: 0,
@@ -340,15 +344,16 @@ export class SidebandManager {
     this.sessions.set(sessionId, state);
 
     ws.on('open', () => this.handleOpen(sessionId, liveSessionId));
-    ws.on('message', data => void this.handleMessage(sessionId, data));
-    ws.on('error', err => void this.handleError(sessionId, err));
+    ws.on('message', (data) => void this.handleMessage(sessionId, data));
+    ws.on('error', (err) => void this.handleError(sessionId, err));
     ws.on('close', (code, reason) => void this.handleClose(sessionId, code, reason));
     ws.on('unexpected-response', (_req, res) => {
       let body = '';
-      res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      res.on('data', (chunk: Buffer) => {
+        body += chunk.toString();
+      });
       res.on('end', () => {
-        const detail =
-          `Live sideband upgrade rejected: HTTP ${res.statusCode} for ${liveSessionId} — ${body || '(empty body)'}`;
+        const detail = `Live sideband upgrade rejected: HTTP ${res.statusCode} for ${liveSessionId} — ${body || '(empty body)'}`;
         console.error(`[Live] ${detail}`);
         // Abort the handshake explicitly. The ws library only calls
         // abortHandshake when 'unexpected-response' has NO listener
@@ -357,13 +362,24 @@ export class SidebandManager {
         // 'error'. connectAndWait waits on exactly those, so an attach
         // rejection (401 on a rotated key, 404, 429) could not fail fast and
         // always burned the full timeout before the participant was told.
-        try { ws.terminate(); } catch { /* already gone */ }
+        try {
+          ws.terminate();
+        } catch {
+          /* already gone */
+        }
         this.sessions.delete(sessionId);
         void this.logConnectionError(sessionId, new Error(detail));
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'sideband:error', {
-            sessionId, error: detail, statusCode: res.statusCode,
-          }, sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'sideband:error',
+            {
+              sessionId,
+              error: detail,
+              statusCode: res.statusCode,
+            },
+            sessionId,
+          );
         }
         // Do not leave an active voice session running with no monitoring —
         // UNLESS this is the opening attach, where connectAndWait is retrying
@@ -415,7 +431,9 @@ export class SidebandManager {
       if (remaining <= 0) break;
       try {
         await this.attachOnce(
-          sessionId, liveSessionId, apiKey,
+          sessionId,
+          liveSessionId,
+          apiKey,
           { model: opts.model, backendModel: opts.backendModel },
           Math.min(this.attachAttemptMs, remaining),
         );
@@ -428,10 +446,10 @@ export class SidebandManager {
         if (attempt >= maxAttempts || Date.now() + backoff >= deadline) break;
         console.warn(
           `[Live] Sideband attach attempt ${attempt}/${maxAttempts} failed for ` +
-          `${sessionId.substring(0, 12)}... (${err instanceof Error ? err.message : String(err)}); ` +
-          `retrying in ${backoff}ms.`,
+            `${sessionId.substring(0, 12)}... (${err instanceof Error ? err.message : String(err)}); ` +
+            `retrying in ${backoff}ms.`,
         );
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
           const t = setTimeout(resolve, backoff);
           t.unref?.();
         });
@@ -442,9 +460,18 @@ export class SidebandManager {
     const detail = `sideband attach failed after ${maxAttempts} attempts within ${budgetMs}ms: ${message}`;
     await this.logConnectionError(sessionId, new Error(detail));
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:attach-failed', {
-        sessionId, liveSessionId, error: detail, attempts: maxAttempts, failedAt: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:attach-failed',
+        {
+          sessionId,
+          liveSessionId,
+          error: detail,
+          attempts: maxAttempts,
+          failedAt: new Date(),
+        },
+        sessionId,
+      );
     }
     throw lastError instanceof Error ? lastError : new Error(detail);
   }
@@ -462,13 +489,19 @@ export class SidebandManager {
 
     try {
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(
-          () => { cleanup(); reject(new Error(`Live sideband did not open within ${timeoutMs}ms`)); },
-          timeoutMs,
-        );
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error(`Live sideband did not open within ${timeoutMs}ms`));
+        }, timeoutMs);
         timer.unref?.();
-        const onOpen = () => { cleanup(); resolve(); };
-        const onFail = () => { cleanup(); reject(new Error('Live sideband closed before opening')); };
+        const onOpen = () => {
+          cleanup();
+          resolve();
+        };
+        const onFail = () => {
+          cleanup();
+          reject(new Error('Live sideband closed before opening'));
+        };
         const cleanup = () => {
           clearTimeout(timer);
           ws.off('open', onOpen);
@@ -505,7 +538,9 @@ export class SidebandManager {
     try {
       ws.removeAllListeners();
       ws.terminate();
-    } catch { /* already gone */ }
+    } catch {
+      /* already gone */
+    }
   }
 
   /**
@@ -531,7 +566,7 @@ export class SidebandManager {
 
       console.error(
         `[Live] UNMONITORED SESSION ${sessionId.substring(0, 12)}... — ${reason}. ` +
-        'Ending it: with no sideband there is no crisis detection on the voice path.',
+          'Ending it: with no sideband there is no crisis detection on the voice path.',
       );
 
       // Alert first: if the teardown itself fails, the page still went out.
@@ -539,17 +574,24 @@ export class SidebandManager {
         const { sendCrisisAlert } = await import('./crisisAlert.service.js');
         await sendCrisisAlert(
           `AI-Therapist: voice session ${sessionId.substring(0, 12)}... lost its monitoring connection ` +
-          `(${reason}) and was ended automatically. No crisis detection was running on that session ` +
-          'after the disconnect. Review the transcript.',
+            `(${reason}) and was ended automatically. No crisis detection was running on that session ` +
+            'after the disconnect. Review the transcript.',
         );
       } catch (err) {
         console.error('[Live] Failed to page on unmonitored session:', err);
       }
 
       if (global.io) {
-        void broadcastAdminEventForSession(global.io, 'sideband:unmonitored', {
-          sessionId, reason, endedAt: new Date(),
-        }, sessionId);
+        void broadcastAdminEventForSession(
+          global.io,
+          'sideband:unmonitored',
+          {
+            sessionId,
+            reason,
+            endedAt: new Date(),
+          },
+          sessionId,
+        );
       }
 
       const { serverEndSession } = await import('./sessionLifecycle.service.js');
@@ -586,15 +628,14 @@ export class SidebandManager {
     const short = sessionId.substring(0, 12);
     console.error(
       `[Live] MODERATION TERMINATION for ${short}... — OpenAI's safety filter ended this session. ` +
-      'Surfacing crisis resources to the participant and alerting the study team.',
+        'Surfacing crisis resources to the participant and alerting the study team.',
     );
 
     // 1. Participant-facing. Emitted before anything that can throw.
     global.io?.to(`session:${sessionId}`).emit('session:moderation-terminated', {
       sessionId,
       reason: 'content_filter',
-      message:
-        'The connection ended unexpectedly. That was not your fault, and nothing you said was wrong.',
+      message: 'The connection ended unexpectedly. That was not your fault, and nothing you said was wrong.',
     });
 
     // Was this session already known to be in crisis? Changes what we tell the
@@ -616,8 +657,8 @@ export class SidebandManager {
       const { sendCrisisAlert } = await import('./crisisAlert.service.js');
       await sendCrisisAlert(
         `AI-Therapist: OpenAI's safety filter TERMINATED voice session ${short}... mid-conversation` +
-        `${flagged ? ' DURING AN ACTIVE CRISIS FLAG' : ''}. The participant lost the assistant without warning. ` +
-        'Review the transcript and consider reaching out.',
+          `${flagged ? ' DURING AN ACTIVE CRISIS FLAG' : ''}. The participant lost the assistant without warning. ` +
+          'Review the transcript and consider reaching out.',
       );
     } catch (err) {
       console.error(`[Live] Failed to alert on moderation termination for ${short}...:`, err);
@@ -636,9 +677,16 @@ export class SidebandManager {
     }
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'session:moderation-terminated', {
-        sessionId, crisisFlagged: flagged, timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:moderation-terminated',
+        {
+          sessionId,
+          crisisFlagged: flagged,
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
   }
 
@@ -659,9 +707,17 @@ export class SidebandManager {
       );
 
       if (global.io) {
-        void broadcastAdminEventForSession(global.io, 'sideband:connected', {
-          sessionId, callId: liveSessionId, channel: 'live', connectedAt: new Date(),
-        }, sessionId);
+        void broadcastAdminEventForSession(
+          global.io,
+          'sideband:connected',
+          {
+            sessionId,
+            callId: liveSessionId,
+            channel: 'live',
+            connectedAt: new Date(),
+          },
+          sessionId,
+        );
       }
 
       this.startKeepalive(sessionId);
@@ -680,7 +736,9 @@ export class SidebandManager {
     const timer = setInterval(() => {
       const s = this.sessions.get(sessionId);
       if (s && s.ws.readyState === WebSocket.OPEN) {
-        try { s.ws.ping(); } catch (err) {
+        try {
+          s.ws.ping();
+        } catch (err) {
           console.error(`[Live] Keepalive ping failed for ${sessionId.substring(0, 12)}...:`, err);
         }
       } else {
@@ -729,9 +787,16 @@ export class SidebandManager {
       case 'session.started':
       case 'session.updated':
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'session:openai-update', {
-            sessionId, eventType: event.type, data: event,
-          }, sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:openai-update',
+            {
+              sessionId,
+              eventType: event.type,
+              data: event,
+            },
+            sessionId,
+          );
         }
         break;
 
@@ -764,13 +829,18 @@ export class SidebandManager {
       case 'session.delegation.created':
         if (global.io) {
           const delegation = event.delegation as { id?: string; target?: string } | undefined;
-          void broadcastAdminEventForSession(global.io, 'live:delegation', {
+          void broadcastAdminEventForSession(
+            global.io,
+            'live:delegation',
+            {
+              sessionId,
+              delegationId: delegation?.id ?? null,
+              target: delegation?.target ?? null,
+              offsetMs: event.offset_ms ?? null,
+              timestamp: new Date(),
+            },
             sessionId,
-            delegationId: delegation?.id ?? null,
-            target: delegation?.target ?? null,
-            offsetMs: event.offset_ms ?? null,
-            timestamp: new Date(),
-          }, sessionId);
+          );
         }
         break;
 
@@ -818,9 +888,17 @@ export class SidebandManager {
         }
         console.log(`[Live] Session closed for ${sessionId.substring(0, 12)}...: reason=${String(event.reason)}`);
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'live:closed', {
-            sessionId, reason: event.reason ?? null, usage: event.usage ?? null, timestamp: new Date(),
-          }, sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'live:closed',
+            {
+              sessionId,
+              reason: event.reason ?? null,
+              usage: event.usage ?? null,
+              timestamp: new Date(),
+            },
+            sessionId,
+          );
         }
         // reason 'content' means OPENAI'S OWN safety filter ended the session,
         // not the participant and not us. In a mental-health context that fires
@@ -883,9 +961,7 @@ export class SidebandManager {
 
     switch (inner.type) {
       case 'response.output_item.done': {
-        const item = inner.item as
-          | { type?: string; name?: string; call_id?: string; arguments?: string }
-          | undefined;
+        const item = inner.item as { type?: string; name?: string; call_id?: string; arguments?: string } | undefined;
         if (item?.type !== 'function_call' || !item.call_id || !item.name) return;
         state.pendingCalls.set(item.call_id, {
           name: item.name,
@@ -938,18 +1014,20 @@ export class SidebandManager {
     void (async () => {
       let messageId: string | number | null = null;
       try {
-        const inserted = await insertMessagesBatch([{
-          session_id: sessionId,
-          role: 'user',
-          // 'voice' / 'response', not 'message': analytics.queries.ts and
-          // adminSessions.queries.ts count voice turns with
-          // `message_type = 'voice'`, so anything else reports zero voice
-          // messages for every GPT-Live session.
-          message_type: 'voice',
-          content: text,
-          content_redacted: null,
-          metadata: { channel: 'live', start_ms: startMs, end_ms: endMs },
-        }]);
+        const inserted = await insertMessagesBatch([
+          {
+            session_id: sessionId,
+            role: 'user',
+            // 'voice' / 'response', not 'message': analytics.queries.ts and
+            // adminSessions.queries.ts count voice turns with
+            // `message_type = 'voice'`, so anything else reports zero voice
+            // messages for every GPT-Live session.
+            message_type: 'voice',
+            content: text,
+            content_redacted: null,
+            metadata: { channel: 'live', start_ms: startMs, end_ms: endMs },
+          },
+        ]);
         messageId = inserted?.[0]?.message_id ?? null;
       } catch (err) {
         console.error(`[Live] Failed to persist user turn for ${sessionId.substring(0, 12)}...:`, err);
@@ -977,15 +1055,17 @@ export class SidebandManager {
 
     void (async () => {
       try {
-        await insertMessagesBatch([{
-          session_id: sessionId,
-          role: 'assistant',
-          // Matches the assistant-side voice convention in existing data.
-          message_type: 'response',
-          content: text,
-          content_redacted: null,
-          metadata: { channel: 'live', start_ms: startMs, end_ms: endMs },
-        }]);
+        await insertMessagesBatch([
+          {
+            session_id: sessionId,
+            role: 'assistant',
+            // Matches the assistant-side voice convention in existing data.
+            message_type: 'response',
+            content: text,
+            content_redacted: null,
+            metadata: { channel: 'live', start_ms: startMs, end_ms: endMs },
+          },
+        ]);
       } catch (err) {
         console.error(`[Live] Failed to persist assistant turn for ${sessionId.substring(0, 12)}...:`, err);
       }
@@ -1022,18 +1102,28 @@ export class SidebandManager {
       else state.assistantTurnIndex += 1;
     }
 
-    void broadcastAdminEventForSession(global.io, 'sideband:transcript', {
+    void broadcastAdminEventForSession(
+      global.io,
+      'sideband:transcript',
+      {
+        sessionId,
+        itemId,
+        ...payload,
+        timestamp: new Date(),
+      },
       sessionId,
-      itemId,
-      ...payload,
-      timestamp: new Date(),
-    }, sessionId);
+    );
 
-    void broadcastAdminEventForSession(global.io, 'session:activity', {
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:activity',
+      {
+        sessionId,
+        lastActivity: new Date(),
+        deltaMessages: payload.final ? 1 : 0,
+      },
       sessionId,
-      lastActivity: new Date(),
-      deltaMessages: payload.final ? 1 : 0,
-    }, sessionId);
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -1062,22 +1152,38 @@ export class SidebandManager {
       parseError = err instanceof Error ? err.message : String(err);
     }
 
-    await insertMessagesBatch([{
-      session_id: sessionId,
-      role: 'system',
-      message_type: 'tool_call',
-      content: `Tool called: ${call.name}`,
-      content_redacted: null,
-      metadata: {
-        tool_name: call.name, call_id: callId, arguments: args,
-        delegation_id: call.delegationId, channel: 'live', status: 'executing',
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'system',
+        message_type: 'tool_call',
+        content: `Tool called: ${call.name}`,
+        content_redacted: null,
+        metadata: {
+          tool_name: call.name,
+          call_id: callId,
+          arguments: args,
+          delegation_id: call.delegationId,
+          channel: 'live',
+          status: 'executing',
+        },
       },
-    }]).catch(err => console.error('[Live] Failed to log tool call:', err));
+    ]).catch((err) => console.error('[Live] Failed to log tool call:', err));
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
-        sessionId, callId, toolName: call.name, args, status: 'executing', timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:tool-call',
+        {
+          sessionId,
+          callId,
+          toolName: call.name,
+          args,
+          status: 'executing',
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
 
     let result: unknown;
@@ -1110,29 +1216,41 @@ export class SidebandManager {
       console.error(`[Live] Failed to return tool result for ${call.name}:`, err);
     }
 
-    await insertMessagesBatch([{
-      session_id: sessionId,
-      role: 'system',
-      message_type: 'tool_response',
-      content: failure ? `Tool error: ${call.name}` : `Tool response: ${call.name}`,
-      content_redacted: null,
-      metadata: {
-        tool_name: call.name, call_id: callId, channel: 'live',
-        ...(failure ? { error: failure, status: 'failed' } : { response: result, status: 'completed' }),
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'system',
+        message_type: 'tool_response',
+        content: failure ? `Tool error: ${call.name}` : `Tool response: ${call.name}`,
+        content_redacted: null,
+        metadata: {
+          tool_name: call.name,
+          call_id: callId,
+          channel: 'live',
+          ...(failure ? { error: failure, status: 'failed' } : { response: result, status: 'completed' }),
+        },
       },
-    }]).catch(err => console.error('[Live] Failed to log tool response:', err));
+    ]).catch((err) => console.error('[Live] Failed to log tool response:', err));
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
-        sessionId, callId, toolName: call.name, args,
-        ...(failure ? { error: failure, status: 'failed' } : { result, status: 'completed' }),
-        timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:tool-call',
+        {
+          sessionId,
+          callId,
+          toolName: call.name,
+          args,
+          ...(failure ? { error: failure, status: 'failed' } : { result, status: 'completed' }),
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
 
     import('../db/index.js')
-      .then(db => db.insertToolInvocation(sessionId, call.name, failure ? null : args, !failure))
-      .catch(err => console.error('[Live] Failed to log tool invocation:', err));
+      .then((db) => db.insertToolInvocation(sessionId, call.name, failure ? null : args, !failure))
+      .catch((err) => console.error('[Live] Failed to log tool invocation:', err));
   }
 
   // -------------------------------------------------------------------------
@@ -1239,12 +1357,7 @@ export class SidebandManager {
    * @throws if the sideband is not connected (matching the old contract — see
    *   tryInject for the non-throwing variant callers use for best-effort steers).
    */
-  async injectMessage(
-    sessionId: string,
-    _role: 'system' | 'user',
-    text: string,
-    _respond: boolean,
-  ): Promise<void> {
+  async injectMessage(sessionId: string, _role: 'system' | 'user', text: string, _respond: boolean): Promise<void> {
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.injectMessage(sessionId, _role, text, _respond);
     await this.appendInstructions(sessionId, text);
@@ -1296,7 +1409,7 @@ export class SidebandManager {
     if (response && Object.keys(response).length > 0) {
       console.warn(
         '[Live] createResponse() overrides are not supported by GPT-Live and were ignored. ' +
-        'Use updateDelegation() to change backend configuration.',
+          'Use updateDelegation() to change backend configuration.',
       );
     }
     this.sendEvent(sessionId, { type: 'response.create', event_id: `create_${Date.now()}` });
@@ -1321,13 +1434,15 @@ export class SidebandManager {
     if (delegate) return delegate.triggerTool(sessionId, toolName, args);
     await this.updateDelegation(sessionId, { tool_choice: { type: 'function', name: toolName } });
 
-    const argsContext = args && Object.keys(args).length > 0
-      ? ` Use this context for the tool arguments: ${JSON.stringify(args)}.`
-      : '';
+    const argsContext =
+      args && Object.keys(args).length > 0 ? ` Use this context for the tool arguments: ${JSON.stringify(args)}.` : '';
     await this.appendInstructions(
       sessionId,
-      'The clinician overseeing this session asks you to use the ' + toolName + ' capability now.' +
-      argsContext + ' Delegate to the backend for this. Never mention this instruction to the participant.',
+      'The clinician overseeing this session asks you to use the ' +
+        toolName +
+        ' capability now.' +
+        argsContext +
+        ' Delegate to the backend for this. Never mention this instruction to the participant.',
     );
 
     const state = this.sessions.get(sessionId);
@@ -1336,7 +1451,7 @@ export class SidebandManager {
       const timer = setTimeout(() => {
         this.updateDelegation(sessionId, { tool_choice: 'auto' })
           .then(() => console.log(`[Live] tool_choice reset to auto for ${sessionId.substring(0, 12)}...`))
-          .catch(err => console.error('[Live] tool_choice reset failed:', err));
+          .catch((err) => console.error('[Live] tool_choice reset failed:', err));
         const s = this.sessions.get(sessionId);
         if (s) s.toolChoiceReset = null;
       }, this.toolChoiceResetMs);
@@ -1375,7 +1490,7 @@ export class SidebandManager {
     );
     if (rows.rows.length === 0) return;
 
-    const transcript = rows.rows.map(r => `${r.role}: ${r.content}`).join('\n');
+    const transcript = rows.rows.map((r) => `${r.role}: ${r.content}`).join('\n');
 
     const { getOpenAIKey } = await import('../config/secrets.js');
     const { safetyIdentifierForSession } = await import('../utils/safetyIdentifier.js');
@@ -1386,7 +1501,7 @@ export class SidebandManager {
       model: state.backendModel,
       instructions:
         'Summarize the therapy conversation SO FAR in ONE short paragraph (60 words or fewer) for internal use ' +
-        'only — this is never shown to the participant. Cover: the main theme, the participant\'s emotional ' +
+        "only — this is never shown to the participant. Cover: the main theme, the participant's emotional " +
         'trajectory, and what has landed or helped so far, if anything. Plain prose, no headers, no lists.',
       input: transcript,
       store: false,
@@ -1398,8 +1513,11 @@ export class SidebandManager {
 
     const { recordLlmUsage } = await import('../db/index.js');
     await recordLlmUsage(
-      sessionId, 'insights', state.backendModel,
-      result.usage?.input_tokens ?? null, result.usage?.output_tokens ?? null,
+      sessionId,
+      'insights',
+      state.backendModel,
+      result.usage?.input_tokens ?? null,
+      result.usage?.output_tokens ?? null,
     );
 
     await this.appendThinking(sessionId, `Recap of the session so far: ${text}`);
@@ -1452,8 +1570,11 @@ export class SidebandManager {
     for (const phase of await buildPhaseNudgeSchedule(sessionId)) {
       const timer = setTimeout(() => {
         this.tryInject(sessionId, 'system', phase.text, false)
-          .then(ok => ok && console.log(`[Live] Phase nudge (${phase.at * 100}%) sent to ${sessionId.substring(0, 12)}...`))
-          .catch(err => console.error('[Live] Phase nudge failed:', err));
+          .then(
+            (ok) =>
+              ok && console.log(`[Live] Phase nudge (${phase.at * 100}%) sent to ${sessionId.substring(0, 12)}...`),
+          )
+          .catch((err) => console.error('[Live] Phase nudge failed:', err));
       }, phase.delayMs);
       timer.unref?.();
       state.phaseTimers.push(timer);
@@ -1480,15 +1601,19 @@ export class SidebandManager {
     };
     if (features.regrounding_enabled !== true) return;
 
-    const minutes = typeof features.regrounding_interval_minutes === 'number'
-      && features.regrounding_interval_minutes > 0
-      ? features.regrounding_interval_minutes
-      : 5;
+    const minutes =
+      typeof features.regrounding_interval_minutes === 'number' && features.regrounding_interval_minutes > 0
+        ? features.regrounding_interval_minutes
+        : 5;
 
-    const timer = setInterval(() => {
-      this.runRegroundingSummary(sessionId).catch(err =>
-        console.error(`[Live] Re-grounding summary failed for ${sessionId.substring(0, 12)}...:`, err));
-    }, minutes * 60 * 1000);
+    const timer = setInterval(
+      () => {
+        this.runRegroundingSummary(sessionId).catch((err) =>
+          console.error(`[Live] Re-grounding summary failed for ${sessionId.substring(0, 12)}...:`, err),
+        );
+      },
+      minutes * 60 * 1000,
+    );
     timer.unref?.();
     state.regrounding = timer;
     console.log(`[Live] Scheduled re-grounding every ${minutes}min for ${sessionId.substring(0, 12)}...`);
@@ -1499,7 +1624,7 @@ export class SidebandManager {
     if (state.keepalive) clearInterval(state.keepalive);
     if (state.regrounding) clearInterval(state.regrounding);
     if (state.toolChoiceReset) clearTimeout(state.toolChoiceReset);
-    state.phaseTimers.forEach(t => clearTimeout(t));
+    state.phaseTimers.forEach((t) => clearTimeout(t));
     state.keepalive = null;
     state.regrounding = null;
     state.toolChoiceReset = null;
@@ -1526,14 +1651,21 @@ export class SidebandManager {
 
   private async handleError(sessionId: string, error: Error): Promise<void> {
     console.error(`[Live] WebSocket error for ${sessionId.substring(0, 12)}...:`, error.message);
-    await pool.query(
-      'UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2',
-      [error.message, sessionId],
-    ).catch(() => {});
+    await pool
+      .query('UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2', [error.message, sessionId])
+      .catch(() => {});
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:status-update', {
-        sessionId, status: 'error', error: error.message, timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:status-update',
+        {
+          sessionId,
+          status: 'error',
+          error: error.message,
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
   }
 
@@ -1569,17 +1701,27 @@ export class SidebandManager {
     if (state) this.clearTimers(state);
     this.sessions.delete(sessionId);
 
-    await pool.query(
-      `UPDATE therapy_sessions
+    await pool
+      .query(
+        `UPDATE therapy_sessions
           SET sideband_connected = FALSE, sideband_disconnected_at = CURRENT_TIMESTAMP
         WHERE session_id = $1`,
-      [sessionId],
-    ).catch(() => {});
+        [sessionId],
+      )
+      .catch(() => {});
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:disconnected', {
-        sessionId, code, reason: reason?.toString(), disconnectedAt: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:disconnected',
+        {
+          sessionId,
+          code,
+          reason: reason?.toString(),
+          disconnectedAt: new Date(),
+        },
+        sessionId,
+      );
     }
 
     // state.finalized means session.closed already arrived: the OpenAI-side live
@@ -1593,27 +1735,34 @@ export class SidebandManager {
     // crisis recovery the client is trying to start.
     if (this.endedSessions.has(sessionId) || code === 1000 || !state || state.finalized) return;
 
-    const status = await pool.query<{ status: string }>(
-      'SELECT status FROM therapy_sessions WHERE session_id = $1', [sessionId],
-    ).catch(() => null);
+    const status = await pool
+      .query<{ status: string }>('SELECT status FROM therapy_sessions WHERE session_id = $1', [sessionId])
+      .catch(() => null);
     if (status?.rows[0]?.status !== 'active') return;
 
     const attempts = state.reconnectAttempts;
     if (attempts >= this.maxReconnectAttempts) {
       console.error(`[Live] Max reconnection attempts reached for ${sessionId.substring(0, 12)}...`);
       await this.failClosedUnmonitored(
-        sessionId, `sideband reconnect exhausted after ${this.maxReconnectAttempts} attempts`,
+        sessionId,
+        `sideband reconnect exhausted after ${this.maxReconnectAttempts} attempts`,
       );
       return;
     }
-    const timer = setTimeout(() => {
-      this.connect(sessionId, state.liveSessionId, state.apiKey, {
-        model: state.model, backendModel: state.backendModel,
-      }).then(() => {
-        const next = this.sessions.get(sessionId);
-        if (next) next.reconnectAttempts = attempts + 1;
-      }).catch(err => console.error('[Live] Reconnection failed:', err));
-    }, this.reconnectDelayMs * (attempts + 1));
+    const timer = setTimeout(
+      () => {
+        this.connect(sessionId, state.liveSessionId, state.apiKey, {
+          model: state.model,
+          backendModel: state.backendModel,
+        })
+          .then(() => {
+            const next = this.sessions.get(sessionId);
+            if (next) next.reconnectAttempts = attempts + 1;
+          })
+          .catch((err) => console.error('[Live] Reconnection failed:', err));
+      },
+      this.reconnectDelayMs * (attempts + 1),
+    );
     timer.unref?.();
   }
 
@@ -1644,15 +1793,19 @@ export class SidebandManager {
     if (state.ws.readyState === WebSocket.OPEN && !state.finalized) {
       try {
         state.ws.send(JSON.stringify({ type: 'session.close', event_id: `close_${Date.now()}` }));
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
           const timer = setTimeout(() => {
-            console.warn(`[Live] No session.closed within ${graceMs}ms for ${sessionId.substring(0, 12)}...; final usage unconfirmed.`);
+            console.warn(
+              `[Live] No session.closed within ${graceMs}ms for ${sessionId.substring(0, 12)}...; final usage unconfirmed.`,
+            );
             resolve();
           }, graceMs);
           timer.unref?.();
           const check = setInterval(() => {
             if (this.sessions.get(sessionId)?.finalized) {
-              clearTimeout(timer); clearInterval(check); resolve();
+              clearTimeout(timer);
+              clearInterval(check);
+              resolve();
             }
           }, 100);
           check.unref?.();
@@ -1716,8 +1869,10 @@ export class SidebandManager {
           backendModel: row.live_backend_model ?? LIVE_DEFAULT_BACKEND_MODEL,
         });
       } catch (err) {
-        console.error(`[Live] Re-attach failed for ${row.session_id.substring(0, 12)}...:`,
-          err instanceof Error ? err.message : err);
+        console.error(
+          `[Live] Re-attach failed for ${row.session_id.substring(0, 12)}...:`,
+          err instanceof Error ? err.message : err,
+        );
       }
     }
     return { attempted: result.rows.length };
@@ -1725,19 +1880,19 @@ export class SidebandManager {
 
   private async logConnectionError(sessionId: string, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
-    await pool.query(
-      'UPDATE therapy_sessions SET sideband_error = $1, sideband_connected = FALSE WHERE session_id = $2',
-      [message, sessionId],
-    ).catch(err => console.error('[Live] Failed to log connection error:', err));
+    await pool
+      .query('UPDATE therapy_sessions SET sideband_error = $1, sideband_connected = FALSE WHERE session_id = $2', [
+        message,
+        sessionId,
+      ])
+      .catch((err) => console.error('[Live] Failed to log connection error:', err));
   }
 
   private async logError(sessionId: string, error: unknown): Promise<void> {
-    const message = typeof error === 'string' ? error
-      : error instanceof Error ? error.message : JSON.stringify(error);
-    await pool.query(
-      'UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2',
-      [message, sessionId],
-    ).catch(err => console.error('[Live] Failed to log error:', err));
+    const message = typeof error === 'string' ? error : error instanceof Error ? error.message : JSON.stringify(error);
+    await pool
+      .query('UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2', [message, sessionId])
+      .catch((err) => console.error('[Live] Failed to log error:', err));
   }
 
   /**
@@ -1755,7 +1910,7 @@ export class SidebandManager {
     const own = Array.from(this.sessions.entries())
       .filter(([, state]) => state.ws.readyState === WebSocket.OPEN)
       .map(([sessionId]) => sessionId);
-    return own.concat(...this.delegates.map(d => d.getActiveConnections()));
+    return own.concat(...this.delegates.map((d) => d.getActiveConnections()));
   }
 
   isConnected(sessionId: string): boolean {
@@ -1772,7 +1927,7 @@ export class SidebandManager {
 
   async shutdown(): Promise<void> {
     for (const d of this.delegates) {
-      await d.shutdown().catch(err => console.error('[Live] delegate shutdown failed:', err));
+      await d.shutdown().catch((err) => console.error('[Live] delegate shutdown failed:', err));
     }
     console.log('[Live] Shutting down all Live sideband connections...');
     for (const sessionId of Array.from(this.sessions.keys())) {

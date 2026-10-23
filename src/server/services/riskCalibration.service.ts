@@ -106,8 +106,16 @@ export const LAYERS: readonly LayerDef[] = [
   { key: 'llm', label: 'LLM assessor', scale: '0..100 as returned; rows the LLM never saw are omitted' },
   { key: 'moderation_self_harm', label: 'Moderation: self-harm', scale: 'category probability x 100' },
   { key: 'moderation_self_harm_intent', label: 'Moderation: self-harm intent', scale: 'category probability x 100' },
-  { key: 'moderation_self_harm_instructions', label: 'Moderation: self-harm instructions', scale: 'category probability x 100' },
-  { key: 'moderation_composite', label: 'Moderation composite', scale: '0..100 pipeline composite (moderationRiskScore)' },
+  {
+    key: 'moderation_self_harm_instructions',
+    label: 'Moderation: self-harm instructions',
+    scale: 'category probability x 100',
+  },
+  {
+    key: 'moderation_composite',
+    label: 'Moderation composite',
+    scale: '0..100 pipeline composite (moderationRiskScore)',
+  },
   { key: 'trajectory', label: 'Trajectory bonus', scale: '0..20 bonus as logged' },
 ];
 
@@ -120,7 +128,14 @@ export type Label = 'positive' | 'negative' | 'excluded';
 export interface LabeledSample {
   history_id: number;
   label: Label;
-  reason: 'confirmed' | 'false_positive' | 'unclear' | 'disputed' | 'unadjudicated' | 'no_event_assumed_negative' | 'no_event_unlabelled';
+  reason:
+    | 'confirmed'
+    | 'false_positive'
+    | 'unclear'
+    | 'disputed'
+    | 'unadjudicated'
+    | 'no_event_assumed_negative'
+    | 'no_event_unlabelled';
   signals: Record<LayerKey, number | null>;
 }
 
@@ -160,7 +175,7 @@ export function signalsFor(row: ScoredMessageRow): Record<LayerKey, number | nul
 }
 
 export function deriveLabels(rows: readonly ScoredMessageRow[], unflaggedAsNegative: boolean): LabeledSample[] {
-  return rows.map(row => ({
+  return rows.map((row) => ({
     history_id: row.history_id,
     ...labelForVerdicts(row.verdicts, row.crisis_event_id !== null, unflaggedAsNegative),
     signals: signalsFor(row),
@@ -210,9 +225,12 @@ export function confusionAt(pairs: readonly ScoredPair[], threshold: number): Co
 export function metricsFromConfusion(threshold: number, c: Confusion): MetricPoint {
   const precision = c.tp + c.fp > 0 ? c.tp / (c.tp + c.fp) : null;
   const recall = c.tp + c.fn > 0 ? c.tp / (c.tp + c.fn) : null;
-  const f1 = precision !== null && recall !== null && precision + recall > 0
-    ? (2 * precision * recall) / (precision + recall)
-    : (precision !== null && recall !== null ? 0 : null);
+  const f1 =
+    precision !== null && recall !== null && precision + recall > 0
+      ? (2 * precision * recall) / (precision + recall)
+      : precision !== null && recall !== null
+        ? 0
+        : null;
   return {
     threshold,
     ...c,
@@ -223,8 +241,11 @@ export function metricsFromConfusion(threshold: number, c: Confusion): MetricPoi
 }
 
 /** P/R/F1 at every grid threshold (score >= threshold predicts positive). */
-export function computeMetricsGrid(pairs: readonly ScoredPair[], grid: readonly number[] = THRESHOLD_GRID): MetricPoint[] {
-  return grid.map(t => metricsFromConfusion(t, confusionAt(pairs, t)));
+export function computeMetricsGrid(
+  pairs: readonly ScoredPair[],
+  grid: readonly number[] = THRESHOLD_GRID,
+): MetricPoint[] {
+  return grid.map((t) => metricsFromConfusion(t, confusionAt(pairs, t)));
 }
 
 export interface BandPerformance {
@@ -250,7 +271,10 @@ export function computeBandPerformance(pairs: readonly ScoredPair[]): BandPerfor
 export function cohenKappa(a: readonly boolean[], b: readonly boolean[]): number | null {
   const n = Math.min(a.length, b.length);
   if (n < 2) return null;
-  let both = 0, aOnly = 0, bOnly = 0, neither = 0;
+  let both = 0,
+    aOnly = 0,
+    bOnly = 0,
+    neither = 0;
   for (let i = 0; i < n; i++) {
     if (a[i] && b[i]) both++;
     else if (a[i]) aOnly++;
@@ -283,7 +307,7 @@ export interface AgreementMatrix {
  */
 export function computeAgreementMatrix(
   samples: readonly Pick<LabeledSample, 'signals'>[],
-  layers: readonly LayerKey[] = LAYERS.map(l => l.key),
+  layers: readonly LayerKey[] = LAYERS.map((l) => l.key),
   flagThreshold = AGREEMENT_FLAG_THRESHOLD,
 ): AgreementMatrix {
   const k = layers.length;
@@ -291,7 +315,9 @@ export function computeAgreementMatrix(
   const agreement: Array<Array<number | null>> = [];
   const n: number[][] = [];
   for (let i = 0; i < k; i++) {
-    kappa.push([]); agreement.push([]); n.push([]);
+    kappa.push([]);
+    agreement.push([]);
+    n.push([]);
     for (let j = 0; j < k; j++) {
       const a: boolean[] = [];
       const b: boolean[] = [];
@@ -303,7 +329,11 @@ export function computeAgreementMatrix(
         b.push(y >= flagThreshold);
       }
       n[i].push(a.length);
-      if (i === j) { kappa[i].push(a.length > 0 ? 1 : null); agreement[i].push(a.length > 0 ? 1 : null); continue; }
+      if (i === j) {
+        kappa[i].push(a.length > 0 ? 1 : null);
+        agreement[i].push(a.length > 0 ? 1 : null);
+        continue;
+      }
       kappa[i].push(cohenKappa(a, b));
       agreement[i].push(a.length > 0 ? round4(a.filter((v, idx) => v === b[idx]).length / a.length) : null);
     }
@@ -322,16 +352,23 @@ export interface ThresholdRecommendation {
   n: number;
 }
 
-export function recommendThreshold(layer: LayerKey, grid: readonly MetricPoint[], current: number, n: number): ThresholdRecommendation {
+export function recommendThreshold(
+  layer: LayerKey,
+  grid: readonly MetricPoint[],
+  current: number,
+  n: number,
+): ThresholdRecommendation {
   let best: MetricPoint | null = null;
   for (const p of grid) {
     if (p.f1 === null) continue;
     if (
-      best === null || p.f1 > best.f1! ||
+      best === null ||
+      p.f1 > best.f1! ||
       (p.f1 === best.f1 && Math.abs(p.threshold - current) < Math.abs(best.threshold - current))
-    ) best = p;
+    )
+      best = p;
   }
-  const atCurrent = grid.find(p => p.threshold === current)?.f1 ?? null;
+  const atCurrent = grid.find((p) => p.threshold === current)?.f1 ?? null;
   return {
     layer,
     current,
@@ -365,12 +402,17 @@ export function mulberry32(seed: number): () => number {
  * Candidates are taken in the order given, so callers must order them
  * deterministically (the queries order by message_id).
  */
-export function stratifiedSample<T extends { stratum: string }>(candidates: readonly T[], size: number, seed: number): T[] {
+export function stratifiedSample<T extends { stratum: string }>(
+  candidates: readonly T[],
+  size: number,
+  seed: number,
+): T[] {
   if (size <= 0 || candidates.length === 0) return [];
   const byStratum = new Map<string, T[]>();
   for (const c of candidates) {
     const list = byStratum.get(c.stratum);
-    if (list) list.push(c); else byStratum.set(c.stratum, [c]);
+    if (list) list.push(c);
+    else byStratum.set(c.stratum, [c]);
   }
   const strata = Array.from(byStratum.keys()).sort();
   const total = candidates.length;
@@ -386,19 +428,27 @@ export function stratifiedSample<T extends { stratum: string }>(candidates: read
   let remaining = want - alloc.reduce((a, b) => a + b, 0);
   // The floor can overshoot: take back from the strata furthest above quota.
   while (remaining < 0) {
-    const i = strata.map((_, k) => k).filter(k => alloc[k] > floor).sort((a, b) => (alloc[b] - quota[b]) - (alloc[a] - quota[a]) || a - b)[0];
-    alloc[i]--; remaining++;
+    const i = strata
+      .map((_, k) => k)
+      .filter((k) => alloc[k] > floor)
+      .sort((a, b) => alloc[b] - quota[b] - (alloc[a] - quota[a]) || a - b)[0];
+    alloc[i]--;
+    remaining++;
   }
-  const order = strata.map((_, i) => i).sort((i, j) => (quota[j] - alloc[j]) - (quota[i] - alloc[i]) || i - j);
+  const order = strata.map((_, i) => i).sort((i, j) => quota[j] - alloc[j] - (quota[i] - alloc[i]) || i - j);
   for (const i of order) {
     if (remaining <= 0) break;
-    if (alloc[i] < sizeOf(i)) { alloc[i]++; remaining--; }
+    if (alloc[i] < sizeOf(i)) {
+      alloc[i]++;
+      remaining--;
+    }
   }
   // Any leftover (strata exhausted) goes to whoever still has room.
   for (let i = 0; remaining > 0 && i < strata.length; i++) {
     const room = byStratum.get(strata[i])!.length - alloc[i];
     const take = Math.min(room, remaining);
-    alloc[i] += take; remaining -= take;
+    alloc[i] += take;
+    remaining -= take;
   }
 
   const rng = mulberry32(seed);
@@ -509,8 +559,14 @@ export interface RiskCalibrationReport {
 // ---------------------------------------------------------------------------
 
 export interface OfflineScorer {
-  (latest: string, history: Array<{ role: string; content_redacted: string }>): Promise<{
-    risk_score: number; model: string; prompt_tokens: number; completion_tokens: number;
+  (
+    latest: string,
+    history: Array<{ role: string; content_redacted: string }>,
+  ): Promise<{
+    risk_score: number;
+    model: string;
+    prompt_tokens: number;
+    completion_tokens: number;
   }>;
 }
 
@@ -541,7 +597,14 @@ export async function estimateMissRate(
   const sample = stratifiedSample(candidates, params.sample_size, params.seed);
   const byStratum = new Map<string, MissRateStratum>();
   for (const c of candidates) {
-    const s = byStratum.get(c.stratum) ?? { stratum: c.stratum, candidates: 0, sampled: 0, scored: 0, ge_50: 0, ge_75: 0 };
+    const s = byStratum.get(c.stratum) ?? {
+      stratum: c.stratum,
+      candidates: 0,
+      sampled: 0,
+      scored: 0,
+      ge_50: 0,
+      ge_75: 0,
+    };
     s.candidates++;
     byStratum.set(c.stratum, s);
   }
@@ -565,7 +628,7 @@ export async function estimateMissRate(
     completion_tokens: 0,
     assessor_model: null,
     by_stratum: [],
-    sampled_message_ids: sample.map(c => c.message_id),
+    sampled_message_ids: sample.map((c) => c.message_id),
     dry_run: params.dry_run,
     note: MISS_RATE_NOTE,
   };
@@ -596,7 +659,10 @@ export async function estimateMissRate(
       const stratum = byStratum.get(item.stratum)!;
       try {
         const ctx = await contextFor(item.message_id);
-        if (!ctx) { report.failed++; continue; }
+        if (!ctx) {
+          report.failed++;
+          continue;
+        }
         const result = await scorer(ctx.latest, ctx.history);
         const cost = assessorCostUsd(result.model, result.prompt_tokens, result.completion_tokens);
         report.spend_usd += cost;
@@ -606,8 +672,14 @@ export async function estimateMissRate(
         if (cost > 0) perCallEstimate = Math.max(cost, report.spend_usd / Math.max(1, report.scored + 1));
         report.scored++;
         stratum.scored++;
-        if (result.risk_score >= 50) { report.ge_50++; stratum.ge_50++; }
-        if (result.risk_score >= 75) { report.ge_75++; stratum.ge_75++; }
+        if (result.risk_score >= 50) {
+          report.ge_50++;
+          stratum.ge_50++;
+        }
+        if (result.risk_score >= 75) {
+          report.ge_75++;
+          stratum.ge_75++;
+        }
       } catch (err) {
         report.failed++;
         log.error({ err }, `[riskCalibration] offline re-score failed for message ${item.message_id}`);
@@ -634,36 +706,36 @@ export function assembleLabelReport(
 ): Pick<RiskCalibrationReport, 'labels' | 'layers' | 'agreement' | 'recommendations'> & { samples: LabeledSample[] } {
   const samples = deriveLabels(rows, unflaggedAsNegative);
   const count = (pred: (s: LabeledSample) => boolean) => samples.filter(pred).length;
-  const positives = count(s => s.label === 'positive');
-  const negatives = count(s => s.label === 'negative');
+  const positives = count((s) => s.label === 'positive');
+  const negatives = count((s) => s.label === 'negative');
   const insufficient = positives < MIN_LABELS_PER_CLASS || negatives < MIN_LABELS_PER_CLASS;
 
   const labels: RiskCalibrationReport['labels'] = {
     scored_messages: samples.length,
-    with_event: rows.filter(r => r.crisis_event_id !== null).length,
+    with_event: rows.filter((r) => r.crisis_event_id !== null).length,
     positives,
     negatives,
-    negatives_from_false_positive: count(s => s.reason === 'false_positive'),
-    negatives_assumed_unflagged: count(s => s.reason === 'no_event_assumed_negative'),
-    excluded_unclear: count(s => s.reason === 'unclear'),
-    excluded_disputed: count(s => s.reason === 'disputed'),
-    excluded_unadjudicated: count(s => s.reason === 'unadjudicated'),
-    excluded_no_event: count(s => s.reason === 'no_event_unlabelled'),
+    negatives_from_false_positive: count((s) => s.reason === 'false_positive'),
+    negatives_assumed_unflagged: count((s) => s.reason === 'no_event_assumed_negative'),
+    excluded_unclear: count((s) => s.reason === 'unclear'),
+    excluded_disputed: count((s) => s.reason === 'disputed'),
+    excluded_unadjudicated: count((s) => s.reason === 'unadjudicated'),
+    excluded_no_event: count((s) => s.reason === 'no_event_unlabelled'),
     unflagged_as_negative: unflaggedAsNegative,
     min_labels_per_class: MIN_LABELS_PER_CLASS,
     insufficient_labels: insufficient,
     coverage,
   };
 
-  const labelled = samples.filter(s => s.label !== 'excluded');
-  const layers: LayerReport[] = LAYERS.map(def => {
+  const labelled = samples.filter((s) => s.label !== 'excluded');
+  const layers: LayerReport[] = LAYERS.map((def) => {
     const pairs: ScoredPair[] = [];
     for (const s of labelled) {
       const v = s.signals[def.key];
       if (v === null) continue;
       pairs.push({ score: v, positive: s.label === 'positive' });
     }
-    const layerPositives = pairs.filter(p => p.positive).length;
+    const layerPositives = pairs.filter((p) => p.positive).length;
     const layerNegatives = pairs.length - layerPositives;
     const enough = !insufficient && layerPositives >= MIN_LABELS_PER_CLASS && layerNegatives >= MIN_LABELS_PER_CLASS;
     return {
@@ -678,8 +750,8 @@ export function assembleLabelReport(
   });
 
   const recommendations = layers
-    .filter(l => l.grid.length > 0)
-    .map(l => recommendThreshold(l.key, l.grid, CURRENT_BANDS.medium, l.n));
+    .filter((l) => l.grid.length > 0)
+    .map((l) => recommendThreshold(l.key, l.grid, CURRENT_BANDS.medium, l.n));
 
   return { labels, layers, agreement: computeAgreementMatrix(samples), recommendations, samples };
 }
@@ -696,7 +768,10 @@ export interface BuildRiskCalibrationInput {
   };
 }
 
-export function normalizeParams(raw: Partial<RiskCalibrationParams> & { since?: string | null; until?: string | null }, now = new Date()): RiskCalibrationParams {
+export function normalizeParams(
+  raw: Partial<RiskCalibrationParams> & { since?: string | null; until?: string | null },
+  now = new Date(),
+): RiskCalibrationParams {
   const until = raw.until ? new Date(raw.until) : now;
   if (Number.isNaN(until.getTime())) throw new Error('until must be an ISO date');
   const since = raw.since ? new Date(raw.since) : new Date(until.getTime() - DEFAULT_SINCE_DAYS * 86_400_000);
@@ -726,17 +801,31 @@ export function normalizeParams(raw: Partial<RiskCalibrationParams> & { since?: 
 export async function buildRiskCalibrationReport(input: BuildRiskCalibrationInput): Promise<RiskCalibrationReport> {
   const { orgId, params } = input;
   const irbOrgId = await getIrbStudyOrgId();
-  const w: IrbWindow = { from: params.since, to: params.until, orgId, includeUnattributed: irbOrgId !== null && irbOrgId === orgId };
+  const w: IrbWindow = {
+    from: params.since,
+    to: params.until,
+    orgId,
+    includeUnattributed: irbOrgId !== null && irbOrgId === orgId,
+  };
   const deps = input.deps ?? {};
   const [rows, coverage, candidates] = await Promise.all([
     (deps.scoredMessages ?? getScoredMessages)(w),
     (deps.coverage ?? getAdjudicationCoverage)(w),
     (deps.unflaggedCandidates ?? getUnflaggedCandidates)(w),
   ]);
-  const { labels, layers, agreement, recommendations } = assembleLabelReport(rows, coverage, params.unflagged_as_negative);
+  const { labels, layers, agreement, recommendations } = assembleLabelReport(
+    rows,
+    coverage,
+    params.unflagged_as_negative,
+  );
   const missRate = await estimateMissRate(candidates, params, deps);
   return {
-    meta: { generated_at: input.generatedAt ?? new Date().toISOString(), git_sha: gitSha(), org_id: orgId, window: { from: params.since, to: params.until } },
+    meta: {
+      generated_at: input.generatedAt ?? new Date().toISOString(),
+      git_sha: gitSha(),
+      org_id: orgId,
+      window: { from: params.since, to: params.until },
+    },
     label_rule: LABEL_RULE,
     labels,
     current_bands: CURRENT_BANDS,
@@ -750,7 +839,10 @@ export async function buildRiskCalibrationReport(input: BuildRiskCalibrationInpu
 
 /** Recommended thresholds as a compact {layer: threshold} map for the run row. */
 export function recommendedThresholdMap(report: RiskCalibrationReport): Record<string, unknown> {
-  const out: Record<string, unknown> = { advisory: true, basis: 'F1-maximising grid threshold vs the medium band (50)' };
+  const out: Record<string, unknown> = {
+    advisory: true,
+    basis: 'F1-maximising grid threshold vs the medium band (50)',
+  };
   for (const r of report.recommendations) out[r.layer] = r.recommended;
   return out;
 }
@@ -775,8 +867,8 @@ export async function runAndStoreRiskCalibration(input: {
   });
   log.info(
     `[riskCalibration] stored run #${row.run_id} for org ${input.orgId}: ${report.labels.scored_messages} scored, ` +
-    `${report.labels.positives}+/${report.labels.negatives}- (${report.labels.insufficient_labels ? 'insufficient labels' : 'metrics computed'}), ` +
-    `miss-rate sample ${report.miss_rate?.scored ?? 0}/${report.miss_rate?.sampled ?? 0} scored, $${report.miss_rate?.spend_usd ?? 0}`,
+      `${report.labels.positives}+/${report.labels.negatives}- (${report.labels.insufficient_labels ? 'insufficient labels' : 'metrics computed'}), ` +
+      `miss-rate sample ${report.miss_rate?.scored ?? 0}/${report.miss_rate?.sampled ?? 0} scored, $${report.miss_rate?.spend_usd ?? 0}`,
   );
   return row;
 }

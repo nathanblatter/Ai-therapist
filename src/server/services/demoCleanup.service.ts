@@ -32,9 +32,9 @@ export async function runDemoCleanup(maxAgeDays = DEMO_MAX_AGE_DAYS): Promise<De
   const expired = await pool.query<{ userid: number }>(
     `SELECT userid FROM users
      WHERE role = 'demo' AND created_at < NOW() - ($1 || ' days')::INTERVAL`,
-    [maxAgeDays]
+    [maxAgeDays],
   );
-  const userIds = expired.rows.map(r => r.userid);
+  const userIds = expired.rows.map((r) => r.userid);
   if (userIds.length === 0) {
     return { usersDeleted: 0, sessionsDeleted: 0, recordingsDeleted: 0 };
   }
@@ -44,7 +44,7 @@ export async function runDemoCleanup(maxAgeDays = DEMO_MAX_AGE_DAYS): Promise<De
   const recordings = await pool.query<{ recording_object_key: string }>(
     `SELECT recording_object_key FROM therapy_sessions
      WHERE user_id = ANY($1) AND recording_object_key IS NOT NULL`,
-    [userIds]
+    [userIds],
   );
   let recordingsDeleted = 0;
   for (const { recording_object_key } of recordings.rows) {
@@ -56,14 +56,8 @@ export async function runDemoCleanup(maxAgeDays = DEMO_MAX_AGE_DAYS): Promise<De
     }
   }
 
-  const sessions = await pool.query(
-    'DELETE FROM therapy_sessions WHERE user_id = ANY($1)',
-    [userIds]
-  );
-  const users = await pool.query(
-    'DELETE FROM users WHERE userid = ANY($1)',
-    [userIds]
-  );
+  const sessions = await pool.query('DELETE FROM therapy_sessions WHERE user_id = ANY($1)', [userIds]);
+  const users = await pool.query('DELETE FROM users WHERE userid = ANY($1)', [userIds]);
 
   const result: DemoCleanupResult = {
     usersDeleted: users.rowCount ?? 0,
@@ -72,16 +66,16 @@ export async function runDemoCleanup(maxAgeDays = DEMO_MAX_AGE_DAYS): Promise<De
   };
   log.info(
     `Swept ${result.usersDeleted} expired demo users ` +
-    `(${result.sessionsDeleted} sessions, ${result.recordingsDeleted} recordings, >${maxAgeDays}d old)`
+      `(${result.sessionsDeleted} sessions, ${result.recordingsDeleted} recordings, >${maxAgeDays}d old)`,
   );
   return result;
 }
 
 /** Run one sweep now, then daily. Failures log and retry next interval. */
 export function startDemoCleanupScheduler(): void {
-  runDemoCleanup().catch(err => log.error({ err }, 'Demo cleanup sweep failed'));
+  runDemoCleanup().catch((err) => log.error({ err }, 'Demo cleanup sweep failed'));
   sweepTimer = setInterval(() => {
-    runDemoCleanup().catch(err => log.error({ err }, 'Demo cleanup sweep failed'));
+    runDemoCleanup().catch((err) => log.error({ err }, 'Demo cleanup sweep failed'));
   }, SWEEP_INTERVAL_MS);
   sweepTimer.unref?.();
 }

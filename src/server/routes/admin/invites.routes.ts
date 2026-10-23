@@ -36,8 +36,7 @@ export default function invitesRoutes(): Router {
   router.post('/admin/api/caseload/invites', requireRole('therapist', 'caseworker'), async (req, res) => {
     try {
       const rawLabel = req.body?.label;
-      const label =
-        typeof rawLabel === 'string' && rawLabel.trim().length > 0 ? rawLabel.trim() : null;
+      const label = typeof rawLabel === 'string' && rawLabel.trim().length > 0 ? rawLabel.trim() : null;
 
       const rawTtl = req.body?.ttlHours;
       let ttlHours = 168;

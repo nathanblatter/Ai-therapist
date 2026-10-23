@@ -1,9 +1,19 @@
 import { useState, useEffect } from 'react';
 import { Shield, Key, Copy, CheckCircle, AlertTriangle } from 'react-feather';
-import { decodeCreationOptions, deviceName, encodeAttestation, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
+import {
+  decodeCreationOptions,
+  deviceName,
+  encodeAttestation,
+  isCancelled,
+  passkeysSupported,
+} from '../../shared/lib/webauthn';
 import { getJson, postJson } from '../../shared/http';
 
-interface PasskeyMeta { id: string; name: string; created_at: string }
+interface PasskeyMeta {
+  id: string;
+  name: string;
+  created_at: string;
+}
 
 /** Passkeys on the signed-in account, through Squawk (auth-service-33).
  *  Registering one converts a password account: Squawk deletes the hash, so
@@ -38,23 +48,34 @@ function PasskeyCard() {
     setError(null);
     setMessage(null);
     try {
-      const begin = await postJson<{ challenge_id?: string; options?: { publicKey: Parameters<typeof decodeCreationOptions>[0] }; error?: string }>(
-        '/api/auth/squawk/passkeys/begin',
-        undefined,
-        { fallback: 'Could not start passkey registration.' }
-      );
-      if (!begin.challenge_id || !begin.options) throw new Error(begin.error || 'Could not start passkey registration.');
+      const begin = await postJson<{
+        challenge_id?: string;
+        options?: { publicKey: Parameters<typeof decodeCreationOptions>[0] };
+        error?: string;
+      }>('/api/auth/squawk/passkeys/begin', undefined, { fallback: 'Could not start passkey registration.' });
+      if (!begin.challenge_id || !begin.options)
+        throw new Error(begin.error || 'Could not start passkey registration.');
       const cred = await navigator.credentials.create({ publicKey: decodeCreationOptions(begin.options.publicKey) });
       if (!cred) throw new Error('No passkey was created.');
       await postJson(
         '/api/auth/squawk/passkeys/finish',
-        { challenge_id: begin.challenge_id, name: deviceName(), credential: encodeAttestation(cred as PublicKeyCredential) },
-        { fallback: 'Passkey registration failed.' }
+        {
+          challenge_id: begin.challenge_id,
+          name: deviceName(),
+          credential: encodeAttestation(cred as PublicKeyCredential),
+        },
+        { fallback: 'Passkey registration failed.' },
       );
       setMessage('Passkey registered. From now on this account signs in with a passkey instead of a password.');
       await load();
     } catch (err) {
-      setError(isCancelled(err) ? 'Passkey prompt was cancelled.' : err instanceof Error ? err.message : 'Passkey registration failed.');
+      setError(
+        isCancelled(err)
+          ? 'Passkey prompt was cancelled.'
+          : err instanceof Error
+            ? err.message
+            : 'Passkey registration failed.',
+      );
     } finally {
       setBusy(false);
     }
@@ -88,7 +109,9 @@ function PasskeyCard() {
       {error && <p className="text-sm text-red-700">{error}</p>}
       {message && <p className="text-sm text-green-700">{message}</p>}
       {!state.linked ? (
-        <p className="text-sm text-gray-500">This account has not signed in through Squawk yet. Sign out and back in, then register a passkey.</p>
+        <p className="text-sm text-gray-500">
+          This account has not signed in through Squawk yet. Sign out and back in, then register a passkey.
+        </p>
       ) : passkeysSupported() ? (
         <button
           type="button"
@@ -147,7 +170,9 @@ export default function MFASetup() {
     setLoading(true);
 
     try {
-      const data = await postJson<{ qrCode: string; secret: string }>('/api/mfa/setup/init', undefined, { fallback: 'Failed to initialize MFA setup' });
+      const data = await postJson<{ qrCode: string; secret: string }>('/api/mfa/setup/init', undefined, {
+        fallback: 'Failed to initialize MFA setup',
+      });
       setQrCode(data.qrCode);
       setSecret(data.secret);
       setSetupStep('verify');
@@ -168,7 +193,11 @@ export default function MFASetup() {
     setLoading(true);
 
     try {
-      const data = await postJson<{ backupCodes: string[] }>('/api/mfa/setup/verify', { token }, { fallback: 'Failed to verify token' });
+      const data = await postJson<{ backupCodes: string[] }>(
+        '/api/mfa/setup/verify',
+        { token },
+        { fallback: 'Failed to verify token' },
+      );
       setBackupCodes(data.backupCodes);
       setSetupStep('complete');
       setSuccessMessage('MFA enabled successfully!');
@@ -218,7 +247,11 @@ export default function MFASetup() {
     setLoading(true);
 
     try {
-      const data = await postJson<{ backupCodes: string[] }>('/api/mfa/regenerate-backup-codes', { password }, { fallback: 'Failed to regenerate backup codes' });
+      const data = await postJson<{ backupCodes: string[] }>(
+        '/api/mfa/regenerate-backup-codes',
+        { password },
+        { fallback: 'Failed to regenerate backup codes' },
+      );
       setBackupCodes(data.backupCodes);
       setSetupStep('complete');
       setSuccessMessage('Backup codes regenerated successfully!');
@@ -259,11 +292,7 @@ export default function MFASetup() {
         </h2>
       </div>
 
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-          {error}
-        </div>
-      )}
+      {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">{error}</div>}
 
       {successMessage && (
         <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded flex items-center gap-2">
@@ -277,11 +306,11 @@ export default function MFASetup() {
         <div className="bg-white p-6 rounded-lg shadow">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Current Status</h3>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-              mfaStatus.enabled
-                ? 'bg-green-100 text-green-800'
-                : 'bg-yellow-100 text-yellow-800'
-            }`}>
+            <span
+              className={`px-3 py-1 rounded-full text-sm font-medium ${
+                mfaStatus.enabled ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+              }`}
+            >
               {mfaStatus.enabled ? 'Enabled' : 'Disabled'}
             </span>
           </div>
@@ -367,10 +396,7 @@ export default function MFASetup() {
               <p className="text-sm text-gray-600 mb-2">Can't scan? Enter this code manually:</p>
               <div className="flex items-center gap-2 bg-white px-4 py-2 rounded border">
                 <code className="text-sm font-mono">{secret}</code>
-                <button
-                  onClick={() => copyToClipboard(secret ?? '')}
-                  className="text-royal hover:text-navy"
-                >
+                <button onClick={() => copyToClipboard(secret ?? '')} className="text-royal hover:text-navy">
                   <Copy size={16} />
                 </button>
               </div>
@@ -379,9 +405,7 @@ export default function MFASetup() {
 
           <div className="border-t pt-4">
             <h4 className="font-semibold mb-2">Step 2: Enter Verification Code</h4>
-            <p className="text-sm text-gray-600 mb-3">
-              Enter the 6-digit code from your authenticator app:
-            </p>
+            <p className="text-sm text-gray-600 mb-3">Enter the 6-digit code from your authenticator app:</p>
 
             <div className="flex gap-2">
               <input
@@ -414,10 +438,12 @@ export default function MFASetup() {
           </div>
 
           <div className="bg-yellow-50 border border-yellow-200 p-4 rounded">
-            <p className="font-semibold text-yellow-800 mb-2 flex items-center gap-1.5"><AlertTriangle size={14} aria-hidden="true" /> Save Your Backup Codes</p>
+            <p className="font-semibold text-yellow-800 mb-2 flex items-center gap-1.5">
+              <AlertTriangle size={14} aria-hidden="true" /> Save Your Backup Codes
+            </p>
             <p className="text-sm text-yellow-700">
-              These backup codes can be used to access your account if you lose your authenticator device.
-              Each code can only be used once. Store them in a secure location.
+              These backup codes can be used to access your account if you lose your authenticator device. Each code can
+              only be used once. Store them in a secure location.
             </p>
           </div>
 
@@ -440,10 +466,7 @@ export default function MFASetup() {
                   className="bg-white border rounded px-3 py-2 font-mono text-sm flex items-center justify-between"
                 >
                   <span>{code}</span>
-                  <button
-                    onClick={() => copyToClipboard(code)}
-                    className="text-gray-400 hover:text-royal"
-                  >
+                  <button onClick={() => copyToClipboard(code)} className="text-gray-400 hover:text-royal">
                     <Copy size={14} />
                   </button>
                 </div>

@@ -12,7 +12,7 @@ export async function getContentWipeLog(limit: number, offset: number): Promise<
     `SELECT * FROM content_wipe_log
      ORDER BY started_at DESC
      LIMIT $1 OFFSET $2`,
-    [limit, offset]
+    [limit, offset],
   );
   const countResult = await pool.query<{ count: string }>('SELECT COUNT(*) as count FROM content_wipe_log');
   return { wipes: result.rows, total: parseInt(countResult.rows[0].count) };

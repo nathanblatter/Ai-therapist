@@ -3,16 +3,33 @@
 // parse/serialize natively; the fallbacks cover the rest.
 
 const toBuf = (s: string): Uint8Array<ArrayBuffer> => {
-  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '='));
+  const bin = atob(
+    s
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+      .padEnd(Math.ceil(s.length / 4) * 4, '='),
+  );
   const out = new Uint8Array(new ArrayBuffer(bin.length));
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 };
 const toB64 = (buf: ArrayBuffer | null): string | undefined =>
-  buf ? btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : undefined;
+  buf
+    ? btoa(String.fromCharCode(...new Uint8Array(buf)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '')
+    : undefined;
 
-interface PkCredParam { type: string; alg: number }
-interface PkDescriptor { type: string; id: string; transports?: string[] }
+interface PkCredParam {
+  type: string;
+  alg: number;
+}
+interface PkDescriptor {
+  type: string;
+  id: string;
+  transports?: string[];
+}
 
 export interface AssertionOptionsJSON {
   challenge: string;

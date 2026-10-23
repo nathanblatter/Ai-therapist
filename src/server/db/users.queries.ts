@@ -38,36 +38,30 @@ export interface UserPreferencesRow {
 export async function getUserPreferences(userId: number | string): Promise<UserPreferencesRow | null> {
   const result = await pool.query<UserPreferencesRow>(
     'SELECT preferred_voice, preferred_language, preferred_theme FROM users WHERE userid = $1',
-    [userId]
+    [userId],
   );
   return result.rows[0] ?? null;
 }
 
 /** Persist just the UI theme preference. */
 export async function setUserPreferredTheme(userId: number | string, theme: string): Promise<void> {
-  await pool.query(
-    'UPDATE users SET preferred_theme = $1 WHERE userid = $2',
-    [theme, userId]
-  );
+  await pool.query('UPDATE users SET preferred_theme = $1 WHERE userid = $2', [theme, userId]);
 }
 
 /** Persist a user's voice/language preferences. */
-export async function updateUserPreferences(
-  userId: number | string,
-  voice: string,
-  language: string
-): Promise<void> {
-  await pool.query(
-    'UPDATE users SET preferred_voice = $1, preferred_language = $2 WHERE userid = $3',
-    [voice, language, userId]
-  );
+export async function updateUserPreferences(userId: number | string, voice: string, language: string): Promise<void> {
+  await pool.query('UPDATE users SET preferred_voice = $1, preferred_language = $2 WHERE userid = $3', [
+    voice,
+    language,
+    userId,
+  ]);
 }
 
 /** A user's stored language preference (null if user/row absent or unset). */
 export async function getUserPreferredLanguage(userId: number | string): Promise<string | null> {
   const result = await pool.query<{ preferred_language: string | null }>(
     'SELECT preferred_language FROM users WHERE userid = $1',
-    [userId]
+    [userId],
   );
   if (result.rows.length === 0) return null;
   return result.rows[0].preferred_language;
@@ -75,10 +69,7 @@ export async function getUserPreferredLanguage(userId: number | string): Promise
 
 /** Persist just the language preference (used by the chat-start flow). */
 export async function setUserPreferredLanguage(userId: number | string, language: string): Promise<void> {
-  await pool.query(
-    'UPDATE users SET preferred_language = $1 WHERE userid = $2',
-    [language, userId]
-  );
+  await pool.query('UPDATE users SET preferred_language = $1 WHERE userid = $2', [language, userId]);
 }
 
 export interface VerifiedUser {
@@ -97,7 +88,7 @@ export async function verifyCredentials(username: string, password: string): Pro
   try {
     const result = await pool.query<UserRow & { password: string }>(
       'SELECT userid, username, password, role, mfa_enabled, mfa_secret, mfa_backup_codes, organization_id, is_sandbox FROM users WHERE username = $1',
-      [username]
+      [username],
     );
 
     if (result.rows.length === 0) {
@@ -144,7 +135,7 @@ export async function createDemoUser(): Promise<{ userid: number; username: stri
      VALUES ($1, $2, 'demo',
              (SELECT org_id FROM organizations WHERE slug = 'irb-study'))
      RETURNING userid, username, role`,
-    [username, hashedPassword]
+    [username, hashedPassword],
   );
   return result.rows[0];
 }
@@ -173,7 +164,7 @@ export async function createUser(
   username: string,
   password: string,
   role: string,
-  options: CreateUserOptions = {}
+  options: CreateUserOptions = {},
 ): Promise<UserRow> {
   // IRB invariant (fail closed): never mint a caseworker inside a research
   // org. The org is resolved exactly as the INSERT below resolves it, so the
@@ -182,7 +173,7 @@ export async function createUser(
     const orgKind = await pool.query<{ kind: string }>(
       `SELECT kind FROM organizations
        WHERE org_id = COALESCE($1, (SELECT org_id FROM organizations WHERE slug = 'irb-study'))`,
-      [options.orgId ?? null]
+      [options.orgId ?? null],
     );
     const kind = orgKind.rows[0]?.kind;
     if (kind === undefined || kind === 'research') {
@@ -199,13 +190,14 @@ export async function createUser(
                COALESCE($4, (SELECT org_id FROM organizations WHERE slug = 'irb-study')),
                $5)
        RETURNING userid, username, role, organization_id, is_sandbox`,
-      [username, hashedPassword, role, options.orgId ?? null, options.isSandbox ?? false]
+      [username, hashedPassword, role, options.orgId ?? null, options.isSandbox ?? false],
     );
 
     return result.rows[0];
   } catch (error: unknown) {
     const pgErr = error as { code?: string };
-    if (pgErr.code === '23505') { // Unique constraint violation
+    if (pgErr.code === '23505') {
+      // Unique constraint violation
       throw new Error('Username already exists');
     }
     console.error('Error creating user:', error);
@@ -221,10 +213,7 @@ export async function createUser(
  *  orgId (caseworker portal C13): when set, additionally restrict to that
  *  organization — at cutover every user is in irb-study, so researcher
  *  results are byte-identical. */
-export async function getAllUsers(
-  scopeTherapistId?: number | null,
-  orgId?: number | null
-): Promise<UserRow[]> {
+export async function getAllUsers(scopeTherapistId?: number | null, orgId?: number | null): Promise<UserRow[]> {
   try {
     const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
     const orgScoped = orgId !== null && orgId !== undefined;
@@ -233,7 +222,7 @@ export async function getAllUsers(
     if (scoped) {
       params.push(scopeTherapistId);
       clauses.push(
-        `(userid = $${params.length} OR EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $${params.length} AND tc.client_id = userid))`
+        `(userid = $${params.length} OR EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $${params.length} AND tc.client_id = userid))`,
       );
     }
     if (orgScoped) {
@@ -243,7 +232,7 @@ export async function getAllUsers(
     const scopeClause = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
     const result = await pool.query<UserRow>(
       `SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users${scopeClause} ORDER BY created_at DESC`,
-      params
+      params,
     );
     return result.rows;
   } catch (error) {
@@ -260,7 +249,7 @@ export async function getOrgTherapistIds(orgId: number): Promise<number[]> {
     `SELECT userid FROM users
      WHERE role = 'therapist' AND organization_id = $1
      ORDER BY userid`,
-    [orgId]
+    [orgId],
   );
   return result.rows.map((row) => row.userid);
 }
@@ -274,17 +263,14 @@ export async function getResearcherIds(): Promise<number[]> {
   const result = await pool.query<{ userid: number }>(
     `SELECT userid FROM users
      WHERE role = 'researcher'
-     ORDER BY userid`
+     ORDER BY userid`,
   );
   return result.rows.map((row) => row.userid);
 }
 
 /** Denormalized users.is_sandbox for one account (false when absent). */
 export async function isSandboxAccount(userId: number): Promise<boolean> {
-  const result = await pool.query<{ is_sandbox: boolean }>(
-    'SELECT is_sandbox FROM users WHERE userid = $1',
-    [userId]
-  );
+  const result = await pool.query<{ is_sandbox: boolean }>('SELECT is_sandbox FROM users WHERE userid = $1', [userId]);
   return result.rows[0]?.is_sandbox ?? false;
 }
 
@@ -299,7 +285,7 @@ export async function isSandboxAccountSession(sessionId: string): Promise<boolea
      FROM therapy_sessions ts
      JOIN users u ON u.userid = ts.user_id
      WHERE ts.session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0]?.is_sandbox ?? false;
 }
@@ -309,7 +295,7 @@ export async function getUserById(userid: number | string): Promise<UserRow | nu
   try {
     const result = await pool.query<UserRow>(
       'SELECT userid, username, role, organization_id, is_sandbox, preferred_voice, preferred_language, mfa_enabled, risk_context_share_enabled, memory_enabled, study_status, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
-      [userid]
+      [userid],
     );
 
     if (result.rows.length === 0) {
@@ -368,7 +354,8 @@ export async function updateUser(userid: number | string, updates: Record<string
     return result.rows[0];
   } catch (error: unknown) {
     const pgErr = error as { code?: string };
-    if (pgErr.code === '23505') { // Unique constraint violation
+    if (pgErr.code === '23505') {
+      // Unique constraint violation
       throw new Error('Username already exists');
     }
     console.error('Error updating user:', error);
@@ -379,10 +366,9 @@ export async function updateUser(userid: number | string, updates: Record<string
 /** Delete a user by id; returns the deleted row. */
 export async function deleteUser(userid: number | string): Promise<UserRow> {
   try {
-    const result = await pool.query<UserRow>(
-      'DELETE FROM users WHERE userid = $1 RETURNING userid, username',
-      [userid]
-    );
+    const result = await pool.query<UserRow>('DELETE FROM users WHERE userid = $1 RETURNING userid, username', [
+      userid,
+    ]);
 
     if (result.rows.length === 0) {
       throw new Error('User not found');
@@ -401,7 +387,7 @@ export async function deleteUser(userid: number | string): Promise<UserRow> {
 export async function getUserBySquawkId(squawkUserId: string): Promise<UserRow | null> {
   const result = await pool.query<UserRow>(
     'SELECT userid, username, role, organization_id, is_sandbox, squawk_user_id FROM users WHERE squawk_user_id = $1',
-    [squawkUserId]
+    [squawkUserId],
   );
   return result.rows[0] ?? null;
 }
@@ -410,7 +396,7 @@ export async function getUserBySquawkId(squawkUserId: string): Promise<UserRow |
 export async function getUserByUsernameForLogin(username: string): Promise<UserRow | null> {
   const result = await pool.query<UserRow>(
     'SELECT userid, username, role, organization_id, is_sandbox, squawk_user_id FROM users WHERE username = $1',
-    [username]
+    [username],
   );
   return result.rows[0] ?? null;
 }
@@ -418,12 +404,18 @@ export async function getUserByUsernameForLogin(username: string): Promise<UserR
 /** Record the Squawk id of a local account (set once, at creation or on the
  *  first Squawk login that matched by username). */
 export async function setSquawkUserId(userid: number | string, squawkUserId: string): Promise<void> {
-  await pool.query('UPDATE users SET squawk_user_id = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2', [squawkUserId, userid]);
+  await pool.query('UPDATE users SET squawk_user_id = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2', [
+    squawkUserId,
+    userid,
+  ]);
 }
 
 /** Copy the role Squawk holds for the account into users.role (Squawk is the
  *  source of roles once an account lives there; RBAC middleware keeps reading
  *  the column). No-op when unchanged. */
 export async function syncRoleFromSquawk(userid: number | string, role: string): Promise<void> {
-  await pool.query('UPDATE users SET role = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2 AND role <> $1', [role, userid]);
+  await pool.query('UPDATE users SET role = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2 AND role <> $1', [
+    role,
+    userid,
+  ]);
 }

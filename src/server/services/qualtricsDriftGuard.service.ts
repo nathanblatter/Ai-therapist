@@ -59,10 +59,10 @@ export function computeSurveyDefinitionHash(definition: SurveyDefinition): strin
 }
 
 async function fetchDefinition(config: QualtricsSyncConfig, surveyId: string): Promise<SurveyDefinition> {
-  const res = await fetch(
-    `https://${config.datacenter}.qualtrics.com/API/v3/survey-definitions/${surveyId}`,
-    { headers: { 'X-API-TOKEN': config.apiToken }, signal: AbortSignal.timeout(30_000) }
-  );
+  const res = await fetch(`https://${config.datacenter}.qualtrics.com/API/v3/survey-definitions/${surveyId}`, {
+    headers: { 'X-API-TOKEN': config.apiToken },
+    signal: AbortSignal.timeout(30_000),
+  });
   if (!res.ok) throw new Error(`survey-definition fetch HTTP ${res.status}`);
   const body = (await res.json()) as { result?: SurveyDefinition };
   if (!body.result) throw new Error('survey-definition fetch: empty result');
@@ -82,16 +82,11 @@ export async function runDriftCheck(): Promise<DriftCheckResult[]> {
   if (!config) return [];
   const results: DriftCheckResult[] = [];
 
-  for (const [surveyRole, surveyId] of Object.entries(config.surveys) as Array<
-    [QualtricsSurveyRole, string]
-  >) {
+  for (const [surveyRole, surveyId] of Object.entries(config.surveys) as Array<[QualtricsSurveyRole, string]>) {
     try {
       const hash = computeSurveyDefinitionHash(await fetchDefinition(config, surveyId));
       const key = `${HASH_KEY_PREFIX}${surveyId}`;
-      const { rows } = await pool.query(
-        'SELECT config_value FROM system_config WHERE config_key = $1',
-        [key]
-      );
+      const { rows } = await pool.query('SELECT config_value FROM system_config WHERE config_key = $1', [key]);
       const stored = rows[0]?.config_value;
       const storedHash = typeof stored === 'string' ? stored : null;
 
@@ -107,7 +102,7 @@ export async function runDriftCheck(): Promise<DriftCheckResult[]> {
            SET config_value = EXCLUDED.config_value,
                updated_at = CURRENT_TIMESTAMP,
                updated_by = 'qualtrics-drift-guard'`,
-        [key, hash]
+        [key, hash],
       );
 
       if (storedHash === null) {
@@ -157,7 +152,7 @@ export async function claimAndRunDailyDriftCheck(): Promise<DriftCheckResult[] |
            updated_by = 'qualtrics-drift-guard'
        WHERE system_config.config_value <> EXCLUDED.config_value
      RETURNING config_key`,
-    [CLAIM_KEY, today]
+    [CLAIM_KEY, today],
   );
   if ((result.rowCount ?? 0) === 0) return 'already-ran';
   return runDriftCheck();

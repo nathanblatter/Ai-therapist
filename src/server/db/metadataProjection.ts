@@ -86,11 +86,6 @@ export function projectSafeMetadata(metadata: unknown): Record<string, unknown> 
  * Apply {@link projectSafeMetadata} to one field of every row (the export and
  * admin-transcript queries alias metadata to `extras`).
  */
-export function projectRowsMetadata<T extends Record<string, unknown>>(
-  rows: T[],
-  field = 'extras'
-): T[] {
-  return rows.map(row =>
-    field in row ? { ...row, [field]: projectSafeMetadata(row[field]) } : row
-  );
+export function projectRowsMetadata<T extends Record<string, unknown>>(rows: T[], field = 'extras'): T[] {
+  return rows.map((row) => (field in row ? { ...row, [field]: projectSafeMetadata(row[field]) } : row));
 }

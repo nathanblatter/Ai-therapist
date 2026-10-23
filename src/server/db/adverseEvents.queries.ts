@@ -84,11 +84,12 @@ export async function insertAdverseEventDraft(input: InsertAdverseEventDraftInpu
   const category = input.category ?? 'crisis';
   // The two auto paths key on different partial unique indexes, so the
   // ON CONFLICT target must match the row being inserted.
-  const conflictClause = input.triggerSource === 'auto_eligibility'
-    ? `ON CONFLICT (session_id) WHERE trigger_source = 'auto_eligibility' DO NOTHING`
-    : input.triggerSource === 'auto_survey'
-      ? `ON CONFLICT (session_ref) WHERE trigger_source = 'auto_survey' DO NOTHING`
-      : `ON CONFLICT (crisis_event_id) WHERE crisis_event_id IS NOT NULL DO NOTHING`;
+  const conflictClause =
+    input.triggerSource === 'auto_eligibility'
+      ? `ON CONFLICT (session_id) WHERE trigger_source = 'auto_eligibility' DO NOTHING`
+      : input.triggerSource === 'auto_survey'
+        ? `ON CONFLICT (session_ref) WHERE trigger_source = 'auto_survey' DO NOTHING`
+        : `ON CONFLICT (crisis_event_id) WHERE crisis_event_id IS NOT NULL DO NOTHING`;
   const result = await pool.query<{ report_id: number }>(
     `INSERT INTO adverse_event_reports
        (session_id, crisis_event_id, user_id, session_ref, participant_ref, occurred_at,
@@ -99,10 +100,22 @@ export async function insertAdverseEventDraft(input: InsertAdverseEventDraftInpu
      ${conflictClause}
      RETURNING report_id`,
     [
-      input.sessionId, input.crisisEventId, input.userId, input.sessionRef, input.participantRef,
-      input.occurredAt, input.severity, input.triggerSource, category, input.summary,
-      JSON.stringify(input.timeline), input.transcriptExcerpt, JSON.stringify(input.actionsTaken),
-      input.dueAt, input.createdBy, input.organizationId ?? null,
+      input.sessionId,
+      input.crisisEventId,
+      input.userId,
+      input.sessionRef,
+      input.participantRef,
+      input.occurredAt,
+      input.severity,
+      input.triggerSource,
+      category,
+      input.summary,
+      JSON.stringify(input.timeline),
+      input.transcriptExcerpt,
+      JSON.stringify(input.actionsTaken),
+      input.dueAt,
+      input.createdBy,
+      input.organizationId ?? null,
     ],
   );
   return result.rows[0]?.report_id ?? null;
@@ -198,7 +211,10 @@ export async function getAdverseEventCounts(scope: AdverseEventScope): Promise<A
 
 /** One report by id, or null when it does not exist OR is outside `scope`
  *  (callers map both to 404 so cross-org existence is never confirmable). */
-export async function getAdverseEventById(id: number, scope: AdverseEventScope): Promise<AdverseEventRowWithFlags | null> {
+export async function getAdverseEventById(
+  id: number,
+  scope: AdverseEventScope,
+): Promise<AdverseEventRowWithFlags | null> {
   const scoped = adverseEventScopeClause(scope, 1);
   const result = await pool.query<AdverseEventRowWithFlags>(
     `SELECT *, ${OVERDUE_EXPR} AS overdue

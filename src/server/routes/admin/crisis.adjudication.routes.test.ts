@@ -8,7 +8,15 @@ import request from 'supertest';
 const dbMocks = vi.hoisted(() => ({
   getCrisisEventClientInfo: vi.fn(),
   getCrisisEventAdjudications: vi.fn(async () => []),
-  upsertCrisisEventAdjudication: vi.fn(async (eventId: number, adjudicatorId: number, verdict: string, note: string | null) => ({ adjudication_id: 1, crisis_event_id: eventId, adjudicator_id: adjudicatorId, verdict, note })),
+  upsertCrisisEventAdjudication: vi.fn(
+    async (eventId: number, adjudicatorId: number, verdict: string, note: string | null) => ({
+      adjudication_id: 1,
+      crisis_event_id: eventId,
+      adjudicator_id: adjudicatorId,
+      verdict,
+      note,
+    }),
+  ),
   ADJUDICATION_VERDICTS: ['confirmed', 'false_positive', 'unclear'],
   sessionExists: vi.fn(async () => true),
   getSessionCrisisFlag: vi.fn(),
@@ -33,7 +41,12 @@ function appAs(role: string, userId = 1, orgId = 1) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as unknown as { session: Record<string, unknown> }).session = { userId, userRole: role, username: 'tester', orgId };
+    (req as unknown as { session: Record<string, unknown> }).session = {
+      userId,
+      userRole: role,
+      username: 'tester',
+      orgId,
+    };
     next();
   });
   app.use(crisisRoutes());
@@ -42,7 +55,12 @@ function appAs(role: string, userId = 1, orgId = 1) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  dbMocks.getCrisisEventClientInfo.mockResolvedValue({ event_id: 12, session_id: 'sess_1', client_user_id: null, session_user_id: 42 });
+  dbMocks.getCrisisEventClientInfo.mockResolvedValue({
+    event_id: 12,
+    session_id: 'sess_1',
+    client_user_id: null,
+    session_user_id: 42,
+  });
   dbMocks.getSessionAccessInfo.mockResolvedValue({ user_id: 42, status: 'ended', owner_organization_id: 1 });
   dbMocks.isAssigned.mockResolvedValue(true);
   dbMocks.getOrganizationIdForUser.mockResolvedValue(1);
@@ -50,42 +68,93 @@ beforeEach(() => {
 
 describe('PUT /admin/api/crisis/events/:eventId/adjudication', () => {
   it('upserts the caller verdict (and trimmed note) for a researcher in the owner org', async () => {
-    const res = await request(appAs('researcher', 1)).put('/admin/api/crisis/events/12/adjudication').send({ verdict: 'false_positive', note: '  benign  ' });
+    const res = await request(appAs('researcher', 1))
+      .put('/admin/api/crisis/events/12/adjudication')
+      .send({ verdict: 'false_positive', note: '  benign  ' });
     expect(res.status).toBe(200);
     expect(dbMocks.upsertCrisisEventAdjudication).toHaveBeenCalledWith(12, 1, 'false_positive', 'benign');
     expect(res.body.adjudication.verdict).toBe('false_positive');
   });
 
   it('rejects an unknown verdict, a long note and a bad id before any lookup', async () => {
-    expect((await request(appAs('researcher')).put('/admin/api/crisis/events/12/adjudication').send({ verdict: 'maybe' })).status).toBe(400);
-    expect((await request(appAs('researcher')).put('/admin/api/crisis/events/12/adjudication').send({ verdict: 'unclear', note: 'x'.repeat(2001) })).status).toBe(400);
-    expect((await request(appAs('researcher')).put('/admin/api/crisis/events/abc/adjudication').send({ verdict: 'unclear' })).status).toBe(400);
+    expect(
+      (await request(appAs('researcher')).put('/admin/api/crisis/events/12/adjudication').send({ verdict: 'maybe' }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await request(appAs('researcher'))
+          .put('/admin/api/crisis/events/12/adjudication')
+          .send({ verdict: 'unclear', note: 'x'.repeat(2001) })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await request(appAs('researcher')).put('/admin/api/crisis/events/abc/adjudication').send({ verdict: 'unclear' }))
+        .status,
+    ).toBe(400);
     expect(dbMocks.getCrisisEventClientInfo).not.toHaveBeenCalled();
   });
 
   it('404s for a therapist whose caseload lacks the session owner', async () => {
     dbMocks.isAssigned.mockResolvedValue(false);
-    const res = await request(appAs('therapist', 7)).put('/admin/api/crisis/events/12/adjudication').send({ verdict: 'confirmed' });
+    const res = await request(appAs('therapist', 7))
+      .put('/admin/api/crisis/events/12/adjudication')
+      .send({ verdict: 'confirmed' });
     expect(res.status).toBe(404);
     expect(dbMocks.upsertCrisisEventAdjudication).not.toHaveBeenCalled();
   });
 
   it('404s for a researcher outside the owner org and for an unknown event', async () => {
-    expect((await request(appAs('researcher', 1, 9)).put('/admin/api/crisis/events/12/adjudication').send({ verdict: 'confirmed' })).status).toBe(404);
+    expect(
+      (
+        await request(appAs('researcher', 1, 9))
+          .put('/admin/api/crisis/events/12/adjudication')
+          .send({ verdict: 'confirmed' })
+      ).status,
+    ).toBe(404);
     dbMocks.getCrisisEventClientInfo.mockResolvedValueOnce(null);
-    expect((await request(appAs('researcher')).put('/admin/api/crisis/events/999/adjudication').send({ verdict: 'confirmed' })).status).toBe(404);
+    expect(
+      (
+        await request(appAs('researcher'))
+          .put('/admin/api/crisis/events/999/adjudication')
+          .send({ verdict: 'confirmed' })
+      ).status,
+    ).toBe(404);
   });
 
   it('resolves a thread-origin event through client_user_id (therapist caseload, researcher org)', async () => {
-    dbMocks.getCrisisEventClientInfo.mockResolvedValue({ event_id: 13, session_id: null, client_user_id: 42, session_user_id: null });
-    expect((await request(appAs('therapist', 7)).put('/admin/api/crisis/events/13/adjudication').send({ verdict: 'confirmed' })).status).toBe(200);
+    dbMocks.getCrisisEventClientInfo.mockResolvedValue({
+      event_id: 13,
+      session_id: null,
+      client_user_id: 42,
+      session_user_id: null,
+    });
+    expect(
+      (
+        await request(appAs('therapist', 7))
+          .put('/admin/api/crisis/events/13/adjudication')
+          .send({ verdict: 'confirmed' })
+      ).status,
+    ).toBe(200);
     expect(dbMocks.isAssigned).toHaveBeenCalledWith(7, 42);
     dbMocks.getOrganizationIdForUser.mockResolvedValue(2);
-    expect((await request(appAs('researcher', 1, 1)).put('/admin/api/crisis/events/13/adjudication').send({ verdict: 'confirmed' })).status).toBe(404);
+    expect(
+      (
+        await request(appAs('researcher', 1, 1))
+          .put('/admin/api/crisis/events/13/adjudication')
+          .send({ verdict: 'confirmed' })
+      ).status,
+    ).toBe(404);
   });
 
   it('is denied to caseworkers (403) even when assigned', async () => {
-    expect((await request(appAs('caseworker', 7)).put('/admin/api/crisis/events/12/adjudication').send({ verdict: 'confirmed' })).status).toBe(403);
+    expect(
+      (
+        await request(appAs('caseworker', 7))
+          .put('/admin/api/crisis/events/12/adjudication')
+          .send({ verdict: 'confirmed' })
+      ).status,
+    ).toBe(403);
   });
 });
 

@@ -13,7 +13,7 @@ export function generateMFASecret(username: string): { secret: string; otpauthUr
   const secret = speakeasy.generateSecret({
     name: `AI Therapy (${username})`,
     issuer: 'AI Therapy Platform',
-    length: 32
+    length: 32,
   });
 
   // generateSecret() drops the issuer from its otpauth_url, so authenticator
@@ -27,7 +27,7 @@ export function generateMFASecret(username: string): { secret: string; otpauthUr
 
   return {
     secret: secret.base32,
-    otpauthUrl
+    otpauthUrl,
   };
 }
 
@@ -57,7 +57,7 @@ export function verifyTOTP(token: string, secret: string): boolean {
     secret: secret,
     encoding: 'base32',
     token: token,
-    window: 2 // Allow 2 time steps before/after for clock drift (±60 seconds)
+    window: 2, // Allow 2 time steps before/after for clock drift (±60 seconds)
   });
 }
 
@@ -89,7 +89,10 @@ export async function generateBackupCodes(count = 10): Promise<{ codes: string[]
  * @param {string[]} hashedCodes - Array of hashed backup codes from database
  * @returns {Promise<{valid: boolean, remainingCodes: string[]}>} - Validation result and updated codes
  */
-export async function verifyBackupCode(code: string, hashedCodes: string[]): Promise<{ valid: boolean; remainingCodes: string[] }> {
+export async function verifyBackupCode(
+  code: string,
+  hashedCodes: string[],
+): Promise<{ valid: boolean; remainingCodes: string[] }> {
   if (!hashedCodes || hashedCodes.length === 0) {
     return { valid: false, remainingCodes: [] };
   }
@@ -124,7 +127,7 @@ export async function enableMFA(userId: number, secret: string, hashedBackupCode
          mfa_backup_codes = $2,
          mfa_enabled_at = CURRENT_TIMESTAMP
      WHERE userid = $3`,
-    [secret, hashedBackupCodes, userId]
+    [secret, hashedBackupCodes, userId],
   );
 }
 
@@ -141,7 +144,7 @@ export async function disableMFA(userId: number): Promise<void> {
          mfa_enabled_at = NULL,
          last_mfa_verified_at = NULL
      WHERE userid = $1`,
-    [userId]
+    [userId],
   );
 }
 
@@ -154,7 +157,7 @@ export async function updateMFAVerificationTime(userId: number): Promise<void> {
     `UPDATE users
      SET last_mfa_verified_at = CURRENT_TIMESTAMP
      WHERE userid = $1`,
-    [userId]
+    [userId],
   );
 }
 
@@ -182,7 +185,7 @@ export async function getMFAStatus(userId: number): Promise<{
     `SELECT mfa_enabled, mfa_secret, mfa_backup_codes, mfa_enabled_at, last_mfa_verified_at
      FROM users
      WHERE userid = $1`,
-    [userId]
+    [userId],
   );
 
   if (result.rows.length === 0) {
@@ -196,7 +199,7 @@ export async function getMFAStatus(userId: number): Promise<{
     enabledAt: user.mfa_enabled_at,
     lastVerifiedAt: user.last_mfa_verified_at,
     backupCodesRemaining: user.mfa_backup_codes ? user.mfa_backup_codes.length : 0,
-    secret: user.mfa_secret // Only return this for internal use
+    secret: user.mfa_secret, // Only return this for internal use
   };
 }
 
@@ -210,6 +213,6 @@ export async function updateBackupCodes(userId: number, remainingCodes: string[]
     `UPDATE users
      SET mfa_backup_codes = $1
      WHERE userid = $2`,
-    [remainingCodes, userId]
+    [remainingCodes, userId],
   );
 }

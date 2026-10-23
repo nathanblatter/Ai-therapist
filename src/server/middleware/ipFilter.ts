@@ -72,7 +72,8 @@ export function restrictParticipantsToUs(req: Request, res: Response, next: Next
   if (!isUsBasedIp(clientIp)) {
     return res.status(403).json({
       error: 'Access Restricted',
-      message: 'This service is only available to users within the United States. If you are a therapist or researcher, please log in to access from any location.'
+      message:
+        'This service is only available to users within the United States. If you are a therapist or researcher, please log in to access from any location.',
     });
   }
 

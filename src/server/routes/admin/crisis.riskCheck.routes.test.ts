@@ -35,7 +35,10 @@ function appAs(role: string, userId = 1, orgId?: number) {
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { session: Record<string, unknown> }).session = {
-      userId, userRole: role, username: 'tester', ...(orgId === undefined ? {} : { orgId }),
+      userId,
+      userRole: role,
+      username: 'tester',
+      ...(orgId === undefined ? {} : { orgId }),
     };
     next();
   });
@@ -47,13 +50,23 @@ const LADDER = {
   session_id: 'sess_1',
   steps: [
     {
-      check_step_id: 1, session_id: 'sess_1', crisis_event_id: 9, step: 'ideation',
-      answer: 'yes, most nights', risk_band: 'moderate', sequence: 1,
+      check_step_id: 1,
+      session_id: 'sess_1',
+      crisis_event_id: 9,
+      step: 'ideation',
+      answer: 'yes, most nights',
+      risk_band: 'moderate',
+      sequence: 1,
       created_at: '2026-09-20T10:00:00.000Z',
     },
     {
-      check_step_id: 2, session_id: 'sess_1', crisis_event_id: 9, step: 'plan',
-      answer: 'no plan', risk_band: 'low', sequence: 2,
+      check_step_id: 2,
+      session_id: 'sess_1',
+      crisis_event_id: 9,
+      step: 'plan',
+      answer: 'no plan',
+      risk_band: 'low',
+      sequence: 2,
       created_at: '2026-09-20T10:02:00.000Z',
     },
   ],
@@ -148,16 +161,28 @@ describe('GET /admin/api/crisis/events?sessionId (researcher org scope)', () => 
   it('same-org owner 200, cross-org owner 404, caseload ignored', async () => {
     dbMocks.isAssigned.mockResolvedValue(false);
     dbMocks.getSessionAccessInfo.mockResolvedValue({ user_id: 42, status: 'ended', owner_organization_id: 2 });
-    expect((await request(appAs('researcher', 1, 2)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(200);
+    expect((await request(appAs('researcher', 1, 2)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(
+      200,
+    );
     expect(getSessionCrisisEvents).toHaveBeenCalledWith('sess_1');
     expect(dbMocks.isAssigned).not.toHaveBeenCalled();
-    expect((await request(appAs('researcher', 1, 1)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(404);
+    expect((await request(appAs('researcher', 1, 1)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(
+      404,
+    );
     expect(getSessionCrisisEvents).toHaveBeenCalledTimes(1);
   });
 
   it('anonymous session: irb-study researchers only', async () => {
-    dbMocks.getSessionAccessInfo.mockResolvedValue({ user_id: null, status: 'ended', owner_organization_id: null } as never);
-    expect((await request(appAs('researcher', 1, 2)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(404);
-    expect((await request(appAs('researcher', 1, 1)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(200);
+    dbMocks.getSessionAccessInfo.mockResolvedValue({
+      user_id: null,
+      status: 'ended',
+      owner_organization_id: null,
+    } as never);
+    expect((await request(appAs('researcher', 1, 2)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(
+      404,
+    );
+    expect((await request(appAs('researcher', 1, 1)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(
+      200,
+    );
   });
 });

@@ -64,24 +64,24 @@ async function hardEnd(opts: AutoTerminateOptions): Promise<void> {
 
   // Free the in-memory chat transcript (ai-therapist-224). No-op for realtime.
   import('../services/chatTherapy.service.js')
-    .then(m => m.endChatSession(sessionId))
-    .catch(e => log.error({ err: e }, 'chat transcript cleanup failed'));
+    .then((m) => m.endChatSession(sessionId))
+    .catch((e) => log.error({ err: e }, 'chat transcript cleanup failed'));
 
   import('../services/sessionRedaction.service.js')
-    .then(m => m.redactSession(sessionId))
-    .catch(e => log.error({ err: e }, '[Redaction] session redaction failed'));
+    .then((m) => m.redactSession(sessionId))
+    .catch((e) => log.error({ err: e }, '[Redaction] session redaction failed'));
 
   import('../services/recorder.service.js')
-    .then(m => m.finalize(sessionId))
-    .catch(e => log.error({ err: e }, '[Recorder] finalize failed'));
+    .then((m) => m.finalize(sessionId))
+    .catch((e) => log.error({ err: e }, '[Recorder] finalize failed'));
 
   import('../services/sessionInsights.service.js')
-    .then(m => m.generateSessionInsightsAsync(sessionId))
-    .catch(e => log.error({ err: e }, '[Insights] generation failed'));
+    .then((m) => m.generateSessionInsightsAsync(sessionId))
+    .catch((e) => log.error({ err: e }, '[Insights] generation failed'));
 
   import('../services/sessionEval.service.js')
-    .then(m => m.maybeAutoEvalSession(sessionId))
-    .catch(e => log.error({ err: e }, '[Evals] auto-eval failed'));
+    .then((m) => m.maybeAutoEvalSession(sessionId))
+    .catch((e) => log.error({ err: e }, '[Evals] auto-eval failed'));
 
   global.io?.to(`session:${sessionId}`).emit('session:status', {
     status: 'ended',
@@ -92,9 +92,18 @@ async function hardEnd(opts: AutoTerminateOptions): Promise<void> {
   });
 
   if (global.io) {
-    void broadcastAdminEventForSession(global.io, 'session:ended', {
-      sessionId, endedAt: new Date(), endedBy: 'system', reason: 'duration_limit',
-    }, sessionId, 'summary');
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:ended',
+      {
+        sessionId,
+        endedAt: new Date(),
+        endedBy: 'system',
+        reason: 'duration_limit',
+      },
+      sessionId,
+      'summary',
+    );
   }
 }
 
@@ -111,15 +120,18 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
   // about time at the hard limit, so closings were rushed or cut off entirely.
   // One minute of runway lets it consolidate and land the recap naturally.
   if (durationMs > 90 * 1000) {
-    const nudge = setTimeout(async () => {
-      try {
-        const current = await getSessionAccessInfo(sessionId);
-        if (!current || current.status !== 'active') return;
-        await steer(sessionId, WRAP_UP_NUDGE, false);
-      } catch (err) {
-        log.error({ err }, `T-60s wrap-up nudge failed for ${sessionId}`);
-      }
-    }, durationMs - 60 * 1000);
+    const nudge = setTimeout(
+      async () => {
+        try {
+          const current = await getSessionAccessInfo(sessionId);
+          if (!current || current.status !== 'active') return;
+          await steer(sessionId, WRAP_UP_NUDGE, false);
+        } catch (err) {
+          log.error({ err }, `T-60s wrap-up nudge failed for ${sessionId}`);
+        }
+      },
+      durationMs - 60 * 1000,
+    );
     nudge.unref?.();
   }
 
@@ -133,7 +145,7 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
         await steer(sessionId, TIME_LIMIT_STEER, true);
         log.info(
           `Session ${sessionId} hit ${maxDurationMinutes}min limit — asked model to wrap up ` +
-          `(${graceMs / 1000}s grace)`,
+            `(${graceMs / 1000}s grace)`,
         );
       } catch (e) {
         log.error({ err: e }, 'wrap-up steer failed, will hard-end after grace');
@@ -155,7 +167,5 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
   }, durationMs);
   limit.unref?.();
 
-  log.info(
-    `Session ${sessionId} will auto-terminate in ${maxDurationMinutes} minutes (+${graceMs / 1000}s grace)`,
-  );
+  log.info(`Session ${sessionId} will auto-terminate in ${maxDurationMinutes} minutes (+${graceMs / 1000}s grace)`);
 }

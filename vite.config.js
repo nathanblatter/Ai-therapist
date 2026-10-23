@@ -1,6 +1,6 @@
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
-import react from "@vitejs/plugin-react";
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import react from '@vitejs/plugin-react';
 
 const repoRoot = dirname(fileURLToPath(import.meta.url));
 
@@ -8,11 +8,11 @@ const repoRoot = dirname(fileURLToPath(import.meta.url));
 // Select with the APP env var (see the build:* scripts in package.json);
 // defaults to "main".
 const APPS = {
-  main: { dir: "src/client/main", html: "index.html", base: "/" },
-  admin: { dir: "src/client/admin", html: "admin.html", base: "/" },
+  main: { dir: 'src/client/main', html: 'index.html', base: '/' },
+  admin: { dir: 'src/client/admin', html: 'admin.html', base: '/' },
 };
 
-const app = APPS[process.env.APP || "main"];
+const app = APPS[process.env.APP || 'main'];
 
 export default {
   root: join(repoRoot, app.dir),

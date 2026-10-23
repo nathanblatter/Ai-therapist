@@ -12,7 +12,7 @@ async function rollbackMigration() {
 
     const rollbackSQL = await fs.readFile(
       path.join(__dirname, '../migrations/014_add_ai_model_config_rollback.sql'),
-      'utf8'
+      'utf8',
     );
 
     await pool.query(rollbackSQL);

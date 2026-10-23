@@ -17,11 +17,16 @@ vi.mock('ws', async () => {
   class MockWebSocket extends EventEmitter {
     sent: string[] = [];
     closed = false;
-    constructor(public url: string, public options: unknown) {
+    constructor(
+      public url: string,
+      public options: unknown,
+    ) {
       super();
       sockets.push(this);
     }
-    send(data: string) { this.sent.push(data); }
+    send(data: string) {
+      this.sent.push(data);
+    }
     close() {
       if (this.closed) return;
       this.closed = true;
@@ -47,7 +52,7 @@ function latest(): MockSocket {
 }
 
 function sentEvents(ws: MockSocket): Array<Record<string, unknown>> {
-  return ws.sent.map(s => JSON.parse(s) as Record<string, unknown>);
+  return ws.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
 }
 
 function emitEvent(ws: EventEmitter, event: Record<string, unknown>) {
@@ -199,7 +204,10 @@ describe('forkAndProbe error envelopes', () => {
 
   it('reports an API error event as code: message, with defaults for a bare error', async () => {
     const first = await start();
-    emitEvent(first.ws, { type: 'error', error: { code: 'invalid_model', message: 'gpt-x is not a valid delegation backend' } });
+    emitEvent(first.ws, {
+      type: 'error',
+      error: { code: 'invalid_model', message: 'gpt-x is not a valid delegation backend' },
+    });
     expect((await first.pending).error).toBe('invalid_model: gpt-x is not a valid delegation backend');
 
     const second = await start();

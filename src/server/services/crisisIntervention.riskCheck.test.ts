@@ -6,21 +6,19 @@
 // score with no ladder logged produces a recorded, channel-appropriate demand.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const {
-  poolQueryMock, logInterventionActionMock, sessionHasRiskCheckMock,
-  getSystemConfigMock, sidebandManagerMock,
-} = vi.hoisted(() => ({
-  poolQueryMock: vi.fn(),
-  logInterventionActionMock: vi.fn(),
-  sessionHasRiskCheckMock: vi.fn(),
-  getSystemConfigMock: vi.fn(),
-  sidebandManagerMock: {
-    getActiveConnections: vi.fn(() => [] as string[]),
-    isConnected: vi.fn(() => false),
-    injectMessage: vi.fn(),
-    tryInject: vi.fn(),
-  },
-}));
+const { poolQueryMock, logInterventionActionMock, sessionHasRiskCheckMock, getSystemConfigMock, sidebandManagerMock } =
+  vi.hoisted(() => ({
+    poolQueryMock: vi.fn(),
+    logInterventionActionMock: vi.fn(),
+    sessionHasRiskCheckMock: vi.fn(),
+    getSystemConfigMock: vi.fn(),
+    sidebandManagerMock: {
+      getActiveConnections: vi.fn(() => [] as string[]),
+      isConnected: vi.fn(() => false),
+      injectMessage: vi.fn(),
+      tryInject: vi.fn(),
+    },
+  }));
 
 vi.mock('../config/db.js', () => ({ pool: { query: poolQueryMock } }));
 vi.mock('./crisisDetection.service.js', () => ({ logInterventionAction: logInterventionActionMock }));
@@ -104,27 +102,46 @@ describe('maybeRequireRiskCheck', () => {
     const guidance = await maybeRequireRiskCheck(s, 40, 'medium', 'chat');
     expect(guidance).toBe(RISK_CHECK_REQUIRED_GUIDANCE);
     expect(guidance).toContain('run_risk_check');
-    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'risk_steering', expect.objectContaining({
-      trigger: 'risk_check_required', channel: 'chat', threshold: 40, riskScore: 40, delivered: true,
-    }));
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      s,
+      'risk_steering',
+      expect.objectContaining({
+        trigger: 'risk_check_required',
+        channel: 'chat',
+        threshold: 40,
+        riskScore: 40,
+        delivered: true,
+      }),
+    );
   });
 
   it('realtime: injects over the sideband and returns null (no same-turn string)', async () => {
     const s = freshSession();
     expect(await maybeRequireRiskCheck(s, 80, 'high', 'realtime')).toBeNull();
     expect(sidebandManagerMock.tryInject).toHaveBeenCalledWith(s, 'system', RISK_CHECK_REQUIRED_GUIDANCE, false);
-    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'risk_steering', expect.objectContaining({
-      trigger: 'risk_check_required', channel: 'realtime', delivered: true,
-    }));
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      s,
+      'risk_steering',
+      expect.objectContaining({
+        trigger: 'risk_check_required',
+        channel: 'realtime',
+        delivered: true,
+      }),
+    );
   });
 
   it('realtime: an undeliverable demand is still RECORDED, as delivered:false', async () => {
     const s = freshSession();
     sidebandManagerMock.tryInject.mockResolvedValue(false);
     await maybeRequireRiskCheck(s, 80, 'high', 'realtime');
-    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'risk_steering', expect.objectContaining({
-      trigger: 'risk_check_required', delivered: false,
-    }));
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      s,
+      'risk_steering',
+      expect.objectContaining({
+        trigger: 'risk_check_required',
+        delivered: false,
+      }),
+    );
   });
 
   it('never re-demands once the session has a ladder step', async () => {

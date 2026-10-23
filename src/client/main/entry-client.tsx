@@ -1,20 +1,20 @@
-import { StrictMode } from "react";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import App from "./components/App";
-import Login from "./components/Login";
-import Profile from "./components/Profile";
-import DemoLanding from "./components/DemoLanding";
-import ProtectedRoute from "../shared/components/ProtectedRoute";
-import "../shared/base.css";
-import { installGlobalErrorReporting } from "./utils/telemetry";
+import { StrictMode } from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import App from './components/App';
+import Login from './components/Login';
+import Profile from './components/Profile';
+import DemoLanding from './components/DemoLanding';
+import ProtectedRoute from '../shared/components/ProtectedRoute';
+import '../shared/base.css';
+import { installGlobalErrorReporting } from './utils/telemetry';
 
 // Report uncaught errors / unhandled rejections to the server-side error
 // beacon (sampled and deduped inside; safe to call before hydration).
 installGlobalErrorReporting();
 
 ReactDOM.hydrateRoot(
-  document.getElementById("root") as Element,
+  document.getElementById('root') as Element,
   <StrictMode>
     <BrowserRouter>
       <Routes>

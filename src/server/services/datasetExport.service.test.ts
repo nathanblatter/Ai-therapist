@@ -27,17 +27,10 @@ vi.mock('../db/qualtricsResponses.queries.js', () => ({
   getSurveyAnswersForExport: vi.fn(async () => mockRows.surveys_scored ?? []),
 }));
 
-import {
-  toCsv,
-  buildDataset,
-  DATASET_FILES,
-  TRANSCRIPT_FILES,
-  type DatasetColumn,
-} from './datasetExport.service.js';
+import { toCsv, buildDataset, DATASET_FILES, TRANSCRIPT_FILES, type DatasetColumn } from './datasetExport.service.js';
 import { ensurePseudonyms } from '../db/datasetExport.queries.js';
 
-const cols = (names: string[]): DatasetColumn[] =>
-  names.map(n => ({ name: n, type: 'string', source: 'x' }));
+const cols = (names: string[]): DatasetColumn[] => names.map((n) => ({ name: n, type: 'string', source: 'x' }));
 
 describe('toCsv', () => {
   it('quotes cells and escapes embedded quotes', () => {
@@ -65,14 +58,14 @@ describe('codebook / CSV registry (drift guard)', () => {
   it('every registry column appears once in the CSV header, in order', () => {
     for (const spec of [...DATASET_FILES, ...TRANSCRIPT_FILES]) {
       const header = toCsv(spec.columns, []).split('\n')[0];
-      expect(header).toBe(spec.columns.map(c => c.name).join(','));
+      expect(header).toBe(spec.columns.map((c) => c.name).join(','));
     }
   });
 
   // Extract the "## <file>" section of a codebook and return its column-row names.
   function sectionColumns(codebook: string, file: string): string[] {
     const lines = codebook.split('\n');
-    const start = lines.findIndex(l => l === `## ${file}`);
+    const start = lines.findIndex((l) => l === `## ${file}`);
     expect(start, `section ${file}`).toBeGreaterThanOrEqual(0);
     const names: string[] = [];
     for (let i = start + 1; i < lines.length; i++) {
@@ -85,13 +78,13 @@ describe('codebook / CSV registry (drift guard)', () => {
 
   it('each codebook file-section lists exactly its CSV columns, in order (no drift)', async () => {
     const result = await buildDataset('2026-08-31T23:59:59Z', { includeTranscripts: true, generatedAt: 'fixed' });
-    const mainBook = result.main.find(f => f.name === 'codebook.md')!.content;
+    const mainBook = result.main.find((f) => f.name === 'codebook.md')!.content;
     for (const spec of DATASET_FILES) {
-      expect(sectionColumns(mainBook, spec.file), spec.file).toEqual(spec.columns.map(c => c.name));
+      expect(sectionColumns(mainBook, spec.file), spec.file).toEqual(spec.columns.map((c) => c.name));
     }
-    const tBook = result.transcripts!.find(f => f.name === 'codebook.md')!.content;
+    const tBook = result.transcripts!.find((f) => f.name === 'codebook.md')!.content;
     for (const spec of TRANSCRIPT_FILES) {
-      expect(sectionColumns(tBook, spec.file), spec.file).toEqual(spec.columns.map(c => c.name));
+      expect(sectionColumns(tBook, spec.file), spec.file).toEqual(spec.columns.map((c) => c.name));
     }
   });
 });
@@ -100,11 +93,22 @@ describe('buildDataset', () => {
   it('assigns pseudonyms before selecting rows and includes all 13 default CSVs + codebook', async () => {
     const result = await buildDataset('2026-08-31T23:59:59Z', { generatedAt: 'fixed' });
     expect(ensurePseudonyms).toHaveBeenCalledWith('2026-08-31T23:59:59Z');
-    const names = result.main.map(f => f.name).sort();
+    const names = result.main.map((f) => f.name).sort();
     expect(names).toEqual([
-      'acoustic_features.csv', 'codebook.md', 'crisis_adjudications.csv', 'crisis_events.csv', 'evals.csv', 'feedback.csv',
-      'human_ratings.csv', 'moods.csv', 'participants.csv', 'screeners.csv', 'semantic_metrics.csv',
-      'sessions.csv', 'surveys.csv', 'surveys_scored.csv',
+      'acoustic_features.csv',
+      'codebook.md',
+      'crisis_adjudications.csv',
+      'crisis_events.csv',
+      'evals.csv',
+      'feedback.csv',
+      'human_ratings.csv',
+      'moods.csv',
+      'participants.csv',
+      'screeners.csv',
+      'semantic_metrics.csv',
+      'sessions.csv',
+      'surveys.csv',
+      'surveys_scored.csv',
     ]);
     expect(result.transcripts).toBeNull();
   });
@@ -113,7 +117,11 @@ describe('buildDataset', () => {
     const off = await buildDataset('2026-08-31T23:59:59Z', { generatedAt: 'fixed' });
     expect(off.transcripts).toBeNull();
     const on = await buildDataset('2026-08-31T23:59:59Z', { includeTranscripts: true, generatedAt: 'fixed' });
-    expect(on.transcripts!.map(f => f.name).sort()).toEqual(['codebook.md', 'feedback_comments.csv', 'transcripts.csv']);
+    expect(on.transcripts!.map((f) => f.name).sort()).toEqual([
+      'codebook.md',
+      'feedback_comments.csv',
+      'transcripts.csv',
+    ]);
   });
 
   it('is deterministic: identical mocked data + asOf + generatedAt => identical strings', async () => {
@@ -123,14 +131,14 @@ describe('buildDataset', () => {
     ];
     const a = await buildDataset('2026-08-31T23:59:59Z', { generatedAt: 'fixed' });
     const b = await buildDataset('2026-08-31T23:59:59Z', { generatedAt: 'fixed' });
-    expect(a.main.map(f => f.content)).toEqual(b.main.map(f => f.content));
+    expect(a.main.map((f) => f.content)).toEqual(b.main.map((f) => f.content));
     mockRows.sessions = [];
   });
 
   it('renders an anonymous session with empty participant_id', async () => {
     mockRows.sessions = [{ session_pseudo_id: 'S0002', participant_id: '', is_anonymous: true }];
     const result = await buildDataset('2026-08-31T23:59:59Z', { generatedAt: 'fixed' });
-    const sessions = result.main.find(f => f.name === 'sessions.csv')!.content;
+    const sessions = result.main.find((f) => f.name === 'sessions.csv')!.content;
     const line = sessions.split('\n')[1];
     // session_pseudo_id, participant_id (empty string), is_anonymous, ...
     expect(line.startsWith('"S0002","",true')).toBe(true);
@@ -141,7 +149,7 @@ describe('buildDataset', () => {
 describe('PII exclusion (query source guard)', () => {
   const queriesSrc = readFileSync(
     path.join(path.dirname(fileURLToPath(import.meta.url)), '../db/datasetExport.queries.ts'),
-    'utf8'
+    'utf8',
   );
 
   it('never selects raw message content (only content_redacted)', () => {
@@ -165,16 +173,34 @@ describe('PII exclusion (query source guard)', () => {
   // Eval program WP2: raters and adjudicators appear as a role, never a name,
   // and no rating note / adjudication note leaves the database.
   it('human_ratings.csv and crisis_adjudications.csv carry roles, verdicts and scores only', () => {
-    const ratings = DATASET_FILES.find(f => f.file === 'human_ratings.csv')!;
-    const adjud = DATASET_FILES.find(f => f.file === 'crisis_adjudications.csv')!;
-    expect(ratings.columns.map(c => c.name)).toEqual([
-      'session_pseudo_id', 'rater_role', 'rater_seq', 'rubric_version',
-      'safety_protocol_score', 'empathy_score', 'modality_fidelity_score', 'disclaimer_compliance_score',
-      'non_directiveness_score', 'clinical_claims_score', 'queue_source', 'stratum', 'rated_at',
+    const ratings = DATASET_FILES.find((f) => f.file === 'human_ratings.csv')!;
+    const adjud = DATASET_FILES.find((f) => f.file === 'crisis_adjudications.csv')!;
+    expect(ratings.columns.map((c) => c.name)).toEqual([
+      'session_pseudo_id',
+      'rater_role',
+      'rater_seq',
+      'rubric_version',
+      'safety_protocol_score',
+      'empathy_score',
+      'modality_fidelity_score',
+      'disclaimer_compliance_score',
+      'non_directiveness_score',
+      'clinical_claims_score',
+      'queue_source',
+      'stratum',
+      'rated_at',
     ]);
-    expect(adjud.columns.map(c => c.name)).toEqual([
-      'session_pseudo_id', 'participant_id', 'thread_origin', 'event_type', 'severity', 'risk_score',
-      'occurred_at', 'adjudicator_role', 'verdict', 'adjudicated_at',
+    expect(adjud.columns.map((c) => c.name)).toEqual([
+      'session_pseudo_id',
+      'participant_id',
+      'thread_origin',
+      'event_type',
+      'severity',
+      'risk_score',
+      'occurred_at',
+      'adjudicator_role',
+      'verdict',
+      'adjudicated_at',
     ]);
     for (const col of [...ratings.columns, ...adjud.columns]) {
       expect(col.name).not.toMatch(/note|username|user_id|rater_id|adjudicator_id/);

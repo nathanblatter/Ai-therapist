@@ -108,12 +108,14 @@ function validateContent(body: unknown, partial: boolean): ValidationResult<Upda
   const title = textField(raw.title);
   if (title === null || (!partial && title === undefined)) return { ok: false, error: 'title is required' };
   if (title !== undefined) {
-    if (title.length > PRACTICE_TITLE_MAX) return { ok: false, error: `title must be at most ${PRACTICE_TITLE_MAX} characters` };
+    if (title.length > PRACTICE_TITLE_MAX)
+      return { ok: false, error: `title must be at most ${PRACTICE_TITLE_MAX} characters` };
     fields.title = title;
   }
 
   const description = textField(raw.description);
-  if (description === null || (!partial && description === undefined)) return { ok: false, error: 'description is required' };
+  if (description === null || (!partial && description === undefined))
+    return { ok: false, error: 'description is required' };
   if (description !== undefined) {
     if (description.length > PRACTICE_DESCRIPTION_MAX) {
       return { ok: false, error: `description must be at most ${PRACTICE_DESCRIPTION_MAX} characters` };
@@ -238,7 +240,8 @@ export default function practiceAssignmentsRoutes(): Router {
       const id = parseId(req.params.id);
       if (id === null) return res.status(400).json({ error: 'Invalid assignment id' });
       const assignment = await reissueAssignment(id, clientId, req.session.userId as number);
-      if (!assignment) return res.status(409).json({ error: 'Only a completed, skipped or cancelled assignment can be re-issued' });
+      if (!assignment)
+        return res.status(409).json({ error: 'Only a completed, skipped or cancelled assignment can be re-issued' });
       audit(req, 'assignment_reissued', clientId, { ...summarize(assignment), reissued_from: id });
       res.status(201).json({ assignment });
     } catch (err) {

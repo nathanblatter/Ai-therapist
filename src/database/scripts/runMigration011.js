@@ -50,7 +50,7 @@ async function runMigration() {
     `);
 
     console.log('Verified tables:');
-    tablesResult.rows.forEach(row => {
+    tablesResult.rows.forEach((row) => {
       console.log(`  ${row.table_name}`);
     });
     console.log();
@@ -66,7 +66,7 @@ async function runMigration() {
     `);
 
     console.log('Verified crisis columns in therapy_sessions:');
-    columnsResult.rows.forEach(row => {
+    columnsResult.rows.forEach((row) => {
       console.log(`  ${row.column_name} (${row.data_type})`);
     });
     console.log();
@@ -81,11 +81,10 @@ async function runMigration() {
     `);
 
     console.log('Verified crisis indexes:');
-    indexesResult.rows.forEach(row => {
+    indexesResult.rows.forEach((row) => {
       console.log(`  ${row.indexname}`);
     });
     console.log();
-
   } catch (error) {
     console.error('\nMigration failed:', error.message);
     console.error('\nYou can rollback using: node src/database/scripts/rollbackMigration011.js\n');

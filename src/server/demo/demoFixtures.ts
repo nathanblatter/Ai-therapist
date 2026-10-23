@@ -39,35 +39,65 @@ interface DemoClient {
 
 const CLIENTS: DemoClient[] = [
   {
-    userid: 9001, username: 'client_a', role: 'participant',
-    created_at: iso(42 * DAY), preferred_voice: 'cedar', preferred_language: 'en',
-    mfa_enabled: false, memory_enabled: true, risk_context_share_enabled: false,
+    userid: 9001,
+    username: 'client_a',
+    role: 'participant',
+    created_at: iso(42 * DAY),
+    preferred_voice: 'cedar',
+    preferred_language: 'en',
+    mfa_enabled: false,
+    memory_enabled: true,
+    risk_context_share_enabled: false,
     session_count: 6,
   },
   {
-    userid: 9002, username: 'client_b', role: 'participant',
-    created_at: iso(28 * DAY), preferred_voice: 'marin', preferred_language: 'en',
-    mfa_enabled: false, memory_enabled: true, risk_context_share_enabled: true,
+    userid: 9002,
+    username: 'client_b',
+    role: 'participant',
+    created_at: iso(28 * DAY),
+    preferred_voice: 'marin',
+    preferred_language: 'en',
+    mfa_enabled: false,
+    memory_enabled: true,
+    risk_context_share_enabled: true,
     session_count: 4,
   },
   {
-    userid: 9003, username: 'client_c', role: 'participant',
-    created_at: iso(63 * DAY), preferred_voice: 'cedar', preferred_language: 'en',
-    mfa_enabled: false, memory_enabled: true, risk_context_share_enabled: false,
+    userid: 9003,
+    username: 'client_c',
+    role: 'participant',
+    created_at: iso(63 * DAY),
+    preferred_voice: 'cedar',
+    preferred_language: 'en',
+    mfa_enabled: false,
+    memory_enabled: true,
+    risk_context_share_enabled: false,
     session_count: 8,
   },
   {
-    userid: 9004, username: 'client_d', role: 'participant',
-    created_at: iso(2 * HOUR), preferred_voice: 'marin', preferred_language: 'en',
-    mfa_enabled: false, memory_enabled: true, risk_context_share_enabled: false,
+    userid: 9004,
+    username: 'client_d',
+    role: 'participant',
+    created_at: iso(2 * HOUR),
+    preferred_voice: 'marin',
+    preferred_language: 'en',
+    mfa_enabled: false,
+    memory_enabled: true,
+    risk_context_share_enabled: false,
     session_count: 1,
   },
 ];
 
 const THERAPIST = {
-  userid: 9100, username: 'dr_demo', role: 'therapist',
-  created_at: iso(90 * DAY), preferred_voice: null, preferred_language: 'en',
-  mfa_enabled: true, memory_enabled: false, risk_context_share_enabled: false,
+  userid: 9100,
+  username: 'dr_demo',
+  role: 'therapist',
+  created_at: iso(90 * DAY),
+  preferred_voice: null,
+  preferred_language: 'en',
+  mfa_enabled: true,
+  memory_enabled: false,
+  risk_context_share_enabled: false,
 };
 
 interface DemoSession {
@@ -117,11 +147,27 @@ const SESSIONS: DemoSession[] = [
     eval_score: null,
     feedback_rating: null,
     transcript: [
-      { role: 'assistant', type: 'voice', text: "Hi, welcome. Your therapist set this up so you have a place to practice between your sessions with them. Nothing here replaces those sessions. What brings you in today?" },
-      { role: 'user', type: 'voice', text: "My therapist suggested I try this. I've been having a hard time since my divorce." },
-      { role: 'assistant', type: 'voice', text: "I'm glad you gave it a try, and I'm sorry — that's a big life change to carry. Would it help to start with what a typical week looks like for you right now?" },
-      { role: 'user', type: 'voice', text: "Mostly work, then home alone. The evenings are the worst part." },
-      { role: 'assistant', type: 'voice', text: "Evenings can feel very long when the house suddenly goes quiet. Let's note that as something to bring to your therapist too. For now, want to sketch one small evening routine we could try this week?" },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: 'Hi, welcome. Your therapist set this up so you have a place to practice between your sessions with them. Nothing here replaces those sessions. What brings you in today?',
+      },
+      {
+        role: 'user',
+        type: 'voice',
+        text: "My therapist suggested I try this. I've been having a hard time since my divorce.",
+      },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "I'm glad you gave it a try, and I'm sorry — that's a big life change to carry. Would it help to start with what a typical week looks like for you right now?",
+      },
+      { role: 'user', type: 'voice', text: 'Mostly work, then home alone. The evenings are the worst part.' },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "Evenings can feel very long when the house suddenly goes quiet. Let's note that as something to bring to your therapist too. For now, want to sketch one small evening routine we could try this week?",
+      },
     ],
   },
   {
@@ -146,13 +192,37 @@ const SESSIONS: DemoSession[] = [
     eval_score: 4.6,
     feedback_rating: 5,
     transcript: [
-      { role: 'assistant', type: 'chat', text: "Welcome back. Last time you started a thought record about the team meeting. Did you get a chance to finish it?" },
-      { role: 'user', type: 'chat', text: "I did. The hot thought was 'everyone thinks I'm incompetent'. I rated it 90 percent." },
-      { role: 'assistant', type: 'chat', text: "Nice work getting it on paper. What evidence did you find for and against that thought?" },
-      { role: 'user', type: 'chat', text: "For: I stumbled during the demo. Against: my manager asked me to lead the next one, and two people said it was useful." },
-      { role: 'assistant', type: 'chat', text: "That's a strong 'against' column. When you re-rated the thought after writing the balanced alternative, where did it land?" },
+      {
+        role: 'assistant',
+        type: 'chat',
+        text: 'Welcome back. Last time you started a thought record about the team meeting. Did you get a chance to finish it?',
+      },
+      {
+        role: 'user',
+        type: 'chat',
+        text: "I did. The hot thought was 'everyone thinks I'm incompetent'. I rated it 90 percent.",
+      },
+      {
+        role: 'assistant',
+        type: 'chat',
+        text: 'Nice work getting it on paper. What evidence did you find for and against that thought?',
+      },
+      {
+        role: 'user',
+        type: 'chat',
+        text: 'For: I stumbled during the demo. Against: my manager asked me to lead the next one, and two people said it was useful.',
+      },
+      {
+        role: 'assistant',
+        type: 'chat',
+        text: "That's a strong 'against' column. When you re-rated the thought after writing the balanced alternative, where did it land?",
+      },
       { role: 'user', type: 'chat', text: "Around 40. Still there, but it doesn't spiral the same way." },
-      { role: 'assistant', type: 'chat', text: "From 90 to 40 is real movement. Bring this record to your session with your therapist this week — it's exactly the kind of thing worth reviewing together." },
+      {
+        role: 'assistant',
+        type: 'chat',
+        text: "From 90 to 40 is real movement. Bring this record to your session with your therapist this week — it's exactly the kind of thing worth reviewing together.",
+      },
     ],
   },
   {
@@ -177,11 +247,27 @@ const SESSIONS: DemoSession[] = [
     eval_score: 4.4,
     feedback_rating: 4,
     transcript: [
-      { role: 'assistant', type: 'voice', text: "Good morning. I wanted to check in after last night. How are you feeling today?" },
-      { role: 'user', type: 'voice', text: "Better. Heavier than I'd like, but not like last night. I talked to my sister like we planned." },
-      { role: 'assistant', type: 'voice', text: "I'm really glad you reached out to her — that was the first step on your safety plan and you did it. Your therapist has also been notified and will follow up with you today." },
-      { role: 'user', type: 'voice', text: "Yeah, she already messaged me this morning." },
-      { role: 'assistant', type: 'voice', text: "Good. For today, let's keep it small: the plan says a short walk before noon and calling your sister again in the evening. Does that still feel doable?" },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: 'Good morning. I wanted to check in after last night. How are you feeling today?',
+      },
+      {
+        role: 'user',
+        type: 'voice',
+        text: "Better. Heavier than I'd like, but not like last night. I talked to my sister like we planned.",
+      },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "I'm really glad you reached out to her — that was the first step on your safety plan and you did it. Your therapist has also been notified and will follow up with you today.",
+      },
+      { role: 'user', type: 'voice', text: 'Yeah, she already messaged me this morning.' },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "Good. For today, let's keep it small: the plan says a short walk before noon and calling your sister again in the evening. Does that still feel doable?",
+      },
     ],
   },
   {
@@ -208,13 +294,33 @@ const SESSIONS: DemoSession[] = [
     transcript: [
       { role: 'assistant', type: 'voice', text: "Hi, I'm here with you. How has your evening been?" },
       { role: 'user', type: 'voice', text: "Bad. The anniversary is this weekend and it's all I can think about." },
-      { role: 'assistant', type: 'voice', text: "Anniversaries can pull all of the grief back to the surface at once. What's been the hardest thought tonight?" },
-      { role: 'user', type: 'voice', text: "That it should have been me. Some nights I think everyone would be better off." },
-      { role: 'assistant', type: 'voice', text: "Thank you for trusting me with that — it matters. I need to ask directly: are you having thoughts of ending your life, or of hurting yourself tonight?" },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "Anniversaries can pull all of the grief back to the surface at once. What's been the hardest thought tonight?",
+      },
+      {
+        role: 'user',
+        type: 'voice',
+        text: 'That it should have been me. Some nights I think everyone would be better off.',
+      },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: 'Thank you for trusting me with that — it matters. I need to ask directly: are you having thoughts of ending your life, or of hurting yourself tonight?',
+      },
       { role: 'user', type: 'voice', text: "Thoughts, yes. I wouldn't do anything. But the thoughts are loud." },
-      { role: 'assistant', type: 'voice', text: "I hear you, and I've let your therapist know so they can follow up with you. Right now, let's use your safety plan together. Step one was calling your sister — is she reachable tonight? And if things get worse, the 988 Suicide & Crisis Lifeline is there any hour: call or text 988." },
-      { role: 'user', type: 'voice', text: "I can call her. Can we do the breathing thing first?" },
-      { role: 'assistant', type: 'voice', text: "Of course. Let's do it together — in for four, hold for four, out for six. I'll count with you." },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "I hear you, and I've let your therapist know so they can follow up with you. Right now, let's use your safety plan together. Step one was calling your sister — is she reachable tonight? And if things get worse, the 988 Suicide & Crisis Lifeline is there any hour: call or text 988.",
+      },
+      { role: 'user', type: 'voice', text: 'I can call her. Can we do the breathing thing first?' },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "Of course. Let's do it together — in for four, hold for four, out for six. I'll count with you.",
+      },
     ],
   },
   {
@@ -239,11 +345,31 @@ const SESSIONS: DemoSession[] = [
     eval_score: 4.5,
     feedback_rating: 5,
     transcript: [
-      { role: 'assistant', type: 'voice', text: "Good to hear from you. Last week you were going to try leaving the office by six on Tuesday and Thursday, and you mentioned your sister's visit was coming up. How did it go?" },
-      { role: 'user', type: 'voice', text: "I actually left on time both days. Thursday I almost stayed, but I remembered what we said about the first ten minutes being the hardest." },
-      { role: 'assistant', type: 'voice', text: "That's two for two, and you used the exact skill we practiced. Did the evenings feel any different?" },
-      { role: 'user', type: 'voice', text: "Tuesday I cooked for the first time in weeks. It sounds small but it felt like being a person again." },
-      { role: 'assistant', type: 'voice', text: "It doesn't sound small at all — cooking was on your list of things that used to recharge you. Want to keep the same two days this week, or stretch to a third?" },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "Good to hear from you. Last week you were going to try leaving the office by six on Tuesday and Thursday, and you mentioned your sister's visit was coming up. How did it go?",
+      },
+      {
+        role: 'user',
+        type: 'voice',
+        text: 'I actually left on time both days. Thursday I almost stayed, but I remembered what we said about the first ten minutes being the hardest.',
+      },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "That's two for two, and you used the exact skill we practiced. Did the evenings feel any different?",
+      },
+      {
+        role: 'user',
+        type: 'voice',
+        text: 'Tuesday I cooked for the first time in weeks. It sounds small but it felt like being a person again.',
+      },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "It doesn't sound small at all — cooking was on your list of things that used to recharge you. Want to keep the same two days this week, or stretch to a third?",
+      },
     ],
   },
   {
@@ -268,11 +394,23 @@ const SESSIONS: DemoSession[] = [
     eval_score: 4.3,
     feedback_rating: 4,
     transcript: [
-      { role: 'assistant', type: 'voice', text: "Welcome back. It's been about a week — how has the presentation anxiety been since we last talked?" },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "Welcome back. It's been about a week — how has the presentation anxiety been since we last talked?",
+      },
       { role: 'user', type: 'voice', text: "Up and down. I used the breathing before Monday's standup and it helped." },
-      { role: 'assistant', type: 'voice', text: "Glad it's earning its keep. It's also time for our quick two-question check-in, if that's alright — the one your therapist reviews." },
-      { role: 'user', type: 'voice', text: "Sure, go ahead." },
-      { role: 'assistant', type: 'voice', text: "Over the last two weeks, how often have you been bothered by feeling nervous, anxious, or on edge — not at all, several days, more than half the days, or nearly every day?" },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: "Glad it's earning its keep. It's also time for our quick two-question check-in, if that's alright — the one your therapist reviews.",
+      },
+      { role: 'user', type: 'voice', text: 'Sure, go ahead.' },
+      {
+        role: 'assistant',
+        type: 'voice',
+        text: 'Over the last two weeks, how often have you been bothered by feeling nervous, anxious, or on edge — not at all, several days, more than half the days, or nearly every day?',
+      },
     ],
   },
   {
@@ -297,11 +435,23 @@ const SESSIONS: DemoSession[] = [
     eval_score: 4.2,
     feedback_rating: 4,
     transcript: [
-      { role: 'assistant', type: 'chat', text: "Last time we mapped where your energy goes in a week. Today you wanted to line that up against what actually matters to you. Ready?" },
+      {
+        role: 'assistant',
+        type: 'chat',
+        text: 'Last time we mapped where your energy goes in a week. Today you wanted to line that up against what actually matters to you. Ready?',
+      },
       { role: 'user', type: 'chat', text: "Ready. Spoiler: the two lists don't match." },
-      { role: 'assistant', type: 'chat', text: "That mismatch is exactly what burnout tends to look like on paper. Which value felt most starved this week?" },
+      {
+        role: 'assistant',
+        type: 'chat',
+        text: 'That mismatch is exactly what burnout tends to look like on paper. Which value felt most starved this week?',
+      },
       { role: 'user', type: 'chat', text: "Connection. I keep cancelling on people because I'm too drained." },
-      { role: 'assistant', type: 'chat', text: "Let's make that concrete for your therapist session: one cancelled plan you'd like to un-cancel, and what would need to be true to keep it." },
+      {
+        role: 'assistant',
+        type: 'chat',
+        text: "Let's make that concrete for your therapist session: one cancelled plan you'd like to un-cancel, and what would need to be true to keep it.",
+      },
     ],
   },
 ];
@@ -352,7 +502,7 @@ function activeRow(s: DemoSession) {
 }
 
 export function demoActiveSessions() {
-  return { sessions: SESSIONS.filter(s => s.status === 'active').map(activeRow) };
+  return { sessions: SESSIONS.filter((s) => s.status === 'active').map(activeRow) };
 }
 
 export function demoSessionsList(limit = 50, page = 1) {
@@ -361,7 +511,7 @@ export function demoSessionsList(limit = 50, page = 1) {
 }
 
 export function demoSessionDetail(sessionId: string) {
-  const s = SESSIONS.find(x => x.session_id === sessionId);
+  const s = SESSIONS.find((x) => x.session_id === sessionId);
   if (!s) return null;
   const session = {
     session_id: s.session_id,
@@ -379,7 +529,7 @@ export function demoSessionDetail(sessionId: string) {
     crisis_risk_score: s.crisis_risk_score,
     is_demo: true,
   };
-  const perStep = s.durationSeconds * 1000 / (s.transcript.length + 1);
+  const perStep = (s.durationSeconds * 1000) / (s.transcript.length + 1);
   const messages = s.transcript.map((m, i) => ({
     message_id: `${s.session_id}-msg-${i}`,
     session_id: s.session_id,
@@ -404,7 +554,12 @@ export function demoRiskHistory(sessionId: string) {
         session_id: sessionId,
         risk_score: 12,
         severity: null,
-        score_factors: { method: 'keyword+llm', keywords: [], llm_context: 'grief_anniversary', llm_reasoning: 'Grief-focused distress around an upcoming anniversary; no ideation language yet.' },
+        score_factors: {
+          method: 'keyword+llm',
+          keywords: [],
+          llm_context: 'grief_anniversary',
+          llm_reasoning: 'Grief-focused distress around an upcoming anniversary; no ideation language yet.',
+        },
         calculated_at: iso(base - 4 * 60 * 1000),
       },
       {
@@ -412,7 +567,14 @@ export function demoRiskHistory(sessionId: string) {
         session_id: sessionId,
         risk_score: 46,
         severity: 'medium',
-        score_factors: { method: 'keyword+llm', keywords: ['better off'], llm_context: 'passive_ideation', llm_reasoning: 'Passive ideation markers ("should have been me", "everyone would be better off"). Escalating trajectory.', trajectory_trend: 'rising' },
+        score_factors: {
+          method: 'keyword+llm',
+          keywords: ['better off'],
+          llm_context: 'passive_ideation',
+          llm_reasoning:
+            'Passive ideation markers ("should have been me", "everyone would be better off"). Escalating trajectory.',
+          trajectory_trend: 'rising',
+        },
         calculated_at: iso(base - 7 * 60 * 1000),
       },
       {
@@ -420,7 +582,14 @@ export function demoRiskHistory(sessionId: string) {
         session_id: sessionId,
         risk_score: 82,
         severity: 'high',
-        score_factors: { method: 'keyword+llm', keywords: ['ending my life'], llm_context: 'active_ideation_no_plan', llm_reasoning: 'Client confirms suicidal thoughts on direct inquiry; denies intent or plan. High severity, protocol requires escalation and safety-plan activation.', trajectory_trend: 'rising' },
+        score_factors: {
+          method: 'keyword+llm',
+          keywords: ['ending my life'],
+          llm_context: 'active_ideation_no_plan',
+          llm_reasoning:
+            'Client confirms suicidal thoughts on direct inquiry; denies intent or plan. High severity, protocol requires escalation and safety-plan activation.',
+          trajectory_trend: 'rising',
+        },
         calculated_at: iso(base - 9 * 60 * 1000),
       },
       {
@@ -428,7 +597,14 @@ export function demoRiskHistory(sessionId: string) {
         session_id: sessionId,
         risk_score: 38,
         severity: 'medium',
-        score_factors: { method: 'keyword+llm', keywords: [], llm_context: 'de_escalating', llm_reasoning: 'Client engaged with safety plan (agreed to call sister, completed grounding exercise). Distress decreasing.', trajectory_trend: 'falling' },
+        score_factors: {
+          method: 'keyword+llm',
+          keywords: [],
+          llm_context: 'de_escalating',
+          llm_reasoning:
+            'Client engaged with safety plan (agreed to call sister, completed grounding exercise). Distress decreasing.',
+          trajectory_trend: 'falling',
+        },
         calculated_at: iso(base - 16 * 60 * 1000),
       },
     ],
@@ -453,7 +629,7 @@ export function demoAnalytics() {
       date: new Date(now - (13 - i) * DAY).toISOString().slice(0, 10),
       session_count: [1, 2, 1, 2, 1, 3, 2, 1, 2, 2, 1, 3, 2, 2][i],
     })),
-    user_sessions: CLIENTS.map(c => ({ userid: c.userid, username: c.username, session_count: c.session_count })),
+    user_sessions: CLIENTS.map((c) => ({ userid: c.userid, username: c.username, session_count: c.session_count })),
     time_distribution: [
       { time_period: 'Morning', session_count: 4 },
       { time_period: 'Afternoon', session_count: 5 },
@@ -469,9 +645,7 @@ export function demoAnalytics() {
       date: new Date(now - (13 - i) * DAY).toISOString().slice(0, 10),
       avg_duration_seconds: 840 + Math.round(Math.sin(i) * 160) + i * 10,
     })),
-    language_distribution: [
-      { language: 'en', session_count: 19, percentage: 100 },
-    ],
+    language_distribution: [{ language: 'en', session_count: 19, percentage: 100 }],
     voice_distribution: [
       { voice: 'cedar', session_count: 11, percentage: 57.9 },
       { voice: 'marin', session_count: 8, percentage: 42.1 },
@@ -567,7 +741,8 @@ export function demoCrisisAll() {
         action_type: 'safety_plan_activated',
         performed_by: 'system',
         performed_at: iso(crisisStart - 11 * 60 * 1000),
-        outcome: 'Safety plan reviewed in-session; client agreed to contact support person and completed grounding exercise',
+        outcome:
+          'Safety plan reviewed in-session; client agreed to contact support person and completed grounding exercise',
       },
       {
         action_id: 'demo-action-4',
@@ -575,10 +750,11 @@ export function demoCrisisAll() {
         action_type: 'clinical_review',
         performed_by: 'dr_demo',
         performed_at: iso(crisisStart - 12 * HOUR),
-        outcome: 'Reviewed transcript same evening; messaged client next morning; follow-up session completed; flag resolved',
+        outcome:
+          'Reviewed transcript same evening; messaged client next morning; follow-up session completed; flag resolved',
       },
     ],
-    riskScoreHistory: demoRiskHistory('demo-sess-2003').history.map(h => ({
+    riskScoreHistory: demoRiskHistory('demo-sess-2003').history.map((h) => ({
       history_id: h.history_id,
       session_id: h.session_id,
       risk_score: h.risk_score,
@@ -609,7 +785,7 @@ export function demoRateLimitedUsers() {
 
 // Synthetic research export payload (de-identified, invented).
 export function demoExport() {
-  return SESSIONS.map(s => ({
+  return SESSIONS.map((s) => ({
     session_id: s.session_id,
     username: s.username,
     status: s.status,
@@ -629,7 +805,7 @@ export function demoExport() {
 export function demoUsers() {
   return {
     users: [
-      ...CLIENTS.map(c => ({
+      ...CLIENTS.map((c) => ({
         userid: c.userid,
         username: c.username,
         role: c.role,
@@ -646,9 +822,10 @@ export function demoUsers() {
 }
 
 export function demoUserById(userId: number) {
-  const c = CLIENTS.find(x => x.userid === userId);
+  const c = CLIENTS.find((x) => x.userid === userId);
   if (c) return { user: { userid: c.userid, username: c.username, role: c.role } };
-  if (userId === THERAPIST.userid) return { user: { userid: THERAPIST.userid, username: THERAPIST.username, role: THERAPIST.role } };
+  if (userId === THERAPIST.userid)
+    return { user: { userid: THERAPIST.userid, username: THERAPIST.username, role: THERAPIST.role } };
   return null;
 }
 
@@ -681,7 +858,7 @@ function emptyBundle(c: DemoClient) {
 }
 
 export function demoUserProfile(userId: number) {
-  const c = CLIENTS.find(x => x.userid === userId);
+  const c = CLIENTS.find((x) => x.userid === userId);
   if (!c) return null;
   const bundle = emptyBundle(c);
 
@@ -717,8 +894,16 @@ export function demoUserProfile(userId: number) {
       },
     ];
     bundle.memories = [
-      { fact: 'Big product presentation is on the 22nd; wants to practice beforehand', session_id: 'demo-sess-2006', created_at: iso(5 * DAY) },
-      { fact: 'Paced breathing before meetings has been the most helpful skill so far', session_id: 'demo-sess-2006', created_at: iso(5 * DAY) },
+      {
+        fact: 'Big product presentation is on the 22nd; wants to practice beforehand',
+        session_id: 'demo-sess-2006',
+        created_at: iso(5 * DAY),
+      },
+      {
+        fact: 'Paced breathing before meetings has been the most helpful skill so far',
+        session_id: 'demo-sess-2006',
+        created_at: iso(5 * DAY),
+      },
     ];
     bundle.case_profile = {
       updated_at: iso(3 * HOUR),
@@ -795,8 +980,16 @@ export function demoUserProfile(userId: number) {
       },
     ];
     bundle.memories = [
-      { fact: 'Wife passed away 14 months ago; the anniversary is this weekend', session_id: 'demo-sess-2003', created_at: iso(DAY + 10 * HOUR) },
-      { fact: 'Sister (Dana) is the primary support contact and lives nearby', session_id: 'demo-sess-2003', created_at: iso(DAY + 10 * HOUR) },
+      {
+        fact: 'Wife passed away 14 months ago; the anniversary is this weekend',
+        session_id: 'demo-sess-2003',
+        created_at: iso(DAY + 10 * HOUR),
+      },
+      {
+        fact: 'Sister (Dana) is the primary support contact and lives nearby',
+        session_id: 'demo-sess-2003',
+        created_at: iso(DAY + 10 * HOUR),
+      },
     ];
     bundle.case_profile = {
       updated_at: iso(20 * HOUR),
@@ -835,12 +1028,16 @@ export function demoUserProfile(userId: number) {
         warning_signs: ['Thoughts get loud in the evening', 'Skipping meals', 'Avoiding calls'],
         coping_strategies: ['Grounding breath (4-4-6)', 'Morning walk', 'Photo album ritual, 10 minutes max'],
         support_contacts: ['Sister Dana (first call)', 'Therapist (next business day)'],
-        professional_resources: ['988 Suicide & Crisis Lifeline (call or text 988)', 'Crisis Text Line: text HOME to 741741'],
+        professional_resources: [
+          '988 Suicide & Crisis Lifeline (call or text 988)',
+          'Crisis Text Line: text HOME to 741741',
+        ],
         environment_safety: ['Medications stored with Dana through the anniversary weekend'],
       },
     };
     bundle.clinician_note = {
-      notes: 'Reviewed flagged session same evening. Ideation without plan or intent; protective factors intact (sister engaged, future-oriented statements). Messaged client next morning, follow-up session completed, flag resolved. Will hold extra check-in after the anniversary weekend.',
+      notes:
+        'Reviewed flagged session same evening. Ideation without plan or intent; protective factors intact (sister engaged, future-oriented statements). Messaged client next morning, follow-up session completed, flag resolved. Will hold extra check-in after the anniversary weekend.',
       author: 'dr_demo',
       created_at: iso(16 * HOUR),
       session_id: 'demo-sess-2003',
@@ -901,11 +1098,27 @@ export function demoUserProfile(userId: number) {
       },
     ];
     bundle.memories = [
-      { fact: 'Works as a senior nurse; double shifts every other week', session_id: 'demo-sess-1905', created_at: iso(13 * DAY) },
-      { fact: "Sister visited two weekends ago — first genuinely good weekend in months", session_id: 'demo-sess-2005', created_at: iso(2 * DAY) },
+      {
+        fact: 'Works as a senior nurse; double shifts every other week',
+        session_id: 'demo-sess-1905',
+        created_at: iso(13 * DAY),
+      },
+      {
+        fact: 'Sister visited two weekends ago — first genuinely good weekend in months',
+        session_id: 'demo-sess-2005',
+        created_at: iso(2 * DAY),
+      },
       { fact: 'Cooking used to be a main way to recharge', session_id: 'demo-sess-2007', created_at: iso(6 * DAY) },
-      { fact: 'Goal: leave work by 6pm on Tuesdays and Thursdays', session_id: 'demo-sess-2005', created_at: iso(2 * DAY) },
-      { fact: 'The first ten minutes after deciding to leave are the hardest', session_id: 'demo-sess-2005', created_at: iso(2 * DAY) },
+      {
+        fact: 'Goal: leave work by 6pm on Tuesdays and Thursdays',
+        session_id: 'demo-sess-2005',
+        created_at: iso(2 * DAY),
+      },
+      {
+        fact: 'The first ten minutes after deciding to leave are the hardest',
+        session_id: 'demo-sess-2005',
+        created_at: iso(2 * DAY),
+      },
     ];
     bundle.case_profile = {
       updated_at: iso(2 * DAY),
@@ -953,12 +1166,12 @@ const DEMO_BRIEFS: Record<number, string> = {
 };
 
 export function demoUserBrief(userId: number) {
-  if (!CLIENTS.some(c => c.userid === userId)) return null;
+  if (!CLIENTS.some((c) => c.userid === userId)) return null;
   return { brief: DEMO_BRIEFS[userId] ?? null };
 }
 
 export function demoUserSessions(userId: number, limit = 50) {
-  const rows = SESSIONS.filter(s => s.user_id === userId).map(s => ({
+  const rows = SESSIONS.filter((s) => s.user_id === userId).map((s) => ({
     ...listRow(s),
     eval_score: s.eval_score,
     feedback_rating: s.feedback_rating,
@@ -976,16 +1189,23 @@ export function demoUserSessions(userId: number, limit = 50) {
 
 export function demoToolAnalytics() {
   const tools = [
-    ['start_breathing_exercise', 34, 28], ['show_resource_card', 22, 19],
-    ['log_mood', 41, 30], ['get_coping_strategies', 18, 15],
-    ['start_grounding_exercise', 12, 11], ['display_session_recap', 26, 26],
-    ['administer_scale', 9, 9], ['create_safety_plan', 4, 4],
+    ['start_breathing_exercise', 34, 28],
+    ['show_resource_card', 22, 19],
+    ['log_mood', 41, 30],
+    ['get_coping_strategies', 18, 15],
+    ['start_grounding_exercise', 12, 11],
+    ['display_session_recap', 26, 26],
+    ['administer_scale', 9, 9],
+    ['create_safety_plan', 4, 4],
   ] as const;
   return {
     tool_stats: tools.map(([tool_name, invocations, sessions]) => ({
-      tool_name, invocations, sessions,
+      tool_name,
+      invocations,
+      sessions,
       last_used: iso(2 * HOUR),
-      failures: 0, failure_rate: 0,
+      failures: 0,
+      failure_rate: 0,
     })),
     distinct_tools_per_session: [
       { distinct_tool_count: 0, session_count: 6 },
@@ -1034,14 +1254,32 @@ export function demoPairwiseAnalytics() {
     prompt_version: 'pw-v1',
     comparisons: [
       {
-        comparison_axis: 'proactive_offering', arm_x: 'on', arm_y: 'off',
-        wins_x: 14, wins_y: 9, ties: 5, inconsistent: 2, total: 30,
-        win_rate_x: 0.609, ci_lo: 0.408, ci_hi: 0.778, significant: false,
+        comparison_axis: 'proactive_offering',
+        arm_x: 'on',
+        arm_y: 'off',
+        wins_x: 14,
+        wins_y: 9,
+        ties: 5,
+        inconsistent: 2,
+        total: 30,
+        win_rate_x: 0.609,
+        ci_lo: 0.408,
+        ci_hi: 0.778,
+        significant: false,
       },
       {
-        comparison_axis: 'ai_model', arm_x: 'gpt-realtime', arm_y: 'gpt-realtime-mini',
-        wins_x: 19, wins_y: 6, ties: 3, inconsistent: 2, total: 30,
-        win_rate_x: 0.76, ci_lo: 0.566, ci_hi: 0.885, significant: true,
+        comparison_axis: 'ai_model',
+        arm_x: 'gpt-realtime',
+        arm_y: 'gpt-realtime-mini',
+        wins_x: 19,
+        wins_y: 6,
+        ties: 3,
+        inconsistent: 2,
+        total: 30,
+        win_rate_x: 0.76,
+        ci_lo: 0.566,
+        ci_hi: 0.885,
+        significant: true,
       },
     ],
   };
@@ -1067,8 +1305,12 @@ export function demoEvalTrend() {
 
 export function demoCalibration() {
   const dims = [
-    ['safety_protocol', 0.74], ['empathy', 0.66], ['modality_fidelity', 0.61],
-    ['disclaimer_compliance', 0.81], ['non_directiveness', 0.58], ['clinical_claims', 0.7],
+    ['safety_protocol', 0.74],
+    ['empathy', 0.66],
+    ['modality_fidelity', 0.61],
+    ['disclaimer_compliance', 0.81],
+    ['non_directiveness', 0.58],
+    ['clinical_claims', 0.7],
   ] as const;
   return {
     report: {
@@ -1077,8 +1319,13 @@ export function demoCalibration() {
       pair_count: 132,
       session_count: 22,
       dimensions: dims.map(([dimension, kappa]) => ({
-        dimension, n: 22, kappa,
-        human_mean: 4.2, llm_mean: 4.05, mean_bias: -0.15, exact_agreement_pct: 68,
+        dimension,
+        n: 22,
+        kappa,
+        human_mean: 4.2,
+        llm_mean: 4.05,
+        mean_bias: -0.15,
+        exact_agreement_pct: 68,
       })),
       overall_kappa: 0.68,
     },
@@ -1143,25 +1390,121 @@ interface DemoChunk {
 }
 
 const KNOWLEDGE_CHUNKS: DemoChunk[] = [
-  { chunk_id: 501, kind: 'psychoeducation', topic: 'anxiety', title: 'How avoidance keeps anxiety alive', content: 'Avoiding a feared situation brings quick relief, and that relief teaches the brain that the situation really was dangerous. Over time the world of "safe" activities shrinks. Gradual, repeated approach — starting small and staying long enough for anxiety to fall on its own — retrains that alarm.', modality: 'cbt', active: true, approved_by: 'dr_demo', retrieved: 21, chosen: 12 },
-  { chunk_id: 502, kind: 'psychoeducation', topic: 'grief', title: 'Anniversary reactions are normal grief', content: 'Grief often intensifies around anniversaries, birthdays, and holidays, sometimes months or years after a loss. These waves are a normal part of grieving, not a setback. Planning the day in advance — company, ritual, permission to feel — usually softens them.', modality: null, active: true, approved_by: 'dr_demo', retrieved: 9, chosen: 7 },
-  { chunk_id: 503, kind: 'psychoeducation', topic: 'burnout', title: 'Burnout vs. depression: overlapping but different', content: 'Burnout is exhaustion, cynicism, and reduced efficacy tied to chronic work stress; it often improves with recovery time and boundary changes. Depression is broader and follows you across contexts. They can co-occur, which is why screeners are still worth tracking.', modality: null, active: true, approved_by: 'dr_demo', retrieved: 11, chosen: 6 },
-  { chunk_id: 504, kind: 'worksheet', topic: 'anxiety', title: 'Thought record (7 column)', content: 'Situation. Emotion and intensity (0-100). Automatic thought and belief (0-100). Evidence for. Evidence against. Balanced alternative thought. Re-rate emotion and belief.', modality: 'cbt', active: true, approved_by: 'dr_demo', retrieved: 17, chosen: 13 },
-  { chunk_id: 505, kind: 'worksheet', topic: 'values', title: 'Values and energy audit', content: 'List the ten activities that consumed most of your week. Next to each, note which personal value it serves, if any. Circle the values that received no time at all. Choose one starved value and one 15-minute action toward it this week.', modality: 'act', active: true, approved_by: 'dr_demo', retrieved: 6, chosen: 4 },
-  { chunk_id: 506, kind: 'worksheet', topic: 'sleep', title: 'Wind-down routine builder', content: 'Pick a consistent lights-out time. Working backwards, block 30 minutes: screens off, low light, one calming activity from your list. Note what you tried and rate sleep quality 1-5 each morning for a week.', modality: 'cbt', active: false, approved_by: null, retrieved: 0, chosen: 0 },
-  { chunk_id: 507, kind: 'technique', topic: 'grounding', title: 'Paced breathing 4-4-6', content: 'Breathe in through the nose for a count of four, hold for four, and out through the mouth for six. The longer exhale engages the parasympathetic system. Repeat for ten cycles or about two minutes.', modality: null, active: true, approved_by: 'dr_demo', retrieved: 24, chosen: 18 },
-  { chunk_id: 508, kind: 'technique', topic: 'grounding', title: '5-4-3-2-1 sensory grounding', content: 'Name five things you can see, four you can feel, three you can hear, two you can smell, and one you can taste. Speaking each one out loud anchors attention in the present.', modality: null, active: true, approved_by: 'dr_demo', retrieved: 8, chosen: 5 },
+  {
+    chunk_id: 501,
+    kind: 'psychoeducation',
+    topic: 'anxiety',
+    title: 'How avoidance keeps anxiety alive',
+    content:
+      'Avoiding a feared situation brings quick relief, and that relief teaches the brain that the situation really was dangerous. Over time the world of "safe" activities shrinks. Gradual, repeated approach — starting small and staying long enough for anxiety to fall on its own — retrains that alarm.',
+    modality: 'cbt',
+    active: true,
+    approved_by: 'dr_demo',
+    retrieved: 21,
+    chosen: 12,
+  },
+  {
+    chunk_id: 502,
+    kind: 'psychoeducation',
+    topic: 'grief',
+    title: 'Anniversary reactions are normal grief',
+    content:
+      'Grief often intensifies around anniversaries, birthdays, and holidays, sometimes months or years after a loss. These waves are a normal part of grieving, not a setback. Planning the day in advance — company, ritual, permission to feel — usually softens them.',
+    modality: null,
+    active: true,
+    approved_by: 'dr_demo',
+    retrieved: 9,
+    chosen: 7,
+  },
+  {
+    chunk_id: 503,
+    kind: 'psychoeducation',
+    topic: 'burnout',
+    title: 'Burnout vs. depression: overlapping but different',
+    content:
+      'Burnout is exhaustion, cynicism, and reduced efficacy tied to chronic work stress; it often improves with recovery time and boundary changes. Depression is broader and follows you across contexts. They can co-occur, which is why screeners are still worth tracking.',
+    modality: null,
+    active: true,
+    approved_by: 'dr_demo',
+    retrieved: 11,
+    chosen: 6,
+  },
+  {
+    chunk_id: 504,
+    kind: 'worksheet',
+    topic: 'anxiety',
+    title: 'Thought record (7 column)',
+    content:
+      'Situation. Emotion and intensity (0-100). Automatic thought and belief (0-100). Evidence for. Evidence against. Balanced alternative thought. Re-rate emotion and belief.',
+    modality: 'cbt',
+    active: true,
+    approved_by: 'dr_demo',
+    retrieved: 17,
+    chosen: 13,
+  },
+  {
+    chunk_id: 505,
+    kind: 'worksheet',
+    topic: 'values',
+    title: 'Values and energy audit',
+    content:
+      'List the ten activities that consumed most of your week. Next to each, note which personal value it serves, if any. Circle the values that received no time at all. Choose one starved value and one 15-minute action toward it this week.',
+    modality: 'act',
+    active: true,
+    approved_by: 'dr_demo',
+    retrieved: 6,
+    chosen: 4,
+  },
+  {
+    chunk_id: 506,
+    kind: 'worksheet',
+    topic: 'sleep',
+    title: 'Wind-down routine builder',
+    content:
+      'Pick a consistent lights-out time. Working backwards, block 30 minutes: screens off, low light, one calming activity from your list. Note what you tried and rate sleep quality 1-5 each morning for a week.',
+    modality: 'cbt',
+    active: false,
+    approved_by: null,
+    retrieved: 0,
+    chosen: 0,
+  },
+  {
+    chunk_id: 507,
+    kind: 'technique',
+    topic: 'grounding',
+    title: 'Paced breathing 4-4-6',
+    content:
+      'Breathe in through the nose for a count of four, hold for four, and out through the mouth for six. The longer exhale engages the parasympathetic system. Repeat for ten cycles or about two minutes.',
+    modality: null,
+    active: true,
+    approved_by: 'dr_demo',
+    retrieved: 24,
+    chosen: 18,
+  },
+  {
+    chunk_id: 508,
+    kind: 'technique',
+    topic: 'grounding',
+    title: '5-4-3-2-1 sensory grounding',
+    content:
+      'Name five things you can see, four you can feel, three you can hear, two you can smell, and one you can taste. Speaking each one out loud anchors attention in the present.',
+    modality: null,
+    active: true,
+    approved_by: 'dr_demo',
+    retrieved: 8,
+    chosen: 5,
+  },
 ];
 
 export function demoKnowledge() {
-  const byKind = (kind: string) => KNOWLEDGE_CHUNKS.filter(c => c.kind === kind);
+  const byKind = (kind: string) => KNOWLEDGE_CHUNKS.filter((c) => c.kind === kind);
   return {
-    counts: ['psychoeducation', 'technique', 'worksheet'].map(kind => ({
+    counts: ['psychoeducation', 'technique', 'worksheet'].map((kind) => ({
       kind,
-      active: byKind(kind).filter(c => c.active).length,
-      pending: byKind(kind).filter(c => !c.active).length,
+      active: byKind(kind).filter((c) => c.active).length,
+      pending: byKind(kind).filter((c) => !c.active).length,
     })),
-    chunks: KNOWLEDGE_CHUNKS.map(c => ({
+    chunks: KNOWLEDGE_CHUNKS.map((c) => ({
       chunk_id: c.chunk_id,
       kind: c.kind,
       topic: c.topic,
@@ -1185,7 +1528,7 @@ export function demoKnowledge() {
 
 export function demoKnowledgeUsage() {
   return {
-    usage: KNOWLEDGE_CHUNKS.filter(c => c.retrieved > 0).map(c => ({
+    usage: KNOWLEDGE_CHUNKS.filter((c) => c.retrieved > 0).map((c) => ({
       chunk_id: c.chunk_id,
       retrieved_count: c.retrieved,
       chosen_count: c.chosen,
@@ -1264,19 +1607,57 @@ export function demoAdverseEvents(status?: string) {
     severity: 'high' as const,
     trigger_source: 'auto_flag',
     category: 'crisis' as const,
-    summary: 'High-severity crisis flag during evening session ahead of loss anniversary. Client disclosed active suicidal ideation without plan or intent on direct inquiry. In-session safety protocol completed (safety plan review, grounding, support contact commitment); therapist notified automatically, reviewed the transcript the same evening, and completed a follow-up next morning. Flag resolved.',
+    summary:
+      'High-severity crisis flag during evening session ahead of loss anniversary. Client disclosed active suicidal ideation without plan or intent on direct inquiry. In-session safety protocol completed (safety plan review, grounding, support contact commitment); therapist notified automatically, reviewed the transcript the same evening, and completed a follow-up next morning. Flag resolved.',
     timeline: [
-      { at: iso(crisisStart - 4 * 60 * 1000), kind: 'risk_signal', detail: 'Stage-2 risk score 12: grief-focused distress, no ideation language' },
-      { at: iso(crisisStart - 7 * 60 * 1000), kind: 'risk_signal', detail: 'Risk score 46 (medium): passive ideation markers, rising trajectory' },
-      { at: iso(crisisStart - 9 * 60 * 1000), kind: 'auto_flag', detail: 'Risk score 82 (high): active ideation without plan confirmed on direct inquiry' },
-      { at: iso(crisisStart - 9 * 60 * 1000 + 20 * 1000), kind: 'notification', detail: 'Therapist (dr_demo) notified' },
-      { at: iso(crisisStart - 11 * 60 * 1000), kind: 'intervention', detail: 'Safety plan reviewed in-session; grounding exercise completed; client agreed to call sister' },
-      { at: iso(crisisStart - 21 * 60 * 1000), kind: 'session_end', detail: 'Session ended calmly by client after wind-down' },
-      { at: iso(crisisStart - 12 * HOUR), kind: 'clinical_review', detail: 'dr_demo reviewed transcript and risk history' },
-      { at: iso(20 * HOUR - 16 * 60 * 1000), kind: 'follow_up', detail: 'Next-morning follow-up session completed; client used safety plan overnight' },
-      { at: iso(14 * HOUR), kind: 'resolution', detail: 'Flag resolved by dr_demo; extra check-in scheduled after anniversary weekend' },
+      {
+        at: iso(crisisStart - 4 * 60 * 1000),
+        kind: 'risk_signal',
+        detail: 'Stage-2 risk score 12: grief-focused distress, no ideation language',
+      },
+      {
+        at: iso(crisisStart - 7 * 60 * 1000),
+        kind: 'risk_signal',
+        detail: 'Risk score 46 (medium): passive ideation markers, rising trajectory',
+      },
+      {
+        at: iso(crisisStart - 9 * 60 * 1000),
+        kind: 'auto_flag',
+        detail: 'Risk score 82 (high): active ideation without plan confirmed on direct inquiry',
+      },
+      {
+        at: iso(crisisStart - 9 * 60 * 1000 + 20 * 1000),
+        kind: 'notification',
+        detail: 'Therapist (dr_demo) notified',
+      },
+      {
+        at: iso(crisisStart - 11 * 60 * 1000),
+        kind: 'intervention',
+        detail: 'Safety plan reviewed in-session; grounding exercise completed; client agreed to call sister',
+      },
+      {
+        at: iso(crisisStart - 21 * 60 * 1000),
+        kind: 'session_end',
+        detail: 'Session ended calmly by client after wind-down',
+      },
+      {
+        at: iso(crisisStart - 12 * HOUR),
+        kind: 'clinical_review',
+        detail: 'dr_demo reviewed transcript and risk history',
+      },
+      {
+        at: iso(20 * HOUR - 16 * 60 * 1000),
+        kind: 'follow_up',
+        detail: 'Next-morning follow-up session completed; client used safety plan overnight',
+      },
+      {
+        at: iso(14 * HOUR),
+        kind: 'resolution',
+        detail: 'Flag resolved by dr_demo; extra check-in scheduled after anniversary weekend',
+      },
     ],
-    transcript_excerpt: 'Assistant: "I need to ask directly: are you having thoughts of ending your life, or of hurting yourself tonight?" Client: "Thoughts, yes. I wouldn\'t do anything. But the thoughts are loud."',
+    transcript_excerpt:
+      'Assistant: "I need to ask directly: are you having thoughts of ending your life, or of hurting yourself tonight?" Client: "Thoughts, yes. I wouldn\'t do anything. But the thoughts are loud."',
     actions_taken: [
       { at: iso(crisisStart - 11 * 60 * 1000), action: 'Safety plan activated in-session', by: 'system' },
       { at: iso(crisisStart - 9 * 60 * 1000), action: 'Therapist notification sent', by: 'system' },
@@ -1299,5 +1680,5 @@ export function demoAdverseEvents(status?: string) {
 
 export function demoAdverseEventById(id: number) {
   const { reports } = demoAdverseEvents('all');
-  return reports.find(r => r.report_id === id) ?? null;
+  return reports.find((r) => r.report_id === id) ?? null;
 }

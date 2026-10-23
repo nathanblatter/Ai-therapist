@@ -3,17 +3,17 @@
 // assigned, or that concern their caseload (plus the org unassigned queue for
 // therapists); researchers see org-wide metadata. Row click opens
 // EscalationDetail (timeline + lifecycle actions).
-import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowUpRight, CheckCircle, Clock, Inbox, Plus } from "react-feather";
-import useAdminFetch from "../../hooks/useAdminFetch";
-import useAuth from "../../hooks/useAuth";
-import Badge from "../../../shared/components/Badge";
-import { isCareTeamRole } from "../../../../shared/roles";
-import EscalationDetail from "./EscalationDetail";
-import EscalationComposer from "./EscalationComposer";
+import { useMemo, useState } from 'react';
+import { AlertTriangle, ArrowUpRight, CheckCircle, Clock, Inbox, Plus } from 'react-feather';
+import useAdminFetch from '../../hooks/useAdminFetch';
+import useAuth from '../../hooks/useAuth';
+import Badge from '../../../shared/components/Badge';
+import { isCareTeamRole } from '../../../../shared/roles';
+import EscalationDetail from './EscalationDetail';
+import EscalationComposer from './EscalationComposer';
 // Canonical escalation vocabulary lives in the server data layer (type-only
 // import, erased at build time).
-import type { EscalationStatus, EscalationUrgency } from "../../../../server/db/escalations.queries";
+import type { EscalationStatus, EscalationUrgency } from '../../../../server/db/escalations.queries';
 
 export type { EscalationStatus, EscalationUrgency };
 
@@ -22,7 +22,7 @@ export interface EscalationListRow {
   org_id: number;
   client_id: number;
   raised_by: number | null;
-  raised_by_role: "caseworker" | "therapist";
+  raised_by_role: 'caseworker' | 'therapist';
   assigned_to: number | null;
   reason: string;
   urgency: EscalationUrgency;
@@ -40,14 +40,14 @@ export interface EscalationListRow {
 }
 
 export function UrgencyBadge({ urgency }: { urgency: EscalationUrgency }) {
-  if (urgency === "emergency") {
+  if (urgency === 'emergency') {
     return (
       <Badge tone="red">
         <AlertTriangle size={12} aria-hidden="true" /> Emergency
       </Badge>
     );
   }
-  if (urgency === "urgent") {
+  if (urgency === 'urgent') {
     return (
       <Badge tone="amber">
         <ArrowUpRight size={12} aria-hidden="true" /> Urgent
@@ -58,14 +58,14 @@ export function UrgencyBadge({ urgency }: { urgency: EscalationUrgency }) {
 }
 
 export function StatusBadge({ status }: { status: EscalationStatus }) {
-  if (status === "resolved") {
+  if (status === 'resolved') {
     return (
       <Badge tone="green">
         <CheckCircle size={12} aria-hidden="true" /> Resolved
       </Badge>
     );
   }
-  if (status === "acknowledged") {
+  if (status === 'acknowledged') {
     return (
       <Badge tone="blue">
         <Clock size={12} aria-hidden="true" /> Acknowledged
@@ -75,14 +75,14 @@ export function StatusBadge({ status }: { status: EscalationStatus }) {
   return <Badge tone="yellow">Open</Badge>;
 }
 
-type Filter = "active" | "mine" | "resolved" | "all";
+type Filter = 'active' | 'mine' | 'resolved' | 'all';
 
 interface EscalationInboxProps {
   userRole: string | null;
 }
 
 export default function EscalationInbox({ userRole }: EscalationInboxProps) {
-  const [filter, setFilter] = useState<Filter>("active");
+  const [filter, setFilter] = useState<Filter>('active');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   // Lifecycle actions (ack/resolve are assignee-only) need my userid; the
@@ -90,9 +90,15 @@ export default function EscalationInbox({ userRole }: EscalationInboxProps) {
   const { userId: currentUserId } = useAuth();
 
   const query =
-    filter === "mine" ? "?mine=1" : filter === "resolved" ? "?status=resolved" : filter === "active" ? "?open_only=1" : "";
+    filter === 'mine'
+      ? '?mine=1'
+      : filter === 'resolved'
+        ? '?status=resolved'
+        : filter === 'active'
+          ? '?open_only=1'
+          : '';
   const { data, loading, error, refetch } = useAdminFetch<{ escalations: EscalationListRow[] }>(
-    `/admin/api/escalations${query}`
+    `/admin/api/escalations${query}`,
   );
   const escalations = useMemo(() => data?.escalations ?? [], [data]);
 
@@ -136,10 +142,10 @@ export default function EscalationInbox({ userRole }: EscalationInboxProps) {
       <div className="mb-4 flex gap-2 flex-wrap" role="tablist" aria-label="Escalation filters">
         {(
           [
-            ["active", "Active"],
-            ["mine", "Raised by me"],
-            ["resolved", "Resolved"],
-            ["all", "All"],
+            ['active', 'Active'],
+            ['mine', 'Raised by me'],
+            ['resolved', 'Resolved'],
+            ['all', 'All'],
           ] as [Filter, string][]
         ).map(([value, label]) => (
           <button
@@ -149,7 +155,7 @@ export default function EscalationInbox({ userRole }: EscalationInboxProps) {
             aria-selected={filter === value}
             onClick={() => setFilter(value)}
             className={`px-3 py-1.5 rounded-full text-sm min-h-[36px] ${
-              filter === value ? "bg-royal text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              filter === value ? 'bg-royal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
             {label}
@@ -169,7 +175,7 @@ export default function EscalationInbox({ userRole }: EscalationInboxProps) {
         ) : escalations.length === 0 ? (
           <div className="text-center py-10 text-gray-500">
             <Inbox size={48} className="mx-auto mb-2 text-gray-400" aria-hidden="true" />
-            <p>No escalations{filter === "active" ? " need attention" : ""}.</p>
+            <p>No escalations{filter === 'active' ? ' need attention' : ''}.</p>
           </div>
         ) : (
           <ul className="divide-y divide-gray-200">
@@ -194,7 +200,7 @@ export default function EscalationInbox({ userRole }: EscalationInboxProps) {
                   <p className="mt-1 text-sm text-gray-700 line-clamp-2">{e.reason}</p>
                   <p className="mt-1 text-xs text-gray-400">
                     {e.assigned_to === null
-                      ? "Unassigned (org queue)"
+                      ? 'Unassigned (org queue)'
                       : `Assigned to ${e.assigned_username ?? `user ${e.assigned_to}`}`}
                   </p>
                 </button>

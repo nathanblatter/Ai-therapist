@@ -12,7 +12,8 @@ module.exports = {
     docs: { description: 'disallow emoji in string literals, template literals and JSX text' },
     schema: [],
     messages: {
-      emoji: 'Emoji {{label}} ("{{char}}") is not allowed (CLAUDE.md: no emojis; use react-feather icons or plain words).',
+      emoji:
+        'Emoji {{label}} ("{{char}}") is not allowed (CLAUDE.md: no emojis; use react-feather icons or plain words).',
     },
   },
   create(context) {
@@ -23,9 +24,15 @@ module.exports = {
       }
     }
     return {
-      Literal(node) { check(node, node.value); },
-      TemplateElement(node) { check(node, node.value.raw); },
-      JSXText(node) { check(node, node.value); },
+      Literal(node) {
+        check(node, node.value);
+      },
+      TemplateElement(node) {
+        check(node, node.value.raw);
+      },
+      JSXText(node) {
+        check(node, node.value);
+      },
     };
   },
 };

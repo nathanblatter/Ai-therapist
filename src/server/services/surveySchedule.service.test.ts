@@ -10,11 +10,7 @@ const dbMocks = vi.hoisted(() => ({
 }));
 vi.mock('../db/index.js', () => dbMocks);
 
-import {
-  computeDueSurveys,
-  getParticipantSurveySchedule,
-  buildSurveyUrl,
-} from './surveySchedule.service.js';
+import { computeDueSurveys, getParticipantSurveySchedule, buildSurveyUrl } from './surveySchedule.service.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const ANCHOR = new Date('2026-09-01T12:00:00Z');
@@ -142,8 +138,6 @@ describe('getParticipantSurveySchedule', () => {
 
 describe('buildSurveyUrl', () => {
   it('builds the jfe link with the sid embedded-data param', () => {
-    expect(buildSurveyUrl('byu.pdx1', 'SV_x', 7)).toBe(
-      'https://byu.pdx1.qualtrics.com/jfe/form/SV_x?sid=7'
-    );
+    expect(buildSurveyUrl('byu.pdx1', 'SV_x', 7)).toBe('https://byu.pdx1.qualtrics.com/jfe/form/SV_x?sid=7');
   });
 });

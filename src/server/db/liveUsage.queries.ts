@@ -37,9 +37,10 @@ const LIVE_DEFAULT_RATE_PER_MINUTE = 0.05;
 /** Price a per-minute voice session (GPT-Live or Grok Voice) in USD from its billed duration. */
 export function estimateLiveCostUsd(model: string | null, durationSeconds: number | null): number {
   if (!durationSeconds || durationSeconds <= 0) return 0;
-  const perMinute = (model ? LIVE_RATES_PER_MINUTE[model] : undefined)
-    ?? (model?.startsWith('grok-voice') ? LIVE_RATES_PER_MINUTE['grok-voice-latest'] : undefined)
-    ?? LIVE_DEFAULT_RATE_PER_MINUTE;
+  const perMinute =
+    (model ? LIVE_RATES_PER_MINUTE[model] : undefined) ??
+    (model?.startsWith('grok-voice') ? LIVE_RATES_PER_MINUTE['grok-voice-latest'] : undefined) ??
+    LIVE_DEFAULT_RATE_PER_MINUTE;
   const cost = (durationSeconds / 60) * perMinute;
   return Math.round(cost * 1_000_000) / 1_000_000;
 }
@@ -78,14 +79,7 @@ export async function recordLiveUsage(
                                 COALESCE(EXCLUDED.peak_context_ratio, 0)
                               ),
          updated_at         = CURRENT_TIMESTAMP`,
-      [
-        sessionId,
-        model,
-        durationSeconds,
-        opts.finalized === true,
-        opts.closeReason ?? null,
-        opts.contextRatio ?? null,
-      ],
+      [sessionId, model, durationSeconds, opts.finalized === true, opts.closeReason ?? null, opts.contextRatio ?? null],
     );
   } catch (err) {
     console.error('[liveUsage] Failed to record live usage (non-fatal):', err);

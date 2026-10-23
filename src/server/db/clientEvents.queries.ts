@@ -29,7 +29,7 @@ export async function insertClientEvent(input: InsertClientEventInput): Promise<
       input.kind,
       input.detail ? JSON.stringify(input.detail) : null,
       input.userAgent ?? null,
-    ]
+    ],
   );
 }
 
@@ -41,7 +41,7 @@ export async function getClientEventStats(days: number): Promise<ClientEventKind
      WHERE created_at >= NOW() - make_interval(days => $1)
      GROUP BY kind
      ORDER BY count DESC`,
-    [days]
+    [days],
   );
   return result.rows as ClientEventKindStat[];
 }

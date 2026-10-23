@@ -47,7 +47,7 @@ describe('broadcastAdminEvent', () => {
 
     await broadcastAdminEvent(io, 'session:started', { sessionId: 's1' }, 42);
 
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast', 'therapist:7', 'therapist:12']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'therapist:7', 'therapist:12']);
     expect(emit).toHaveBeenCalledTimes(3);
     expect(emit).toHaveBeenCalledWith('session:started', { sessionId: 's1' });
     expect(mocks.getTherapistIdsForClient).toHaveBeenCalledWith(42);
@@ -59,7 +59,7 @@ describe('broadcastAdminEvent', () => {
 
     await broadcastAdminEvent(io, 'session:activity', { sessionId: 's1' }, 42);
 
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast']);
   });
 
   it.each([null, undefined])('fails closed (admin-broadcast only, no lookup) for participantUserId=%s', async (uid) => {
@@ -67,7 +67,7 @@ describe('broadcastAdminEvent', () => {
 
     await broadcastAdminEvent(io, 'sideband:transcript', { delta: 'x' }, uid);
 
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast']);
     expect(mocks.getTherapistIdsForClient).not.toHaveBeenCalled();
   });
 
@@ -76,7 +76,7 @@ describe('broadcastAdminEvent', () => {
 
     await broadcastAdminEvent(io, 'session:crisis-detected', {}, Number.NaN);
 
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast']);
     expect(mocks.getTherapistIdsForClient).not.toHaveBeenCalled();
   });
 
@@ -87,7 +87,7 @@ describe('broadcastAdminEvent', () => {
 
     await expect(broadcastAdminEvent(io, 'session:crisis-detected', {}, 42)).resolves.toBeUndefined();
 
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast']);
     expect(logMock.error).toHaveBeenCalled();
   });
 
@@ -98,7 +98,7 @@ describe('broadcastAdminEvent', () => {
 
     await broadcastAdminEvent(io, 'session:crisis-detected', {}, 42);
 
-    expect(to.mock.calls.map(c => c[0])).toEqual(['therapist:7']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['therapist:7']);
     expect(mocks.isSandboxAccount).toHaveBeenCalledWith(42);
   });
 
@@ -121,14 +121,14 @@ describe('broadcastAdminEvent', () => {
 
     await broadcastAdminEvent(io, 'session:crisis-detected', {}, 42);
 
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
     expect(logMock.error).toHaveBeenCalled();
 
     // Failures are not cached: the next event retries the lookup.
     mocks.isSandboxAccount.mockResolvedValue(true);
     to.mockClear();
     await broadcastAdminEvent(io, 'session:crisis-detected', {}, 42);
-    expect(to.mock.calls.map(c => c[0])).toEqual(['therapist:7']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['therapist:7']);
   });
 });
 
@@ -141,7 +141,7 @@ describe('broadcastAdminEventForSession', () => {
     await broadcastAdminEventForSession(io, 'sideband:transcript', { delta: 'x' }, 'sess-1');
 
     expect(mocks.getSessionAccessInfo).toHaveBeenCalledWith('sess-1');
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
   });
 
   it('coerces string user_id from the session row', async () => {
@@ -170,12 +170,12 @@ describe('broadcastAdminEventForSession', () => {
     mocks.getSessionAccessInfo.mockResolvedValueOnce({ status: 'active', user_id: null, session_type: 'realtime' });
 
     await broadcastAdminEventForSession(io, 'sideband:transcript', {}, 'anon-sess');
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast']);
 
     to.mockClear();
     mocks.getSessionAccessInfo.mockResolvedValueOnce(null);
     await broadcastAdminEventForSession(io, 'sideband:transcript', {}, 'missing-sess');
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast']);
 
     expect(mocks.getTherapistIdsForClient).not.toHaveBeenCalled();
   });
@@ -186,14 +186,13 @@ describe('broadcastAdminEventForSession', () => {
     mocks.getSessionAccessInfo.mockRejectedValueOnce(new Error('db down'));
 
     await expect(broadcastAdminEventForSession(io, 'sideband:transcript', {}, 'sess-1')).resolves.toBeUndefined();
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast']);
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast']);
 
     // Failure is not cached: a later call retries the lookup.
     mocks.getSessionAccessInfo.mockResolvedValueOnce({ status: 'active', user_id: 42, session_type: 'realtime' });
     mocks.getTherapistIdsForClient.mockResolvedValue([7]);
     to.mockClear();
     await broadcastAdminEventForSession(io, 'sideband:transcript', {}, 'sess-1');
-    expect(to.mock.calls.map(c => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
-
+    expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
   });
 });

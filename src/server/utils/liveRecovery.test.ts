@@ -11,10 +11,7 @@
 // runtime without provoking the vendor's filter on demand.
 
 import { describe, it, expect } from 'vitest';
-import {
-  buildLiveSessionConfig,
-  buildLiveRecoveryInstructions,
-} from './liveSessionConfig.js';
+import { buildLiveSessionConfig, buildLiveRecoveryInstructions } from './liveSessionConfig.js';
 
 const baseInput = {
   model: 'gpt-live-1',
@@ -62,7 +59,9 @@ describe('crisis recovery voice session', () => {
 
   it('never stores the recovery session', () => {
     const config = buildLiveSessionConfig({
-      ...baseInput, recovery: { crisisLine: '988' }, storable: false,
+      ...baseInput,
+      recovery: { crisisLine: '988' },
+      storable: false,
     });
     expect(config.store).toBe(false);
   });
@@ -105,7 +104,6 @@ describe('recovery instructions content', () => {
   });
 
   it('honours the configured language', () => {
-    expect(buildLiveRecoveryInstructions({ languageName: 'Spanish', crisisLine: '988' }))
-      .toContain('Speak Spanish');
+    expect(buildLiveRecoveryInstructions({ languageName: 'Spanish', crisisLine: '988' })).toContain('Speak Spanish');
   });
 });

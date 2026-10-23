@@ -7,12 +7,7 @@
 // on the user row (study_status_source + study_status_changed_at).
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import {
-  getUserById,
-  getStudyStatusDetail,
-  setStudyStatus,
-  type StudyStatus,
-} from '../../db/index.js';
+import { getUserById, getStudyStatusDetail, setStudyStatus, type StudyStatus } from '../../db/index.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('studyStatusRoutes');

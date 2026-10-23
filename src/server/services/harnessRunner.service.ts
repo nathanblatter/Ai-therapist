@@ -132,15 +132,15 @@ export async function startHarnessRun(req: HarnessRunRequest): Promise<{ pid: nu
       child.kill('SIGKILL');
     }, RUN_TIMEOUT_MS),
   };
-  child.stdout?.on('data', d => appendLog(run, d));
-  child.stderr?.on('data', d => appendLog(run, d));
-  child.on('exit', code => {
+  child.stdout?.on('data', (d) => appendLog(run, d));
+  child.stderr?.on('data', (d) => appendLog(run, d));
+  child.on('exit', (code) => {
     clearTimeout(run.killTimer);
     lastExit = { code, at: new Date().toISOString(), suite: run.suite };
     if (active?.child === child) active = null;
     log.info(`harness ${run.suite} run (pid ${child.pid}) exited with code ${code}`);
   });
-  child.on('error', err => {
+  child.on('error', (err) => {
     clearTimeout(run.killTimer);
     lastExit = { code: null, at: new Date().toISOString(), suite: run.suite };
     if (active?.child === child) active = null;
@@ -169,7 +169,13 @@ export interface HarnessSchedule {
   extra_suites: HarnessSuite[];
 }
 
-export const DEFAULT_SCHEDULE: HarnessSchedule = { enabled: false, suite: 'voice', hour_utc: 9, variations: 1, extra_suites: [] };
+export const DEFAULT_SCHEDULE: HarnessSchedule = {
+  enabled: false,
+  suite: 'voice',
+  hour_utc: 9,
+  variations: 1,
+  extra_suites: [],
+};
 
 /** How long after hour_utc an extra suite may still start (the primary run can
  *  take most of the hour). */
@@ -179,14 +185,20 @@ export function normalizeSchedule(raw: unknown): HarnessSchedule {
   const r = (raw ?? {}) as Partial<HarnessSchedule>;
   const suite = SUITES.includes(r.suite as HarnessSuite) ? (r.suite as HarnessSuite) : DEFAULT_SCHEDULE.suite;
   const extras = Array.isArray(r.extra_suites) ? r.extra_suites : [];
-  const extra_suites = [...new Set(extras.filter((x): x is HarnessSuite => SUITES.includes(x as HarnessSuite) && x !== suite))];
+  const extra_suites = [
+    ...new Set(extras.filter((x): x is HarnessSuite => SUITES.includes(x as HarnessSuite) && x !== suite)),
+  ];
   return {
     enabled: r.enabled === true,
     suite,
-    hour_utc: Number.isInteger(r.hour_utc) && (r.hour_utc as number) >= 0 && (r.hour_utc as number) <= 23
-      ? (r.hour_utc as number) : DEFAULT_SCHEDULE.hour_utc,
-    variations: Number.isInteger(r.variations) && (r.variations as number) >= 1 && (r.variations as number) <= 5
-      ? (r.variations as number) : 1,
+    hour_utc:
+      Number.isInteger(r.hour_utc) && (r.hour_utc as number) >= 0 && (r.hour_utc as number) <= 23
+        ? (r.hour_utc as number)
+        : DEFAULT_SCHEDULE.hour_utc,
+    variations:
+      Number.isInteger(r.variations) && (r.variations as number) >= 1 && (r.variations as number) <= 5
+        ? (r.variations as number)
+        : 1,
     extra_suites,
   };
 }
@@ -268,7 +280,7 @@ async function schedulerTick(): Promise<void> {
       `SELECT DISTINCT ON (suite) suite, started_at FROM harness_runs
         WHERE trigger = 'nightly' ORDER BY suite, started_at DESC`,
     );
-    const lastBySuite = new Map(rows.map(r => [r.suite, r.started_at]));
+    const lastBySuite = new Map(rows.map((r) => [r.suite, r.started_at]));
     const primaryLast = lastBySuite.get(schedule.suite) ?? null;
     if (nightlyDue(schedule, now, primaryLast, active !== null)) {
       log.info(`nightly harness run due (suite=${schedule.suite})`);
@@ -277,7 +289,8 @@ async function schedulerTick(): Promise<void> {
     }
     const primaryStartedTonight = !!primaryLast && now.getTime() - primaryLast.getTime() < 20 * 60 * 60 * 1000;
     for (const suite of schedule.extra_suites) {
-      if (!extraSuiteDue(schedule, now, lastBySuite.get(suite) ?? null, primaryStartedTonight, active !== null)) continue;
+      if (!extraSuiteDue(schedule, now, lastBySuite.get(suite) ?? null, primaryStartedTonight, active !== null))
+        continue;
       log.info(`nightly harness run due (extra suite=${suite})`);
       await startHarnessRun({ suite, variations: schedule.variations, trigger: 'nightly' });
       return; // one run per tick; the next tick picks up the next suite
@@ -290,7 +303,9 @@ async function schedulerTick(): Promise<void> {
 /** Start the in-process nightly scheduler (no-op when already started). */
 export function startHarnessScheduler(): void {
   if (schedulerTimer) return;
-  schedulerTimer = setInterval(() => { void schedulerTick(); }, SCHEDULER_TICK_MS);
+  schedulerTimer = setInterval(() => {
+    void schedulerTick();
+  }, SCHEDULER_TICK_MS);
   schedulerTimer.unref?.();
   log.info('harness nightly scheduler started (5min tick)');
 }

@@ -54,9 +54,7 @@ describe('runDemoCleanup', () => {
 
     // Sessions must go before users: therapy_sessions.user_id is ON DELETE SET
     // NULL, so the reverse order would orphan sessions as anonymous rows.
-    const deleteOrder = queryMock.mock.calls
-      .map(c => c[0] as string)
-      .filter(t => t.startsWith('DELETE'));
+    const deleteOrder = queryMock.mock.calls.map((c) => c[0] as string).filter((t) => t.startsWith('DELETE'));
     expect(deleteOrder[0]).toContain('therapy_sessions');
     expect(deleteOrder[1]).toContain('users');
     expect(queryMock.mock.calls[2][1]).toEqual([[1, 2]]);
@@ -72,9 +70,7 @@ describe('runDemoCleanup', () => {
       })
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [], rowCount: 1 });
-    deleteObjectMock
-      .mockRejectedValueOnce(new Error('minio down'))
-      .mockResolvedValueOnce(undefined);
+    deleteObjectMock.mockRejectedValueOnce(new Error('minio down')).mockResolvedValueOnce(undefined);
 
     const result = await runDemoCleanup(7);
 

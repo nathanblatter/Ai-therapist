@@ -51,7 +51,7 @@ describe('GET /admin/api/export caseload gating', () => {
     expect(mocks.getSessionAccessInfo).not.toHaveBeenCalled();
     // Access audit (091): the export is recorded with actor + export shape.
     expect(mocks.logDataAccess).toHaveBeenCalledWith(
-      expect.objectContaining({ accessedBy: 1, role: 'researcher', action: 'export' })
+      expect.objectContaining({ accessedBy: 1, role: 'researcher', action: 'export' }),
     );
   });
 

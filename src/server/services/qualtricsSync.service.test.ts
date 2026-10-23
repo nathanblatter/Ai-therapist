@@ -83,9 +83,7 @@ describe('getQualtricsSyncConfig', () => {
 
 describe('extractTypedStudyId', () => {
   it('finds a numeric _TEXT answer and ignores prose text answers', () => {
-    expect(
-      extractTypedStudyId({ QID2_TEXT: ' 23 ', QID9_TEXT: 'I felt sad this week', finished: 1 })
-    ).toBe('23');
+    expect(extractTypedStudyId({ QID2_TEXT: ' 23 ', QID9_TEXT: 'I felt sad this week', finished: 1 })).toBe('23');
   });
 
   it('returns null when nothing looks like a study id', () => {
@@ -105,9 +103,7 @@ describe('fetchAllResponses', () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { result: { progressId: 'PG1' } }))
       .mockResolvedValueOnce(jsonResponse(200, { result: { status: 'complete', fileId: 'F1' } }))
-      .mockResolvedValueOnce(
-        jsonResponse(200, { responses: [{ responseId: 'R_1', values: { finished: 1 } }] })
-      );
+      .mockResolvedValueOnce(jsonResponse(200, { responses: [{ responseId: 'R_1', values: { finished: 1 } }] }));
 
     const responses = await fetchAllResponses(CONFIG, 'SV_weekly');
     expect(responses).toHaveLength(1);
@@ -147,9 +143,7 @@ describe('syncAllSurveys', () => {
 
   it('links via sid embedded data first and upserts the response', async () => {
     dbMocks.resolveStudySidToUserId.mockResolvedValue(42);
-    mockExport([
-      { responseId: 'R_1', values: { finished: 1, recordedDate: '2026-09-02T10:00:00Z', sid: '23' } },
-    ]);
+    mockExport([{ responseId: 'R_1', values: { finished: 1, recordedDate: '2026-09-02T10:00:00Z', sid: '23' } }]);
 
     const results = await syncAllSurveys(CONFIG);
     expect(results[0]).toMatchObject({ surveyRole: 'weekly', fetched: 1, upserted: 1, linked: 1 });
@@ -162,7 +156,7 @@ describe('syncAllSurveys', () => {
         studySid: '23',
         finished: true,
         recordedAt: '2026-09-02T10:00:00Z',
-      })
+      }),
     );
   });
 
@@ -172,9 +166,7 @@ describe('syncAllSurveys', () => {
 
     await syncAllSurveys(CONFIG);
     expect(dbMocks.resolveStudySidToUserId).toHaveBeenCalledWith('7');
-    expect(dbMocks.upsertQualtricsResponse).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 7, studySid: '7' })
-    );
+    expect(dbMocks.upsertQualtricsResponse).toHaveBeenCalledWith(expect.objectContaining({ userId: 7, studySid: '7' }));
   });
 
   it('uses the /join-study signup fallback for baseline responses', async () => {
@@ -192,7 +184,7 @@ describe('syncAllSurveys', () => {
     const results = await syncAllSurveys(CONFIG);
     expect(results[0]).toMatchObject({ fetched: 1, upserted: 1, linked: 0 });
     expect(dbMocks.upsertQualtricsResponse).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: null, finished: false })
+      expect.objectContaining({ userId: null, finished: false }),
     );
   });
 
@@ -219,7 +211,7 @@ describe('syncAllSurveys', () => {
         sourceId: 'R_adv',
         clientId: 42,
         detail: { surveyRole: 'weekly', responseId: 'R_adv', triggers: ['QID10', 'QID11_TEXT'], reportId: 101 },
-      })
+      }),
     );
     // The distress text itself must never leave qualtrics_responses.
     const call = workQueueMocks.enqueueWorkItem.mock.calls[0][0];
@@ -348,7 +340,7 @@ describe('withdrawal status application', () => {
         severity: 'info',
         sourceId: 'R_1',
         clientId: 42,
-      })
+      }),
     );
   });
 
@@ -363,7 +355,7 @@ describe('withdrawal status application', () => {
         itemType: 'participant_withdrawal',
         severity: 'warning',
         detail: expect.objectContaining({ requestsDeletion: true, status: 'paused' }),
-      })
+      }),
     );
   });
 
@@ -414,7 +406,7 @@ describe('adverse-event drafting + webhook', () => {
           responseId: 'R_adv',
           values: { finished: 1, sid: '42', QID10: 2, QID11_TEXT: ' it upset me ' },
         },
-      })
+      }),
     );
     const outcome = await handleResponseWebhook('SV_weekly', 'R_adv');
     expect(outcome).toBe('ok');
@@ -425,10 +417,10 @@ describe('adverse-event drafting + webhook', () => {
         sessionRef: 'qualtrics:R_adv',
         userId: 42,
         transcriptExcerpt: 'it upset me',
-      })
+      }),
     );
     expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
-      expect.objectContaining({ detail: expect.objectContaining({ reportId: 101 }) })
+      expect.objectContaining({ detail: expect.objectContaining({ reportId: 101 }) }),
     );
   });
 
@@ -437,11 +429,11 @@ describe('adverse-event drafting + webhook', () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, {
         result: { responseId: 'R_adv2', values: { finished: 1, sid: '42', QID10: 2 } },
-      })
+      }),
     );
     await handleResponseWebhook('SV_weekly', 'R_adv2');
     expect(workQueueMocks.enqueueWorkItem).toHaveBeenCalledWith(
-      expect.objectContaining({ detail: expect.objectContaining({ reportId: null }) })
+      expect.objectContaining({ detail: expect.objectContaining({ reportId: null }) }),
     );
   });
 
@@ -457,12 +449,8 @@ describe('adverse-event drafting + webhook', () => {
 describe('nextBusinessDay', () => {
   it('skips weekends', () => {
     // Friday 2026-09-04 UTC -> Monday 2026-09-07
-    expect(nextBusinessDay(new Date('2026-09-04T12:00:00Z')).toISOString()).toBe(
-      '2026-09-07T12:00:00.000Z'
-    );
+    expect(nextBusinessDay(new Date('2026-09-04T12:00:00Z')).toISOString()).toBe('2026-09-07T12:00:00.000Z');
     // Wednesday -> Thursday
-    expect(nextBusinessDay(new Date('2026-09-02T12:00:00Z')).toISOString()).toBe(
-      '2026-09-03T12:00:00.000Z'
-    );
+    expect(nextBusinessDay(new Date('2026-09-02T12:00:00Z')).toISOString()).toBe('2026-09-03T12:00:00.000Z');
   });
 });

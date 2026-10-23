@@ -36,9 +36,7 @@ interface RetentionSettings {
  */
 export async function getRetentionSettings(): Promise<RetentionSettings> {
   try {
-    const result = await pool.query(
-      `SELECT config_value FROM system_config WHERE config_key = 'content_retention'`
-    );
+    const result = await pool.query(`SELECT config_value FROM system_config WHERE config_key = 'content_retention'`);
     if (result.rows.length === 0) {
       return getDefaultSettings();
     }
@@ -56,20 +54,23 @@ function getDefaultSettings(): RetentionSettings {
     wipe_time: '03:00',
     require_redaction_complete: true,
     last_wipe_at: null,
-    last_wipe_count: 0
+    last_wipe_count: 0,
   };
 }
 
 /**
  * Update content retention settings
  */
-export async function updateRetentionSettings(settings: RetentionSettings, updatedBy: string): Promise<RetentionSettings> {
+export async function updateRetentionSettings(
+  settings: RetentionSettings,
+  updatedBy: string,
+): Promise<RetentionSettings> {
   const result = await pool.query(
     `UPDATE system_config
      SET config_value = $1, updated_at = CURRENT_TIMESTAMP, updated_by = $2
      WHERE config_key = 'content_retention'
      RETURNING config_value`,
-    [JSON.stringify(settings), updatedBy]
+    [JSON.stringify(settings), updatedBy],
   );
 
   // Restart scheduler with new settings
@@ -84,7 +85,10 @@ export async function updateRetentionSettings(settings: RetentionSettings, updat
  * @param {string} triggeredByUser - Username if manual trigger
  * @returns {Object} Wipe result with counts
  */
-export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByUser: string | null = null): Promise<{
+export async function executeContentWipe(
+  triggeredBy = 'scheduler',
+  triggeredByUser: string | null = null,
+): Promise<{
   success: boolean;
   wipeId: unknown;
   messagesWiped?: number | null;
@@ -105,7 +109,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
       `INSERT INTO content_wipe_log (status, triggered_by, triggered_by_user, retention_hours)
        VALUES ('running', $1, $2, $3)
        RETURNING wipe_id`,
-      [triggeredBy, triggeredByUser, settings.retention_hours]
+      [triggeredBy, triggeredByUser, settings.retention_hours],
     );
     wipeId = logResult.rows[0].wipe_id;
 
@@ -171,10 +175,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
     // window. require_redaction_complete's analog here is "scan settled":
     // scan_status='pending' messages are left for the next run. Sandbox
     // threads are exempt inside the query (spec section 10 item 10).
-    const threadBodiesWiped = await wipeAgedThreadMessageBodies(
-      cutoffTime,
-      settings.require_redaction_complete
-    );
+    const threadBodiesWiped = await wipeAgedThreadMessageBodies(cutoffTime, settings.require_redaction_complete);
 
     // Count skipped messages (those with content but not wiped)
     const skippedResult = await pool.query(
@@ -182,7 +183,7 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
        WHERE content IS NOT NULL
          AND created_at < $1
          AND (content_redacted IS NULL OR metadata->>'redaction_error' IS NOT NULL)`,
-      [cutoffTime]
+      [cutoffTime],
     );
     const messagesSkipped = parseInt(skippedResult.rows[0].count);
 
@@ -194,36 +195,43 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
            messages_skipped = $2,
            status = 'completed'
        WHERE wipe_id = $3`,
-      [messagesWiped, messagesSkipped, wipeId]
+      [messagesWiped, messagesSkipped, wipeId],
     );
 
     // Update last wipe info in settings
     const updatedSettings: RetentionSettings = {
       ...settings,
       last_wipe_at: new Date().toISOString(),
-      last_wipe_count: messagesWiped ?? 0
+      last_wipe_count: messagesWiped ?? 0,
     };
     await pool.query(
       `UPDATE system_config
        SET config_value = $1, updated_at = CURRENT_TIMESTAMP
        WHERE config_key = 'content_retention'`,
-      [JSON.stringify(updatedSettings)]
+      [JSON.stringify(updatedSettings)],
     );
 
-    console.log(`[ContentWipe] Content wipe completed: ${messagesWiped} messages wiped, ${messagesSkipped} skipped, ${threadBodiesWiped} thread message bodies wiped`);
+    console.log(
+      `[ContentWipe] Content wipe completed: ${messagesWiped} messages wiped, ${messagesSkipped} skipped, ${threadBodiesWiped} thread message bodies wiped`,
+    );
 
     // Notify admin dashboards. Through broadcastAdminEvent with no participant
     // linkage -> researcher room only (the old hand-rolled emit targeted a
     // room named 'admin' that no socket ever joins, so it was never delivered).
     if (global.io) {
-      void broadcastAdminEvent(global.io, 'content:wiped', {
-        wipeId,
-        messagesWiped,
-        messagesSkipped,
-        threadBodiesWiped,
-        triggeredBy,
-        completedAt: new Date().toISOString()
-      }, null);
+      void broadcastAdminEvent(
+        global.io,
+        'content:wiped',
+        {
+          wipeId,
+          messagesWiped,
+          messagesSkipped,
+          threadBodiesWiped,
+          triggeredBy,
+          completedAt: new Date().toISOString(),
+        },
+        null,
+      );
     }
 
     return {
@@ -231,9 +239,8 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
       wipeId,
       messagesWiped,
       messagesSkipped,
-      threadBodiesWiped
+      threadBodiesWiped,
     };
-
   } catch (error: unknown) {
     console.error('Content wipe failed:', error);
 
@@ -242,20 +249,22 @@ export async function executeContentWipe(triggeredBy = 'scheduler', triggeredByU
     // Update log entry with error (best-effort: if the DB is the thing that is
     // down, this UPDATE would rethrow out of the catch and kill the scheduler).
     if (wipeId != null) {
-      await pool.query(
-        `UPDATE content_wipe_log
+      await pool
+        .query(
+          `UPDATE content_wipe_log
          SET completed_at = CURRENT_TIMESTAMP,
              status = 'failed',
              error_message = $1
          WHERE wipe_id = $2`,
-        [errorMessage, wipeId]
-      ).catch(logErr => console.error('[ContentWipe] failed to record wipe failure:', logErr));
+          [errorMessage, wipeId],
+        )
+        .catch((logErr) => console.error('[ContentWipe] failed to record wipe failure:', logErr));
     }
 
     return {
       success: false,
       wipeId,
-      error: errorMessage
+      error: errorMessage,
     };
   }
 }
@@ -283,7 +292,7 @@ export async function getWipeStats(): Promise<Record<string, unknown>> {
          JOIN users sbxu ON sbxu.userid = sbx.user_id
          WHERE sbx.session_id = messages.session_id AND sbxu.is_sandbox
        )`,
-    [cutoffTime]
+    [cutoffTime],
   );
 
   // Get messages awaiting redaction. Scoped to the rows redaction actually
@@ -293,26 +302,24 @@ export async function getWipeStats(): Promise<Record<string, unknown>> {
     `SELECT COUNT(*) as count FROM messages
      WHERE content IS NOT NULL
        AND content_redacted IS NULL
-       AND ${REDACTABLE_ROWS_SQL}`
+       AND ${REDACTABLE_ROWS_SQL}`,
   );
 
   // Get messages with redaction errors
   const redactionErrorsResult = await pool.query(
     `SELECT COUNT(*) as count FROM messages
      WHERE content IS NOT NULL
-       AND metadata->>'redaction_error' IS NOT NULL`
+       AND metadata->>'redaction_error' IS NOT NULL`,
   );
 
   // Get total messages with original content still present
-  const totalWithContentResult = await pool.query(
-    `SELECT COUNT(*) as count FROM messages WHERE content IS NOT NULL`
-  );
+  const totalWithContentResult = await pool.query(`SELECT COUNT(*) as count FROM messages WHERE content IS NOT NULL`);
 
   // Get recent wipe log
   const recentWipesResult = await pool.query(
     `SELECT * FROM content_wipe_log
      ORDER BY started_at DESC
-     LIMIT 10`
+     LIMIT 10`,
   );
 
   return {
@@ -321,10 +328,10 @@ export async function getWipeStats(): Promise<Record<string, unknown>> {
       pending_wipe: parseInt(pendingResult.rows[0].count),
       awaiting_redaction: parseInt(awaitingRedactionResult.rows[0].count),
       redaction_errors: parseInt(redactionErrorsResult.rows[0].count),
-      total_with_content: parseInt(totalWithContentResult.rows[0].count)
+      total_with_content: parseInt(totalWithContentResult.rows[0].count),
     },
     recent_wipes: recentWipesResult.rows,
-    next_scheduled_wipe: nextScheduledWipe?.toISOString() || null
+    next_scheduled_wipe: nextScheduledWipe?.toISOString() || null,
   };
 }
 
@@ -380,10 +387,9 @@ async function scheduleNextWipe(): Promise<void> {
   // throws anymore) so a failure can neither become an unhandled rejection
   // nor skip the reschedule.
   wipeInterval = setTimeout(async () => {
-    await executeContentWipe('scheduler')
-      .catch(err => console.error('[ContentWipe] scheduled wipe failed:', err));
+    await executeContentWipe('scheduler').catch((err) => console.error('[ContentWipe] scheduled wipe failed:', err));
     // Schedule the next one
-    scheduleNextWipe().catch(err => console.error('[ContentWipe] reschedule failed:', err));
+    scheduleNextWipe().catch((err) => console.error('[ContentWipe] reschedule failed:', err));
   }, msUntilWipe);
   wipeInterval.unref?.();
 }
@@ -412,9 +418,9 @@ export async function findEndedSessionsWithRedactionGaps(limit = 200): Promise<s
         AND ${redactableRowsSql('m')}
         AND u.is_sandbox IS NOT TRUE
       LIMIT $1`,
-    [limit]
+    [limit],
   );
-  return result.rows.map(r => r.session_id);
+  return result.rows.map((r) => r.session_id);
 }
 
 /**
@@ -429,9 +435,7 @@ export async function sweepRedactionGaps(): Promise<{ sweptSessions: number }> {
   console.log(`[Redaction sweep] re-running redactSession for ${sessionIds.length} ended session(s) with gaps`);
   const { redactSession } = await import('./sessionRedaction.service.js');
   for (const sessionId of sessionIds) {
-    await redactSession(sessionId).catch(err =>
-      console.error(`[Redaction sweep] failed for ${sessionId}:`, err)
-    );
+    await redactSession(sessionId).catch((err) => console.error(`[Redaction sweep] failed for ${sessionId}:`, err));
   }
   return { sweptSessions: sessionIds.length };
 }
@@ -445,11 +449,11 @@ export async function startScheduler(): Promise<void> {
 
   if (!redactionSweepInterval) {
     redactionSweepInterval = setInterval(() => {
-      sweepRedactionGaps().catch(err => console.error('[Redaction sweep] tick failed:', err));
+      sweepRedactionGaps().catch((err) => console.error('[Redaction sweep] tick failed:', err));
     }, REDACTION_SWEEP_INTERVAL_MS);
     redactionSweepInterval.unref?.();
     // Run once immediately rather than waiting a full interval after boot/restart.
-    sweepRedactionGaps().catch(err => console.error('[Redaction sweep] initial run failed:', err));
+    sweepRedactionGaps().catch((err) => console.error('[Redaction sweep] initial run failed:', err));
   }
 }
 
@@ -474,6 +478,6 @@ export function stopScheduler(): void {
 export function getSchedulerStatus(): { running: boolean; nextScheduledWipe: string | null } {
   return {
     running: wipeInterval !== null,
-    nextScheduledWipe: nextScheduledWipe?.toISOString() || null
+    nextScheduledWipe: nextScheduledWipe?.toISOString() || null,
   };
 }

@@ -36,19 +36,32 @@ export async function executeLoggedToolCall(
   channel: 'chat' | 'realtime' = 'chat',
 ): Promise<ExecutedToolCall> {
   // Log the call to the transcript (same shape as sidebandManager).
-  await insertMessagesBatch([{
-    session_id: sessionId,
-    role: 'system',
-    message_type: 'tool_call',
-    content: `Tool called: ${toolName}`,
-    content_redacted: null,
-    metadata: { tool_name: toolName, call_id: callId, arguments: args, status: 'executing', channel },
-  }]).catch(err => console.error('[ToolExecution] Failed to log tool_call message:', err));
+  await insertMessagesBatch([
+    {
+      session_id: sessionId,
+      role: 'system',
+      message_type: 'tool_call',
+      content: `Tool called: ${toolName}`,
+      content_redacted: null,
+      metadata: { tool_name: toolName, call_id: callId, arguments: args, status: 'executing', channel },
+    },
+  ]).catch((err) => console.error('[ToolExecution] Failed to log tool_call message:', err));
 
   if (global.io) {
-    void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
-      sessionId, callId, toolName, args, status: 'executing', channel, timestamp: new Date(),
-    }, sessionId);
+    void broadcastAdminEventForSession(
+      global.io,
+      'sideband:tool-call',
+      {
+        sessionId,
+        callId,
+        toolName,
+        args,
+        status: 'executing',
+        channel,
+        timestamp: new Date(),
+      },
+      sessionId,
+    );
   }
 
   try {
@@ -58,22 +71,36 @@ export async function executeLoggedToolCall(
     // Invocation analytics (ai-therapist-32), stamped with the session's
     // current risk score inside the query — same as the sideband path.
     import('../db/index.js')
-      .then(db => db.insertToolInvocation(sessionId, toolName, args, true))
-      .catch(err => console.error('[ToolExecution] Failed to log tool invocation:', err));
+      .then((db) => db.insertToolInvocation(sessionId, toolName, args, true))
+      .catch((err) => console.error('[ToolExecution] Failed to log tool invocation:', err));
 
-    await insertMessagesBatch([{
-      session_id: sessionId,
-      role: 'system',
-      message_type: 'tool_response',
-      content: `Tool response: ${toolName}`,
-      content_redacted: null,
-      metadata: { tool_name: toolName, call_id: callId, response: result, status: 'completed', channel },
-    }]).catch(err => console.error('[ToolExecution] Failed to log tool_response message:', err));
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'system',
+        message_type: 'tool_response',
+        content: `Tool response: ${toolName}`,
+        content_redacted: null,
+        metadata: { tool_name: toolName, call_id: callId, response: result, status: 'completed', channel },
+      },
+    ]).catch((err) => console.error('[ToolExecution] Failed to log tool_response message:', err));
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
-        sessionId, callId, toolName, args, result, status: 'completed', channel, timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:tool-call',
+        {
+          sessionId,
+          callId,
+          toolName,
+          args,
+          result,
+          status: 'completed',
+          channel,
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
 
     return { result, success: true };
@@ -81,24 +108,37 @@ export async function executeLoggedToolCall(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[ToolExecution] Tool ${toolName} failed for session ${sessionId.substring(0, 12)}...:`, error);
 
-    await insertMessagesBatch([{
-      session_id: sessionId,
-      role: 'system',
-      message_type: 'tool_response',
-      content: `Tool error: ${toolName}`,
-      content_redacted: null,
-      metadata: { tool_name: toolName, call_id: callId, error: errorMessage, status: 'failed', channel },
-    }]).catch(err => console.error('[ToolExecution] Failed to log tool error message:', err));
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'system',
+        message_type: 'tool_response',
+        content: `Tool error: ${toolName}`,
+        content_redacted: null,
+        metadata: { tool_name: toolName, call_id: callId, error: errorMessage, status: 'failed', channel },
+      },
+    ]).catch((err) => console.error('[ToolExecution] Failed to log tool error message:', err));
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
-        sessionId, callId, toolName, error: errorMessage, status: 'failed', channel, timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:tool-call',
+        {
+          sessionId,
+          callId,
+          toolName,
+          error: errorMessage,
+          status: 'failed',
+          channel,
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
 
     import('../db/index.js')
-      .then(db => db.insertToolInvocation(sessionId, toolName, null, false))
-      .catch(err => console.error('[ToolExecution] Failed to log tool invocation:', err));
+      .then((db) => db.insertToolInvocation(sessionId, toolName, null, false))
+      .catch((err) => console.error('[ToolExecution] Failed to log tool invocation:', err));
 
     return { result: { error: errorMessage, success: false }, success: false };
   }

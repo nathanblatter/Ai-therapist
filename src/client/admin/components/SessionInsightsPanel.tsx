@@ -14,9 +14,7 @@ import { isCareTeamRole } from '../../../shared/roles';
 // Canonical insight shapes live in the server data layer (type-only import,
 // erased at build time).
 import type { SessionSummary, SoapNote, AffectPoint } from '../../../server/db/insights.queries';
-import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine,
-} from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts';
 
 // The therapist's authored progress note for this session (careNotes slice B).
 interface AuthoredNote {
@@ -58,7 +56,13 @@ interface SessionInsightsPanelProps {
   participantUserId?: number | null;
 }
 
-export default function SessionInsightsPanel({ sessionId, userRole, sessionStatus, checkin, participantUserId }: SessionInsightsPanelProps) {
+export default function SessionInsightsPanel({
+  sessionId,
+  userRole,
+  sessionStatus,
+  checkin,
+  participantUserId,
+}: SessionInsightsPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [insights, setInsights] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(false);
@@ -122,7 +126,7 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
     setNotesSaved(false);
     try {
       await postJson(`/admin/api/sessions/${sessionId}/insights/notes`, { notes: notesDraft });
-      setInsights(prev => (prev ? { ...prev, notes_for_next_session: notesDraft } : prev));
+      setInsights((prev) => (prev ? { ...prev, notes_for_next_session: notesDraft } : prev));
       setNotesSaved(true);
     } catch {
       /* a failed save leaves the draft in the textarea */
@@ -137,8 +141,12 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
     setBusy(true);
     setSeedError(null);
     try {
-      const data = await postJson<{ note: AuthoredNote }>(`/admin/api/sessions/${sessionId}/notes/from-insights`, undefined, { fallback: 'Failed to start the progress note' });
-      setInsights(prev => (prev ? { ...prev, authored_note: data.note } : prev));
+      const data = await postJson<{ note: AuthoredNote }>(
+        `/admin/api/sessions/${sessionId}/notes/from-insights`,
+        undefined,
+        { fallback: 'Failed to start the progress note' },
+      );
+      setInsights((prev) => (prev ? { ...prev, authored_note: data.note } : prev));
     } catch (err: unknown) {
       setSeedError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -180,7 +188,11 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
             <div>
               <h4 className="font-semibold text-gray-700 mb-1">Pre-session check-in</h4>
               <div className="bg-white rounded p-3 text-gray-700 space-y-1">
-                {checkin.mood !== undefined && <div>Mood: <strong>{checkin.mood}/10</strong></div>}
+                {checkin.mood !== undefined && (
+                  <div>
+                    Mood: <strong>{checkin.mood}/10</strong>
+                  </div>
+                )}
                 {checkin.topic && <div>On their mind: &ldquo;{checkin.topic}&rdquo;</div>}
                 {checkin.goal && <div>Goal: &ldquo;{checkin.goal}&rdquo;</div>}
               </div>
@@ -207,16 +219,18 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
           {insights?.safety_plan && (
             <div>
               <h4 className="font-semibold text-gray-700 mb-1">
-                Safety plan <span className="font-normal text-xs text-gray-400">created {new Date(insights.safety_plan.created_at).toLocaleString()}</span>
+                Safety plan{' '}
+                <span className="font-normal text-xs text-gray-400">
+                  created {new Date(insights.safety_plan.created_at).toLocaleString()}
+                </span>
               </h4>
               <div className="bg-white rounded p-3 text-gray-700 space-y-2">
                 {Object.entries(insights.safety_plan.plan).map(([section, items]) =>
                   Array.isArray(items) && items.length > 0 ? (
                     <div key={section}>
-                      <span className="font-medium capitalize">{section.replace(/_/g, ' ')}:</span>{' '}
-                      {items.join('; ')}
+                      <span className="font-medium capitalize">{section.replace(/_/g, ' ')}:</span> {items.join('; ')}
                     </div>
-                  ) : null
+                  ) : null,
                 )}
               </div>
             </div>
@@ -228,9 +242,11 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
               <div className="bg-white rounded p-3 text-gray-700 space-y-1">
                 {insights.scale_responses.map((r, i) => (
                   <div key={i}>
-                    <span className="font-mono uppercase">{r.scale}</span>: score <strong>{r.score}</strong>
-                    {' '}(items: {r.answers.join(', ')}) · {new Date(r.created_at).toLocaleString()}
-                    {r.score >= 3 && <span className="ml-2 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">≥ cutoff</span>}
+                    <span className="font-mono uppercase">{r.scale}</span>: score <strong>{r.score}</strong> (items:{' '}
+                    {r.answers.join(', ')}) · {new Date(r.created_at).toLocaleString()}
+                    {r.score >= 3 && (
+                      <span className="ml-2 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">≥ cutoff</span>
+                    )}
                   </div>
                 ))}
                 <p className="text-xs text-gray-400 pt-1">Screeners, not diagnoses.</p>
@@ -255,14 +271,30 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                       }}
                       contentStyle={{ fontSize: 11 }}
                     />
-                    <Line type="monotone" dataKey="valence" name="valence" stroke="#4f46e5" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="arousal" name="arousal" stroke="#d97706" strokeWidth={1.5} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
+                    <Line
+                      type="monotone"
+                      dataKey="valence"
+                      name="valence"
+                      stroke="#4f46e5"
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                      isAnimationActive={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="arousal"
+                      name="arousal"
+                      stroke="#d97706"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                      dot={false}
+                      isAnimationActive={false}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
                 <p className="text-xs text-gray-400 mt-1">
-                  Valence (solid, -1 negative to +1 positive) and arousal (dashed, 0 calm to 1
-                  activated) per participant turn — a model estimate for research review, not a
-                  clinical measure.
+                  Valence (solid, -1 negative to +1 positive) and arousal (dashed, 0 calm to 1 activated) per
+                  participant turn — a model estimate for research review, not a clinical measure.
                 </p>
               </div>
             </div>
@@ -282,8 +314,10 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                 )}
                 {summary.topics && summary.topics.length > 0 && (
                   <div className="flex flex-wrap gap-1">
-                    {summary.topics.map(t => (
-                      <span key={t} className="bg-indigo-100 text-indigo-800 text-xs px-2 py-0.5 rounded">{t}</span>
+                    {summary.topics.map((t) => (
+                      <span key={t} className="bg-indigo-100 text-indigo-800 text-xs px-2 py-0.5 rounded">
+                        {t}
+                      </span>
                     ))}
                   </div>
                 )}
@@ -321,12 +355,12 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                 </div>
               </div>
               <div className="bg-white rounded p-3 text-gray-700 space-y-2">
-                {(['subjective', 'objective', 'assessment', 'plan'] as const).map(k =>
+                {(['subjective', 'objective', 'assessment', 'plan'] as const).map((k) =>
                   soap[k] ? (
                     <div key={k}>
                       <span className="font-medium capitalize">{k}:</span> {soap[k]}
                     </div>
-                  ) : null
+                  ) : null,
                 )}
                 {insights?.soap_status === 'reviewed' && (
                   <p className="text-xs text-green-700 pt-1 border-t border-gray-100">
@@ -358,7 +392,11 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
                       <FileText size={12} aria-hidden="true" /> Start progress note from this draft
                     </button>
                   )}
-                  {seedError && <p className="text-xs text-red-600 mt-1" role="alert">{seedError}</p>}
+                  {seedError && (
+                    <p className="text-xs text-red-600 mt-1" role="alert">
+                      {seedError}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -370,7 +408,10 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
               <div className="bg-white rounded p-3 space-y-2">
                 <textarea
                   value={notesDraft}
-                  onChange={e => { setNotesDraft(e.target.value); setNotesSaved(false); }}
+                  onChange={(e) => {
+                    setNotesDraft(e.target.value);
+                    setNotesSaved(false);
+                  }}
                   placeholder="Guidance for the AI in this participant's next session (private — never shown to them)…"
                   maxLength={1000}
                   rows={3}

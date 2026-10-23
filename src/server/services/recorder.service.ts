@@ -1,18 +1,11 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { createLogger } from "../utils/logger.js";
-import {
-  ensureBucket,
-  putObject,
-  RECORDINGS_BUCKET,
-} from "../config/objectStorage.js";
-import {
-  setSessionRecording,
-  setSessionParticipantRecording,
-} from "../db/recording.queries.js";
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createLogger } from '../utils/logger.js';
+import { ensureBucket, putObject, RECORDINGS_BUCKET } from '../config/objectStorage.js';
+import { setSessionRecording, setSessionParticipantRecording } from '../db/recording.queries.js';
 
-const log = createLogger("recorder");
+const log = createLogger('recorder');
 
 // Live audio arrives as base64 PCM16 batches, tagged by track:
 //   'mixed'       — the browser's mic+assistant mixdown (admin playback, 022)
@@ -23,8 +16,8 @@ const log = createLogger("recorder");
 // Streaming to disk keeps memory flat even for long sessions (~170MB of PCM
 // for 30 min would be too much for RAM).
 
-export type RecordingTrack = "mixed" | "participant";
-const TRACKS: RecordingTrack[] = ["mixed", "participant"];
+export type RecordingTrack = 'mixed' | 'participant';
+const TRACKS: RecordingTrack[] = ['mixed', 'participant'];
 
 interface ActiveRecording {
   filePath: string;
@@ -60,7 +53,7 @@ export function isFinalized(sessionId: string): boolean {
   return finalized.has(sessionId);
 }
 
-const TMP_DIR = path.join(os.tmpdir(), "ai-therapist-recordings");
+const TMP_DIR = path.join(os.tmpdir(), 'ai-therapist-recordings');
 
 function tmpDir(): string {
   if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
@@ -72,7 +65,7 @@ export function appendChunk(
   sessionId: string,
   base64Pcm16: string,
   sampleRate: number,
-  track: RecordingTrack = "mixed",
+  track: RecordingTrack = 'mixed',
 ): void {
   // Drop stragglers that arrive after the recording was closed — re-creating
   // the stream here would truncate the finalized file.
@@ -88,7 +81,7 @@ export function appendChunk(
     // on a write failure. Capture it instead so we stop counting bytes that
     // never reached disk — otherwise the duration derived from the counter
     // would over-report the real audio.
-    stream.on("error", (err) => {
+    stream.on('error', (err) => {
       rec!.errored = true;
       log.error({ err }, `[rec] write stream error for ${key}`);
     });
@@ -96,7 +89,7 @@ export function appendChunk(
     log.info(`[rec] started ${track} recording for ${sessionId} @ ${sampleRate}Hz`);
   }
   if (rec.errored) return; // stream is dead; don't count bytes we can't persist
-  const buf = Buffer.from(base64Pcm16, "base64");
+  const buf = Buffer.from(base64Pcm16, 'base64');
   rec.stream.write(buf);
   rec.byteLength += buf.length;
 }
@@ -130,13 +123,9 @@ export async function finalize(sessionId: string): Promise<void> {
   }
 }
 
-async function finalizeTrack(
-  sessionId: string,
-  track: RecordingTrack,
-  rec: ActiveRecording,
-): Promise<void> {
-  const persist = track === "mixed" ? setSessionRecording : setSessionParticipantRecording;
-  const objectName = track === "mixed" ? "recording.wav" : "participant.wav";
+async function finalizeTrack(sessionId: string, track: RecordingTrack, rec: ActiveRecording): Promise<void> {
+  const persist = track === 'mixed' ? setSessionRecording : setSessionParticipantRecording;
+  const objectName = track === 'mixed' ? 'recording.wav' : 'participant.wav';
   try {
     await new Promise<void>((resolve, reject) => {
       rec.stream.end((err?: unknown) => (err ? reject(err) : resolve()));
@@ -153,7 +142,7 @@ async function finalizeTrack(
     const key = `sessions/${sessionId}/${objectName}`;
 
     await ensureBucket();
-    await putObject(key, wav, "audio/wav");
+    await putObject(key, wav, 'audio/wav');
 
     // Derive duration from the bytes actually on disk, not the in-memory
     // counter — if any write was dropped the two diverge, and the stored
@@ -167,7 +156,7 @@ async function finalizeTrack(
     const durationMs = Math.round((pcm.length / 2 / rec.sampleRate) * 1000);
     await persist(sessionId, {
       objectKey: key,
-      status: "ready",
+      status: 'ready',
       durationMs,
       sampleRate: rec.sampleRate,
       sizeBytes: wav.length,
@@ -180,7 +169,7 @@ async function finalizeTrack(
   } catch (err) {
     log.error({ err }, `[rec] failed to finalize ${track} recording for ${sessionId}`);
     try {
-      await persist(sessionId, { status: "failed" });
+      await persist(sessionId, { status: 'failed' });
     } catch {
       /* swallow — best effort */
     }
@@ -191,8 +180,8 @@ async function finalizeTrack(
 
 /** Discard a session's buffers without uploading (e.g. on hard failure). */
 export function abort(sessionId: string): void {
-  const tracks = TRACKS.map((track) => recordings.get(recKey(sessionId, track))).filter(
-    (rec): rec is ActiveRecording => Boolean(rec),
+  const tracks = TRACKS.map((track) => recordings.get(recKey(sessionId, track))).filter((rec): rec is ActiveRecording =>
+    Boolean(rec),
   );
   // Same ordering fix as finalize(): the marker must be set even when nothing
   // was buffered, or a straggler batch re-opens a recording for an aborted
@@ -223,10 +212,10 @@ function buildWav(pcm: Buffer, sampleRate: number): Buffer {
   const dataSize = pcm.length;
 
   const header = Buffer.alloc(44);
-  header.write("RIFF", 0);
+  header.write('RIFF', 0);
   header.writeUInt32LE(36 + dataSize, 4);
-  header.write("WAVE", 8);
-  header.write("fmt ", 12);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
   header.writeUInt32LE(16, 16); // PCM fmt chunk size
   header.writeUInt16LE(1, 20); // audio format = PCM
   header.writeUInt16LE(numChannels, 22);
@@ -234,7 +223,7 @@ function buildWav(pcm: Buffer, sampleRate: number): Buffer {
   header.writeUInt32LE(byteRate, 28);
   header.writeUInt16LE(blockAlign, 32);
   header.writeUInt16LE(bitsPerSample, 34);
-  header.write("data", 36);
+  header.write('data', 36);
   header.writeUInt32LE(dataSize, 40);
 
   return Buffer.concat([header, pcm]);

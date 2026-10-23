@@ -43,7 +43,9 @@ export default function WorksheetReviewPanel() {
     setLoadingQueue(true);
     setError(null);
     try {
-      const data = await getJson<{ instances?: WorksheetReviewQueueRow[]; total?: number }>('/admin/api/worksheets/review?limit=100');
+      const data = await getJson<{ instances?: WorksheetReviewQueueRow[]; total?: number }>(
+        '/admin/api/worksheets/review?limit=100',
+      );
       setQueue(data.instances ?? []);
       setTotal(data.total ?? 0);
     } catch (e) {
@@ -53,7 +55,9 @@ export default function WorksheetReviewPanel() {
     }
   }, []);
 
-  useEffect(() => { loadQueue(); }, [loadQueue]);
+  useEffect(() => {
+    loadQueue();
+  }, [loadQueue]);
 
   const open = async (id: number) => {
     setSelectedId(id);
@@ -83,7 +87,12 @@ export default function WorksheetReviewPanel() {
 
   const promote = async () => {
     if (selectedId === null) return;
-    if (!confirm('Promote this template to the knowledge base? Only the template text on the right is stored; it lands as pending approval.')) return;
+    if (
+      !confirm(
+        'Promote this template to the knowledge base? Only the template text on the right is stored; it lands as pending approval.',
+      )
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
@@ -110,7 +119,11 @@ export default function WorksheetReviewPanel() {
     setBusy(true);
     setError(null);
     try {
-      await postJson(`/admin/api/worksheets/review/${selectedId}/reject`, { note: note.trim() }, { fallback: 'Reject failed' });
+      await postJson(
+        `/admin/api/worksheets/review/${selectedId}/reject`,
+        { note: note.trim() },
+        { fallback: 'Reject failed' },
+      );
       await finish('Worksheet rejected.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Reject failed');
@@ -124,12 +137,16 @@ export default function WorksheetReviewPanel() {
   return (
     <div>
       <p className="text-sm text-gray-600 mb-4">
-        Completed personalized worksheets wait here. The filled instance is shown for review only;
-        what gets promoted is the de-personalised template on the right, which you can edit first.
-        Participant answers never enter the knowledge base.
+        Completed personalized worksheets wait here. The filled instance is shown for review only; what gets promoted is
+        the de-personalised template on the right, which you can edit first. Participant answers never enter the
+        knowledge base.
       </p>
 
-      {notice && <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">{notice}</div>}
+      {notice && (
+        <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
+          {notice}
+        </div>
+      )}
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-[18rem_1fr] gap-4">
@@ -137,8 +154,12 @@ export default function WorksheetReviewPanel() {
         <div className="bg-white rounded-lg shadow p-3">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Queue ({total})</p>
-            <button onClick={loadQueue} disabled={loadingQueue} title="Refresh"
-              className="p-1 text-gray-500 hover:text-gray-800 disabled:opacity-40">
+            <button
+              onClick={loadQueue}
+              disabled={loadingQueue}
+              title="Refresh"
+              className="p-1 text-gray-500 hover:text-gray-800 disabled:opacity-40"
+            >
               <RefreshCw size={14} />
             </button>
           </div>
@@ -148,17 +169,20 @@ export default function WorksheetReviewPanel() {
             <p className="text-sm text-gray-500 py-4 text-center">Nothing waiting for review.</p>
           ) : (
             <ul className="divide-y divide-gray-100">
-              {queue.map(row => (
+              {queue.map((row) => (
                 <li key={row.instance_id}>
-                  <button onClick={() => open(row.instance_id)}
-                    className={`w-full text-left px-2 py-2 rounded hover:bg-gray-50 ${selectedId === row.instance_id ? 'bg-royal/10' : ''}`}>
+                  <button
+                    onClick={() => open(row.instance_id)}
+                    className={`w-full text-left px-2 py-2 rounded hover:bg-gray-50 ${selectedId === row.instance_id ? 'bg-royal/10' : ''}`}
+                  >
                     <p className="text-sm font-medium text-gray-900 truncate">{row.title}</p>
                     <p className="text-xs text-gray-500 truncate">
                       #{row.instance_id} · {row.section_count} section{row.section_count === 1 ? '' : 's'}
                       {row.template_title ? ` · from "${row.template_title}"` : ' · no template'}
                     </p>
                     <p className="text-xs text-gray-400">
-                      {row.user_id !== null ? `Participant ${row.user_id}` : 'Unknown participant'} · {row.completed_at ? formatDateTime(String(row.completed_at)) : 'completed'}
+                      {row.user_id !== null ? `Participant ${row.user_id}` : 'Unknown participant'} ·{' '}
+                      {row.completed_at ? formatDateTime(String(row.completed_at)) : 'completed'}
                     </p>
                   </button>
                 </li>
@@ -181,7 +205,13 @@ export default function WorksheetReviewPanel() {
                   <p className="text-xs text-gray-500">
                     Instance #{instance.instance_id} · session {instance.session_id} ·{' '}
                     {instance.user_id !== null ? `participant ${instance.user_id}` : 'unknown participant'}
-                    {instance.template_title && <> · template: {instance.template_title}{instance.template_chunk_id !== null && ` (chunk #${instance.template_chunk_id})`}</>}
+                    {instance.template_title && (
+                      <>
+                        {' '}
+                        · template: {instance.template_title}
+                        {instance.template_chunk_id !== null && ` (chunk #${instance.template_chunk_id})`}
+                      </>
+                    )}
                   </p>
                 </div>
                 <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
@@ -213,38 +243,49 @@ export default function WorksheetReviewPanel() {
 
                 {/* Stripped template (editable) */}
                 <div>
-                  <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Template to promote</p>
+                  <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+                    Template to promote
+                  </p>
                   <p className="text-xs text-gray-500 mb-2 inline-flex items-start gap-1">
                     <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-                    <span>Answers and the personalized intro are already stripped. Generalize any prompt wording that still refers to this participant; the server refuses text that repeats an answer.</span>
+                    <span>
+                      Answers and the personalized intro are already stripped. Generalize any prompt wording that still
+                      refers to this participant; the server refuses text that repeats an answer.
+                    </span>
                   </p>
                   <input
                     type="text"
                     value={title}
-                    onChange={e => setTitle(e.target.value)}
+                    onChange={(e) => setTitle(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-2"
                     placeholder="Template title"
                   />
                   <textarea
                     value={content}
-                    onChange={e => setContent(e.target.value)}
+                    onChange={(e) => setContent(e.target.value)}
                     rows={16}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"
                   />
                   <input
                     type="text"
                     value={note}
-                    onChange={e => setNote(e.target.value)}
+                    onChange={(e) => setNote(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mt-2"
                     placeholder="Review note (required to reject, optional to promote)"
                   />
                   <div className="flex gap-2 mt-3">
-                    <button onClick={promote} disabled={busy || !content.trim() || !title.trim()}
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-40 inline-flex items-center gap-1">
+                    <button
+                      onClick={promote}
+                      disabled={busy || !content.trim() || !title.trim()}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-40 inline-flex items-center gap-1"
+                    >
                       <CheckCircle size={14} /> {busy ? 'Working…' : 'Promote template'}
                     </button>
-                    <button onClick={reject} disabled={busy}
-                      className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-40 inline-flex items-center gap-1">
+                    <button
+                      onClick={reject}
+                      disabled={busy}
+                      className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-40 inline-flex items-center gap-1"
+                    >
                       <XCircle size={14} /> Reject
                     </button>
                   </div>

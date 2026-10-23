@@ -25,7 +25,9 @@ export default function SessionCrisisEvents({ sessionId }: { sessionId: string }
 
   const load = useCallback(async () => {
     try {
-      const data = await getJson<{ events: CrisisEventRow[] }>(`/admin/api/crisis/events?sessionId=${encodeURIComponent(sessionId)}`);
+      const data = await getJson<{ events: CrisisEventRow[] }>(
+        `/admin/api/crisis/events?sessionId=${encodeURIComponent(sessionId)}`,
+      );
       setEvents(data.events ?? []);
     } catch (err) {
       console.error('Failed to fetch session crisis events:', err);
@@ -33,10 +35,12 @@ export default function SessionCrisisEvents({ sessionId }: { sessionId: string }
     }
   }, [sessionId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (!events || events.length === 0) return null;
-  const unadjudicated = events.filter(e => !(e.adjudications?.length)).length;
+  const unadjudicated = events.filter((e) => !e.adjudications?.length).length;
 
   return (
     <div className="mb-4 bg-white border border-gray-200 rounded-lg">
@@ -49,7 +53,9 @@ export default function SessionCrisisEvents({ sessionId }: { sessionId: string }
           {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
           <AlertTriangle size={16} className="text-red-500" />
           <span className="font-semibold text-navy">Crisis events</span>
-          <span className="text-xs text-gray-500">{events.length} event{events.length === 1 ? '' : 's'}</span>
+          <span className="text-xs text-gray-500">
+            {events.length} event{events.length === 1 ? '' : 's'}
+          </span>
           {unadjudicated > 0 && (
             <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">
               {unadjudicated} unadjudicated
@@ -59,10 +65,12 @@ export default function SessionCrisisEvents({ sessionId }: { sessionId: string }
       </button>
       {expanded && (
         <div className="px-4 pb-4 space-y-2">
-          {events.map(event => (
+          {events.map((event) => (
             <div key={event.event_id} className="p-3 bg-gray-50 rounded border border-gray-100">
               <div className="flex items-center gap-2 flex-wrap text-sm">
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${severityBadgeClass(event.severity ?? undefined)}`}>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${severityBadgeClass(event.severity ?? undefined)}`}
+                >
                   {event.severity || 'n/a'}
                 </span>
                 <span className="font-semibold">{event.event_type.replace(/_/g, ' ')}</span>
@@ -75,7 +83,11 @@ export default function SessionCrisisEvents({ sessionId }: { sessionId: string }
                 eventId={event.event_id}
                 adjudications={event.adjudications}
                 compact
-                onSaved={next => setEvents(prev => (prev ?? []).map(e => (e.event_id === event.event_id ? { ...e, adjudications: next } : e)))}
+                onSaved={(next) =>
+                  setEvents((prev) =>
+                    (prev ?? []).map((e) => (e.event_id === event.event_id ? { ...e, adjudications: next } : e)),
+                  )
+                }
               />
             </div>
           ))}

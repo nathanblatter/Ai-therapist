@@ -23,11 +23,15 @@ export function renderAdverseEventPrintHtml(r: AdverseEventRow): string {
   const actions = Array.isArray(r.actions_taken) ? r.actions_taken : [];
 
   const timelineRows = timeline.length
-    ? timeline.map(t => `<tr><td>${esc(fmt(t.at))}</td><td>${esc(t.kind)}</td><td>${esc(t.detail)}</td></tr>`).join('')
+    ? timeline
+        .map((t) => `<tr><td>${esc(fmt(t.at))}</td><td>${esc(t.kind)}</td><td>${esc(t.detail)}</td></tr>`)
+        .join('')
     : '<tr><td colspan="3" class="muted">No timeline entries.</td></tr>';
 
   const actionRows = actions.length
-    ? actions.map(a => `<tr><td>${esc(fmt(a.at))}</td><td>${esc(a.action)}</td><td>${esc(a.by ?? '—')}</td></tr>`).join('')
+    ? actions
+        .map((a) => `<tr><td>${esc(fmt(a.at))}</td><td>${esc(a.action)}</td><td>${esc(a.by ?? '—')}</td></tr>`)
+        .join('')
     : '<tr><td colspan="3" class="muted">No actions recorded.</td></tr>';
 
   return `<!doctype html>

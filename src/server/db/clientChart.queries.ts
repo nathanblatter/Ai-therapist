@@ -18,7 +18,7 @@ export async function getClientSignedNotes(clientId: number, limit = 1000): Prom
      WHERE client_id = $1 AND status IN ('signed', 'amended')
      ORDER BY signed_at ASC NULLS LAST, note_id ASC
      LIMIT $2`,
-    [clientId, limit]
+    [clientId, limit],
   );
   return result.rows;
 }
@@ -40,7 +40,7 @@ export async function getClientScreeners(clientId: number, limit = 1000): Promis
      WHERE ts.user_id = $1
      ORDER BY sr.created_at ASC, sr.scale ASC
      LIMIT $2`,
-    [clientId, limit]
+    [clientId, limit],
   );
   return result.rows;
 }
@@ -79,7 +79,7 @@ export async function getClientSessionSummaries(clientId: number, limit = 1000):
      WHERE ts.user_id = $1 AND ts.status = 'ended' AND ts.is_demo IS NOT TRUE
      ORDER BY ts.created_at ASC
      LIMIT $2`,
-    [clientId, limit]
+    [clientId, limit],
   );
   return result.rows;
 }
@@ -112,7 +112,7 @@ export async function getClientCrisisEvents(clientId: number, limit = 1000): Pro
      WHERE COALESCE(ts.user_id, ce.client_user_id) = $1
      ORDER BY ce.created_at ASC, ce.event_id ASC
      LIMIT $2`,
-    [clientId, limit]
+    [clientId, limit],
   );
   return result.rows;
 }
@@ -140,7 +140,7 @@ export async function getClientInterventionActions(clientId: number, limit = 100
      WHERE ts.user_id = $1
      ORDER BY ia.performed_at ASC, ia.action_id ASC
      LIMIT $2`,
-    [clientId, limit]
+    [clientId, limit],
   );
   return result.rows;
 }

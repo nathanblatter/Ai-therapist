@@ -63,19 +63,34 @@ const ASSISTANT_TURN_GAP_MS = 2_500;
 const QUIET_BEFORE_SPEAKING_MS = 1_500;
 const QUIET_WAIT_CAP_MS = 20_000;
 
-type LiveEvent = { type?: string; delta?: unknown; start_ms?: unknown; end_ms?: unknown; session?: unknown; error?: unknown; reason?: unknown };
+type LiveEvent = {
+  type?: string;
+  delta?: unknown;
+  start_ms?: unknown;
+  end_ms?: unknown;
+  session?: unknown;
+  error?: unknown;
+  reason?: unknown;
+};
 
-export interface Fragment { text: string; startMs: number }
+export interface Fragment {
+  text: string;
+  startMs: number;
+}
 
 /** Assemble transcript fragments into one turn (unit-tested offline). */
 export function joinFragments(frags: Fragment[]): string {
   // Sort by start_ms, concatenate exactly as received (fragments carry their
   // own whitespace) — the same rule the server's TranscriptAssembler applies.
-  return [...frags].sort((a, b) => a.startMs - b.startMs).map(f => f.text).join('').trim();
+  return [...frags]
+    .sort((a, b) => a.startMs - b.startMs)
+    .map((f) => f.text)
+    .join('')
+    .trim();
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export class LiveVoiceSession implements VoiceTransport {
@@ -127,13 +142,22 @@ export class LiveVoiceSession implements VoiceTransport {
     openingPrompt: string,
   ): Promise<{ session: LiveVoiceSession; opening: string }> {
     if (opts.textTurns) {
-      throw new Error('--voice-text-turns is a Grok-proxy mode; GPT-Live has no typed-text route (the browser queues text on its own data channel)');
+      throw new Error(
+        '--voice-text-turns is a Grok-proxy mode; GPT-Live has no typed-text route (the browser queues text on its own data channel)',
+      );
     }
     // Offer first, with the audio track and the data channel negotiated in it,
     // exactly as the browser does. werift gathers ICE inside setLocalDescription.
     const pc = new RTCPeerConnection({
       codecs: {
-        audio: [new RTCRtpCodecParameters({ mimeType: 'audio/opus', clockRate: OPUS_RTP_CLOCK, channels: 2, payloadType: OPUS_PAYLOAD_TYPE })],
+        audio: [
+          new RTCRtpCodecParameters({
+            mimeType: 'audio/opus',
+            clockRate: OPUS_RTP_CLOCK,
+            channels: 2,
+            payloadType: OPUS_PAYLOAD_TYPE,
+          }),
+        ],
       },
     });
     const track = new MediaStreamTrack({ kind: 'audio' });
@@ -168,7 +192,8 @@ export class LiveVoiceSession implements VoiceTransport {
     try {
       const startedBy = Date.now() + STARTED_TIMEOUT_MS;
       while (!vs.started) {
-        if (vs.closed) throw new Error(`GPT-Live connection closed before session.started (${vs.closeReason ?? 'no reason'})`);
+        if (vs.closed)
+          throw new Error(`GPT-Live connection closed before session.started (${vs.closeReason ?? 'no reason'})`);
         if (vs.lastError) throw new Error(`GPT-Live error before session.started: ${vs.lastError}`);
         if (Date.now() > startedBy) throw new Error('timeout waiting for session.started on the data channel');
         await sleep(50);
@@ -192,24 +217,30 @@ export class LiveVoiceSession implements VoiceTransport {
       const text = typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString() : '';
       if (!text) return;
       let ev: LiveEvent;
-      try { ev = JSON.parse(text) as LiveEvent; } catch { return; }
+      try {
+        ev = JSON.parse(text) as LiveEvent;
+      } catch {
+        return;
+      }
       this.onEvent(ev);
     };
-    this.dc.stateChanged.subscribe(state => {
+    this.dc.stateChanged.subscribe((state) => {
       if (state === 'closed') {
         this.closed = true;
         this.closeReason = this.closeReason ?? 'data channel closed';
       }
     });
-    this.pc.ontrack = e => {
-      e.track.onReceiveRtp.subscribe(rtp => {
+    this.pc.ontrack = (e) => {
+      e.track.onReceiveRtp.subscribe((rtp) => {
         try {
           const pcm = this.decoder.decode(rtp.payload);
           if (pcm && pcm.length > 0) this.assistantPcm.push(Buffer.from(pcm));
-        } catch { /* DTX / comfort noise / undecodable frame */ }
+        } catch {
+          /* DTX / comfort noise / undecodable frame */
+        }
       });
     };
-    this.pc.connectionStateChange.subscribe(state => {
+    this.pc.connectionStateChange.subscribe((state) => {
       if (process.env.REDTEAM_VOICE_DEBUG) console.log(`[voice:live] connection ${state}`);
       if ((state === 'failed' || state === 'closed') && !this.closed) {
         this.closed = true;
@@ -220,7 +251,11 @@ export class LiveVoiceSession implements VoiceTransport {
 
   private onEvent(ev: LiveEvent): void {
     const type = typeof ev.type === 'string' ? ev.type : '';
-    if (process.env.REDTEAM_VOICE_DEBUG && type !== 'session.output_transcript.delta' && type !== 'session.input_transcript.delta') {
+    if (
+      process.env.REDTEAM_VOICE_DEBUG &&
+      type !== 'session.output_transcript.delta' &&
+      type !== 'session.input_transcript.delta'
+    ) {
       console.log(`[voice:live] ${JSON.stringify(ev).slice(0, 200)}`);
     }
     switch (type) {
@@ -253,7 +288,9 @@ export class LiveVoiceSession implements VoiceTransport {
   private sendAppend(text: string): void {
     // Same shape as the browser's sendInvisiblePrompt; the API caps appends at
     // 500 tokens, enforced as 1600 chars client-side.
-    this.dc.send(JSON.stringify({ type: 'session.instructions.append', delegation_id: null, content: text.slice(0, 1600) }));
+    this.dc.send(
+      JSON.stringify({ type: 'session.instructions.append', delegation_id: null, content: text.slice(0, 1600) }),
+    );
   }
 
   /** Wait until the assistant has said something and then gone quiet. Returns
@@ -272,7 +309,8 @@ export class LiveVoiceSession implements VoiceTransport {
         this.assistantFrags = [];
         return text;
       }
-      if (this.closed) throw new Error(`GPT-Live session closed (${this.closeReason ?? 'no reason'}) while waiting for the assistant`);
+      if (this.closed)
+        throw new Error(`GPT-Live session closed (${this.closeReason ?? 'no reason'}) while waiting for the assistant`);
       if (Date.now() > deadline) throw new Error('timeout waiting for the assistant turn (no output transcript)');
       const quietFor = Date.now() - Math.max(this.lastAssistantDeltaAt, this.lastUserDeltaAt);
       if (this.assistantFrags.length > 0 && quietFor > ASSISTANT_TURN_GAP_MS) {
@@ -320,7 +358,10 @@ export class LiveVoiceSession implements VoiceTransport {
   }
 
   private stopPump(): void {
-    if (this.pumpTimer) { clearTimeout(this.pumpTimer); this.pumpTimer = null; }
+    if (this.pumpTimer) {
+      clearTimeout(this.pumpTimer);
+      this.pumpTimer = null;
+    }
   }
 
   private writeOpusFrame(pcmFrame: Buffer, marker: boolean): void {
@@ -351,7 +392,10 @@ export class LiveVoiceSession implements VoiceTransport {
     this.userFrags = [];
 
     const speech = await this.openai.audio.speech.create({
-      model: TTS_MODEL, voice: TTS_VOICE, input: text, response_format: 'pcm',
+      model: TTS_MODEL,
+      voice: TTS_VOICE,
+      input: text,
+      response_format: 'pcm',
     });
     const spoken = Buffer.from(await speech.arrayBuffer());
     this.cost.addTts(text.length, pcmDurationMs(spoken) / 1000);
@@ -363,18 +407,23 @@ export class LiveVoiceSession implements VoiceTransport {
     // Hand the utterance to the microphone pump and wait for it to play out
     // at real-time pace (the pump sends silence again once the queue drains).
     const frames = pcm.length / PCM_BYTES_PER_FRAME;
-    for (let i = 0; i < frames; i++) this.micQueue.push(pcm.subarray(i * PCM_BYTES_PER_FRAME, (i + 1) * PCM_BYTES_PER_FRAME));
+    for (let i = 0; i < frames; i++)
+      this.micQueue.push(pcm.subarray(i * PCM_BYTES_PER_FRAME, (i + 1) * PCM_BYTES_PER_FRAME));
     const playoutBy = Date.now() + frames * FRAME_MS + 500;
     while (this.micQueue.length > 0 && Date.now() < playoutBy) {
       if (this.closed && this.closeReason === 'content') break;
-      if (this.closed) throw new Error(`GPT-Live session closed (${this.closeReason ?? 'no reason'}) while streaming audio`);
+      if (this.closed)
+        throw new Error(`GPT-Live session closed (${this.closeReason ?? 'no reason'}) while streaming audio`);
       await sleep(FRAME_MS);
     }
     this.userTurns += 1;
 
     const assistantText = await this.awaitAssistantTurn(deadline);
     const userText = this.takeUserText();
-    if (!userText) console.warn(`[redteam:voice] no input transcript arrived for "${text.slice(0, 60)}..." — using the TTS input text`);
+    if (!userText)
+      console.warn(
+        `[redteam:voice] no input transcript arrived for "${text.slice(0, 60)}..." — using the TTS input text`,
+      );
     await this.uploadPendingAudio();
     return {
       userText: userText || text,
@@ -387,22 +436,29 @@ export class LiveVoiceSession implements VoiceTransport {
 
   private async uploadPendingAudio(): Promise<void> {
     if (this.pendingPcm.length === 0) return;
-    const chunks = this.pendingPcm.flatMap(p => chunkBase64Pcm(p));
+    const chunks = this.pendingPcm.flatMap((p) => chunkBase64Pcm(p));
     this.pendingPcm = [];
     const MAX_BATCH_B64_BYTES = 2_000_000;
     const batches: string[][] = [];
     let cur: string[] = [];
     let curBytes = 0;
     for (const c of chunks) {
-      if (curBytes + c.length > MAX_BATCH_B64_BYTES && cur.length > 0) { batches.push(cur); cur = []; curBytes = 0; }
+      if (curBytes + c.length > MAX_BATCH_B64_BYTES && cur.length > 0) {
+        batches.push(cur);
+        cur = [];
+        curBytes = 0;
+      }
       cur.push(c);
       curBytes += c.length;
     }
     if (cur.length > 0) batches.push(cur);
     for (const batch of batches) {
       try {
-        const res = await this.agent.post(`/api/sessions/${this.sessionId}/audio`).send({ chunks: batch, sampleRate: VOICE_SAMPLE_RATE });
-        if (res.status !== 204) console.warn(`[redteam:voice] audio upload for ${this.sessionId} → ${res.status} (audio not recorded)`);
+        const res = await this.agent
+          .post(`/api/sessions/${this.sessionId}/audio`)
+          .send({ chunks: batch, sampleRate: VOICE_SAMPLE_RATE });
+        if (res.status !== 204)
+          console.warn(`[redteam:voice] audio upload for ${this.sessionId} → ${res.status} (audio not recorded)`);
       } catch (err) {
         console.warn(`[redteam:voice] audio upload failed: ${(err as Error).message}`);
       }
@@ -417,8 +473,17 @@ export class LiveVoiceSession implements VoiceTransport {
     const closeBy = Date.now() + 6_000;
     while (!this.closed && Date.now() < closeBy) await sleep(100);
     this.stopPump();
-    try { this.dc.close(); } catch { /* ignore */ }
+    try {
+      this.dc.close();
+    } catch {
+      /* ignore */
+    }
     await this.pc.close().catch(() => {});
-    try { this.encoder.delete(); this.decoder.delete(); } catch { /* ignore */ }
+    try {
+      this.encoder.delete();
+      this.decoder.delete();
+    } catch {
+      /* ignore */
+    }
   }
 }

@@ -51,9 +51,13 @@ beforeEach(() => {
 describe('POST /admin/api/sandbox/invites', () => {
   it('is researcher-only: 403 therapist/caseworker/participant, 401 anonymous', async () => {
     for (const role of ['therapist', 'caseworker', 'participant']) {
-      expect((await request(appAs(role)).post('/admin/api/sandbox/invites').send({ count: 1, role: 'therapist' })).status).toBe(403);
+      expect(
+        (await request(appAs(role)).post('/admin/api/sandbox/invites').send({ count: 1, role: 'therapist' })).status,
+      ).toBe(403);
     }
-    expect((await request(appAs(null)).post('/admin/api/sandbox/invites').send({ count: 1, role: 'therapist' })).status).toBe(401);
+    expect(
+      (await request(appAs(null)).post('/admin/api/sandbox/invites').send({ count: 1, role: 'therapist' })).status,
+    ).toBe(401);
     expect(mocks.createSandboxInviteBatch).not.toHaveBeenCalled();
   });
 
@@ -94,14 +98,29 @@ describe('POST /admin/api/sandbox/invites', () => {
   });
 
   it('rejects a non-positive or oversized ttlHours', async () => {
-    expect((await request(appAs('researcher')).post('/admin/api/sandbox/invites').send({ count: 1, role: 'therapist', ttlHours: 0 })).status).toBe(400);
-    expect((await request(appAs('researcher')).post('/admin/api/sandbox/invites').send({ count: 1, role: 'therapist', ttlHours: 24 * 365 })).status).toBe(400);
+    expect(
+      (
+        await request(appAs('researcher'))
+          .post('/admin/api/sandbox/invites')
+          .send({ count: 1, role: 'therapist', ttlHours: 0 })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(appAs('researcher'))
+          .post('/admin/api/sandbox/invites')
+          .send({ count: 1, role: 'therapist', ttlHours: 24 * 365 })
+      ).status,
+    ).toBe(400);
     expect(mocks.createSandboxInviteBatch).not.toHaveBeenCalled();
   });
 
   it('500s when the insert fails', async () => {
     mocks.createSandboxInviteBatch.mockRejectedValue(new Error('db down'));
-    expect((await request(appAs('researcher')).post('/admin/api/sandbox/invites').send({ count: 1, role: 'therapist' })).status).toBe(500);
+    expect(
+      (await request(appAs('researcher')).post('/admin/api/sandbox/invites').send({ count: 1, role: 'therapist' }))
+        .status,
+    ).toBe(500);
   });
 });
 

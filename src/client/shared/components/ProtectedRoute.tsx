@@ -24,7 +24,7 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const checkAuthStatus = async () => {
     try {
       const response = await fetch('/api/auth/status', {
-        credentials: 'include'
+        credentials: 'include',
       });
       const data = await response.json();
 

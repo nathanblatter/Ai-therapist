@@ -29,9 +29,7 @@ interface EmbeddingSettings {
 
 async function getSettings(): Promise<EmbeddingSettings> {
   try {
-    const result = await pool.query(
-      `SELECT config_value FROM system_config WHERE config_key = 'message_embeddings'`
-    );
+    const result = await pool.query(`SELECT config_value FROM system_config WHERE config_key = 'message_embeddings'`);
     if (result.rows.length === 0) return { enabled: true };
     return result.rows[0].config_value as EmbeddingSettings;
   } catch (err) {
@@ -61,17 +59,17 @@ export async function sweepMessageEmbeddings(limit = SWEEP_BATCH_LIMIT): Promise
         AND u.is_sandbox IS NOT TRUE
       ORDER BY m.created_at
       LIMIT $1`,
-    [limit]
+    [limit],
   );
   if (pending.rows.length === 0) return { embedded: 0 };
 
-  const vectors = await embedTextBatch(pending.rows.map(r => r.content_redacted));
+  const vectors = await embedTextBatch(pending.rows.map((r) => r.content_redacted));
 
   let embedded = 0;
   for (let i = 0; i < pending.rows.length; i++) {
     const result = await pool.query(
       `UPDATE messages SET embedding = $1::vector WHERE message_id = $2 AND embedding IS NULL`,
-      [toVectorLiteral(vectors[i]), pending.rows[i].message_id]
+      [toVectorLiteral(vectors[i]), pending.rows[i].message_id],
     );
     embedded += result.rowCount ?? 0;
   }
@@ -84,11 +82,11 @@ export async function sweepMessageEmbeddings(limit = SWEEP_BATCH_LIMIT): Promise
 export function startMessageEmbeddingScheduler(): void {
   if (sweepInterval) return;
   sweepInterval = setInterval(() => {
-    sweepMessageEmbeddings().catch(err => console.error('[MessageEmbedding] sweep failed:', err));
+    sweepMessageEmbeddings().catch((err) => console.error('[MessageEmbedding] sweep failed:', err));
   }, SWEEP_INTERVAL_MS);
   sweepInterval.unref?.();
   // Catch up promptly after boot/restart instead of waiting a full interval.
-  sweepMessageEmbeddings().catch(err => console.error('[MessageEmbedding] initial sweep failed:', err));
+  sweepMessageEmbeddings().catch((err) => console.error('[MessageEmbedding] initial sweep failed:', err));
 }
 
 export function stopMessageEmbeddingScheduler(): void {

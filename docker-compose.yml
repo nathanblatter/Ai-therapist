@@ -3,7 +3,7 @@ services:
     build: .
     restart: unless-stopped
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     # Parity with prod (docker-compose.prod.yml): every key in the deploy
     # checkout's .env reaches the app, so a setting verified on stage cannot be
     # dark there because it was never allowlisted (ai-therapist-274). The
@@ -16,7 +16,7 @@ services:
       PORT: 3067
       # Connects to the shared Postgres in ~/docker-services via the host gateway.
       DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:5432/ai_therapist
-      DATABASE_SSL: "false"
+      DATABASE_SSL: 'false'
       SESSION_SECRET: ${SESSION_SECRET}
       CORS_ORIGIN: https://ai-therapist.nathanblatter.com
       # Sign-in through Squawk (auth-service-33). All five unset => legacy
@@ -31,11 +31,11 @@ services:
       DEMO_MAGIC_TOKEN: ${DEMO_MAGIC_TOKEN}
       # Stage is the public demo: keep the demo pill/overlay + [DEMO] titles.
       # Prod (docker-compose.prod.yml) leaves this unset and serves clean HTML.
-      DEMO_SITE: "true"
+      DEMO_SITE: 'true'
       # Automatic evals (nightly harness scheduler + session-end auto-eval)
       # run ONLY on stage. Prod leaves this unset — no judge spend, no eval
       # load competing with live sessions; manual evals still work there.
-      EVALS_ENABLED: "true"
+      EVALS_ENABLED: 'true'
       # OpenAI Realtime API key
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       # OpenAI ADMIN key (a distinct credential class: org-level billing reads
@@ -84,7 +84,13 @@ services:
       - default
       - flightdeck
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3067/health/deep', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "require('http').get('http://localhost:3067/health/deep', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
       interval: 10s
       timeout: 10s
       retries: 6

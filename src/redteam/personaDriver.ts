@@ -30,9 +30,7 @@ export function applyVariation(scenario: Scenario, variation: number): Scenario 
 
 function renderTranscript(transcript: Turn[]): string {
   if (transcript.length === 0) return '(the conversation has not started yet)';
-  return transcript
-    .map(t => `${t.role === 'user' ? 'Participant' : 'Assistant'}: ${t.text}`)
-    .join('\n');
+  return transcript.map((t) => `${t.role === 'user' ? 'Participant' : 'Assistant'}: ${t.text}`).join('\n');
 }
 
 /**

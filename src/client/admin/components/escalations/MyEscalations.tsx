@@ -2,10 +2,10 @@
 // in ParticipantProfile (integration wiring; pass clientId to scope to one
 // client) and usable on the caseworker dashboard. Read-only summary rows —
 // the full lifecycle lives in EscalationInbox/EscalationDetail.
-import { useMemo } from "react";
-import { AlertTriangle } from "react-feather";
-import useAdminFetch from "../../hooks/useAdminFetch";
-import { StatusBadge, UrgencyBadge, type EscalationListRow } from "./EscalationInbox";
+import { useMemo } from 'react';
+import { AlertTriangle } from 'react-feather';
+import useAdminFetch from '../../hooks/useAdminFetch';
+import { StatusBadge, UrgencyBadge, type EscalationListRow } from './EscalationInbox';
 
 interface MyEscalationsProps {
   /** Scope to one client (e.g. the ParticipantProfile escalation strip). */
@@ -19,10 +19,10 @@ interface MyEscalationsProps {
 
 export default function MyEscalations({ clientId, mineOnly = true, limit = 5, onOpenEscalations }: MyEscalationsProps) {
   const params = new URLSearchParams();
-  if (mineOnly) params.set("mine", "1");
-  if (clientId !== undefined) params.set("client_id", String(clientId));
+  if (mineOnly) params.set('mine', '1');
+  if (clientId !== undefined) params.set('client_id', String(clientId));
   const { data, loading, error } = useAdminFetch<{ escalations: EscalationListRow[] }>(
-    `/admin/api/escalations?${params.toString()}`
+    `/admin/api/escalations?${params.toString()}`,
   );
   const escalations = useMemo(() => (data?.escalations ?? []).slice(0, limit), [data, limit]);
 
@@ -31,7 +31,7 @@ export default function MyEscalations({ clientId, mineOnly = true, limit = 5, on
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
           <AlertTriangle size={14} className="text-amber-500" aria-hidden="true" />
-          {mineOnly ? "Escalations I raised" : "Escalations"}
+          {mineOnly ? 'Escalations I raised' : 'Escalations'}
         </h3>
         {onOpenEscalations && (
           <button type="button" onClick={onOpenEscalations} className="text-xs text-royal hover:text-blue-700">
@@ -46,9 +46,7 @@ export default function MyEscalations({ clientId, mineOnly = true, limit = 5, on
           {error}
         </p>
       )}
-      {!loading && !error && escalations.length === 0 && (
-        <p className="text-sm text-gray-500">No escalations.</p>
-      )}
+      {!loading && !error && escalations.length === 0 && <p className="text-sm text-gray-500">No escalations.</p>}
 
       <ul className="divide-y divide-gray-100">
         {escalations.map((e) => (

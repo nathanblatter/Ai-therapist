@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const {
-  createMock,
-  getSessionMessagesMock,
-  getSessionConfigMock,
-  insertEvalPairMock,
-} = vi.hoisted(() => ({
+const { createMock, getSessionMessagesMock, getSessionConfigMock, insertEvalPairMock } = vi.hoisted(() => ({
   createMock: vi.fn(),
   getSessionMessagesMock: vi.fn(),
   getSessionConfigMock: vi.fn(),
@@ -35,7 +30,13 @@ import type { PairCandidateRow } from '../db/index.js';
 
 void ({} as PairwiseRunOptions);
 
-function cand(id: string, arm: string, modality: string | null, band: 'short' | 'medium' | 'long', ts: number): PairCandidateRow {
+function cand(
+  id: string,
+  arm: string,
+  modality: string | null,
+  band: 'short' | 'medium' | 'long',
+  ts: number,
+): PairCandidateRow {
   return { session_id: id, modality, duration_band: band, arm, created_at: new Date(ts) };
 }
 
@@ -46,7 +47,11 @@ beforeEach(() => {
     { role: 'assistant', content: 'hello', content_redacted: null },
   ]);
   getSessionConfigMock.mockResolvedValue({ modality: 'cbt' });
-  insertEvalPairMock.mockImplementation(async (row: Record<string, unknown>) => ({ pair_id: 1, created_at: new Date(), ...row }));
+  insertEvalPairMock.mockImplementation(async (row: Record<string, unknown>) => ({
+    pair_id: 1,
+    created_at: new Date(),
+    ...row,
+  }));
 });
 
 describe('mergeVerdicts', () => {
@@ -72,13 +77,13 @@ describe('matchPairs', () => {
     const pairs = matchPairs(candidates, 20);
     expect(pairs).toHaveLength(2);
     // newest of each arm: gpt-4o s3(3000) vs gpt-5 s4(4000); then s1 vs s2
-    const ids = pairs.map(p => [p.a.session_id, p.b.session_id].sort()).map(x => x.join(','));
+    const ids = pairs.map((p) => [p.a.session_id, p.b.session_id].sort()).map((x) => x.join(','));
     expect(ids).toContain('s3,s4');
     expect(ids).toContain('s1,s2');
     // canonical order a < b
     for (const p of pairs) expect(p.a.session_id < p.b.session_id).toBe(true);
     // no session reused
-    const used = pairs.flatMap(p => [p.a.session_id, p.b.session_id]);
+    const used = pairs.flatMap((p) => [p.a.session_id, p.b.session_id]);
     expect(new Set(used).size).toBe(used.length);
   });
 

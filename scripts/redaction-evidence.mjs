@@ -14,9 +14,21 @@ import { redactPHIBatch } from '../src/server/services/redaction.service.js';
 // Each case: a message, the planted PHI substrings that MUST NOT survive, and
 // the Safe Harbor category it exercises. Synthetic — no real person.
 const CASES = [
-  { cat: '1. Names', text: 'Hi, my name is Jonathan Reyes and my sister is Maria Reyes.', phi: ['Jonathan Reyes', 'Maria Reyes'] },
-  { cat: '2. Geographic', text: 'I live at 448 Oak Street, Provo, Utah 84604.', phi: ['448 Oak Street', 'Provo', '84604'] },
-  { cat: '3. Dates', text: 'I was born on March 14, 1998 and admitted on 06/02/2026.', phi: ['March 14, 1998', '06/02/2026'] },
+  {
+    cat: '1. Names',
+    text: 'Hi, my name is Jonathan Reyes and my sister is Maria Reyes.',
+    phi: ['Jonathan Reyes', 'Maria Reyes'],
+  },
+  {
+    cat: '2. Geographic',
+    text: 'I live at 448 Oak Street, Provo, Utah 84604.',
+    phi: ['448 Oak Street', 'Provo', '84604'],
+  },
+  {
+    cat: '3. Dates',
+    text: 'I was born on March 14, 1998 and admitted on 06/02/2026.',
+    phi: ['March 14, 1998', '06/02/2026'],
+  },
   { cat: '4. Telephone', text: 'You can call me at (801) 555-0148 any time.', phi: ['801) 555-0148'] },
   { cat: '5. Fax', text: 'Send the form to our fax at 801-555-0199.', phi: ['801-555-0199'] },
   { cat: '6. Email', text: 'My email is jon.reyes47@gmail.com if you need it.', phi: ['jon.reyes47@gmail.com'] },
@@ -29,9 +41,18 @@ const CASES = [
   { cat: '13. Device ID', text: 'My CPAP serial number is SN-4483-DEV-1190.', phi: ['SN-4483-DEV-1190'] },
   { cat: '14. URL', text: 'My blog is at https://jonreyeswellness.com/journal.', phi: ['jonreyeswellness.com'] },
   { cat: '15. IP address', text: 'The app logged my IP as 172.58.203.14 last night.', phi: ['172.58.203.14'] },
-  { cat: '16-18. Other unique ID', text: 'My student ID at BYU is 09-338-2214 and everyone calls me by it.', phi: ['09-338-2214'] },
+  {
+    cat: '16-18. Other unique ID',
+    text: 'My student ID at BYU is 09-338-2214 and everyone calls me by it.',
+    phi: ['09-338-2214'],
+  },
   // control: no PHI — the sentinel phrase must SURVIVE (over-redaction check)
-  { cat: 'Control (no PHI)', text: 'I felt really anxious before my exam this week and could not sleep.', phi: [], mustKeep: 'anxious before my exam' },
+  {
+    cat: 'Control (no PHI)',
+    text: 'I felt really anxious before my exam this week and could not sleep.',
+    phi: [],
+    mustKeep: 'anxious before my exam',
+  },
 ];
 
 function stamp() {
@@ -89,7 +110,7 @@ async function main() {
     `| --- | --- | --- | --- |`,
     ...rows.map(
       (r) =>
-        `| ${r.cat} | ${r.phi.length} | ${r.survived.length ? r.survived.join('; ') : '—'} | ${r.ok ? 'redacted' : 'LEAK'} |`
+        `| ${r.cat} | ${r.phi.length} | ${r.survived.length ? r.survived.join('; ') : '—'} | ${r.ok ? 'redacted' : 'LEAK'} |`,
     ),
     ``,
     `## Redacted output (verbatim)`,
@@ -97,12 +118,7 @@ async function main() {
     `Synthetic inputs and their redacted forms, to show placeholder behavior and`,
     `that non-PHI clinical content is preserved:`,
     ``,
-    ...rows.flatMap((r) => [
-      `**${r.cat}**  `,
-      `- in:  ${r.text}  `,
-      `- out: ${r.out}`,
-      ``,
-    ]),
+    ...rows.flatMap((r) => [`**${r.cat}**  `, `- in:  ${r.text}  `, `- out: ${r.out}`, ``]),
     `---`,
     `Reproduce: \`OPENAI_API_KEY=... node node_modules/.bin/tsx scripts/redaction-evidence.mjs\``,
     ``,
@@ -111,7 +127,9 @@ async function main() {
   const outPath = `docs/redaction-evidence-${stamp()}.md`;
   const { writeFileSync } = await import('node:fs');
   writeFileSync(outPath, md);
-  console.log(`\nPlanted ${planted}, survived ${leaks}, cases passed ${passed}/${CASES.length}, shape ${shapeOk ? 'ok' : 'BROKEN'}`);
+  console.log(
+    `\nPlanted ${planted}, survived ${leaks}, cases passed ${passed}/${CASES.length}, shape ${shapeOk ? 'ok' : 'BROKEN'}`,
+  );
   console.log(`wrote ${outPath}`);
   if (leaks > 0 || !shapeOk) process.exitCode = 1;
 }

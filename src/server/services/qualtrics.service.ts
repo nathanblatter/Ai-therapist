@@ -29,9 +29,7 @@ export function getQualtricsJoinConfig(): QualtricsJoinConfig | null {
   };
 }
 
-export type ResponseVerification =
-  | { ok: true; finished: boolean }
-  | { ok: false; reason: 'not_found' | 'unavailable' };
+export type ResponseVerification = { ok: true; finished: boolean } | { ok: false; reason: 'not_found' | 'unavailable' };
 
 /** Qualtrics ResponseIDs look like R_ followed by url-safe base64-ish chars.
  *  Reject anything else before it reaches the API client. */
@@ -46,7 +44,7 @@ export function isPlausibleResponseId(value: unknown): value is string {
  */
 export async function verifyBaselineResponse(
   config: QualtricsJoinConfig,
-  responseId: string
+  responseId: string,
 ): Promise<ResponseVerification> {
   const url = `https://${config.datacenter}.qualtrics.com/API/v3/surveys/${config.baselineSurveyId}/responses/${responseId}`;
   let res: Response;

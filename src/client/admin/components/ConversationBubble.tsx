@@ -43,7 +43,7 @@ export default function ConversationBubble({
   onDelete,
   onCancel,
   onContentChange,
-  userRole
+  userRole,
 }: ConversationBubbleProps) {
   const formatTime = formatDateTime;
 
@@ -67,10 +67,13 @@ export default function ConversationBubble({
   };
 
   return (
-    <div className={`flex w-full mb-3 ${message.role === 'user' ? 'justify-end' : message.role === 'assistant' ? 'justify-start' : 'justify-center'}`}>
+    <div
+      className={`flex w-full mb-3 ${message.role === 'user' ? 'justify-end' : message.role === 'assistant' ? 'justify-start' : 'justify-center'}`}
+    >
       <div className={`max-w-xl px-4 py-3 rounded-2xl ${getBubbleClass()}`}>
         <div className="text-xs opacity-70 mb-1">
-          {message.role.toUpperCase()} | {message.message_type} | {message.created_at ? formatTime(message.created_at) : ''}
+          {message.role.toUpperCase()} | {message.message_type} |{' '}
+          {message.created_at ? formatTime(message.created_at) : ''}
         </div>
 
         {/* Visual indicator for which field is being edited */}
@@ -91,16 +94,24 @@ export default function ConversationBubble({
         ) : (
           <div>
             {message.message_type === 'tool_call' && (
-              <div className="font-semibold text-purple-900 mb-2 flex items-center gap-1.5"><Tool size={14} aria-hidden="true" /> Tool Call</div>
+              <div className="font-semibold text-purple-900 mb-2 flex items-center gap-1.5">
+                <Tool size={14} aria-hidden="true" /> Tool Call
+              </div>
             )}
             {message.message_type === 'tool_response' && (
-              <div className="font-semibold text-purple-800 mb-2 flex items-center gap-1.5"><Inbox size={14} aria-hidden="true" /> Tool Response</div>
+              <div className="font-semibold text-purple-800 mb-2 flex items-center gap-1.5">
+                <Inbox size={14} aria-hidden="true" /> Tool Response
+              </div>
             )}
             {userRole === 'researcher' && !message.message ? (
               <div className="text-gray-400 italic flex items-center">
                 <svg className="animate-spin inline w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
                 </svg>
                 Redacting content...
               </div>
@@ -114,9 +125,24 @@ export default function ConversationBubble({
             )}
             {message.metadata && (message.message_type === 'tool_call' || message.message_type === 'tool_response') && (
               <div className="mt-2 p-2 bg-white bg-opacity-50 rounded text-xs">
-                <div><strong>Tool:</strong> {message.metadata.tool_name}</div>
+                <div>
+                  <strong>Tool:</strong> {message.metadata.tool_name}
+                </div>
                 {message.metadata.status && (
-                  <div><strong>Status:</strong> <span className={message.metadata.status === 'completed' ? 'text-green-700' : message.metadata.status === 'failed' ? 'text-red-700' : 'text-yellow-700'}>{message.metadata.status}</span></div>
+                  <div>
+                    <strong>Status:</strong>{' '}
+                    <span
+                      className={
+                        message.metadata.status === 'completed'
+                          ? 'text-green-700'
+                          : message.metadata.status === 'failed'
+                            ? 'text-red-700'
+                            : 'text-yellow-700'
+                      }
+                    >
+                      {message.metadata.status}
+                    </span>
+                  </div>
                 )}
               </div>
             )}

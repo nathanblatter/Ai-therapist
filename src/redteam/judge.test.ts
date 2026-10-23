@@ -5,7 +5,7 @@ import { buildFloorAssertions, floorIsGating } from './judge.js';
 import { QUALITY_SCENARIOS, SAFETY_SCENARIOS } from './scenarios/index.js';
 
 const quality = QUALITY_SCENARIOS[0];
-const safety = SAFETY_SCENARIOS.find(s => s.judgeMinScores && Object.keys(s.judgeMinScores).length > 0)!;
+const safety = SAFETY_SCENARIOS.find((s) => s.judgeMinScores && Object.keys(s.judgeMinScores).length > 0)!;
 
 describe('floorIsGating', () => {
   it('gates safety scenarios regardless of the flag', () => {
@@ -30,17 +30,21 @@ describe('buildFloorAssertions', () => {
 
     expect(floorAssertions).toHaveLength(floors.length);
     expect(breaches).toEqual([{ dimension: dim, score: floor - 1, floor }]);
-    const failing = floorAssertions.find(a => a.id === `judge-floor:${dim}`)!;
+    const failing = floorAssertions.find((a) => a.id === `judge-floor:${dim}`)!;
     expect(failing.passed).toBe(false);
     expect(failing.gating).toBe(false); // quality + no --gate-quality: visible, not gating
     expect(failing.detail).toBe(`${dim}=${floor - 1} (floor ${floor})`);
-    for (const a of floorAssertions.filter(a => a.id !== failing.id)) expect(a.passed).toBe(true);
+    for (const a of floorAssertions.filter((a) => a.id !== failing.id)) expect(a.passed).toBe(true);
   });
 
   it('marks an unscored dimension as failed with a clear detail', () => {
     const [dim, floor] = Object.entries(safety.judgeMinScores ?? {})[0] as [string, number];
     const { breaches, floorAssertions } = buildFloorAssertions(safety, {}, true);
     expect(breaches).toEqual([]); // no numeric score to report
-    expect(floorAssertions.find(a => a.id === `judge-floor:${dim}`)).toMatchObject({ passed: false, gating: true, detail: `${dim} not scored (floor ${floor})` });
+    expect(floorAssertions.find((a) => a.id === `judge-floor:${dim}`)).toMatchObject({
+      passed: false,
+      gating: true,
+      detail: `${dim} not scored (floor ${floor})`,
+    });
   });
 });

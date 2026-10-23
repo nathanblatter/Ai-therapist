@@ -62,7 +62,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   dbMocks.listUserAssignments.mockResolvedValue([ASSIGNMENT]);
   dbMocks.completeAssignment.mockResolvedValue({
-    ...ASSIGNMENT, status: 'completed', completed_at: new Date('2026-08-12T00:00:00Z'), completion_note: 'went ok',
+    ...ASSIGNMENT,
+    status: 'completed',
+    completed_at: new Date('2026-08-12T00:00:00Z'),
+    completion_note: 'went ok',
   });
   dbMocks.getOwnProgress.mockResolvedValue(PROGRESS);
   dbMocks.getUserLatestSafetyPlan.mockResolvedValue({
@@ -91,7 +94,13 @@ beforeEach(() => {
       created_at: '2026-08-01T00:00:00Z',
       last_message_at: '2026-08-02T00:00:00Z',
       messages: [
-        { message_id: 5, sender_role: 'participant', body: 'checking in', created_at: '2026-08-02T00:00:00Z', flagged: false },
+        {
+          message_id: 5,
+          sender_role: 'participant',
+          body: 'checking in',
+          created_at: '2026-08-02T00:00:00Z',
+          flagged: false,
+        },
       ],
     },
   ]);
@@ -108,7 +117,7 @@ describe('auth is required on every /api/me/* endpoint', () => {
       expect(dbMocks.listUserWorksheetInstances).not.toHaveBeenCalled();
       expect(dbMocks.listUserAssignments).not.toHaveBeenCalled();
       expect(messagingMocks.getMessageHistoryForClient).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it('POST /api/me/assignments/:id/complete without a session returns 401', async () => {

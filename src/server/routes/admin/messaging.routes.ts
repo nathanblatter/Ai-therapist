@@ -106,7 +106,7 @@ export default function adminMessagingRoutes(): Router {
         log.error({ err }, 'Failed to create thread');
         res.status(500).json({ error: 'Failed to create thread' });
       }
-    }
+    },
   );
 
   // GET /api/admin/messaging/threads/:threadId/messages - own thread only.
@@ -131,7 +131,7 @@ export default function adminMessagingRoutes(): Router {
         log.error({ err }, 'Failed to list thread messages');
         res.status(500).json({ error: 'Failed to load messages' });
       }
-    }
+    },
   );
 
   // POST /api/admin/messaging/threads/:threadId/messages - send (active only).
@@ -172,7 +172,7 @@ export default function adminMessagingRoutes(): Router {
         log.error({ err }, 'Failed to send message');
         res.status(500).json({ error: 'Failed to send message' });
       }
-    }
+    },
   );
 
   // POST /api/admin/messaging/threads/:threadId/read - advance read pointer
@@ -200,7 +200,7 @@ export default function adminMessagingRoutes(): Router {
         log.error({ err }, 'Failed to mark thread read');
         res.status(500).json({ error: 'Failed to mark thread read' });
       }
-    }
+    },
   );
 
   // GET /api/admin/messaging/clients/:userId/threads - the caller's own
@@ -223,7 +223,7 @@ export default function adminMessagingRoutes(): Router {
         log.error({ err }, 'Failed to load client threads');
         res.status(500).json({ error: 'Failed to load threads' });
       }
-    }
+    },
   );
 
   // GET /api/admin/messaging/flagged - message-origin crisis events
@@ -233,35 +233,31 @@ export default function adminMessagingRoutes(): Router {
   // the catch below, never an unscoped read); the null guard is belt — null
   // only means unauthenticated, which requireRole already rejects. Payload is
   // summary metadata only (no message bodies; risk_factors are short labels).
-  router.get(
-    '/api/admin/messaging/flagged',
-    requireRole('therapist', 'caseworker', 'researcher'),
-    async (req, res) => {
-      try {
-        const scopeMemberId = isCareTeamRole(req.session.userRole) ? req.session.userId! : null;
-        let events: Record<string, unknown>[];
-        if (scopeMemberId !== null) {
-          events = await listMessageOriginCrisisEvents(scopeMemberId);
-        } else {
-          const orgId = await orgIdFor(req);
-          events = orgId === null ? [] : await listMessageOriginCrisisEvents(null, orgId);
-        }
-        // Summary-tier scrub (ai-therapist-143): message-origin crisis_events
-        // carry risk_factors/notes that, on the LLM-fallback path, hold the
-        // verbatim crisis keywords the participant typed. Summary tier gets
-        // the allowlist projection (ai-therapist-146), exactly as
-        // crisis.routes does for every other crisis surface;
-        // therapists/researchers are full-tier and keep the fields.
-        if (dataTierFor(req.session.userRole) === 'summary') {
-          events = projectRows(events, FLAGGED_EVENT_SUMMARY_FIELDS) as typeof events;
-        }
-        res.json({ events });
-      } catch (err) {
-        log.error({ err }, 'Failed to list flagged message events');
-        res.status(500).json({ error: 'Failed to load flagged messages' });
+  router.get('/api/admin/messaging/flagged', requireRole('therapist', 'caseworker', 'researcher'), async (req, res) => {
+    try {
+      const scopeMemberId = isCareTeamRole(req.session.userRole) ? req.session.userId! : null;
+      let events: Record<string, unknown>[];
+      if (scopeMemberId !== null) {
+        events = await listMessageOriginCrisisEvents(scopeMemberId);
+      } else {
+        const orgId = await orgIdFor(req);
+        events = orgId === null ? [] : await listMessageOriginCrisisEvents(null, orgId);
       }
+      // Summary-tier scrub (ai-therapist-143): message-origin crisis_events
+      // carry risk_factors/notes that, on the LLM-fallback path, hold the
+      // verbatim crisis keywords the participant typed. Summary tier gets
+      // the allowlist projection (ai-therapist-146), exactly as
+      // crisis.routes does for every other crisis surface;
+      // therapists/researchers are full-tier and keep the fields.
+      if (dataTierFor(req.session.userRole) === 'summary') {
+        events = projectRows(events, FLAGGED_EVENT_SUMMARY_FIELDS) as typeof events;
+      }
+      res.json({ events });
+    } catch (err) {
+      log.error({ err }, 'Failed to list flagged message events');
+      res.status(500).json({ error: 'Failed to load flagged messages' });
     }
-  );
+  });
 
   return router;
 }

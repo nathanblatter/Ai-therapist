@@ -130,9 +130,7 @@ describe('seedSandboxCaseload', () => {
   it('always includes the crisis and brand-new personas, with crisis artifacts', async () => {
     await seedSandboxCaseload(INPUT);
     const calls = seedCalls();
-    const usernames = calls
-      .filter(([sql]) => sql.includes('INSERT INTO users'))
-      .map(([, params]) => String(params[0]));
+    const usernames = calls.filter(([sql]) => sql.includes('INSERT INTO users')).map(([, params]) => String(params[0]));
     expect(usernames).toContain(`sbx_${CRISIS_PERSONA_HANDLE}_7`);
     expect(usernames).toContain(`sbx_${BRAND_NEW_PERSONA_HANDLE}_7`);
 
@@ -177,9 +175,7 @@ describe('seedSandboxCaseload', () => {
       expect(params[4]).toBe('caseworker'); // author_role
       expect(params[5]).toBe('case'); // note_type
     }
-    const counterpart = calls.find(
-      ([sql, params]) => sql.includes('INSERT INTO users') && params[2] !== 'participant'
-    );
+    const counterpart = calls.find(([sql, params]) => sql.includes('INSERT INTO users') && params[2] !== 'participant');
     expect(counterpart?.[1][2]).toBe('therapist');
   });
 

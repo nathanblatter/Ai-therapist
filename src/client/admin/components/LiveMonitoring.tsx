@@ -132,7 +132,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   useEffect(() => {
     (async () => {
       try {
-        const data = await getJson<{ tools?: Array<{ name: string; description: string; enabled: boolean }> }>('/admin/api/tools');
+        const data = await getJson<{ tools?: Array<{ name: string; description: string; enabled: boolean }> }>(
+          '/admin/api/tools',
+        );
         const tools = (data.tools || [])
           .filter((t: { enabled: boolean }) => t.enabled)
           .map((t: { name: string; description: string }) => ({ name: t.name, description: t.description }));
@@ -261,10 +263,13 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   };
 
   // Tear down audio and the crisis-banner timer on unmount.
-  useEffect(() => () => {
-    stopListening();
-    if (crisisAlertTimerRef.current) clearTimeout(crisisAlertTimerRef.current);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(
+    () => () => {
+      stopListening();
+      if (crisisAlertTimerRef.current) clearTimeout(crisisAlertTimerRef.current);
+    },
+    [],
+  ); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the transcript pinned to the newest turn as it streams in.
   useEffect(() => {
@@ -286,12 +291,14 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
 
     (async () => {
       try {
-        const data = await getJson<{ messages?: Array<{ message_id: number; role: 'user' | 'assistant'; message: string; created_at: string }> }>(
-          `/admin/api/sessions/${sid}`
-        );
+        const data = await getJson<{
+          messages?: Array<{ message_id: number; role: 'user' | 'assistant'; message: string; created_at: string }>;
+        }>(`/admin/api/sessions/${sid}`);
         const dbTurns: TranscriptTurn[] = (data.messages || [])
-          .filter((m: { role: string; message: string | null }) =>
-            (m.role === 'user' || m.role === 'assistant') && (m.message ?? '').trim())
+          .filter(
+            (m: { role: string; message: string | null }) =>
+              (m.role === 'user' || m.role === 'assistant') && (m.message ?? '').trim(),
+          )
           .map((m: { message_id: number; role: 'user' | 'assistant'; message: string; created_at: string }) => ({
             itemId: `db-${m.message_id}`,
             role: m.role,
@@ -301,12 +308,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           }));
         if (dbTurns.length === 0) return;
 
-        setTranscripts(prev => {
+        setTranscripts((prev) => {
           const live = prev[sid] ?? [];
-          const earliestLive = live.length > 0
-            ? Math.min(...live.map(t => new Date(t.timestamp).getTime()))
-            : Infinity;
-          const history = dbTurns.filter(t => new Date(t.timestamp).getTime() < earliestLive);
+          const earliestLive =
+            live.length > 0 ? Math.min(...live.map((t) => new Date(t.timestamp).getTime())) : Infinity;
+          const history = dbTurns.filter((t) => new Date(t.timestamp).getTime() < earliestLive);
           if (history.length === 0) return prev;
           return { ...prev, [sid]: [...history, ...live].slice(-200) };
         });
@@ -320,12 +326,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
 
   // Accumulate live transcript deltas (keyed by item_id) into ordered turns.
   const handleSidebandTranscript = (data: {
-    sessionId: string; role: 'assistant' | 'user'; itemId: string;
-    delta?: string; text?: string; final: boolean; timestamp: string;
+    sessionId: string;
+    role: 'assistant' | 'user';
+    itemId: string;
+    delta?: string;
+    text?: string;
+    final: boolean;
+    timestamp: string;
   }) => {
-    setTranscripts(prev => {
+    setTranscripts((prev) => {
       const turns = prev[data.sessionId] ? [...prev[data.sessionId]] : [];
-      const idx = turns.findIndex(t => t.itemId === data.itemId);
+      const idx = turns.findIndex((t) => t.itemId === data.itemId);
       if (idx === -1) {
         turns.push({
           itemId: data.itemId,
@@ -351,20 +362,22 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     setLoading(true);
     setError(null);
     try {
-      const data = await getJson<{ sessions?: LiveSession[] }>('/admin/api/sessions/active', { fallback: 'Failed to fetch active sessions' });
+      const data = await getJson<{ sessions?: LiveSession[] }>('/admin/api/sessions/active', {
+        fallback: 'Failed to fetch active sessions',
+      });
       // Parse numeric fields to ensure they're numbers, not strings
       const sessions: LiveSession[] = (data.sessions || []).map((session: LiveSession) => ({
         ...session,
         message_count: parseInt(String(session.message_count)) || 0,
-        duration_seconds: parseFloat(String(session.duration_seconds)) || 0
+        duration_seconds: parseFloat(String(session.duration_seconds)) || 0,
       }));
       // MERGE with live state rather than replacing it: the DB lags the
       // sideband (messages flush every ~15s), so live counts/activity that are
       // AHEAD of the fetch win; sessions the fetch doesn't know about yet
       // (created while it was in flight) are kept.
-      setActiveSessions(prev => {
-        const bySessionId = new Map(prev.map(s => [s.session_id, s]));
-        const merged = sessions.map(fetched => {
+      setActiveSessions((prev) => {
+        const bySessionId = new Map(prev.map((s) => [s.session_id, s]));
+        const merged = sessions.map((fetched) => {
           const live = bySessionId.get(fetched.session_id);
           if (!live) return fetched;
           bySessionId.delete(fetched.session_id);
@@ -372,8 +385,8 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
             ...fetched,
             message_count: Math.max(fetched.message_count, live.message_count || 0),
             last_activity:
-              live.last_activity && (!fetched.last_activity ||
-                new Date(live.last_activity) > new Date(fetched.last_activity))
+              live.last_activity &&
+              (!fetched.last_activity || new Date(live.last_activity) > new Date(fetched.last_activity))
                 ? live.last_activity
                 : fetched.last_activity,
           };
@@ -389,35 +402,48 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     }
   };
 
-  const handleSessionCreated = (data: { sessionId: string; userId: string; username: string; status: string; created_at: string }) => {
-    setActiveSessions(prev => {
-      if (prev.some(s => s.session_id === data.sessionId)) return prev;
-      return [{
-        session_id: data.sessionId,
-        user_id: data.userId,
-        username: data.username,
-        session_name: null,
-        status: data.status,
-        created_at: data.created_at,
-        message_count: 0,
-        last_activity: data.created_at,
-        duration_seconds: 0
-      }, ...prev];
+  const handleSessionCreated = (data: {
+    sessionId: string;
+    userId: string;
+    username: string;
+    status: string;
+    created_at: string;
+  }) => {
+    setActiveSessions((prev) => {
+      if (prev.some((s) => s.session_id === data.sessionId)) return prev;
+      return [
+        {
+          session_id: data.sessionId,
+          user_id: data.userId,
+          username: data.username,
+          session_name: null,
+          status: data.status,
+          created_at: data.created_at,
+          message_count: 0,
+          last_activity: data.created_at,
+          duration_seconds: 0,
+        },
+        ...prev,
+      ];
     });
   };
 
   const handleSessionEnded = (data: { sessionId: string }) => {
-    setActiveSessions(prev =>
-      prev.filter(s => s.session_id !== data.sessionId)
-    );
+    setActiveSessions((prev) => prev.filter((s) => s.session_id !== data.sessionId));
   };
 
   // Activity arrives from two sources: the sideband (live, per-turn delta) and
   // the 15s DB flush (absolute total, for reconciliation). totalMessages sets the
   // count to truth; deltaMessages increments it live between flushes.
-  const handleSessionActivity = (data: { sessionId: string; totalMessages?: number; deltaMessages?: number; messageCount?: number; lastActivity: string }) => {
-    setActiveSessions(prev =>
-      prev.map(session => {
+  const handleSessionActivity = (data: {
+    sessionId: string;
+    totalMessages?: number;
+    deltaMessages?: number;
+    messageCount?: number;
+    lastActivity: string;
+  }) => {
+    setActiveSessions((prev) =>
+      prev.map((session) => {
         if (session.session_id !== data.sessionId) return session;
         const current = parseInt(String(session.message_count || 0));
         let nextCount = current;
@@ -429,7 +455,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           nextCount = current + data.messageCount; // legacy delta shape
         }
         return { ...session, message_count: nextCount, last_activity: data.lastActivity };
-      })
+      }),
     );
   };
 
@@ -439,14 +465,20 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   const handleEligibilityViolation = (data: { sessionId: string; statedAge: number | null; channel: string }) => {
     toast.warning(
       `Eligibility: session ${data.sessionId.substring(0, 12)}… disclosed being a minor` +
-      `${data.statedAge != null ? ` (stated age ${data.statedAge})` : ''} and was ended. An adverse-event draft was created.`,
+        `${data.statedAge != null ? ` (stated age ${data.statedAge})` : ''} and was ended. An adverse-event draft was created.`,
     );
   };
 
-  const handleCrisisDetected = (data: { sessionId: string; severity: string; riskScore: number; detectedAt: string; message: string }) => {
+  const handleCrisisDetected = (data: {
+    sessionId: string;
+    severity: string;
+    riskScore: number;
+    detectedAt: string;
+    message: string;
+  }) => {
     // Update session in state
-    setActiveSessions(prev =>
-      prev.map(session =>
+    setActiveSessions((prev) =>
+      prev.map((session) =>
         session.session_id === data.sessionId
           ? {
               ...session,
@@ -454,10 +486,10 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               crisis_severity: data.severity,
               crisis_risk_score: data.riskScore,
               crisis_flagged_at: data.detectedAt,
-              crisis_flagged_by: 'system'
+              crisis_flagged_by: 'system',
             }
-          : session
-      )
+          : session,
+      ),
     );
 
     // Show alert banner (auto-dismiss after 30s)
@@ -466,7 +498,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       severity: data.severity,
       riskScore: data.riskScore,
       message: data.message,
-      type: 'auto'
+      type: 'auto',
     });
     if (crisisAlertTimerRef.current) clearTimeout(crisisAlertTimerRef.current);
     crisisAlertTimerRef.current = setTimeout(() => setCrisisAlert(null), 30000);
@@ -478,15 +510,22 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       new Notification(`${data.severity.toUpperCase()} Crisis Detected`, {
         body: `Session: ${data.sessionId.substring(0, 12)}...\nRisk Score: ${data.riskScore}`,
         icon: '/favicon.ico',
-        requireInteraction: data.severity === 'high'
+        requireInteraction: data.severity === 'high',
       });
     }
   };
 
-  const handleCrisisFlagged = (data: { sessionId: string; severity: string; riskScore: number; flaggedAt: string; flaggedBy: string; message: string }) => {
+  const handleCrisisFlagged = (data: {
+    sessionId: string;
+    severity: string;
+    riskScore: number;
+    flaggedAt: string;
+    flaggedBy: string;
+    message: string;
+  }) => {
     // Update session in state
-    setActiveSessions(prev =>
-      prev.map(session =>
+    setActiveSessions((prev) =>
+      prev.map((session) =>
         session.session_id === data.sessionId
           ? {
               ...session,
@@ -494,10 +533,10 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               crisis_severity: data.severity,
               crisis_risk_score: data.riskScore,
               crisis_flagged_at: data.flaggedAt,
-              crisis_flagged_by: data.flaggedBy
+              crisis_flagged_by: data.flaggedBy,
             }
-          : session
-      )
+          : session,
+      ),
     );
 
     // Show alert banner (auto-dismiss after 15s for manual flags)
@@ -506,7 +545,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       severity: data.severity,
       riskScore: data.riskScore,
       message: data.message,
-      type: 'manual'
+      type: 'manual',
     });
     if (crisisAlertTimerRef.current) clearTimeout(crisisAlertTimerRef.current);
     crisisAlertTimerRef.current = setTimeout(() => setCrisisAlert(null), 15000);
@@ -514,8 +553,8 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
 
   const handleCrisisUnflagged = (data: { sessionId: string }) => {
     // Update session in state
-    setActiveSessions(prev =>
-      prev.map(session =>
+    setActiveSessions((prev) =>
+      prev.map((session) =>
         session.session_id === data.sessionId
           ? {
               ...session,
@@ -523,89 +562,115 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               crisis_severity: null,
               crisis_risk_score: null,
               crisis_flagged_at: null,
-              crisis_flagged_by: null
+              crisis_flagged_by: null,
             }
-          : session
-      )
+          : session,
+      ),
     );
   };
 
   // Sideband event handlers
   const handleSidebandConnected = (data: { sessionId: string; callId: string; connectedAt: string }) => {
     console.log('[LiveMonitoring] Sideband connected:', data);
-    setSidebandConnections(prev => {
-      const exists = prev.find(c => c.sessionId === data.sessionId);
+    setSidebandConnections((prev) => {
+      const exists = prev.find((c) => c.sessionId === data.sessionId);
       if (exists) return prev;
-      return [...prev, {
-        sessionId: data.sessionId,
-        callId: data.callId,
-        connectedAt: data.connectedAt,
-        status: 'connected'
-      }];
+      return [
+        ...prev,
+        {
+          sessionId: data.sessionId,
+          callId: data.callId,
+          connectedAt: data.connectedAt,
+          status: 'connected',
+        },
+      ];
     });
   };
 
-  const handleSidebandDisconnected = (data: { sessionId: string; disconnectedAt: string; code: number; reason: string }) => {
+  const handleSidebandDisconnected = (data: {
+    sessionId: string;
+    disconnectedAt: string;
+    code: number;
+    reason: string;
+  }) => {
     console.log('[LiveMonitoring] Sideband disconnected:', data);
     // Update status instead of removing (keep visible for debugging)
-    setSidebandConnections(prev =>
-      prev.map(c =>
+    setSidebandConnections((prev) =>
+      prev.map((c) =>
         c.sessionId === data.sessionId
-          ? { ...c, status: 'disconnected', disconnectedAt: data.disconnectedAt, closeCode: data.code, closeReason: data.reason }
-          : c
-      )
+          ? {
+              ...c,
+              status: 'disconnected',
+              disconnectedAt: data.disconnectedAt,
+              closeCode: data.code,
+              closeReason: data.reason,
+            }
+          : c,
+      ),
     );
   };
 
-  const handleSidebandStatusUpdate = (data: { sessionId: string; status: string; error?: string; timestamp: string }) => {
+  const handleSidebandStatusUpdate = (data: {
+    sessionId: string;
+    status: string;
+    error?: string;
+    timestamp: string;
+  }) => {
     console.log('[LiveMonitoring] Sideband status update:', data);
-    setSidebandConnections(prev =>
-      prev.map(c =>
+    setSidebandConnections((prev) =>
+      prev.map((c) =>
         c.sessionId === data.sessionId
           ? { ...c, status: data.status, error: data.error, lastUpdate: data.timestamp }
-          : c
-      )
+          : c,
+      ),
     );
   };
 
   const handleSidebandError = (data: { sessionId: string; error: string }) => {
     console.error('[LiveMonitoring] Sideband error:', data);
-    setSidebandEvents(prev => ({
+    setSidebandEvents((prev) => ({
       ...prev,
       [data.sessionId]: [
         ...(prev[data.sessionId] || []),
         {
           type: 'error',
           timestamp: new Date(),
-          data: data.error
-        }
-      ].slice(-50)
+          data: data.error,
+        },
+      ].slice(-50),
     }));
   };
 
   const handleOpenAIUpdate = (data: { sessionId: string; eventType: string; data: unknown }) => {
     console.log('[LiveMonitoring] OpenAI event:', data);
-    setSidebandEvents(prev => ({
+    setSidebandEvents((prev) => ({
       ...prev,
       [data.sessionId]: [
         ...(prev[data.sessionId] || []),
         {
           type: data.eventType,
           timestamp: new Date(),
-          data: data.data
-        }
-      ].slice(-50)
+          data: data.data,
+        },
+      ].slice(-50),
     }));
   };
 
-  const handleSidebandToolCall = (data: { sessionId: string; toolName: string; status: string; args?: unknown; result?: unknown; error?: string; callId?: string }) => {
+  const handleSidebandToolCall = (data: {
+    sessionId: string;
+    toolName: string;
+    status: string;
+    args?: unknown;
+    result?: unknown;
+    error?: string;
+    callId?: string;
+  }) => {
     console.log('[LiveMonitoring] Sideband tool call:', data);
-    setSidebandEvents(prev => ({
+    setSidebandEvents((prev) => ({
       ...prev,
-      [data.sessionId]: [
-        ...(prev[data.sessionId] || []),
-        { type: 'tool_call', timestamp: new Date(), data }
-      ].slice(-50)
+      [data.sessionId]: [...(prev[data.sessionId] || []), { type: 'tool_call', timestamp: new Date(), data }].slice(
+        -50,
+      ),
     }));
   };
 
@@ -685,12 +750,16 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
 
   const handleInject = async () => {
     if (!selectedSidebandSession || !injectText.trim()) return;
-    const ok = await postSideband('inject', {
-      sessionId: selectedSidebandSession.sessionId,
-      text: injectText.trim(),
-      role: injectRole,
-      respond: injectRespond,
-    }, `Injected ${injectRole} message`);
+    const ok = await postSideband(
+      'inject',
+      {
+        sessionId: selectedSidebandSession.sessionId,
+        text: injectText.trim(),
+        role: injectRole,
+        respond: injectRespond,
+      },
+      `Injected ${injectRole} message`,
+    );
     if (ok) {
       setShowInjectModal(false);
       setInjectText('');
@@ -728,7 +797,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     try {
       await postJson('/admin/api/sideband/disconnect', { sessionId });
       toast.success('Sideband connection disconnected');
-      setSidebandConnections(prev => prev.filter(c => c.sessionId !== sessionId));
+      setSidebandConnections((prev) => prev.filter((c) => c.sessionId !== sessionId));
       if (selectedSidebandSession?.sessionId === sessionId) {
         setSelectedSidebandSession(null);
       }
@@ -769,7 +838,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     const classes: Record<string, string> = {
       high: 'bg-red-100 border-red-500 text-red-900',
       medium: 'bg-amber-100 border-amber-500 text-amber-900',
-      low: 'bg-green-100 border-green-500 text-green-900'
+      low: 'bg-green-100 border-green-500 text-green-900',
     };
     return classes[severity] || 'bg-gray-100 border-gray-500 text-gray-900';
   };
@@ -782,7 +851,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     }
 
     try {
-      const data = await postJson(`/admin/api/sessions/${sessionId}/end`, undefined, { fallback: 'Failed to end session' });
+      const data = await postJson(`/admin/api/sessions/${sessionId}/end`, undefined, {
+        fallback: 'Failed to end session',
+      });
       console.log('Session ended successfully:', data);
 
       // Session will be removed via Socket.io event, no need to update state manually
@@ -793,21 +864,15 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   };
 
   // Filter sessions
-  const displayedSessions = showCrisisOnly
-    ? activeSessions.filter(s => s.crisis_flagged)
-    : activeSessions;
+  const displayedSessions = showCrisisOnly ? activeSessions.filter((s) => s.crisis_flagged) : activeSessions;
 
-  const crisisCount = activeSessions.filter(s => s.crisis_flagged).length;
+  const crisisCount = activeSessions.filter((s) => s.crisis_flagged).length;
 
   // Get events for selected sideband session
-  const selectedSidebandEvents = selectedSidebandSession
-    ? (sidebandEvents[selectedSidebandSession.sessionId] || [])
-    : [];
+  const selectedSidebandEvents = selectedSidebandSession ? sidebandEvents[selectedSidebandSession.sessionId] || [] : [];
 
   // Live transcript for the selected session.
-  const selectedTranscript = selectedSidebandSession
-    ? (transcripts[selectedSidebandSession.sessionId] || [])
-    : [];
+  const selectedTranscript = selectedSidebandSession ? transcripts[selectedSidebandSession.sessionId] || [] : [];
 
   return (
     <div className="p-6 space-y-6">
@@ -823,7 +888,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
             <AlertTriangle size={24} aria-hidden="true" />
             <div>
               <p className="font-bold">{crisisAlert.message}</p>
-              <p className="text-sm">Session: {crisisAlert.sessionId.substring(0, 12)}... | Risk Score: {crisisAlert.riskScore}</p>
+              <p className="text-sm">
+                Session: {crisisAlert.sessionId.substring(0, 12)}... | Risk Score: {crisisAlert.riskScore}
+              </p>
             </div>
           </div>
           <div className="flex gap-2">
@@ -851,8 +918,16 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <h2 className="text-2xl font-bold text-navy">Live Session Monitoring</h2>
           <p className="text-gray-600 mt-1">
             Real-time view of active therapy sessions
-            {connected && <span className="ml-2 text-green-600" role="status" aria-live="polite">● Connected</span>}
-            {!connected && <span className="ml-2 text-red-600" role="status" aria-live="assertive">● Disconnected</span>}
+            {connected && (
+              <span className="ml-2 text-green-600" role="status" aria-live="polite">
+                ● Connected
+              </span>
+            )}
+            {!connected && (
+              <span className="ml-2 text-red-600" role="status" aria-live="assertive">
+                ● Disconnected
+              </span>
+            )}
           </p>
         </div>
         <div className="flex gap-2">
@@ -861,9 +936,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
             aria-pressed={showCrisisOnly}
             aria-label={showCrisisOnly ? 'Show all sessions' : 'Show crisis sessions only'}
             className={`px-4 py-2 rounded transition min-h-[44px] ${
-              showCrisisOnly
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              showCrisisOnly ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
             }`}
           >
             {showCrisisOnly ? 'Show All' : 'Crisis Only'}
@@ -906,15 +979,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Active Users</p>
-              <p className="text-3xl font-bold text-navy mt-1">
-                {new Set(activeSessions.map(s => s.user_id)).size}
-              </p>
+              <p className="text-3xl font-bold text-navy mt-1">{new Set(activeSessions.map((s) => s.user_id)).size}</p>
             </div>
             <Users size={32} className="text-royal" aria-hidden="true" />
           </div>
         </div>
 
-        <div className={`p-4 rounded-lg shadow ${crisisCount > 0 ? 'bg-red-50' : 'bg-white'}`} role="status" aria-live="assertive">
+        <div
+          className={`p-4 rounded-lg shadow ${crisisCount > 0 ? 'bg-red-50' : 'bg-white'}`}
+          role="status"
+          aria-live="assertive"
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Crisis Sessions</p>
@@ -922,7 +997,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                 {crisisCount}
               </p>
             </div>
-            <AlertTriangle size={32} className={crisisCount > 0 ? 'text-red-600' : 'text-gray-400'} aria-hidden="true" />
+            <AlertTriangle
+              size={32}
+              className={crisisCount > 0 ? 'text-red-600' : 'text-gray-400'}
+              aria-hidden="true"
+            />
           </div>
         </div>
       </div>
@@ -930,11 +1009,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
       {/* Sessions Table */}
       {loading && <div className="text-center py-8 text-gray-600">Loading active sessions...</div>}
 
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-          Error: {error}
-        </div>
-      )}
+      {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">Error: {error}</div>}
 
       {!loading && !error && displayedSessions.length === 0 && (
         <div className="bg-white p-8 rounded-lg shadow text-center text-gray-600">
@@ -947,20 +1022,36 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <table className="w-full" role="table">
             <thead className="bg-navy text-white">
               <tr>
-                <th className="px-4 py-3 text-left" scope="col">Crisis</th>
-                <th className="px-4 py-3 text-left" scope="col">User</th>
-                <th className="px-4 py-3 text-left" scope="col">Session ID</th>
-                <th className="px-4 py-3 text-left" scope="col">Started</th>
-                <th className="px-4 py-3 text-left" scope="col">Duration</th>
-                <th className="px-4 py-3 text-left" scope="col">Messages</th>
-                <th className="px-4 py-3 text-left" scope="col">Last Activity</th>
-                <th className="px-4 py-3 text-left" scope="col">Actions</th>
+                <th className="px-4 py-3 text-left" scope="col">
+                  Crisis
+                </th>
+                <th className="px-4 py-3 text-left" scope="col">
+                  User
+                </th>
+                <th className="px-4 py-3 text-left" scope="col">
+                  Session ID
+                </th>
+                <th className="px-4 py-3 text-left" scope="col">
+                  Started
+                </th>
+                <th className="px-4 py-3 text-left" scope="col">
+                  Duration
+                </th>
+                <th className="px-4 py-3 text-left" scope="col">
+                  Messages
+                </th>
+                <th className="px-4 py-3 text-left" scope="col">
+                  Last Activity
+                </th>
+                <th className="px-4 py-3 text-left" scope="col">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {displayedSessions.map((session, idx) => {
-                const isRecentlyActive = session.last_activity &&
-                  (Date.now() - new Date(session.last_activity).getTime()) < 30000; // 30s
+                const isRecentlyActive =
+                  session.last_activity && Date.now() - new Date(session.last_activity).getTime() < 30000; // 30s
 
                 return (
                   <tr
@@ -972,12 +1063,12 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                     <td className="px-4 py-3">
                       {session.crisis_flagged ? (
                         <div className="flex flex-col gap-1">
-                          <span className={`px-2 py-1 rounded text-xs font-semibold uppercase ${getCrisisBadgeClasses(session.crisis_severity ?? '')}`}>
+                          <span
+                            className={`px-2 py-1 rounded text-xs font-semibold uppercase ${getCrisisBadgeClasses(session.crisis_severity ?? '')}`}
+                          >
                             {session.crisis_severity}
                           </span>
-                          <span className="text-xs text-gray-600">
-                            Score: {session.crisis_risk_score}
-                          </span>
+                          <span className="text-xs text-gray-600">Score: {session.crisis_risk_score}</span>
                         </div>
                       ) : (
                         <span className="text-gray-400 text-sm">—</span>
@@ -992,9 +1083,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="font-mono text-sm text-gray-600">
-                        {session.session_id.substring(0, 8)}...
-                      </span>
+                      <span className="font-mono text-sm text-gray-600">{session.session_id.substring(0, 8)}...</span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {new Date(session.created_at).toLocaleString('en-US', {
@@ -1003,14 +1092,14 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                         year: 'numeric',
                         hour: 'numeric',
                         minute: '2-digit',
-                        hour12: true
+                        hour12: true,
                       })}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {formatDuration(
                         session.status === 'active'
                           ? Math.max(0, Math.floor((nowTick - new Date(session.created_at).getTime()) / 1000))
-                          : session.duration_seconds
+                          : session.duration_seconds,
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -1018,9 +1107,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                         {session.message_count || 0}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {getTimeSince(session.last_activity)}
-                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{getTimeSince(session.last_activity)}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <button
@@ -1067,16 +1154,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           </div>
 
           {/* Info banner for 404 errors */}
-          {sidebandConnections.some(c => c.error?.includes('404')) && (
+          {sidebandConnections.some((c) => c.error?.includes('404')) && (
             <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="text-yellow-600 flex-shrink-0" size={20} />
                 <div>
                   <h5 className="font-semibold text-yellow-900 mb-1">OpenAI Sideband Feature Not Available</h5>
                   <p className="text-sm text-yellow-800">
-                    OpenAI is returning 404 errors for sideband WebSocket connections. This feature may not be enabled for your API key yet.
-                    Sideband connections allow server-side monitoring and control of Realtime API sessions.
-                    The client-side WebRTC connection works normally - this only affects admin monitoring capabilities.
+                    OpenAI is returning 404 errors for sideband WebSocket connections. This feature may not be enabled
+                    for your API key yet. Sideband connections allow server-side monitoring and control of Realtime API
+                    sessions. The client-side WebRTC connection works normally - this only affects admin monitoring
+                    capabilities.
                   </p>
                 </div>
               </div>
@@ -1086,11 +1174,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Connections List */}
             <div className="bg-white rounded-lg shadow p-4">
-              <h4 className="font-semibold text-navy mb-3">
-                Connection Attempts ({sidebandConnections.length})
-              </h4>
+              <h4 className="font-semibold text-navy mb-3">Connection Attempts ({sidebandConnections.length})</h4>
               <div className="space-y-2 max-h-96 overflow-y-auto">
-                {sidebandConnections.map(conn => (
+                {sidebandConnections.map((conn) => (
                   <button
                     key={conn.sessionId}
                     onClick={() => setSelectedSidebandSession(conn)}
@@ -1101,35 +1187,44 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`w-2 h-2 rounded-full ${
-                        conn.status === 'connected' ? 'bg-green-500 animate-pulse' :
-                        conn.status === 'error' ? 'bg-red-500' :
-                        conn.status === 'disconnected' ? 'bg-gray-400' :
-                        'bg-yellow-500'
-                      }`}></span>
-                      <span className="font-mono text-sm font-medium">
-                        {conn.sessionId.substring(0, 12)}...
-                      </span>
-                      <span className={`text-xs ml-auto ${
-                        selectedSidebandSession?.sessionId === conn.sessionId
-                          ? 'text-white opacity-75'
-                          : 'text-gray-500'
-                      }`}>
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          conn.status === 'connected'
+                            ? 'bg-green-500 animate-pulse'
+                            : conn.status === 'error'
+                              ? 'bg-red-500'
+                              : conn.status === 'disconnected'
+                                ? 'bg-gray-400'
+                                : 'bg-yellow-500'
+                        }`}
+                      ></span>
+                      <span className="font-mono text-sm font-medium">{conn.sessionId.substring(0, 12)}...</span>
+                      <span
+                        className={`text-xs ml-auto ${
+                          selectedSidebandSession?.sessionId === conn.sessionId
+                            ? 'text-white opacity-75'
+                            : 'text-gray-500'
+                        }`}
+                      >
                         {conn.status || 'connected'}
                       </span>
                     </div>
-                    <div className={`text-xs ${
-                      selectedSidebandSession?.sessionId === conn.sessionId
-                        ? 'text-white opacity-75'
-                        : 'text-gray-600'
-                    }`}>
+                    <div
+                      className={`text-xs ${
+                        selectedSidebandSession?.sessionId === conn.sessionId
+                          ? 'text-white opacity-75'
+                          : 'text-gray-600'
+                      }`}
+                    >
                       Call ID: {conn.callId?.substring(0, 16)}...
                     </div>
-                    <div className={`text-xs ${
-                      selectedSidebandSession?.sessionId === conn.sessionId
-                        ? 'text-white opacity-75'
-                        : 'text-gray-500'
-                    }`}>
+                    <div
+                      className={`text-xs ${
+                        selectedSidebandSession?.sessionId === conn.sessionId
+                          ? 'text-white opacity-75'
+                          : 'text-gray-500'
+                      }`}
+                    >
                       {new Date(conn.connectedAt).toLocaleTimeString()}
                     </div>
                   </button>
@@ -1147,9 +1242,11 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                     </h4>
                     <div className="flex flex-wrap gap-2 justify-end">
                       <button
-                        onClick={() => listeningSessionId === selectedSidebandSession.sessionId
-                          ? stopListening()
-                          : startListening(selectedSidebandSession.sessionId)}
+                        onClick={() =>
+                          listeningSessionId === selectedSidebandSession.sessionId
+                            ? stopListening()
+                            : startListening(selectedSidebandSession.sessionId)
+                        }
                         title="Listen to the assistant's audio live"
                         className={`px-3 py-1.5 text-white rounded transition text-sm min-h-[44px] inline-flex items-center gap-1 ${
                           listeningSessionId === selectedSidebandSession.sessionId
@@ -1189,12 +1286,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                           value={selectedTool}
                           onChange={(e) => setSelectedTool(e.target.value)}
                           aria-label="Tool to trigger"
-                          title={availableTools.find(t => t.name === selectedTool)?.description || 'Pick a tool to force the AI to call'}
+                          title={
+                            availableTools.find((t) => t.name === selectedTool)?.description ||
+                            'Pick a tool to force the AI to call'
+                          }
                           className="border border-gray-300 rounded px-2 py-1.5 text-sm min-h-[44px] max-w-[180px] bg-white text-gray-900"
                         >
                           <option value="">Trigger tool…</option>
-                          {availableTools.map(t => (
-                            <option key={t.name} value={t.name}>{t.name}</option>
+                          {availableTools.map((t) => (
+                            <option key={t.name} value={t.name}>
+                              {t.name}
+                            </option>
                           ))}
                         </select>
                         <button
@@ -1236,12 +1338,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       </div>
                       <div>
                         <span className="font-medium text-gray-700">Status:</span>
-                        <div className={`font-semibold ${
-                          selectedSidebandSession.status === 'connected' ? 'text-green-600' :
-                          selectedSidebandSession.status === 'error' ? 'text-red-600' :
-                          selectedSidebandSession.status === 'disconnected' ? 'text-gray-600' :
-                          'text-yellow-600'
-                        }`}>
+                        <div
+                          className={`font-semibold ${
+                            selectedSidebandSession.status === 'connected'
+                              ? 'text-green-600'
+                              : selectedSidebandSession.status === 'error'
+                                ? 'text-red-600'
+                                : selectedSidebandSession.status === 'disconnected'
+                                  ? 'text-gray-600'
+                                  : 'text-yellow-600'
+                          }`}
+                        >
                           {selectedSidebandSession.status || 'connected'}
                         </div>
                       </div>
@@ -1257,7 +1364,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                         <div className="font-medium text-gray-700 text-xs mb-1">
                           Close Reason (Code: {selectedSidebandSession.closeCode}):
                         </div>
-                        <div className="text-xs text-gray-600">{selectedSidebandSession.closeReason || 'No reason provided'}</div>
+                        <div className="text-xs text-gray-600">
+                          {selectedSidebandSession.closeReason || 'No reason provided'}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1271,7 +1380,10 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                         live
                       </span>
                     </div>
-                    <div ref={transcriptScrollRef} className="bg-white border border-gray-200 rounded p-3 max-h-80 overflow-y-auto space-y-2">
+                    <div
+                      ref={transcriptScrollRef}
+                      className="bg-white border border-gray-200 rounded p-3 max-h-80 overflow-y-auto space-y-2"
+                    >
                       {selectedTranscript.length === 0 ? (
                         <p className="text-gray-400 text-sm italic">Waiting for speech…</p>
                       ) : (
@@ -1287,7 +1399,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                                   : 'bg-gray-100 text-gray-900 rounded-bl-none'
                               }`}
                             >
-                              <div className={`text-[10px] uppercase tracking-wide mb-0.5 ${turn.role === 'user' ? 'text-blue-100' : 'text-gray-500'}`}>
+                              <div
+                                className={`text-[10px] uppercase tracking-wide mb-0.5 ${turn.role === 'user' ? 'text-blue-100' : 'text-gray-500'}`}
+                              >
                                 {turn.role === 'user' ? 'Participant' : 'AI'}
                               </div>
                               <span>{turn.text}</span>
@@ -1312,27 +1426,44 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                       <div className="space-y-2">
                         {selectedSidebandEvents.map((event, idx) => {
                           if (event.type === 'tool_call') {
-                            const td = event.data as { toolName?: string; status?: string; args?: unknown; result?: unknown; error?: string };
+                            const td = event.data as {
+                              toolName?: string;
+                              status?: string;
+                              args?: unknown;
+                              result?: unknown;
+                              error?: string;
+                            };
                             const status = td.status || 'executing';
-                            const style = status === 'completed'
-                              ? 'bg-green-50 border-green-500'
-                              : status === 'failed'
-                                ? 'bg-red-50 border-red-500'
-                                : 'bg-purple-50 border-purple-500';
+                            const style =
+                              status === 'completed'
+                                ? 'bg-green-50 border-green-500'
+                                : status === 'failed'
+                                  ? 'bg-red-50 border-red-500'
+                                  : 'bg-purple-50 border-purple-500';
                             return (
                               <div key={idx} className={`p-2 rounded text-xs border-l-2 ${style}`}>
                                 <div className="flex justify-between items-center mb-1">
-                                  <span className="font-semibold text-gray-900 inline-flex items-center gap-1"><Tool size={12} aria-hidden="true" /> {td.toolName} · {status}</span>
-                                  <span className="text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
+                                  <span className="font-semibold text-gray-900 inline-flex items-center gap-1">
+                                    <Tool size={12} aria-hidden="true" /> {td.toolName} · {status}
+                                  </span>
+                                  <span className="text-gray-500">
+                                    {new Date(event.timestamp).toLocaleTimeString()}
+                                  </span>
                                 </div>
                                 {td.args !== undefined && (
-                                  <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">args: {JSON.stringify(td.args, null, 2)}</pre>
+                                  <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
+                                    args: {JSON.stringify(td.args, null, 2)}
+                                  </pre>
                                 )}
                                 {td.result !== undefined && (
-                                  <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">result: {JSON.stringify(td.result, null, 2)}</pre>
+                                  <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
+                                    result: {JSON.stringify(td.result, null, 2)}
+                                  </pre>
                                 )}
                                 {td.error && (
-                                  <pre className="text-xs text-red-700 overflow-x-auto whitespace-pre-wrap break-words">error: {td.error}</pre>
+                                  <pre className="text-xs text-red-700 overflow-x-auto whitespace-pre-wrap break-words">
+                                    error: {td.error}
+                                  </pre>
                                 )}
                               </div>
                             );
@@ -1348,9 +1479,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                             >
                               <div className="flex justify-between items-center mb-1">
                                 <span className="font-semibold text-gray-900">{event.type}</span>
-                                <span className="text-gray-500">
-                                  {new Date(event.timestamp).toLocaleTimeString()}
-                                </span>
+                                <span className="text-gray-500">{new Date(event.timestamp).toLocaleTimeString()}</span>
                               </div>
                               <pre className="text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap break-words">
                                 {JSON.stringify(event.data, null, 2)}
@@ -1392,8 +1521,8 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
               <>
                 <p className="text-gray-600 text-sm mb-4">
                   Paste a <code>session</code> config object. Any RealtimeSession field is allowed:
-                  <code> instructions</code>, <code>tools</code>, <code>tool_choice</code>, <code>temperature</code>, <code>turn_detection</code>.
-                  Sent as a live <code>session.update</code>.
+                  <code> instructions</code>, <code>tools</code>, <code>tool_choice</code>, <code>temperature</code>,{' '}
+                  <code>turn_detection</code>. Sent as a live <code>session.update</code>.
                 </p>
                 <textarea
                   value={advancedConfigText}
@@ -1405,8 +1534,8 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
             ) : (
               <>
                 <p className="text-gray-600 text-sm mb-4">
-                  Update the AI instructions for this session in real-time via the sideband connection.
-                  This will modify how the AI behaves without ending the session.
+                  Update the AI instructions for this session in real-time via the sideband connection. This will modify
+                  how the AI behaves without ending the session.
                 </p>
                 <textarea
                   value={updateInstructions}
@@ -1451,9 +1580,8 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-navy mb-4">Inject Message</h3>
             <p className="text-gray-600 text-sm mb-4">
-              Insert a message into the live conversation context. A <strong>system</strong> message is a
-              private steer (the participant won't see it as a turn); a <strong>user</strong> message acts as
-              the participant.
+              Insert a message into the live conversation context. A <strong>system</strong> message is a private steer
+              (the participant won't see it as a turn); a <strong>user</strong> message acts as the participant.
             </p>
 
             <div className="flex flex-wrap items-center gap-4 mb-3">
@@ -1469,11 +1597,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                 </select>
               </label>
               <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={injectRespond}
-                  onChange={(e) => setInjectRespond(e.target.checked)}
-                />
+                <input type="checkbox" checked={injectRespond} onChange={(e) => setInjectRespond(e.target.checked)} />
                 Make AI respond immediately
               </label>
             </div>
@@ -1511,7 +1635,6 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           </div>
         </div>
       )}
-
     </div>
   );
 }

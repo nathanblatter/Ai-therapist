@@ -25,7 +25,7 @@ async function createInitialUser() {
       `INSERT INTO users (username, password, role, organization_id)
        VALUES ($1, $2, $3, (SELECT org_id FROM organizations WHERE slug = 'irb-study'))
        ON CONFLICT (username) DO NOTHING`,
-      [username, hashedPassword, role]
+      [username, hashedPassword, role],
     );
 
     console.log('Initial researcher user created successfully');

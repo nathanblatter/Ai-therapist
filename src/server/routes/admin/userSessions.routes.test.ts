@@ -36,7 +36,11 @@ function appAs(role: string | null, orgId?: number) {
 beforeEach(() => {
   vi.clearAllMocks();
   dbMocks.getActiveUserSessions.mockResolvedValue([
-    { sid: 'a', expire: '2026-11-01T00:00:00.000Z', sess: { cookie: {}, userId: 9, username: 'p9', userRole: 'participant' } },
+    {
+      sid: 'a',
+      expire: '2026-11-01T00:00:00.000Z',
+      sess: { cookie: {}, userId: 9, username: 'p9', userRole: 'participant' },
+    },
     { sid: 'b', expire: '2026-11-01T00:00:00.000Z', sess: JSON.stringify({ cookie: {} }) },
   ]);
   dbMocks.deleteUserSession.mockResolvedValue('a');

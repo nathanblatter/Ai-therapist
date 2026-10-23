@@ -27,7 +27,7 @@ const RERANK_PROMPT = (topN: number) =>
   `You rank retrieved passages for a mental-health support assistant. Given the query and the numbered candidates, pick the ${topN} passages that most directly and completely answer the query, best first. Prefer passages that answer the specific question over ones that merely share keywords. Return STRICT JSON only: {"ranking": [<candidate numbers, best first, exactly ${topN} of them>], "reasoning": "<one short sentence>"}`;
 
 export interface RerankResult {
-  chunks: KnowledgeChunk[];      // topN, rerank order (or vector order on fallback)
+  chunks: KnowledgeChunk[]; // topN, rerank order (or vector order on fallback)
   usedFallback: boolean;
   latencyMs: number;
 }
@@ -80,7 +80,16 @@ export async function rerankChunks(
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`rerank timed out after ${ms}ms`)), ms);
-    p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
   });
 }
 
@@ -108,13 +117,16 @@ async function callRerankModel(
   });
 
   recordLlmUsage(
-    ctx.sessionId, 'rerank', RERANK_MODEL,
-    response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
-  ).catch(err => log.error({ err }, '[rerank] failed to record LLM usage (non-fatal)'));
+    ctx.sessionId,
+    'rerank',
+    RERANK_MODEL,
+    response.usage?.prompt_tokens ?? null,
+    response.usage?.completion_tokens ?? null,
+  ).catch((err) => log.error({ err }, '[rerank] failed to record LLM usage (non-fatal)'));
 
   const parsed = JSON.parse(response.choices[0]?.message?.content ?? '{}') as { ranking?: unknown };
   if (!Array.isArray(parsed.ranking)) throw new Error('rerank response missing ranking array');
-  return parsed.ranking.map(n => Number(n)).filter(n => Number.isFinite(n));
+  return parsed.ranking.map((n) => Number(n)).filter((n) => Number.isFinite(n));
 }
 
 /**
@@ -156,9 +168,9 @@ function logDecision(
     toolName: ctx.toolName,
     query,
     candidates: candidates.map((c, i) => ({ chunk_id: c.chunk_id, vec_rank: i, similarity: c.similarity ?? null })),
-    chosen: chosen.map(c => c.chunk_id),
+    chosen: chosen.map((c) => c.chunk_id),
     usedFallback: result.usedFallback,
     model: RERANK_MODEL,
     latencyMs: result.latencyMs,
-  }).catch(err => log.error({ err }, '[rerank] failed to log decision (non-fatal)'));
+  }).catch((err) => log.error({ err }, '[rerank] failed to log decision (non-fatal)'));
 }

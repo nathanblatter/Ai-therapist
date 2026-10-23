@@ -29,7 +29,7 @@ export function isValidRating(value: unknown): value is number | null | undefine
  *  is the public route, so nothing here trusts the input's shape. */
 export async function upsertSessionFeedback(
   sessionId: string,
-  input: SessionFeedbackInput
+  input: SessionFeedbackInput,
 ): Promise<SessionFeedbackRow> {
   for (const field of RATING_FIELDS) {
     if (!isValidRating(input[field])) {
@@ -47,16 +47,21 @@ export async function upsertSessionFeedback(
        would_return_rating = EXCLUDED.would_return_rating,
        comments = EXCLUDED.comments
      RETURNING *`,
-    [sessionId, input.helpfulness_rating ?? null, input.ease_rating ?? null, input.would_return_rating ?? null, comments]
+    [
+      sessionId,
+      input.helpfulness_rating ?? null,
+      input.ease_rating ?? null,
+      input.would_return_rating ?? null,
+      comments,
+    ],
   );
   return result.rows[0];
 }
 
 export async function getSessionFeedback(sessionId: string): Promise<SessionFeedbackRow | null> {
-  const result = await pool.query<SessionFeedbackRow>(
-    'SELECT * FROM session_feedback WHERE session_id = $1',
-    [sessionId]
-  );
+  const result = await pool.query<SessionFeedbackRow>('SELECT * FROM session_feedback WHERE session_id = $1', [
+    sessionId,
+  ]);
   return result.rows[0] ?? null;
 }
 
@@ -79,7 +84,7 @@ export async function getFeedbackAggregate(): Promise<FeedbackAggregate> {
             AVG(helpfulness_rating) AS avg_helpfulness,
             AVG(ease_rating) AS avg_ease,
             AVG(would_return_rating) AS avg_would_return
-     FROM session_feedback`
+     FROM session_feedback`,
   );
   const row = result.rows[0];
   return {

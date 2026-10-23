@@ -12,10 +12,7 @@ async function runMigration() {
   try {
     console.log('Running migration 028: Add theme preference...');
 
-    const sql = fs.readFileSync(
-      path.join(__dirname, '../migrations/028_add_theme_preference.sql'),
-      'utf8'
-    );
+    const sql = fs.readFileSync(path.join(__dirname, '../migrations/028_add_theme_preference.sql'), 'utf8');
 
     await client.query(sql);
 

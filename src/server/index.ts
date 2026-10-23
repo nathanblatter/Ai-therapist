@@ -1,101 +1,105 @@
-import express, { type Request, type Response } from "express";
-import { createServer } from "http";
-import { Server, type Socket } from "socket.io";
-import fs from "fs";
-import { createServer as createViteServer } from "vite";
-import "dotenv/config";
-import path from "path";
-import { fileURLToPath } from "url";
-import session, { type Session, type SessionData } from "express-session";
-import type { IncomingMessage } from "http";
-import connectPgSimple from "connect-pg-simple";
-import helmet from "helmet";
-import { pinoHttp } from "pino-http";
-import { randomUUID } from "crypto";
-import { opsMetricsMiddleware } from "./services/opsMetrics.service.js";
-import { createAdapter as createPostgresAdapter } from "@socket.io/postgres-adapter";
-import {pool } from "./config/db.js";
-import { requireRole } from "./middleware/auth.js";
-import { errorHandler } from "./middleware/errorHandler.js";
-import { insertMessagesBatch, getSidebandConnectionsByIds, getSessionAccessInfo } from "./db/index.js";
-import configRoutes from "./routes/public/config.routes.js";
-import voicesRoutes from "./routes/public/voices.routes.js";
-import authRoutes from "./routes/public/auth.routes.js";
-import squawkAuthRoutes from "./routes/public/squawkAuth.routes.js";
-import magicLinkRoutes from "./routes/public/magicLink.routes.js";
-import demoRoutes from "./routes/demo.routes.js";
-import { canAdminAccessSessionLive } from "./middleware/caseload.js";
-import { orgIdFor } from "./middleware/org.js";
-import { getCaseloadClientIds } from "./db/index.js";
-import mfaRoutes from "./routes/public/mfa.routes.js";
-import usersRoutes from "./routes/public/users.routes.js";
-import healthRoutes from "./routes/public/health.routes.js";
-import bugReportRoutes from "./routes/public/bugReport.routes.js";
-import contentRetentionRoutes from "./routes/admin/contentRetention.routes.js";
-import userSessionsRoutes from "./routes/admin/userSessions.routes.js";
-import crisisRoutes from "./routes/admin/crisis.routes.js";
-import adverseEventsRoutes from "./routes/admin/adverseEvents.routes.js";
-import redactionRoutes from "./routes/admin/redaction.routes.js";
-import adminConfigRoutes from "./routes/admin/config.routes.js";
-import analyticsRoutes from "./routes/admin/analytics.routes.js";
-import studyOpsRoutes from "./routes/admin/studyOps.routes.js";
-import irbPacketRoutes from "./routes/admin/irbPacket.routes.js";
-import weeklyDigestRoutes from "./routes/admin/weeklyDigest.routes.js";
-import riskCalibrationRoutes from "./routes/admin/riskCalibration.routes.js";
-import exportRoutes from "./routes/admin/export.routes.js";
-import adminRateLimitsRoutes from "./routes/admin/rateLimits.routes.js";
-import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
-import adminSessionsRoutes from "./routes/admin/sessions.routes.js";
-import sidebandRoutes from "./routes/admin/sideband.routes.js";
-import insightsRoutes from "./routes/admin/insights.routes.js";
-import participantProfileRoutes from "./routes/admin/participantProfile.routes.js";
-import studyStatusRoutes from "./routes/admin/studyStatus.routes.js";
-import knowledgeRoutes from "./routes/admin/knowledge.routes.js";
-import worksheetReviewRoutes from "./routes/admin/worksheetReview.routes.js";
-import qualtricsSyncRoutes from "./routes/admin/qualtricsSync.routes.js";
-import prepRoutes from "./routes/admin/prep.routes.js";
-import evalsRoutes from "./routes/admin/evals.routes.js";
-import chatRoutes from "./routes/public/chat.routes.js";
-import sessionsRoutes from "./routes/public/sessions.routes.js";
-import liveSessionRoutes from "./routes/public/liveSession.routes.js";
-import grokSessionRoutes from "./routes/public/grokSession.routes.js";
-import logsRoutes from "./routes/public/logs.routes.js";
-import clientEventsRoutes from "./routes/public/clientEvents.routes.js";
-import engagementEventsRoutes from "./routes/public/engagementEvents.routes.js";
-import adminUsageRoutes from "./routes/admin/adminUsage.routes.js";
-import telemetryRoutes from "./routes/admin/telemetry.routes.js";
-import opsRoutes from "./routes/admin/ops.routes.js";
-import consentRoutes from "./routes/public/consent.routes.js";
-import progressRoutes from "./routes/public/progress.routes.js";
-import adminConsentRoutes from "./routes/admin/consent.routes.js";
-import caseloadRoutes from "./routes/admin/caseload.routes.js";
-import auditRoutes from "./routes/admin/audit.routes.js";
-import invitesRoutes from "./routes/admin/invites.routes.js";
-import joinRoutes from "./routes/join.routes.js";
-import joinStudyRoutes from "./routes/joinStudy.routes.js";
-import surveysRoutes from "./routes/public/surveys.routes.js";
-import qualtricsWebhookRoutes from "./routes/public/qualtricsWebhook.routes.js";
-import caseworkerDashboardRoutes from "./routes/admin/caseworkerDashboard.routes.js";
-import assistantRoutes from "./routes/admin/assistant.routes.js";
-import workQueueRoutes from "./routes/admin/workQueue.routes.js";
-import notificationsRoutes from "./routes/admin/notifications.routes.js";
-import escalationsRoutes from "./routes/admin/escalations.routes.js";
-import notesRoutes from "./routes/admin/notes.routes.js";
-import practiceAssignmentsRoutes from "./routes/admin/practiceAssignments.routes.js";
-import clientChartRoutes from "./routes/admin/clientChart.routes.js";
-import adminMessagingRoutes from "./routes/admin/messaging.routes.js";
-import publicMessagingRoutes from "./routes/public/messaging.routes.js";
-import sandboxInvitesRoutes from "./routes/admin/sandboxInvites.routes.js";
-import { restrictParticipantsToUs } from "./middleware/ipFilter.js";
-import { startScheduler as startContentWipeScheduler } from "./services/contentWipe.service.js";
-import { startScheduler as startDataRetentionScheduler } from "./services/dataRetention.service.js";
-import { startDemoCleanupScheduler } from "./services/demoCleanup.service.js";
-import { startQualtricsSyncScheduler } from "./services/qualtricsSync.service.js";
-import { startWorkQueueScheduler } from "./services/workQueue.service.js";
-import { startMessageEmbeddingScheduler } from "./services/messageEmbedding.service.js";
-import { startSurveyReminderScheduler } from "./services/qualtricsReminders.service.js";
-import { startMessageScanSweeper } from "./services/messageSafety.service.js";
-import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
+import express, { type Request, type Response } from 'express';
+import { createServer } from 'http';
+import { Server, type Socket } from 'socket.io';
+import fs from 'fs';
+import { createServer as createViteServer } from 'vite';
+import 'dotenv/config';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import session, { type Session, type SessionData } from 'express-session';
+import type { IncomingMessage } from 'http';
+import connectPgSimple from 'connect-pg-simple';
+import helmet from 'helmet';
+import { pinoHttp } from 'pino-http';
+import { randomUUID } from 'crypto';
+import { opsMetricsMiddleware } from './services/opsMetrics.service.js';
+import { createAdapter as createPostgresAdapter } from '@socket.io/postgres-adapter';
+import { pool } from './config/db.js';
+import { requireRole } from './middleware/auth.js';
+import { errorHandler } from './middleware/errorHandler.js';
+import { insertMessagesBatch, getSidebandConnectionsByIds, getSessionAccessInfo } from './db/index.js';
+import configRoutes from './routes/public/config.routes.js';
+import voicesRoutes from './routes/public/voices.routes.js';
+import authRoutes from './routes/public/auth.routes.js';
+import squawkAuthRoutes from './routes/public/squawkAuth.routes.js';
+import magicLinkRoutes from './routes/public/magicLink.routes.js';
+import demoRoutes from './routes/demo.routes.js';
+import { canAdminAccessSessionLive } from './middleware/caseload.js';
+import { orgIdFor } from './middleware/org.js';
+import { getCaseloadClientIds } from './db/index.js';
+import mfaRoutes from './routes/public/mfa.routes.js';
+import usersRoutes from './routes/public/users.routes.js';
+import healthRoutes from './routes/public/health.routes.js';
+import bugReportRoutes from './routes/public/bugReport.routes.js';
+import contentRetentionRoutes from './routes/admin/contentRetention.routes.js';
+import userSessionsRoutes from './routes/admin/userSessions.routes.js';
+import crisisRoutes from './routes/admin/crisis.routes.js';
+import adverseEventsRoutes from './routes/admin/adverseEvents.routes.js';
+import redactionRoutes from './routes/admin/redaction.routes.js';
+import adminConfigRoutes from './routes/admin/config.routes.js';
+import analyticsRoutes from './routes/admin/analytics.routes.js';
+import studyOpsRoutes from './routes/admin/studyOps.routes.js';
+import irbPacketRoutes from './routes/admin/irbPacket.routes.js';
+import weeklyDigestRoutes from './routes/admin/weeklyDigest.routes.js';
+import riskCalibrationRoutes from './routes/admin/riskCalibration.routes.js';
+import exportRoutes from './routes/admin/export.routes.js';
+import adminRateLimitsRoutes from './routes/admin/rateLimits.routes.js';
+import rateLimitsRoutes from './routes/public/rateLimits.routes.js';
+import adminSessionsRoutes from './routes/admin/sessions.routes.js';
+import sidebandRoutes from './routes/admin/sideband.routes.js';
+import insightsRoutes from './routes/admin/insights.routes.js';
+import participantProfileRoutes from './routes/admin/participantProfile.routes.js';
+import studyStatusRoutes from './routes/admin/studyStatus.routes.js';
+import knowledgeRoutes from './routes/admin/knowledge.routes.js';
+import worksheetReviewRoutes from './routes/admin/worksheetReview.routes.js';
+import qualtricsSyncRoutes from './routes/admin/qualtricsSync.routes.js';
+import prepRoutes from './routes/admin/prep.routes.js';
+import evalsRoutes from './routes/admin/evals.routes.js';
+import chatRoutes from './routes/public/chat.routes.js';
+import sessionsRoutes from './routes/public/sessions.routes.js';
+import liveSessionRoutes from './routes/public/liveSession.routes.js';
+import grokSessionRoutes from './routes/public/grokSession.routes.js';
+import logsRoutes from './routes/public/logs.routes.js';
+import clientEventsRoutes from './routes/public/clientEvents.routes.js';
+import engagementEventsRoutes from './routes/public/engagementEvents.routes.js';
+import adminUsageRoutes from './routes/admin/adminUsage.routes.js';
+import telemetryRoutes from './routes/admin/telemetry.routes.js';
+import opsRoutes from './routes/admin/ops.routes.js';
+import consentRoutes from './routes/public/consent.routes.js';
+import progressRoutes from './routes/public/progress.routes.js';
+import adminConsentRoutes from './routes/admin/consent.routes.js';
+import caseloadRoutes from './routes/admin/caseload.routes.js';
+import auditRoutes from './routes/admin/audit.routes.js';
+import invitesRoutes from './routes/admin/invites.routes.js';
+import joinRoutes from './routes/join.routes.js';
+import joinStudyRoutes from './routes/joinStudy.routes.js';
+import surveysRoutes from './routes/public/surveys.routes.js';
+import qualtricsWebhookRoutes from './routes/public/qualtricsWebhook.routes.js';
+import caseworkerDashboardRoutes from './routes/admin/caseworkerDashboard.routes.js';
+import assistantRoutes from './routes/admin/assistant.routes.js';
+import workQueueRoutes from './routes/admin/workQueue.routes.js';
+import notificationsRoutes from './routes/admin/notifications.routes.js';
+import escalationsRoutes from './routes/admin/escalations.routes.js';
+import notesRoutes from './routes/admin/notes.routes.js';
+import practiceAssignmentsRoutes from './routes/admin/practiceAssignments.routes.js';
+import clientChartRoutes from './routes/admin/clientChart.routes.js';
+import adminMessagingRoutes from './routes/admin/messaging.routes.js';
+import publicMessagingRoutes from './routes/public/messaging.routes.js';
+import sandboxInvitesRoutes from './routes/admin/sandboxInvites.routes.js';
+import { restrictParticipantsToUs } from './middleware/ipFilter.js';
+import { startScheduler as startContentWipeScheduler } from './services/contentWipe.service.js';
+import { startScheduler as startDataRetentionScheduler } from './services/dataRetention.service.js';
+import { startDemoCleanupScheduler } from './services/demoCleanup.service.js';
+import { startQualtricsSyncScheduler } from './services/qualtricsSync.service.js';
+import { startWorkQueueScheduler } from './services/workQueue.service.js';
+import { startMessageEmbeddingScheduler } from './services/messageEmbedding.service.js';
+import { startSurveyReminderScheduler } from './services/qualtricsReminders.service.js';
+import { startMessageScanSweeper } from './services/messageSafety.service.js';
+import {
+  noteSessionActivity,
+  scheduleAbandonCheck,
+  startAbandonedSessionSweeper,
+} from './services/sessionLifecycle.service.js';
 
 import { createLogger } from './utils/logger.js';
 
@@ -135,15 +139,13 @@ async function adminMayAccessSessionLive(socket: AuthSocket, sessionId: string):
     socket.userId,
     Number.isInteger(ownerId) ? ownerId : null,
     callerOrgId,
-    info.owner_organization_id ?? null
+    info.owner_organization_id ?? null,
   );
 }
 
 // ES module-compatible __dirname replacement
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-
 
 const app = express();
 
@@ -156,10 +158,8 @@ const io = new Server(httpServer, {
     // Same-origin requests never need CORS headers, so production defaults to
     // denying cross-origin entirely (`false`). `origin: true` would reflect
     // ANY origin with credentials — never do that.
-    origin: process.env.NODE_ENV === 'production'
-      ? (process.env.CORS_ORIGIN || false)
-      : 'http://localhost:5173',
-    credentials: true
+    origin: process.env.NODE_ENV === 'production' ? process.env.CORS_ORIGIN || false : 'http://localhost:5173',
+    credentials: true,
   },
   transports: ['websocket', 'polling'],
   // The Grok Voice proxy handles its own raw WebSocket upgrades on the same
@@ -190,7 +190,6 @@ pool.on('error', (err) => {
 global.io = io;
 
 const port = process.env.PORT || 3067;
-
 
 // Language instructions are now stored in the database system_config table
 // They will be loaded dynamically from the 'languages' config
@@ -225,7 +224,7 @@ if (process.env.NODE_ENV === 'production') {
   app.use(
     helmet.contentSecurityPolicy({
       useDefaults: false,
-      reportOnly: !CSP_ENFORCE,  // report-only by default; set CSP_ENFORCE=true to enforce
+      reportOnly: !CSP_ENFORCE, // report-only by default; set CSP_ENFORCE=true to enforce
       directives: {
         'default-src': ["'self'"],
         'script-src': ["'self'"],
@@ -252,7 +251,7 @@ if (process.env.NODE_ENV === 'production') {
         'frame-ancestors': ["'self'"],
         'report-uri': ['/csp-report'],
       },
-    })
+    }),
   );
 
   if (CSP_ENFORCE) {
@@ -269,7 +268,7 @@ app.post(
   (req, res) => {
     cspLog.warn({ report: req.body }, 'violation report');
     res.sendStatus(204);
-  }
+  },
 );
 
 // Global JSON body parsing — except routes that mount their own parser with a
@@ -279,9 +278,7 @@ app.post(
 // dropping recording audio whenever a client uploads a backlog).
 const globalJsonParser = express.json();
 const OWN_PARSER_PATHS = /^\/api\/(client-events$|engagement-events$|sessions\/[^/]+\/audio$)/;
-app.use((req, res, next) =>
-  OWN_PARSER_PATHS.test(req.path) ? next() : globalJsonParser(req, res, next)
-);
+app.use((req, res, next) => (OWN_PARSER_PATHS.test(req.path) ? next() : globalJsonParser(req, res, next)));
 
 // ==================== HTTP TELEMETRY ====================
 // In-process ops metrics (rolling 60-min request/error/latency window per
@@ -292,7 +289,17 @@ app.use(opsMetricsMiddleware());
 // static/build assets, vite HMR internals, socket.io polling — are skipped
 // entirely to keep production log volume sane; everything else logs one line
 // per response: info for 2xx/3xx, warn for 4xx, error for 5xx.
-const QUIET_PATH_PREFIXES = ['/health', '/socket.io', '/assets/', '/@vite', '/@fs', '/@react-refresh', '/node_modules/', '/src/', '/favicon'];
+const QUIET_PATH_PREFIXES = [
+  '/health',
+  '/socket.io',
+  '/assets/',
+  '/@vite',
+  '/@fs',
+  '/@react-refresh',
+  '/node_modules/',
+  '/src/',
+  '/favicon',
+];
 const STATIC_ASSET_RE = /\.(js|mjs|cjs|css|map|png|jpe?g|gif|svg|ico|woff2?|ttf|webp|mp3|wasm)(\?|$)/;
 function isQuietPath(url: string): boolean {
   const pathOnly = url.split('?')[0];
@@ -314,7 +321,7 @@ app.use(
       paths: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
       censor: '[redacted]',
     },
-  })
+  }),
 );
 // ==================== END HTTP TELEMETRY ====================
 
@@ -332,7 +339,7 @@ const sessionMiddleware = session({
   store: new PgSession({
     pool: pool,
     tableName: 'user_sessions',
-    createTableIfMissing: false // We create table via migration
+    createTableIfMissing: false, // We create table via migration
   }),
   secret: process.env.SESSION_SECRET || 'dev-only-insecure-secret',
   resave: false,
@@ -341,8 +348,8 @@ const sessionMiddleware = session({
     secure: process.env.NODE_ENV === 'production' ? true : false,
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax' // Prevent CSRF while allowing navigation
-  }
+    sameSite: 'lax', // Prevent CSRF while allowing navigation
+  },
 });
 app.use(sessionMiddleware);
 
@@ -401,12 +408,12 @@ import('./services/sidebandManager.service.js')
       onClient: (sessionId, ws) => grokVoiceManager.attachClient(sessionId, ws),
     });
   })
-  .catch(err => log.error({ err }, '[Grok] Failed to wire the voice proxy'));
+  .catch((err) => log.error({ err }, '[Grok] Failed to wire the voice proxy'));
 
 // Connection handler
 io.on('connection', (socket: AuthSocket) => {
-  const isAdmin = socket.userRole === 'therapist' || socket.userRole === 'researcher'
-    || socket.userRole === 'caseworker';
+  const isAdmin =
+    socket.userRole === 'therapist' || socket.userRole === 'researcher' || socket.userRole === 'caseworker';
 
   // Every authenticated socket (any role, incl. participants) joins its
   // user:<id> room. The room carries ONLY messaging:* events (spec C7) —
@@ -442,7 +449,7 @@ io.on('connection', (socket: AuthSocket) => {
     // acceptable (therapists don't need presence pings).
     socket.to('admin-broadcast').emit('admin:joined', {
       username: socket.username,
-      role: socket.userRole
+      role: socket.userRole,
     });
   } else {
     socketLog.info(`Participant connected (${socket.id})`);
@@ -466,7 +473,9 @@ io.on('connection', (socket: AuthSocket) => {
       // the HTTP layer — deny without confirming existence.
       try {
         if (!(await adminMayAccessSessionLive(socket, sessionId))) {
-          socketLog.warn(`Denied ${socket.userRole} session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not permitted)`);
+          socketLog.warn(
+            `Denied ${socket.userRole} session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not permitted)`,
+          );
           return;
         }
       } catch (err) {
@@ -531,9 +540,7 @@ io.on('connection', (socket: AuthSocket) => {
       // resolution adminMayAccessSessionLive and GET /admin/api/sideband/status
       // use: orgIdFor on the socket's express session, throwing (-> catch,
       // empty list) rather than widening to an all-orgs read (ai-therapist-278).
-      const orgId = socket.userRole === 'researcher'
-        ? await orgIdFor(socket.request as unknown as Request)
-        : null;
+      const orgId = socket.userRole === 'researcher' ? await orgIdFor(socket.request as unknown as Request) : null;
       let rows = await getSidebandConnectionsByIds(activeSessions, orgId);
 
       // Caseload RBAC: therapists only see their assigned clients' live
@@ -541,14 +548,16 @@ io.on('connection', (socket: AuthSocket) => {
       if (socket.userRole === 'therapist' && socket.userId != null) {
         const caseload = new Set(await getCaseloadClientIds(socket.userId));
         // user_id rides along on the sideband row itself — no per-row lookups.
-        rows = rows.filter(row => row.user_id !== null && row.user_id !== undefined && caseload.has(Number(row.user_id)));
+        rows = rows.filter(
+          (row) => row.user_id !== null && row.user_id !== undefined && caseload.has(Number(row.user_id)),
+        );
       }
 
-      const connections = rows.map(session => ({
+      const connections = rows.map((session) => ({
         sessionId: session.session_id,
         callId: session.openai_call_id,
         connectedAt: session.sideband_connected_at,
-        status: session.sideband_connected ? 'connected' : 'disconnected'
+        status: session.sideband_connected ? 'connected' : 'disconnected',
       }));
 
       socket.emit('admin:sideband-connections', connections);
@@ -572,7 +581,9 @@ io.on('connection', (socket: AuthSocket) => {
     // session:join.
     try {
       if (!(await adminMayAccessSessionLive(socket, String(sessionId)))) {
-        socketLog.warn(`Denied ${socket.userRole} admin:sendMessage for ${String(sessionId).substring(0, 12)}... (${socket.username}: not permitted)`);
+        socketLog.warn(
+          `Denied ${socket.userRole} admin:sendMessage for ${String(sessionId).substring(0, 12)}... (${socket.username}: not permitted)`,
+        );
         return;
       }
     } catch (err) {
@@ -608,7 +619,7 @@ io.on('connection', (socket: AuthSocket) => {
         message,
         messageType, // 'visible' or 'invisible'
         senderName: socket.username,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
     }
 
@@ -623,9 +634,9 @@ io.on('connection', (socket: AuthSocket) => {
         admin_username: socket.username,
         message_type: messageType,
         delivered_via: deliveredVia,
-        sent_at: new Date().toISOString()
+        sent_at: new Date().toISOString(),
       },
-      created_at: new Date()
+      created_at: new Date(),
     };
 
     // Insert admin message into database
@@ -667,7 +678,6 @@ io.on('connection', (socket: AuthSocket) => {
 });
 // ==================== END SOCKET.IO SETUP ====================
 
-
 // ===================== Authentication Routes =====================
 // Login, register, logout, status live in routes/public/auth.routes.ts.
 app.use(authRoutes());
@@ -691,7 +701,6 @@ app.use(mfaRoutes());
 // Per-user rate-limit status -> routes/public/rateLimits.routes.ts.
 app.use(rateLimitsRoutes());
 
-
 // ===================== User Management API Routes =====================
 // /api/users + /api/users/preferences live in routes/public/users.routes.ts.
 app.use(usersRoutes());
@@ -706,16 +715,12 @@ app.use(consentRoutes());
 // Participant progress home (/api/me/*) -> routes/public/progress.routes.ts.
 app.use(progressRoutes());
 
-
 // ===================== Chat-Only Therapy Endpoints =====================
 // Voice-disabled flow (GPT chat completions) -> routes/public/chat.routes.ts.
 app.use(chatRoutes());
 
-
-
 // Admin sideband control (status / live instruction updates) -> routes/admin/sideband.routes.ts.
 app.use(sidebandRoutes());
-
 
 // ===================== Session Management API Routes =====================
 // Public session create/list/view/end + register-call -> routes/public/sessions.routes.ts.
@@ -725,11 +730,8 @@ app.use(liveSessionRoutes());
 app.use(grokSessionRoutes());
 app.use(sessionsRoutes());
 
-
-
 // Participant async secure messaging -> routes/public/messaging.routes.ts.
 app.use(publicMessagingRoutes());
-
 
 // ===================== Logs batch route with redaction =====================
 // Batch message logging + crisis detection -> routes/public/logs.routes.ts.
@@ -740,7 +742,6 @@ app.use(clientEventsRoutes());
 
 // Phase 2 engagement telemetry (flag-gated, default off) -> routes/public/engagementEvents.routes.ts.
 app.use(engagementEventsRoutes());
-
 
 // ===================== Admin API Routes =====================
 
@@ -771,10 +772,8 @@ app.use(weeklyDigestRoutes());
 // Risk-score calibration runs (eval spec WP3) -> routes/admin/riskCalibration.routes.ts.
 app.use(riskCalibrationRoutes());
 
-
 // Research-data export (JSON/CSV) -> routes/admin/export.routes.ts.
 app.use(exportRoutes());
-
 
 // ===================== System Configuration API Routes =====================
 // Public config + voice-preview endpoints are defined in routes/public/.
@@ -786,7 +785,6 @@ app.use(adminConfigRoutes());
 // Versioned IRB consent documents (publish/re-consent) -> routes/admin/consent.routes.ts.
 app.use(adminConsentRoutes());
 
-
 // Content Retention / Data Wipe Endpoints -> routes/admin/contentRetention.routes.ts
 app.use(contentRetentionRoutes());
 
@@ -794,8 +792,6 @@ app.use(contentRetentionRoutes());
 app.use(userSessionsRoutes());
 // Admin rate-limited participants roster -> routes/admin/rateLimits.routes.ts.
 app.use(adminRateLimitsRoutes());
-
-
 
 // Crisis Management API Routes -> routes/admin/crisis.routes.ts
 app.use(crisisRoutes());
@@ -893,7 +889,7 @@ function applyDemoBranding(html: string): string {
 }
 
 async function startProdServer() {
-  log.info("Starting in production mode...");
+  log.info('Starting in production mode...');
 
   // Cache policy: hashed build assets are content-addressed, so cache them
   // forever (immutable); HTML must never be cached or browsers keep loading a
@@ -914,22 +910,32 @@ async function startProdServer() {
   app.use(express.static(path.resolve(__dirname, '../../dist/client'), { index: false, setHeaders: staticCache }));
 
   // Serve admin static assets (CSS, JS) - admin assets are prefixed with "admin-" so no conflicts
-  app.use('/assets', express.static(path.resolve(__dirname, '../../dist/admin-client/assets'), { setHeaders: staticCache }));
+  app.use(
+    '/assets',
+    express.static(path.resolve(__dirname, '../../dist/admin-client/assets'), { setHeaders: staticCache }),
+  );
 
   // Participant app tutorial (onboarding material): a self-contained static
   // page + narrated video at /tutorial. Public by design — participants need
   // it before/without logging in, and it contains no sensitive data. Serving
   // index.html here is fine (it is not the SPA shell; gotcha #6 concerns /).
-  app.use('/tutorial', express.static(path.resolve(__dirname, '../../public/tutorial'), { index: 'index.html', setHeaders: staticCache }));
+  app.use(
+    '/tutorial',
+    express.static(path.resolve(__dirname, '../../public/tutorial'), { index: 'index.html', setHeaders: staticCache }),
+  );
 
   // Only the main app is SSR'd; admin is a plain SPA.
   // @ts-ignore – this module is generated at build time and not available during type-check
-  const { render } = await import('../../dist/server/entry-server.js') as { render: (url: string) => Promise<{ html: string }> };
+  const { render } = (await import('../../dist/server/entry-server.js')) as {
+    render: (url: string) => Promise<{ html: string }>;
+  };
 
   // Admin panel route (demo accounts see a synthetic-data version — see demo.routes.ts)
   app.get('/admin', requireRole('therapist', 'caseworker', 'researcher', 'demo'), (_req, res) => {
     try {
-      const html = applyDemoBranding(fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8'));
+      const html = applyDemoBranding(
+        fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8'),
+      );
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
       log.error({ err: e }, 'Failed to serve the admin panel');
@@ -944,7 +950,9 @@ async function startProdServer() {
   // Handle all other requests with main app SSR.
   app.use('*', async (req, res) => {
     try {
-      const template = applyDemoBranding(fs.readFileSync(path.resolve(__dirname, '../../dist/client/index.html'), 'utf-8'));
+      const template = applyDemoBranding(
+        fs.readFileSync(path.resolve(__dirname, '../../dist/client/index.html'), 'utf-8'),
+      );
       const appHtml = await render(req.originalUrl);
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
@@ -956,11 +964,11 @@ async function startProdServer() {
 }
 
 async function startDevServer() {
-  log.info("Starting in development mode...");
+  log.info('Starting in development mode...');
 
   const vite = await createViteServer({
     server: { middlewareMode: true },
-    appType: "custom",
+    appType: 'custom',
   });
   app.use(vite.middlewares);
 
@@ -968,15 +976,15 @@ async function startDevServer() {
   // demo.routes.ts). Admin is a plain SPA — no SSR pass, just the transformed
   // template with the entry script pointed at its real location (Vite's root
   // is src/client/main, so the relative src in admin.html won't resolve).
-  app.get("/admin", requireRole('therapist', 'caseworker', 'researcher', 'demo'), async (req, res, next) => {
+  app.get('/admin', requireRole('therapist', 'caseworker', 'researcher', 'demo'), async (req, res, next) => {
     try {
-      let template = fs.readFileSync(path.resolve(__dirname, "../client/admin/admin.html"), "utf-8");
+      let template = fs.readFileSync(path.resolve(__dirname, '../client/admin/admin.html'), 'utf-8');
       template = template.replace(
         'src="./admin-entry-client.tsx"',
-        'src="/@fs' + path.resolve(__dirname, "../client/admin/admin-entry-client.tsx") + '"'
+        'src="/@fs' + path.resolve(__dirname, '../client/admin/admin-entry-client.tsx') + '"',
       );
       const html = applyDemoBranding(await vite.transformIndexHtml(req.originalUrl, template));
-      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
     } catch (e: unknown) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
@@ -985,23 +993,23 @@ async function startDevServer() {
 
   // The standalone /redact app was merged into admin (Research > Redaction
   // Review); redirect old bookmarks. /redact/api/* stays (redaction.routes.ts).
-  app.get("/redact", (_req, res) => res.redirect('/admin'));
+  app.get('/redact', (_req, res) => res.redirect('/admin'));
 
   // Main app SSR (catch-all)
-  app.use("/", async (req, res, next) => {
+  app.use('/', async (req, res, next) => {
     try {
       const template = await vite.transformIndexHtml(
         req.originalUrl,
-        fs.readFileSync(path.resolve(__dirname, "../client/main/index.html"), "utf-8")
+        fs.readFileSync(path.resolve(__dirname, '../client/main/index.html'), 'utf-8'),
       );
       // Make sure the path here is relative to the project root for ssrLoadModule
-      const { render } = await vite.ssrLoadModule("src/client/main/entry-server.jsx");
+      const { render } = await vite.ssrLoadModule('src/client/main/entry-server.jsx');
       const appHtml = await render(req.originalUrl);
 
       // This line is the critical fix
       const html = applyDemoBranding(template.replace(`<!--ssr-outlet-->`, appHtml?.html));
 
-      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
     } catch (e: unknown) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
@@ -1012,7 +1020,7 @@ async function startDevServer() {
 // --- Main Server Initialization ---
 
 async function initializeServer() {
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === 'production') {
     await startProdServer();
   } else {
     await startDevServer();
@@ -1106,14 +1114,14 @@ if (isEntrypoint) {
     // the schedule on. Manual evals (admin POST /eval, CLI) work everywhere.
     if (process.env.SOCKET_PG_ADAPTER !== 'off' && process.env.EVALS_ENABLED === 'true') {
       import('./services/harnessRunner.service.js')
-        .then(m => m.startHarnessScheduler())
-        .catch(err => log.error({ err }, 'Failed to start harness scheduler'));
+        .then((m) => m.startHarnessScheduler())
+        .catch((err) => log.error({ err }, 'Failed to start harness scheduler'));
       // Weekly PI digest (config-gated via evals.digest_schedule, default off;
       // eval spec WP7). Same stage-only gate: the digest reads eval tables
       // that only fill where automatic evals run.
       import('./services/weeklyDigest.service.js')
-        .then(m => m.startWeeklyDigestScheduler())
-        .catch(err => log.error({ err }, 'Failed to start weekly digest scheduler'));
+        .then((m) => m.startWeeklyDigestScheduler())
+        .catch((err) => log.error({ err }, 'Failed to start weekly digest scheduler'));
     } else if (process.env.SOCKET_PG_ADAPTER !== 'off') {
       log.info('Automatic evals disabled (EVALS_ENABLED not set) — stage-only feature');
     }

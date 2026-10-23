@@ -45,7 +45,9 @@ function appAs(role: string | null) {
 beforeEach(() => {
   setEnabledMock.mockReset();
   isAssignedMock.mockReset().mockResolvedValue(true);
-  getSessionAccessInfoMock.mockReset().mockResolvedValue({ status: 'ended', user_id: 42, session_type: 'realtime', owner_organization_id: 1 });
+  getSessionAccessInfoMock
+    .mockReset()
+    .mockResolvedValue({ status: 'ended', user_id: 42, session_type: 'realtime', owner_organization_id: 1 });
   getOrgForUserMock.mockReset().mockResolvedValue(1);
 });
 

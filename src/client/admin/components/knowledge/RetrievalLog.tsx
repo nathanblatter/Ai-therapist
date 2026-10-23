@@ -44,17 +44,27 @@ export default function RetrievalLog() {
       const params = new URLSearchParams();
       if (tool !== 'all') params.set('tool', tool);
       if (appliedSessionId) params.set('sessionId', appliedSessionId);
-      const data = await getJson<{ stats?: RerankStats | null; decisions?: Decision[] }>(`/admin/api/knowledge/rerank-decisions?${params}`);
+      const data = await getJson<{ stats?: RerankStats | null; decisions?: Decision[] }>(
+        `/admin/api/knowledge/rerank-decisions?${params}`,
+      );
       setStats(data.stats ?? null);
       setDecisions(data.decisions ?? []);
     } catch (e) {
-      setError(e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load retrieval log');
+      setError(
+        e instanceof HttpError
+          ? `Failed to load (${e.status})`
+          : e instanceof Error
+            ? e.message
+            : 'Failed to load retrieval log',
+      );
     } finally {
       setLoading(false);
     }
   }, [tool, appliedSessionId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const pct = (v: number) => `${(v * 100).toFixed(0)}%`;
 
@@ -77,32 +87,54 @@ export default function RetrievalLog() {
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <p className="text-xs text-gray-500">p95 latency</p>
-          <p className="text-2xl font-bold text-gray-900">{stats?.p95_latency_ms != null ? `${stats.p95_latency_ms}ms` : '–'}</p>
+          <p className="text-2xl font-bold text-gray-900">
+            {stats?.p95_latency_ms != null ? `${stats.p95_latency_ms}ms` : '–'}
+          </p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <select value={tool} onChange={e => setTool(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
-          {TOOLS.map(t => <option key={t} value={t}>{t === 'all' ? 'All tools' : t}</option>)}
+        <select
+          value={tool}
+          onChange={(e) => setTool(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+        >
+          {TOOLS.map((t) => (
+            <option key={t} value={t}>
+              {t === 'all' ? 'All tools' : t}
+            </option>
+          ))}
         </select>
         <form
-          onSubmit={e => { e.preventDefault(); setAppliedSessionId(sessionId.trim()); }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            setAppliedSessionId(sessionId.trim());
+          }}
           className="flex items-center gap-2"
         >
           <input
             type="text"
             value={sessionId}
-            onChange={e => setSessionId(e.target.value)}
+            onChange={(e) => setSessionId(e.target.value)}
             placeholder="Filter by session id"
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-64"
           />
-          <button type="submit" className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">
+          <button
+            type="submit"
+            className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+          >
             Filter
           </button>
           {appliedSessionId && (
-            <button type="button" onClick={() => { setSessionId(''); setAppliedSessionId(''); }}
-              className="text-xs text-gray-500 hover:underline">
+            <button
+              type="button"
+              onClick={() => {
+                setSessionId('');
+                setAppliedSessionId('');
+              }}
+              className="text-xs text-gray-500 hover:underline"
+            >
               Clear
             </button>
           )}
@@ -114,7 +146,9 @@ export default function RetrievalLog() {
       {loading ? (
         <div className="text-gray-500 p-8 text-center">Loading…</div>
       ) : decisions.length === 0 ? (
-        <div className="text-gray-500 p-8 text-center bg-white rounded-lg shadow">No rerank decisions match this filter.</div>
+        <div className="text-gray-500 p-8 text-center bg-white rounded-lg shadow">
+          No rerank decisions match this filter.
+        </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-x-auto">
           <table className="w-full text-sm">
@@ -130,14 +164,19 @@ export default function RetrievalLog() {
               </tr>
             </thead>
             <tbody>
-              {decisions.map(d => (
+              {decisions.map((d) => (
                 <tr key={d.decision_id} className="border-b last:border-0 align-top">
                   <td className="py-2 px-3 text-gray-600 whitespace-nowrap">{formatDateTime(d.created_at)}</td>
-                  <td className="py-2 px-3 text-gray-500 font-mono text-xs max-w-[10rem] truncate" title={d.session_id ?? ''}>
+                  <td
+                    className="py-2 px-3 text-gray-500 font-mono text-xs max-w-[10rem] truncate"
+                    title={d.session_id ?? ''}
+                  >
                     {d.session_id ?? '–'}
                   </td>
                   <td className="py-2 px-3 text-gray-700">{d.tool_name}</td>
-                  <td className="py-2 px-3 text-gray-600 max-w-xs truncate" title={d.query}>{d.query}</td>
+                  <td className="py-2 px-3 text-gray-600 max-w-xs truncate" title={d.query}>
+                    {d.query}
+                  </td>
                   <td className="py-2 px-3 text-gray-600 whitespace-nowrap">
                     {d.candidates.length} → {d.chosen.join(', ') || '–'}
                   </td>
@@ -150,7 +189,9 @@ export default function RetrievalLog() {
                       <span className="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-700">reranked</span>
                     )}
                   </td>
-                  <td className="py-2 px-3 text-gray-600 whitespace-nowrap">{d.latency_ms != null ? `${d.latency_ms}ms` : '–'}</td>
+                  <td className="py-2 px-3 text-gray-600 whitespace-nowrap">
+                    {d.latency_ms != null ? `${d.latency_ms}ms` : '–'}
+                  </td>
                 </tr>
               ))}
             </tbody>

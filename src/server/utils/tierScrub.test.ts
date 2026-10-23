@@ -40,12 +40,23 @@ describe('projectRow / projectRows', () => {
 describe('summary allowlists never contain verbatim-bearing columns', () => {
   const VERBATIM_COLUMNS = [
     // crisis_events / intervention_actions / risk_score_history
-    'risk_factors', 'intervention_details', 'notes', 'action_details', 'score_factors',
+    'risk_factors',
+    'intervention_details',
+    'notes',
+    'action_details',
+    'score_factors',
     // session_insights clinical documentation
-    'soap_note', 'soap_status', 'soap_reviewed_by', 'soap_reviewed_at',
-    'notes_for_next_session', 'notes_author', 'notes_created_at',
+    'soap_note',
+    'soap_status',
+    'soap_reviewed_by',
+    'soap_reviewed_at',
+    'notes_for_next_session',
+    'notes_author',
+    'notes_created_at',
     // raw content columns, should any join ever drag them in
-    'content', 'content_redacted', 'transcript_excerpt',
+    'content',
+    'content_redacted',
+    'transcript_excerpt',
   ];
 
   for (const [name, allow] of [

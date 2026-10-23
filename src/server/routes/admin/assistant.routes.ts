@@ -48,7 +48,9 @@ export default function assistantRoutes(): Router {
       }
       const messages = parseHistory(req.body?.messages);
       if (!messages) {
-        return res.status(400).json({ error: 'messages must be 1-20 user/assistant turns ending with a user message.' });
+        return res
+          .status(400)
+          .json({ error: 'messages must be 1-20 user/assistant turns ending with a user message.' });
       }
       try {
         const ctx: AssistantContext = {
@@ -63,7 +65,7 @@ export default function assistantRoutes(): Router {
         log.error({ err }, 'assistant turn failed');
         res.status(502).json({ error: 'The assistant is unavailable right now. Try again shortly.' });
       }
-    }
+    },
   );
 
   return router;

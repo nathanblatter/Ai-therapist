@@ -33,7 +33,7 @@ export async function getActiveUserSessions(orgId: number): Promise<UserSessionR
      ${OWNER_JOIN}
      WHERE ${orgScopeSql('$1')}
      ORDER BY s.expire DESC`,
-    [orgId]
+    [orgId],
   );
   return result.rows;
 }
@@ -53,7 +53,7 @@ export async function deleteUserSession(sid: string, orgId: number): Promise<str
          WHERE s.sid = $1 AND ${orgScopeSql('$2')}
        )
      RETURNING sid`,
-    [sid, orgId]
+    [sid, orgId],
   );
   return result.rows[0]?.sid ?? null;
 }

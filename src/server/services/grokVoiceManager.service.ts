@@ -61,8 +61,11 @@ import { insertMessagesBatch } from '../db/index.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { grokRealtimeUrl } from '../utils/grokVoiceConfig.js';
 import {
-  GROK_DEFAULT_REFUSAL_GUARD, GROK_REFUSAL_STEER, GrokRefusalDetector,
-  buildGrokRefusalRecoveryLine, type GrokRefusalGuardConfig,
+  GROK_DEFAULT_REFUSAL_GUARD,
+  GROK_REFUSAL_STEER,
+  GrokRefusalDetector,
+  buildGrokRefusalRecoveryLine,
+  type GrokRefusalGuardConfig,
 } from '../utils/grokRefusalGuard.js';
 import type { VoiceSidebandDelegate } from './sidebandManager.service.js';
 import type { GrokServerMessage } from '../../shared/grokVoiceProtocol.js';
@@ -309,7 +312,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
     client.on('message', (data, isBinary) => this.handleClientMessage(sessionId, data, isBinary));
     client.on('close', () => void this.handleClientClose(sessionId));
-    client.on('error', err => console.error(`[Grok] Client socket error for ${short}...:`, err.message));
+    client.on('error', (err) => console.error(`[Grok] Client socket error for ${short}...:`, err.message));
 
     if (state.everReady) {
       // Re-attach. The xAI session never noticed: audio simply resumes. If the
@@ -322,9 +325,16 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       if (state.resuming) this.sendToClient(sessionId, { type: 'link', state: 'reconnecting' });
       this.broadcastStatus(sessionId, 'connected', `Participant reconnected (${state.clientReconnects})`);
       if (global.io) {
-        void broadcastAdminEventForSession(global.io, 'session:activity', {
-          sessionId, lastActivity: new Date(), deltaMessages: 0,
-        }, sessionId);
+        void broadcastAdminEventForSession(
+          global.io,
+          'session:activity',
+          {
+            sessionId,
+            lastActivity: new Date(),
+            deltaMessages: 0,
+          },
+          sessionId,
+        );
       }
       return;
     }
@@ -334,8 +344,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     } catch (err) {
       console.error(`[Grok] Upstream open FAILED for ${short}...:`, err instanceof Error ? err.message : err);
       this.sendToClient(sessionId, { type: 'error', message: 'Could not reach the voice service.' });
-      await this.failClosed(sessionId, 'upstream_unavailable',
-        'We could not connect to the voice service. Please try again in a moment.');
+      await this.failClosed(
+        sessionId,
+        'upstream_unavailable',
+        'We could not connect to the voice service. Please try again in a moment.',
+      );
     }
   }
 
@@ -358,18 +371,32 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     // (resume, or a participant end racing a re-dial) its late events are
     // ignored rather than persisted, metered or treated as a fresh loss.
     const current = () => this.sessions.get(sessionId)?.upstream === ws;
-    ws.on('message', data => { if (current()) void this.handleUpstreamMessage(sessionId, data); });
-    ws.on('error', err => { if (current()) void this.handleUpstreamError(sessionId, err); });
-    ws.on('close', (code, reason) => { if (current()) void this.handleUpstreamClose(sessionId, code, reason); });
+    ws.on('message', (data) => {
+      if (current()) void this.handleUpstreamMessage(sessionId, data);
+    });
+    ws.on('error', (err) => {
+      if (current()) void this.handleUpstreamError(sessionId, err);
+    });
+    ws.on('close', (code, reason) => {
+      if (current()) void this.handleUpstreamClose(sessionId, code, reason);
+    });
     ws.on('unexpected-response', (_req, res) => {
       let body = '';
-      res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      res.on('data', (chunk: Buffer) => {
+        body += chunk.toString();
+      });
       res.on('end', () => {
-        console.error(`[Grok] Upstream upgrade rejected: HTTP ${res.statusCode} for ${short}... — ${body || '(empty body)'}`);
+        console.error(
+          `[Grok] Upstream upgrade rejected: HTTP ${res.statusCode} for ${short}... — ${body || '(empty body)'}`,
+        );
         // ws only aborts the handshake itself when nothing listens for this
         // event; with a listener registered we must terminate explicitly or
         // the socket sits in CONNECTING and neither 'close' nor 'error' fires.
-        try { ws.terminate(); } catch { /* already gone */ }
+        try {
+          ws.terminate();
+        } catch {
+          /* already gone */
+        }
       });
     });
 
@@ -377,17 +404,29 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       const timer = setTimeout(() => {
         cleanup();
         if (state.upstream === ws) state.upstream = null;
-        try { ws.terminate(); } catch { /* ignore */ }
+        try {
+          ws.terminate();
+        } catch {
+          /* ignore */
+        }
         reject(new Error(`xAI socket did not open within ${this.upstreamOpenTimeoutMs}ms`));
       }, this.upstreamOpenTimeoutMs);
       timer.unref?.();
-      const onOpen = () => { cleanup(); resolve(); };
+      const onOpen = () => {
+        cleanup();
+        resolve();
+      };
       const onFail = () => {
         cleanup();
         if (state.upstream === ws) state.upstream = null;
         reject(new Error('xAI socket closed before opening'));
       };
-      const cleanup = () => { clearTimeout(timer); ws.off('open', onOpen); ws.off('close', onFail); ws.off('error', onFail); };
+      const cleanup = () => {
+        clearTimeout(timer);
+        ws.off('open', onOpen);
+        ws.off('close', onFail);
+        ws.off('error', onFail);
+      };
       ws.once('open', onOpen);
       ws.once('close', onFail);
       ws.once('error', onFail);
@@ -396,7 +435,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     if (state.ended || state.endRequested || state.upstream !== ws) {
       // The session ended (or the participant pressed end) while the socket
       // was opening. Never leave a billable orphan at xAI.
-      try { ws.close(1000, 'Session ended'); } catch { /* ignore */ }
+      try {
+        ws.close(1000, 'Session ended');
+      } catch {
+        /* ignore */
+      }
       if (state.upstream === ws) state.upstream = null;
       return;
     }
@@ -442,9 +485,17 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         break;
       case 'mic':
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'session:activity', {
-            sessionId, lastActivity: new Date(), deltaMessages: 0, mic: msg.on === true,
-          }, sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:activity',
+            {
+              sessionId,
+              lastActivity: new Date(),
+              deltaMessages: 0,
+              mic: msg.on === true,
+            },
+            sessionId,
+          );
         }
         break;
       default:
@@ -473,8 +524,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     // (attachClient); the assistant's audio in between is dropped (nobody is
     // listening), its transcript is still persisted. The window bounds the
     // billing exposure; past it the session ends, fail closed.
-    this.broadcastStatus(sessionId, 'client_reconnecting',
-      `Participant socket lost; waiting up to ${Math.round(state.reconnectWindowMs / 1000)} s for a reconnect`);
+    this.broadcastStatus(
+      sessionId,
+      'client_reconnecting',
+      `Participant socket lost; waiting up to ${Math.round(state.reconnectWindowMs / 1000)} s for a reconnect`,
+    );
     // While the upstream is itself being resumed its deadline (the same timer
     // slot) already bounds everything; the browser's window is armed when the
     // resume completes (onUpstreamResumed).
@@ -521,10 +575,9 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
           // Model pinning (ai-therapist-61): record the exact model the alias
           // resolved to, so the session stays reproducible when xAI moves the
           // alias mid-study.
-          await pool.query(
-            'UPDATE session_configurations SET ai_model = $1 WHERE session_id = $2',
-            [session.model, sessionId],
-          ).catch(err => console.error('[Grok] Failed to pin resolved model:', err));
+          await pool
+            .query('UPDATE session_configurations SET ai_model = $1 WHERE session_id = $2', [session.model, sessionId])
+            .catch((err) => console.error('[Grok] Failed to pin resolved model:', err));
         }
         break;
       }
@@ -540,7 +593,9 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
           // xAI minted a NEW conversation for the re-dial: the cache was not
           // honoured (expired, or the id was unknown). Record it so the live
           // results are honest, and key any further resume to the new id.
-          console.warn(`[Grok] ${sessionId.substring(0, 12)}... resume produced a new conversation ${conversation.id} (was ${state.conversationId})`);
+          console.warn(
+            `[Grok] ${sessionId.substring(0, 12)}... resume produced a new conversation ${conversation.id} (was ${state.conversationId})`,
+          );
           state.conversationId = conversation.id;
         }
         break;
@@ -558,7 +613,9 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         if (state.resuming) {
           state.replayedItems += 1;
           const item = event.item as { id?: string; type?: string; role?: string } | undefined;
-          console.log(`[Grok] ${sessionId.substring(0, 12)}... replayed item ${item?.id ?? '?'} (${item?.type ?? '?'}${item?.role ? `/${item.role}` : ''})`);
+          console.log(
+            `[Grok] ${sessionId.substring(0, 12)}... replayed item ${item?.id ?? '?'} (${item?.type ?? '?'}${item?.role ? `/${item.role}` : ''})`,
+          );
         }
         break;
       }
@@ -568,9 +625,16 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         state.ready = true;
         state.everReady = true;
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'session:openai-update', {
-            sessionId, eventType: event.type, data: event,
-          }, sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:openai-update',
+            {
+              sessionId,
+              eventType: event.type,
+              data: event,
+            },
+            sessionId,
+          );
         }
         if (first) {
           this.sendToClient(sessionId, { type: 'ready', model: state.resolvedModel ?? state.model });
@@ -589,7 +653,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         this.sendToClient(sessionId, { type: 'speech_started' });
         if (state.responseInFlight) {
           state.responseInFlight = false;
-          try { this.sendUpstream(sessionId, { type: 'response.cancel' }); } catch { /* closing */ }
+          try {
+            this.sendUpstream(sessionId, { type: 'response.cancel' });
+          } catch {
+            /* closing */
+          }
         }
         this.finalizeAssistantTurn(sessionId, 'interrupted');
         break;
@@ -692,13 +760,24 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
           break;
         }
         console.error(`[Grok] API error for ${sessionId.substring(0, 12)}...:`, err ?? event);
-        await pool.query(
-          'UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2',
-          [err?.message ?? JSON.stringify(event).slice(0, 500), sessionId],
-        ).catch(() => {});
-        this.sendToClient(sessionId, { type: 'error', message: err?.message ?? 'Voice service error', code: err?.code ?? null });
+        await pool
+          .query('UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2', [
+            err?.message ?? JSON.stringify(event).slice(0, 500),
+            sessionId,
+          ])
+          .catch(() => {});
+        this.sendToClient(sessionId, {
+          type: 'error',
+          message: err?.message ?? 'Voice service error',
+          code: err?.code ?? null,
+        });
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'sideband:error', { sessionId, error: err ?? event }, sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'sideband:error',
+            { sessionId, error: err ?? event },
+            sessionId,
+          );
         }
         break;
       }
@@ -723,9 +802,18 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       console.error('[Grok] Failed to mark session monitored:', err);
     }
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:connected', {
-        sessionId, callId: null, channel: 'grok', model: state.resolvedModel ?? state.model, connectedAt: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:connected',
+        {
+          sessionId,
+          callId: null,
+          channel: 'grok',
+          model: state.resolvedModel ?? state.model,
+          connectedAt: new Date(),
+        },
+        sessionId,
+      );
     }
     await this.schedulePhaseNudges(sessionId);
 
@@ -763,10 +851,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       // An item id seen on an earlier leg (a resumed upstream replaying what
       // it cached) is never a new utterance either (ai-therapist-245).
       const sameItem = prev?.itemId === itemId || state.seenUserItems.has(itemId);
-      const echoedBeforeAnyReply = prev
-        && prev.text === text
-        && now - prev.at < USER_TURN_DEDUPE_MS
-        && prev.assistantTurnIndex === state.assistantTurnIndex;
+      const echoedBeforeAnyReply =
+        prev &&
+        prev.text === text &&
+        now - prev.at < USER_TURN_DEDUPE_MS &&
+        prev.assistantTurnIndex === state.assistantTurnIndex;
       if (sameItem || echoedBeforeAnyReply) {
         console.log(`[Grok] duplicate user transcript dropped for ${sessionId.substring(0, 12)}... (${itemId})`);
         return;
@@ -780,15 +869,17 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     void (async () => {
       let messageId: string | number | null = null;
       try {
-        const inserted = await insertMessagesBatch([{
-          session_id: sessionId,
-          role: 'user',
-          // 'voice' so analytics count this as a voice turn (see sidebandManager).
-          message_type: 'voice',
-          content: text,
-          content_redacted: null,
-          metadata: { channel: 'grok', item_id: itemId },
-        }]);
+        const inserted = await insertMessagesBatch([
+          {
+            session_id: sessionId,
+            role: 'user',
+            // 'voice' so analytics count this as a voice turn (see sidebandManager).
+            message_type: 'voice',
+            content: text,
+            content_redacted: null,
+            metadata: { channel: 'grok', item_id: itemId },
+          },
+        ]);
         messageId = inserted?.[0]?.message_id ?? null;
       } catch (err) {
         console.error(`[Grok] Failed to persist user turn for ${sessionId.substring(0, 12)}...:`, err);
@@ -823,14 +914,18 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
     state.assistantTurnIndex += 1;
     this.emitTranscript(sessionId, { role: 'assistant', itemId, text, final: true });
-    void insertMessagesBatch([{
-      session_id: sessionId,
-      role: 'assistant',
-      message_type: 'response',
-      content: text,
-      content_redacted: null,
-      metadata: { channel: 'grok', item_id: itemId },
-    }]).catch(err => console.error(`[Grok] Failed to persist assistant turn for ${sessionId.substring(0, 12)}...:`, err));
+    void insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'assistant',
+        message_type: 'response',
+        content: text,
+        content_redacted: null,
+        metadata: { channel: 'grok', item_id: itemId },
+      },
+    ]).catch((err) =>
+      console.error(`[Grok] Failed to persist assistant turn for ${sessionId.substring(0, 12)}...:`, err),
+    );
 
     // Only a turn the model actually finished says anything about a refusal
     // loop; a turn cut short by barge-in or teardown is truncated by us.
@@ -859,12 +954,16 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     // the top (steer, then recovery) instead of repeating our own line on every
     // further refusal, and the counter cannot drift while delivery awaits.
     if (action === 'recover') state.refusal.reset();
-    void this.breakRefusalLoop(sessionId, action, text, streak).catch(err =>
-      console.error(`[Grok] Refusal recovery failed for ${sessionId.substring(0, 12)}...:`, err));
+    void this.breakRefusalLoop(sessionId, action, text, streak).catch((err) =>
+      console.error(`[Grok] Refusal recovery failed for ${sessionId.substring(0, 12)}...:`, err),
+    );
   }
 
   private async breakRefusalLoop(
-    sessionId: string, action: 'steer' | 'recover', refusalText: string, streak: number,
+    sessionId: string,
+    action: 'steer' | 'recover',
+    refusalText: string,
+    streak: number,
   ): Promise<void> {
     const state = this.sessions.get(sessionId);
     if (!state || state.ended) return;
@@ -872,11 +971,19 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     console.warn(`[Grok] Refusal loop for ${short}...: ${streak} in a row; action=${action}`);
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:status-update', {
-        sessionId, status: 'refusal_loop', action, streak,
-        error: `Model refused ${streak} turns in a row: ${refusalText.slice(0, 200)}`,
-        timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:status-update',
+        {
+          sessionId,
+          status: 'refusal_loop',
+          action,
+          streak,
+          error: `Model refused ${streak} turns in a row: ${refusalText.slice(0, 200)}`,
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
 
     if (action === 'steer') {
@@ -894,20 +1001,25 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     state.assistantTurnIndex += 1;
     const itemId = `grok-recovery-${state.assistantTurnIndex}`;
     this.emitTranscript(sessionId, { role: 'assistant', itemId, text: line, final: true });
-    await insertMessagesBatch([{
-      session_id: sessionId,
-      role: 'assistant',
-      message_type: 'response',
-      content: line,
-      content_redacted: null,
-      metadata: { channel: 'grok', item_id: itemId, server_authored: true, reason: 'refusal_loop' },
-    }]).catch(err => console.error('[Grok] Failed to persist refusal recovery line:', err));
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'assistant',
+        message_type: 'response',
+        content: line,
+        content_redacted: null,
+        metadata: { channel: 'grok', item_id: itemId, server_authored: true, reason: 'refusal_loop' },
+      },
+    ]).catch((err) => console.error('[Grok] Failed to persist refusal recovery line:', err));
 
     // Visible to admins alongside crisis interventions.
     try {
       const { logInterventionAction } = await import('./crisisDetection.service.js');
       await logInterventionAction(sessionId, 'voice_refusal_recovery', {
-        channel: 'grok', streak, refusal: refusalText.slice(0, 500), delivered: 'transcript',
+        channel: 'grok',
+        streak,
+        refusal: refusalText.slice(0, 500),
+        delivered: 'transcript',
       });
     } catch (err) {
       console.error('[Grok] Failed to log refusal intervention:', err);
@@ -926,17 +1038,29 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     if (!global.io) return;
     // Same event shape the GPT-Live sideband emits, so LiveMonitoring needs no
     // changes: deltas accumulate on the row keyed by itemId, finals replace it.
-    void broadcastAdminEventForSession(global.io, 'sideband:transcript', {
+    void broadcastAdminEventForSession(
+      global.io,
+      'sideband:transcript',
+      {
+        sessionId,
+        itemId: payload.itemId,
+        role: payload.role,
+        ...(payload.final ? { text: payload.text } : { delta: payload.text }),
+        final: payload.final,
+        timestamp: new Date(),
+      },
       sessionId,
-      itemId: payload.itemId,
-      role: payload.role,
-      ...(payload.final ? { text: payload.text } : { delta: payload.text }),
-      final: payload.final,
-      timestamp: new Date(),
-    }, sessionId);
-    void broadcastAdminEventForSession(global.io, 'session:activity', {
-      sessionId, lastActivity: new Date(), deltaMessages: payload.final ? 1 : 0,
-    }, sessionId);
+    );
+    void broadcastAdminEventForSession(
+      global.io,
+      'session:activity',
+      {
+        sessionId,
+        lastActivity: new Date(),
+        deltaMessages: payload.final ? 1 : 0,
+      },
+      sessionId,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -960,19 +1084,31 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     // stays here, so the model receives exactly one result per call.
     this.sendToClient(sessionId, { type: 'tool_call', callId, name: call.name, args });
 
-    await insertMessagesBatch([{
-      session_id: sessionId,
-      role: 'system',
-      message_type: 'tool_call',
-      content: `Tool called: ${call.name}`,
-      content_redacted: null,
-      metadata: { tool_name: call.name, call_id: callId, arguments: args, channel: 'grok', status: 'executing' },
-    }]).catch(err => console.error('[Grok] Failed to log tool call:', err));
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'system',
+        message_type: 'tool_call',
+        content: `Tool called: ${call.name}`,
+        content_redacted: null,
+        metadata: { tool_name: call.name, call_id: callId, arguments: args, channel: 'grok', status: 'executing' },
+      },
+    ]).catch((err) => console.error('[Grok] Failed to log tool call:', err));
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
-        sessionId, callId, toolName: call.name, args, status: 'executing', timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:tool-call',
+        {
+          sessionId,
+          callId,
+          toolName: call.name,
+          args,
+          status: 'executing',
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
 
     let result: unknown;
@@ -1002,29 +1138,41 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       console.error(`[Grok] Failed to return tool result for ${call.name}:`, err);
     }
 
-    await insertMessagesBatch([{
-      session_id: sessionId,
-      role: 'system',
-      message_type: 'tool_response',
-      content: failure ? `Tool error: ${call.name}` : `Tool response: ${call.name}`,
-      content_redacted: null,
-      metadata: {
-        tool_name: call.name, call_id: callId, channel: 'grok',
-        ...(failure ? { error: failure, status: 'failed' } : { response: result, status: 'completed' }),
+    await insertMessagesBatch([
+      {
+        session_id: sessionId,
+        role: 'system',
+        message_type: 'tool_response',
+        content: failure ? `Tool error: ${call.name}` : `Tool response: ${call.name}`,
+        content_redacted: null,
+        metadata: {
+          tool_name: call.name,
+          call_id: callId,
+          channel: 'grok',
+          ...(failure ? { error: failure, status: 'failed' } : { response: result, status: 'completed' }),
+        },
       },
-    }]).catch(err => console.error('[Grok] Failed to log tool response:', err));
+    ]).catch((err) => console.error('[Grok] Failed to log tool response:', err));
 
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:tool-call', {
-        sessionId, callId, toolName: call.name, args,
-        ...(failure ? { error: failure, status: 'failed' } : { result, status: 'completed' }),
-        timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:tool-call',
+        {
+          sessionId,
+          callId,
+          toolName: call.name,
+          args,
+          ...(failure ? { error: failure, status: 'failed' } : { result, status: 'completed' }),
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
 
     import('../db/index.js')
-      .then(db => db.insertToolInvocation(sessionId, call.name, failure ? null : args, !failure))
-      .catch(err => console.error('[Grok] Failed to log tool invocation:', err));
+      .then((db) => db.insertToolInvocation(sessionId, call.name, failure ? null : args, !failure))
+      .catch((err) => console.error('[Grok] Failed to log tool invocation:', err));
   }
 
   // -------------------------------------------------------------------------
@@ -1042,9 +1190,13 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     const state = this.sessions.get(sessionId);
     if (!state) return;
     const response = event.response as { id?: string } | undefined;
-    const usage = event.usage as {
-      input_tokens?: number; output_tokens?: number; billable_audio_seconds?: number;
-    } | undefined;
+    const usage = event.usage as
+      | {
+          input_tokens?: number;
+          output_tokens?: number;
+          billable_audio_seconds?: number;
+        }
+      | undefined;
     if (!usage) return;
 
     const model = state.resolvedModel ?? state.model;
@@ -1060,8 +1212,12 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         state.legFresh = false;
         if (state.legBase > 0) {
           const carried = secs >= state.legBase;
-          console.log(`[Grok] ${sessionId.substring(0, 12)}... first usage on resumed leg: ${secs} s ` +
-            (carried ? `(counter carried across the resume; previous total ${state.legBase} s)` : `(counter restarted; offset ${state.legBase} s)`));
+          console.log(
+            `[Grok] ${sessionId.substring(0, 12)}... first usage on resumed leg: ${secs} s ` +
+              (carried
+                ? `(counter carried across the resume; previous total ${state.legBase} s)`
+                : `(counter restarted; offset ${state.legBase} s)`),
+          );
           if (carried) state.legBase = 0;
         }
         state.legSeconds = 0;
@@ -1097,8 +1253,12 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     try {
       const { insertTurnLatency } = await import('../db/latency.queries.js');
       await insertTurnLatency({
-        sessionId, turnIndex: state.userTurnIndex, userDoneAt, firstOutputAt,
-        responseDoneAt: new Date(), channel: 'realtime',
+        sessionId,
+        turnIndex: state.userTurnIndex,
+        userDoneAt,
+        firstOutputAt,
+        responseDoneAt: new Date(),
+        channel: 'realtime',
       });
     } catch (err) {
       console.error('[Grok] turn latency record failed:', err);
@@ -1110,7 +1270,8 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     if (!state) return;
     const { recordLiveUsage } = await import('../db/liveUsage.queries.js');
     await recordLiveUsage(sessionId, state.resolvedModel ?? state.model, state.billableSeconds, {
-      finalized: true, closeReason,
+      finalized: true,
+      closeReason,
     });
   }
 
@@ -1128,7 +1289,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
   }
 
   getActiveConnections(): string[] {
-    return Array.from(this.sessions.keys()).filter(id => this.isConnected(id));
+    return Array.from(this.sessions.keys()).filter((id) => this.isConnected(id));
   }
 
   /** Latest cumulative billable seconds, or null when not tracked. */
@@ -1170,7 +1331,9 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       // the reconnect window, after which the session ends and the queue dies
       // with it).
       state.queuedSteers.push({ role, text, respond });
-      console.log(`[Grok] steer queued during resume for ${sessionId.substring(0, 12)}... (${state.queuedSteers.length} pending)`);
+      console.log(
+        `[Grok] steer queued during resume for ${sessionId.substring(0, 12)}... (${state.queuedSteers.length} pending)`,
+      );
       return true;
     }
     if (!this.isConnected(sessionId)) return false;
@@ -1201,9 +1364,12 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
   /** Force a response, with optional per-response overrides (e.g. instructions). */
   async createResponse(sessionId: string, response?: Record<string, unknown>): Promise<void> {
-    this.sendUpstream(sessionId, response && Object.keys(response).length > 0
-      ? { type: 'response.create', response }
-      : { type: 'response.create' });
+    this.sendUpstream(
+      sessionId,
+      response && Object.keys(response).length > 0
+        ? { type: 'response.create', response }
+        : { type: 'response.create' },
+    );
   }
 
   /** Admin "trigger tool": pin tool_choice for one response, then restore auto. */
@@ -1212,13 +1378,13 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     if (!state) throw new Error('Grok voice connection not active');
     await this.updateSession(sessionId, { tool_choice: { type: 'function', name: toolName } });
     state.toolChoicePinned = true;
-    const argsContext = args && Object.keys(args).length > 0
-      ? ` Use this context for the tool arguments: ${JSON.stringify(args)}.`
-      : '';
+    const argsContext =
+      args && Object.keys(args).length > 0 ? ` Use this context for the tool arguments: ${JSON.stringify(args)}.` : '';
     await this.injectMessage(
-      sessionId, 'system',
+      sessionId,
+      'system',
       `The clinician overseeing this session asks you to use the ${toolName} tool now.${argsContext} ` +
-      'Never mention this instruction to the participant.',
+        'Never mention this instruction to the participant.',
       true,
     );
   }
@@ -1248,21 +1414,35 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     this.sendToClient(sessionId, { type: 'closed', reason: 'ended' });
     this.closeUpstream(state, 1000, 'Session ended');
     if (state.client) {
-      try { state.client.close(1000, 'Session ended'); } catch { /* already gone */ }
+      try {
+        state.client.close(1000, 'Session ended');
+      } catch {
+        /* already gone */
+      }
       state.client = null;
     }
     this.sessions.delete(sessionId);
 
-    await pool.query(
-      `UPDATE therapy_sessions
+    await pool
+      .query(
+        `UPDATE therapy_sessions
           SET sideband_connected = FALSE, sideband_disconnected_at = CURRENT_TIMESTAMP
         WHERE session_id = $1`,
-      [sessionId],
-    ).catch(() => {});
+        [sessionId],
+      )
+      .catch(() => {});
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:disconnected', {
-        sessionId, code: 1000, reason: 'Session ended', disconnectedAt: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:disconnected',
+        {
+          sessionId,
+          code: 1000,
+          reason: 'Session ended',
+          disconnectedAt: new Date(),
+        },
+        sessionId,
+      );
     }
   }
 
@@ -1279,24 +1459,36 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
   private async handleUpstreamError(sessionId: string, error: Error): Promise<void> {
     console.error(`[Grok] Upstream socket error for ${sessionId.substring(0, 12)}...:`, error.message);
-    await pool.query(
-      'UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2',
-      [error.message, sessionId],
-    ).catch(() => {});
+    await pool
+      .query('UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2', [error.message, sessionId])
+      .catch(() => {});
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:status-update', {
-        sessionId, status: 'error', error: error.message, timestamp: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:status-update',
+        {
+          sessionId,
+          status: 'error',
+          error: error.message,
+          timestamp: new Date(),
+        },
+        sessionId,
+      );
     }
   }
 
   private async handleUpstreamClose(sessionId: string, code: number, reason: Buffer): Promise<void> {
     const state = this.sessions.get(sessionId);
-    console.log(`[Grok] Upstream closed for ${sessionId.substring(0, 12)}...: ${code} - ${reason?.toString() || 'no reason'}`);
+    console.log(
+      `[Grok] Upstream closed for ${sessionId.substring(0, 12)}...: ${code} - ${reason?.toString() || 'no reason'}`,
+    );
     if (!state) return;
     state.upstream = null;
     state.ready = false;
-    if (state.keepalive) { clearInterval(state.keepalive); state.keepalive = null; }
+    if (state.keepalive) {
+      clearInterval(state.keepalive);
+      state.keepalive = null;
+    }
     if (state.ended) return;
 
     const wasInFlight = state.responseInFlight;
@@ -1327,9 +1519,12 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       return;
     }
     await this.persistFinalUsage(sessionId, 'connection_lost');
-    await this.failClosed(sessionId, 'upstream_lost',
+    await this.failClosed(
+      sessionId,
+      'upstream_lost',
       'The connection to the voice service was lost. Nothing you shared was lost. ' +
-      'You can start a new session whenever you are ready.');
+        'You can start a new session whenever you are ready.',
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -1350,10 +1545,15 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     state.resumeAttempt = 0;
     state.replayedItems = 0;
     const windowS = Math.round(state.reconnectWindowMs / 1000);
-    console.warn(`[Grok] Upstream lost for ${sessionId.substring(0, 12)}...; resuming conversation ${state.conversationId} (window ${windowS} s)`);
+    console.warn(
+      `[Grok] Upstream lost for ${sessionId.substring(0, 12)}...; resuming conversation ${state.conversationId} (window ${windowS} s)`,
+    );
     this.sendToClient(sessionId, { type: 'link', state: 'reconnecting' });
-    this.broadcastStatus(sessionId, 'upstream_reconnecting',
-      `Voice service connection lost; resuming conversation within ${windowS} s`);
+    this.broadcastStatus(
+      sessionId,
+      'upstream_reconnecting',
+      `Voice service connection lost; resuming conversation within ${windowS} s`,
+    );
     this.armResumeDeadline(sessionId);
     void this.attemptResume(sessionId);
   }
@@ -1382,7 +1582,10 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       await this.openUpstream(sessionId, true);
       // session.updated on the new leg completes the resume (onUpstreamResumed).
     } catch (err) {
-      console.error(`[Grok] Resume attempt ${state.resumeAttempt} failed for ${short}...:`, err instanceof Error ? err.message : err);
+      console.error(
+        `[Grok] Resume attempt ${state.resumeAttempt} failed for ${short}...:`,
+        err instanceof Error ? err.message : err,
+      );
       this.scheduleResumeAttempt(sessionId);
     }
   }
@@ -1410,32 +1613,45 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       // The browser is gone too: its own window applies from here.
       this.armOrphanTimer(sessionId, state.reconnectWindowMs, 'client_disconnected');
     }
-    console.log(`[Grok] Upstream resumed for ${sessionId.substring(0, 12)}... (resume ${state.upstreamResumes}, ${state.replayedItems} replayed items)`);
+    console.log(
+      `[Grok] Upstream resumed for ${sessionId.substring(0, 12)}... (resume ${state.upstreamResumes}, ${state.replayedItems} replayed items)`,
+    );
     this.sendToClient(sessionId, { type: 'link', state: 'restored' });
-    this.broadcastStatus(sessionId, 'connected',
-      `Voice service connection restored (resume ${state.upstreamResumes}, ${state.replayedItems} cached turns replayed)`);
-    await pool.query(
-      'UPDATE therapy_sessions SET sideband_connected = TRUE, sideband_error = NULL WHERE session_id = $1',
-      [sessionId],
-    ).catch(() => {});
+    this.broadcastStatus(
+      sessionId,
+      'connected',
+      `Voice service connection restored (resume ${state.upstreamResumes}, ${state.replayedItems} cached turns replayed)`,
+    );
+    await pool
+      .query('UPDATE therapy_sessions SET sideband_connected = TRUE, sideband_error = NULL WHERE session_id = $1', [
+        sessionId,
+      ])
+      .catch(() => {});
 
     const queued = state.queuedSteers.splice(0);
     for (const steer of queued) {
       try {
         await this.injectMessage(sessionId, steer.role, steer.text, steer.respond);
       } catch (err) {
-        console.error(`[Grok] Queued steer could not be delivered after resume for ${sessionId.substring(0, 12)}...:`, err);
+        console.error(
+          `[Grok] Queued steer could not be delivered after resume for ${sessionId.substring(0, 12)}...:`,
+          err,
+        );
       }
     }
-    if (state.resumeInterrupted && !queued.some(q => q.respond)) {
+    if (state.resumeInterrupted && !queued.some((q) => q.respond)) {
       // The participant heard a reply stop mid-sentence. Ask the model to
       // finish the thought rather than leave a silence it does not know about.
       state.resumeInterrupted = false;
       try {
-        await this.injectMessage(sessionId, 'system',
+        await this.injectMessage(
+          sessionId,
+          'system',
           'The voice connection dropped for a moment and your last reply was cut off. ' +
-          'Briefly pick up where you left off in one or two sentences, then listen. ' +
-          'Do not mention the connection.', true);
+            'Briefly pick up where you left off in one or two sentences, then listen. ' +
+            'Do not mention the connection.',
+          true,
+        );
       } catch (err) {
         console.error('[Grok] Post-resume continuation failed:', err);
       }
@@ -1445,7 +1661,10 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
   private cancelResume(state: GrokSessionState): void {
     state.resuming = false;
-    if (state.resumeTimer) { clearTimeout(state.resumeTimer); state.resumeTimer = null; }
+    if (state.resumeTimer) {
+      clearTimeout(state.resumeTimer);
+      state.resumeTimer = null;
+    }
   }
 
   /**
@@ -1457,12 +1676,24 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     const state = this.sessions.get(sessionId);
     const ws = state?.upstream;
     if (!state || !ws) return false;
-    try { ws.terminate(); } catch { /* ignore */ }
+    try {
+      ws.terminate();
+    } catch {
+      /* ignore */
+    }
     return true;
   }
 
   /** What the harness and admin tooling may want to know about a session's links. */
-  getLinkStats(sessionId: string): { conversationId: string | null; clientReconnects: number; upstreamResumes: number; replayedItems: number; resuming: boolean } | null {
+  getLinkStats(
+    sessionId: string,
+  ): {
+    conversationId: string | null;
+    clientReconnects: number;
+    upstreamResumes: number;
+    replayedItems: number;
+    resuming: boolean;
+  } | null {
     const state = this.sessions.get(sessionId);
     if (!state) return null;
     return {
@@ -1480,9 +1711,16 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     if (!state || state.ended) return;
     this.sendToClient(sessionId, { type: 'closed', reason });
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'sideband:unmonitored', {
-        sessionId, reason, endedAt: new Date(),
-      }, sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'sideband:unmonitored',
+        {
+          sessionId,
+          reason,
+          endedAt: new Date(),
+        },
+        sessionId,
+      );
     }
     try {
       const { serverEndSession } = await import('./sessionLifecycle.service.js');
@@ -1503,15 +1741,26 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
   /** One `sideband:status-update` per link transition (admin Live Monitoring). */
   private broadcastStatus(sessionId: string, status: string, detail: string): void {
     if (!global.io) return;
-    void broadcastAdminEventForSession(global.io, 'sideband:status-update', {
-      sessionId, status, error: status === 'connected' ? undefined : detail, detail, timestamp: new Date(),
-    }, sessionId);
+    void broadcastAdminEventForSession(
+      global.io,
+      'sideband:status-update',
+      {
+        sessionId,
+        status,
+        error: status === 'connected' ? undefined : detail,
+        detail,
+        timestamp: new Date(),
+      },
+      sessionId,
+    );
   }
 
   private sendToClient(sessionId: string, msg: GrokServerMessage): void {
     const client = this.sessions.get(sessionId)?.client;
     if (client && client.readyState === WebSocket.OPEN) {
-      try { client.send(JSON.stringify(msg)); } catch (err) {
+      try {
+        client.send(JSON.stringify(msg));
+      } catch (err) {
         console.error(`[Grok] Client send failed for ${sessionId.substring(0, 12)}...:`, err);
       }
     }
@@ -1522,10 +1771,15 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     if (!ws) return;
     state.upstream = null;
     state.ready = false;
-    if (state.keepalive) { clearInterval(state.keepalive); state.keepalive = null; }
+    if (state.keepalive) {
+      clearInterval(state.keepalive);
+      state.keepalive = null;
+    }
     try {
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(code, reason);
-    } catch { /* already gone */ }
+    } catch {
+      /* already gone */
+    }
   }
 
   private startKeepalive(sessionId: string): void {
@@ -1535,7 +1789,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     const timer = setInterval(() => {
       const s = this.sessions.get(sessionId);
       if (s?.upstream && s.upstream.readyState === WebSocket.OPEN) {
-        try { s.upstream.ping(); } catch { /* ignore */ }
+        try {
+          s.upstream.ping();
+        } catch {
+          /* ignore */
+        }
       } else {
         clearInterval(timer);
       }
@@ -1556,22 +1814,32 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         console.warn(`[Grok] Resume window elapsed for ${sessionId.substring(0, 12)}...; ending the session.`);
         this.cancelResume(s);
         void this.persistFinalUsage(sessionId, 'connection_lost').then(() =>
-          this.failClosed(sessionId, 'upstream_lost',
+          this.failClosed(
+            sessionId,
+            'upstream_lost',
             'The connection to the voice service was lost and could not be restored. ' +
-            'Nothing you shared was lost. You can start a new session whenever you are ready.'));
+              'Nothing you shared was lost. You can start a new session whenever you are ready.',
+          ),
+        );
         return;
       }
       if (s.client && s.client.readyState === WebSocket.OPEN) return; // reattached in time
       console.warn(`[Grok] Session ${sessionId.substring(0, 12)}... orphaned (${reason}); ending it.`);
-      void this.failClosed(sessionId, reason,
-        'Your session ended because the connection to our server was lost. Nothing you shared was lost.');
+      void this.failClosed(
+        sessionId,
+        reason,
+        'Your session ended because the connection to our server was lost. Nothing you shared was lost.',
+      );
     }, delayMs);
     timer.unref?.();
     state.orphanTimer = timer;
   }
 
   private clearOrphanTimer(state: GrokSessionState): void {
-    if (state.orphanTimer) { clearTimeout(state.orphanTimer); state.orphanTimer = null; }
+    if (state.orphanTimer) {
+      clearTimeout(state.orphanTimer);
+      state.orphanTimer = null;
+    }
   }
 
   private async schedulePhaseNudges(sessionId: string): Promise<void> {
@@ -1582,8 +1850,11 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       for (const phase of await buildPhaseNudgeSchedule(sessionId)) {
         const timer = setTimeout(() => {
           this.tryInject(sessionId, 'system', phase.text, false)
-            .then(ok => ok && console.log(`[Grok] Phase nudge (${phase.at * 100}%) sent to ${sessionId.substring(0, 12)}...`))
-            .catch(err => console.error('[Grok] Phase nudge failed:', err));
+            .then(
+              (ok) =>
+                ok && console.log(`[Grok] Phase nudge (${phase.at * 100}%) sent to ${sessionId.substring(0, 12)}...`),
+            )
+            .catch((err) => console.error('[Grok] Phase nudge failed:', err));
         }, phase.delayMs);
         timer.unref?.();
         state.phaseTimers.push(timer);
@@ -1594,9 +1865,12 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
   }
 
   private clearTimers(state: GrokSessionState): void {
-    if (state.resumeTimer) { clearTimeout(state.resumeTimer); state.resumeTimer = null; }
+    if (state.resumeTimer) {
+      clearTimeout(state.resumeTimer);
+      state.resumeTimer = null;
+    }
     if (state.keepalive) clearInterval(state.keepalive);
-    state.phaseTimers.forEach(t => clearTimeout(t));
+    state.phaseTimers.forEach((t) => clearTimeout(t));
     this.clearOrphanTimer(state);
     state.keepalive = null;
     state.phaseTimers = [];

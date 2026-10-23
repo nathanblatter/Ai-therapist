@@ -12,7 +12,15 @@ const dbMocks = vi.hoisted(() => ({
   listAssistantAudit: vi.fn(),
   logDataAccess: vi.fn(),
   isDataAccessAction: (v: unknown) =>
-    ['transcript_view', 'recording_stream', 'recording_download', 'export', 'dataset_export', 'audit_log_view', 'worksheet_review'].includes(String(v)),
+    [
+      'transcript_view',
+      'recording_stream',
+      'recording_download',
+      'export',
+      'dataset_export',
+      'audit_log_view',
+      'worksheet_review',
+    ].includes(String(v)),
   // Caseload middleware (requireClientAccess).
   isAssigned: vi.fn(),
   getSessionAccessInfo: vi.fn(),
@@ -41,16 +49,34 @@ function appAs(role: string | null, userId = 1) {
 }
 
 const ROW = {
-  id: 10, accessed_by: 7, actor_username: 'r1', role: 'researcher', action: 'transcript_view',
-  session_id: 's-1', participant_user_id: 42, participant_username: 'p42',
-  detail: { contentColumn: 'content_redacted' }, created_at: '2026-10-01T00:00:00Z',
+  id: 10,
+  accessed_by: 7,
+  actor_username: 'r1',
+  role: 'researcher',
+  action: 'transcript_view',
+  session_id: 's-1',
+  participant_user_id: 42,
+  participant_username: 'p42',
+  detail: { contentColumn: 'content_redacted' },
+  created_at: '2026-10-01T00:00:00Z',
 };
 
 beforeEach(() => {
   dbMocks.listDataAccessLog.mockReset().mockResolvedValue({ rows: [ROW], total: 1 });
   dbMocks.getParticipantAccessHistory.mockReset().mockResolvedValue({
-    rows: [ROW], total: 1,
-    actors: [{ accessed_by: 7, actor_username: 'r1', role: 'researcher', action: 'transcript_view', count: 1, first_at: ROW.created_at, last_at: ROW.created_at }],
+    rows: [ROW],
+    total: 1,
+    actors: [
+      {
+        accessed_by: 7,
+        actor_username: 'r1',
+        role: 'researcher',
+        action: 'transcript_view',
+        count: 1,
+        first_at: ROW.created_at,
+        last_at: ROW.created_at,
+      },
+    ],
   });
   dbMocks.listRedactionReviewLog.mockReset().mockResolvedValue({ rows: [], total: 0 });
   dbMocks.listAssistantAudit.mockReset().mockResolvedValue({ rows: [], total: 0 });
@@ -68,18 +94,22 @@ describe('GET /admin/api/audit/data-access', () => {
     expect(res.body.rows[0]).toMatchObject({ id: 10, actor_username: 'r1' });
     expect(dbMocks.listDataAccessLog).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 25, offset: 50, participantUserId: null, action: null }),
-      1
+      1,
     );
   });
 
   it('passes every filter through, normalizing dates to ISO', async () => {
     const res = await request(appAs('researcher')).get(
-      '/admin/api/audit/data-access?participantUserId=42&sessionId=s-1&actorUsername=r1&action=export&since=2026-10-01&until=2026-10-02T00:00:00Z'
+      '/admin/api/audit/data-access?participantUserId=42&sessionId=s-1&actorUsername=r1&action=export&since=2026-10-01&until=2026-10-02T00:00:00Z',
     );
     expect(res.status).toBe(200);
     expect(dbMocks.listDataAccessLog.mock.calls[0][0]).toMatchObject({
-      participantUserId: 42, sessionId: 's-1', actorUsername: 'r1', action: 'export',
-      since: '2026-10-01T00:00:00.000Z', until: '2026-10-02T00:00:00.000Z',
+      participantUserId: 42,
+      sessionId: 's-1',
+      actorUsername: 'r1',
+      action: 'export',
+      since: '2026-10-01T00:00:00.000Z',
+      until: '2026-10-02T00:00:00.000Z',
     });
   });
 
@@ -116,7 +146,7 @@ describe('GET /admin/api/audit/data-access/participant/:userId', () => {
     expect(res.body.actors[0]).toMatchObject({ actor_username: 'r1', count: 1 });
     expect(dbMocks.getParticipantAccessHistory).toHaveBeenCalledWith(42, { limit: 50, offset: 0 });
     expect(dbMocks.logDataAccess).toHaveBeenCalledWith(
-      expect.objectContaining({ accessedBy: 7, role: 'researcher', action: 'audit_log_view', userId: 42 })
+      expect.objectContaining({ accessedBy: 7, role: 'researcher', action: 'audit_log_view', userId: 42 }),
     );
   });
 
@@ -141,7 +171,7 @@ describe('GET /admin/api/audit/data-access/participant/:userId', () => {
     expect(dbMocks.isAssigned).toHaveBeenLastCalledWith(3, 42);
     expect(dbMocks.getParticipantAccessHistory).toHaveBeenCalledWith(42, { limit: 10, offset: 0 });
     expect(dbMocks.logDataAccess).toHaveBeenCalledWith(
-      expect.objectContaining({ accessedBy: 3, role: 'therapist', action: 'audit_log_view', userId: 42 })
+      expect.objectContaining({ accessedBy: 3, role: 'therapist', action: 'audit_log_view', userId: 42 }),
     );
   });
 
@@ -157,10 +187,15 @@ describe('GET /admin/api/audit/data-access/participant/:userId', () => {
 
 describe('GET /admin/api/audit/redaction-review', () => {
   it('returns an org-scoped page for a researcher with validated filters', async () => {
-    const res = await request(appAs('researcher')).get('/admin/api/audit/redaction-review?reviewedBy=5&action=corrected');
+    const res = await request(appAs('researcher')).get(
+      '/admin/api/audit/redaction-review?reviewedBy=5&action=corrected',
+    );
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ rows: [], total: 0, limit: 50, offset: 0 });
-    expect(dbMocks.listRedactionReviewLog).toHaveBeenCalledWith({ reviewedBy: 5, action: 'corrected', limit: 50, offset: 0 }, 1);
+    expect(dbMocks.listRedactionReviewLog).toHaveBeenCalledWith(
+      { reviewedBy: 5, action: 'corrected', limit: 50, offset: 0 },
+      1,
+    );
   });
 
   it('scopes by the caller org, never unscoped (ai-therapist-272)', async () => {
@@ -185,7 +220,7 @@ describe('GET /admin/api/audit/assistant', () => {
     expect(res.status).toBe(200);
     expect(dbMocks.listAssistantAudit).toHaveBeenCalledWith(
       expect.objectContaining({ username: 't1', since: '2026-10-01T00:00:00.000Z', userId: null }),
-      1
+      1,
     );
   });
 

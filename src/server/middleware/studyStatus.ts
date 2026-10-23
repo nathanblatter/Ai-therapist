@@ -11,11 +11,7 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('studyStatusMiddleware');
 
-export async function requireActiveStudyStatus(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
+export async function requireActiveStudyStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
   const role = req.session?.userRole ?? 'participant';
   if (role !== 'participant' || req.session?.isSandbox || !req.session?.userId) {
     next();

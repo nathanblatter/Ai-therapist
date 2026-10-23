@@ -32,14 +32,32 @@ export interface ToolDefinition {
  * teardown flow).
  */
 const CHAT_CAPABLE_TOOLS = new Set([
-  'get_crisis_resources', 'show_resource_card', 'create_safety_plan', 'retrieve_safety_plan',
-  'remember_this', 'recall_previous_sessions', 'recall_relevant_history',
-  'log_mood', 'set_session_goal', 'recall_session_goal',
-  'get_session_summary', 'get_time_remaining', 'get_coping_strategies',
-  'retrieve_psychoeducation', 'find_worksheet', 'suggest_modality_technique',
-  'start_thought_record', 'show_journaling_prompt', 'display_session_recap',
-  'administer_scale', 'flag_notable_moment', 'compare_screener_trend',
-  'review_practice', 'create_custom_worksheet', 'escalate_to_human', 'run_risk_check',
+  'get_crisis_resources',
+  'show_resource_card',
+  'create_safety_plan',
+  'retrieve_safety_plan',
+  'remember_this',
+  'recall_previous_sessions',
+  'recall_relevant_history',
+  'log_mood',
+  'set_session_goal',
+  'recall_session_goal',
+  'get_session_summary',
+  'get_time_remaining',
+  'get_coping_strategies',
+  'retrieve_psychoeducation',
+  'find_worksheet',
+  'suggest_modality_technique',
+  'start_thought_record',
+  'show_journaling_prompt',
+  'display_session_recap',
+  'administer_scale',
+  'flag_notable_moment',
+  'compare_screener_trend',
+  'review_practice',
+  'create_custom_worksheet',
+  'escalate_to_human',
+  'run_risk_check',
 ]);
 
 /** Effective channel for a definition: explicit field wins, else the set. */
@@ -56,7 +74,7 @@ function toolChannel(def: ToolDefinition): 'realtime' | 'chat' | 'both' {
  * harness, ai-therapist-124). Chat has its own projection (toResponsesTools).
  */
 export function toRealtimeTools(defs: ToolDefinition[]): Array<Record<string, unknown>> {
-  return defs.map(d => ({
+  return defs.map((d) => ({
     type: d.type,
     name: d.name,
     description: d.description,
@@ -147,7 +165,7 @@ export class ToolRegistry {
    * @returns {ToolDefinition[]} Array of OpenAI function definitions
    */
   getAllToolDefinitions(): ToolDefinition[] {
-    return Array.from(this.tools.values()).map(tool => tool.definition);
+    return Array.from(this.tools.values()).map((tool) => tool.definition);
   }
 
   /**
@@ -158,7 +176,7 @@ export class ToolRegistry {
    */
   async getEnabledToolDefinitions(opts: { channel?: 'realtime' | 'chat' } = {}): Promise<ToolDefinition[]> {
     const disabled = await this.getDisabledTools();
-    return this.getAllToolDefinitions().filter(def => {
+    return this.getAllToolDefinitions().filter((def) => {
       if (disabled.includes(def.name)) return false;
       if (!opts.channel) return true;
       const ch = toolChannel(def);
@@ -193,12 +211,13 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'get_session_summary',
-        description: 'Get a summary of the current therapy session including duration, message count, and conversation statistics.',
+        description:
+          'Get a summary of the current therapy session including duration, message count, and conversation statistics.',
         parameters: {
           type: 'object',
           properties: {},
-          required: []
-        }
+          required: [],
+        },
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         const session_id = ctx.sessionId;
@@ -207,7 +226,8 @@ export class ToolRegistry {
         }
 
         try {
-          const result = await pool.query(`
+          const result = await pool.query(
+            `
             SELECT
               ts.created_at,
               EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ts.created_at)) / 60 as duration_minutes,
@@ -219,12 +239,14 @@ export class ToolRegistry {
             LEFT JOIN messages m ON ts.session_id = m.session_id
             WHERE ts.session_id = $1
             GROUP BY ts.session_id, ts.created_at
-          `, [session_id]);
+          `,
+            [session_id],
+          );
 
           if (result.rows.length === 0) {
             return {
               error: 'Session not found',
-              session_id
+              session_id,
             };
           }
 
@@ -236,16 +258,16 @@ export class ToolRegistry {
             user_messages: parseInt(session.user_messages),
             assistant_messages: parseInt(session.assistant_messages),
             system_messages: parseInt(session.system_messages),
-            started_at: session.created_at
+            started_at: session.created_at,
           };
         } catch (error: unknown) {
           console.error('[ToolRegistry] Error in get_session_summary:', error);
           return {
             error: 'Failed to retrieve session summary',
-            details: error instanceof Error ? error.message : String(error)
+            details: error instanceof Error ? error.message : String(error),
           };
         }
-      }
+      },
     );
 
     // Tool 2: Get crisis resources
@@ -254,30 +276,35 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'get_crisis_resources',
-        description: 'Get emergency crisis support resources including hotline numbers and online services. Use this when someone is in crisis or mentions thoughts of self-harm.',
+        description:
+          'Get emergency crisis support resources including hotline numbers and online services. Use this when someone is in crisis or mentions thoughts of self-harm.',
         parameters: {
           type: 'object',
           properties: {
             resource_type: {
               type: 'string',
               enum: ['all', 'suicide', 'domestic_violence', 'substance_abuse', 'mental_health'],
-              description: 'Type of crisis resources to retrieve. Default is "all" to provide comprehensive support options.'
-            }
+              description:
+                'Type of crisis resources to retrieve. Default is "all" to provide comprehensive support options.',
+            },
           },
-          required: []
-        }
+          required: [],
+        },
       },
       async (args: Record<string, unknown>) => {
         const resource_type = (args['resource_type'] as string | undefined) ?? 'all';
 
-        const resources: Record<ResourceKey, { name: string; phone: string; text?: string; chat?: string; available: string; description: string }> = {
+        const resources: Record<
+          ResourceKey,
+          { name: string; phone: string; text?: string; chat?: string; available: string; description: string }
+        > = {
           suicide: {
             name: '988 Suicide & Crisis Lifeline',
             phone: '988',
             text: 'Text 988',
             chat: 'https://988lifeline.org/chat',
             available: '24/7',
-            description: 'Free and confidential support for people in distress, prevention and crisis resources.'
+            description: 'Free and confidential support for people in distress, prevention and crisis resources.',
           },
           domestic_violence: {
             name: 'National Domestic Violence Hotline',
@@ -285,44 +312,44 @@ export class ToolRegistry {
             text: 'Text START to 88788',
             chat: 'https://www.thehotline.org',
             available: '24/7',
-            description: 'Support for domestic violence victims and survivors.'
+            description: 'Support for domestic violence victims and survivors.',
           },
           substance_abuse: {
             name: 'SAMHSA National Helpline',
             phone: '1-800-662-4357',
             available: '24/7',
-            description: 'Treatment referral and information service for substance abuse and mental health issues.'
+            description: 'Treatment referral and information service for substance abuse and mental health issues.',
           },
           mental_health: {
             name: 'NAMI HelpLine',
             phone: '1-800-950-6264',
             text: 'Text "HelpLine" to 62640',
             available: 'M-F 10am-10pm ET',
-            description: 'National Alliance on Mental Illness - Information, referrals, and support.'
-          }
+            description: 'National Alliance on Mental Illness - Information, referrals, and support.',
+          },
         };
 
         if (resource_type === 'all') {
           return {
             message: 'Here are crisis support resources available to you:',
             resources: resources,
-            important_note: 'If you are in immediate danger, please call 911 or go to your nearest emergency room.'
+            important_note: 'If you are in immediate danger, please call 911 or go to your nearest emergency room.',
           };
         } else if (resource_type in resources) {
           const key = resource_type as ResourceKey;
           return {
             message: `Here is the ${resource_type.replace('_', ' ')} support resource:`,
             resource: resources[key],
-            important_note: 'If you are in immediate danger, please call 911 or go to your nearest emergency room.'
+            important_note: 'If you are in immediate danger, please call 911 or go to your nearest emergency room.',
           };
         } else {
           return {
             error: 'Resource type not found',
             available_types: Object.keys(resources),
-            default_resource: resources.suicide
+            default_resource: resources.suicide,
           };
         }
-      }
+      },
     );
 
     // Tool 3: Guided breathing exercise (ai-therapist-26). The participant's
@@ -334,26 +361,27 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'start_breathing_exercise',
-        description: 'Start a guided box-breathing exercise on the participant\'s screen (an animated breathing circle appears). Use when the participant seems anxious, overwhelmed, or asks for help calming down. Always ask if they would like to try it before starting.',
+        description:
+          "Start a guided box-breathing exercise on the participant's screen (an animated breathing circle appears). Use when the participant seems anxious, overwhelmed, or asks for help calming down. Always ask if they would like to try it before starting.",
         parameters: {
           type: 'object',
           properties: {
             duration_seconds: {
               type: 'number',
-              description: 'How long the exercise should run. Default 60, maximum 300.'
-            }
+              description: 'How long the exercise should run. Default 60, maximum 300.',
+            },
           },
-          required: []
-        }
+          required: [],
+        },
       },
       async (args: Record<string, unknown>) => {
         const duration = Math.min(Math.max(Number(args['duration_seconds']) || 60, 20), 300);
         return {
           success: true,
           duration_seconds: duration,
-          guidance: `A breathing circle is now showing on the participant's screen for ${duration} seconds. Narrate calmly along with it: breathe in slowly for 4 counts as the circle grows, hold for 4, breathe out for 4 as it shrinks, hold for 4. Keep your voice slow and quiet, repeat the cycle with them, and check in gently when the exercise ends.`
+          guidance: `A breathing circle is now showing on the participant's screen for ${duration} seconds. Narrate calmly along with it: breathe in slowly for 4 counts as the circle grows, hold for 4, breathe out for 4 as it shrinks, hold for 4. Keep your voice slow and quiet, repeat the cycle with them, and check in gently when the exercise ends.`,
         };
-      }
+      },
     );
 
     // Tool 4: 5-4-3-2-1 grounding exercise (ai-therapist-26).
@@ -362,13 +390,15 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'start_grounding_exercise',
-        description: 'Start a 5-4-3-2-1 grounding exercise on the participant\'s screen (a step-by-step sensory checklist appears). Use when the participant feels panicky, dissociated, or stuck in racing thoughts. Always ask if they would like to try it before starting.',
-        parameters: { type: 'object', properties: {}, required: [] }
+        description:
+          "Start a 5-4-3-2-1 grounding exercise on the participant's screen (a step-by-step sensory checklist appears). Use when the participant feels panicky, dissociated, or stuck in racing thoughts. Always ask if they would like to try it before starting.",
+        parameters: { type: 'object', properties: {}, required: [] },
       },
       async () => ({
         success: true,
-        guidance: 'A 5-4-3-2-1 grounding checklist is now showing on the participant\'s screen. Walk them through it slowly, one sense at a time: 5 things they can see, 4 they can touch, 3 they can hear, 2 they can smell, 1 they can taste. Wait for their answers at each step — don\'t rush. Afterwards, ask how they feel.'
-      })
+        guidance:
+          "A 5-4-3-2-1 grounding checklist is now showing on the participant's screen. Walk them through it slowly, one sense at a time: 5 things they can see, 4 they can touch, 3 they can hear, 2 they can smell, 1 they can taste. Wait for their answers at each step — don't rush. Afterwards, ask how they feel.",
+      }),
     );
 
     // Tool 5: Structured mood self-report (ai-therapist-27).
@@ -377,7 +407,8 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'log_mood',
-        description: 'Record the participant\'s self-reported mood when they describe how they are feeling, especially when they give or agree to a 1-10 rating. Ask naturally ("out of 10, where would you put how you\'re feeling right now?") — never demand a number.',
+        description:
+          'Record the participant\'s self-reported mood when they describe how they are feeling, especially when they give or agree to a 1-10 rating. Ask naturally ("out of 10, where would you put how you\'re feeling right now?") — never demand a number.',
         parameters: {
           type: 'object',
           properties: {
@@ -385,11 +416,11 @@ export class ToolRegistry {
             tags: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Short feeling words the participant used, e.g. ["anxious", "hopeful"].'
-            }
+              description: 'Short feeling words the participant used, e.g. ["anxious", "hopeful"].',
+            },
           },
-          required: ['score']
-        }
+          required: ['score'],
+        },
       },
       async (args: Record<string, unknown>) => {
         const score = Number(args['score']);
@@ -399,7 +430,7 @@ export class ToolRegistry {
         // The invocation itself (args + risk score) is persisted by the
         // sideband's tool_invocations logging — nothing more to store here.
         return { success: true, recorded: { score, tags: args['tags'] ?? [] } };
-      }
+      },
     );
 
     // Tools 6+7: Session goal (ai-therapist-28).
@@ -408,14 +439,15 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'set_session_goal',
-        description: 'Record what the participant wants from today\'s conversation, once it becomes clear early in the session. One concise sentence in their words.',
+        description:
+          "Record what the participant wants from today's conversation, once it becomes clear early in the session. One concise sentence in their words.",
         parameters: {
           type: 'object',
           properties: {
-            goal: { type: 'string', description: 'The participant\'s goal for this conversation.' }
+            goal: { type: 'string', description: "The participant's goal for this conversation." },
           },
-          required: ['goal']
-        }
+          required: ['goal'],
+        },
       },
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         const goal = typeof args['goal'] === 'string' ? args['goal'].trim().substring(0, 500) : '';
@@ -425,7 +457,7 @@ export class ToolRegistry {
         const { setSessionGoal } = await import('../db/index.js');
         await setSessionGoal(ctx.sessionId, goal);
         return { success: true, goal };
-      }
+      },
     );
 
     this.registerTool(
@@ -433,8 +465,9 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'recall_session_goal',
-        description: 'Retrieve the goal set for this conversation (from set_session_goal or the participant\'s pre-session check-in). Use before wrapping up to check the conversation served what they came for.',
-        parameters: { type: 'object', properties: {}, required: [] }
+        description:
+          "Retrieve the goal set for this conversation (from set_session_goal or the participant's pre-session check-in). Use before wrapping up to check the conversation served what they came for.",
+        parameters: { type: 'object', properties: {}, required: [] },
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
@@ -442,12 +475,14 @@ export class ToolRegistry {
         const goal = await getSessionGoal(ctx.sessionId);
         if (goal) return { goal, source: 'set_during_session' };
         const result = await pool.query<{ checkin: { goal?: string } | null }>(
-          'SELECT checkin FROM therapy_sessions WHERE session_id = $1', [ctx.sessionId]);
+          'SELECT checkin FROM therapy_sessions WHERE session_id = $1',
+          [ctx.sessionId],
+        );
         const checkinGoal = result.rows[0]?.checkin?.goal;
         return checkinGoal
           ? { goal: checkinGoal, source: 'pre_session_checkin' }
           : { goal: null, message: 'No goal was recorded for this session.' };
-      }
+      },
     );
 
     // Tool 8: Model-initiated escalation (ai-therapist-29).
@@ -456,7 +491,8 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'escalate_to_human',
-        description: 'Alert the human monitoring team about this session. Use when you judge the participant needs human attention: safety concerns below the obvious-crisis threshold, requests to speak to a person, or situations beyond your scope. Do not announce the escalation to the participant unless they asked for a human.',
+        description:
+          'Alert the human monitoring team about this session. Use when you judge the participant needs human attention: safety concerns below the obvious-crisis threshold, requests to speak to a person, or situations beyond your scope. Do not announce the escalation to the participant unless they asked for a human.',
         parameters: {
           type: 'object',
           properties: {
@@ -464,17 +500,18 @@ export class ToolRegistry {
             urgency: {
               type: 'string',
               enum: ['low', 'medium', 'high'],
-              description: 'low = review when convenient; medium = look soon; high = immediate safety concern.'
-            }
+              description: 'low = review when convenient; medium = look soon; high = immediate safety concern.',
+            },
           },
-          required: ['reason', 'urgency']
-        }
+          required: ['reason', 'urgency'],
+        },
       },
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
         const reason = typeof args['reason'] === 'string' ? args['reason'].substring(0, 1000) : 'No reason given';
         const urgency = ['low', 'medium', 'high'].includes(args['urgency'] as string)
-          ? (args['urgency'] as 'low' | 'medium' | 'high') : 'medium';
+          ? (args['urgency'] as 'low' | 'medium' | 'high')
+          : 'medium';
 
         const { flagSessionCrisis, logInterventionAction } = await import('./crisisDetection.service.js');
         const scoreByUrgency = { low: 30, medium: 55, high: 80 } as const;
@@ -482,8 +519,14 @@ export class ToolRegistry {
         // High urgency raises a full crisis flag; lower urgencies alert without flagging.
         if (urgency === 'high') {
           await flagSessionCrisis(
-            ctx.sessionId, 'high', scoreByUrgency.high,
-            'ai_assistant', 'ai_tool', null, ['model_escalation'], reason
+            ctx.sessionId,
+            'high',
+            scoreByUrgency.high,
+            'ai_assistant',
+            'ai_tool',
+            null,
+            ['model_escalation'],
+            reason,
           );
           // The flag above satisfies the risk pipeline's shouldFlag transition
           // guard, which would otherwise skip the emergency protocol entirely
@@ -496,16 +539,24 @@ export class ToolRegistry {
         await logInterventionAction(ctx.sessionId, 'ai_escalation', { urgency, reason });
 
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'session:escalation-requested', {
-            sessionId: ctx.sessionId, urgency, reason, requestedAt: new Date(),
-            message: `AI requested human attention (${urgency}): ${reason}`,
-          }, ctx.sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:escalation-requested',
+            {
+              sessionId: ctx.sessionId,
+              urgency,
+              reason,
+              requestedAt: new Date(),
+              message: `AI requested human attention (${urgency}): ${reason}`,
+            },
+            ctx.sessionId,
+          );
         }
         return {
           success: true,
-          message: `The monitoring team has been alerted (${urgency} urgency). Continue supporting the participant calmly; a human can now step in via this session.`
+          message: `The monitoring team has been alerted (${urgency} urgency). Continue supporting the participant calmly; a human can now step in via this session.`,
         };
-      }
+      },
     );
 
     // Tool 9: Curated coping-technique library (ai-therapist-30).
@@ -514,18 +565,19 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'get_coping_strategies',
-        description: 'Look up vetted coping techniques for a topic before suggesting one. Prefer these over improvising, and offer ONE at a time in your own warm words.',
+        description:
+          'Look up vetted coping techniques for a topic before suggesting one. Prefer these over improvising, and offer ONE at a time in your own warm words.',
         parameters: {
           type: 'object',
           properties: {
             topic: {
               type: 'string',
               enum: ['anxiety', 'stress', 'sleep', 'anger', 'sadness', 'grounding'],
-              description: 'What the participant is struggling with.'
-            }
+              description: 'What the participant is struggling with.',
+            },
           },
-          required: ['topic']
-        }
+          required: ['topic'],
+        },
       },
       async (args: Record<string, unknown>) => {
         const topic = args['topic'] as string;
@@ -533,9 +585,13 @@ export class ToolRegistry {
         const library = await getCopingLibrary();
         const techniques = library[topic];
         return techniques
-          ? { topic, techniques, note: 'Offer one technique at a time, in your own words, and check it fits before moving on.' }
+          ? {
+              topic,
+              techniques,
+              note: 'Offer one technique at a time, in your own words, and check it fits before moving on.',
+            }
           : { error: `No techniques for topic '${topic}'`, available_topics: Object.keys(library) };
-      }
+      },
     );
 
     // Tool 10: Time remaining (ai-therapist-31) — lets the model wind down
@@ -545,8 +601,9 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'get_time_remaining',
-        description: 'Check how many minutes remain before this session\'s time limit. Use when a conversation is winding toward a natural close, or to pace a longer topic. Never read the exact number out robotically — use it to close warmly in time.',
-        parameters: { type: 'object', properties: {}, required: [] }
+        description:
+          "Check how many minutes remain before this session's time limit. Use when a conversation is winding toward a natural close, or to pace a longer topic. Never read the exact number out robotically — use it to close warmly in time.",
+        parameters: { type: 'object', properties: {}, required: [] },
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
@@ -557,13 +614,15 @@ export class ToolRegistry {
           return { unlimited: true, message: 'This session has no time limit.' };
         }
         const result = await pool.query<{ created_at: Date }>(
-          'SELECT created_at FROM therapy_sessions WHERE session_id = $1', [ctx.sessionId]);
+          'SELECT created_at FROM therapy_sessions WHERE session_id = $1',
+          [ctx.sessionId],
+        );
         const createdAt = result.rows[0]?.created_at;
         if (!createdAt) return { error: 'Session not found' };
         const elapsedMin = (Date.now() - new Date(createdAt).getTime()) / 60000;
         const remaining = Math.max(0, Math.round(limits.max_duration_minutes - elapsedMin));
         return { minutes_remaining: remaining, session_length_minutes: limits.max_duration_minutes };
-      }
+      },
     );
 
     // ==================== WAVE 2 TOOLS ====================
@@ -575,24 +634,26 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'show_resource_card',
-        description: 'Display a tappable crisis-resource card on the participant\'s screen with call/text buttons (988, crisis text line, etc.). Stronger than reading numbers aloud — use whenever you share crisis resources, alongside saying them.',
+        description:
+          "Display a tappable crisis-resource card on the participant's screen with call/text buttons (988, crisis text line, etc.). Stronger than reading numbers aloud — use whenever you share crisis resources, alongside saying them.",
         parameters: {
           type: 'object',
           properties: {
             resource_type: {
               type: 'string',
               enum: ['all', 'suicide', 'domestic_violence', 'substance_abuse', 'mental_health'],
-              description: 'Which resources to show. Default all.'
-            }
+              description: 'Which resources to show. Default all.',
+            },
           },
-          required: []
-        }
+          required: [],
+        },
       },
       async (args: Record<string, unknown>) => ({
         success: true,
         shown: args['resource_type'] ?? 'all',
-        guidance: 'The resource card is now on the participant\'s screen with tappable call/text buttons. Mention it gently ("I\'ve put some numbers on your screen you can tap any time") without pressuring them to use it right now.'
-      })
+        guidance:
+          'The resource card is now on the participant\'s screen with tappable call/text buttons. Mention it gently ("I\'ve put some numbers on your screen you can tap any time") without pressuring them to use it right now.',
+      }),
     );
 
     // Guided CBT thought record (client renders the form; the completed record
@@ -602,13 +663,15 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'start_thought_record',
-        description: 'Open a guided CBT thought-record form on the participant\'s screen (situation → automatic thought → feeling → evidence → balanced thought). Use when examining a specific unhelpful thought, after asking if they\'d like to work through it in writing.',
-        parameters: { type: 'object', properties: {}, required: [] }
+        description:
+          "Open a guided CBT thought-record form on the participant's screen (situation → automatic thought → feeling → evidence → balanced thought). Use when examining a specific unhelpful thought, after asking if they'd like to work through it in writing.",
+        parameters: { type: 'object', properties: {}, required: [] },
       },
       async () => ({
         success: true,
-        guidance: 'A thought-record form is now on the participant\'s screen. Stay quiet or offer brief encouragement while they fill it in; when they finish you will receive their entries — respond to the balanced thought they arrived at, not the form itself.'
-      })
+        guidance:
+          "A thought-record form is now on the participant's screen. Stay quiet or offer brief encouragement while they fill it in; when they finish you will receive their entries — respond to the balanced thought they arrived at, not the form itself.",
+      }),
     );
 
     // Private journaling overlay. Participant chooses whether to share.
@@ -617,20 +680,25 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'show_journaling_prompt',
-        description: 'Open a private writing box on the participant\'s screen with a prompt you provide. They choose to share what they wrote with you OR keep it entirely private (you will never see it). Good for feelings that are easier to write than say.',
+        description:
+          "Open a private writing box on the participant's screen with a prompt you provide. They choose to share what they wrote with you OR keep it entirely private (you will never see it). Good for feelings that are easier to write than say.",
         parameters: {
           type: 'object',
           properties: {
-            prompt: { type: 'string', description: 'The journaling prompt, e.g. "What would you say to them if there were no consequences?"' }
+            prompt: {
+              type: 'string',
+              description: 'The journaling prompt, e.g. "What would you say to them if there were no consequences?"',
+            },
           },
-          required: ['prompt']
-        }
+          required: ['prompt'],
+        },
       },
       async (args: Record<string, unknown>) => ({
         success: true,
         prompt: args['prompt'],
-        guidance: 'The writing box is on their screen. Give them quiet time. If they share it, respond to what they wrote with care; if they keep it private, respect that completely and ask only how the writing felt.'
-      })
+        guidance:
+          'The writing box is on their screen. Give them quiet time. If they share it, respond to what they wrote with care; if they keep it private, respect that completely and ask only how the writing felt.',
+      }),
     );
 
     // End-of-session visual recap card (client renders from the args).
@@ -639,21 +707,23 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'display_session_recap',
-        description: 'Show a visual recap card at the end of the session: what was worked on, techniques tried, and one takeaway. Call during your wind-down, right before saying goodbye.',
+        description:
+          'Show a visual recap card at the end of the session: what was worked on, techniques tried, and one takeaway. Call during your wind-down, right before saying goodbye.',
         parameters: {
           type: 'object',
           properties: {
             focus: { type: 'string', description: 'One line: what today was about.' },
             techniques: { type: 'array', items: { type: 'string' }, description: 'Techniques tried or discussed.' },
-            takeaway: { type: 'string', description: 'One warm, specific takeaway for the participant.' }
+            takeaway: { type: 'string', description: 'One warm, specific takeaway for the participant.' },
           },
-          required: ['focus', 'takeaway']
-        }
+          required: ['focus', 'takeaway'],
+        },
       },
       async () => ({
         success: true,
-        guidance: 'The recap card is on the participant\'s screen — they can screenshot it. Close the conversation warmly.'
-      })
+        guidance:
+          "The recap card is on the participant's screen — they can screenshot it. Close the conversation warmly.",
+      }),
     );
 
     // Collaborative safety plan: stored server-side + shown as a card.
@@ -662,28 +732,50 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'create_safety_plan',
-        description: 'Save a safety plan you built WITH the participant (never invent entries — use their words). It is stored for the clinical team and shown to the participant as a card they can keep. Use after talking through warning signs and coping steps with someone experiencing recurring distress or risk.',
+        description:
+          'Save a safety plan you built WITH the participant (never invent entries — use their words). It is stored for the clinical team and shown to the participant as a card they can keep. Use after talking through warning signs and coping steps with someone experiencing recurring distress or risk.',
         parameters: {
           type: 'object',
           properties: {
             warning_signs: { type: 'array', items: { type: 'string' }, description: 'Their early warning signs.' },
-            coping_strategies: { type: 'array', items: { type: 'string' }, description: 'Steps that help them, in their words.' },
-            support_contacts: { type: 'array', items: { type: 'string' }, description: 'People they said they could reach out to (first names only).' },
-            reasons_worth_living: { type: 'array', items: { type: 'string' }, description: 'Their stated reasons/values (optional).' }
+            coping_strategies: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Steps that help them, in their words.',
+            },
+            support_contacts: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'People they said they could reach out to (first names only).',
+            },
+            reasons_worth_living: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Their stated reasons/values (optional).',
+            },
           },
-          required: ['warning_signs', 'coping_strategies']
-        }
+          required: ['warning_signs', 'coping_strategies'],
+        },
       },
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
         const clean = (v: unknown): string[] =>
-          Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string').map(s => s.substring(0, 300)).slice(0, 10) : [];
+          Array.isArray(v)
+            ? v
+                .filter((s): s is string => typeof s === 'string')
+                .map((s) => s.substring(0, 300))
+                .slice(0, 10)
+            : [];
         const plan = {
           warning_signs: clean(args['warning_signs']),
           coping_strategies: clean(args['coping_strategies']),
           support_contacts: clean(args['support_contacts']),
           reasons_worth_living: clean(args['reasons_worth_living']),
-          professional_resources: ['988 Suicide & Crisis Lifeline (call or text 988)', 'Crisis Text Line (text HOME to 741741)', '911 for immediate danger'],
+          professional_resources: [
+            '988 Suicide & Crisis Lifeline (call or text 988)',
+            'Crisis Text Line (text HOME to 741741)',
+            '911 for immediate danger',
+          ],
         };
         if (plan.warning_signs.length === 0 || plan.coping_strategies.length === 0) {
           return { error: 'warning_signs and coping_strategies are both required' };
@@ -693,15 +785,22 @@ export class ToolRegistry {
         await insertSafetyPlan(ctx.sessionId, session?.user_id ?? null, plan);
 
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'session:safety-plan-created', {
-            sessionId: ctx.sessionId, createdAt: new Date(),
-          }, ctx.sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:safety-plan-created',
+            {
+              sessionId: ctx.sessionId,
+              createdAt: new Date(),
+            },
+            ctx.sessionId,
+          );
         }
         return {
           success: true,
-          guidance: 'The safety plan is saved and now showing on the participant\'s screen with crisis lines added. Encourage them to screenshot it and revisit the coping steps when warning signs appear.'
+          guidance:
+            "The safety plan is saved and now showing on the participant's screen with crisis lines added. Encourage them to screenshot it and revisit the coping steps when warning signs appear.",
         };
-      }
+      },
     );
 
     // On-demand deep memory recall (consent-gated like the injected block).
@@ -710,25 +809,28 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'recall_previous_sessions',
-        description: 'Retrieve summaries of this participant\'s previous conversations (only works if they are logged in and opted into session memory). Use when past context would genuinely help — e.g. they reference something from before.',
-        parameters: { type: 'object', properties: {}, required: [] }
+        description:
+          "Retrieve summaries of this participant's previous conversations (only works if they are logged in and opted into session memory). Use when past context would genuinely help — e.g. they reference something from before.",
+        parameters: { type: 'object', properties: {}, required: [] },
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
-        const { getSession, getUserMemoryEnabled, getRecentUserSummaries, getUserMemories } = await import('../db/index.js');
+        const { getSession, getUserMemoryEnabled, getRecentUserSummaries, getUserMemories } = await import(
+          '../db/index.js'
+        );
         const session = await getSession(ctx.sessionId);
         const userId = session?.user_id;
         if (!userId) return { available: false, reason: 'Participant is anonymous — no session history exists.' };
         if (!(await getUserMemoryEnabled(userId))) {
-          return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
+          return {
+            available: false,
+            reason: 'Participant has not opted into session memory. Do not press them about it.',
+          };
         }
-        const [summaries, facts] = await Promise.all([
-          getRecentUserSummaries(userId, 5),
-          getUserMemories(userId),
-        ]);
+        const [summaries, facts] = await Promise.all([getRecentUserSummaries(userId, 5), getUserMemories(userId)]);
         return {
           available: true,
-          previous_sessions: summaries.map(s => ({
+          previous_sessions: summaries.map((s) => ({
             date: (s.ended_at ?? s.created_at).toISOString().slice(0, 10),
             headline: s.summary.headline,
             topics: s.summary.topics,
@@ -736,9 +838,9 @@ export class ToolRegistry {
             follow_up: s.summary.follow_up,
           })),
           remembered_facts: facts,
-          note: 'Use for continuity and warmth. Never claim to remember more than this.'
+          note: 'Use for continuity and warmth. Never claim to remember more than this.',
         };
-      }
+      },
     );
 
     // Participant-approved memory.
@@ -747,14 +849,15 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'remember_this',
-        description: 'Store one specific fact the participant EXPLICITLY asked you to remember for future conversations ("remember that..."). Only works for logged-in participants with session memory on. Never store anything they did not ask you to keep.',
+        description:
+          'Store one specific fact the participant EXPLICITLY asked you to remember for future conversations ("remember that..."). Only works for logged-in participants with session memory on. Never store anything they did not ask you to keep.',
         parameters: {
           type: 'object',
           properties: {
-            fact: { type: 'string', description: 'The fact, phrased close to their words. One sentence.' }
+            fact: { type: 'string', description: 'The fact, phrased close to their words. One sentence.' },
           },
-          required: ['fact']
-        }
+          required: ['fact'],
+        },
       },
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         const fact = typeof args['fact'] === 'string' ? args['fact'].trim().substring(0, 300) : '';
@@ -763,10 +866,17 @@ export class ToolRegistry {
         const session = await getSession(ctx.sessionId);
         const userId = session?.user_id;
         if (!userId) {
-          return { stored: false, reason: 'Participant is anonymous — memories need an account. Let them know gently if they asked.' };
+          return {
+            stored: false,
+            reason: 'Participant is anonymous — memories need an account. Let them know gently if they asked.',
+          };
         }
         if (!(await getUserMemoryEnabled(userId))) {
-          return { stored: false, reason: 'Session memory is turned off in their settings. Mention they can enable it there if they want this remembered.' };
+          return {
+            stored: false,
+            reason:
+              'Session memory is turned off in their settings. Mention they can enable it there if they want this remembered.',
+          };
         }
         // Embed the fact so recall_relevant_history can find it semantically.
         // Best-effort: if embedding fails, still store the fact (it remains
@@ -780,7 +890,7 @@ export class ToolRegistry {
         }
         await insertUserMemory(userId, fact, ctx.sessionId, embedding);
         return { stored: true, fact };
-      }
+      },
     );
 
     // Graceful model-initiated session end (the client performs the teardown).
@@ -789,8 +899,9 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'end_session',
-        description: 'End the session cleanly. Call ONLY after you have fully said goodbye and the participant has agreed the conversation is complete — the session closes a few seconds after you call this.',
-        parameters: { type: 'object', properties: {}, required: [] }
+        description:
+          'End the session cleanly. Call ONLY after you have fully said goodbye and the participant has agreed the conversation is complete — the session closes a few seconds after you call this.',
+        parameters: { type: 'object', properties: {}, required: [] },
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         // Server-side backstop (ai-therapist-113): ending used to depend
@@ -804,18 +915,18 @@ export class ToolRegistry {
           const sessionId = ctx.sessionId;
           setTimeout(() => {
             import('./sessionLifecycle.service.js')
-              .then(m => m.serverEndSession(sessionId, { endedBy: 'model', reason: 'model_end_session' }))
-              .then(ended => {
+              .then((m) => m.serverEndSession(sessionId, { endedBy: 'model', reason: 'model_end_session' }))
+              .then((ended) => {
                 if (ended) console.log(`[end_session] server backstop ended session ${sessionId}`);
               })
-              .catch(err => console.error('[end_session] server backstop failed:', err));
+              .catch((err) => console.error('[end_session] server backstop failed:', err));
           }, 15 * 1000);
         }
         return {
           success: true,
-          message: 'The session will close in a few seconds. Do not start any new topics.'
+          message: 'The session will close in a few seconds. Do not start any new topics.',
         };
-      }
+      },
     );
 
     // Mid-session language switch (steers the model; config recorded).
@@ -824,30 +935,33 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'switch_language',
-        description: 'Switch the conversation language when the participant asks or clearly prefers another language. Continue in the new language immediately after calling.',
+        description:
+          'Switch the conversation language when the participant asks or clearly prefers another language. Continue in the new language immediately after calling.',
         parameters: {
           type: 'object',
           properties: {
-            language: { type: 'string', description: 'Target language code, e.g. "es", "fr", "ja".' }
+            language: { type: 'string', description: 'Target language code, e.g. "es", "fr", "ja".' },
           },
-          required: ['language']
-        }
+          required: ['language'],
+        },
       },
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         const language = typeof args['language'] === 'string' ? args['language'].toLowerCase().substring(0, 10) : '';
         if (!language || !ctx.sessionId) return { error: 'language and session context are required' };
         const { getSystemConfig } = await import('../utils/sessionHelpers.js');
         const config = await getSystemConfig();
-        const languages = (config.languages as { languages?: { value: string; label: string; enabled: boolean }[] } | undefined)?.languages ?? [];
+        const languages =
+          (config.languages as { languages?: { value: string; label: string; enabled: boolean }[] } | undefined)
+            ?.languages ?? [];
         // The model tends to say bare codes ("es"); config uses regional ones
         // ("es-ES", "es-419") — exact match first, then prefix match.
-        const enabled = languages.filter(l => l.enabled);
+        const enabled = languages.filter((l) => l.enabled);
         const target =
-          enabled.find(l => l.value.toLowerCase() === language) ??
-          enabled.find(l => l.value.toLowerCase().startsWith(`${language}-`)) ??
-          enabled.find(l => l.value.toLowerCase().split('-')[0] === language.split('-')[0]);
+          enabled.find((l) => l.value.toLowerCase() === language) ??
+          enabled.find((l) => l.value.toLowerCase().startsWith(`${language}-`)) ??
+          enabled.find((l) => l.value.toLowerCase().split('-')[0] === language.split('-')[0]);
         if (!target) {
-          return { error: `Language '${language}' is not available`, available: enabled.map(l => l.value) };
+          return { error: `Language '${language}' is not available`, available: enabled.map((l) => l.value) };
         }
         // Push the change into the LIVE session config too (ai-therapist-112):
         // previously only the DB row changed, so the running OpenAI session
@@ -859,7 +973,7 @@ export class ToolRegistry {
         let liveUpdated = false;
         const cfg = await pool.query<{ instructions: string | null }>(
           'SELECT instructions FROM session_configurations WHERE session_id = $1',
-          [ctx.sessionId]
+          [ctx.sessionId],
         );
         const baseInstructions = cfg.rows[0]?.instructions;
         let newInstructions: string | null = null;
@@ -882,15 +996,15 @@ export class ToolRegistry {
         }
         await pool.query(
           'UPDATE session_configurations SET language = $2, instructions = COALESCE($3, instructions) WHERE session_id = $1',
-          [ctx.sessionId, target.value, newInstructions]
+          [ctx.sessionId, target.value, newInstructions],
         );
         return {
           success: true,
           language: target.label,
           live_config_updated: liveUpdated,
-          guidance: `Continue the conversation entirely in ${target.label} from your next sentence. Keep the same warmth and approach.`
+          guidance: `Continue the conversation entirely in ${target.label} from your next sentence. Keep the same warmth and approach.`,
         };
-      }
+      },
     );
 
     // Brief validated screeners (PHQ-2 / GAD-2). Client renders the form and
@@ -900,14 +1014,15 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'administer_scale',
-        description: 'Present a brief 2-question validated check-in form on the participant\'s screen: phq2 (mood) or gad2 (anxiety). These are screeners, not diagnoses. Ask permission first ("mind if I ask two quick standard questions?"). At most one scale per session unless the participant asks, and each scale at most once every 7 days per participant (a consent commitment the server enforces — if it was administered more recently, this call returns an error; just move on without mentioning it).',
+        description:
+          'Present a brief 2-question validated check-in form on the participant\'s screen: phq2 (mood) or gad2 (anxiety). These are screeners, not diagnoses. Ask permission first ("mind if I ask two quick standard questions?"). At most one scale per session unless the participant asks, and each scale at most once every 7 days per participant (a consent commitment the server enforces — if it was administered more recently, this call returns an error; just move on without mentioning it).',
         parameters: {
           type: 'object',
           properties: {
-            scale: { type: 'string', enum: ['phq2', 'gad2'], description: 'Which screener to present.' }
+            scale: { type: 'string', enum: ['phq2', 'gad2'], description: 'Which screener to present.' },
           },
-          required: ['scale']
-        }
+          required: ['scale'],
+        },
       },
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         const { SCALES, SCALE_MIN_INTERVAL_DAYS, daysSinceScaleAdministered } = await import('../utils/scales.js');
@@ -939,9 +1054,9 @@ export class ToolRegistry {
         return {
           success: true,
           scale: scale.id,
-          guidance: `The ${scale.name} form is on the participant's screen. Wait quietly while they answer; you will receive the result. Respond supportively to the answers — never announce a score as a diagnosis.`
+          guidance: `The ${scale.name} form is on the participant's screen. Wait quietly while they answer; you will receive the result. Respond supportively to the answers — never announce a score as a diagnosis.`,
         };
-      }
+      },
     );
 
     // Research bookmark: the invocation log IS the storage; a transcript
@@ -951,38 +1066,49 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'flag_notable_moment',
-        description: 'Silently bookmark a conversationally significant moment for the research team: a breakthrough, a technique clearly landing or failing, strong resistance, or an unexpected turn. The participant never sees this. Use sparingly (a few per session at most).',
+        description:
+          'Silently bookmark a conversationally significant moment for the research team: a breakthrough, a technique clearly landing or failing, strong resistance, or an unexpected turn. The participant never sees this. Use sparingly (a few per session at most).',
         parameters: {
           type: 'object',
           properties: {
             category: {
               type: 'string',
               enum: ['breakthrough', 'technique_worked', 'technique_failed', 'resistance', 'disclosure', 'other'],
-              description: 'What kind of moment this is.'
+              description: 'What kind of moment this is.',
             },
-            reason: { type: 'string', description: 'One sentence on why it is notable.' }
+            reason: { type: 'string', description: 'One sentence on why it is notable.' },
           },
-          required: ['category', 'reason']
-        }
+          required: ['category', 'reason'],
+        },
       },
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
         const { insertMessagesBatch } = await import('../db/index.js');
-        await insertMessagesBatch([{
-          session_id: ctx.sessionId,
-          role: 'system',
-          message_type: 'notable_moment',
-          content: `[${args['category']}] ${args['reason']}`,
-          content_redacted: `[${args['category']}] ${args['reason']}`,
-          metadata: { category: args['category'], reason: args['reason'] },
-        }]);
+        await insertMessagesBatch([
+          {
+            session_id: ctx.sessionId,
+            role: 'system',
+            message_type: 'notable_moment',
+            content: `[${args['category']}] ${args['reason']}`,
+            content_redacted: `[${args['category']}] ${args['reason']}`,
+            metadata: { category: args['category'], reason: args['reason'] },
+          },
+        ]);
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'session:notable-moment', {
-            sessionId: ctx.sessionId, category: args['category'], reason: args['reason'], flaggedAt: new Date(),
-          }, ctx.sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:notable-moment',
+            {
+              sessionId: ctx.sessionId,
+              category: args['category'],
+              reason: args['reason'],
+              flaggedAt: new Date(),
+            },
+            ctx.sessionId,
+          );
         }
         return { success: true, note: 'Bookmarked. Do not mention this to the participant.' };
-      }
+      },
     );
 
     // Tool 22: Grounded psychoeducation retrieval (RAG over a vetted, evidence-
@@ -1017,9 +1143,7 @@ export class ToolRegistry {
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         const query = typeof args['query'] === 'string' ? args['query'].trim() : '';
         if (!query) return { error: 'query text is required' };
-        const topic = typeof args['topic'] === 'string' && args['topic'].trim()
-          ? args['topic'].trim()
-          : null;
+        const topic = typeof args['topic'] === 'string' && args['topic'].trim() ? args['topic'].trim() : null;
 
         try {
           const { embedText } = await import('./embeddings.service.js');
@@ -1039,11 +1163,12 @@ export class ToolRegistry {
 
           const { rerankChunks } = await import('./rerank.service.js');
           const { chunks: rows } = await rerankChunks(query, candidates, 3, {
-            sessionId: ctx.sessionId ?? null, toolName: 'retrieve_psychoeducation',
+            sessionId: ctx.sessionId ?? null,
+            toolName: 'retrieve_psychoeducation',
           });
 
           return {
-            results: rows.map(r => ({
+            results: rows.map((r) => ({
               title: r.title,
               content: r.content,
               source: r.source,
@@ -1059,7 +1184,7 @@ export class ToolRegistry {
               'The knowledge base is unavailable right now. Continue supporting the participant without it, and do not invent citations.',
           };
         }
-      }
+      },
     );
 
     // Tool 23: Semantic recall over the participant's OWN remembered facts
@@ -1091,7 +1216,10 @@ export class ToolRegistry {
         const userId = session?.user_id;
         if (!userId) return { available: false, reason: 'Participant is anonymous — no saved history.' };
         if (!(await getUserMemoryEnabled(userId))) {
-          return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
+          return {
+            available: false,
+            reason: 'Participant has not opted into session memory. Do not press them about it.',
+          };
         }
 
         try {
@@ -1107,14 +1235,14 @@ export class ToolRegistry {
           }
           return {
             available: true,
-            memories: rows.map(r => ({ fact: r.fact, when: r.created_at.toISOString().slice(0, 10) })),
+            memories: rows.map((r) => ({ fact: r.fact, when: r.created_at.toISOString().slice(0, 10) })),
             note: 'Use for continuity and warmth. Never claim to remember more than these facts.',
           };
         } catch (error) {
           console.error('[ToolRegistry] recall_relevant_history failed:', error);
           return { error: 'Could not search history right now. Continue without it; do not invent past details.' };
         }
-      }
+      },
     );
 
     // Tool 24: Find the best-fitting worksheet for a concern, then hand off to a
@@ -1126,11 +1254,15 @@ export class ToolRegistry {
         type: 'function',
         name: 'find_worksheet',
         description:
-          "Find the most fitting therapeutic worksheet/exercise for what the participant is working on, then follow its instructions to open it on their screen. Use when a written exercise would help. After calling this, call the render tool it returns (start_thought_record or show_journaling_prompt).",
+          'Find the most fitting therapeutic worksheet/exercise for what the participant is working on, then follow its instructions to open it on their screen. Use when a written exercise would help. After calling this, call the render tool it returns (start_thought_record or show_journaling_prompt).',
         parameters: {
           type: 'object',
           properties: {
-            concern: { type: 'string', description: 'What they want to work on, e.g. "a harsh self-critical thought" or "grief about a breakup".' },
+            concern: {
+              type: 'string',
+              description:
+                'What they want to work on, e.g. "a harsh self-critical thought" or "grief about a breakup".',
+            },
           },
           required: ['concern'],
         },
@@ -1147,16 +1279,19 @@ export class ToolRegistry {
           if (candidates.length === 0) {
             return {
               found: false,
-              guidance: 'No matching worksheet found. You can still open a blank thought record (start_thought_record) or offer a journaling prompt (show_journaling_prompt) if it would help. Do not invent a named worksheet.',
+              guidance:
+                'No matching worksheet found. You can still open a blank thought record (start_thought_record) or offer a journaling prompt (show_journaling_prompt) if it would help. Do not invent a named worksheet.',
             };
           }
           const { rerankChunks } = await import('./rerank.service.js');
           const { chunks: rows } = await rerankChunks(concern, candidates, 1, {
-            sessionId: ctx.sessionId ?? null, toolName: 'find_worksheet',
+            sessionId: ctx.sessionId ?? null,
+            toolName: 'find_worksheet',
           });
           const w = rows[0];
           const meta = (w.metadata ?? {}) as { render_tool?: string; prompt?: string };
-          const renderTool = meta.render_tool === 'start_thought_record' ? 'start_thought_record' : 'show_journaling_prompt';
+          const renderTool =
+            meta.render_tool === 'start_thought_record' ? 'start_thought_record' : 'show_journaling_prompt';
           return {
             found: true,
             template_id: w.chunk_id,
@@ -1165,14 +1300,18 @@ export class ToolRegistry {
             source: w.source,
             render_tool: renderTool,
             suggested_prompt: meta.prompt ?? null,
-            guidance: `This worksheet fits. Briefly introduce it in your own warm words, then call ${renderTool}${meta.prompt ? ` with prompt: "${meta.prompt}"` : ''}. Do not invent worksheet content beyond this. ` +
+            guidance:
+              `This worksheet fits. Briefly introduce it in your own warm words, then call ${renderTool}${meta.prompt ? ` with prompt: "${meta.prompt}"` : ''}. Do not invent worksheet content beyond this. ` +
               `If personalizing the wording to what the participant just told you would help more than the generic form, you may instead call create_custom_worksheet with template_id ${w.chunk_id}, keeping the same number and kind of sections as this template.`,
           };
         } catch (error) {
           console.error('[ToolRegistry] find_worksheet failed:', error);
-          return { error: 'The worksheet library is unavailable right now. Offer a blank thought record or journaling prompt instead if useful.' };
+          return {
+            error:
+              'The worksheet library is unavailable right now. Offer a blank thought record or journaling prompt instead if useful.',
+          };
         }
-      }
+      },
     );
 
     // Tool 25: Suggest a technique matching the session's active modality
@@ -1214,12 +1353,14 @@ export class ToolRegistry {
           if (candidates.length === 0) {
             return {
               found: false,
-              guidance: 'No matching technique in the library. Offer support in your own words consistent with the approach; do not invent named techniques or cite sources.',
+              guidance:
+                'No matching technique in the library. Offer support in your own words consistent with the approach; do not invent named techniques or cite sources.',
             };
           }
           const { rerankChunks } = await import('./rerank.service.js');
           const { chunks: rows } = await rerankChunks(concern, candidates, 1, {
-            sessionId: ctx.sessionId ?? null, toolName: 'suggest_modality_technique',
+            sessionId: ctx.sessionId ?? null,
+            toolName: 'suggest_modality_technique',
           });
           const t = rows[0];
           return {
@@ -1228,13 +1369,17 @@ export class ToolRegistry {
             how_to: t.content,
             approach: t.modality ?? 'general',
             source: t.source,
-            guidance: 'Offer this technique in warm, plain language, matched to the active approach and to what the participant said. Do not add steps or citations beyond what is shown here.',
+            guidance:
+              'Offer this technique in warm, plain language, matched to the active approach and to what the participant said. Do not add steps or citations beyond what is shown here.',
           };
         } catch (error) {
           console.error('[ToolRegistry] suggest_modality_technique failed:', error);
-          return { error: 'The technique library is unavailable right now. Continue supportively in your own words without naming a specific technique or source.' };
+          return {
+            error:
+              'The technique library is unavailable right now. Continue supportively in your own words without naming a specific technique or source.',
+          };
         }
-      }
+      },
     );
 
     // Tools 26-28: interactive on-screen experiences (client renders the widget
@@ -1245,7 +1390,8 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'start_body_scan',
-        description: 'Start a guided body-scan relaxation on the participant\'s screen — attention moves gently from feet to head, softening each area. Use when they feel tense, wired, or want to relax. Ask first, then narrate slowly alongside the visual.',
+        description:
+          "Start a guided body-scan relaxation on the participant's screen — attention moves gently from feet to head, softening each area. Use when they feel tense, wired, or want to relax. Ask first, then narrate slowly alongside the visual.",
         parameters: {
           type: 'object',
           properties: {
@@ -1256,8 +1402,9 @@ export class ToolRegistry {
       },
       async () => ({
         success: true,
-        guidance: 'A guided body-scan is now on the participant\'s screen, advancing through body regions on its own. Narrate slowly and calmly in time with it; leave silences. When it ends, ask how their body feels now.',
-      })
+        guidance:
+          "A guided body-scan is now on the participant's screen, advancing through body regions on its own. Narrate slowly and calmly in time with it; leave silences. When it ends, ask how their body feels now.",
+      }),
     );
 
     this.registerTool(
@@ -1265,13 +1412,15 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'start_values_sort',
-        description: 'Open an ACT values card-sort on the participant\'s screen: they tap the values that matter most to them. Use when exploring what gives their life meaning or direction, or when they feel stuck or disconnected. You will receive their choices when they finish.',
+        description:
+          "Open an ACT values card-sort on the participant's screen: they tap the values that matter most to them. Use when exploring what gives their life meaning or direction, or when they feel stuck or disconnected. You will receive their choices when they finish.",
         parameters: { type: 'object', properties: {}, required: [] },
       },
       async () => ({
         success: true,
-        guidance: 'A values card-sort is on the participant\'s screen. Give them quiet time to choose. When they finish you\'ll receive the values they picked — reflect those back warmly and help them find one small values-aligned step.',
-      })
+        guidance:
+          "A values card-sort is on the participant's screen. Give them quiet time to choose. When they finish you'll receive the values they picked — reflect those back warmly and help them find one small values-aligned step.",
+      }),
     );
 
     this.registerTool(
@@ -1279,13 +1428,15 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'start_fear_ladder',
-        description: 'Open a fear-ladder builder on the participant\'s screen: they list situations they avoid and rate the distress of each. Use when working on avoidance or planning graded exposure. You will receive the ranked ladder (easiest to hardest) when they finish.',
+        description:
+          "Open a fear-ladder builder on the participant's screen: they list situations they avoid and rate the distress of each. Use when working on avoidance or planning graded exposure. You will receive the ranked ladder (easiest to hardest) when they finish.",
         parameters: { type: 'object', properties: {}, required: [] },
       },
       async () => ({
         success: true,
-        guidance: 'A fear-ladder builder is on the participant\'s screen. Let them fill it in. When they finish you\'ll receive their situations ranked easiest to hardest — affirm the effort and, only if they\'re willing, offer the lowest rung as a first step.',
-      })
+        guidance:
+          "A fear-ladder builder is on the participant's screen. Let them fill it in. When they finish you'll receive their situations ranked easiest to hardest — affirm the effort and, only if they're willing, offer the lowest rung as a first step.",
+      }),
     );
 
     // Tool 29: Follow-through check on last session's assigned practice
@@ -1295,17 +1446,27 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'review_practice',
-        description: "Look up what the participant was asked to practice or work on after their last session — a thought record, a safety plan, or similar — so you can ask how it went. Only works for logged-in participants with session memory on.",
+        description:
+          'Look up what the participant was asked to practice or work on after their last session — a thought record, a safety plan, or similar — so you can ask how it went. Only works for logged-in participants with session memory on.',
         parameters: { type: 'object', properties: {}, required: [] },
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
-        const { getSession, getUserMemoryEnabled, getUserLatestThoughtRecord, getUserLatestSafetyPlan, listUserAssignments } = await import('../db/index.js');
+        const {
+          getSession,
+          getUserMemoryEnabled,
+          getUserLatestThoughtRecord,
+          getUserLatestSafetyPlan,
+          listUserAssignments,
+        } = await import('../db/index.js');
         const session = await getSession(ctx.sessionId);
         const userId = session?.user_id;
         if (!userId) return { available: false, reason: 'Participant is anonymous — no session history exists.' };
         if (!(await getUserMemoryEnabled(userId))) {
-          return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
+          return {
+            available: false,
+            reason: 'Participant has not opted into session memory. Do not press them about it.',
+          };
         }
         const [thoughtRecord, safetyPlan, openAssignments] = await Promise.all([
           getUserLatestThoughtRecord(userId),
@@ -1313,16 +1474,23 @@ export class ToolRegistry {
           listUserAssignments(userId, { status: 'assigned', limit: 5 }),
         ]);
         if (!thoughtRecord && !safetyPlan && openAssignments.length === 0) {
-          return { available: true, practice: null, note: 'No recorded practice from a previous session — do not invent one.' };
+          return {
+            available: true,
+            practice: null,
+            note: 'No recorded practice from a previous session — do not invent one.',
+          };
         }
         return {
           available: true,
           thought_record: thoughtRecord?.record.balanced_thought
-            ? { balanced_thought: thoughtRecord.record.balanced_thought, when: thoughtRecord.created_at.toISOString().slice(0, 10) }
+            ? {
+                balanced_thought: thoughtRecord.record.balanced_thought,
+                when: thoughtRecord.created_at.toISOString().slice(0, 10),
+              }
             : null,
           has_safety_plan: !!safetyPlan,
           // Assigned via assign_practice and not yet marked done by the participant.
-          open_assignments: openAssignments.map(a => ({
+          open_assignments: openAssignments.map((a) => ({
             title: a.title,
             kind: a.kind,
             suggested_frequency: a.suggested_frequency,
@@ -1330,7 +1498,7 @@ export class ToolRegistry {
           })),
           note: 'Ask how it went in your own warm words. Do not read this back verbatim or claim more detail than shown here.',
         };
-      }
+      },
     );
 
     // Tool 32b: forward-looking practice (ai-therapist-123) — the counterpart
@@ -1342,14 +1510,24 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'assign_practice',
-        description: 'Assign a small, concrete between-session practice the participant agreed to. Only after discussing it with them. One assignment per topic.',
+        description:
+          'Assign a small, concrete between-session practice the participant agreed to. Only after discussing it with them. One assignment per topic.',
         parameters: {
           type: 'object',
           properties: {
-            title: { type: 'string', description: 'Short name for the practice, in plain words (e.g. "Two-minute breathing before bed").' },
-            description: { type: 'string', description: 'What to actually do, phrased close to how you agreed on it together. One or two sentences.' },
+            title: {
+              type: 'string',
+              description: 'Short name for the practice, in plain words (e.g. "Two-minute breathing before bed").',
+            },
+            description: {
+              type: 'string',
+              description: 'What to actually do, phrased close to how you agreed on it together. One or two sentences.',
+            },
             kind: { type: 'string', enum: [...PRACTICE_KINDS], description: 'What kind of practice this is.' },
-            suggested_frequency: { type: 'string', description: 'How often, if you agreed on one (e.g. "daily", "when the worry shows up").' },
+            suggested_frequency: {
+              type: 'string',
+              description: 'How often, if you agreed on one (e.g. "daily", "when the worry shows up").',
+            },
           },
           required: ['title', 'description'],
         },
@@ -1358,18 +1536,24 @@ export class ToolRegistry {
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
         const title = typeof args['title'] === 'string' ? args['title'].trim().substring(0, 200) : '';
-        const description = typeof args['description'] === 'string' ? args['description'].trim().substring(0, 1000) : '';
+        const description =
+          typeof args['description'] === 'string' ? args['description'].trim().substring(0, 1000) : '';
         if (!title || !description) return { error: 'title and description are both required' };
-        const kind = PRACTICE_KINDS.find(k => k === args['kind']) ?? 'custom';
-        const suggestedFrequency = typeof args['suggested_frequency'] === 'string'
-          ? args['suggested_frequency'].trim().substring(0, 200) || null
-          : null;
+        const kind = PRACTICE_KINDS.find((k) => k === args['kind']) ?? 'custom';
+        const suggestedFrequency =
+          typeof args['suggested_frequency'] === 'string'
+            ? args['suggested_frequency'].trim().substring(0, 200) || null
+            : null;
 
         const { getSession, insertPracticeAssignment } = await import('../db/index.js');
         const session = await getSession(ctx.sessionId);
         const userId = session?.user_id;
         if (!userId) {
-          return { assigned: false, reason: 'Participant is anonymous — practice assignments need an account. Suggest the practice verbally instead.' };
+          return {
+            assigned: false,
+            reason:
+              'Participant is anonymous — practice assignments need an account. Suggest the practice verbally instead.',
+          };
         }
         await insertPracticeAssignment({
           userId,
@@ -1380,7 +1564,7 @@ export class ToolRegistry {
           suggestedFrequency,
         });
         return { assigned: true, title };
-      }
+      },
     );
 
     // Tool 30: This session's PHQ-2/GAD-2 vs their previous one (ai-therapist-69).
@@ -1389,7 +1573,8 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'compare_screener_trend',
-        description: 'Compare this session\'s PHQ-2/GAD-2 screener result (after administer_scale finishes) to the participant\'s previous one, with direction. Only works for logged-in participants with session memory on.',
+        description:
+          "Compare this session's PHQ-2/GAD-2 screener result (after administer_scale finishes) to the participant's previous one, with direction. Only works for logged-in participants with session memory on.",
         parameters: {
           type: 'object',
           properties: {
@@ -1403,22 +1588,36 @@ export class ToolRegistry {
         const scale = args['scale'] as string;
         if (scale !== 'phq2' && scale !== 'gad2') return { error: 'Unknown scale', available: ['phq2', 'gad2'] };
 
-        const { getSession, getUserMemoryEnabled, getSessionScaleResponses, getUserLatestScaleScore } = await import('../db/index.js');
+        const { getSession, getUserMemoryEnabled, getSessionScaleResponses, getUserLatestScaleScore } = await import(
+          '../db/index.js'
+        );
         const session = await getSession(ctx.sessionId);
         const userId = session?.user_id;
         if (!userId) return { available: false, reason: 'Participant is anonymous — no prior screeners on record.' };
         if (!(await getUserMemoryEnabled(userId))) {
-          return { available: false, reason: 'Participant has not opted into session memory. Do not press them about it.' };
+          return {
+            available: false,
+            reason: 'Participant has not opted into session memory. Do not press them about it.',
+          };
         }
 
-        const thisSessionResponses = (await getSessionScaleResponses(ctx.sessionId)).filter(r => r.scale === scale);
+        const thisSessionResponses = (await getSessionScaleResponses(ctx.sessionId)).filter((r) => r.scale === scale);
         const current = thisSessionResponses[thisSessionResponses.length - 1];
         if (!current) {
-          return { available: false, reason: `No ${scale.toUpperCase()} response recorded yet this session — call administer_scale first.` };
+          return {
+            available: false,
+            reason: `No ${scale.toUpperCase()} response recorded yet this session — call administer_scale first.`,
+          };
         }
         const previous = await getUserLatestScaleScore(userId, scale, ctx.sessionId);
         if (!previous) {
-          return { available: true, current_score: current.score, previous_score: null, direction: null, note: 'First time this screener has been recorded — no trend yet.' };
+          return {
+            available: true,
+            current_score: current.score,
+            previous_score: null,
+            direction: null,
+            note: 'First time this screener has been recorded — no trend yet.',
+          };
         }
         const delta = current.score - previous.score;
         const direction = delta > 0 ? 'up' : delta < 0 ? 'down' : 'unchanged';
@@ -1430,7 +1629,7 @@ export class ToolRegistry {
           direction,
           note: 'These are screeners, not diagnoses — respond supportively in plain language, never announce a "diagnosis".',
         };
-      }
+      },
     );
 
     // Tool 31: Surface an existing safety plan mid-session (ai-therapist-72),
@@ -1440,16 +1639,24 @@ export class ToolRegistry {
       {
         type: 'function',
         name: 'retrieve_safety_plan',
-        description: 'Check whether the participant already has a safety plan — from this session or (for logged-in, memory-consented participants) a previous one — before offering to build a new one with create_safety_plan.',
+        description:
+          'Check whether the participant already has a safety plan — from this session or (for logged-in, memory-consented participants) a previous one — before offering to build a new one with create_safety_plan.',
         parameters: { type: 'object', properties: {}, required: [] },
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };
-        const { getSession, getSessionSafetyPlan, getUserMemoryEnabled, getUserLatestSafetyPlan } = await import('../db/index.js');
+        const { getSession, getSessionSafetyPlan, getUserMemoryEnabled, getUserLatestSafetyPlan } = await import(
+          '../db/index.js'
+        );
 
         const own = await getSessionSafetyPlan(ctx.sessionId);
         if (own) {
-          return { available: true, source: 'this_session', plan: own.plan, created_at: own.created_at.toISOString().slice(0, 10) };
+          return {
+            available: true,
+            source: 'this_session',
+            plan: own.plan,
+            created_at: own.created_at.toISOString().slice(0, 10),
+          };
         }
 
         const session = await getSession(ctx.sessionId);
@@ -1457,11 +1664,20 @@ export class ToolRegistry {
         if (userId && (await getUserMemoryEnabled(userId))) {
           const prior = await getUserLatestSafetyPlan(userId);
           if (prior) {
-            return { available: true, source: 'previous_session', plan: prior.plan, created_at: prior.created_at.toISOString().slice(0, 10) };
+            return {
+              available: true,
+              source: 'previous_session',
+              plan: prior.plan,
+              created_at: prior.created_at.toISOString().slice(0, 10),
+            };
           }
         }
-        return { available: false, reason: 'No safety plan exists yet. If risk is elevated, consider building one together with create_safety_plan.' };
-      }
+        return {
+          available: false,
+          reason:
+            'No safety plan exists yet. If risk is elevated, consider building one together with create_safety_plan.',
+        };
+      },
     );
 
     // Tool 32: Personalized worksheet generation within a vetted template's
@@ -1477,20 +1693,27 @@ export class ToolRegistry {
         type: 'function',
         name: 'create_custom_worksheet',
         description:
-          'Generate a worksheet personalized to what the participant just told you, WITHIN the structure of a vetted template retrieved from find_worksheet. Call find_worksheet first to get a template_id. Keep the same number and kind of sections as the template — only wording (title, intro, prompt labels) may be personalized. After calling this, the worksheet opens on the participant\'s screen; you will receive their answers when they finish.',
+          "Generate a worksheet personalized to what the participant just told you, WITHIN the structure of a vetted template retrieved from find_worksheet. Call find_worksheet first to get a template_id. Keep the same number and kind of sections as the template — only wording (title, intro, prompt labels) may be personalized. After calling this, the worksheet opens on the participant's screen; you will receive their answers when they finish.",
         parameters: {
           type: 'object',
           properties: {
             template_id: { type: 'number', description: 'The template_id returned by find_worksheet.' },
             title: { type: 'string', description: 'Personalized worksheet title (short).' },
-            intro: { type: 'string', description: 'One or two warm sentences introducing the worksheet, referencing what they told you.' },
+            intro: {
+              type: 'string',
+              description: 'One or two warm sentences introducing the worksheet, referencing what they told you.',
+            },
             sections: {
               type: 'array',
-              description: 'Ordered prompts/sections, matching the template\'s structure exactly in count and type.',
+              description: "Ordered prompts/sections, matching the template's structure exactly in count and type.",
               items: {
                 type: 'object',
                 properties: {
-                  type: { type: 'string', enum: ['text', 'textarea', 'scale'], description: 'Input type: text = short answer, textarea = longer writing, scale = 0-100 slider.' },
+                  type: {
+                    type: 'string',
+                    enum: ['text', 'textarea', 'scale'],
+                    description: 'Input type: text = short answer, textarea = longer writing, scale = 0-100 slider.',
+                  },
                   label: { type: 'string', description: 'The personalized prompt/question for this section.' },
                   placeholder: { type: 'string', description: 'Optional short example/placeholder text.' },
                 },
@@ -1505,7 +1728,8 @@ export class ToolRegistry {
         if (!ctx.sessionId) return { error: 'No session context available' };
 
         const templateId = Number(args['template_id']);
-        if (!Number.isFinite(templateId)) return { error: 'template_id is required — call find_worksheet first to get one' };
+        if (!Number.isFinite(templateId))
+          return { error: 'template_id is required — call find_worksheet first to get one' };
 
         const title = typeof args['title'] === 'string' ? args['title'].trim().substring(0, 200) : '';
         const intro = typeof args['intro'] === 'string' ? args['intro'].trim().substring(0, 500) : null;
@@ -1519,7 +1743,8 @@ export class ToolRegistry {
             const rec = s as Record<string, unknown>;
             const type = typeof rec['type'] === 'string' ? rec['type'] : '';
             const label = typeof rec['label'] === 'string' ? rec['label'].trim().substring(0, 300) : '';
-            const placeholder = typeof rec['placeholder'] === 'string' ? rec['placeholder'].trim().substring(0, 150) : undefined;
+            const placeholder =
+              typeof rec['placeholder'] === 'string' ? rec['placeholder'].trim().substring(0, 150) : undefined;
             if (!ALLOWED_TYPES.has(type) || !label) return null;
             return { type: type as 'text' | 'textarea' | 'scale', label, ...(placeholder ? { placeholder } : {}) };
           })
@@ -1533,7 +1758,9 @@ export class ToolRegistry {
           const { getKnowledgeChunkById, insertWorksheetInstance } = await import('../db/index.js');
           const template = await getKnowledgeChunkById(templateId);
           if (!template || template.kind !== 'worksheet' || !template.active) {
-            return { error: 'Unknown or inactive worksheet template. Call find_worksheet again to get a valid template_id.' };
+            return {
+              error: 'Unknown or inactive worksheet template. Call find_worksheet again to get a valid template_id.',
+            };
           }
 
           // Enforce the vetted template's structure: the model may personalize
@@ -1573,9 +1800,17 @@ export class ToolRegistry {
           });
 
           if (global.io) {
-            void broadcastAdminEventForSession(global.io, 'session:worksheet-created', {
-              sessionId: ctx.sessionId, instanceId, templateId: template.chunk_id, createdAt: new Date(),
-            }, ctx.sessionId);
+            void broadcastAdminEventForSession(
+              global.io,
+              'session:worksheet-created',
+              {
+                sessionId: ctx.sessionId,
+                instanceId,
+                templateId: template.chunk_id,
+                createdAt: new Date(),
+              },
+              ctx.sessionId,
+            );
           }
 
           return {
@@ -1584,13 +1819,17 @@ export class ToolRegistry {
             title,
             intro,
             sections,
-            guidance: 'The personalized worksheet is now on the participant\'s screen. Stay quiet or offer brief encouragement while they fill it in; when they finish you will receive their answers — respond to what they wrote, not the form itself.',
+            guidance:
+              "The personalized worksheet is now on the participant's screen. Stay quiet or offer brief encouragement while they fill it in; when they finish you will receive their answers — respond to what they wrote, not the form itself.",
           };
         } catch (error) {
           console.error('[ToolRegistry] create_custom_worksheet failed:', error);
-          return { error: 'Could not create the personalized worksheet right now. Fall back to find_worksheet\'s standard render tool instead.' };
+          return {
+            error:
+              "Could not create the personalized worksheet right now. Fall back to find_worksheet's standard render tool instead.",
+          };
         }
-      }
+      },
     );
 
     // Tool 33: Explicit laddered risk assessment logging (ai-therapist-71).
@@ -1638,7 +1877,8 @@ export class ToolRegistry {
         const riskBand = typeof args['risk_band'] === 'string' ? args['risk_band'] : '';
         const answer = typeof args['answer'] === 'string' ? args['answer'].trim().substring(0, 1000) : '';
 
-        if (!STEPS.has(step)) return { error: 'step must be one of ideation, plan, means, timeframe, intent, protective_factors' };
+        if (!STEPS.has(step))
+          return { error: 'step must be one of ideation, plan, means, timeframe, intent, protective_factors' };
         if (!BANDS.has(riskBand)) return { error: 'risk_band must be one of none, low, moderate, high, imminent' };
         if (!answer) return { error: 'answer text is required' };
 
@@ -1659,21 +1899,33 @@ export class ToolRegistry {
           });
 
           if (global.io) {
-            void broadcastAdminEventForSession(global.io, 'session:risk-check-step', {
-              sessionId: ctx.sessionId, step, riskBand, loggedAt: new Date(),
-            }, ctx.sessionId);
+            void broadcastAdminEventForSession(
+              global.io,
+              'session:risk-check-step',
+              {
+                sessionId: ctx.sessionId,
+                step,
+                riskBand,
+                loggedAt: new Date(),
+              },
+              ctx.sessionId,
+            );
           }
 
           return {
             success: true,
             logged: { step, risk_band: riskBand },
-            guidance: 'Step logged. Continue the ladder gently, one question at a time, or if you have enough information, move to safety planning or your crisis protocol as clinically indicated.',
+            guidance:
+              'Step logged. Continue the ladder gently, one question at a time, or if you have enough information, move to safety planning or your crisis protocol as clinically indicated.',
           };
         } catch (error) {
           console.error('[ToolRegistry] run_risk_check failed:', error);
-          return { error: 'Could not log this step right now. Continue the assessment verbally and follow your crisis protocol.' };
+          return {
+            error:
+              'Could not log this step right now. Continue the assessment verbally and follow your crisis protocol.',
+          };
         }
-      }
+      },
     );
 
     // Tool 34: Uninterruptible moment (ai-therapist-102). Does NOT mute the

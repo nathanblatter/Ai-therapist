@@ -1,12 +1,12 @@
-import { StrictMode } from "react";
-import { renderToString } from "react-dom/server";
-import { StaticRouter } from "react-router-dom/server";
-import { Routes, Route, Navigate } from "react-router-dom";
-import App from "./components/App";
-import Login from "./components/Login";
-import Profile from "./components/Profile";
-import DemoLanding from "./components/DemoLanding";
-import ProtectedRoute from "../shared/components/ProtectedRoute";
+import { StrictMode } from 'react';
+import { renderToString } from 'react-dom/server';
+import { StaticRouter } from 'react-router-dom/server';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import App from './components/App';
+import Login from './components/Login';
+import Profile from './components/Profile';
+import DemoLanding from './components/DemoLanding';
+import ProtectedRoute from '../shared/components/ProtectedRoute';
 
 export function render(url: string) {
   const html = renderToString(

@@ -1,17 +1,27 @@
 // The privacy guarantee of the worksheet review loop (ai-therapist-89): a
 // promoted template never carries a participant's answers.
 import { describe, it, expect } from 'vitest';
-import { buildWorksheetTemplate, findParticipantContent, MIN_ANSWER_CHARS, SHINGLE_WORDS } from './worksheetTemplate.js';
+import {
+  buildWorksheetTemplate,
+  findParticipantContent,
+  MIN_ANSWER_CHARS,
+  SHINGLE_WORDS,
+} from './worksheetTemplate.js';
 import type { WorksheetSection } from '../db/worksheets.queries.js';
 
 const SECTIONS: WorksheetSection[] = [
-  { type: 'textarea', label: 'What happened when your manager criticized the report?', placeholder: 'Describe the moment' },
+  {
+    type: 'textarea',
+    label: 'What happened when your manager criticized the report?',
+    placeholder: 'Describe the moment',
+  },
   { type: 'textarea', label: 'What evidence supports the thought?' },
   { type: 'scale', label: 'How strongly do you believe it now?' },
 ];
 
 const RESPONSES = {
-  'What happened when your manager criticized the report?': 'My manager Priya said the Q3 report was sloppy in front of the whole team on Tuesday.',
+  'What happened when your manager criticized the report?':
+    'My manager Priya said the Q3 report was sloppy in front of the whole team on Tuesday.',
   'What evidence supports the thought?': 'I missed two deadlines last month and my sister says I am lazy.',
   'How strongly do you believe it now?': '70',
 };
@@ -38,7 +48,10 @@ describe('buildWorksheetTemplate', () => {
     // Belt and braces for the type-level guarantee: feeding an object that
     // also carries responses/intro changes nothing in the output.
     const withExtras = buildWorksheetTemplate({
-      title: 'Evidence list', sections: SECTIONS, template_title: null, template_rationale: null,
+      title: 'Evidence list',
+      sections: SECTIONS,
+      template_title: null,
+      template_rationale: null,
       ...({ responses: RESPONSES, intro: 'After what you told me about Priya and the report' } as object),
     });
     expect(withExtras.content).not.toContain('Priya');
@@ -51,7 +64,12 @@ describe('buildWorksheetTemplate', () => {
   });
 
   it('omits the derived-from line when the template title equals the instance title, and the rationale when absent', () => {
-    const t = buildWorksheetTemplate({ title: 'Evidence list', sections: SECTIONS, template_title: 'Evidence list', template_rationale: null });
+    const t = buildWorksheetTemplate({
+      title: 'Evidence list',
+      sections: SECTIONS,
+      template_title: 'Evidence list',
+      template_rationale: null,
+    });
     expect(t.content).not.toContain('Derived from');
     expect(t.content).not.toContain('Rationale:');
   });
@@ -65,17 +83,23 @@ describe('findParticipantContent', () => {
 
   it('catches a whole answer pasted in, ignoring case, punctuation and spacing', () => {
     const text = `Prompt:   my MANAGER priya said the q3 report was sloppy, in front of the whole team on tuesday`;
-    expect(findParticipantContent(text, RESPONSES)).toEqual({ key: 'What happened when your manager criticized the report?' });
+    expect(findParticipantContent(text, RESPONSES)).toEqual({
+      key: 'What happened when your manager criticized the report?',
+    });
   });
 
   it('catches a fragment of an answer (a run of consecutive words)', () => {
     const words = 'I missed two deadlines last month and'.split(' ');
     expect(words.length).toBeGreaterThanOrEqual(SHINGLE_WORDS);
-    expect(findParticipantContent(`Example: ${words.join(' ')} ...`, RESPONSES)).toEqual({ key: 'What evidence supports the thought?' });
+    expect(findParticipantContent(`Example: ${words.join(' ')} ...`, RESPONSES)).toEqual({
+      key: 'What evidence supports the thought?',
+    });
   });
 
   it('does not flag a short run that is ordinary template wording', () => {
-    expect(findParticipantContent('What evidence supports the thought? Think of the whole team.', RESPONSES)).toBeNull();
+    expect(
+      findParticipantContent('What evidence supports the thought? Think of the whole team.', RESPONSES),
+    ).toBeNull();
   });
 
   it('ignores short answers (scale values, yes/no) that carry no participant signal', () => {

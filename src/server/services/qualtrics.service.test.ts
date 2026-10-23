@@ -78,7 +78,7 @@ describe('verifyBaselineResponse', () => {
     await verifyBaselineResponse(CONFIG, 'R_1hB2c3D4e5F6g7H');
     expect(fetchMock).toHaveBeenCalledWith(
       'https://byu.pdx1.qualtrics.com/API/v3/surveys/SV_aW32vA2r2yHrpI2/responses/R_1hB2c3D4e5F6g7H',
-      expect.objectContaining({ headers: expect.objectContaining({ 'X-API-TOKEN': 'test-token' }) })
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-API-TOKEN': 'test-token' }) }),
     );
   });
 

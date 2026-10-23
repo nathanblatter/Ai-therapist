@@ -33,7 +33,7 @@ export interface AssistantAuditFilters {
  */
 export async function listAssistantAudit(
   filters: AssistantAuditFilters,
-  orgId: number | null = null
+  orgId: number | null = null,
 ): Promise<{ rows: AssistantAuditRow[]; total: number }> {
   const where = `
     WHERE ($1::int IS NULL OR aa.user_id = $1)
@@ -56,7 +56,7 @@ export async function listAssistantAudit(
        ${from} ${where}
        ORDER BY aa.audit_id DESC
        LIMIT $6 OFFSET $7`,
-      [...params, filters.limit, filters.offset]
+      [...params, filters.limit, filters.offset],
     ),
     pool.query<{ count: string }>(`SELECT COUNT(*) AS count ${from} ${where}`, params),
   ]);

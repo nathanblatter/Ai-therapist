@@ -8,7 +8,12 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-import { logDataAccess, listDataAccessLog, getParticipantAccessHistory, isDataAccessAction } from './accessLog.queries.js';
+import {
+  logDataAccess,
+  listDataAccessLog,
+  getParticipantAccessHistory,
+  isDataAccessAction,
+} from './accessLog.queries.js';
 
 beforeEach(() => {
   queryMock.mockReset().mockResolvedValue({ rowCount: 1, rows: [] });
@@ -43,9 +48,7 @@ describe('logDataAccess', () => {
   it('never rejects when the insert fails (fire-and-forget)', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     queryMock.mockRejectedValueOnce(new Error('db down'));
-    await expect(
-      logDataAccess({ accessedBy: 1, role: 'therapist', action: 'export' })
-    ).resolves.toBeUndefined();
+    await expect(logDataAccess({ accessedBy: 1, role: 'therapist', action: 'export' })).resolves.toBeUndefined();
     expect(consoleSpy).toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
@@ -53,12 +56,19 @@ describe('logDataAccess', () => {
 
 describe('listDataAccessLog', () => {
   it('runs the page and count queries with every filter bound, org-scoped', async () => {
-    queryMock
-      .mockResolvedValueOnce({ rows: [{ id: 1 }] })
-      .mockResolvedValueOnce({ rows: [{ count: '12' }] });
+    queryMock.mockResolvedValueOnce({ rows: [{ id: 1 }] }).mockResolvedValueOnce({ rows: [{ count: '12' }] });
     const page = await listDataAccessLog(
-      { participantUserId: 42, sessionId: 's', actorUsername: 'r', action: 'export', since: 'a', until: 'b', limit: 25, offset: 50 },
-      3
+      {
+        participantUserId: 42,
+        sessionId: 's',
+        actorUsername: 'r',
+        action: 'export',
+        since: 'a',
+        until: 'b',
+        limit: 25,
+        offset: 50,
+      },
+      3,
     );
     expect(page).toEqual({ rows: [{ id: 1 }], total: 12 });
     const [pageSql, pageParams] = queryMock.mock.calls[0];

@@ -94,8 +94,8 @@ export function resolveGrokRefusalGuard(raw: unknown): GrokRefusalGuardConfig {
   const patterns = Array.isArray(r.patterns)
     ? r.patterns
         .filter((p): p is string => typeof p === 'string')
-        .map(p => normalizeRefusalText(p))
-        .filter(p => p.length > 0)
+        .map((p) => normalizeRefusalText(p))
+        .filter((p) => p.length > 0)
     : [];
 
   const steerAfter = clampInt(r.steerAfter, 1, 20, d.steerAfter);
@@ -139,7 +139,7 @@ export class GrokRefusalDetector {
   isRefusal(text: string): boolean {
     const normalized = normalizeRefusalText(text);
     if (!normalized || normalized.length > this.config.maxChars) return false;
-    if (this.config.patterns.some(p => normalized.includes(p))) return true;
+    if (this.config.patterns.some((p) => normalized.includes(p))) return true;
     return this.lastShortTurn !== null && isNearIdentical(normalized, this.lastShortTurn);
   }
 
@@ -196,9 +196,10 @@ export const GROK_REFUSAL_STEER =
  * is no audio for a server-authored turn.
  */
 export function buildGrokRefusalRecoveryLine(crisisLine?: string | null): string {
-  const crisis = crisisLine && crisisLine.trim().length > 0
-    ? crisisLine.trim()
-    : 'call or text 988 to reach the Suicide and Crisis Lifeline, or call 911 if you are in immediate danger';
+  const crisis =
+    crisisLine && crisisLine.trim().length > 0
+      ? crisisLine.trim()
+      : 'call or text 988 to reach the Suicide and Crisis Lifeline, or call 911 if you are in immediate danger';
   return (
     'This is a note from the study system, not from the assistant. ' +
     'Something on our side is blocking its replies right now, so it keeps repeating itself. ' +

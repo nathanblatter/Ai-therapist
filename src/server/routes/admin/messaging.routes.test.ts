@@ -92,7 +92,14 @@ beforeEach(() => {
   ]);
   dbMocks.listThreadMessages.mockResolvedValue([messageRow()]);
   dbMocks.insertThreadMessage.mockResolvedValue(
-    messageRow({ sender_id: CLINICIAN_ID, sender_role: 'caseworker', risk_score: null, risk_severity: null, scan_status: 'not_applicable', crisis_event_id: null })
+    messageRow({
+      sender_id: CLINICIAN_ID,
+      sender_role: 'caseworker',
+      risk_score: null,
+      risk_severity: null,
+      scan_status: 'not_applicable',
+      crisis_event_id: null,
+    }),
   );
   dbMocks.markThreadRead.mockResolvedValue(undefined);
   dbMocks.countUnreadForUser.mockResolvedValue(1);
@@ -127,22 +134,21 @@ describe('GET /api/admin/messaging/inbox', () => {
 
 describe('POST /api/admin/messaging/threads', () => {
   it('creates (or revives) the pair thread for an assigned client', async () => {
-    const res = await request(appAs('caseworker'))
-      .post('/api/admin/messaging/threads')
-      .send({ client_id: CLIENT_ID });
+    const res = await request(appAs('caseworker')).post('/api/admin/messaging/threads').send({ client_id: CLIENT_ID });
     expect(res.status).toBe(201);
     expect(res.body.thread.thread_id).toBe(5);
     expect(dbMocks.getOrCreateThread).toHaveBeenCalledWith({
-      clientId: CLIENT_ID, clinicianId: CLINICIAN_ID, clinicianRole: 'caseworker',
-      orgId: 1, isSandbox: false,
+      clientId: CLIENT_ID,
+      clinicianId: CLINICIAN_ID,
+      clinicianRole: 'caseworker',
+      orgId: 1,
+      isSandbox: false,
     });
   });
 
   it('404s (not 403) for a client not on the caseload', async () => {
     dbMocks.isAssigned.mockResolvedValue(false);
-    const res = await request(appAs('caseworker'))
-      .post('/api/admin/messaging/threads')
-      .send({ client_id: CLIENT_ID });
+    const res = await request(appAs('caseworker')).post('/api/admin/messaging/threads').send({ client_id: CLIENT_ID });
     expect(res.status).toBe(404);
     expect(dbMocks.getOrCreateThread).not.toHaveBeenCalled();
   });
@@ -151,14 +157,12 @@ describe('POST /api/admin/messaging/threads', () => {
     dbMocks.isSandboxAccount.mockResolvedValue(true);
     await request(appAs('therapist')).post('/api/admin/messaging/threads').send({ client_id: CLIENT_ID });
     expect(dbMocks.getOrCreateThread).toHaveBeenCalledWith(
-      expect.objectContaining({ isSandbox: true, clinicianRole: 'therapist' })
+      expect.objectContaining({ isSandbox: true, clinicianRole: 'therapist' }),
     );
   });
 
   it('400s on a non-numeric client_id', async () => {
-    const res = await request(appAs('caseworker'))
-      .post('/api/admin/messaging/threads')
-      .send({ client_id: 'abc' });
+    const res = await request(appAs('caseworker')).post('/api/admin/messaging/threads').send({ client_id: 'abc' });
     expect(res.status).toBe(400);
   });
 });
@@ -168,7 +172,9 @@ describe('GET /api/admin/messaging/threads/:threadId/messages', () => {
     const res = await request(appAs('caseworker')).get('/api/admin/messaging/threads/5/messages');
     expect(res.status).toBe(200);
     expect(res.body.messages[0]).toMatchObject({
-      message_id: 101, scan_status: 'flagged', risk_severity: 'medium',
+      message_id: 101,
+      scan_status: 'flagged',
+      risk_severity: 'medium',
     });
   });
 
@@ -187,8 +193,11 @@ describe('POST /api/admin/messaging/threads/:threadId/messages', () => {
       .send({ body: 'checking in' });
     expect(res.status).toBe(201);
     expect(dbMocks.insertThreadMessage).toHaveBeenCalledWith({
-      threadId: 5, senderId: CLINICIAN_ID, senderRole: 'caseworker',
-      body: 'checking in', scanStatus: 'not_applicable',
+      threadId: 5,
+      senderId: CLINICIAN_ID,
+      senderRole: 'caseworker',
+      body: 'checking in',
+      scanStatus: 'not_applicable',
     });
     expect(emitMock).toHaveBeenCalledWith('messaging:new-message', expect.objectContaining({ threadId: 5 }));
     // Participant echo carries no scan internals.
@@ -207,9 +216,7 @@ describe('POST /api/admin/messaging/threads/:threadId/messages', () => {
   });
 
   it('400s empty bodies', async () => {
-    const res = await request(appAs('caseworker'))
-      .post('/api/admin/messaging/threads/5/messages')
-      .send({});
+    const res = await request(appAs('caseworker')).post('/api/admin/messaging/threads/5/messages').send({});
     expect(res.status).toBe(400);
   });
 });
@@ -222,7 +229,9 @@ describe('POST /api/admin/messaging/threads/:threadId/read', () => {
     expect(res.status).toBe(200);
     expect(dbMocks.markThreadRead).toHaveBeenCalledWith(5, CLINICIAN_ID, 101);
     expect(emitMock).toHaveBeenCalledWith('messaging:read', {
-      threadId: 5, lastReadMessageId: 101, readerId: CLINICIAN_ID,
+      threadId: 5,
+      lastReadMessageId: 101,
+      readerId: CLINICIAN_ID,
     });
   });
 });
@@ -284,7 +293,9 @@ describe('GET /api/admin/messaging/flagged', () => {
     app.use(express.json());
     app.use((req, _res, next) => {
       (req as unknown as { session: Record<string, unknown> }).session = {
-        userId: 7, userRole: 'researcher', username: 'r1',
+        userId: 7,
+        userRole: 'researcher',
+        username: 'r1',
       };
       next();
     });
@@ -300,7 +311,9 @@ describe('GET /api/admin/messaging/flagged', () => {
     app.use(express.json());
     app.use((req, _res, next) => {
       (req as unknown as { session: Record<string, unknown> }).session = {
-        userId: 7, userRole: 'researcher', username: 'r1',
+        userId: 7,
+        userRole: 'researcher',
+        username: 'r1',
       };
       next();
     });
@@ -319,9 +332,15 @@ describe('GET /api/admin/messaging/flagged', () => {
   // (summary tier) must never receive those fields; therapists (full tier) do.
   it('strips verbatim crisis fields (risk_factors/notes) for caseworkers', async () => {
     dbMocks.listMessageOriginCrisisEvents.mockResolvedValue([
-      { event_id: 900, client_user_id: CLIENT_ID, severity: 'high', thread_id: 5,
-        risk_factors: ['kill myself'], notes: 'Message risk score: 90 - Factors: kill myself',
-        intervention_details: 'x' },
+      {
+        event_id: 900,
+        client_user_id: CLIENT_ID,
+        severity: 'high',
+        thread_id: 5,
+        risk_factors: ['kill myself'],
+        notes: 'Message risk score: 90 - Factors: kill myself',
+        intervention_details: 'x',
+      },
     ]);
     const res = await request(appAs('caseworker')).get('/api/admin/messaging/flagged');
     expect(res.status).toBe(200);
@@ -336,8 +355,14 @@ describe('GET /api/admin/messaging/flagged', () => {
 
   it('keeps the full crisis fields for full-tier therapists', async () => {
     dbMocks.listMessageOriginCrisisEvents.mockResolvedValue([
-      { event_id: 900, client_user_id: CLIENT_ID, severity: 'high', thread_id: 5,
-        risk_factors: ['kill myself'], notes: 'detail' },
+      {
+        event_id: 900,
+        client_user_id: CLIENT_ID,
+        severity: 'high',
+        thread_id: 5,
+        risk_factors: ['kill myself'],
+        notes: 'detail',
+      },
     ]);
     const res = await request(appAs('therapist')).get('/api/admin/messaging/flagged');
     expect(res.status).toBe(200);

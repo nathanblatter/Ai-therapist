@@ -12,12 +12,7 @@ import {
   insertConsentDocument,
   getActiveConsentDocument,
 } from '../../db/index.js';
-import {
-  getActiveConsent,
-  invalidateConsentCache,
-  resolveConsentAudience,
-  sha256Hex,
-} from '../../utils/consent.js';
+import { getActiveConsent, invalidateConsentCache, resolveConsentAudience, sha256Hex } from '../../utils/consent.js';
 
 import { createLogger } from '../../utils/logger.js';
 

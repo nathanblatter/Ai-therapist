@@ -62,7 +62,7 @@ export async function insertPracticeAssignment(input: NewPracticeAssignment): Pr
       input.description,
       input.kind ?? 'custom',
       input.suggestedFrequency ?? null,
-    ]
+    ],
   );
   return result.rows[0];
 }
@@ -74,7 +74,7 @@ export async function insertPracticeAssignment(input: NewPracticeAssignment): Pr
  */
 export async function listUserAssignments(
   userId: number,
-  opts: { status?: Exclude<PracticeAssignmentStatus, 'cancelled'>; limit?: number } = {}
+  opts: { status?: Exclude<PracticeAssignmentStatus, 'cancelled'>; limit?: number } = {},
 ): Promise<PracticeAssignment[]> {
   const limit = opts.limit ?? 50;
   const result = await pool.query<PracticeAssignment>(
@@ -84,7 +84,7 @@ export async function listUserAssignments(
        AND ($2::text IS NULL OR status = $2)
      ORDER BY assigned_at DESC
      LIMIT $3`,
-    [userId, opts.status ?? null, limit]
+    [userId, opts.status ?? null, limit],
   );
   return result.rows;
 }
@@ -97,7 +97,7 @@ export async function listUserAssignments(
 export async function completeAssignment(
   id: number,
   userId: number,
-  note?: string | null
+  note?: string | null,
 ): Promise<PracticeAssignment | null> {
   const result = await pool.query<PracticeAssignment>(
     `UPDATE practice_assignments
@@ -106,7 +106,7 @@ export async function completeAssignment(
          completion_note = $3
      WHERE id = $1 AND user_id = $2 AND status = 'assigned'
      RETURNING *`,
-    [id, userId, note ?? null]
+    [id, userId, note ?? null],
   );
   return result.rows[0] ?? null;
 }
@@ -129,7 +129,7 @@ export async function createAssignment(input: ClinicianAssignmentInput): Promise
        (user_id, title, description, kind, suggested_frequency, source, authored_by)
      VALUES ($1, $2, $3, $4, $5, 'therapist', $6)
      RETURNING *`,
-    [input.userId, input.title, input.description, input.kind, input.suggestedFrequency, input.authoredBy]
+    [input.userId, input.title, input.description, input.kind, input.suggestedFrequency, input.authoredBy],
   );
   return result.rows[0];
 }
@@ -150,7 +150,7 @@ export interface UpdateAssignmentFields {
 export async function updateAssignment(
   id: number,
   userId: number,
-  fields: UpdateAssignmentFields
+  fields: UpdateAssignmentFields,
 ): Promise<PracticeAssignment | null> {
   const result = await pool.query<PracticeAssignment>(
     `UPDATE practice_assignments
@@ -168,7 +168,7 @@ export async function updateAssignment(
       fields.kind ?? null,
       fields.suggestedFrequency !== undefined,
       fields.suggestedFrequency ?? null,
-    ]
+    ],
   );
   return result.rows[0] ?? null;
 }
@@ -178,7 +178,7 @@ export async function cancelAssignment(
   id: number,
   userId: number,
   cancelledBy: number,
-  reason: string
+  reason: string,
 ): Promise<PracticeAssignment | null> {
   const result = await pool.query<PracticeAssignment>(
     `UPDATE practice_assignments
@@ -188,7 +188,7 @@ export async function cancelAssignment(
          cancel_reason = $4
      WHERE id = $1 AND user_id = $2 AND status = 'assigned'
      RETURNING *`,
-    [id, userId, cancelledBy, reason]
+    [id, userId, cancelledBy, reason],
   );
   return result.rows[0] ?? null;
 }
@@ -202,7 +202,7 @@ export async function cancelAssignment(
 export async function reissueAssignment(
   id: number,
   userId: number,
-  authoredBy: number
+  authoredBy: number,
 ): Promise<PracticeAssignment | null> {
   const result = await pool.query<PracticeAssignment>(
     `INSERT INTO practice_assignments
@@ -211,17 +211,14 @@ export async function reissueAssignment(
        FROM practice_assignments
       WHERE id = $1 AND user_id = $2 AND status <> 'assigned'
      RETURNING *`,
-    [id, userId, authoredBy]
+    [id, userId, authoredBy],
   );
   return result.rows[0] ?? null;
 }
 
 /** Every assignment for a client (all statuses, incl. cancelled), newest first,
  *  with the authoring/cancelling clinician's username for the panel. */
-export async function listAssignmentsForClient(
-  userId: number,
-  limit = 100
-): Promise<PracticeAssignmentListRow[]> {
+export async function listAssignmentsForClient(userId: number, limit = 100): Promise<PracticeAssignmentListRow[]> {
   const result = await pool.query<PracticeAssignmentListRow>(
     `SELECT pa.*,
             au.username AS authored_by_username,
@@ -232,7 +229,7 @@ export async function listAssignmentsForClient(
       WHERE pa.user_id = $1
       ORDER BY pa.assigned_at DESC, pa.id DESC
       LIMIT $2`,
-    [userId, limit]
+    [userId, limit],
   );
   return result.rows;
 }

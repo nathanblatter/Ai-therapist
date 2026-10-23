@@ -156,9 +156,7 @@ describe('POST /join-study', () => {
   });
 
   it('validates the password length before touching anything', async () => {
-    const res = await request(makeApp())
-      .post(`/join-study?qid=${QID}`)
-      .send({ username: 'xyz', password: 'short' });
+    const res = await request(makeApp()).post(`/join-study?qid=${QID}`).send({ username: 'xyz', password: 'short' });
     expect(res.status).toBe(400);
     expect(serviceMocks.verifyBaselineResponse).not.toHaveBeenCalled();
   });
@@ -174,9 +172,7 @@ describe('POST /join-study', () => {
 
   it('mirrors the page username rules server-side (3-64 chars, restricted charset)', async () => {
     for (const username of ['ab', 'x'.repeat(65), 'two words', 'quote"name']) {
-      const res = await request(makeApp())
-        .post(`/join-study?qid=${QID}`)
-        .send({ username, password: 'longenough12' });
+      const res = await request(makeApp()).post(`/join-study?qid=${QID}`).send({ username, password: 'longenough12' });
       expect(res.status, username).toBe(400);
     }
     expect(serviceMocks.verifyBaselineResponse).not.toHaveBeenCalled();

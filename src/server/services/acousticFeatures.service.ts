@@ -10,10 +10,7 @@
 // Runs fire-and-forget from the session-end handler, chained after
 // recorder.service.finalize so the participant WAV is already uploaded.
 import { getObjectStream } from '../config/objectStorage.js';
-import {
-  getParticipantRecordingForSession,
-  upsertSessionAcousticFeatures,
-} from '../db/index.js';
+import { getParticipantRecordingForSession, upsertSessionAcousticFeatures } from '../db/index.js';
 import { getSystemConfig } from '../utils/sessionHelpers.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -116,7 +113,7 @@ export function computeAcousticFeatures(samples: Int16Array, sampleRate: number)
   // floored so a near-silent recording doesn't classify noise as speech.
   const sortedRms = [...rmsPerFrame].sort((a, b) => a - b);
   const threshold = Math.max(0.004, 0.15 * percentile(sortedRms, 0.95));
-  const speechFlags = rmsPerFrame.map(r => r >= threshold);
+  const speechFlags = rmsPerFrame.map((r) => r >= threshold);
 
   // Pause structure: silent runs of at least MIN_PAUSE_MS between speech.
   const minPauseFrames = Math.max(1, Math.round(MIN_PAUSE_MS / HOP_MS));
@@ -153,7 +150,7 @@ export function computeAcousticFeatures(samples: Int16Array, sampleRate: number)
   }
   f0s.sort((a, b) => a - b);
 
-  const silentFrames = speechFlags.filter(s => !s).length;
+  const silentFrames = speechFlags.filter((s) => !s).length;
   const durationMin = durationMs / 60000;
 
   return {

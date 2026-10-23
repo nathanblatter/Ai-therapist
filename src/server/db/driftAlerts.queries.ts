@@ -35,7 +35,9 @@ function normalize(row: Record<string, unknown>): DriftAlertRow {
 /** Insert an open alert; returns null on unique-violation (an open alert for the
  *  bucket already exists) — catch pg error code '23505'. */
 export async function insertDriftAlert(
-  a: Omit<DriftAlertRow, 'alert_id' | 'created_at' | 'acknowledged_at' | 'acknowledged_by' | 'paged'> & { paged?: boolean }
+  a: Omit<DriftAlertRow, 'alert_id' | 'created_at' | 'acknowledged_at' | 'acknowledged_by' | 'paged'> & {
+    paged?: boolean;
+  },
 ): Promise<DriftAlertRow | null> {
   try {
     const result = await pool.query(
@@ -44,9 +46,16 @@ export async function insertDriftAlert(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
-        a.dimension, a.ai_model, a.prompt_version, a.rolling_mean, a.baseline_mean,
-        a.drop_amount, a.window_n, a.baseline_n, a.paged ?? false,
-      ]
+        a.dimension,
+        a.ai_model,
+        a.prompt_version,
+        a.rolling_mean,
+        a.baseline_mean,
+        a.drop_amount,
+        a.window_n,
+        a.baseline_n,
+        a.paged ?? false,
+      ],
     );
     return normalize(result.rows[0]);
   } catch (err) {
@@ -59,7 +68,7 @@ export async function getOpenDriftAlerts(): Promise<DriftAlertRow[]> {
   const result = await pool.query(
     `SELECT * FROM eval_drift_alerts
      WHERE acknowledged_at IS NULL
-     ORDER BY created_at DESC`
+     ORDER BY created_at DESC`,
   );
   return result.rows.map(normalize);
 }
@@ -70,7 +79,7 @@ export async function acknowledgeDriftAlert(alertId: number, userId: number): Pr
        SET acknowledged_at = CURRENT_TIMESTAMP, acknowledged_by = $2
      WHERE alert_id = $1 AND acknowledged_at IS NULL
      RETURNING *`,
-    [alertId, userId]
+    [alertId, userId],
   );
   return result.rows[0] ? normalize(result.rows[0]) : null;
 }

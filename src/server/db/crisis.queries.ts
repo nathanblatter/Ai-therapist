@@ -34,10 +34,7 @@ export interface RecordCrisisEventInput {
  * become columns, so each path writes exactly what it wrote when the inserts
  * were hand-rolled per service. Returns the new event_id.
  */
-export async function recordCrisisEvent(
-  input: RecordCrisisEventInput,
-  db: Queryable = pool
-): Promise<number> {
+export async function recordCrisisEvent(input: RecordCrisisEventInput, db: Queryable = pool): Promise<number> {
   const columns: string[] = [];
   const values: unknown[] = [];
   const add = (column: string, value: unknown): void => {
@@ -65,7 +62,7 @@ export async function recordCrisisEvent(
     `INSERT INTO crisis_events (${columns.join(', ')})
      VALUES (${placeholders})
      RETURNING event_id`,
-    values
+    values,
   );
   return result.rows[0].event_id;
 }
@@ -78,11 +75,11 @@ export async function sessionExists(sessionId: string): Promise<boolean> {
 
 /** A session's crisis-flag state, or null if the session doesn't exist. */
 export async function getSessionCrisisFlag(
-  sessionId: string
+  sessionId: string,
 ): Promise<{ session_id: string; crisis_flagged: boolean } | null> {
   const result = await pool.query<{ session_id: string; crisis_flagged: boolean }>(
     'SELECT session_id, crisis_flagged FROM therapy_sessions WHERE session_id = $1',
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0] ?? null;
 }
@@ -139,7 +136,7 @@ export async function getRecentSessionMessages(sessionId: string, limit = 10): P
        AND message_type <> ALL($3::text[])
      ORDER BY created_at DESC
      LIMIT $2`,
-    [sessionId, limit, BOOKKEEPING_MESSAGE_TYPES]
+    [sessionId, limit, BOOKKEEPING_MESSAGE_TYPES],
   );
   return result.rows.reverse();
 }
@@ -156,7 +153,7 @@ export async function getSessionCrisisState(sessionId: string): Promise<SessionC
     `SELECT crisis_flagged, crisis_severity, crisis_risk_score
      FROM therapy_sessions
      WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0] ?? null;
 }
@@ -186,7 +183,7 @@ export interface AllCrisisData {
  * sessions because caseload/org scoping already excludes them). */
 export async function getAllCrisisData(
   scopeTherapistId?: number | null,
-  orgId?: number | null
+  orgId?: number | null,
 ): Promise<AllCrisisData> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
   const params: unknown[] = scoped ? [scopeTherapistId] : [];
@@ -203,7 +200,8 @@ export async function getAllCrisisData(
         AND ${ownerOrgScopeSql(`$${params.length}`, 'COALESCE(ts.user_id, ce.client_user_id)')}`;
   }
   const [crisisEvents, interventionActions, riskScoreHistory] = await Promise.all([
-    pool.query(`
+    pool.query(
+      `
       SELECT ce.*, ts.session_name, ts.user_id, u.username, ${CRISIS_EVENT_ADJUDICATIONS_SQL}
       FROM crisis_events ce
       LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
@@ -211,23 +209,31 @@ export async function getAllCrisisData(
       WHERE (ts.is_demo IS NOT TRUE OR EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))${crisisScopeClause}
       ORDER BY ce.created_at DESC
       LIMIT 500
-    `, params),
-    pool.query(`
+    `,
+      params,
+    ),
+    pool.query(
+      `
       SELECT ia.*, ts.session_name
       FROM intervention_actions ia
       LEFT JOIN therapy_sessions ts ON ia.session_id = ts.session_id
       WHERE (ts.is_demo IS NOT TRUE OR EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))${sessionScopeClause}
       ORDER BY ia.performed_at DESC
       LIMIT 500
-    `, params),
-    pool.query(`
+    `,
+      params,
+    ),
+    pool.query(
+      `
       SELECT rsh.*, ts.session_name
       FROM risk_score_history rsh
       LEFT JOIN therapy_sessions ts ON rsh.session_id = ts.session_id
       WHERE (ts.is_demo IS NOT TRUE OR EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))${sessionScopeClause}
       ORDER BY rsh.calculated_at DESC
       LIMIT 1000
-    `, params),
+    `,
+      params,
+    ),
   ]);
 
   return {
@@ -247,7 +253,7 @@ export async function getAllCrisisData(
 export async function getUserRiskContextEnabled(userId: number): Promise<boolean> {
   const result = await pool.query<{ risk_context_share_enabled: boolean }>(
     'SELECT risk_context_share_enabled FROM users WHERE userid = $1',
-    [userId]
+    [userId],
   );
   return result.rows[0]?.risk_context_share_enabled ?? false;
 }
@@ -255,7 +261,7 @@ export async function getUserRiskContextEnabled(userId: number): Promise<boolean
 export async function setUserRiskContextEnabled(userId: number, enabled: boolean): Promise<void> {
   await pool.query(
     'UPDATE users SET risk_context_share_enabled = $2, updated_at = CURRENT_TIMESTAMP WHERE userid = $1',
-    [userId, enabled]
+    [userId, enabled],
   );
 }
 
@@ -271,7 +277,7 @@ export interface PriorCrisisFlag {
 export async function getUserPriorCrisisFlags(
   userId: number,
   excludeSessionId: string | null,
-  limit = 3
+  limit = 3,
 ): Promise<PriorCrisisFlag[]> {
   const result = await pool.query<PriorCrisisFlag>(
     `SELECT session_id, crisis_severity AS severity, crisis_flagged_at AS flagged_at,
@@ -281,7 +287,7 @@ export async function getUserPriorCrisisFlags(
        AND ($2::text IS NULL OR session_id != $2)
      ORDER BY crisis_flagged_at DESC
      LIMIT $3`,
-    [userId, excludeSessionId, limit]
+    [userId, excludeSessionId, limit],
   );
   return result.rows;
 }
@@ -350,7 +356,7 @@ export async function hasInterventionAction(sessionId: string, actionType: strin
  *  unless sandbox-owned (s7 — see getAllCrisisData). */
 export async function getAllCrisisEvents(
   scopeTherapistId?: number | null,
-  orgId?: number | null
+  orgId?: number | null,
 ): Promise<Record<string, unknown>[]> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
   const params: unknown[] = scoped ? [scopeTherapistId] : [];
@@ -363,7 +369,8 @@ export async function getAllCrisisEvents(
     scopeClause += `
       AND ${ownerOrgScopeSql(`$${params.length}`, 'COALESCE(ts.user_id, ce.client_user_id)')}`;
   }
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT ce.*, ts.session_name, u.username, ${CRISIS_EVENT_ADJUDICATIONS_SQL}
     FROM crisis_events ce
     LEFT JOIN therapy_sessions ts ON ce.session_id = ts.session_id
@@ -371,7 +378,9 @@ export async function getAllCrisisEvents(
     WHERE (ts.is_demo IS NOT TRUE OR EXISTS (SELECT 1 FROM users su WHERE su.userid = ts.user_id AND su.is_sandbox IS TRUE))${scopeClause}
     ORDER BY ce.created_at DESC
     LIMIT 100
-  `, params);
+  `,
+    params,
+  );
   return result.rows;
 }
 
@@ -393,7 +402,7 @@ export async function getCrisisEventClientInfo(eventId: number): Promise<CrisisE
      FROM crisis_events ce
      LEFT JOIN therapy_sessions ts ON ts.session_id = ce.session_id
      WHERE ce.event_id = $1`,
-    [eventId]
+    [eventId],
   );
   return result.rows[0] ?? null;
 }
@@ -446,8 +455,12 @@ const RESOURCE_CARD_TOOLS = ['show_resource_card', 'get_crisis_resources', 'crea
 
 /** True when anything in the context warrants a safety line in the summary. */
 export function hasSafetyContext(ctx: SessionSafetyContext): boolean {
-  return ctx.crisisEvents.length > 0 || ctx.escalations.length > 0
-    || ctx.resourceCards.length > 0 || ctx.adverseEvents.length > 0;
+  return (
+    ctx.crisisEvents.length > 0 ||
+    ctx.escalations.length > 0 ||
+    ctx.resourceCards.length > 0 ||
+    ctx.adverseEvents.length > 0
+  );
 }
 
 /** Crisis events, escalations, safety/resource tool calls and adverse-event
@@ -483,8 +496,8 @@ export async function getSessionSafetyContext(sessionId: string): Promise<Sessio
   ]);
 
   const toolEscalations: SafetyContextEscalation[] = toolCalls.rows
-    .filter(r => r.tool_name === 'escalate_to_human')
-    .map(r => ({
+    .filter((r) => r.tool_name === 'escalate_to_human')
+    .map((r) => ({
       source: 'tool' as const,
       reason: typeof r.arguments?.reason === 'string' ? r.arguments.reason : 'escalate_to_human called',
       urgency: typeof r.arguments?.urgency === 'string' ? r.arguments.urgency : null,
@@ -494,13 +507,12 @@ export async function getSessionSafetyContext(sessionId: string): Promise<Sessio
 
   return {
     crisisEvents: crisisEvents.rows,
-    escalations: [
-      ...escalations.rows.map(r => ({ ...r, source: 'escalation' as const })),
-      ...toolEscalations,
-    ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    escalations: [...escalations.rows.map((r) => ({ ...r, source: 'escalation' as const })), ...toolEscalations].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    ),
     resourceCards: toolCalls.rows
-      .filter(r => RESOURCE_CARD_TOOLS.includes(r.tool_name))
-      .map(r => ({
+      .filter((r) => RESOURCE_CARD_TOOLS.includes(r.tool_name))
+      .map((r) => ({
         tool_name: r.tool_name,
         resource_type: typeof r.arguments?.resource_type === 'string' ? r.arguments.resource_type : null,
         created_at: r.created_at,

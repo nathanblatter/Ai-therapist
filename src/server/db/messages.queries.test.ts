@@ -23,10 +23,19 @@ import {
   deleteMessage,
 } from './messages.queries.js';
 
-const ROW = { message_id: 1, session_id: 's1', role: 'user', message_type: 'chat', content: 'hi', content_redacted: 'hi', metadata: null, created_at: new Date() };
+const ROW = {
+  message_id: 1,
+  session_id: 's1',
+  role: 'user',
+  message_type: 'chat',
+  content: 'hi',
+  content_redacted: 'hi',
+  metadata: null,
+  created_at: new Date(),
+};
 
 function clientSql(): string[] {
-  return clientQueryMock.mock.calls.map(c => (c[0] as string).trim().split(/\s+/)[0]);
+  return clientQueryMock.mock.calls.map((c) => (c[0] as string).trim().split(/\s+/)[0]);
 }
 
 beforeEach(() => {
@@ -44,7 +53,9 @@ describe('insertMessage', () => {
     queryMock.mockResolvedValue({ rows: [ROW] });
     await expect(insertMessage('s1', 'user', 'chat', 'raw text', 'redacted text')).resolves.toBe(ROW);
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
-    expect(sql).toMatch(/INSERT INTO messages \(session_id, role, message_type, content, content_redacted, metadata, created_at\)\s+VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, CURRENT_TIMESTAMP\)\s+RETURNING \*/);
+    expect(sql).toMatch(
+      /INSERT INTO messages \(session_id, role, message_type, content, content_redacted, metadata, created_at\)\s+VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, CURRENT_TIMESTAMP\)\s+RETURNING \*/,
+    );
     expect(params).toEqual(['s1', 'user', 'chat', 'raw text', 'redacted text', null]);
   });
 
@@ -57,14 +68,22 @@ describe('insertMessage', () => {
 describe('insertMessagesBatch', () => {
   it('inserts every row inside one transaction, defaulting created_at to now', async () => {
     clientQueryMock.mockImplementation(async (sql: string, params?: unknown[]) =>
-      sql.startsWith('INSERT') ? { rows: [{ ...ROW, content: (params as string[])[3] }] } : { rows: [] });
+      sql.startsWith('INSERT') ? { rows: [{ ...ROW, content: (params as string[])[3] }] } : { rows: [] },
+    );
     const when = new Date('2026-01-01T00:00:00Z');
     const before = Date.now();
     const rows = await insertMessagesBatch([
-      { session_id: 's1', role: 'user', message_type: 'chat', content: 'one', content_redacted: 'one', created_at: when },
+      {
+        session_id: 's1',
+        role: 'user',
+        message_type: 'chat',
+        content: 'one',
+        content_redacted: 'one',
+        created_at: when,
+      },
       { session_id: 's1', role: 'assistant', message_type: 'chat', content: 'two', content_redacted: 'two' },
     ]);
-    expect(rows.map(r => r.content)).toEqual(['one', 'two']);
+    expect(rows.map((r) => r.content)).toEqual(['one', 'two']);
     expect(clientSql()).toEqual(['BEGIN', 'INSERT', 'INSERT', 'COMMIT']);
 
     const first = clientQueryMock.mock.calls[1] as [string, unknown[]];
@@ -83,9 +102,11 @@ describe('insertMessagesBatch', () => {
       if (sql.startsWith('INSERT')) throw new Error('constraint violated');
       return { rows: [] };
     });
-    await expect(insertMessagesBatch([
-      { session_id: 's1', role: 'user', message_type: 'chat', content: 'x', content_redacted: 'x' },
-    ])).rejects.toThrow('constraint violated');
+    await expect(
+      insertMessagesBatch([
+        { session_id: 's1', role: 'user', message_type: 'chat', content: 'x', content_redacted: 'x' },
+      ]),
+    ).rejects.toThrow('constraint violated');
     expect(clientSql()).toEqual(['BEGIN', 'INSERT', 'ROLLBACK']);
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });
@@ -114,7 +135,9 @@ describe('getMessageOwner', () => {
     await expect(getMessageOwner(9)).resolves.toEqual({ session_id: 's1', user_id: 42, owner_organization_id: 2 });
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('SELECT m.session_id, ts.user_id, u.organization_id AS owner_organization_id');
-    expect(sql).toMatch(/LEFT JOIN therapy_sessions ts ON ts\.session_id = m\.session_id\s+LEFT JOIN users u ON u\.userid = ts\.user_id\s+WHERE m\.message_id = \$1/);
+    expect(sql).toMatch(
+      /LEFT JOIN therapy_sessions ts ON ts\.session_id = m\.session_id\s+LEFT JOIN users u ON u\.userid = ts\.user_id\s+WHERE m\.message_id = \$1/,
+    );
     expect(params).toEqual([9]);
   });
 
@@ -133,32 +156,42 @@ describe('getSessionMessageCount', () => {
 
 describe('updateMessage', () => {
   it('rejects an unknown field before touching the pool', async () => {
-    await expect(updateMessage(1, 'x', 'metadata' as 'content', {})).rejects.toThrow('fieldToUpdate must be either "content" or "content_redacted"');
+    await expect(updateMessage(1, 'x', 'metadata' as 'content', {})).rejects.toThrow(
+      'fieldToUpdate must be either "content" or "content_redacted"',
+    );
     expect(connectMock).not.toHaveBeenCalled();
   });
 
   it('therapist edit: re-redacts and writes both columns, merging the edit metadata', async () => {
     redactMock.mockResolvedValue('[NAME] said hi');
-    clientQueryMock.mockImplementation(async (sql: string) => sql.startsWith('UPDATE') ? { rows: [ROW] } : { rows: [] });
+    clientQueryMock.mockImplementation(async (sql: string) =>
+      sql.startsWith('UPDATE') ? { rows: [ROW] } : { rows: [] },
+    );
     const meta = { edited_by: 'dr_t', edited_at: '2026-01-01' };
     await expect(updateMessage(5, 'Alice said hi', 'content', meta)).resolves.toBe(ROW);
 
     expect(redactMock).toHaveBeenCalledWith('Alice said hi');
     expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'COMMIT']);
     const [sql, params] = clientQueryMock.mock.calls[1] as [string, unknown[]];
-    expect(sql).toMatch(/SET content = \$1,\s+content_redacted = \$2,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$3::jsonb\s+WHERE message_id = \$4\s+RETURNING \*/);
+    expect(sql).toMatch(
+      /SET content = \$1,\s+content_redacted = \$2,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$3::jsonb\s+WHERE message_id = \$4\s+RETURNING \*/,
+    );
     expect(params).toEqual(['Alice said hi', '[NAME] said hi', JSON.stringify(meta), 5]);
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });
 
   it('researcher edit: writes only content_redacted and never runs redaction', async () => {
-    clientQueryMock.mockImplementation(async (sql: string) => sql.startsWith('UPDATE') ? { rows: [ROW] } : { rows: [] });
+    clientQueryMock.mockImplementation(async (sql: string) =>
+      sql.startsWith('UPDATE') ? { rows: [ROW] } : { rows: [] },
+    );
     const meta = { edited_by: 'researcher' };
     await updateMessage('5', 'cleaned', 'content_redacted', meta);
 
     expect(redactMock).not.toHaveBeenCalled();
     const [sql, params] = clientQueryMock.mock.calls[1] as [string, unknown[]];
-    expect(sql).toMatch(/SET content_redacted = \$1,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$2::jsonb\s+WHERE message_id = \$3/);
+    expect(sql).toMatch(
+      /SET content_redacted = \$1,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$2::jsonb\s+WHERE message_id = \$3/,
+    );
     expect(sql).not.toMatch(/SET content =/);
     expect(params).toEqual(['cleaned', JSON.stringify(meta), '5']);
   });
@@ -181,7 +214,10 @@ describe('deleteMessage', () => {
     await expect(deleteMessage(1)).resolves.toBe(ROW);
     expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'SELECT', 'DELETE', 'COMMIT']);
     expect(clientQueryMock.mock.calls[1]).toEqual(['SELECT session_id FROM messages WHERE message_id = $1', [1]]);
-    expect(clientQueryMock.mock.calls[2]).toEqual(['SELECT COUNT(*) as count FROM messages WHERE session_id = $1', ['s1']]);
+    expect(clientQueryMock.mock.calls[2]).toEqual([
+      'SELECT COUNT(*) as count FROM messages WHERE session_id = $1',
+      ['s1'],
+    ]);
     expect(clientQueryMock.mock.calls[3]).toEqual(['DELETE FROM messages WHERE message_id = $1 RETURNING *', [1]]);
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });

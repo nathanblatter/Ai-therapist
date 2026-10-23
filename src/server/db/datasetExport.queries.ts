@@ -55,7 +55,7 @@ export async function ensurePseudonyms(asOf: string): Promise<void> {
            SELECT 1 FROM research_pseudonyms rp
            WHERE rp.entity_type = 'participant' AND rp.entity_key = u.userid::text
          )`,
-      [asOf]
+      [asOf],
     );
 
     // Sessions: non-demo, in-scope, unmapped. Numbered S0001.. in
@@ -75,7 +75,7 @@ export async function ensurePseudonyms(asOf: string): Promise<void> {
            SELECT 1 FROM research_pseudonyms rp
            WHERE rp.entity_type = 'session' AND rp.entity_key = ts.session_id
          )`,
-      [asOf]
+      [asOf],
     );
 
     await client.query('COMMIT');
@@ -177,7 +177,7 @@ export async function getParticipantsExport(asOf: string): Promise<DatasetRow[]>
      LEFT JOIN crisis ON crisis.user_id = parts.userid
      LEFT JOIN consents ON consents.user_id = parts.userid
      ORDER BY parts.pseudonym`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -258,7 +258,7 @@ export async function getSessionsExport(asOf: string): Promise<DatasetRow[]> {
      LEFT JOIN risk ON risk.session_id = sess.session_id
      LEFT JOIN llm ON llm.session_id = sess.session_id
      ORDER BY sess.session_pseudo_id`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -286,7 +286,7 @@ export async function getScreenersExport(asOf: string): Promise<DatasetRow[]> {
      LEFT JOIN research_pseudonyms pp
        ON pp.entity_type = 'participant' AND pp.entity_key = sess.user_id::text
      ORDER BY sess.session_pseudo_id, sr.scale, sr.created_at, sr.response_id`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -321,7 +321,7 @@ export async function getMoodsExport(asOf: string): Promise<DatasetRow[]> {
      LEFT JOIN research_pseudonyms pp
        ON pp.entity_type = 'participant' AND pp.entity_key = signals.user_id::text
      ORDER BY signals.session_pseudo_id, signals.recorded_at, signals.source`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -348,7 +348,7 @@ export async function getFeedbackExport(asOf: string): Promise<DatasetRow[]> {
      LEFT JOIN research_pseudonyms pp
        ON pp.entity_type = 'participant' AND pp.entity_key = sess.user_id::text
      ORDER BY sess.session_pseudo_id`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -376,7 +376,7 @@ export async function getEvalsExport(asOf: string): Promise<DatasetRow[]> {
      FROM session_evals se
      JOIN sess ON sess.session_id = se.session_id
      ORDER BY sess.session_pseudo_id, se.prompt_version`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -421,7 +421,7 @@ export async function getCrisisEventsExport(asOf: string): Promise<DatasetRow[]>
         OR (ce.session_id IS NULL AND ce.client_user_id IS NOT NULL
             AND cu.is_sandbox IS NOT TRUE AND ce.created_at <= $1)
      ORDER BY COALESCE(sess.session_pseudo_id, ''), ce.created_at, ce.event_id`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -451,7 +451,7 @@ export async function getTranscriptsExport(asOf: string): Promise<DatasetRow[]> 
      JOIN sess ON sess.session_id = m.session_id
      WHERE m.role IN ('user', 'assistant')
      ORDER BY sess.session_pseudo_id, m.created_at, m.message_id`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -479,7 +479,7 @@ export async function getFeedbackCommentsExport(asOf: string): Promise<DatasetRo
        ON pp.entity_type = 'participant' AND pp.entity_key = sess.user_id::text
      WHERE sf.comments IS NOT NULL AND length(trim(sf.comments)) > 0
      ORDER BY sess.session_pseudo_id`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -549,7 +549,7 @@ export async function getSemanticMetricsExport(asOf: string): Promise<DatasetRow
      LEFT JOIN research_pseudonyms pp
        ON pp.entity_type = 'participant' AND pp.entity_key = sess.user_id::text
      ORDER BY sess.session_pseudo_id`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -625,7 +625,7 @@ export async function getHumanRatingsExport(asOf: string): Promise<DatasetRow[]>
      LEFT JOIN eval_rating_queue q ON q.session_id = hr.session_id
      WHERE hr.updated_at <= $1
      ORDER BY sess.session_pseudo_id, rater_seq`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -668,7 +668,7 @@ export async function getCrisisAdjudicationsExport(asOf: string): Promise<Datase
          OR (ce.session_id IS NULL AND ce.client_user_id IS NOT NULL
              AND cu.is_sandbox IS NOT TRUE AND ce.created_at <= $1))
      ORDER BY COALESCE(sess.session_pseudo_id, ''), ce.created_at, ce.event_id, a.adjudicated_at, a.adjudication_id`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }

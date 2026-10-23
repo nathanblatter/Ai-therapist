@@ -52,40 +52,119 @@ export const DEFAULT_MODALITY_PRESETS: Record<string, ModalityPreset> = {
     label: 'Supportive listening',
     addition: `\n\n## Therapeutic approach: supportive listening\nPrioritize reflective listening and validation. Mirror the participant's language, summarize what you hear, and normalize their feelings. Offer coping ideas only when asked or when the participant seems stuck — the relationship is the intervention.`,
     phases: [
-      { at: 0.15, label: 'open', guidance: 'Settle into open, unhurried listening — invite them to share whatever is on their mind, without steering toward a specific topic yet.' },
-      { at: 0.45, label: 'explore', guidance: 'Deepen your understanding: ask gentle follow-up questions and reflect back what you are hearing, rather than problem-solving.' },
-      { at: 0.7, label: 'validate', guidance: 'Focus on validating their experience and normalizing their feelings; offer a coping idea only if they seem stuck or ask for one.' },
-      { at: 0.85, label: 'close', guidance: 'Begin winding down: summarize what was shared, highlight anything that seemed to help, and invite final thoughts before closing warmly.' },
+      {
+        at: 0.15,
+        label: 'open',
+        guidance:
+          'Settle into open, unhurried listening — invite them to share whatever is on their mind, without steering toward a specific topic yet.',
+      },
+      {
+        at: 0.45,
+        label: 'explore',
+        guidance:
+          'Deepen your understanding: ask gentle follow-up questions and reflect back what you are hearing, rather than problem-solving.',
+      },
+      {
+        at: 0.7,
+        label: 'validate',
+        guidance:
+          'Focus on validating their experience and normalizing their feelings; offer a coping idea only if they seem stuck or ask for one.',
+      },
+      {
+        at: 0.85,
+        label: 'close',
+        guidance:
+          'Begin winding down: summarize what was shared, highlight anything that seemed to help, and invite final thoughts before closing warmly.',
+      },
     ],
   },
   cbt: {
     label: 'CBT-informed',
     addition: `\n\n## Therapeutic approach: CBT-informed\nUse cognitive-behavioral techniques where natural: help the participant notice the link between situations, thoughts, feelings, and behaviours; gently examine unhelpful thought patterns with curious questions (never lecture); suggest small, concrete behavioural experiments or coping actions. One technique at a time.`,
     phases: [
-      { at: 0.15, label: 'agenda', guidance: 'Collaboratively set or confirm today\'s agenda: ask what would be most useful to focus on in this conversation.' },
-      { at: 0.3, label: 'review_homework', guidance: 'If a practice or homework item was suggested in a previous session, briefly check in on how it went before moving on.' },
-      { at: 0.65, label: 'work', guidance: 'This is the core working phase: use cognitive-behavioral techniques (thought records, examining evidence, small behavioural experiments) on the agenda item, one technique at a time.' },
-      { at: 0.85, label: 'assign_practice', guidance: 'Begin winding down: summarize what was worked on and, if it fits naturally, suggest one small, concrete practice item to try before the next conversation, then close warmly.' },
+      {
+        at: 0.15,
+        label: 'agenda',
+        guidance:
+          "Collaboratively set or confirm today's agenda: ask what would be most useful to focus on in this conversation.",
+      },
+      {
+        at: 0.3,
+        label: 'review_homework',
+        guidance:
+          'If a practice or homework item was suggested in a previous session, briefly check in on how it went before moving on.',
+      },
+      {
+        at: 0.65,
+        label: 'work',
+        guidance:
+          'This is the core working phase: use cognitive-behavioral techniques (thought records, examining evidence, small behavioural experiments) on the agenda item, one technique at a time.',
+      },
+      {
+        at: 0.85,
+        label: 'assign_practice',
+        guidance:
+          'Begin winding down: summarize what was worked on and, if it fits naturally, suggest one small, concrete practice item to try before the next conversation, then close warmly.',
+      },
     ],
   },
   act: {
     label: 'ACT-informed',
     addition: `\n\n## Therapeutic approach: ACT-informed\nDraw on acceptance and commitment ideas: help the participant make room for difficult feelings rather than fight them, notice thoughts as thoughts (defusion), connect with what they value, and take one small values-aligned step. Use plain language, not ACT jargon.`,
     phases: [
-      { at: 0.15, label: 'engage', guidance: 'Connect with what brought them here today and how they are experiencing it right now, in plain language.' },
-      { at: 0.4, label: 'defusion_acceptance', guidance: 'Gently help them notice difficult thoughts and feelings as things to make room for rather than fight — defusion and acceptance, without jargon.' },
-      { at: 0.65, label: 'values', guidance: 'Explore what matters to them underneath the struggle — their values — and how the current situation connects to those.' },
-      { at: 0.85, label: 'committed_action', guidance: 'Begin winding down: help them identify one small, values-aligned step, then summarize and close warmly.' },
+      {
+        at: 0.15,
+        label: 'engage',
+        guidance:
+          'Connect with what brought them here today and how they are experiencing it right now, in plain language.',
+      },
+      {
+        at: 0.4,
+        label: 'defusion_acceptance',
+        guidance:
+          'Gently help them notice difficult thoughts and feelings as things to make room for rather than fight — defusion and acceptance, without jargon.',
+      },
+      {
+        at: 0.65,
+        label: 'values',
+        guidance:
+          'Explore what matters to them underneath the struggle — their values — and how the current situation connects to those.',
+      },
+      {
+        at: 0.85,
+        label: 'committed_action',
+        guidance:
+          'Begin winding down: help them identify one small, values-aligned step, then summarize and close warmly.',
+      },
     ],
   },
   mi: {
     label: 'Motivational interviewing',
     addition: `\n\n## Therapeutic approach: motivational interviewing\nUse the MI spirit: open questions, affirmations, reflections, summaries. Roll with resistance instead of arguing; draw out the participant's own reasons for change (change talk); support autonomy — they are the expert on their life.`,
     phases: [
-      { at: 0.15, label: 'engage', guidance: 'Focus on engaging: build rapport with open questions and reflective listening before steering toward any particular change.' },
-      { at: 0.4, label: 'focus', guidance: 'Help clarify a focus — what change, if any, they are considering — using their language, not yours.' },
-      { at: 0.65, label: 'evoke', guidance: 'Evoke their own reasons for change: draw out change talk with open questions, affirmations, and reflections; roll with any resistance instead of arguing.' },
-      { at: 0.85, label: 'plan', guidance: 'If they are ready, begin exploring what a small next step could look like, supporting their autonomy; then summarize and close warmly.' },
+      {
+        at: 0.15,
+        label: 'engage',
+        guidance:
+          'Focus on engaging: build rapport with open questions and reflective listening before steering toward any particular change.',
+      },
+      {
+        at: 0.4,
+        label: 'focus',
+        guidance: 'Help clarify a focus — what change, if any, they are considering — using their language, not yours.',
+      },
+      {
+        at: 0.65,
+        label: 'evoke',
+        guidance:
+          'Evoke their own reasons for change: draw out change talk with open questions, affirmations, and reflections; roll with any resistance instead of arguing.',
+      },
+      {
+        at: 0.85,
+        label: 'plan',
+        guidance:
+          'If they are ready, begin exploring what a small next step could look like, supporting their autonomy; then summarize and close warmly.',
+      },
     ],
   },
 };
@@ -121,14 +200,14 @@ export async function getSystemConfig(): Promise<SystemConfig> {
   const now = Date.now();
 
   // Return cached config if still valid
-  if (systemConfigCache && configCacheTime && (now - configCacheTime < CONFIG_CACHE_TTL)) {
+  if (systemConfigCache && configCacheTime && now - configCacheTime < CONFIG_CACHE_TTL) {
     return systemConfigCache;
   }
 
   try {
     const rows = await fetchSystemConfigRows();
     const config: SystemConfig = {};
-    rows.forEach(row => {
+    rows.forEach((row) => {
       config[row.config_key] = row.config_value;
     });
 
@@ -143,14 +222,14 @@ export async function getSystemConfig(): Promise<SystemConfig> {
         hotline: '988 Suicide & Crisis Lifeline',
         phone: '988',
         text: 'Text HOME to 741741',
-        enabled: true
+        enabled: true,
       },
       session_limits: {
         max_duration_minutes: 30,
         max_sessions_per_day: 3,
         cooldown_minutes: 30,
-        enabled: true
-      }
+        enabled: true,
+      },
     };
   }
 }
@@ -211,7 +290,7 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
       `SELECT COUNT(*) as session_count
        FROM therapy_sessions
        WHERE user_id = $1 AND created_at >= $2`,
-      [userId, todayStart]
+      [userId, todayStart],
     );
     const demoCount = parseInt(demoToday.rows[0].session_count);
 
@@ -255,7 +334,7 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
     `SELECT COUNT(*) as session_count
      FROM therapy_sessions
      WHERE user_id = $1 AND created_at >= $2`,
-    [userId, todayStart]
+    [userId, todayStart],
   );
 
   const todaySessionCount = parseInt(todaySessionsResult.rows[0].session_count);
@@ -266,7 +345,7 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
       reason: 'daily_limit',
       message: `You have reached your daily limit of ${limits.max_sessions_per_day} sessions. Please try again tomorrow.`,
       limit: limits.max_sessions_per_day,
-      current: todaySessionCount
+      current: todaySessionCount,
     };
   }
 
@@ -278,7 +357,7 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
        WHERE user_id = $1 AND ended_at IS NOT NULL
        ORDER BY ended_at DESC
        LIMIT 1`,
-      [userId]
+      [userId],
     );
 
     if (recentSessionResult.rows.length > 0) {
@@ -287,15 +366,18 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
       const timeSinceEndMs = now.getTime() - lastEndedAt.getTime();
       const cooldownMs = limits.cooldown_minutes * 60 * 1000;
 
-      log.debug({
-        lastEndedAt: lastEndedAt.toISOString(),
-        now: now.toISOString(),
-        timeSinceEndMs,
-        timeSinceEndMinutes: timeSinceEndMs / 60000,
-        cooldownMinutes: limits.cooldown_minutes,
-        cooldownMs,
-        isInCooldown: timeSinceEndMs < cooldownMs
-      }, 'Cooldown check');
+      log.debug(
+        {
+          lastEndedAt: lastEndedAt.toISOString(),
+          now: now.toISOString(),
+          timeSinceEndMs,
+          timeSinceEndMinutes: timeSinceEndMs / 60000,
+          cooldownMinutes: limits.cooldown_minutes,
+          cooldownMs,
+          isInCooldown: timeSinceEndMs < cooldownMs,
+        },
+        'Cooldown check',
+      );
 
       if (timeSinceEndMs < cooldownMs) {
         const remainingMs = cooldownMs - timeSinceEndMs;
@@ -306,7 +388,7 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
           reason: 'cooldown',
           message: `Please wait ${minutesRemaining} more minute${minutesRemaining !== 1 ? 's' : ''} before starting a new session.`,
           cooldown_minutes: limits.cooldown_minutes,
-          minutes_remaining: minutesRemaining
+          minutes_remaining: minutesRemaining,
         };
       }
     }
@@ -317,8 +399,8 @@ export async function checkSessionLimits(userId: unknown, userRole: string | nul
     limits: {
       max_duration_minutes: limits.max_duration_minutes,
       max_sessions_per_day: limits.max_sessions_per_day,
-      sessions_today: todaySessionCount
-    }
+      sessions_today: todaySessionCount,
+    },
   };
 }
 
@@ -416,12 +498,16 @@ export async function resolveProactiveOffering(): Promise<boolean> {
   return Math.random() < 0.5;
 }
 
-export async function getSystemPrompt(language = 'en', sessionType = 'realtime', proactiveOffering?: boolean): Promise<string> {
+export async function getSystemPrompt(
+  language = 'en',
+  sessionType = 'realtime',
+  proactiveOffering?: boolean,
+): Promise<string> {
   const config = await getSystemConfig();
   const crisisContact = (config.crisis_contact as CrisisContact | undefined) || {
     hotline: '988 Suicide & Crisis Lifeline',
     phone: '988',
-    text: 'Text HOME to 741741'
+    text: 'Text HOME to 741741',
   };
 
   // Build the crisis text for interpolation
@@ -443,7 +529,10 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime',
   basePrompt = basePrompt.replace(/\{\{crisis_text\}\}/g, crisisText);
 
   // Get language-specific addition from database config
-  const languagesConfig = (config.languages as LanguagesConfig | undefined) || { languages: [], default_language: 'en' };
+  const languagesConfig = (config.languages as LanguagesConfig | undefined) || {
+    languages: [],
+    default_language: 'en',
+  };
   const languageObj = languagesConfig.languages
     ? languagesConfig.languages.find((l: LanguageOption) => l.value === language)
     : null;
@@ -458,7 +547,7 @@ export async function getSystemPrompt(language = 'en', sessionType = 'realtime',
   // / fallback call sites still get a coherent prompt (not persisted as a
   // research condition in that case — only token.routes.ts's per-session call
   // does that).
-  const proactive = proactiveOffering ?? await resolveProactiveOffering();
+  const proactive = proactiveOffering ?? (await resolveProactiveOffering());
   const proactiveAddition = proactive ? PROACTIVE_OFFERING_ADDITION : REACTIVE_ONLY_ADDITION;
 
   return basePrompt + modalityAddition + proactiveAddition + languageAddition;
@@ -497,18 +586,18 @@ export async function getLanguageName(language: string): Promise<string | null> 
  */
 export const sessionConfigDefault = {
   session: {
-    model: "gpt-live-1",
+    model: 'gpt-live-1',
     audio: {
       output: {
-        voice: "marin",
+        voice: 'marin',
       },
     },
     delegation: {
-      type: "responses",
+      type: 'responses',
       responses: {
-        model: "gpt-5.6-terra",
+        model: 'gpt-5.6-terra',
         tools: [] as unknown[],
-        tool_choice: "auto",
+        tool_choice: 'auto',
         parallel_tool_calls: false,
       },
     },

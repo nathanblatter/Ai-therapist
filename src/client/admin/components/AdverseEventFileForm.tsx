@@ -55,17 +55,28 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
         if (!cancelled) setError('Could not load your caseload.');
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [clientId]);
 
   const submit = async () => {
     const target = clientId ?? selectedClient;
-    if (target === '' || target === undefined) { setError('Select a client.'); return; }
-    if (!summary.trim()) { setError('A summary of the event is required.'); return; }
+    if (target === '' || target === undefined) {
+      setError('Select a client.');
+      return;
+    }
+    if (!summary.trim()) {
+      setError('A summary of the event is required.');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      const actionLines = actions.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+      const actionLines = actions
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l !== '');
       const report = await postJson<{ report_id: number }>(`/admin/api/clients/${target}/adverse-events`, {
         summary: summary.trim(),
         severity,
@@ -91,17 +102,24 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <AlertTriangle size={18} className="text-red-600" /> Report adverse event
           </h3>
-          <button onClick={onClose} aria-label="Close" className="text-gray-500 hover:text-gray-800"><X size={20} /></button>
+          <button onClick={onClose} aria-label="Close" className="text-gray-500 hover:text-gray-800">
+            <X size={20} />
+          </button>
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          Files a draft report for review and sign-off by the study team. Describe what happened in your own words — do not paste session content.
+          Files a draft report for review and sign-off by the study team. Describe what happened in your own words — do
+          not paste session content.
         </p>
 
         {clientId !== undefined ? (
-          <p className="text-sm text-gray-700 mb-3"><span className="text-gray-500">Client:</span> {clientName ?? `user ${clientId}`}</p>
+          <p className="text-sm text-gray-700 mb-3">
+            <span className="text-gray-500">Client:</span> {clientName ?? `user ${clientId}`}
+          </p>
         ) : (
           <>
-            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-client">Client</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-client">
+              Client
+            </label>
             <select
               id="ae-file-client"
               value={selectedClient}
@@ -110,7 +128,9 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
             >
               <option value="">Select a client…</option>
               {clients.map((c) => (
-                <option key={c.client_id} value={c.client_id}>{c.username}</option>
+                <option key={c.client_id} value={c.client_id}>
+                  {c.username}
+                </option>
               ))}
             </select>
           </>
@@ -118,7 +138,9 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
 
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-severity">Severity</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-severity">
+              Severity
+            </label>
             <select
               id="ae-file-severity"
               value={severity}
@@ -131,7 +153,9 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-occurred">When it occurred</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-occurred">
+              When it occurred
+            </label>
             <input
               id="ae-file-occurred"
               type="datetime-local"
@@ -142,7 +166,9 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
           </div>
         </div>
 
-        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-summary">What happened</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-summary">
+          What happened
+        </label>
         <textarea
           id="ae-file-summary"
           value={summary}
@@ -152,7 +178,9 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
           className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm mb-3"
         />
 
-        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-actions">Actions taken so far (optional, one per line)</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="ae-file-actions">
+          Actions taken so far (optional, one per line)
+        </label>
         <textarea
           id="ae-file-actions"
           value={actions}
@@ -162,11 +190,23 @@ export default function AdverseEventFileForm({ clientId, clientName, onClose, on
           className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm mb-3 font-mono"
         />
 
-        {error && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+        {error && (
+          <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
+        )}
 
         <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
-          <button onClick={onClose} disabled={submitting} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-40">Cancel</button>
-          <button onClick={submit} disabled={submitting} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-40">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={submitting}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-40"
+          >
             {submitting ? 'Filing…' : 'File report'}
           </button>
         </div>

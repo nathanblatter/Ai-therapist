@@ -124,9 +124,18 @@ export async function upsertKnowledgeChunk(chunk: KnowledgeChunkInput): Promise<
        embedding = EXCLUDED.embedding,
        updated_at = CURRENT_TIMESTAMP`,
     [
-      chunk.topic, chunk.title, chunk.content, chunk.source, chunk.source_url, chunk.license,
-      chunk.kind, chunk.modality, chunk.metadata ? JSON.stringify(chunk.metadata) : null,
-      chunk.content_hash, vec, chunk.active,
+      chunk.topic,
+      chunk.title,
+      chunk.content,
+      chunk.source,
+      chunk.source_url,
+      chunk.license,
+      chunk.kind,
+      chunk.modality,
+      chunk.metadata ? JSON.stringify(chunk.metadata) : null,
+      chunk.content_hash,
+      vec,
+      chunk.active,
     ],
   );
 }
@@ -259,8 +268,16 @@ export async function createKnowledgeChunk(input: CreateKnowledgeChunkInput): Pr
      ON CONFLICT (content_hash) DO NOTHING
      RETURNING chunk_id`,
     [
-      input.topic, input.title, input.content, input.source, input.source_url,
-      input.license, input.kind, input.modality, input.content_hash, vec,
+      input.topic,
+      input.title,
+      input.content,
+      input.source,
+      input.source_url,
+      input.license,
+      input.kind,
+      input.modality,
+      input.content_hash,
+      vec,
     ],
   );
   return result.rows[0]?.chunk_id ?? null;
@@ -295,9 +312,17 @@ export async function updateKnowledgeChunk(chunkId: number, input: UpdateKnowled
              updated_at = CURRENT_TIMESTAMP
          WHERE chunk_id = $1`,
         [
-          chunkId, input.topic, input.title, input.content, input.source, input.source_url,
-          input.license, input.kind, input.modality,
-          change.content_hash, toVectorLiteral(change.embedding),
+          chunkId,
+          input.topic,
+          input.title,
+          input.content,
+          input.source,
+          input.source_url,
+          input.license,
+          input.kind,
+          input.modality,
+          change.content_hash,
+          toVectorLiteral(change.embedding),
         ],
       )
     : await pool.query(
@@ -307,8 +332,15 @@ export async function updateKnowledgeChunk(chunkId: number, input: UpdateKnowled
              updated_at = CURRENT_TIMESTAMP
          WHERE chunk_id = $1`,
         [
-          chunkId, input.topic, input.title, input.content, input.source, input.source_url,
-          input.license, input.kind, input.modality,
+          chunkId,
+          input.topic,
+          input.title,
+          input.content,
+          input.source,
+          input.source_url,
+          input.license,
+          input.kind,
+          input.modality,
         ],
       );
   return (r.rowCount ?? 0) > 0;

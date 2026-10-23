@@ -77,8 +77,12 @@ const EMPTY_BUNDLE = {
 
 beforeEach(() => {
   mocks.getUserById.mockReset().mockResolvedValue({
-    userid: 42, username: 'p42', role: 'participant',
-    preferred_voice: 'cedar', preferred_language: 'en', mfa_enabled: false,
+    userid: 42,
+    username: 'p42',
+    role: 'participant',
+    preferred_voice: 'cedar',
+    preferred_language: 'en',
+    mfa_enabled: false,
     created_at: new Date('2026-01-01'),
   });
   mocks.getUserProfileBundle.mockReset().mockResolvedValue(EMPTY_BUNDLE);
@@ -133,9 +137,7 @@ describe('GET /admin/api/users/:userId/sessions', () => {
       { session_id: 's2', session_name: null },
     ]);
     mocks.countSessions.mockResolvedValue(2);
-    mocks.getSessionScoreExtras.mockResolvedValue([
-      { session_id: 's1', eval_score: 4.2, feedback_rating: 5 },
-    ]);
+    mocks.getSessionScoreExtras.mockResolvedValue([{ session_id: 's1', eval_score: 4.2, feedback_rating: 5 }]);
 
     const res = await request(appAs('researcher')).get('/admin/api/users/42/sessions');
 
@@ -229,10 +231,20 @@ describe('GET /admin/api/users/:userId/brief (ai-therapist-122)', () => {
     mocks.getUserProfileBundle.mockResolvedValue({
       ...EMPTY_BUNDLE,
       ended_session_count: 3,
-      summaries: [{
-        session_id: 's-new', session_name: 'New session', ended_at: new Date(), created_at: new Date(),
-        summary: { headline: 'New headline', topics: ['sleep'], mood_trajectory: 'improving', follow_up: 'Keep the wind-down routine.' },
-      }],
+      summaries: [
+        {
+          session_id: 's-new',
+          session_name: 'New session',
+          ended_at: new Date(),
+          created_at: new Date(),
+          summary: {
+            headline: 'New headline',
+            topics: ['sleep'],
+            mood_trajectory: 'improving',
+            follow_up: 'Keep the wind-down routine.',
+          },
+        },
+      ],
     });
     const fresh = await request(appAs('therapist')).get('/admin/api/users/42/brief');
     expect(fresh.status).toBe(200);

@@ -68,8 +68,8 @@ export default function caseloadRoutes(): Router {
     try {
       const users = await getAllUsers(null, (await orgIdFor(req)) ?? undefined);
       const therapists = users
-        .filter(u => u.role === 'therapist')
-        .map(u => ({ userid: u.userid, username: u.username, created_at: u.created_at ?? null }));
+        .filter((u) => u.role === 'therapist')
+        .map((u) => ({ userid: u.userid, username: u.username, created_at: u.created_at ?? null }));
       res.json({ therapists });
     } catch (err) {
       log.error({ err }, 'Failed to fetch therapists');
@@ -99,8 +99,7 @@ export default function caseloadRoutes(): Router {
 
     // Care-team role for the edge (caseworker portal): defaults to therapist;
     // body { member_role: 'caseworker' } assigns a caseworker edge instead.
-    const memberRole: CareTeamRole =
-      req.body?.member_role === 'caseworker' ? 'caseworker' : 'therapist';
+    const memberRole: CareTeamRole = req.body?.member_role === 'caseworker' ? 'caseworker' : 'therapist';
 
     try {
       // Caller-org == target-org (C13): never rewire another org's care team.
@@ -113,7 +112,9 @@ export default function caseloadRoutes(): Router {
         await assignClient(therapistId, clientId, req.session.userId ?? null);
       }
       void insertCaseloadAudit({
-        action: 'assign', therapistId, clientId,
+        action: 'assign',
+        therapistId,
+        clientId,
         actorUserId: req.session.userId ?? null,
         actorUsername: req.session.username ?? null,
         detail: memberRole === 'caseworker' ? { member_role: memberRole } : undefined,
@@ -165,7 +166,9 @@ export default function caseloadRoutes(): Router {
           log.error({ err }, 'Failed to freeze message threads on unassign');
         }
         void insertCaseloadAudit({
-          action: 'unassign', therapistId, clientId,
+          action: 'unassign',
+          therapistId,
+          clientId,
           actorUserId: req.session.userId ?? null,
           actorUsername: req.session.username ?? null,
         });

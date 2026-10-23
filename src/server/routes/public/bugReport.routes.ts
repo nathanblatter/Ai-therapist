@@ -14,9 +14,15 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024; // 8MB, mirrors flightdeck's cap
 // Magic-byte sniff for the image types flightdeck accepts. Flightdeck sniffs
 // again server-side; this just rejects junk before we buffer/forward it.
 function sniffImage(buf: Buffer): string | null {
-  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+    return 'image/png';
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
-  if (buf.length >= 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (
+    buf.length >= 12 &&
+    buf.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    buf.subarray(8, 12).toString('latin1') === 'WEBP'
+  )
+    return 'image/webp';
   if (buf.length >= 6 && ['GIF87a', 'GIF89a'].includes(buf.subarray(0, 6).toString('latin1'))) return 'image/gif';
   return null;
 }
@@ -39,7 +45,12 @@ export default function bugReportRoutes(): Router {
   // write route they need a limiter — a stuck client or hostile script must
   // not be able to flood the tracker.
   const reportLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
-  const screenshotLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  const screenshotLimiter = rateLimit({
+    windowMs: 10 * 60_000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
 
   router.post('/api/bug-report', reportLimiter, async (req, res) => {
     const key = process.env.FLIGHTDECK_INGEST_KEY;
@@ -124,7 +135,9 @@ export default function bugReportRoutes(): Router {
         return fail(400, 'Unexpected field "' + field + '"; use "files".');
       }
       const chunks: Buffer[] = [];
-      stream.on('data', (c: Buffer) => { if (!failed) chunks.push(c); });
+      stream.on('data', (c: Buffer) => {
+        if (!failed) chunks.push(c);
+      });
       stream.on('limit', () => fail(413, 'Each screenshot must be 8MB or less.'));
       stream.on('close', () => {
         if (failed) return;
@@ -157,7 +170,8 @@ export default function bugReportRoutes(): Router {
         const body = await r.json().catch(() => null);
         if (!r.ok) {
           log.error({ status: r.status, body }, 'screenshot forward rejected');
-          return res.status(r.status === 404 || r.status === 410 ? 410 : 502)
+          return res
+            .status(r.status === 404 || r.status === 410 ? 410 : 502)
             .json({ error: 'Could not attach screenshots.' });
         }
         res.status(201).json({ ok: true, attachments: body });

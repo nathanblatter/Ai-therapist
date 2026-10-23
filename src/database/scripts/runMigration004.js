@@ -27,7 +27,6 @@ async function runMigration() {
     console.log('  - session_id column changed from UUID to TEXT');
     console.log('  - Foreign key constraints recreated');
     console.log('  - Now supports external session IDs (e.g., GPT realtime)\n');
-
   } catch (error) {
     console.error('\nMigration failed:', error.message);
     console.error('\nYou can rollback using a custom rollback script if needed.\n');

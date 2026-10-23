@@ -10,10 +10,7 @@ async function runMigration() {
   try {
     console.log('Running migration 014: Add AI model configuration...');
 
-    const migrationSQL = await fs.readFile(
-      path.join(__dirname, '../migrations/014_add_ai_model_config.sql'),
-      'utf8'
-    );
+    const migrationSQL = await fs.readFile(path.join(__dirname, '../migrations/014_add_ai_model_config.sql'), 'utf8');
 
     await pool.query(migrationSQL);
 

@@ -37,22 +37,28 @@ const SCENARIO = {
 describe('insertHarnessRun', () => {
   it('wraps run + scenario inserts in one transaction and returns the id', async () => {
     clientQueryMock.mockImplementation(async (sql: string) =>
-      sql.includes('INSERT INTO harness_runs') ? { rows: [{ id: 7 }] } : { rows: [] });
+      sql.includes('INSERT INTO harness_runs') ? { rows: [{ id: 7 }] } : { rows: [] },
+    );
 
     const id = await insertHarnessRun({
-      startedAt: '2026-08-15T00:00:00Z', finishedAt: '2026-08-15T00:01:00Z',
-      suite: 'voice', seed: 42, variations: 2, judgeModel: 'gpt-4o-mini',
-      gitSha: 'abc', trigger: 'manual',
+      startedAt: '2026-08-15T00:00:00Z',
+      finishedAt: '2026-08-15T00:01:00Z',
+      suite: 'voice',
+      seed: 42,
+      variations: 2,
+      judgeModel: 'gpt-4o-mini',
+      gitSha: 'abc',
+      trigger: 'manual',
       scenarios: [SCENARIO, { ...SCENARIO, variation: 1, passed: false }],
     });
 
     expect(id).toBe(7);
-    const sqls = clientQueryMock.mock.calls.map(c => c[0]);
+    const sqls = clientQueryMock.mock.calls.map((c) => c[0]);
     expect(sqls[0]).toBe('BEGIN');
     expect(sqls.at(-1)).toBe('COMMIT');
-    expect(sqls.filter(s => s.includes('harness_scenario_results')).length).toBe(2);
+    expect(sqls.filter((s) => s.includes('harness_scenario_results')).length).toBe(2);
     // pass_count computed from scenarios (1 of 2).
-    const runParams = clientQueryMock.mock.calls.find(c => c[0].includes('INSERT INTO harness_runs'))![1];
+    const runParams = clientQueryMock.mock.calls.find((c) => c[0].includes('INSERT INTO harness_runs'))![1];
     expect(runParams[10]).toBe(1); // pass_count
     expect(runParams[9]).toBe(2); // scenario_count
     expect(releaseMock).toHaveBeenCalled();
@@ -64,11 +70,17 @@ describe('insertHarnessRun', () => {
       if (sql.includes('harness_scenario_results')) throw new Error('boom');
       return { rows: [] };
     });
-    await expect(insertHarnessRun({
-      startedAt: 's', finishedAt: 'f', suite: 'smoke', seed: 1, variations: 1,
-      scenarios: [SCENARIO],
-    })).rejects.toThrow('boom');
-    expect(clientQueryMock.mock.calls.map(c => c[0])).toContain('ROLLBACK');
+    await expect(
+      insertHarnessRun({
+        startedAt: 's',
+        finishedAt: 'f',
+        suite: 'smoke',
+        seed: 1,
+        variations: 1,
+        scenarios: [SCENARIO],
+      }),
+    ).rejects.toThrow('boom');
+    expect(clientQueryMock.mock.calls.map((c) => c[0])).toContain('ROLLBACK');
     expect(releaseMock).toHaveBeenCalled();
   });
 });

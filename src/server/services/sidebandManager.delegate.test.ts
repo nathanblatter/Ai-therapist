@@ -13,7 +13,9 @@ vi.mock('ws', () => {
 });
 vi.mock('../config/db.js', () => ({ pool: { query: vi.fn().mockResolvedValue({ rows: [] }) } }));
 vi.mock('../db/index.js', () => ({
-  insertMessagesBatch: vi.fn(), insertToolInvocation: vi.fn(), recordLlmUsage: vi.fn(),
+  insertMessagesBatch: vi.fn(),
+  insertToolInvocation: vi.fn(),
+  recordLlmUsage: vi.fn(),
 }));
 vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEventForSession: vi.fn() }));
 
@@ -21,20 +23,31 @@ import { sidebandManager, type VoiceSidebandDelegate } from './sidebandManager.s
 
 function fakeDelegate(owned: string[]): VoiceSidebandDelegate & { calls: string[] } {
   const calls: string[] = [];
-  const rec = (name: string) => (...args: unknown[]) => { calls.push(`${name}:${String(args[0])}`); return Promise.resolve(); };
+  const rec =
+    (name: string) =>
+    (...args: unknown[]) => {
+      calls.push(`${name}:${String(args[0])}`);
+      return Promise.resolve();
+    };
   return {
     calls,
-    owns: id => owned.includes(id),
-    isConnected: id => owned.includes(id),
+    owns: (id) => owned.includes(id),
+    isConnected: (id) => owned.includes(id),
     getActiveConnections: () => owned,
-    tryInject: (id) => { calls.push(`tryInject:${id}`); return Promise.resolve(true); },
+    tryInject: (id) => {
+      calls.push(`tryInject:${id}`);
+      return Promise.resolve(true);
+    },
     injectMessage: rec('injectMessage'),
     updateSession: rec('updateSession'),
     interrupt: rec('interrupt'),
     createResponse: rec('createResponse'),
     triggerTool: rec('triggerTool'),
     disconnect: rec('disconnect'),
-    shutdown: () => { calls.push('shutdown'); return Promise.resolve(); },
+    shutdown: () => {
+      calls.push('shutdown');
+      return Promise.resolve();
+    },
   };
 }
 
@@ -60,8 +73,13 @@ describe('SidebandManager delegate forwarding', () => {
     await sidebandManager.triggerTool('grok_a', 'find_worksheet');
     await sidebandManager.disconnect('grok_a');
     expect(d.calls).toEqual([
-      'tryInject:grok_a', 'injectMessage:grok_a', 'updateSession:grok_a', 'interrupt:grok_a',
-      'createResponse:grok_a', 'triggerTool:grok_a', 'disconnect:grok_a',
+      'tryInject:grok_a',
+      'injectMessage:grok_a',
+      'updateSession:grok_a',
+      'interrupt:grok_a',
+      'createResponse:grok_a',
+      'triggerTool:grok_a',
+      'disconnect:grok_a',
     ]);
   });
 

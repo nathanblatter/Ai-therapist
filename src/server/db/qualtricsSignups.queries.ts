@@ -21,16 +21,13 @@ const SIGNUP_COLUMNS = 'signup_id, response_id, survey_id, user_id, claimed_at, 
  * concurrent posts. Returns the claimed row, or null when the response was
  * already claimed.
  */
-export async function claimQualtricsResponse(
-  responseId: string,
-  surveyId: string
-): Promise<QualtricsSignupRow | null> {
+export async function claimQualtricsResponse(responseId: string, surveyId: string): Promise<QualtricsSignupRow | null> {
   const result = await pool.query<QualtricsSignupRow>(
     `INSERT INTO qualtrics_signups (response_id, survey_id)
      VALUES ($1, $2)
      ON CONFLICT (response_id) DO NOTHING
      RETURNING ${SIGNUP_COLUMNS}`,
-    [responseId, surveyId]
+    [responseId, surveyId],
   );
   return result.rows[0] ?? null;
 }
@@ -41,31 +38,23 @@ export async function claimQualtricsResponse(
  * produced an account.
  */
 export async function releaseQualtricsClaim(signupId: number): Promise<void> {
-  await pool.query(
-    'DELETE FROM qualtrics_signups WHERE signup_id = $1 AND registered_at IS NULL',
-    [signupId]
-  );
+  await pool.query('DELETE FROM qualtrics_signups WHERE signup_id = $1 AND registered_at IS NULL', [signupId]);
 }
 
 /** Record which user account a claimed response produced. */
-export async function markQualtricsSignupRegistered(
-  signupId: number,
-  userId: number
-): Promise<void> {
-  await pool.query(
-    'UPDATE qualtrics_signups SET user_id = $1, registered_at = now() WHERE signup_id = $2',
-    [userId, signupId]
-  );
+export async function markQualtricsSignupRegistered(signupId: number, userId: number): Promise<void> {
+  await pool.query('UPDATE qualtrics_signups SET user_id = $1, registered_at = now() WHERE signup_id = $2', [
+    userId,
+    signupId,
+  ]);
 }
 
 /** Look up an existing claim (used by GET /join-study to render an
  *  already-used page instead of the registration form). */
-export async function findQualtricsSignup(
-  responseId: string
-): Promise<QualtricsSignupRow | null> {
+export async function findQualtricsSignup(responseId: string): Promise<QualtricsSignupRow | null> {
   const result = await pool.query<QualtricsSignupRow>(
     `SELECT ${SIGNUP_COLUMNS} FROM qualtrics_signups WHERE response_id = $1`,
-    [responseId]
+    [responseId],
   );
   return result.rows[0] ?? null;
 }

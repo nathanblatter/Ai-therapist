@@ -36,12 +36,18 @@ describe('redactPHIBatch usage sink (ai-therapist-194)', () => {
       // first pass: malformed reply (billed), then a good retry
       .mockResolvedValueOnce({ output_text: 'not json', usage: { input_tokens: 10, output_tokens: 1 } })
       .mockResolvedValueOnce({
-        ...batchReply([{ i: 0, text: 'A' }, { i: 1, text: 'B' }]),
+        ...batchReply([
+          { i: 0, text: 'A' },
+          { i: 1, text: 'B' },
+        ]),
         usage: { input_tokens: 120, output_tokens: 40 },
       })
       // second pass
       .mockResolvedValueOnce({
-        ...batchReply([{ i: 0, text: 'A' }, { i: 1, text: 'B' }]),
+        ...batchReply([
+          { i: 0, text: 'A' },
+          { i: 1, text: 'B' },
+        ]),
         usage: { input_tokens: 110, output_tokens: 35 },
       });
 
@@ -57,8 +63,18 @@ describe('redactPHIBatch usage sink (ai-therapist-194)', () => {
 
   it('records null tokens when the reply carries no usage block', async () => {
     createMock
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A' }, { i: 1, text: 'B' }]))
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A' }, { i: 1, text: 'B' }]));
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A' },
+          { i: 1, text: 'B' },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A' },
+          { i: 1, text: 'B' },
+        ]),
+      );
     const usage: Array<{ model: string; tokensIn: number | null; tokensOut: number | null }> = [];
     await redactPHIBatch(ITEMS, { usage });
     expect(usage).toHaveLength(2);
@@ -77,14 +93,18 @@ describe('redactPHIBatch', () => {
 
   it('sends anchored {i, text} items and maps redacted text back by id (double pass)', async () => {
     createMock
-      .mockResolvedValueOnce(batchReply([
-        { i: 0, text: 'My name is [REDACTED: NAME]' },
-        { i: 1, text: 'I live in [REDACTED: LOCATION]' },
-      ]))
-      .mockResolvedValueOnce(batchReply([
-        { i: 0, text: 'My name is [REDACTED: NAME]' },
-        { i: 1, text: 'I live in [REDACTED: LOCATION]' },
-      ]));
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'My name is [REDACTED: NAME]' },
+          { i: 1, text: 'I live in [REDACTED: LOCATION]' },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'My name is [REDACTED: NAME]' },
+          { i: 1, text: 'I live in [REDACTED: LOCATION]' },
+        ]),
+      );
 
     const result = await redactPHIBatch(ITEMS);
     expect(result.get(11)).toBe('My name is [REDACTED: NAME]');
@@ -111,8 +131,18 @@ describe('redactPHIBatch', () => {
   it('retries the batch once when the model merges/drops items', async () => {
     createMock
       .mockResolvedValueOnce(batchReply([{ i: 0, text: 'merged both messages' }])) // 1 item for 2
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A-red' }, { i: 1, text: 'B-red' }]))
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A-red' }, { i: 1, text: 'B-red' }]));
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A-red' },
+          { i: 1, text: 'B-red' },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A-red' },
+          { i: 1, text: 'B-red' },
+        ]),
+      );
 
     const result = await redactPHIBatch(ITEMS);
     expect(result.get(11)).toBe('A-red');
@@ -122,9 +152,24 @@ describe('redactPHIBatch', () => {
 
   it('rejects null text elements instead of storing the literal "null"', async () => {
     createMock
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: null }, { i: 1, text: 'B-red' }]))
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A-red' }, { i: 1, text: 'B-red' }]))
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A-red' }, { i: 1, text: 'B-red' }]));
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: null },
+          { i: 1, text: 'B-red' },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A-red' },
+          { i: 1, text: 'B-red' },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A-red' },
+          { i: 1, text: 'B-red' },
+        ]),
+      );
 
     const result = await redactPHIBatch(ITEMS);
     expect(result.get(11)).toBe('A-red');
@@ -133,9 +178,24 @@ describe('redactPHIBatch', () => {
 
   it('rejects duplicate indices', async () => {
     createMock
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A' }, { i: 0, text: 'A again' }]))
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A-red' }, { i: 1, text: 'B-red' }]))
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A-red' }, { i: 1, text: 'B-red' }]));
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A' },
+          { i: 0, text: 'A again' },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A-red' },
+          { i: 1, text: 'B-red' },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A-red' },
+          { i: 1, text: 'B-red' },
+        ]),
+      );
 
     const result = await redactPHIBatch(ITEMS);
     expect(result.get(12)).toBe('B-red');
@@ -149,13 +209,21 @@ describe('redactPHIBatch', () => {
       .mockResolvedValueOnce({ output_text: 'A-item-red' })
       .mockResolvedValueOnce({ output_text: 'B-item-red' })
       // second pass: healthy batch
-      .mockResolvedValueOnce(batchReply([{ i: 0, text: 'A-final' }, { i: 1, text: 'B-final' }]));
+      .mockResolvedValueOnce(
+        batchReply([
+          { i: 0, text: 'A-final' },
+          { i: 1, text: 'B-final' },
+        ]),
+      );
 
     const result = await redactPHIBatch(ITEMS);
     expect(result.get(11)).toBe('A-final');
     expect(result.get(12)).toBe('B-final');
     // per-item calls use plain string input, not the anchored JSON array
-    const perItemInputs = createMock.mock.calls.slice(2, 4).map(c => c[0].input).sort();
+    const perItemInputs = createMock.mock.calls
+      .slice(2, 4)
+      .map((c) => c[0].input)
+      .sort();
     expect(perItemInputs).toEqual(['I live in Provo', 'My name is John Smith'].sort());
   });
 

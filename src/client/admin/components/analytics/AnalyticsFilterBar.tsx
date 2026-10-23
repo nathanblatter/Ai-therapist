@@ -15,7 +15,7 @@ const VOICE_OPTIONS = [
   { value: 'marin', label: 'Marin' },
   { value: 'sage', label: 'Sage' },
   { value: 'shimmer', label: 'Shimmer' },
-  { value: 'verse', label: 'Verse' }
+  { value: 'verse', label: 'Verse' },
 ];
 
 const LANGUAGE_OPTIONS = [
@@ -33,24 +33,24 @@ const LANGUAGE_OPTIONS = [
   { value: 'ko', label: 'Korean' },
   { value: 'ar', label: 'Arabic' },
   { value: 'hi', label: 'Hindi' },
-  { value: 'ru', label: 'Russian' }
+  { value: 'ru', label: 'Russian' },
 ];
 
 const SESSION_TYPE_OPTIONS = [
   { value: 'realtime', label: 'Realtime' },
-  { value: 'chat', label: 'Chat' }
+  { value: 'chat', label: 'Chat' },
 ];
 
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
   { value: 'ended', label: 'Ended' },
-  { value: 'archived', label: 'Archived' }
+  { value: 'archived', label: 'Archived' },
 ];
 
 const ENDED_BY_OPTIONS = [
   { value: 'user', label: 'User' },
   { value: 'admin', label: 'Admin' },
-  { value: 'system', label: 'System' }
+  { value: 'system', label: 'System' },
 ];
 
 export const EMPTY_FILTERS: AnalyticsFilterState = {
@@ -61,7 +61,7 @@ export const EMPTY_FILTERS: AnalyticsFilterState = {
   sessionTypes: [],
   statuses: [],
   endedBy: [],
-  crisisFlagged: ''
+  crisisFlagged: '',
 };
 
 interface FilterOption {
@@ -97,11 +97,7 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFi
           >
             All
           </button>
-          <button
-            type="button"
-            onClick={() => onChange([])}
-            className="text-xs text-gray-500 hover:underline"
-          >
+          <button type="button" onClick={() => onChange([])} className="text-xs text-gray-500 hover:underline">
             Clear
           </button>
         </div>
@@ -143,7 +139,7 @@ export default function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilte
     onChange({
       ...filters,
       startDate: firstDay.toISOString().split('T')[0],
-      endDate: lastDay.toISOString().split('T')[0]
+      endDate: lastDay.toISOString().split('T')[0],
     });
   };
 
@@ -158,7 +154,7 @@ export default function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilte
     filters.sessionTypes.length > 0,
     filters.statuses.length > 0,
     filters.endedBy.length > 0,
-    filters.crisisFlagged !== ''
+    filters.crisisFlagged !== '',
   ].filter(Boolean).length;
 
   return (
@@ -179,18 +175,13 @@ export default function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilte
           className="border rounded px-3 py-2"
           placeholder="End date"
         />
-        <button
-          onClick={setCurrentMonth}
-          className="bg-royal text-white px-4 py-2 rounded hover:bg-navy"
-        >
+        <button onClick={setCurrentMonth} className="bg-royal text-white px-4 py-2 rounded hover:bg-navy">
           Current Month
         </button>
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}
           className={`px-4 py-2 rounded font-medium transition-colors ${
-            showAdvanced
-              ? 'bg-royal text-white'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            showAdvanced ? 'bg-royal text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
           }`}
         >
           Advanced Filters {showAdvanced ? '▲' : '▼'}
@@ -200,10 +191,7 @@ export default function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilte
             </span>
           )}
         </button>
-        <button
-          onClick={() => onChange(EMPTY_FILTERS)}
-          className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
-        >
+        <button onClick={() => onChange(EMPTY_FILTERS)} className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300">
           Clear All
         </button>
       </div>
@@ -250,9 +238,12 @@ export default function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilte
                 {[
                   { value: '', label: 'All' },
                   { value: 'true', label: 'Yes' },
-                  { value: 'false', label: 'No' }
-                ].map(opt => (
-                  <label key={opt.value} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 px-1 rounded">
+                  { value: 'false', label: 'No' },
+                ].map((opt) => (
+                  <label
+                    key={opt.value}
+                    className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 px-1 rounded"
+                  >
                     <input
                       type="radio"
                       name="crisisFlagged"
@@ -268,10 +259,7 @@ export default function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilte
             </div>
           </div>
 
-          <button
-            onClick={handleClearAdvanced}
-            className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300 text-sm"
-          >
+          <button onClick={handleClearAdvanced} className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300 text-sm">
             Clear Advanced Filters
           </button>
         </div>

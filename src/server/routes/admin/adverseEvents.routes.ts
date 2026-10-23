@@ -95,8 +95,7 @@ export default function adverseEventsRoutes(): Router {
   const denySandbox = (req: Request, res: Response, next: NextFunction): void => {
     if (req.session?.isSandbox === true) {
       log.warn(
-        `Blocked sandbox account '${req.session?.username ?? 'unknown'}' from reading the ` +
-        'adverse-event register.',
+        `Blocked sandbox account '${req.session?.username ?? 'unknown'}' from reading the ` + 'adverse-event register.',
       );
       // 404, not 403 — existence of the register must not be confirmable,
       // matching the caseload middleware's convention in this file.
@@ -175,7 +174,8 @@ export default function adverseEventsRoutes(): Router {
     const body = req.body ?? {};
     const fields: UpdateAdverseEventFields = {};
     if (typeof body.summary === 'string') fields.summary = body.summary;
-    if (body.transcript_excerpt === null || typeof body.transcript_excerpt === 'string') fields.transcript_excerpt = body.transcript_excerpt;
+    if (body.transcript_excerpt === null || typeof body.transcript_excerpt === 'string')
+      fields.transcript_excerpt = body.transcript_excerpt;
     if (Array.isArray(body.actions_taken)) fields.actions_taken = body.actions_taken;
     if (Array.isArray(body.timeline)) fields.timeline = body.timeline;
     if (typeof body.due_at === 'string') {
@@ -183,7 +183,8 @@ export default function adverseEventsRoutes(): Router {
       if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'due_at is not a valid date' });
       fields.due_at = d;
     }
-    if (body.severity === 'low' || body.severity === 'medium' || body.severity === 'high') fields.severity = body.severity;
+    if (body.severity === 'low' || body.severity === 'medium' || body.severity === 'high')
+      fields.severity = body.severity;
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: 'no editable fields supplied' });
 
     try {
@@ -258,22 +259,31 @@ export default function adverseEventsRoutes(): Router {
   // Researchers pass the caseload gate (study staff) but are org-checked
   // here: the session's owner must belong to the caller's organization (an
   // anonymous session counts as irb-study custody). 404 otherwise.
-  router.post('/admin/api/sessions/:sessionId/adverse-events', canWrite, requireSessionClientAccess(), async (req, res) => {
-    const createdBy = req.session.username ?? 'unknown-admin';
-    try {
-      const scope = await scopeFor(req);
-      if (!scope.careTeam && !(await sessionInOrg(req.params.sessionId, scope.orgId))) {
-        return res.status(404).json({ error: 'Not found' });
+  router.post(
+    '/admin/api/sessions/:sessionId/adverse-events',
+    canWrite,
+    requireSessionClientAccess(),
+    async (req, res) => {
+      const createdBy = req.session.username ?? 'unknown-admin';
+      try {
+        const scope = await scopeFor(req);
+        if (!scope.careTeam && !(await sessionInOrg(req.params.sessionId, scope.orgId))) {
+          return res.status(404).json({ error: 'Not found' });
+        }
+        const { draftAdverseEventFromCrisis } = await import('../../services/adverseEvent.service.js');
+        const reportId = await draftAdverseEventFromCrisis(req.params.sessionId, {
+          triggerSource: 'manual',
+          createdBy,
+        });
+        if (reportId == null)
+          return res.status(422).json({ error: 'Could not draft an adverse event for this session' });
+        res.status(201).json(await getAdverseEventById(reportId, scope));
+      } catch (err) {
+        log.error({ err }, 'manual draft failed');
+        res.status(500).json({ error: 'Failed to file adverse event' });
       }
-      const { draftAdverseEventFromCrisis } = await import('../../services/adverseEvent.service.js');
-      const reportId = await draftAdverseEventFromCrisis(req.params.sessionId, { triggerSource: 'manual', createdBy });
-      if (reportId == null) return res.status(422).json({ error: 'Could not draft an adverse event for this session' });
-      res.status(201).json(await getAdverseEventById(reportId, scope));
-    } catch (err) {
-      log.error({ err }, 'manual draft failed');
-      res.status(500).json({ error: 'Failed to file adverse event' });
-    }
-  });
+    },
+  );
 
   // Caseworker AE filing (spec s10 item 6): file a draft report for a
   // caseload client, outside any session. requireClientAccess gives the
@@ -330,7 +340,13 @@ export default function adverseEventsRoutes(): Router {
           triggerSource: 'manual',
           category: 'crisis',
           summary,
-          timeline: [{ at: occurredAt.toISOString(), kind: 'report_filed', detail: `Filed by ${req.session.userRole} ${username}` }],
+          timeline: [
+            {
+              at: occurredAt.toISOString(),
+              kind: 'report_filed',
+              detail: `Filed by ${req.session.userRole} ${username}`,
+            },
+          ],
           transcriptExcerpt: null,
           actionsTaken,
           dueAt: new Date(occurredAt.getTime() + 7 * 24 * 3_600_000),
@@ -359,7 +375,12 @@ export default function adverseEventsRoutes(): Router {
           itemType: 'adverse_event',
           severity: 'warning',
           title: `Adverse event draft #${reportId} awaiting review`,
-          detail: { report_id: reportId, trigger_source: 'manual', filed_by: username, filed_by_role: req.session.userRole },
+          detail: {
+            report_id: reportId,
+            trigger_source: 'manual',
+            filed_by: username,
+            filed_by_role: req.session.userRole,
+          },
           sourceTable: 'adverse_event_reports',
           sourceId: String(reportId),
           clientId,
@@ -368,14 +389,12 @@ export default function adverseEventsRoutes(): Router {
         // Same tier guard as the read routes: caseworker responses never
         // carry transcript_excerpt (null at creation, but keep the invariant).
         const created = await getAdverseEventById(reportId, await scopeFor(req));
-        res.status(201).json(
-          created && req.session.userRole === 'caseworker' ? scrubForCaseworker(created) : created
-        );
+        res.status(201).json(created && req.session.userRole === 'caseworker' ? scrubForCaseworker(created) : created);
       } catch (err) {
         log.error({ err }, 'caseworker filing failed');
         res.status(500).json({ error: 'Failed to file adverse event' });
       }
-    }
+    },
   );
 
   return router;

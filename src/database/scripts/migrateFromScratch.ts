@@ -162,7 +162,11 @@ export function buildPlan(files: readonly MigrationFile[], opts: PlanOptions = {
       const maxSelected = selected.length ? selected[selected.length - 1].number : 0;
       if (maxSelected < o.deferToEnd.requires) {
         const req = String(o.deferToEnd.requires).padStart(3, '0');
-        deferred.push({ kind: 'skip', file: f.name, note: `needs ${req}, plan stops at ${String(maxSelected).padStart(3, '0')}` });
+        deferred.push({
+          kind: 'skip',
+          file: f.name,
+          note: `needs ${req}, plan stops at ${String(maxSelected).padStart(3, '0')}`,
+        });
       } else {
         deferred.push({ ...step, note: o.reason });
       }
@@ -221,7 +225,10 @@ export function splitStatements(sql: string): string[] {
     if (ch === "'") {
       let j = i + 1;
       while (j < sql.length) {
-        if (sql[j] === "'" && sql[j + 1] === "'") { j += 2; continue; }
+        if (sql[j] === "'" && sql[j + 1] === "'") {
+          j += 2;
+          continue;
+        }
         if (sql[j] === "'") break;
         j++;
       }
@@ -410,7 +417,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (a === '--help' || a === '-h') out.help = true;
     else if (a === '--to') {
       const v = argv[++i];
-      if (!/^\d{1,3}$/.test(v ?? '')) throw new Error(`--to expects a three-digit migration number, got ${v ?? '(nothing)'}`);
+      if (!/^\d{1,3}$/.test(v ?? ''))
+        throw new Error(`--to expects a three-digit migration number, got ${v ?? '(nothing)'}`);
       out.to = Number(v);
     } else if (a.startsWith('--to=')) {
       const v = a.slice(5);
@@ -454,7 +462,9 @@ async function main(): Promise<void> {
     console.error('migrateFromScratch: DATABASE_URL must be set (this script does not read .env on purpose)');
     process.exit(2);
   }
-  console.log(`migrateFromScratch: ${steps.length} step(s) to ${target}, target ${connectionString.replace(/:\/\/([^:]+):[^@]*@/, '://$1:***@')}`);
+  console.log(
+    `migrateFromScratch: ${steps.length} step(s) to ${target}, target ${connectionString.replace(/:\/\/([^:]+):[^@]*@/, '://$1:***@')}`,
+  );
   const start = Date.now();
   await executePlan(steps, {
     connectionString,
@@ -464,7 +474,8 @@ async function main(): Promise<void> {
   console.log(`migrateFromScratch: done in ${Date.now() - start} ms`);
 }
 
-const invokedDirectly = process.argv[1] !== undefined && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+const invokedDirectly =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (invokedDirectly) {
   main().catch((err: Error) => {
     console.error(`migrateFromScratch: FAILED: ${err.message}`);

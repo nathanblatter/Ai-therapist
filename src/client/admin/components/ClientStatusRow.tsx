@@ -57,11 +57,7 @@ export default function ClientStatusRow({ client, onSelect }: ClientStatusRowPro
     >
       <div
         className={`w-1.5 self-stretch rounded-full shrink-0 ${
-          client.open_crisis_count > 0
-            ? 'bg-red-500'
-            : needsAttention
-              ? 'bg-amber-400'
-              : 'bg-gray-200'
+          client.open_crisis_count > 0 ? 'bg-red-500' : needsAttention ? 'bg-amber-400' : 'bg-gray-200'
         }`}
         aria-hidden="true"
       />
@@ -90,14 +86,9 @@ export default function ClientStatusRow({ client, onSelect }: ClientStatusRowPro
           )}
         </div>
         <div className="text-xs text-gray-500 mt-0.5">
-          Last session {timeAgo(client.last_session_at)}
-          {' '}&bull;{' '}
-          {client.ended_session_count} session{client.ended_session_count === 1 ? '' : 's'}
-          {client.last_checkin_mood !== null && (
-            <>
-              {' '}&bull; last mood {client.last_checkin_mood}
-            </>
-          )}
+          Last session {timeAgo(client.last_session_at)} &bull; {client.ended_session_count} session
+          {client.ended_session_count === 1 ? '' : 's'}
+          {client.last_checkin_mood !== null && <> &bull; last mood {client.last_checkin_mood}</>}
         </div>
         {client.attention.reasons.length > 0 && (
           <div className="flex gap-1.5 flex-wrap mt-1.5">

@@ -3,24 +3,24 @@
 // notes or case notes; caseworkers write case notes only (the server 400s
 // anything else). Drafts autosave (debounced) once created; signing asks for
 // confirmation because signed notes are immutable (amend-only from there).
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, ArrowLeft, Check, Edit3, Trash2 } from "react-feather";
-import type { CareNote, CareNoteType, CaseNoteKind } from "./NotesPanel";
-import { deleteJson, postJson } from "../../../shared/http";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertCircle, ArrowLeft, Check, Edit3, Trash2 } from 'react-feather';
+import type { CareNote, CareNoteType, CaseNoteKind } from './NotesPanel';
+import { deleteJson, postJson } from '../../../shared/http';
 
 const CASE_KINDS: { value: CaseNoteKind; label: string }[] = [
-  { value: "contact", label: "Contact" },
-  { value: "referral", label: "Referral" },
-  { value: "coordination", label: "Coordination" },
-  { value: "safety_check", label: "Safety check" },
-  { value: "other", label: "Other" },
+  { value: 'contact', label: 'Contact' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'coordination', label: 'Coordination' },
+  { value: 'safety_check', label: 'Safety check' },
+  { value: 'other', label: 'Other' },
 ];
 
-const SOAP_FIELDS: { key: "subjective" | "objective" | "assessment" | "plan"; label: string }[] = [
-  { key: "subjective", label: "Subjective" },
-  { key: "objective", label: "Objective" },
-  { key: "assessment", label: "Assessment" },
-  { key: "plan", label: "Plan" },
+const SOAP_FIELDS: { key: 'subjective' | 'objective' | 'assessment' | 'plan'; label: string }[] = [
+  { key: 'subjective', label: 'Subjective' },
+  { key: 'objective', label: 'Objective' },
+  { key: 'assessment', label: 'Assessment' },
+  { key: 'plan', label: 'Plan' },
 ];
 
 interface NoteEditorProps {
@@ -35,21 +35,21 @@ interface NoteEditorProps {
 }
 
 export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }: NoteEditorProps) {
-  const isCaseworker = userRole === "caseworker";
+  const isCaseworker = userRole === 'caseworker';
   const [noteId, setNoteId] = useState<number | null>(note?.note_id ?? null);
-  const [noteType, setNoteType] = useState<CareNoteType>(note?.note_type ?? (isCaseworker ? "case" : "progress"));
-  const [caseKind, setCaseKind] = useState<CaseNoteKind>(note?.case_note_kind ?? "contact");
+  const [noteType, setNoteType] = useState<CareNoteType>(note?.note_type ?? (isCaseworker ? 'case' : 'progress'));
+  const [caseKind, setCaseKind] = useState<CaseNoteKind>(note?.case_note_kind ?? 'contact');
   const [fields, setFields] = useState<Record<string, string>>({
-    subjective: String(note?.content.subjective ?? ""),
-    objective: String(note?.content.objective ?? ""),
-    assessment: String(note?.content.assessment ?? ""),
-    plan: String(note?.content.plan ?? ""),
-    narrative: String(note?.content.narrative ?? ""),
-    contact_method: String(note?.content.contact_method ?? ""),
-    referral_to: String(note?.content.referral_to ?? ""),
-    outcome: String(note?.content.outcome ?? ""),
+    subjective: String(note?.content.subjective ?? ''),
+    objective: String(note?.content.objective ?? ''),
+    assessment: String(note?.content.assessment ?? ''),
+    plan: String(note?.content.plan ?? ''),
+    narrative: String(note?.content.narrative ?? ''),
+    contact_method: String(note?.content.contact_method ?? ''),
+    referral_to: String(note?.content.referral_to ?? ''),
+    outcome: String(note?.content.outcome ?? ''),
   });
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [confirmSign, setConfirmSign] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -59,9 +59,9 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
   const buildContent = useCallback((): Record<string, string> => {
     const content: Record<string, string> = {};
     const keys =
-      noteType === "progress"
-        ? (["subjective", "objective", "assessment", "plan"] as const)
-        : (["narrative", "contact_method", "referral_to", "outcome"] as const);
+      noteType === 'progress'
+        ? (['subjective', 'objective', 'assessment', 'plan'] as const)
+        : (['narrative', 'contact_method', 'referral_to', 'outcome'] as const);
     for (const key of keys) {
       const value = fields[key]?.trim();
       if (value) content[key] = value;
@@ -69,40 +69,41 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
     return content;
   }, [fields, noteType]);
 
-  const hasContent = Object.keys(buildContent()).length > 0 && (noteType === "progress" || !!fields.narrative.trim());
+  const hasContent = Object.keys(buildContent()).length > 0 && (noteType === 'progress' || !!fields.narrative.trim());
 
   const persist = useCallback(async (): Promise<CareNote | null> => {
     const content = buildContent();
     if (Object.keys(content).length === 0) return null;
-    setSaveState("saving");
+    setSaveState('saving');
     setError(null);
     try {
-      const data = noteId === null
-        ? await postJson<{ note: CareNote }>(
-            `/admin/api/users/${clientId}/notes`,
-            {
-              note_type: noteType,
-              case_note_kind: noteType === "case" ? caseKind : undefined,
-              content,
-            },
-            { fallback: "Failed to save the draft" }
-          )
-        : await postJson<{ note: CareNote }>(
-            `/admin/api/notes/${noteId}`,
-            {
-              content,
-              case_note_kind: noteType === "case" ? caseKind : undefined,
-            },
-            { method: "PUT", fallback: "Failed to save the draft" }
-          );
+      const data =
+        noteId === null
+          ? await postJson<{ note: CareNote }>(
+              `/admin/api/users/${clientId}/notes`,
+              {
+                note_type: noteType,
+                case_note_kind: noteType === 'case' ? caseKind : undefined,
+                content,
+              },
+              { fallback: 'Failed to save the draft' },
+            )
+          : await postJson<{ note: CareNote }>(
+              `/admin/api/notes/${noteId}`,
+              {
+                content,
+                case_note_kind: noteType === 'case' ? caseKind : undefined,
+              },
+              { method: 'PUT', fallback: 'Failed to save the draft' },
+            );
       const saved: CareNote = data.note;
       setNoteId(saved.note_id);
-      setSaveState("saved");
+      setSaveState('saved');
       dirty.current = false;
       onSaved?.(saved);
       return saved;
     } catch (err: unknown) {
-      setSaveState("idle");
+      setSaveState('idle');
       setError(err instanceof Error ? err.message : String(err));
       return null;
     }
@@ -123,7 +124,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
 
   const setField = (key: string, value: string) => {
     dirty.current = true;
-    setSaveState("idle");
+    setSaveState('idle');
     setFields((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -137,7 +138,9 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
         if (!saved) return;
         id = saved.note_id;
       }
-      const data = await postJson<{ note: CareNote }>(`/admin/api/notes/${id}/sign`, undefined, { fallback: "Failed to sign the note" });
+      const data = await postJson<{ note: CareNote }>(`/admin/api/notes/${id}/sign`, undefined, {
+        fallback: 'Failed to sign the note',
+      });
       onSaved?.(data.note);
       onDone();
     } catch (err: unknown) {
@@ -156,7 +159,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
     setBusy(true);
     setError(null);
     try {
-      await deleteJson(`/admin/api/notes/${noteId}`, undefined, { fallback: "Failed to delete the draft" });
+      await deleteJson(`/admin/api/notes/${noteId}`, undefined, { fallback: 'Failed to delete the draft' });
       onSaved?.(null);
       onDone();
     } catch (err: unknown) {
@@ -177,8 +180,8 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
           <ArrowLeft size={14} aria-hidden="true" /> Notes
         </button>
         <span className="text-xs text-gray-400 flex items-center gap-1">
-          {saveState === "saving" && "Saving draft..."}
-          {saveState === "saved" && (
+          {saveState === 'saving' && 'Saving draft...'}
+          {saveState === 'saved' && (
             <>
               <Check size={12} aria-hidden="true" /> Draft saved
             </>
@@ -196,8 +199,8 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
         <div className="mb-3 flex gap-1" role="tablist" aria-label="Note type">
           {(
             [
-              ["progress", "Progress (SOAP)"],
-              ["case", "Case note"],
+              ['progress', 'Progress (SOAP)'],
+              ['case', 'Case note'],
             ] as [CareNoteType, string][]
           ).map(([value, label]) => (
             <button
@@ -207,7 +210,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
               aria-selected={noteType === value}
               onClick={() => setNoteType(value)}
               className={`px-3 py-1.5 rounded-full text-sm ${
-                noteType === value ? "bg-royal text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                noteType === value ? 'bg-royal text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
               {label}
@@ -219,7 +222,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
         <p className="mb-3 text-xs text-gray-500">Case note (caseworkers document contacts and coordination).</p>
       )}
 
-      {noteType === "case" && (
+      {noteType === 'case' && (
         <div className="mb-3">
           <label htmlFor="case-kind" className="block text-sm font-medium text-gray-700 mb-1">
             Kind
@@ -242,7 +245,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
         </div>
       )}
 
-      {noteType === "progress" ? (
+      {noteType === 'progress' ? (
         <div className="space-y-3">
           {SOAP_FIELDS.map(({ key, label }) => (
             <div key={key}>
@@ -253,7 +256,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
                 id={`soap-${key}`}
                 value={fields[key]}
                 onChange={(e) => setField(key, e.target.value)}
-                rows={key === "subjective" || key === "assessment" ? 3 : 2}
+                rows={key === 'subjective' || key === 'assessment' ? 3 : 2}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-royal"
               />
             </div>
@@ -268,7 +271,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
             <textarea
               id="case-narrative"
               value={fields.narrative}
-              onChange={(e) => setField("narrative", e.target.value)}
+              onChange={(e) => setField('narrative', e.target.value)}
               rows={4}
               placeholder="What happened, who was contacted, next steps..."
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-royal"
@@ -277,9 +280,9 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {(
               [
-                ["contact_method", "Contact method"],
-                ["referral_to", "Referral to"],
-                ["outcome", "Outcome"],
+                ['contact_method', 'Contact method'],
+                ['referral_to', 'Referral to'],
+                ['outcome', 'Outcome'],
               ] as const
             ).map(([key, label]) => (
               <div key={key}>
@@ -349,7 +352,7 @@ export default function NoteEditor({ clientId, userRole, note, onSaved, onDone }
           disabled={busy}
           className="ml-auto px-3 py-2 text-red-600 hover:text-red-800 disabled:opacity-50 flex items-center gap-1 min-h-[44px]"
         >
-          <Trash2 size={15} aria-hidden="true" /> {noteId === null ? "Discard" : "Delete draft"}
+          <Trash2 size={15} aria-hidden="true" /> {noteId === null ? 'Discard' : 'Delete draft'}
         </button>
       </div>
     </div>

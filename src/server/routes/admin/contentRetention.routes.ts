@@ -46,7 +46,11 @@ export default function contentRetentionRoutes(): Router {
     if (typeof settings.enabled !== 'boolean') {
       return res.status(400).json({ error: 'enabled must be a boolean' });
     }
-    if (typeof settings.retention_hours !== 'number' || settings.retention_hours < 1 || settings.retention_hours > 8760) {
+    if (
+      typeof settings.retention_hours !== 'number' ||
+      settings.retention_hours < 1 ||
+      settings.retention_hours > 8760
+    ) {
       return res.status(400).json({ error: 'retention_hours must be between 1 and 8760 (1 year)' });
     }
     const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
@@ -117,10 +121,18 @@ export default function contentRetentionRoutes(): Router {
     const { settings } = req.body as { settings?: DataRetentionSettings };
     if (!settings) return res.status(400).json({ error: 'Settings are required' });
     if (typeof settings.enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be a boolean' });
-    if (typeof settings.recordings_retention_days !== 'number' || settings.recordings_retention_days < 1 || settings.recordings_retention_days > 3650) {
+    if (
+      typeof settings.recordings_retention_days !== 'number' ||
+      settings.recordings_retention_days < 1 ||
+      settings.recordings_retention_days > 3650
+    ) {
       return res.status(400).json({ error: 'recordings_retention_days must be between 1 and 3650' });
     }
-    if (typeof settings.wiped_user_grace_days !== 'number' || settings.wiped_user_grace_days < 0 || settings.wiped_user_grace_days > 3650) {
+    if (
+      typeof settings.wiped_user_grace_days !== 'number' ||
+      settings.wiped_user_grace_days < 0 ||
+      settings.wiped_user_grace_days > 3650
+    ) {
       return res.status(400).json({ error: 'wiped_user_grace_days must be between 0 and 3650' });
     }
     if (!/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(settings.run_time)) {

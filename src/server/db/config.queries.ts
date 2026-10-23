@@ -10,18 +10,11 @@ export interface SystemConfigRow {
 // The voices/languages config blob shapes live in src/shared/systemConfig.ts
 // (single source of truth for server + UIs); re-exported here so existing
 // importers of config.queries / the db barrel keep working.
-export type {
-  VoiceOption,
-  VoicesConfig,
-  LanguageOption,
-  LanguagesConfig,
-} from '../../shared/systemConfig.js';
+export type { VoiceOption, VoicesConfig, LanguageOption, LanguagesConfig } from '../../shared/systemConfig.js';
 
 /** Fetch every row from the system_config key/value table. */
 export async function fetchSystemConfigRows(): Promise<SystemConfigRow[]> {
-  const result = await pool.query<SystemConfigRow>(
-    'SELECT config_key, config_value FROM system_config'
-  );
+  const result = await pool.query<SystemConfigRow>('SELECT config_key, config_value FROM system_config');
   return result.rows;
 }
 
@@ -36,18 +29,13 @@ export interface SystemConfigFullRow {
 
 /** Every config row with its audit metadata, ordered by key (admin view). */
 export async function getAllSystemConfig(): Promise<SystemConfigFullRow[]> {
-  const result = await pool.query<SystemConfigFullRow>(
-    'SELECT * FROM system_config ORDER BY config_key'
-  );
+  const result = await pool.query<SystemConfigFullRow>('SELECT * FROM system_config ORDER BY config_key');
   return result.rows;
 }
 
 /** A single config row by key, or null if it doesn't exist. */
 export async function getSystemConfigByKey(key: string): Promise<SystemConfigFullRow | null> {
-  const result = await pool.query<SystemConfigFullRow>(
-    'SELECT * FROM system_config WHERE config_key = $1',
-    [key]
-  );
+  const result = await pool.query<SystemConfigFullRow>('SELECT * FROM system_config WHERE config_key = $1', [key]);
   return result.rows[0] ?? null;
 }
 
@@ -55,14 +43,14 @@ export async function getSystemConfigByKey(key: string): Promise<SystemConfigFul
 export async function updateSystemConfig(
   key: string,
   value: unknown,
-  updatedBy: string | undefined
+  updatedBy: string | undefined,
 ): Promise<SystemConfigFullRow | null> {
   const result = await pool.query<SystemConfigFullRow>(
     `UPDATE system_config
      SET config_value = $1, updated_at = CURRENT_TIMESTAMP, updated_by = $2
      WHERE config_key = $3
      RETURNING *`,
-    [JSON.stringify(value), updatedBy, key]
+    [JSON.stringify(value), updatedBy, key],
   );
   return result.rows[0] ?? null;
 }
@@ -78,7 +66,7 @@ export async function upsertSystemConfig(
   key: string,
   value: unknown,
   updatedBy: string | undefined,
-  description: string | null = null
+  description: string | null = null,
 ): Promise<SystemConfigFullRow> {
   const result = await pool.query<SystemConfigFullRow>(
     `INSERT INTO system_config (config_key, config_value, description, updated_at, updated_by)
@@ -88,7 +76,7 @@ export async function upsertSystemConfig(
            updated_at = CURRENT_TIMESTAMP,
            updated_by = EXCLUDED.updated_by
      RETURNING *`,
-    [key, JSON.stringify(value), description, updatedBy]
+    [key, JSON.stringify(value), description, updatedBy],
   );
   return result.rows[0];
 }

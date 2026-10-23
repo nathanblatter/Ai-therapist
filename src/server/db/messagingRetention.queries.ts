@@ -50,9 +50,7 @@ export interface AgedMessageDeletionResult {
  * Threads themselves are kept: the thread row is the care-team assignment
  * record, not content.
  */
-export async function deleteAgedThreadMessages(
-  input: AgedMessageDeletionInput
-): Promise<AgedMessageDeletionResult> {
+export async function deleteAgedThreadMessages(input: AgedMessageDeletionInput): Promise<AgedMessageDeletionResult> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -66,9 +64,9 @@ export async function deleteAgedThreadMessages(
           AND mt.is_sandbox IS NOT TRUE
           AND cu.is_sandbox IS NOT TRUE
         ORDER BY tm.message_id`,
-      [input.days]
+      [input.days],
     );
-    const ids = aged.rows.map(r => r.message_id);
+    const ids = aged.rows.map((r) => r.message_id);
 
     if (ids.length === 0) {
       await client.query('COMMIT');
@@ -77,18 +75,13 @@ export async function deleteAgedThreadMessages(
 
     // FK order (see doc comment): release the message -> event reference, then
     // delete the events, then the messages.
-    await client.query(
-      `UPDATE thread_messages SET crisis_event_id = NULL WHERE message_id = ANY($1::bigint[])`,
-      [ids]
-    );
-    const crisisResult = await client.query(
-      `DELETE FROM crisis_events WHERE thread_message_id = ANY($1::bigint[])`,
-      [ids]
-    );
-    const messagesResult = await client.query(
-      `DELETE FROM thread_messages WHERE message_id = ANY($1::bigint[])`,
-      [ids]
-    );
+    await client.query(`UPDATE thread_messages SET crisis_event_id = NULL WHERE message_id = ANY($1::bigint[])`, [ids]);
+    const crisisResult = await client.query(`DELETE FROM crisis_events WHERE thread_message_id = ANY($1::bigint[])`, [
+      ids,
+    ]);
+    const messagesResult = await client.query(`DELETE FROM thread_messages WHERE message_id = ANY($1::bigint[])`, [
+      ids,
+    ]);
 
     const messagesDeleted = messagesResult.rowCount ?? 0;
     const crisisEventsDeleted = crisisResult.rowCount ?? 0;
@@ -106,7 +99,7 @@ export async function deleteAgedThreadMessages(
         JSON.stringify(input.policySnapshot),
         input.triggeredBy,
         input.triggeredByUser,
-      ]
+      ],
     );
 
     await client.query('COMMIT');
@@ -132,10 +125,7 @@ export async function deleteAgedThreadMessages(
  * require_redaction_complete guard: scan_status='pending' messages are left
  * alone so the async safety scan never loses its input mid-flight.
  */
-export async function wipeAgedThreadMessageBodies(
-  cutoff: Date,
-  requireScanComplete: boolean
-): Promise<number> {
+export async function wipeAgedThreadMessageBodies(cutoff: Date, requireScanComplete: boolean): Promise<number> {
   const scanGuard = requireScanComplete ? `\n        AND tm.scan_status <> 'pending'` : '';
   const result = await pool.query(
     `UPDATE thread_messages tm
@@ -149,7 +139,7 @@ export async function wipeAgedThreadMessageBodies(
           SELECT 1 FROM users cu
           WHERE cu.userid = mt.client_id AND cu.is_sandbox
         )${scanGuard}`,
-    [cutoff]
+    [cutoff],
   );
   return result.rowCount ?? 0;
 }
@@ -201,7 +191,7 @@ export async function getMessageHistoryForClient(clientId: number): Promise<Expo
       WHERE mt.client_id = $1
       GROUP BY mt.thread_id
       ORDER BY mt.thread_id`,
-    [clientId]
+    [clientId],
   );
   return result.rows;
 }

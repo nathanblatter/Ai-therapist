@@ -36,32 +36,40 @@ export default function ToolUsagePanel() {
 
   if (loading) {
     return (
-      <Panel><p className="text-gray-500 text-center py-4">Loading tool usage...</p></Panel>
+      <Panel>
+        <p className="text-gray-500 text-center py-4">Loading tool usage...</p>
+      </Panel>
     );
   }
   if (error || !data) {
     return (
-      <Panel><p className="text-red-600 text-center py-4">{error || 'No tool analytics available'}</p></Panel>
+      <Panel>
+        <p className="text-red-600 text-center py-4">{error || 'No tool analytics available'}</p>
+      </Panel>
     );
   }
 
-  const frequencyData = data.tool_stats.map(t => ({
+  const frequencyData = data.tool_stats.map((t) => ({
     tool: t.tool_name,
     invocations: t.invocations,
   }));
 
-  const distributionData = data.distinct_tools_per_session.map(b => ({
-    name: b.distinct_tool_count === 0 ? '0 tools' : `${b.distinct_tool_count} tool${b.distinct_tool_count === 1 ? '' : 's'}`,
+  const distributionData = data.distinct_tools_per_session.map((b) => ({
+    name:
+      b.distinct_tool_count === 0
+        ? '0 tools'
+        : `${b.distinct_tool_count} tool${b.distinct_tool_count === 1 ? '' : 's'}`,
     sessions: b.session_count,
   }));
 
-  const toolUsePercentage = data.total_sessions > 0
-    ? Math.round((data.sessions_with_tool_use / data.total_sessions) * 100)
-    : 0;
+  const toolUsePercentage =
+    data.total_sessions > 0 ? Math.round((data.sessions_with_tool_use / data.total_sessions) * 100) : 0;
 
   return (
     <div className="space-y-4">
-      <h3 className="text-xl font-bold flex items-center gap-2"><Tool size={20} /> Tool Usage Analytics</h3>
+      <h3 className="text-xl font-bold flex items-center gap-2">
+        <Tool size={20} /> Tool Usage Analytics
+      </h3>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard label="Registered Tools" value={data.registered_tool_count} icon={Tool} />
@@ -71,9 +79,11 @@ export default function ToolUsagePanel() {
 
       {data.dead_tools.length > 0 && (
         <Panel title="Dead Tools">
-          <p className="text-sm text-gray-600 mb-3">Registered in the tool registry but never invoked in any logged session.</p>
+          <p className="text-sm text-gray-600 mb-3">
+            Registered in the tool registry but never invoked in any logged session.
+          </p>
           <div className="flex flex-wrap gap-2">
-            {data.dead_tools.map(name => (
+            {data.dead_tools.map((name) => (
               <span key={name} className="font-mono text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">
                 {name}
               </span>
@@ -127,7 +137,7 @@ export default function ToolUsagePanel() {
               {data.tool_stats
                 .slice()
                 .sort((a, b) => b.failure_rate - a.failure_rate)
-                .map(t => (
+                .map((t) => (
                   <tr key={t.tool_name} className="border-b last:border-0">
                     <td className="py-2 pr-4 font-mono text-xs">{t.tool_name}</td>
                     <td className="py-2 pr-4">{t.invocations}</td>

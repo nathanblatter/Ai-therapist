@@ -20,7 +20,7 @@ export type MessageContentColumn = 'content' | 'content_redacted';
  *  (ai-therapist-276, the by-id gate's rule). */
 export async function getActiveSessions(
   scopeTherapistId?: number | null,
-  orgId?: number | null
+  orgId?: number | null,
 ): Promise<AdminSessionRow[]> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
   const params: unknown[] = scoped ? [scopeTherapistId] : [];
@@ -33,7 +33,8 @@ export async function getActiveSessions(
     scopeClause += `
       AND ${ownerOrgScopeSql(`$${params.length}`, 'ts.user_id')}`;
   }
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT
       ts.session_id,
       ts.user_id,
@@ -56,7 +57,9 @@ export async function getActiveSessions(
       AND (ts.is_demo IS NOT TRUE OR u.is_sandbox IS TRUE)${scopeClause}
     GROUP BY ts.session_id, u.username
     ORDER BY ts.crisis_flagged DESC, ts.created_at DESC
-  `, params);
+  `,
+    params,
+  );
   return result.rows;
 }
 
@@ -89,7 +92,7 @@ export interface SessionListFilters {
 export async function listSessions(
   f: SessionListFilters,
   scopeTherapistId?: number | null,
-  orgId?: number | null
+  orgId?: number | null,
 ): Promise<AdminSessionRow[]> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
   const extraParams: unknown[] = scoped ? [scopeTherapistId] : [];
@@ -102,7 +105,8 @@ export async function listSessions(
     scopeClause += `
         AND ${ownerOrgScopeSql(`$${16 + extraParams.length}`, 'ts.user_id')}`;
   }
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     WITH session_stats AS (
       SELECT
         ts.session_id,
@@ -155,25 +159,27 @@ export async function listSessions(
       AND ($15::TEXT[] IS NULL OR duration_category = ANY($15))
     ORDER BY start_time DESC
     LIMIT $6 OFFSET $7
-  `, [
-    f.search,         // $1
-    f.startDate,      // $2
-    f.endDate,        // $3
-    f.minMessages,    // $4
-    f.maxMessages,    // $5
-    f.limit,          // $6
-    f.offset,         // $7
-    f.voices,         // $8
-    f.languages,      // $9
-    f.sessionTypes,   // $10
-    f.statuses,       // $11
-    f.endedBy,        // $12
-    f.crisisFlagged,  // $13
-    f.crisisSeverity, // $14
-    f.durations,      // $15
-    f.userId ?? null, // $16
-    ...extraParams,   // $17+ (caseload scope and/or org scope, when present)
-  ]);
+  `,
+    [
+      f.search, // $1
+      f.startDate, // $2
+      f.endDate, // $3
+      f.minMessages, // $4
+      f.maxMessages, // $5
+      f.limit, // $6
+      f.offset, // $7
+      f.voices, // $8
+      f.languages, // $9
+      f.sessionTypes, // $10
+      f.statuses, // $11
+      f.endedBy, // $12
+      f.crisisFlagged, // $13
+      f.crisisSeverity, // $14
+      f.durations, // $15
+      f.userId ?? null, // $16
+      ...extraParams, // $17+ (caseload scope and/or org scope, when present)
+    ],
+  );
   return result.rows;
 }
 
@@ -185,7 +191,7 @@ export async function listSessions(
 export async function countSessions(
   f: SessionListFilters,
   scopeTherapistId?: number | null,
-  orgId?: number | null
+  orgId?: number | null,
 ): Promise<number> {
   const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
   const extraParams: unknown[] = scoped ? [scopeTherapistId] : [];
@@ -198,7 +204,8 @@ export async function countSessions(
     scopeClause += `
       AND ${ownerOrgScopeSql(`$${11 + extraParams.length}`, 'ts.user_id')}`;
   }
-  const result = await pool.query<{ total: string }>(`
+  const result = await pool.query<{ total: string }>(
+    `
     SELECT COUNT(DISTINCT ts.session_id) as total
     FROM therapy_sessions ts
     LEFT JOIN users u ON ts.user_id = u.userid
@@ -216,33 +223,38 @@ export async function countSessions(
       AND ($9::BOOLEAN IS NULL OR ts.crisis_flagged = $9)
       AND ($10::TEXT IS NULL OR ts.crisis_severity = $10)
       AND ($11::INT IS NULL OR ts.user_id = $11)${scopeClause}
-  `, [
-    f.search,
-    f.startDate,
-    f.endDate,
-    f.voices,
-    f.languages,
-    f.sessionTypes,
-    f.statuses,
-    f.endedBy,
-    f.crisisFlagged,
-    f.crisisSeverity,
-    f.userId ?? null,
-    ...extraParams, // $12+ (caseload scope and/or org scope, when present)
-  ]);
+  `,
+    [
+      f.search,
+      f.startDate,
+      f.endDate,
+      f.voices,
+      f.languages,
+      f.sessionTypes,
+      f.statuses,
+      f.endedBy,
+      f.crisisFlagged,
+      f.crisisSeverity,
+      f.userId ?? null,
+      ...extraParams, // $12+ (caseload scope and/or org scope, when present)
+    ],
+  );
   return parseInt(result.rows[0].total);
 }
 
 /** Session row joined with username, or null if not found. */
 export async function getSessionWithUser(sessionId: string): Promise<AdminSessionRow | null> {
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT
       ts.*,
       u.username
     FROM therapy_sessions ts
     LEFT JOIN users u ON ts.user_id = u.userid
     WHERE ts.session_id = $1
-  `, [sessionId]);
+  `,
+    [sessionId],
+  );
   return result.rows[0] ?? null;
 }
 
@@ -259,17 +271,17 @@ export async function getSessionWithUser(sessionId: string): Promise<AdminSessio
  */
 export function messageTextSql(contentColumn: MessageContentColumn, alias = ''): string {
   const q = alias ? `${alias}.` : '';
-  return contentColumn === 'content'
-    ? `COALESCE(${q}content, ${q}content_redacted)`
-    : `${q}content_redacted`;
+  return contentColumn === 'content' ? `COALESCE(${q}content, ${q}content_redacted)` : `${q}content_redacted`;
 }
 
 /** A session's messages in order, exposing the role-appropriate content column. */
-export async function getAdminSessionMessages(sessionId: string, contentColumn: MessageContentColumn): Promise<AdminSessionRow[]> {
-  const contentWipedSql = contentColumn === 'content'
-    ? '(content IS NULL AND content_redacted IS NOT NULL)'
-    : 'FALSE';
-  const result = await pool.query(`
+export async function getAdminSessionMessages(
+  sessionId: string,
+  contentColumn: MessageContentColumn,
+): Promise<AdminSessionRow[]> {
+  const contentWipedSql = contentColumn === 'content' ? '(content IS NULL AND content_redacted IS NOT NULL)' : 'FALSE';
+  const result = await pool.query(
+    `
     SELECT
       message_id,
       session_id,
@@ -282,7 +294,9 @@ export async function getAdminSessionMessages(sessionId: string, contentColumn: 
     FROM messages
     WHERE session_id = $1
     ORDER BY created_at ASC
-  `, [sessionId]);
+  `,
+    [sessionId],
+  );
   // Researchers reading the redacted column must not get raw participant text
   // back via the metadata blob beside it (ai-therapist-217).
   return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
@@ -294,7 +308,7 @@ export async function getRedactionStatus(sessionId: string): Promise<number> {
     `SELECT COUNT(*) as pending_count
      FROM messages
      WHERE session_id = $1 AND content_redacted IS NULL AND ${REDACTABLE_ROWS_SQL}`,
-    [sessionId]
+    [sessionId],
   );
   return parseInt(result.rows[0].pending_count);
 }
@@ -327,7 +341,7 @@ export async function getRedactionStatusBreakdown(sessionId: string): Promise<Re
        COUNT(*) FILTER (WHERE ${REDACTABLE_ROWS_SQL} AND content IS NOT NULL AND content_redacted IS NOT NULL) AS redacted
      FROM messages
      WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   const total = parseInt(result.rows[0]?.total ?? '0');
   const redacted = parseInt(result.rows[0]?.redacted ?? '0');

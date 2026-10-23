@@ -106,8 +106,15 @@ describe('POST /admin/api/escalations', () => {
     expect(res.status).toBe(201);
     expect(res.body.escalation.escalation_id).toBe(11);
     expect(dbMocks.createEscalation).toHaveBeenCalledWith(
-      expect.objectContaining({ clientId: 42, raisedBy: 2, raisedByRole: 'caseworker', assignedTo: 9, urgency: 'urgent', orgId: 5 }),
-      'user2'
+      expect.objectContaining({
+        clientId: 42,
+        raisedBy: 2,
+        raisedByRole: 'caseworker',
+        assignedTo: 9,
+        urgency: 'urgent',
+        orgId: 5,
+      }),
+      'user2',
     );
   });
 
@@ -121,7 +128,7 @@ describe('POST /admin/api/escalations', () => {
         sourceTable: 'escalations',
         sourceId: '11',
         isSandbox: false,
-      })
+      }),
     );
   });
 
@@ -133,10 +140,11 @@ describe('POST /admin/api/escalations', () => {
       .send({ ...body, urgency: 'emergency' });
     expect(res.status).toBe(201);
     expect(dbMocks.createEscalation).toHaveBeenCalledWith(
-      expect.objectContaining({ assignedTo: null }), expect.anything()
+      expect.objectContaining({ assignedTo: null }),
+      expect.anything(),
     );
     expect(dbMocks.insertWorkItem).toHaveBeenCalledWith(
-      expect.objectContaining({ severity: 'urgent', assigneeId: null, assigneeRole: null })
+      expect.objectContaining({ severity: 'urgent', assigneeId: null, assigneeRole: null }),
     );
     // Spec 072: unassigned emergency fans out to every org therapist.
     expect(dbMocks.getOrgTherapistIds).toHaveBeenCalledWith(5);
@@ -151,7 +159,10 @@ describe('POST /admin/api/escalations', () => {
 
   it('400s a crisis_event_id that belongs to a different client', async () => {
     dbMocks.getCrisisEventClientInfo.mockResolvedValue({
-      event_id: 33, session_id: 's1', client_user_id: null, session_user_id: 77,
+      event_id: 33,
+      session_id: 's1',
+      client_user_id: null,
+      session_user_id: 77,
     });
     const res = await request(appAs('caseworker', 2))
       .post('/admin/api/escalations')
@@ -162,7 +173,10 @@ describe('POST /admin/api/escalations', () => {
 
   it('accepts a crisis_event_id that belongs to the client', async () => {
     dbMocks.getCrisisEventClientInfo.mockResolvedValue({
-      event_id: 33, session_id: 's1', client_user_id: null, session_user_id: 42,
+      event_id: 33,
+      session_id: 's1',
+      client_user_id: null,
+      session_user_id: 42,
     });
     const res = await request(appAs('caseworker', 2))
       .post('/admin/api/escalations')
@@ -194,9 +208,27 @@ describe('POST /admin/api/escalations', () => {
 
   it('400s on missing reason, bad urgency, and off-care-team assigned_to', async () => {
     const app = appAs('caseworker', 2);
-    expect((await request(app).post('/admin/api/escalations').send({ ...body, reason: '  ' })).status).toBe(400);
-    expect((await request(app).post('/admin/api/escalations').send({ ...body, urgency: 'meh' })).status).toBe(400);
-    expect((await request(app).post('/admin/api/escalations').send({ ...body, assigned_to: 777 })).status).toBe(400);
+    expect(
+      (
+        await request(app)
+          .post('/admin/api/escalations')
+          .send({ ...body, reason: '  ' })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app)
+          .post('/admin/api/escalations')
+          .send({ ...body, urgency: 'meh' })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app)
+          .post('/admin/api/escalations')
+          .send({ ...body, assigned_to: 777 })
+      ).status,
+    ).toBe(400);
     expect(dbMocks.createEscalation).not.toHaveBeenCalled();
   });
 
@@ -216,7 +248,7 @@ describe('GET /admin/api/escalations', () => {
     expect(dbMocks.listEscalations).toHaveBeenCalledWith(
       // ai-therapist-144: a caseworker's list scope must carry the role so the
       // query EXCLUDES org-unassigned escalations (they can't open those).
-      expect.objectContaining({ memberId: 2, memberRole: 'caseworker', orgId: null })
+      expect.objectContaining({ memberId: 2, memberRole: 'caseworker', orgId: null }),
     );
   });
 
@@ -225,7 +257,7 @@ describe('GET /admin/api/escalations', () => {
     const res = await request(appAs('therapist', 9)).get('/admin/api/escalations');
     expect(res.status).toBe(200);
     expect(dbMocks.listEscalations).toHaveBeenCalledWith(
-      expect.objectContaining({ memberId: 9, memberRole: 'therapist' })
+      expect.objectContaining({ memberId: 9, memberRole: 'therapist' }),
     );
   });
 
@@ -291,10 +323,15 @@ describe('POST /admin/api/escalations/:id/acknowledge', () => {
     expect(res.status).toBe(200);
     expect(res.body.escalation.status).toBe('acknowledged');
     expect(dbMocks.insertEscalationEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: 'acknowledged', actorUserId: 9 })
+      expect.objectContaining({ eventType: 'acknowledged', actorUserId: 9 }),
     );
     expect(dbMocks.insertWorkItem).toHaveBeenCalledWith(
-      expect.objectContaining({ itemType: 'escalation_response', assigneeId: 2, sourceTable: 'escalation_events', sourceId: '77' })
+      expect.objectContaining({
+        itemType: 'escalation_response',
+        assigneeId: 2,
+        sourceTable: 'escalation_events',
+        sourceId: '77',
+      }),
     );
   });
 
@@ -317,7 +354,9 @@ describe('POST /admin/api/escalations/:id/acknowledge', () => {
 describe('POST /admin/api/escalations/:id/resolve', () => {
   beforeEach(() => {
     dbMocks.getEscalationById.mockResolvedValue(baseEscalation());
-    dbMocks.resolveEscalation.mockResolvedValue(baseEscalation({ status: 'resolved', resolution_note: 'Spoke with client' }));
+    dbMocks.resolveEscalation.mockResolvedValue(
+      baseEscalation({ status: 'resolved', resolution_note: 'Spoke with client' }),
+    );
   });
 
   it('resolves for the assignee and expires the inbound work item', async () => {
@@ -328,7 +367,7 @@ describe('POST /admin/api/escalations/:id/resolve', () => {
     expect(dbMocks.resolveEscalation).toHaveBeenCalledWith(11, 9, 'Spoke with client');
     expect(dbMocks.expireWorkItemsBySource).toHaveBeenCalledWith('escalation_inbound', 'escalations', ['11']);
     expect(dbMocks.insertWorkItem).toHaveBeenCalledWith(
-      expect.objectContaining({ itemType: 'escalation_response', assigneeId: 2 })
+      expect.objectContaining({ itemType: 'escalation_response', assigneeId: 2 }),
     );
   });
 
@@ -360,16 +399,20 @@ describe('POST /admin/api/escalations/:id/reopen', () => {
         sourceTable: 'escalations',
         sourceId: '11', // same source key as the create: the resolve-expired row is reactivated
         reopen: true,
-      })
+      }),
     );
   });
 
   it('fans an unassigned emergency reopen out to every org therapist', async () => {
-    dbMocks.getEscalationById.mockResolvedValue(baseEscalation({ status: 'resolved', assigned_to: null, urgency: 'emergency' }));
-    dbMocks.reopenEscalation.mockResolvedValue(baseEscalation({ status: 'open', assigned_to: null, urgency: 'emergency' }));
+    dbMocks.getEscalationById.mockResolvedValue(
+      baseEscalation({ status: 'resolved', assigned_to: null, urgency: 'emergency' }),
+    );
+    dbMocks.reopenEscalation.mockResolvedValue(
+      baseEscalation({ status: 'open', assigned_to: null, urgency: 'emergency' }),
+    );
     await request(appAs('caseworker', 2)).post('/admin/api/escalations/11/reopen');
     expect(dbMocks.insertWorkItem).toHaveBeenCalledWith(
-      expect.objectContaining({ itemType: 'escalation_inbound', assigneeId: null, severity: 'urgent', reopen: true })
+      expect.objectContaining({ itemType: 'escalation_inbound', assigneeId: null, severity: 'urgent', reopen: true }),
     );
     expect(dbMocks.getOrgTherapistIds).toHaveBeenCalledWith(5);
   });
@@ -392,13 +435,15 @@ describe('POST /admin/api/escalations/:id/comments', () => {
       .send({ comment: 'Following up tomorrow' });
     expect(res.status).toBe(201);
     expect(dbMocks.insertEscalationEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: 'comment', detail: { comment: 'Following up tomorrow' } })
+      expect.objectContaining({ eventType: 'comment', detail: { comment: 'Following up tomorrow' } }),
     );
     expect(dbMocks.insertWorkItem).toHaveBeenCalledWith(expect.objectContaining({ itemType: 'escalation_response' }));
   });
 
   it('does not enqueue a response item when the raiser comments on their own escalation', async () => {
-    await request(appAs('caseworker', 2)).post('/admin/api/escalations/11/comments').send({ comment: 'Adding context' });
+    await request(appAs('caseworker', 2))
+      .post('/admin/api/escalations/11/comments')
+      .send({ comment: 'Adding context' });
     expect(dbMocks.insertWorkItem).not.toHaveBeenCalled();
   });
 
@@ -410,7 +455,10 @@ describe('POST /admin/api/escalations/:id/comments', () => {
 describe('POST /admin/api/escalations/:id/claim', () => {
   beforeEach(() => {
     dbMocks.getEscalationById.mockResolvedValue(baseEscalation({ assigned_to: null }));
-    dbMocks.claimEscalationAudited.mockResolvedValue({ escalation: baseEscalation({ assigned_to: 8 }), grant: 'granted' });
+    dbMocks.claimEscalationAudited.mockResolvedValue({
+      escalation: baseEscalation({ assigned_to: 8 }),
+      grant: 'granted',
+    });
   });
 
   it('lets a same-org therapist claim, auto-granting audited caseload access', async () => {
@@ -424,7 +472,11 @@ describe('POST /admin/api/escalations/:id/claim', () => {
 
   it('still 200s (claim kept, no grant) when the caseload rules reject the claimer', async () => {
     const grantError = new dbMocks.CaseloadRoleError('User 8 is not a therapist account');
-    dbMocks.claimEscalationAudited.mockResolvedValue({ escalation: baseEscalation({ assigned_to: 8 }), grant: 'rejected', grantError });
+    dbMocks.claimEscalationAudited.mockResolvedValue({
+      escalation: baseEscalation({ assigned_to: 8 }),
+      grant: 'rejected',
+      grantError,
+    });
     const res = await request(appAs('therapist', 8)).post('/admin/api/escalations/11/claim');
     expect(res.status).toBe(200);
     expect(dbMocks.insertEscalationEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'claimed' }));

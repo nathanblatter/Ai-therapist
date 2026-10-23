@@ -55,7 +55,7 @@ export async function getFunnel(days: number): Promise<FunnelCounts> {
      FROM therapy_sessions s
      WHERE s.created_at >= NOW() - make_interval(days => $1)
        AND s.is_demo IS NOT TRUE`,
-    [days]
+    [days],
   );
   const row = result.rows[0] ?? {};
   return {

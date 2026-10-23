@@ -4,15 +4,15 @@
 // escalations, reopen for the raiser/care team, comments for everyone who can
 // see it. The server is the authority; buttons are shown optimistically by
 // role and 403/409 responses surface inline.
-import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, CheckCircle, CornerUpLeft, MessageSquare, UserCheck } from "react-feather";
-import { StatusBadge, UrgencyBadge, type EscalationListRow } from "./EscalationInbox";
-import { getJson, postJson } from "../../../shared/http";
+import { useCallback, useEffect, useState } from 'react';
+import { ArrowLeft, CheckCircle, CornerUpLeft, MessageSquare, UserCheck } from 'react-feather';
+import { StatusBadge, UrgencyBadge, type EscalationListRow } from './EscalationInbox';
+import { getJson, postJson } from '../../../shared/http';
 
 interface EscalationEvent {
   event_id: number;
   escalation_id: number;
-  event_type: "created" | "acknowledged" | "resolved" | "reopened" | "reassigned" | "claimed" | "comment";
+  event_type: 'created' | 'acknowledged' | 'resolved' | 'reopened' | 'reassigned' | 'claimed' | 'comment';
   actor_user_id: number | null;
   actor_username: string | null;
   detail: { comment?: string; resolution_note?: string; urgency?: string } | null;
@@ -26,14 +26,14 @@ interface EscalationDetailProps {
   onBack: () => void;
 }
 
-const EVENT_LABELS: Record<EscalationEvent["event_type"], string> = {
-  created: "raised this escalation",
-  acknowledged: "acknowledged",
-  resolved: "resolved",
-  reopened: "reopened",
-  reassigned: "reassigned",
-  claimed: "claimed from the unassigned queue",
-  comment: "commented",
+const EVENT_LABELS: Record<EscalationEvent['event_type'], string> = {
+  created: 'raised this escalation',
+  acknowledged: 'acknowledged',
+  resolved: 'resolved',
+  reopened: 'reopened',
+  reassigned: 'reassigned',
+  claimed: 'claimed from the unassigned queue',
+  comment: 'commented',
 };
 
 export default function EscalationDetail({ escalationId, userRole, currentUserId, onBack }: EscalationDetailProps) {
@@ -43,15 +43,17 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [comment, setComment] = useState("");
-  const [resolutionNote, setResolutionNote] = useState("");
+  const [comment, setComment] = useState('');
+  const [resolutionNote, setResolutionNote] = useState('');
   const [showResolveForm, setShowResolveForm] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getJson<{ escalation: EscalationListRow; events?: EscalationEvent[] }>(`/admin/api/escalations/${escalationId}`);
+      const data = await getJson<{ escalation: EscalationListRow; events?: EscalationEvent[] }>(
+        `/admin/api/escalations/${escalationId}`,
+      );
       setEscalation(data.escalation);
       setEvents(data.events ?? []);
     } catch (err: unknown) {
@@ -83,17 +85,17 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
   const handleComment = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!comment.trim()) return;
-    const ok = await act("comments", { comment: comment.trim() });
-    if (ok) setComment("");
+    const ok = await act('comments', { comment: comment.trim() });
+    if (ok) setComment('');
   };
 
-  const isTherapist = userRole === "therapist";
-  const isCareTeam = isTherapist || userRole === "caseworker";
+  const isTherapist = userRole === 'therapist';
+  const isCareTeam = isTherapist || userRole === 'caseworker';
   const isAssignee = escalation !== null && currentUserId !== null && escalation.assigned_to === currentUserId;
-  const canAck = isTherapist && isAssignee && escalation?.status === "open";
-  const canResolve = isTherapist && isAssignee && escalation !== null && escalation.status !== "resolved";
-  const canClaim = isTherapist && escalation?.assigned_to === null && escalation?.status !== "resolved";
-  const canReopen = isCareTeam && escalation?.status === "resolved";
+  const canAck = isTherapist && isAssignee && escalation?.status === 'open';
+  const canResolve = isTherapist && isAssignee && escalation !== null && escalation.status !== 'resolved';
+  const canClaim = isTherapist && escalation?.assigned_to === null && escalation?.status !== 'resolved';
+  const canReopen = isCareTeam && escalation?.status === 'resolved';
 
   return (
     <div className="p-6">
@@ -126,12 +128,14 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
             <p className="text-gray-800 whitespace-pre-wrap">{escalation.reason}</p>
             <dl className="mt-3 text-sm text-gray-500 space-y-0.5">
               <div>
-                Assigned:{" "}
+                Assigned:{' '}
                 {escalation.assigned_to === null
-                  ? "unassigned (org queue)"
-                  : escalation.assigned_username ?? `user ${escalation.assigned_to}`}
+                  ? 'unassigned (org queue)'
+                  : (escalation.assigned_username ?? `user ${escalation.assigned_to}`)}
               </div>
-              <div>Raised {new Date(escalation.created_at).toLocaleString()} by a {escalation.raised_by_role}</div>
+              <div>
+                Raised {new Date(escalation.created_at).toLocaleString()} by a {escalation.raised_by_role}
+              </div>
               {escalation.crisis_event_id !== null && <div>Linked crisis event: #{escalation.crisis_event_id}</div>}
               {escalation.session_id !== null && <div>Linked session: {escalation.session_id}</div>}
               {escalation.resolution_note && (
@@ -149,7 +153,7 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
               {canAck && (
                 <button
                   type="button"
-                  onClick={() => act("acknowledge")}
+                  onClick={() => act('acknowledge')}
                   disabled={busy}
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 min-h-[44px]"
                 >
@@ -169,7 +173,7 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
               {canClaim && (
                 <button
                   type="button"
-                  onClick={() => act("claim")}
+                  onClick={() => act('claim')}
                   disabled={busy}
                   className="px-4 py-2 bg-royal text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 min-h-[44px]"
                   title="Claiming assigns this client to your caseload (audited)"
@@ -180,7 +184,7 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
               {canReopen && (
                 <button
                   type="button"
-                  onClick={() => act("reopen")}
+                  onClick={() => act('reopen')}
                   disabled={busy}
                   className="px-4 py-2 bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200 disabled:opacity-50 flex items-center gap-1.5 min-h-[44px]"
                 >
@@ -194,7 +198,7 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
                 className="mt-3 space-y-2"
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  const ok = await act("resolve", {
+                  const ok = await act('resolve', {
                     resolution_note: resolutionNote.trim() || undefined,
                   });
                   if (ok) setShowResolveForm(false);
@@ -238,7 +242,7 @@ export default function EscalationDetail({ escalationId, userRole, currentUserId
               {events.map((ev) => (
                 <li key={ev.event_id} className="text-sm">
                   <div className="text-gray-800">
-                    <span className="font-medium">{ev.actor_username ?? "system"}</span>{" "}
+                    <span className="font-medium">{ev.actor_username ?? 'system'}</span>{' '}
                     {EVENT_LABELS[ev.event_type] ?? ev.event_type}
                     <span className="text-xs text-gray-400 ml-2">{new Date(ev.created_at).toLocaleString()}</span>
                   </div>

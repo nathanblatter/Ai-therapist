@@ -18,9 +18,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // without opening a socket. Private methods are reached through a typed cast,
 // the way the Realtime test file did.
 const {
-  queryMock, getSystemConfigMock, getActiveModalityMock, insertMessagesBatchMock,
-  insertToolInvocationMock, recordLlmUsageMock, recordLiveUsageMock,
-  runCrisisPipelineMock, executeToolMock, broadcastMock, safetyIdentifierMock,
+  queryMock,
+  getSystemConfigMock,
+  getActiveModalityMock,
+  insertMessagesBatchMock,
+  insertToolInvocationMock,
+  recordLlmUsageMock,
+  recordLiveUsageMock,
+  runCrisisPipelineMock,
+  executeToolMock,
+  broadcastMock,
+  safetyIdentifierMock,
 } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   getSystemConfigMock: vi.fn(),
@@ -98,7 +106,8 @@ const MAX_DURATION_MINUTES = 30;
 /** Attach a session with genuine internal state over a fake socket. */
 async function attach(sessionId: string): Promise<FakeSocket> {
   const ws = await sidebandManager.connect(sessionId, `live_${sessionId}`, 'sk-test', {
-    model: MODEL, backendModel: BACKEND_MODEL,
+    model: MODEL,
+    backendModel: BACKEND_MODEL,
   });
   return ws as unknown as FakeSocket;
 }
@@ -161,7 +170,9 @@ afterEach(() => {
 describe('TranscriptAssembler', () => {
   it('concatenates fragments exactly as received (no trimming, no inserted spaces)', () => {
     const turns: string[] = [];
-    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+    const a = new TranscriptAssembler(TURN_GAP_MS, (text) => {
+      turns.push(text);
+    });
 
     a.add({ delta: 'I have', start_ms: 0, end_ms: 400 });
     a.add({ delta: ' been', start_ms: 400, end_ms: 700 });
@@ -173,8 +184,7 @@ describe('TranscriptAssembler', () => {
 
   it('orders fragments by start_ms, not arrival order', () => {
     const turns: Array<{ text: string; startMs: number; endMs: number }> = [];
-    const a = new TranscriptAssembler(TURN_GAP_MS, (text, startMs, endMs) =>
-      turns.push({ text, startMs, endMs }));
+    const a = new TranscriptAssembler(TURN_GAP_MS, (text, startMs, endMs) => turns.push({ text, startMs, endMs }));
 
     // Deliberately out of order: the docs allow late, out-of-order delivery.
     a.add({ delta: ' world', start_ms: 500, end_ms: 900 });
@@ -190,7 +200,9 @@ describe('TranscriptAssembler', () => {
 
   it('flushes only after gapMs of silence, and rides through shorter pauses', () => {
     const turns: string[] = [];
-    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+    const a = new TranscriptAssembler(TURN_GAP_MS, (text) => {
+      turns.push(text);
+    });
 
     a.add({ delta: 'one', start_ms: 0, end_ms: 100 });
     vi.advanceTimersByTime(TURN_GAP_MS - 1);
@@ -207,7 +219,9 @@ describe('TranscriptAssembler', () => {
 
   it('starts a NEW turn for a fragment arriving after a flush', () => {
     const turns: string[] = [];
-    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+    const a = new TranscriptAssembler(TURN_GAP_MS, (text) => {
+      turns.push(text);
+    });
 
     a.add({ delta: 'first', start_ms: 0, end_ms: 100 });
     vi.advanceTimersByTime(TURN_GAP_MS);
@@ -219,7 +233,9 @@ describe('TranscriptAssembler', () => {
 
   it('flush() emits a pending turn immediately, without waiting for the gap', () => {
     const turns: string[] = [];
-    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+    const a = new TranscriptAssembler(TURN_GAP_MS, (text) => {
+      turns.push(text);
+    });
 
     a.add({ delta: 'final words', start_ms: 0, end_ms: 100 });
     a.flush();
@@ -232,7 +248,9 @@ describe('TranscriptAssembler', () => {
 
   it('does not emit a turn for whitespace-only accumulations', () => {
     const turns: string[] = [];
-    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+    const a = new TranscriptAssembler(TURN_GAP_MS, (text) => {
+      turns.push(text);
+    });
 
     a.add({ delta: '  ', start_ms: 0, end_ms: 100 });
     a.add({ delta: '\n', start_ms: 100, end_ms: 200 });
@@ -250,7 +268,9 @@ describe('TranscriptAssembler', () => {
 
   it('dispose() cancels the pending flush and drops the buffer', () => {
     const turns: string[] = [];
-    const a = new TranscriptAssembler(TURN_GAP_MS, text => { turns.push(text); });
+    const a = new TranscriptAssembler(TURN_GAP_MS, (text) => {
+      turns.push(text);
+    });
 
     a.add({ delta: 'never emitted', start_ms: 0, end_ms: 100 });
     a.dispose();
@@ -275,7 +295,7 @@ describe('user turn -> crisis pipeline', () => {
     await flush();
 
     const userInserts = insertMessagesBatchMock.mock.calls
-      .map(c => c[0][0])
+      .map((c) => c[0][0])
       .filter((row: Internal) => row.role === 'user');
     expect(userInserts).toHaveLength(1);
     expect(userInserts[0].content).toBe('I have been feeling hopeless');
@@ -310,13 +330,16 @@ describe('user turn -> crisis pipeline', () => {
     await attach(sessionId);
 
     await fire(sessionId, {
-      type: 'session.output_transcript.delta', delta: 'That sounds hard.', start_ms: 0, end_ms: 900,
+      type: 'session.output_transcript.delta',
+      delta: 'That sounds hard.',
+      start_ms: 0,
+      end_ms: 900,
     });
     await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
     await flush();
 
     const assistantInserts = insertMessagesBatchMock.mock.calls
-      .map(c => c[0][0])
+      .map((c) => c[0][0])
       .filter((row: Internal) => row.role === 'assistant');
     expect(assistantInserts).toHaveLength(1);
     expect(assistantInserts[0].content).toBe('That sounds hard.');
@@ -353,7 +376,7 @@ describe('voice usage metering', () => {
     await fire(sessionId, { type: 'session.usage.updated', usage: { seconds: 30 } });
     await flush();
 
-    const durations = recordLiveUsageMock.mock.calls.map(c => c[2]);
+    const durations = recordLiveUsageMock.mock.calls.map((c) => c[2]);
     expect(durations).toEqual([12, 30]);
     // 12 + 30 = 42 would be the accumulate bug.
     expect(durations).not.toContain(42);
@@ -365,11 +388,15 @@ describe('voice usage metering', () => {
     await attach(sessionId);
 
     await fire(sessionId, {
-      type: 'session.usage.updated', usage: { seconds: 5 }, context_window: { usage_ratio: 0.7 },
+      type: 'session.usage.updated',
+      usage: { seconds: 5 },
+      context_window: { usage_ratio: 0.7 },
     });
     await flush();
     await fire(sessionId, {
-      type: 'session.usage.updated', usage: { seconds: 9 }, context_window: { usage_ratio: 0.4 },
+      type: 'session.usage.updated',
+      usage: { seconds: 9 },
+      context_window: { usage_ratio: 0.4 },
     });
     await flush();
 
@@ -384,7 +411,9 @@ describe('voice usage metering', () => {
     await fire(sessionId, { type: 'session.usage.updated', usage: { seconds: 100 } });
     await flush();
     await fire(sessionId, {
-      type: 'session.closed', reason: 'max_duration_reached', usage: { seconds: 118 },
+      type: 'session.closed',
+      reason: 'max_duration_reached',
+      usage: { seconds: 118 },
     });
     await flush();
 
@@ -421,11 +450,13 @@ describe('delegated tool calls (nested response.event)', () => {
     await flush();
 
     expect(executeToolMock).toHaveBeenCalledWith(
-      'find_worksheet', { topic: 'anxiety' }, { sessionId, channel: 'realtime' },
+      'find_worksheet',
+      { topic: 'anxiety' },
+      { sessionId, channel: 'realtime' },
     );
 
     const events = sentEvents(ws);
-    expect(events.map(e => e.type)).toEqual(['response.item.create', 'response.create']);
+    expect(events.map((e) => e.type)).toEqual(['response.item.create', 'response.create']);
     expect(events[0].item).toEqual({
       type: 'function_call_output',
       call_id: 'call_a',
@@ -442,7 +473,7 @@ describe('delegated tool calls (nested response.event)', () => {
     await flush();
 
     const events = sentEvents(ws);
-    expect(events.map(e => e.type)).toEqual(['response.item.create', 'response.create']);
+    expect(events.map((e) => e.type)).toEqual(['response.item.create', 'response.create']);
     expect(JSON.parse(events[0].item.output)).toEqual({ error: 'worksheet service down', success: false });
   });
 
@@ -487,7 +518,9 @@ describe('delegated tool calls (nested response.event)', () => {
     // configured for it, and the guide's terminal snapshot cannot be trusted to
     // tell us how many calls are open).
     sb.sessions.get(sessionId).pendingCalls.set('call_b', {
-      name: 'tool_b', args: '{}', delegationId: 'dg_1',
+      name: 'tool_b',
+      args: '{}',
+      delegationId: 'dg_1',
     });
 
     await fire(sessionId, outputItemDone('call_a', 'tool_a', '{}'));
@@ -495,15 +528,15 @@ describe('delegated tool calls (nested response.event)', () => {
 
     // Call A's result is submitted, but B is still outstanding — continuing the
     // backend now would run it while it waits on a sibling call.
-    expect(sentEvents(ws).map(e => e.type)).toEqual(['response.item.create']);
+    expect(sentEvents(ws).map((e) => e.type)).toEqual(['response.item.create']);
     expect([...sb.sessions.get(sessionId).pendingCalls.keys()]).toEqual(['call_b']);
 
     await fire(sessionId, outputItemDone('call_b', 'tool_b', '{}'));
     await flush();
 
-    const types = sentEvents(ws).map(e => e.type);
+    const types = sentEvents(ws).map((e) => e.type);
     expect(types).toEqual(['response.item.create', 'response.item.create', 'response.create']);
-    expect(types.filter(t => t === 'response.create')).toHaveLength(1);
+    expect(types.filter((t) => t === 'response.create')).toHaveLength(1);
   });
 });
 
@@ -531,9 +564,7 @@ describe('backend usage metering (nested response.completed)', () => {
     await flush();
 
     expect(recordLlmUsageMock).toHaveBeenCalledTimes(1);
-    expect(recordLlmUsageMock).toHaveBeenCalledWith(
-      sessionId, 'live_delegation', 'gpt-5.6-terra', 1200, 300,
-    );
+    expect(recordLlmUsageMock).toHaveBeenCalledWith(sessionId, 'live_delegation', 'gpt-5.6-terra', 1200, 300);
   });
 
   it('falls back to the configured backend model when the event omits one', async () => {
@@ -582,7 +613,7 @@ describe('tryInject', () => {
 
     expect(result).toBe(true);
     const events = sentEvents(ws);
-    expect(events.map(e => e.type)).toEqual(['session.instructions.append']);
+    expect(events.map((e) => e.type)).toEqual(['session.instructions.append']);
     expect(events[0].content).toBe('exercise finished');
     expect(events[0].delegation_id).toBeNull();
   });
@@ -590,7 +621,9 @@ describe('tryInject', () => {
   it('returns false when the underlying send fails', async () => {
     const sessionId = 's-inject-err';
     const ws = await attach(sessionId);
-    ws.send.mockImplementation(() => { throw new Error('socket torn down'); });
+    ws.send.mockImplementation(() => {
+      throw new Error('socket torn down');
+    });
 
     const result = await sidebandManager.tryInject(sessionId, 'system', 'text', false);
     expect(result).toBe(false);
@@ -637,8 +670,8 @@ describe('tryInject', () => {
 describe('schedulePhaseNudges', () => {
   function appended(ws: FakeSocket): string[] {
     return sentEvents(ws)
-      .filter(e => e.type === 'session.instructions.append')
-      .map(e => e.content as string);
+      .filter((e) => e.type === 'session.instructions.append')
+      .map((e) => e.content as string);
   }
 
   it('falls back to the fixed 60%/85% script when the active modality has no phases', async () => {
@@ -833,13 +866,15 @@ function controllableWs() {
     on,
     once: on,
     off: vi.fn((event: string, handler: unknown) => {
-      handlers[event] = (handlers[event] ?? []).filter(h => h !== handler);
+      handlers[event] = (handlers[event] ?? []).filter((h) => h !== handler);
     }),
     send: vi.fn(),
     ping: vi.fn(),
     close: vi.fn(),
     terminate: vi.fn(),
-    removeAllListeners: vi.fn(() => { for (const k of Object.keys(handlers)) delete handlers[k]; }),
+    removeAllListeners: vi.fn(() => {
+      for (const k of Object.keys(handlers)) delete handlers[k];
+    }),
     emit: (event: string, ...args: Internal[]) => {
       for (const h of [...(handlers[event] ?? [])]) h(...args);
     },
@@ -866,9 +901,13 @@ describe('opening attach', () => {
   function startAttach(sessionId: string) {
     const result = sidebandManager
       .connectAndWait(sessionId, `live_${sessionId}`, 'sk-test', {
-        model: MODEL, backendModel: BACKEND_MODEL,
+        model: MODEL,
+        backendModel: BACKEND_MODEL,
       })
-      .then(() => 'opened' as const, (err: Error) => err);
+      .then(
+        () => 'opened' as const,
+        (err: Error) => err,
+      );
     return result;
   }
 
@@ -915,15 +954,19 @@ describe('opening attach', () => {
 
     const errorWrite = queryMock.mock.calls.find(
       (call: Internal[]) =>
-        typeof call[0] === 'string' &&
-        call[0].includes('sideband_error') && call[0].includes('sideband_connected'),
+        typeof call[0] === 'string' && call[0].includes('sideband_error') && call[0].includes('sideband_connected'),
     ) as Internal[] | undefined;
     expect(errorWrite).toBeDefined();
     expect(errorWrite![1][0]).toContain('sideband attach failed after 3 attempts');
     expect(broadcastMock).toHaveBeenCalledWith(
-      expect.anything(), 'sideband:attach-failed', expect.objectContaining({
-        sessionId: 's-attach-dead', liveSessionId: 'live_s-attach-dead', attempts: 3,
-      }), 's-attach-dead',
+      expect.anything(),
+      'sideband:attach-failed',
+      expect.objectContaining({
+        sessionId: 's-attach-dead',
+        liveSessionId: 'live_s-attach-dead',
+        attempts: 3,
+      }),
+      's-attach-dead',
     );
   });
 
@@ -951,8 +994,7 @@ describe('opening attach', () => {
     expect(await settled).toBeInstanceOf(Error);
     expect(
       queryMock.mock.calls.some(
-        (call: Internal[]) =>
-          typeof call[0] === 'string' && call[0].includes('sideband_connected = TRUE'),
+        (call: Internal[]) => typeof call[0] === 'string' && call[0].includes('sideband_connected = TRUE'),
       ),
     ).toBe(false);
   });
@@ -1012,7 +1054,8 @@ describe('reattachActiveSessions', () => {
     expect(attempted).toBe(3);
     expect(connectSpy).toHaveBeenCalledTimes(1);
     expect(connectSpy).toHaveBeenCalledWith('s-orphan', 'live_1', 'sk-standard', {
-      model: 'gpt-live-1', backendModel: 'gpt-5.6-terra',
+      model: 'gpt-live-1',
+      backendModel: 'gpt-5.6-terra',
     });
     connectSpy.mockRestore();
   });
@@ -1050,9 +1093,10 @@ describe('admin control surface', () => {
     await sidebandManager.triggerTool(sessionId, 'start_breathing_exercise', { duration_seconds: 90 });
 
     const events = sentEvents(ws);
-    expect(events.map(e => e.type)).toEqual(['session.update', 'session.instructions.append']);
+    expect(events.map((e) => e.type)).toEqual(['session.update', 'session.instructions.append']);
     expect(events[0].session.delegation.responses.tool_choice).toEqual({
-      type: 'function', name: 'start_breathing_exercise',
+      type: 'function',
+      name: 'start_breathing_exercise',
     });
     const nudge = events[1].content as string;
     expect(nudge).toMatch(/clinician overseeing this session asks you to use the start_breathing_exercise/i);
@@ -1063,7 +1107,7 @@ describe('admin control surface', () => {
     await vi.advanceTimersByTimeAsync(45_000);
     await flush();
 
-    const reset = sentEvents(ws).find(e => e.type === 'session.update');
+    const reset = sentEvents(ws).find((e) => e.type === 'session.update');
     expect(reset!.session.delegation.responses.tool_choice).toBe('auto');
     expect(sb.sessions.get(sessionId).toolChoiceReset).toBeNull();
   });
@@ -1074,7 +1118,7 @@ describe('admin control surface', () => {
 
     await sidebandManager.triggerTool(sessionId, 'end_session');
 
-    const nudge = sentEvents(ws).find(e => e.type === 'session.instructions.append')!.content as string;
+    const nudge = sentEvents(ws).find((e) => e.type === 'session.instructions.append')!.content as string;
     expect(nudge).not.toMatch(/context for the tool arguments/);
   });
 
@@ -1085,7 +1129,7 @@ describe('admin control surface', () => {
     await sidebandManager.interrupt(sessionId);
 
     const events = sentEvents(ws);
-    expect(events.map(e => e.type)).toEqual(['session.instructions.append']);
+    expect(events.map((e) => e.type)).toEqual(['session.instructions.append']);
     expect(events[0].content).toMatch(/stop speaking immediately/i);
   });
 
@@ -1116,8 +1160,7 @@ describe('admin control surface', () => {
   });
 
   it('injectMessage throws when the sideband is not connected', async () => {
-    await expect(sidebandManager.injectMessage('s-gone', 'system', 'hi', false))
-      .rejects.toThrow(/not active/i);
+    await expect(sidebandManager.injectMessage('s-gone', 'system', 'hi', false)).rejects.toThrow(/not active/i);
   });
 
   it('mute / unmute send the server-side input-audio controls', async () => {
@@ -1127,8 +1170,7 @@ describe('admin control surface', () => {
     await sidebandManager.muteInput(sessionId);
     await sidebandManager.unmuteInput(sessionId);
 
-    expect(sentEvents(ws).map(e => e.type))
-      .toEqual(['session.input_audio.mute', 'session.input_audio.unmute']);
+    expect(sentEvents(ws).map((e) => e.type)).toEqual(['session.input_audio.mute', 'session.input_audio.unmute']);
   });
 });
 
@@ -1144,8 +1186,9 @@ describe('error handling', () => {
     await fire(sessionId, { type: 'error', error: { code: 'invalid_event', message: 'bad event' } });
     await flush();
 
-    const update = queryMock.mock.calls.find((c: unknown[]) =>
-      typeof c[0] === 'string' && (c[0] as string).includes('SET sideband_error'));
+    const update = queryMock.mock.calls.find(
+      (c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).includes('SET sideband_error'),
+    );
     expect(update).toBeTruthy();
     expect((update![1] as unknown[])[0]).toContain('bad event');
   });

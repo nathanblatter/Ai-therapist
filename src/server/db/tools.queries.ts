@@ -6,14 +6,14 @@ export async function insertToolInvocation(
   sessionId: string,
   toolName: string,
   args: Record<string, unknown> | null,
-  success: boolean
+  success: boolean,
 ): Promise<void> {
   await pool.query(
     `INSERT INTO tool_invocations (session_id, tool_name, arguments, success, risk_score_at)
      VALUES ($1, $2, $3, $4,
        (SELECT risk_score FROM risk_score_history
         WHERE session_id = $1 ORDER BY calculated_at DESC LIMIT 1))`,
-    [sessionId, toolName, args ? JSON.stringify(args) : null, success]
+    [sessionId, toolName, args ? JSON.stringify(args) : null, success],
   );
 }
 
@@ -30,16 +30,20 @@ export interface ToolInvocationStats {
  *  includes failure/misfire counts alongside frequency). */
 export async function getToolInvocationStats(): Promise<ToolInvocationStats[]> {
   const result = await pool.query<{
-    tool_name: string; invocations: string; sessions: string; last_used: Date | null; failures: string;
+    tool_name: string;
+    invocations: string;
+    sessions: string;
+    last_used: Date | null;
+    failures: string;
   }>(
     `SELECT tool_name, COUNT(*) AS invocations,
             COUNT(DISTINCT session_id) AS sessions, MAX(created_at) AS last_used,
             COUNT(*) FILTER (WHERE success IS FALSE) AS failures
      FROM tool_invocations
      GROUP BY tool_name
-     ORDER BY COUNT(*) DESC`
+     ORDER BY COUNT(*) DESC`,
   );
-  return result.rows.map(r => {
+  return result.rows.map((r) => {
     const invocations = parseInt(r.invocations, 10);
     const failures = parseInt(r.failures, 10);
     return {
@@ -71,9 +75,9 @@ export async function getToolsPerSessionDistribution(): Promise<ToolsPerSessionB
        GROUP BY session_id
      ) per_session
      GROUP BY distinct_tool_count
-     ORDER BY distinct_tool_count`
+     ORDER BY distinct_tool_count`,
   );
-  return result.rows.map(r => ({
+  return result.rows.map((r) => ({
     distinct_tool_count: parseInt(r.distinct_tool_count, 10),
     session_count: parseInt(r.session_count, 10),
   }));
@@ -85,7 +89,7 @@ export async function getToolUsageSessionCounts(): Promise<{ total_sessions: num
   const result = await pool.query<{ total_sessions: string; sessions_with_tool_use: string }>(
     `SELECT
        (SELECT COUNT(*) FROM therapy_sessions WHERE is_demo IS NOT TRUE) AS total_sessions,
-       (SELECT COUNT(DISTINCT session_id) FROM tool_invocations) AS sessions_with_tool_use`
+       (SELECT COUNT(DISTINCT session_id) FROM tool_invocations) AS sessions_with_tool_use`,
   );
   const row = result.rows[0];
   return {
@@ -96,16 +100,13 @@ export async function getToolUsageSessionCounts(): Promise<{ total_sessions: num
 
 /** The model-set goal for a session (set_session_goal / recall_session_goal). */
 export async function setSessionGoal(sessionId: string, goal: string): Promise<void> {
-  await pool.query(
-    'UPDATE therapy_sessions SET session_goal = $2 WHERE session_id = $1',
-    [sessionId, goal]
-  );
+  await pool.query('UPDATE therapy_sessions SET session_goal = $2 WHERE session_id = $1', [sessionId, goal]);
 }
 
 export async function getSessionGoal(sessionId: string): Promise<string | null> {
   const result = await pool.query<{ session_goal: string | null }>(
     'SELECT session_goal FROM therapy_sessions WHERE session_id = $1',
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0]?.session_goal ?? null;
 }
@@ -120,21 +121,18 @@ export interface SafetyPlan {
   professional_resources?: string[];
 }
 
-export async function insertSafetyPlan(
-  sessionId: string,
-  userId: number | null,
-  plan: SafetyPlan
-): Promise<void> {
-  await pool.query(
-    'INSERT INTO safety_plans (session_id, user_id, plan) VALUES ($1, $2, $3)',
-    [sessionId, userId, JSON.stringify(plan)]
-  );
+export async function insertSafetyPlan(sessionId: string, userId: number | null, plan: SafetyPlan): Promise<void> {
+  await pool.query('INSERT INTO safety_plans (session_id, user_id, plan) VALUES ($1, $2, $3)', [
+    sessionId,
+    userId,
+    JSON.stringify(plan),
+  ]);
 }
 
 export async function getSessionSafetyPlan(sessionId: string): Promise<{ plan: SafetyPlan; created_at: Date } | null> {
   const result = await pool.query<{ plan: SafetyPlan; created_at: Date }>(
     'SELECT plan, created_at FROM safety_plans WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1',
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0] ?? null;
 }
@@ -149,18 +147,20 @@ export async function insertUserMemory(
   embedding?: number[],
 ): Promise<void> {
   const vec = embedding ? `[${embedding.join(',')}]` : null;
-  await pool.query(
-    'INSERT INTO user_memories (user_id, fact, session_id, embedding) VALUES ($1, $2, $3, $4::vector)',
-    [userId, fact, sessionId, vec]
-  );
+  await pool.query('INSERT INTO user_memories (user_id, fact, session_id, embedding) VALUES ($1, $2, $3, $4::vector)', [
+    userId,
+    fact,
+    sessionId,
+    vec,
+  ]);
 }
 
 export async function getUserMemories(userId: number, limit = 10): Promise<string[]> {
   const result = await pool.query<{ fact: string }>(
     'SELECT fact FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
-    [userId, limit]
+    [userId, limit],
   );
-  return result.rows.map(r => r.fact);
+  return result.rows.map((r) => r.fact);
 }
 
 export interface UserMemoryFact {
@@ -173,7 +173,7 @@ export interface UserMemoryFact {
 export async function getUserMemoriesWithDates(userId: number, limit = 10): Promise<UserMemoryFact[]> {
   const result = await pool.query<UserMemoryFact>(
     'SELECT fact, session_id, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
-    [userId, limit]
+    [userId, limit],
   );
   return result.rows;
 }
@@ -197,7 +197,7 @@ export async function searchUserMemories(
      WHERE user_id = $1 AND embedding IS NOT NULL
      ORDER BY embedding <=> $2::vector
      LIMIT $3`,
-    [userId, vec, limit]
+    [userId, vec, limit],
   );
   return result.rows;
 }
@@ -206,12 +206,14 @@ export async function insertScaleResponse(
   sessionId: string,
   scale: string,
   answers: number[],
-  score: number
+  score: number,
 ): Promise<void> {
-  await pool.query(
-    'INSERT INTO scale_responses (session_id, scale, answers, score) VALUES ($1, $2, $3, $4)',
-    [sessionId, scale, JSON.stringify(answers), score]
-  );
+  await pool.query('INSERT INTO scale_responses (session_id, scale, answers, score) VALUES ($1, $2, $3, $4)', [
+    sessionId,
+    scale,
+    JSON.stringify(answers),
+    score,
+  ]);
 }
 
 export interface ScaleResponseRow {
@@ -224,7 +226,7 @@ export interface ScaleResponseRow {
 export async function getSessionScaleResponses(sessionId: string): Promise<ScaleResponseRow[]> {
   const result = await pool.query<ScaleResponseRow>(
     'SELECT scale, answers, score, created_at FROM scale_responses WHERE session_id = $1 ORDER BY created_at',
-    [sessionId]
+    [sessionId],
   );
   return result.rows;
 }

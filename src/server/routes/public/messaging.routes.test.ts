@@ -83,7 +83,7 @@ beforeEach(() => {
   ]);
   dbMocks.listThreadMessages.mockResolvedValue([messageRow()]);
   dbMocks.insertThreadMessage.mockResolvedValue(
-    messageRow({ risk_score: null, risk_severity: null, scan_status: 'pending', crisis_event_id: null })
+    messageRow({ risk_score: null, risk_severity: null, scan_status: 'pending', crisis_event_id: null }),
   );
   dbMocks.markThreadRead.mockResolvedValue(undefined);
   dbMocks.countUnreadForUser.mockResolvedValue(2);
@@ -97,7 +97,10 @@ describe('GET /api/messaging/threads', () => {
     expect(res.status).toBe(200);
     expect(res.body.unread_total).toBe(2);
     expect(res.body.threads[0]).toMatchObject({
-      thread_id: 5, counterpart_username: 'cw1', unread_count: 2, status: 'active',
+      thread_id: 5,
+      counterpart_username: 'cw1',
+      unread_count: 2,
+      status: 'active',
     });
     expect(res.body.threads[0]).not.toHaveProperty('org_id');
     expect(res.body.threads[0]).not.toHaveProperty('is_sandbox');
@@ -135,15 +138,16 @@ describe('GET /api/messaging/threads/:threadId/messages', () => {
 
 describe('POST /api/messaging/threads/:threadId/messages', () => {
   it('inserts a pending-scan message, fires the scan, and notifies the clinician room', async () => {
-    const res = await request(appAs(CLIENT_ID))
-      .post('/api/messaging/threads/5/messages')
-      .send({ body: 'hello there' });
+    const res = await request(appAs(CLIENT_ID)).post('/api/messaging/threads/5/messages').send({ body: 'hello there' });
     expect(res.status).toBe(201);
     expect(res.body.message).toMatchObject({ message_id: 101, flagged: false });
     expect(res.body.message).not.toHaveProperty('risk_score');
     expect(dbMocks.insertThreadMessage).toHaveBeenCalledWith({
-      threadId: 5, senderId: CLIENT_ID, senderRole: 'participant',
-      body: 'hello there', scanStatus: 'pending',
+      threadId: 5,
+      senderId: CLIENT_ID,
+      senderRole: 'participant',
+      body: 'hello there',
+      scanStatus: 'pending',
     });
     expect(scanMock).toHaveBeenCalledTimes(1);
     expect(emitMock).toHaveBeenCalledWith('messaging:new-message', expect.objectContaining({ threadId: 5 }));
@@ -151,9 +155,7 @@ describe('POST /api/messaging/threads/:threadId/messages', () => {
 
   it('409s thread_frozen on a frozen thread', async () => {
     dbMocks.getThreadById.mockResolvedValue(threadRow({ status: 'frozen', frozen_reason: 'unassigned' }));
-    const res = await request(appAs(CLIENT_ID))
-      .post('/api/messaging/threads/5/messages')
-      .send({ body: 'hello' });
+    const res = await request(appAs(CLIENT_ID)).post('/api/messaging/threads/5/messages').send({ body: 'hello' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('thread_frozen');
     expect(dbMocks.insertThreadMessage).not.toHaveBeenCalled();
@@ -161,19 +163,21 @@ describe('POST /api/messaging/threads/:threadId/messages', () => {
 
   it('400s on empty and over-length bodies', async () => {
     expect(
-      (await request(appAs(CLIENT_ID)).post('/api/messaging/threads/5/messages').send({ body: '   ' })).status
+      (await request(appAs(CLIENT_ID)).post('/api/messaging/threads/5/messages').send({ body: '   ' })).status,
     ).toBe(400);
     expect(
-      (await request(appAs(CLIENT_ID)).post('/api/messaging/threads/5/messages').send({ body: 'x'.repeat(4001) })).status
+      (
+        await request(appAs(CLIENT_ID))
+          .post('/api/messaging/threads/5/messages')
+          .send({ body: 'x'.repeat(4001) })
+      ).status,
     ).toBe(400);
     expect(dbMocks.insertThreadMessage).not.toHaveBeenCalled();
   });
 
   it('404s a non-party sender', async () => {
     dbMocks.getThreadById.mockResolvedValue(threadRow({ client_id: 777 }));
-    const res = await request(appAs(CLIENT_ID))
-      .post('/api/messaging/threads/5/messages')
-      .send({ body: 'hello' });
+    const res = await request(appAs(CLIENT_ID)).post('/api/messaging/threads/5/messages').send({ body: 'hello' });
     expect(res.status).toBe(404);
   });
 });
@@ -186,7 +190,9 @@ describe('POST /api/messaging/threads/:threadId/read', () => {
     expect(res.status).toBe(200);
     expect(dbMocks.markThreadRead).toHaveBeenCalledWith(5, CLIENT_ID, 101);
     expect(emitMock).toHaveBeenCalledWith('messaging:read', {
-      threadId: 5, lastReadMessageId: 101, readerId: CLIENT_ID,
+      threadId: 5,
+      lastReadMessageId: 101,
+      readerId: CLIENT_ID,
     });
   });
 

@@ -7,14 +7,25 @@
 // Squawk failure on creation rolls the local row back so the person can
 // retry, while a failure on update/delete is logged and surfaced (the local
 // change stands, and the next login re-syncs the role from Squawk).
-import { createUser, updateUser, deleteUser, getUserById, setSquawkUserId, type CreateUserOptions, type UserRow } from '../db/index.js';
+import {
+  createUser,
+  updateUser,
+  deleteUser,
+  getUserById,
+  setSquawkUserId,
+  type CreateUserOptions,
+  type UserRow,
+} from '../db/index.js';
 import * as squawk from './squawk.service.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('accounts');
 
 export class AccountSyncError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = 'AccountSyncError';
   }
@@ -22,8 +33,15 @@ export class AccountSyncError extends Error {
 
 /** Create the local row and, when Squawk is on, the matching password account
  *  there (same username, same password, the role as its Squawk role). */
-export async function registerAccount(username: string, password: string, role: string, options?: CreateUserOptions): Promise<UserRow> {
-  const user = options ? await createUser(username, password, role, options) : await createUser(username, password, role);
+export async function registerAccount(
+  username: string,
+  password: string,
+  role: string,
+  options?: CreateUserOptions,
+): Promise<UserRow> {
+  const user = options
+    ? await createUser(username, password, role, options)
+    : await createUser(username, password, role);
   if (!squawk.enabled()) return user;
   try {
     const remote = await squawk.createPasswordUser(username, password, role);
@@ -31,7 +49,9 @@ export async function registerAccount(username: string, password: string, role: 
     return { ...user, squawk_user_id: remote.id };
   } catch (err) {
     log.error({ err, username }, 'Squawk account creation failed; rolling back the local row');
-    await deleteUser(user.userid).catch((e: unknown) => log.error({ err: e, userid: user.userid }, 'local rollback failed'));
+    await deleteUser(user.userid).catch((e: unknown) =>
+      log.error({ err: e, userid: user.userid }, 'local rollback failed'),
+    );
     if (err instanceof squawk.SquawkError && err.code === 'identity_taken') {
       throw new Error('Username already exists');
     }
@@ -75,7 +95,10 @@ export async function removeAccount(userid: number | string): Promise<UserRow> {
       await squawk.deleteUser(current.squawk_user_id);
     } catch (err) {
       if (!(err instanceof squawk.SquawkError && err.status === 404)) {
-        log.error({ err, userid, squawkUserId: current.squawk_user_id }, 'Squawk account deletion failed; the local row is gone');
+        log.error(
+          { err, userid, squawkUserId: current.squawk_user_id },
+          'Squawk account deletion failed; the local row is gone',
+        );
       }
     }
   }

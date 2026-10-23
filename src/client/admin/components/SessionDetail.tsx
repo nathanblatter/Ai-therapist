@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef } from "react";
-import { X, AlertTriangle, Eye, FileText, Link2, Check, Clock, Download } from "react-feather";
-import ConversationBubble from "./ConversationBubble";
-import SessionInsightsPanel from "./SessionInsightsPanel";
-import SessionEvalPanel from "./SessionEvalPanel";
-import RiskTimeline from "./RiskTimeline";
-import SessionCrisisEvents from "./SessionCrisisEvents";
-import RiskCheckLadder from "./RiskCheckLadder";
+import { useState, useEffect, useRef } from 'react';
+import { X, AlertTriangle, Eye, FileText, Link2, Check, Clock, Download } from 'react-feather';
+import ConversationBubble from './ConversationBubble';
+import SessionInsightsPanel from './SessionInsightsPanel';
+import SessionEvalPanel from './SessionEvalPanel';
+import RiskTimeline from './RiskTimeline';
+import SessionCrisisEvents from './SessionCrisisEvents';
+import RiskCheckLadder from './RiskCheckLadder';
 import { useSocket } from '../hooks/useSocket';
 import useAuth from '../hooks/useAuth';
-import { toast } from "../../shared/components/Toast";
-import { deleteJson, getJson, postJson, HttpError } from "../../shared/http";
-import { formatDateTime } from "../../shared/format";
-import { severityBadgeClass } from "../../shared/severity";
+import { toast } from '../../shared/components/Toast';
+import { deleteJson, getJson, postJson, HttpError } from '../../shared/http';
+import { formatDateTime } from '../../shared/format';
+import { severityBadgeClass } from '../../shared/severity';
 
 interface Message {
   message_id: string;
@@ -157,7 +157,11 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   const [flagSeverity, setFlagSeverity] = useState('medium');
   const [flagNotes, setFlagNotes] = useState('');
   const [flagging, setFlagging] = useState(false);
-  const [recording, setRecording] = useState<{ url: string; durationMs: number | null; participantTrack: { url: string } | null } | null>(null);
+  const [recording, setRecording] = useState<{
+    url: string;
+    durationMs: number | null;
+    participantTrack: { url: string } | null;
+  } | null>(null);
   const [redactionStatus, setRedactionStatus] = useState<RedactionStatus | null>(null);
   const [feedback, setFeedback] = useState<SessionFeedback | null>(null);
   const [cost, setCost] = useState<SessionCost | null>(null);
@@ -184,7 +188,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       setError(null);
 
       try {
-        const data = await getJson<SessionBundle>(`/admin/api/sessions/${sessionId}`, { fallback: 'Failed to fetch session details' });
+        const data = await getJson<SessionBundle>(`/admin/api/sessions/${sessionId}`, {
+          fallback: 'Failed to fetch session details',
+        });
         setMessages(data.messages);
         setSession(data.session);
         setFeedback(data.feedback ?? null);
@@ -211,18 +217,27 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     let cancelled = false;
     const fetchRecording = async () => {
       try {
-        const info = await getJson<{ available: boolean; url: string; durationMs: number | null; participantTrack?: { url: string } | null }>(
-          `/admin/api/sessions/${sessionId}/recording-info`
-        );
+        const info = await getJson<{
+          available: boolean;
+          url: string;
+          durationMs: number | null;
+          participantTrack?: { url: string } | null;
+        }>(`/admin/api/sessions/${sessionId}/recording-info`);
         if (!cancelled) {
-          setRecording(info.available ? { url: info.url, durationMs: info.durationMs, participantTrack: info.participantTrack ?? null } : null);
+          setRecording(
+            info.available
+              ? { url: info.url, durationMs: info.durationMs, participantTrack: info.participantTrack ?? null }
+              : null,
+          );
         }
       } catch {
         /* no recording yet */
       }
     };
     fetchRecording();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, session?.status]);
 
   // Track scroll position for smart scroll
@@ -258,10 +273,10 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         const showUnredacted = userRole === 'therapist' || session?.status === 'active';
         const processedMessages: Message[] = data.messages.map((msg: Message) => ({
           ...msg,
-          message: (showUnredacted ? msg.content : msg.content_redacted) ?? msg.message
+          message: (showUnredacted ? msg.content : msg.content_redacted) ?? msg.message,
         }));
 
-        setMessages(prev => [...prev, ...processedMessages]);
+        setMessages((prev) => [...prev, ...processedMessages]);
 
         // Smart scroll: only if user is at bottom
         if (isAtBottom) {
@@ -278,14 +293,16 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       if (data.sessionId !== sessionId) return;
       console.log(`Session redaction completed (${data.count} messages); refreshing`);
       getJson<SessionBundle>(`/admin/api/sessions/${sessionId}`)
-        .then(d => { if (d?.messages) setMessages(d.messages); })
-        .catch(err => console.error('Failed to refresh after redaction:', err));
+        .then((d) => {
+          if (d?.messages) setMessages(d.messages);
+        })
+        .catch((err) => console.error('Failed to refresh after redaction:', err));
       fetchRedactionStatus();
     };
 
     const handleSessionStatus = (data: SessionStatusData) => {
       if (data.status === 'ended') {
-        setSession(prev => prev ? { ...prev, status: 'ended' } : prev);
+        setSession((prev) => (prev ? { ...prev, status: 'ended' } : prev));
       }
     };
 
@@ -293,7 +310,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       if (data.sessionId === sessionId) {
         console.log('Sideband connected:', data);
         setSidebandConnected(true);
-        setSession(prev => prev ? { ...prev, sideband_connected: true } : prev);
+        setSession((prev) => (prev ? { ...prev, sideband_connected: true } : prev));
       }
     };
 
@@ -301,7 +318,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       if (data.sessionId === sessionId) {
         console.log('Sideband disconnected:', data);
         setSidebandConnected(false);
-        setSession(prev => prev ? { ...prev, sideband_connected: false } : prev);
+        setSession((prev) => (prev ? { ...prev, sideband_connected: false } : prev));
       }
     };
 
@@ -413,15 +430,17 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       const { message: updatedMessage } = await postJson<{ message: Message }>(
         `/admin/api/messages/${messageId}`,
         { content: editedContent },
-        { method: 'PUT', fallback: 'Failed to update message' }
+        { method: 'PUT', fallback: 'Failed to update message' },
       );
 
       // Update local state - server returns message in same format as initial fetch
-      setMessages(messages.map(msg =>
-        msg.message_id === messageId
-          ? { ...msg, message: updatedMessage.message, extras: updatedMessage.extras }
-          : msg
-      ));
+      setMessages(
+        messages.map((msg) =>
+          msg.message_id === messageId
+            ? { ...msg, message: updatedMessage.message, extras: updatedMessage.extras }
+            : msg,
+        ),
+      );
 
       setEditingMessageId(null);
       setEditedContent('');
@@ -440,7 +459,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
       await deleteJson(`/admin/api/messages/${messageId}`, undefined, { fallback: 'Failed to delete message' });
 
       // Remove from local state
-      setMessages(messages.filter(msg => msg.message_id !== messageId));
+      setMessages(messages.filter((msg) => msg.message_id !== messageId));
       setError(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -469,7 +488,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     socket.emit('admin:sendMessage', {
       sessionId,
       message: adminMessage.trim(),
-      messageType
+      messageType,
     });
 
     // Add to local messages for immediate feedback (only for visible messages)
@@ -481,9 +500,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         message_type: `admin_${messageType}`,
         message: `[Message from you]: ${adminMessage.trim()}`,
         created_at: new Date().toISOString(),
-        extras: { admin_sent: true }
+        extras: { admin_sent: true },
       };
-      setMessages(prev => [...prev, newMessage]);
+      setMessages((prev) => [...prev, newMessage]);
     }
 
     // Clear input and reset state
@@ -531,17 +550,21 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     try {
       const data = await postJson<FlagCrisisResponse>(`/admin/api/sessions/${sessionId}/crisis/flag`, {
         severity: flagSeverity,
-        notes: flagNotes
+        notes: flagNotes,
       });
       // Update local session state
-      setSession(prev => prev ? ({
-        ...prev,
-        crisis_flagged: true,
-        crisis_severity: data.severity,
-        crisis_risk_score: data.riskScore,
-        crisis_flagged_at: data.flaggedAt,
-        crisis_flagged_by: data.flaggedBy
-      }) : prev);
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              crisis_flagged: true,
+              crisis_severity: data.severity,
+              crisis_risk_score: data.riskScore,
+              crisis_flagged_at: data.flaggedAt,
+              crisis_flagged_by: data.flaggedBy,
+            }
+          : prev,
+      );
       setShowFlagModal(false);
       setFlagNotes('');
       toast.success(`Session flagged as ${flagSeverity} risk`);
@@ -561,7 +584,11 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
   // warmly over the sideband, with a server-side hard end as backstop —
   // contrast with the abrupt remote end.
   const handleCrisisWindDown = async () => {
-    if (!window.confirm('Ask the AI to share crisis resources, close warmly, and end this session? It will be force-ended after 75 seconds if the wrap-up does not complete.')) {
+    if (
+      !window.confirm(
+        'Ask the AI to share crisis resources, close warmly, and end this session? It will be force-ended after 75 seconds if the wrap-up does not complete.',
+      )
+    ) {
       return;
     }
     try {
@@ -587,14 +614,18 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
     try {
       await deleteJson(`/admin/api/sessions/${sessionId}/crisis/flag`, { notes: 'Manually unflagged via admin panel' });
       // Update local session state
-      setSession(prev => prev ? ({
-        ...prev,
-        crisis_flagged: false,
-        crisis_severity: undefined,
-        crisis_risk_score: null,
-        crisis_flagged_at: null,
-        crisis_flagged_by: null
-      }) : prev);
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              crisis_flagged: false,
+              crisis_severity: undefined,
+              crisis_risk_score: null,
+              crisis_flagged_at: null,
+              crisis_flagged_by: null,
+            }
+          : prev,
+      );
       toast.success('Crisis flag removed');
     } catch (error: unknown) {
       if (error instanceof HttpError) {
@@ -608,7 +639,7 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
   // Filter messages for display
   const displayMessages = filterToolCalls
-    ? messages.filter(msg => msg.message_type === 'tool_call' || msg.message_type === 'tool_response')
+    ? messages.filter((msg) => msg.message_type === 'tool_call' || msg.message_type === 'tool_response')
     : messages;
 
   return (
@@ -626,7 +657,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                 {session?.session_name || 'Session Details'}
               </h2>
               {session?.crisis_flagged && (
-                <span className={`px-3 py-1 rounded text-sm font-semibold uppercase flex items-center gap-1 ${severityBadgeClass(session.crisis_severity, { solid: true, pulseHigh: true })}`}>
+                <span
+                  className={`px-3 py-1 rounded text-sm font-semibold uppercase flex items-center gap-1 ${severityBadgeClass(session.crisis_severity, { solid: true, pulseHigh: true })}`}
+                >
                   <AlertTriangle size={16} />
                   {session.crisis_severity} RISK
                 </span>
@@ -635,9 +668,16 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
             <p className="text-xs text-gray-300 mt-1 font-mono">{sessionId}</p>
             {session?.crisis_flagged && (
               <div className="mt-2 text-xs bg-red-900 bg-opacity-30 px-3 py-2 rounded">
-                <div><strong>Risk Score:</strong> {session.crisis_risk_score}/100</div>
-                <div><strong>Flagged by:</strong> {session.crisis_flagged_by}</div>
-                <div><strong>Flagged at:</strong> {session.crisis_flagged_at ? new Date(session.crisis_flagged_at).toLocaleString() : ''}</div>
+                <div>
+                  <strong>Risk Score:</strong> {session.crisis_risk_score}/100
+                </div>
+                <div>
+                  <strong>Flagged by:</strong> {session.crisis_flagged_by}
+                </div>
+                <div>
+                  <strong>Flagged at:</strong>{' '}
+                  {session.crisis_flagged_at ? new Date(session.crisis_flagged_at).toLocaleString() : ''}
+                </div>
               </div>
             )}
             {isEditMode && (
@@ -647,24 +687,33 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
             )}
             {session && (
               <div className="text-sm text-lightBlue mt-2 space-y-1">
-                <div>User: <span className="font-semibold">{session.username || 'Anonymous'}</span></div>
+                <div>
+                  User: <span className="font-semibold">{session.username || 'Anonymous'}</span>
+                </div>
                 <div className="flex items-center gap-2">
-                  <span>Status: <span className={`font-semibold ${session.status === 'ended' ? 'text-gray-300' : 'text-green-300'}`}>{session.status}</span></span>
+                  <span>
+                    Status:{' '}
+                    <span
+                      className={`font-semibold ${session.status === 'ended' ? 'text-gray-300' : 'text-green-300'}`}
+                    >
+                      {session.status}
+                    </span>
+                  </span>
                   {session.status === 'active' && (session.sideband_connected || sidebandConnected) && (
                     <span className="px-2 py-0.5 text-xs font-medium rounded bg-green-500 text-white inline-flex items-center gap-1">
                       <Link2 size={12} aria-hidden="true" /> Sideband Active
                     </span>
                   )}
-                  {session.status === 'active' && session.openai_call_id && !(session.sideband_connected || sidebandConnected) && (
-                    <span className="px-2 py-0.5 text-xs font-medium rounded bg-yellow-500 text-yellow-900 inline-flex items-center gap-1">
-                      <AlertTriangle size={12} aria-hidden="true" /> Sideband Disconnected
-                    </span>
-                  )}
+                  {session.status === 'active' &&
+                    session.openai_call_id &&
+                    !(session.sideband_connected || sidebandConnected) && (
+                      <span className="px-2 py-0.5 text-xs font-medium rounded bg-yellow-500 text-yellow-900 inline-flex items-center gap-1">
+                        <AlertTriangle size={12} aria-hidden="true" /> Sideband Disconnected
+                      </span>
+                    )}
                 </div>
                 <div>Started: {session.created_at ? formatDateTime(session.created_at) : ''}</div>
-                {session.ended_at && (
-                  <div>Ended: {formatDateTime(session.ended_at)}</div>
-                )}
+                {session.ended_at && <div>Ended: {formatDateTime(session.ended_at)}</div>}
                 {session.status === 'ended' && redactionStatus && redactionStatus.status !== 'no_content' && (
                   <div className="flex items-center gap-2">
                     <span>Redaction:</span>
@@ -673,17 +722,24 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                         redactionStatus.status === 'complete'
                           ? 'bg-green-600 text-white'
                           : redactionStatus.status === 'partial'
-                          ? 'bg-yellow-500 text-yellow-900'
-                          : 'bg-red-500 text-white'
+                            ? 'bg-yellow-500 text-yellow-900'
+                            : 'bg-red-500 text-white'
                       }`}
                       title={`${redactionStatus.redacted}/${redactionStatus.total} messages redacted`}
                     >
                       {redactionStatus.status === 'complete' ? (
-                        <span className="inline-flex items-center gap-1"><Check size={12} aria-hidden="true" /> Complete</span>
+                        <span className="inline-flex items-center gap-1">
+                          <Check size={12} aria-hidden="true" /> Complete
+                        </span>
                       ) : redactionStatus.status === 'partial' ? (
-                        <span className="inline-flex items-center gap-1"><AlertTriangle size={12} aria-hidden="true" /> Partial ({redactionStatus.redacted}/{redactionStatus.total})</span>
+                        <span className="inline-flex items-center gap-1">
+                          <AlertTriangle size={12} aria-hidden="true" /> Partial ({redactionStatus.redacted}/
+                          {redactionStatus.total})
+                        </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1"><Clock size={12} aria-hidden="true" /> Pending</span>
+                        <span className="inline-flex items-center gap-1">
+                          <Clock size={12} aria-hidden="true" /> Pending
+                        </span>
                       )}
                     </span>
                   </div>
@@ -706,23 +762,23 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
               )}
               {session?.crisis_flagged ? (
                 <>
-                <button
-                  onClick={handleUnflagCrisis}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium transition min-h-[44px]"
-                  aria-label="Remove crisis flag from this session"
-                >
-                  Unflag Crisis
-                </button>
-                {session?.status === 'active' && (
                   <button
-                    onClick={handleCrisisWindDown}
-                    className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded text-sm font-medium transition min-h-[44px]"
-                    aria-label="Have the AI share crisis resources, close warmly, and end the session"
-                    title="The AI shares crisis resources and closes warmly; the session is force-ended if that doesn't finish within 75 seconds"
+                    onClick={handleUnflagCrisis}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm font-medium transition min-h-[44px]"
+                    aria-label="Remove crisis flag from this session"
                   >
-                    Wind Down & End
+                    Unflag Crisis
                   </button>
-                )}
+                  {session?.status === 'active' && (
+                    <button
+                      onClick={handleCrisisWindDown}
+                      className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded text-sm font-medium transition min-h-[44px]"
+                      aria-label="Have the AI share crisis resources, close warmly, and end the session"
+                      title="The AI shares crisis resources and closes warmly; the session is force-ended if that doesn't finish within 75 seconds"
+                    >
+                      Wind Down & End
+                    </button>
+                  )}
                 </>
               ) : (
                 <button
@@ -784,7 +840,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                     <dt className="text-gray-500">Crisis calls</dt>
                     <dd>{cost.calls_by_purpose.crisis}</dd>
                     <dt className="text-gray-500">Tokens (in / out)</dt>
-                    <dd>{cost.tokens_in} / {cost.tokens_out}</dd>
+                    <dd>
+                      {cost.tokens_in} / {cost.tokens_out}
+                    </dd>
                     <dt className="text-gray-500">Est. LLM cost</dt>
                     <dd>${cost.estimated_cost_usd.toFixed(4)}</dd>
                     <dt className="text-gray-500">Voice cost (metered)</dt>
@@ -878,25 +936,23 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
           {/* Caseworker tier: the session-detail transcript endpoint 404s for
               caseworkers by design — show the summary-view card, not an error. */}
-          {!loading && userRole === 'caseworker' && (
-            <TranscriptNoticeCard variant="caseworker-summary" />
-          )}
+          {!loading && userRole === 'caseworker' && <TranscriptNoticeCard variant="caseworker-summary" />}
 
           {error && userRole !== 'caseworker' && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-              Error: {error}
-            </div>
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">Error: {error}</div>
           )}
 
-          {!loading && !error && messages.length === 0 && userRole !== 'caseworker' && (
-            session?.is_demo && viewerIsSandbox ? (
+          {!loading &&
+            !error &&
+            messages.length === 0 &&
+            userRole !== 'caseworker' &&
+            (session?.is_demo && viewerIsSandbox ? (
               <TranscriptNoticeCard variant="sandbox-empty" />
             ) : (
               <div className="text-center py-8">
                 <p className="text-gray-500">No messages found</p>
               </div>
-            )
-          )}
+            ))}
 
           {!loading && !error && displayMessages.length === 0 && filterToolCalls && (
             <div className="text-center py-8">
@@ -929,7 +985,11 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
         <footer className="border-t">
           {/* Admin Message Input - Only show for active sessions */}
           {session?.status === 'active' && (
-            <div className="p-4 bg-yellow-50 border-b border-yellow-200" role="form" aria-label="Send message to participant">
+            <div
+              className="p-4 bg-yellow-50 border-b border-yellow-200"
+              role="form"
+              aria-label="Send message to participant"
+            >
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm font-semibold text-yellow-900">Send message to participant:</span>
                 <select
@@ -948,7 +1008,11 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                   value={adminMessage}
                   onChange={(e) => setAdminMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendAdminMessage()}
-                  placeholder={messageType === 'visible' ? 'Type a message to show the user...' : 'Type an instruction for the AI...'}
+                  placeholder={
+                    messageType === 'visible'
+                      ? 'Type a message to show the user...'
+                      : 'Type an instruction for the AI...'
+                  }
                   aria-label={messageType === 'visible' ? 'Message to send to user' : 'Invisible instruction for AI'}
                   className="flex-1 px-3 py-2 border border-yellow-400 rounded focus:outline-none focus:ring-2 focus:ring-yellow-500 min-h-[44px]"
                   disabled={sendingMessage}
@@ -999,9 +1063,16 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
       {/* Update Instructions Modal */}
       {showInstructionsModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="instructions-modal-title">
+        <div
+          className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="instructions-modal-title"
+        >
           <div className="bg-white p-6 rounded-lg shadow-xl max-w-2xl w-full mx-4">
-            <h3 id="instructions-modal-title" className="text-lg font-semibold mb-4">Update Session Instructions</h3>
+            <h3 id="instructions-modal-title" className="text-lg font-semibold mb-4">
+              Update Session Instructions
+            </h3>
             <p className="text-sm text-gray-600 mb-4">
               Update the AI's behavior and instructions for this session. Changes take effect immediately.
             </p>
@@ -1040,11 +1111,18 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
       {/* Flag Crisis Modal */}
       {showFlagModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="flag-crisis-modal-title">
+        <div
+          className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="flag-crisis-modal-title"
+        >
           <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="flex items-center gap-2 mb-4">
               <AlertTriangle size={24} className="text-red-600" aria-hidden="true" />
-              <h3 id="flag-crisis-modal-title" className="text-lg font-semibold">Flag Session as Crisis</h3>
+              <h3 id="flag-crisis-modal-title" className="text-lg font-semibold">
+                Flag Session as Crisis
+              </h3>
             </div>
             <p className="text-sm text-gray-600 mb-4">
               Mark this session for crisis intervention. Select the severity level and add any relevant notes.
@@ -1052,7 +1130,10 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
             <div className="mb-4">
               <label htmlFor="crisis-severity" className="block text-sm font-medium text-gray-700 mb-2">
-                Severity Level <span className="text-red-500" aria-label="required">*</span>
+                Severity Level{' '}
+                <span className="text-red-500" aria-label="required">
+                  *
+                </span>
               </label>
               <select
                 ref={severitySelectRef}

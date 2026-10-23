@@ -13,10 +13,7 @@ async function runMigration() {
     console.log('Starting migration 019: Add System Prompts Configuration...');
 
     // Read the migration SQL file
-    const migrationSQL = fs.readFileSync(
-      path.join(__dirname, '../migrations/019_add_system_prompts.sql'),
-      'utf8'
-    );
+    const migrationSQL = fs.readFileSync(path.join(__dirname, '../migrations/019_add_system_prompts.sql'), 'utf8');
 
     // Execute the migration
     await client.query('BEGIN');
@@ -25,7 +22,6 @@ async function runMigration() {
 
     console.log('OK: Migration 019 completed successfully!');
     console.log('System prompts configuration added to system_config table');
-
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('FAIL: Migration 019 failed:', error);

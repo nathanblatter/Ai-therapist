@@ -242,7 +242,14 @@ export async function promoteWorksheetToKnowledgeChunk(input: PromoteWorksheetIn
        VALUES ($1, $2, $3, 'worksheet_promotion', NULL, NULL, 'worksheet', NULL, $4, $5, $6::vector, FALSE)
        ON CONFLICT (content_hash) DO NOTHING
        RETURNING chunk_id`,
-      [input.topic, input.title, input.content, JSON.stringify(metadata), input.content_hash, `[${input.embedding.join(',')}]`],
+      [
+        input.topic,
+        input.title,
+        input.content,
+        JSON.stringify(metadata),
+        input.content_hash,
+        `[${input.embedding.join(',')}]`,
+      ],
     );
     const chunkId = inserted.rows[0]?.chunk_id;
     if (chunkId === undefined) {

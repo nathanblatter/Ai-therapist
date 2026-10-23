@@ -62,7 +62,7 @@ export const RESPONSES_MODEL = 'gpt-5-mini';
 
 const QUESTION =
   'Does this text still contain a direct personal identifier as defined by the HIPAA Safe Harbor ' +
-  'list: a person\'s name (first, last, or nickname used as a name), a street address or city smaller ' +
+  "list: a person's name (first, last, or nickname used as a name), a street address or city smaller " +
   'than a state, a specific date other than a year, a phone number, email address, account or record ' +
   'number, URL, or any other number or string that identifies a specific person? Placeholders such as ' +
   '[REDACTED: NAME] are NOT identifiers. Generic references ("my mom", "my therapist", "the university") ' +
@@ -97,9 +97,10 @@ export async function getVerifierConfig(): Promise<VerifierConfig> {
     const { getSystemConfigByKey } = await import('../db/index.js');
     const row = await getSystemConfigByKey('redaction_verifier');
     const v = (row?.config_value ?? {}) as Partial<VerifierConfig>;
-    const threshold = typeof v.threshold === 'number' && v.threshold >= 0 && v.threshold <= 1
-      ? v.threshold
-      : DEFAULT_VERIFIER_CONFIG.threshold;
+    const threshold =
+      typeof v.threshold === 'number' && v.threshold >= 0 && v.threshold <= 1
+        ? v.threshold
+        : DEFAULT_VERIFIER_CONFIG.threshold;
     const backend: VerifierBackend =
       v.backend === 'decisions' || v.backend === 'responses' || v.backend === 'auto'
         ? v.backend
@@ -138,7 +139,11 @@ export function buildDecisionsBody(text: string): Record<string, unknown> {
  * decisions[]/output[] wrapper). Throws on anything it cannot read so a
  * contract drift surfaces as an error on the row, not as a silent 0.
  */
-export function parseDecisionsResponse(raw: unknown): { pLeak: number; tokensIn: number | null; tokensOut: number | null } {
+export function parseDecisionsResponse(raw: unknown): {
+  pLeak: number;
+  tokensIn: number | null;
+  tokensOut: number | null;
+} {
   const root = raw as Record<string, unknown>;
   const candidates: unknown[] = [root];
   for (const key of ['decision', 'decisions', 'output', 'answers']) {
@@ -176,7 +181,7 @@ export function isDecisionsUnavailableError(err: unknown): boolean {
   const e = err as { status?: number; message?: string } | undefined;
   if (e?.status === 404) return true;
   const msg = (e?.message ?? '').toLowerCase();
-  return msg.includes('not enabled') || msg.includes('decision api') && msg.includes('not');
+  return msg.includes('not enabled') || (msg.includes('decision api') && msg.includes('not'));
 }
 
 async function askDecisions(client: DecisionsClient, text: string): Promise<DecisionAnswer> {
@@ -188,7 +193,11 @@ async function askDecisions(client: DecisionsClient, text: string): Promise<Deci
 // ---- Responses fallback ----------------------------------------------------
 
 type ResponsesClient = {
-  responses: { create: (opts: Record<string, unknown>) => Promise<{ output_text: string; usage?: { input_tokens?: number; output_tokens?: number } }> };
+  responses: {
+    create: (
+      opts: Record<string, unknown>,
+    ) => Promise<{ output_text: string; usage?: { input_tokens?: number; output_tokens?: number } }>;
+  };
 };
 
 const LEAK_SCHEMA = {
@@ -200,14 +209,17 @@ const LEAK_SCHEMA = {
     additionalProperties: false,
     properties: {
       leaks: { type: 'boolean' },
-      probability: { type: 'number', description: 'Probability in [0,1] that the text still contains a direct personal identifier.' },
+      probability: {
+        type: 'number',
+        description: 'Probability in [0,1] that the text still contains a direct personal identifier.',
+      },
     },
     required: ['leaks', 'probability'],
   },
 } as const;
 
 async function askResponses(client: ResponsesClient, text: string): Promise<DecisionAnswer> {
-  const response = await withFlex(RESPONSES_MODEL, tierParams =>
+  const response = await withFlex(RESPONSES_MODEL, (tierParams) =>
     client.responses.create({
       model: RESPONSES_MODEL,
       reasoning: { effort: 'low' },
@@ -218,7 +230,8 @@ async function askResponses(client: ResponsesClient, text: string): Promise<Deci
       text: { format: LEAK_SCHEMA },
       store: false,
       ...tierParams,
-    }));
+    }),
+  );
   const parsed = JSON.parse(response.output_text) as { leaks: boolean; probability: number };
   const p = clamp01(parsed.probability);
   // Reconcile stated-vs-derived the same way the crisis assessor does: the
@@ -251,7 +264,9 @@ export async function askLeakCheck(text: string, cfg: VerifierConfig, client?: O
       if (cfg.backend === 'decisions' || !isDecisionsUnavailableError(err)) throw err;
       if (!decisionsUnavailableUntilRestart) {
         decisionsUnavailableUntilRestart = true;
-        log.warn(`Decisions API unavailable (${err instanceof Error ? err.message : err}); using the Responses fallback until restart`);
+        log.warn(
+          `Decisions API unavailable (${err instanceof Error ? err.message : err}); using the Responses fallback until restart`,
+        );
       }
     }
   }
@@ -285,7 +300,7 @@ export async function verifyRedactedMessages(
     return summary;
   }
 
-  const queue = items.filter(i => i.text.trim().length > 0);
+  const queue = items.filter((i) => i.text.trim().length > 0);
   let next = 0;
   async function worker() {
     while (next < queue.length) {
@@ -313,8 +328,12 @@ export async function verifyRedactedMessages(
         const message = err instanceof Error ? err.message : String(err);
         log.error(`leak-check failed for message ${item.id}: ${message}`);
         await persistCheck(item.id, {
-          p_leak: -1, flagged: false, backend: cfg.backend === 'responses' ? 'responses' : 'decisions',
-          model: 'n/a', checked_at: checkedAt, error: message.slice(0, 300),
+          p_leak: -1,
+          flagged: false,
+          backend: cfg.backend === 'responses' ? 'responses' : 'decisions',
+          model: 'n/a',
+          checked_at: checkedAt,
+          error: message.slice(0, 300),
         }).catch(() => undefined);
       }
     }
@@ -322,7 +341,9 @@ export async function verifyRedactedMessages(
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
 
   if (summary.flagged > 0) {
-    log.warn(`session ${sessionId.substring(0, 12)}... : ${summary.flagged}/${summary.checked} redacted message(s) flagged for leak review`);
+    log.warn(
+      `session ${sessionId.substring(0, 12)}... : ${summary.flagged}/${summary.checked} redacted message(s) flagged for leak review`,
+    );
   }
   return summary;
 }

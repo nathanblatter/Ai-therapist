@@ -97,7 +97,10 @@ describe('askLeakCheck backend selection', () => {
 
   it('auto: falls back to Responses when the preview is not enabled, and stays there', async () => {
     postMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
-    createMock.mockResolvedValue({ output_text: JSON.stringify({ leaks: true, probability: 0.8 }), usage: { input_tokens: 50, output_tokens: 10 } });
+    createMock.mockResolvedValue({
+      output_text: JSON.stringify({ leaks: true, probability: 0.8 }),
+      usage: { input_tokens: 50, output_tokens: 10 },
+    });
 
     const first = await askLeakCheck('my sister Marie', CFG);
     expect(first.backend).toBe('responses');
@@ -154,7 +157,9 @@ describe('verifyRedactedMessages', () => {
   });
 
   it('honours the configured threshold and disabled flag', async () => {
-    getSystemConfigByKeyMock.mockResolvedValue({ config_value: { enabled: true, backend: 'decisions', threshold: 0.95 } });
+    getSystemConfigByKeyMock.mockResolvedValue({
+      config_value: { enabled: true, backend: 'decisions', threshold: 0.95 },
+    });
     postMock.mockResolvedValue({ choice: 'yes', confidence: 0.9 });
     expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 1, flagged: 0 });
 
@@ -166,7 +171,7 @@ describe('verifyRedactedMessages', () => {
 
   it('records a per-row error and never throws when the model call fails', async () => {
     postMock.mockRejectedValue(new Error('boom'));
-    const summary = await verifyRedactedMessages('s', [{ id: 7, text: 'x' }], );
+    const summary = await verifyRedactedMessages('s', [{ id: 7, text: 'x' }]);
     expect(summary).toEqual({ checked: 0, flagged: 0 });
     const [, params] = queryMock.mock.calls.find(([sql]) => /redaction_check/.test(sql as string))!;
     expect(JSON.parse(params![0] as string)).toMatchObject({ flagged: false, error: 'boom' });

@@ -22,9 +22,7 @@ export type SessionStartRefusal =
   | 'live_not_active'
   | 'session_exists';
 
-export type SessionStartResult =
-  | { ok: true }
-  | { ok: false; refusal: SessionStartRefusal };
+export type SessionStartResult = { ok: true } | { ok: false; refusal: SessionStartRefusal };
 
 export const SESSION_START_OK: SessionStartResult = { ok: true };
 

@@ -39,7 +39,8 @@ export interface DashboardAnalyticsRow {
 
 /** Compute every dashboard metric for the given filter set in one round-trip. */
 export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<DashboardAnalyticsRow> {
-  const result = await pool.query<DashboardAnalyticsRow>(`
+  const result = await pool.query<DashboardAnalyticsRow>(
+    `
       WITH date_filtered_sessions AS (
         SELECT ts.*
         FROM therapy_sessions ts
@@ -300,16 +301,18 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
         (SELECT row_to_json(chat_response_times.*) FROM chat_response_times) AS chat_response_times,
         (SELECT row_to_json(turn_taking_ratio.*) FROM turn_taking_ratio) AS turn_taking,
         (SELECT row_to_json(sideband_reliability.*) FROM sideband_reliability) AS sideband_reliability
-    `, [
-    f.startDate,        // $1
-    f.endDate,          // $2
-    f.voices,           // $3
-    f.languages,        // $4
-    f.sessionTypes,     // $5
-    f.statuses,         // $6
-    f.endedBy,          // $7
-    f.crisisFlagged,    // $8
-  ]);
+    `,
+    [
+      f.startDate, // $1
+      f.endDate, // $2
+      f.voices, // $3
+      f.languages, // $4
+      f.sessionTypes, // $5
+      f.statuses, // $6
+      f.endedBy, // $7
+      f.crisisFlagged, // $8
+    ],
+  );
 
   return result.rows[0];
 }

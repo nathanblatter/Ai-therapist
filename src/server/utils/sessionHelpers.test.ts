@@ -4,7 +4,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
 vi.mock('../config/db.js', () => ({ pool: { query: queryMock } }));
 
-import { checkSessionLimits, invalidateConfigCache, resolveProactiveOffering, getSystemPrompt } from './sessionHelpers.js';
+import {
+  checkSessionLimits,
+  invalidateConfigCache,
+  resolveProactiveOffering,
+  getSystemPrompt,
+} from './sessionHelpers.js';
 
 const SESSION_LIMITS = {
   enabled: true,
@@ -14,16 +19,17 @@ const SESSION_LIMITS = {
 };
 
 interface SetupOptions {
-  limits?: { enabled: boolean; max_sessions_per_day?: number; cooldown_minutes?: number; max_duration_minutes?: number };
+  limits?: {
+    enabled: boolean;
+    max_sessions_per_day?: number;
+    cooldown_minutes?: number;
+    max_duration_minutes?: number;
+  };
   todayCount?: number;
   lastEndedAt?: Date | null;
 }
 
-function setup({
-  limits = SESSION_LIMITS,
-  todayCount = 0,
-  lastEndedAt = null,
-}: SetupOptions = {}) {
+function setup({ limits = SESSION_LIMITS, todayCount = 0, lastEndedAt = null }: SetupOptions = {}) {
   queryMock.mockReset();
   queryMock.mockImplementation((sql: string) => {
     if (sql.includes('system_config')) {

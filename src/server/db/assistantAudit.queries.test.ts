@@ -18,7 +18,10 @@ describe('listAssistantAudit', () => {
     queryMock
       .mockResolvedValueOnce({ rows: [{ audit_id: 1, question: 'how many sessions?' }] })
       .mockResolvedValueOnce({ rows: [{ count: '3' }] });
-    const page = await listAssistantAudit({ userId: 7, username: 't', since: 'a', until: 'b', limit: 5, offset: 10 }, 2);
+    const page = await listAssistantAudit(
+      { userId: 7, username: 't', since: 'a', until: 'b', limit: 5, offset: 10 },
+      2,
+    );
     expect(page.total).toBe(3);
     expect(page.rows[0]).toMatchObject({ audit_id: 1 });
     const [sql, params] = queryMock.mock.calls[0];

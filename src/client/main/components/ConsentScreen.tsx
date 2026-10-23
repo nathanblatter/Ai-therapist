@@ -41,7 +41,7 @@ function renderConsentBody(body: string) {
             <span>{renderInline(b)}</span>
           </li>
         ))}
-      </ul>
+      </ul>,
     );
     bullets = [];
   };
@@ -53,7 +53,7 @@ function renderConsentBody(body: string) {
       blocks.push(
         <h2 key={`h-${blocks.length}`} className="text-xl font-semibold text-gray-900 mb-1">
           {line.slice(3)}
-        </h2>
+        </h2>,
       );
     } else if (line.startsWith('- ')) {
       bullets.push(line.slice(2));
@@ -64,7 +64,7 @@ function renderConsentBody(body: string) {
       blocks.push(
         <p key={`p-${blocks.length}`} className="text-sm text-gray-500 mb-4">
           {renderInline(line)}
-        </p>
+        </p>,
       );
     }
   }
@@ -76,11 +76,19 @@ function renderConsentBody(body: string) {
 function renderInline(text: string) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((p, i) =>
-    p.startsWith('**') && p.endsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>
+    p.startsWith('**') && p.endsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>,
   );
 }
 
-export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion, body, reconsentRequired, onCancel, onAccept }: ConsentScreenProps) {
+export default function ConsentScreen({
+  isOpen,
+  recordingEnabled,
+  consentVersion,
+  body,
+  reconsentRequired,
+  onCancel,
+  onAccept,
+}: ConsentScreenProps) {
   const [acknowledged, setAcknowledged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,7 +143,11 @@ export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion
         aria-modal="true"
         aria-labelledby="consent-heading"
       >
-        <div ref={panelRef} tabIndex={-1} className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 focus:outline-none">
+        <div
+          ref={panelRef}
+          tabIndex={-1}
+          className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 focus:outline-none"
+        >
           {reconsentRequired && (
             <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-sm text-amber-800">
               Our consent terms have been updated since you last agreed. Please review and re-accept to continue.
@@ -149,9 +161,9 @@ export default function ConsentScreen({ isOpen, recordingEnabled, consentVersion
               <li className="flex gap-2">
                 <Mic size={16} className="mt-0.5 flex-shrink-0 text-gray-500" aria-hidden="true" />
                 <span>
-                  <strong>Audio recording.</strong> This session's audio (your microphone and the
-                  assistant's voice) is recorded and stored securely for up to 12 months for safety
-                  review and research analyses, then automatically deleted.
+                  <strong>Audio recording.</strong> This session's audio (your microphone and the assistant's voice) is
+                  recorded and stored securely for up to 12 months for safety review and research analyses, then
+                  automatically deleted.
                 </span>
               </li>
             </ul>

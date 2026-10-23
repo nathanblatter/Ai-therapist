@@ -59,9 +59,7 @@ let nextScheduledRun: Date | null = null;
 
 export async function getDataRetentionSettings(): Promise<DataRetentionSettings> {
   try {
-    const result = await pool.query(
-      `SELECT config_value FROM system_config WHERE config_key = 'data_retention'`
-    );
+    const result = await pool.query(`SELECT config_value FROM system_config WHERE config_key = 'data_retention'`);
     if (result.rows.length === 0) return { ...DEFAULT_SETTINGS };
     return { ...DEFAULT_SETTINGS, ...(result.rows[0].config_value as Partial<DataRetentionSettings>) };
   } catch (err) {
@@ -72,14 +70,14 @@ export async function getDataRetentionSettings(): Promise<DataRetentionSettings>
 
 export async function updateDataRetentionSettings(
   settings: DataRetentionSettings,
-  _updatedBy: string
+  _updatedBy: string,
 ): Promise<DataRetentionSettings> {
   const result = await pool.query(
     `UPDATE system_config
         SET config_value = $1, updated_at = CURRENT_TIMESTAMP, updated_by = $2
       WHERE config_key = 'data_retention'
       RETURNING config_value`,
-    [JSON.stringify(settings), _updatedBy]
+    [JSON.stringify(settings), _updatedBy],
   );
   await startScheduler(); // restart with new run_time / enabled
   return (result.rows[0]?.config_value as DataRetentionSettings) ?? settings;
@@ -97,28 +95,43 @@ async function deleteRecording(
   runId: string,
   settings: DataRetentionSettings,
   triggeredBy: 'scheduler' | 'manual',
-  triggeredByUser: string | null
+  triggeredByUser: string | null,
 ): Promise<boolean> {
-  const keys = [row.recording_object_key, row.participant_recording_object_key]
-    .filter((k): k is string => Boolean(k));
+  const keys = [row.recording_object_key, row.participant_recording_object_key].filter((k): k is string => Boolean(k));
   let allDeleted = true;
   for (const key of keys) {
     try {
       await deleteObject(key);
       await insertDeletionLog({
-        runId, artifactType: 'recording_object', artifactRef: key,
-        sessionId: row.session_id, userId: row.user_id, reason, policySnapshot: settings,
-        triggeredBy, triggeredByUser, success: true, errorMessage: null,
+        runId,
+        artifactType: 'recording_object',
+        artifactRef: key,
+        sessionId: row.session_id,
+        userId: row.user_id,
+        reason,
+        policySnapshot: settings,
+        triggeredBy,
+        triggeredByUser,
+        success: true,
+        errorMessage: null,
       });
     } catch (err) {
       allDeleted = false;
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(`[Retention] failed to delete recording ${key}:`, errorMessage);
       await insertDeletionLog({
-        runId, artifactType: 'recording_object', artifactRef: key,
-        sessionId: row.session_id, userId: row.user_id, reason, policySnapshot: settings,
-        triggeredBy, triggeredByUser, success: false, errorMessage,
-      }).catch(logErr => console.error('[Retention] failed to write deletion log:', logErr));
+        runId,
+        artifactType: 'recording_object',
+        artifactRef: key,
+        sessionId: row.session_id,
+        userId: row.user_id,
+        reason,
+        policySnapshot: settings,
+        triggeredBy,
+        triggeredByUser,
+        success: false,
+        errorMessage,
+      }).catch((logErr) => console.error('[Retention] failed to write deletion log:', logErr));
     }
   }
   if (!allDeleted) return false;
@@ -141,7 +154,7 @@ async function deleteRecording(
  */
 export async function enforceRetention(
   triggeredBy: 'scheduler' | 'manual',
-  triggeredByUser?: string
+  triggeredByUser?: string,
 ): Promise<RetentionRunResult> {
   const settings = await getDataRetentionSettings();
   const runId = randomUUID();
@@ -159,17 +172,19 @@ export async function enforceRetention(
   const ageOut = await getRecordingsToAgeOut(settings.recordings_retention_days);
   for (const row of ageOut) {
     const ok = await deleteRecording(row, 'recording_retention', runId, settings, triggeredBy, triggeredByUser ?? null);
-    if (ok) recordingsDeleted++; else failures++;
+    if (ok) recordingsDeleted++;
+    else failures++;
   }
 
   // 2. Wiped-user grace (orphaned ended sessions past grace). Skip any already
   // handled in rule 1 to avoid double work within the same pass.
-  const handled = new Set(ageOut.map(r => r.session_id));
+  const handled = new Set(ageOut.map((r) => r.session_id));
   const grace = await getOrphanedRecordingsPastGrace(settings.wiped_user_grace_days);
   for (const row of grace) {
     if (handled.has(row.session_id)) continue;
     const ok = await deleteRecording(row, 'wiped_user_grace', runId, settings, triggeredBy, triggeredByUser ?? null);
-    if (ok) graceDeleted++; else failures++;
+    if (ok) graceDeleted++;
+    else failures++;
   }
 
   // 3. Message age-out (caseworker portal spec section 10 item 8: messages
@@ -199,13 +214,17 @@ export async function enforceRetention(
     last_run_at: new Date().toISOString(),
     last_run_deletions: totalDeletions,
   };
-  await pool.query(
-    `UPDATE system_config SET config_value = $1, updated_at = CURRENT_TIMESTAMP
+  await pool
+    .query(
+      `UPDATE system_config SET config_value = $1, updated_at = CURRENT_TIMESTAMP
       WHERE config_key = 'data_retention'`,
-    [JSON.stringify(updated)]
-  ).catch(err => console.error('[Retention] failed to stamp last_run:', err));
+      [JSON.stringify(updated)],
+    )
+    .catch((err) => console.error('[Retention] failed to stamp last_run:', err));
 
-  console.log(`[Retention] run ${runId}: ${recordingsDeleted} aged-out, ${graceDeleted} grace, ${threadMessagesDeleted} thread messages, ${failures} failures`);
+  console.log(
+    `[Retention] run ${runId}: ${recordingsDeleted} aged-out, ${graceDeleted} grace, ${threadMessagesDeleted} thread messages, ${failures} failures`,
+  );
   return { runId, recordingsDeleted, graceDeleted, threadMessagesDeleted, failures, skipped: false };
 }
 
@@ -232,7 +251,7 @@ async function scheduleNextRun(): Promise<void> {
   const ms = nextScheduledRun.getTime() - Date.now();
   console.log(`[Retention] Next run scheduled for ${nextScheduledRun.toISOString()}`);
   retentionTimeout = setTimeout(async () => {
-    await enforceRetention('scheduler').catch(err => console.error('[Retention] scheduled run failed:', err));
+    await enforceRetention('scheduler').catch((err) => console.error('[Retention] scheduled run failed:', err));
     // Daily, idempotent study-ops anomaly scan piggybacks on this tick.
     try {
       const { scanForDeviations } = await import('../db/studyOps.queries.js');

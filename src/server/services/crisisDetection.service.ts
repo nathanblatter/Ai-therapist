@@ -30,10 +30,23 @@ const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
   // Explicit ideation / self-harm / means.
   high: {
     keywords: [
-      'suicide', 'suicidal', 'kill myself', 'end my life', 'take my own life',
-      'want to die', 'better off dead', 'wish i was dead', 'wish i were dead',
-      'end it all', 'no reason to live', 'not worth living',
-      'self-harm', 'self harm', 'cut myself', 'hurt myself', 'harm myself',
+      'suicide',
+      'suicidal',
+      'kill myself',
+      'end my life',
+      'take my own life',
+      'want to die',
+      'better off dead',
+      'wish i was dead',
+      'wish i were dead',
+      'end it all',
+      'no reason to live',
+      'not worth living',
+      'self-harm',
+      'self harm',
+      'cut myself',
+      'hurt myself',
+      'harm myself',
       'overdose',
     ],
     score: 75,
@@ -49,19 +62,34 @@ const CRISIS_KEYWORDS: Record<string, { keywords: string[]; score: number }> = {
   // (or came back under-scored) produced steering but no crisis flag.
   medium: {
     keywords: [
-      "don't want to be here", 'do not want to be here', "don't want to exist",
-      "don't want to be alive", "don't want to live", "don't want to wake up",
-      'want to disappear', "can't go on", 'cannot go on', 'no point in living',
-      'no point going on', 'give up on life', 'tired of living', 'tired of being alive',
-      'everyone would be better off without me', 'better off without me',
+      "don't want to be here",
+      'do not want to be here',
+      "don't want to exist",
+      "don't want to be alive",
+      "don't want to live",
+      "don't want to wake up",
+      'want to disappear',
+      "can't go on",
+      'cannot go on',
+      'no point in living',
+      'no point going on',
+      'give up on life',
+      'tired of living',
+      'tired of being alive',
+      'everyone would be better off without me',
+      'better off without me',
     ],
     score: PASSIVE_IDEATION_SCORE,
   },
   // Acute distress — enough to warrant a contextual look, nothing more.
   low: {
     keywords: [
-      'hopeless', 'worthless', "can't take it anymore", 'cannot take it anymore',
-      "can't take this anymore", 'no way out',
+      'hopeless',
+      'worthless',
+      "can't take it anymore",
+      'cannot take it anymore',
+      "can't take this anymore",
+      'no way out',
     ],
     score: 15,
   },
@@ -80,13 +108,15 @@ const PASSIVE_IDEATION_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
     // "it would be easier if I didn't have to do this anymore" / "...if I
     // wasn't here" / "...if I were just gone" - with filler between the parts.
     label: 'easier if (indirect escape wish)',
-    pattern: /\beasier\b[\w\s,'-]{0,40}?\bif\b[\w\s,'-]{0,30}?\bi\b[\w\s,'-]{0,15}?(?:(?:did|do|does|would|could)n'?t have to|(?:was|were)n'?t (?:here|around|alive)|(?:was|were) (?:just )?gone|(?:did|do|would)n'?t wake up|(?:did|do|would)n'?t exist)\b/,
+    pattern:
+      /\beasier\b[\w\s,'-]{0,40}?\bif\b[\w\s,'-]{0,30}?\bi\b[\w\s,'-]{0,15}?(?:(?:did|do|does|would|could)n'?t have to|(?:was|were)n'?t (?:here|around|alive)|(?:was|were) (?:just )?gone|(?:did|do|would)n'?t wake up|(?:did|do|would)n'?t exist)\b/,
   },
   {
     // The negated-obligation form on its own: "I wish I didn't have to keep
     // going", "if I just didn't have to do this anymore".
     label: 'did not have to go on (escape wish)',
-    pattern: /\b(?:did|do|does|would|could)n'?t have to (?:do this|deal with (?:this|it|any of this)|be here|keep going|keep doing this|go on|wake up|exist)\b/,
+    pattern:
+      /\b(?:did|do|does|would|could)n'?t have to (?:do this|deal with (?:this|it|any of this)|be here|keep going|keep doing this|go on|wake up|exist)\b/,
   },
   {
     label: 'tired of being here (passive ideation)',
@@ -94,17 +124,20 @@ const PASSIVE_IDEATION_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   },
   {
     label: 'would not mind not waking up',
-    pattern: /\bwould'?n'?t (?:mind|care)\b[\w\s,'-]{0,20}?(?:not waking up|never waking up|if i (?:did|do|would)n'?t wake up|if i never woke up|if i (?:was|were)n'?t (?:here|around|alive)|if i (?:was|were) (?:just )?gone|if i disappeared|if i (?:did|do)n'?t exist)\b/,
+    pattern:
+      /\bwould'?n'?t (?:mind|care)\b[\w\s,'-]{0,20}?(?:not waking up|never waking up|if i (?:did|do|would)n'?t wake up|if i never woke up|if i (?:was|were)n'?t (?:here|around|alive)|if i (?:was|were) (?:just )?gone|if i disappeared|if i (?:did|do)n'?t exist)\b/,
   },
   {
     // "I hope I just don't wake up tomorrow" / "wish I wouldn't wake up".
     label: 'hope i do not wake up',
-    pattern: /\b(?:hope|hoping|wish|wishing)\b[\w\s,'-]{0,15}?\bi\b[\w\s,'-]{0,12}?(?:do|did|would|could)n'?t wake up\b(?!\s+(?:on time|in time|early|late|until|at|for|to)\b)/,
+    pattern:
+      /\b(?:hope|hoping|wish|wishing)\b[\w\s,'-]{0,15}?\bi\b[\w\s,'-]{0,12}?(?:do|did|would|could)n'?t wake up\b(?!\s+(?:on time|in time|early|late|until|at|for|to)\b)/,
   },
   {
     // "I just want to go to sleep and not wake up".
     label: 'sleep and not wake up',
-    pattern: /\b(?:go to sleep|fall asleep|going to sleep)\b[\w\s,'-]{0,20}?\bnot wake up\b(?!\s+(?:on time|in time|early|late|until|at|for|to)\b)/,
+    pattern:
+      /\b(?:go to sleep|fall asleep|going to sleep)\b[\w\s,'-]{0,20}?\bnot wake up\b(?!\s+(?:on time|in time|early|late|until|at|for|to)\b)/,
   },
   {
     // "everyone would be fine without me" - the non-"better off" variants.
@@ -178,9 +211,9 @@ export function detectCrisisKeywords(content: string): KeywordAnalysis {
   }
 
   return {
-    keywords: detectedKeywords.map(k => k.keyword),
+    keywords: detectedKeywords.map((k) => k.keyword),
     keywordScore: totalScore,
-    detectedKeywords
+    detectedKeywords,
   };
 }
 
@@ -267,8 +300,7 @@ function applyIdeationFloor(
   const floorSeverity = severityForScore(PASSIVE_IDEATION_SCORE);
   return {
     riskScore: PASSIVE_IDEATION_SCORE,
-    severity:
-      SEVERITY_RANK_ORDER[llm.severity] >= SEVERITY_RANK_ORDER[floorSeverity] ? llm.severity : floorSeverity,
+    severity: SEVERITY_RANK_ORDER[llm.severity] >= SEVERITY_RANK_ORDER[floorSeverity] ? llm.severity : floorSeverity,
     floored: true,
   };
 }
@@ -317,8 +349,10 @@ let strictSchemaUnsupported = false;
 
 function isSchemaUnsupportedError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return /json_schema|response_format|structured output/i.test(message)
-    && /unsupported|not supported|invalid|unknown/i.test(message);
+  return (
+    /json_schema|response_format|structured output/i.test(message) &&
+    /unsupported|not supported|invalid|unknown/i.test(message)
+  );
 }
 
 // HistoryMessage (role + content/content_redacted) is shared with the minor
@@ -369,8 +403,8 @@ async function assessRiskWithLLM(
   const client = await getClient();
 
   const transcript = conversationHistory
-    .filter(m => (m.role === 'user' || m.role === 'assistant') && (m.content ?? m.content_redacted))
-    .map(m => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.content ?? m.content_redacted}`)
+    .filter((m) => (m.role === 'user' || m.role === 'assistant') && (m.content ?? m.content_redacted))
+    .map((m) => `${m.role === 'user' ? 'Participant' : 'Assistant'}: ${m.content ?? m.content_redacted}`)
     .join('\n')
     .slice(-6000);
 
@@ -383,28 +417,31 @@ async function assessRiskWithLLM(
     try {
       const { safetyIdentifierForSession } = await import('../utils/safetyIdentifier.js');
       safetyIdentifier = await safetyIdentifierForSession(sessionId);
-    } catch { /* proceed without */ }
+    } catch {
+      /* proceed without */
+    }
   }
 
-  const callAssessor = (useStrictSchema: boolean) => client.chat.completions.create({
-    model: riskModel,
-    temperature: 0,
-    max_tokens: 300,
-    response_format: useStrictSchema ? RISK_ASSESSMENT_SCHEMA : { type: 'json_object' },
-    // This call carries un-redacted transcript excerpts (the assessment
-    // needs the participant's actual words). Never let it become stored
-    // application state on OpenAI's side.
-    store: false,
-    ...(safetyIdentifier ? { safety_identifier: safetyIdentifier } : {}),
-    ...extraParams,
-    messages: [
-      { role: 'system', content: RISK_ASSESSMENT_PROMPT },
-      {
-        role: 'user',
-        content: `Recent transcript:\n${transcript}\n\nLatest participant message (the one that tripped the screen):\n"${latestContent}"`,
-      },
-    ],
-  });
+  const callAssessor = (useStrictSchema: boolean) =>
+    client.chat.completions.create({
+      model: riskModel,
+      temperature: 0,
+      max_tokens: 300,
+      response_format: useStrictSchema ? RISK_ASSESSMENT_SCHEMA : { type: 'json_object' },
+      // This call carries un-redacted transcript excerpts (the assessment
+      // needs the participant's actual words). Never let it become stored
+      // application state on OpenAI's side.
+      store: false,
+      ...(safetyIdentifier ? { safety_identifier: safetyIdentifier } : {}),
+      ...extraParams,
+      messages: [
+        { role: 'system', content: RISK_ASSESSMENT_PROMPT },
+        {
+          role: 'user',
+          content: `Recent transcript:\n${transcript}\n\nLatest participant message (the one that tripped the screen):\n"${latestContent}"`,
+        },
+      ],
+    });
 
   let response;
   if (strictSchemaUnsupported) {
@@ -415,7 +452,10 @@ async function assessRiskWithLLM(
     } catch (err) {
       if (!isSchemaUnsupportedError(err)) throw err;
       strictSchemaUnsupported = true;
-      log.error({ err }, `[risk] model '${riskModel}' rejected strict json_schema; falling back to json_object for this process`);
+      log.error(
+        { err },
+        `[risk] model '${riskModel}' rejected strict json_schema; falling back to json_object for this process`,
+      );
       response = await callAssessor(false);
     }
   }
@@ -434,11 +474,16 @@ async function assessRiskWithLLM(
   // Cost tracking (ai-therapist-25c): best-effort, never blocks risk assessment.
   if (sessionId) {
     import('../db/index.js')
-      .then(({ recordLlmUsage }) => recordLlmUsage(
-        sessionId, 'crisis', riskModel,
-        response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
-      ))
-      .catch(err => log.error({ err }, '[risk] failed to record LLM usage (non-fatal)'));
+      .then(({ recordLlmUsage }) =>
+        recordLlmUsage(
+          sessionId,
+          'crisis',
+          riskModel,
+          response.usage?.prompt_tokens ?? null,
+          response.usage?.completion_tokens ?? null,
+        ),
+      )
+      .catch((err) => log.error({ err }, '[risk] failed to record LLM usage (non-fatal)'));
   }
 
   const parsed = JSON.parse(response.choices[0]?.message?.content ?? '{}') as Partial<LlmRiskAssessment>;
@@ -460,11 +505,18 @@ async function assessRiskWithLLM(
     risk_score: score,
     severity,
     context: typeof parsed.context === 'string' ? parsed.context : 'unclear',
-    factors: Array.isArray(parsed.factors) ? parsed.factors.filter((f): f is string => typeof f === 'string').slice(0, 8) : [],
+    factors: Array.isArray(parsed.factors)
+      ? parsed.factors.filter((f): f is string => typeof f === 'string').slice(0, 8)
+      : [],
     reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning.slice(0, 400) : '',
-    ...(response.usage ? {
-      usage: { prompt_tokens: response.usage.prompt_tokens ?? 0, completion_tokens: response.usage.completion_tokens ?? 0 },
-    } : {}),
+    ...(response.usage
+      ? {
+          usage: {
+            prompt_tokens: response.usage.prompt_tokens ?? 0,
+            completion_tokens: response.usage.completion_tokens ?? 0,
+          },
+        }
+      : {}),
   };
 }
 
@@ -496,7 +548,7 @@ export async function assessRiskOffline(
   history: HistoryMessage[] = [],
 ): Promise<OfflineRiskAssessment> {
   const model = await resolveRiskModel();
-  const llm = await withFlex(model, extra => assessRiskWithLLM(latestContent, history, undefined, extra));
+  const llm = await withFlex(model, (extra) => assessRiskWithLLM(latestContent, history, undefined, extra));
   return {
     risk_score: llm.risk_score,
     severity: llm.severity,
@@ -611,7 +663,7 @@ async function trackEmotionalTrajectory(sessionId: string): Promise<TrajectoryRe
        WHERE session_id = $1
        ORDER BY calculated_at DESC
        LIMIT 5`,
-      [sessionId]
+      [sessionId],
     );
 
     const history = historyResult.rows.reverse(); // Chronological order
@@ -624,7 +676,7 @@ async function trackEmotionalTrajectory(sessionId: string): Promise<TrajectoryRe
     let trend = 'stable';
 
     // Detect downward spiral (increasing risk scores)
-    const scores = history.map(h => h.risk_score);
+    const scores = history.map((h) => h.risk_score);
     const isIncreasing = scores.every((score, i) => i === 0 || score >= scores[i - 1]);
 
     if (isIncreasing && scores.length >= 3) {
@@ -643,7 +695,7 @@ async function trackEmotionalTrajectory(sessionId: string): Promise<TrajectoryRe
 
     return {
       trajectoryScore: Math.min(trajectoryScore, 20),
-      trend
+      trend,
     };
   } catch (error) {
     console.error('Error tracking emotional trajectory:', error);
@@ -679,12 +731,15 @@ interface RiskAnalysisResult {
  * flag → high flag + alert. If the LLM call fails, the keyword tier score
  * stands (fail toward detection, never away from it).
  */
-export async function analyzeMessageRisk(message: MessageInput, conversationHistory: HistoryMessage[] = []): Promise<RiskAnalysisResult> {
+export async function analyzeMessageRisk(
+  message: MessageInput,
+  conversationHistory: HistoryMessage[] = [],
+): Promise<RiskAnalysisResult> {
   try {
     // Free moderation screen runs in parallel with the keyword/trajectory
     // work (ai-therapist-167). It is a supplementary signal: null on outage.
     const moderationPromise = import('./moderation.service.js')
-      .then(m => m.getSelfHarmScores(message.content).then(scores => ({ scores, riskOf: m.moderationRiskScore })))
+      .then((m) => m.getSelfHarmScores(message.content).then((scores) => ({ scores, riskOf: m.moderationRiskScore })))
       .catch(() => null);
 
     const keywordAnalysis = detectCrisisKeywords(message.content);
@@ -730,7 +785,10 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
         // below 90 so a screen alone cannot mimic the very top band.
         riskScore = Math.max(riskScore, Math.min(85, moderationScore));
         method = 'keyword_fallback';
-        log.error({ err }, `[risk] LLM assessment failed for session ${message.session_id}; using screen-tier score ${riskScore}`);
+        log.error(
+          { err },
+          `[risk] LLM assessment failed for session ${message.session_id}; using screen-tier score ${riskScore}`,
+        );
       }
     }
 
@@ -768,26 +826,32 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
             method,
             keyword_score: keywordAnalysis.keywordScore,
             keywords: keywordAnalysis.keywords,
-            ...(trajectory.trajectoryScore > 0 ? {
-              trajectory_score: trajectory.trajectoryScore,
-              trajectory_trend: trajectory.trend,
-            } : {}),
-            ...(moderation ? {
-              moderation_score: moderationScore,
-              moderation_flagged: moderation.flagged,
-              moderation_self_harm: moderation.selfHarm,
-              moderation_self_harm_intent: moderation.selfHarmIntent,
-              moderation_self_harm_instructions: moderation.selfHarmInstructions,
-            } : {}),
+            ...(trajectory.trajectoryScore > 0
+              ? {
+                  trajectory_score: trajectory.trajectoryScore,
+                  trajectory_trend: trajectory.trend,
+                }
+              : {}),
+            ...(moderation
+              ? {
+                  moderation_score: moderationScore,
+                  moderation_flagged: moderation.flagged,
+                  moderation_self_harm: moderation.selfHarm,
+                  moderation_self_harm_intent: moderation.selfHarmIntent,
+                  moderation_self_harm_instructions: moderation.selfHarmInstructions,
+                }
+              : {}),
             ...(llmFloored ? { passive_ideation_floor: PASSIVE_IDEATION_SCORE } : {}),
-            ...(llm ? {
-              llm_score: llm.risk_score,
-              llm_context: llm.context,
-              llm_factors: llm.factors,
-              llm_reasoning: llm.reasoning,
-            } : {}),
-          })
-        ]
+            ...(llm
+              ? {
+                  llm_score: llm.risk_score,
+                  llm_context: llm.context,
+                  llm_factors: llm.factors,
+                  llm_reasoning: llm.reasoning,
+                }
+              : {}),
+          }),
+        ],
       );
     } catch (insertError) {
       console.error('Error logging risk_score_history (non-fatal, verdict stands):', insertError);
@@ -802,7 +866,7 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
         ...(trajectory.trajectoryScore > 0 ? { trajectory: trajectory.trajectoryScore } : {}),
         ...(moderationScore > 0 ? { moderation: moderationScore } : {}),
         ...(llm ? { llm: llm.risk_score } : {}),
-      }
+      },
     };
   } catch (error) {
     console.error('Error in analyzeMessageRisk:', error);
@@ -810,7 +874,7 @@ export async function analyzeMessageRisk(message: MessageInput, conversationHist
       riskScore: 0,
       severity: 'none',
       factors: [],
-      breakdown: {}
+      breakdown: {},
     };
   }
 }
@@ -830,7 +894,7 @@ export async function flagSessionCrisis(
   triggerMethod: string,
   messageId: string | number | null,
   factors: string[],
-  notes: string | null
+  notes: string | null,
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -850,7 +914,7 @@ export async function flagSessionCrisis(
              ELSE 'normal'
            END
        WHERE session_id = $1`,
-      [sessionId, severity, riskScore, triggeredBy]
+      [sessionId, severity, riskScore, triggeredBy],
     );
 
     // Create crisis event (single writer: db/crisis.queries recordCrisisEvent)
@@ -866,7 +930,7 @@ export async function flagSessionCrisis(
         riskFactors: factors,
         notes,
       },
-      client
+      client,
     );
 
     await client.query('COMMIT');
@@ -883,8 +947,8 @@ export async function flagSessionCrisis(
   // Dynamic import matches the crisisAlert pattern and keeps test mocking easy.
   if (severity === 'high') {
     import('./adverseEvent.service.js')
-      .then(m => m.draftAdverseEventFromCrisis(sessionId))
-      .catch(err => console.error('AE auto-draft failed:', err));
+      .then((m) => m.draftAdverseEventFromCrisis(sessionId))
+      .catch((err) => console.error('AE auto-draft failed:', err));
   }
 }
 
@@ -904,13 +968,13 @@ export async function unflagSessionCrisis(sessionId: string, unflaggedBy: string
            crisis_unflagged_by = $2,
            monitoring_frequency = 'normal'
        WHERE session_id = $1`,
-      [sessionId, unflaggedBy]
+      [sessionId, unflaggedBy],
     );
 
     // Create crisis event
     await recordCrisisEvent(
       { sessionId, eventType: 'unflagged', triggeredBy: unflaggedBy, triggerMethod: 'manual', notes },
-      client
+      client,
     );
 
     await client.query('COMMIT');
@@ -930,7 +994,7 @@ export async function updateRiskScore(
   newScore: number,
   newSeverity: string,
   changedBy: string,
-  notes: string | null
+  notes: string | null,
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -939,7 +1003,7 @@ export async function updateRiskScore(
     // Get previous values
     const prevResult = await client.query<{ crisis_risk_score: number; crisis_severity: string }>(
       `SELECT crisis_risk_score, crisis_severity FROM therapy_sessions WHERE session_id = $1`,
-      [sessionId]
+      [sessionId],
     );
     const prev = prevResult.rows[0];
 
@@ -949,7 +1013,7 @@ export async function updateRiskScore(
        SET crisis_risk_score = $2,
            crisis_severity = $3
        WHERE session_id = $1`,
-      [sessionId, newScore, newSeverity]
+      [sessionId, newScore, newSeverity],
     );
 
     // Create crisis event
@@ -965,7 +1029,7 @@ export async function updateRiskScore(
         triggerMethod: 'manual',
         notes,
       },
-      client
+      client,
     );
 
     await client.query('COMMIT');
@@ -985,18 +1049,17 @@ interface ActionDetails {
 /**
  * Log intervention action
  */
-export async function logInterventionAction(sessionId: string, actionType: string, actionDetails: ActionDetails): Promise<void> {
+export async function logInterventionAction(
+  sessionId: string,
+  actionType: string,
+  actionDetails: ActionDetails,
+): Promise<void> {
   try {
     await pool.query(
       `INSERT INTO intervention_actions
        (session_id, action_type, action_details, risk_score)
        VALUES ($1, $2, $3, $4)`,
-      [
-        sessionId,
-        actionType,
-        JSON.stringify(actionDetails),
-        actionDetails.riskScore || null
-      ]
+      [sessionId, actionType, JSON.stringify(actionDetails), actionDetails.riskScore || null],
     );
   } catch (error) {
     console.error('Error logging intervention action:', error);
@@ -1012,7 +1075,7 @@ export async function getSessionCrisisEvents(sessionId: string): Promise<unknown
      FROM crisis_events ce
      WHERE ce.session_id = $1
      ORDER BY ce.created_at DESC`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows;
 }
@@ -1041,7 +1104,7 @@ export async function getActiveCrisisSessions(orgId?: number | null): Promise<un
        AND ($1::int IS NULL OR u.organization_id = $1
          OR (ts.user_id IS NULL AND $1 = ${IRB_STUDY_ORG_ID_SQL}))
      ORDER BY ts.crisis_risk_score DESC, ts.crisis_flagged_at DESC`,
-    [orgId ?? null]
+    [orgId ?? null],
   );
   return result.rows;
 }
@@ -1054,7 +1117,7 @@ export async function getSessionRiskHistory(sessionId: string): Promise<unknown[
     `SELECT * FROM risk_score_history
      WHERE session_id = $1
      ORDER BY calculated_at ASC`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows;
 }

@@ -1,21 +1,16 @@
 // Project-wide ambient type augmentations for the server.
-import "express-session";
-import type { Server as SocketIOServer } from "socket.io";
-import type { UserRole } from "../shared/roles.js";
+import 'express-session';
+import type { Server as SocketIOServer } from 'socket.io';
+import type { UserRole } from '../shared/roles.js';
 
 // The role/tier vocabulary lives in src/shared/roles.ts (caseworker portal
 // foundation); re-exported here so existing `from '../types.js'` imports keep
 // working.
-export type {
-  UserRole,
-  CareTeamRole,
-  DataTier,
-  CareTeamMember,
-} from "../shared/roles.js";
-export { isCareTeamRole, dataTierFor } from "../shared/roles.js";
+export type { UserRole, CareTeamRole, DataTier, CareTeamMember } from '../shared/roles.js';
+export { isCareTeamRole, dataTierFor } from '../shared/roles.js';
 
 // Fields we store on the express session (set at login / MFA).
-declare module "express-session" {
+declare module 'express-session' {
   interface SessionData {
     userId?: number;
     username?: string;

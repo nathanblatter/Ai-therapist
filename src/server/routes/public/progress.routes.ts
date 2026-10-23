@@ -113,9 +113,8 @@ export default function progressRoutes(): Router {
       if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({ error: 'Invalid assignment id' });
       }
-      const note = typeof req.body?.note === 'string' && req.body.note.trim()
-        ? req.body.note.trim().substring(0, 500)
-        : null;
+      const note =
+        typeof req.body?.note === 'string' && req.body.note.trim() ? req.body.note.trim().substring(0, 500) : null;
       const assignment = await completeAssignment(id, req.session.userId!, note);
       if (!assignment) {
         return res.status(404).json({ error: 'Assignment not found' });

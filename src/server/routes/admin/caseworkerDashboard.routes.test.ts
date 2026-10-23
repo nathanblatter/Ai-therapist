@@ -57,13 +57,23 @@ function appAs(role: string | null, userId = 8, orgId?: number) {
 
 function rosterRow(overrides: Record<string, unknown> = {}) {
   return {
-    client_id: 42, username: 'p42', assigned_at: '2026-08-01', member_role: 'caseworker',
+    client_id: 42,
+    username: 'p42',
+    assigned_at: '2026-08-01',
+    member_role: 'caseworker',
     last_session_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-    ended_session_count: 5, last_checkin_mood: 7,
-    last_summary: { headline: 'steady' }, last_summary_session_id: 's1',
-    latest_risk_score: 20, latest_risk_severity: 'low', latest_risk_at: '2026-08-20',
-    open_crisis_count: 0, latest_scales: null, open_escalation_count: 0,
-    overdue_practice_count: 0, has_safety_plan: false,
+    ended_session_count: 5,
+    last_checkin_mood: 7,
+    last_summary: { headline: 'steady' },
+    last_summary_session_id: 's1',
+    latest_risk_score: 20,
+    latest_risk_severity: 'low',
+    latest_risk_at: '2026-08-20',
+    open_crisis_count: 0,
+    latest_scales: null,
+    open_escalation_count: 0,
+    overdue_practice_count: 0,
+    has_safety_plan: false,
     ...overrides,
   };
 }
@@ -74,11 +84,19 @@ beforeEach(() => {
   dbMocks.countUnreadByClientForMember.mockResolvedValue([]);
   dbMocks.listCaseworkerRoster.mockResolvedValue([rosterRow()]);
   dbMocks.getRosterClientDetail.mockResolvedValue({
-    recent_summaries: [], scale_history: [], risk_history: [], mood_history: [], safety_plan: null,
+    recent_summaries: [],
+    scale_history: [],
+    risk_history: [],
+    mood_history: [],
+    safety_plan: null,
   });
   dbMocks.getClientEngagementSignals.mockResolvedValue({
-    last_session_at: '2026-09-10T12:00:00Z', ended_session_count: 5, last_checkin_mood: 6,
-    open_crisis_count: 0, open_escalation_count: 0, has_safety_plan: false,
+    last_session_at: '2026-09-10T12:00:00Z',
+    ended_session_count: 5,
+    last_checkin_mood: 6,
+    open_crisis_count: 0,
+    open_escalation_count: 0,
+    has_safety_plan: false,
   });
   dbMocks.recordLlmUsage.mockResolvedValue(undefined);
   dbMocks.isAssigned.mockResolvedValue(true);
@@ -98,13 +116,15 @@ describe('computeAttention', () => {
     const { score, reasons } = computeAttention(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       rosterRow({ open_crisis_count: 1, latest_risk_severity: 'high', open_escalation_count: 2 }) as any,
-      3
+      3,
     );
     const codes = reasons.map((r) => r.code);
     expect(codes).toEqual(expect.arrayContaining(['crisis_open', 'risk_high', 'escalation_open', 'unread_messages']));
     expect(score).toBe(
-      DEFAULT_ATTENTION_RANKING.crisis_open + DEFAULT_ATTENTION_RANKING.risk_high +
-      DEFAULT_ATTENTION_RANKING.escalation_open + DEFAULT_ATTENTION_RANKING.unread_messages
+      DEFAULT_ATTENTION_RANKING.crisis_open +
+        DEFAULT_ATTENTION_RANKING.risk_high +
+        DEFAULT_ATTENTION_RANKING.escalation_open +
+        DEFAULT_ATTENTION_RANKING.unread_messages,
     );
     for (const reason of reasons) {
       expect(reason.label).toBeTruthy();
@@ -150,7 +170,8 @@ describe('GET /admin/api/caseworker/roster', () => {
 
   it('honors system_config attention_ranking overrides', async () => {
     dbMocks.getSystemConfigByKey.mockResolvedValue({
-      config_key: 'attention_ranking', config_value: { unread_messages: 99 },
+      config_key: 'attention_ranking',
+      config_value: { unread_messages: 99 },
     });
     dbMocks.countUnreadByClientForMember.mockResolvedValue([{ client_id: 42, unread_count: 1 }]);
     const res = await request(appAs('caseworker', 8)).get('/admin/api/caseworker/roster');
@@ -224,10 +245,18 @@ describe('GET /admin/api/caseworker/roster/:userId/detail', () => {
 
 describe('GET /admin/api/caseworker/roster/:userId/catchup', () => {
   const detailWithSummary = {
-    recent_summaries: [{
-      session_id: 's9', ended_at: '2026-09-10T12:00:00Z',
-      summary: { headline: 'steady week', topics: ['sleep'], mood_trajectory: 'started flat, ended brighter', follow_up: 'sleep routine' },
-    }],
+    recent_summaries: [
+      {
+        session_id: 's9',
+        ended_at: '2026-09-10T12:00:00Z',
+        summary: {
+          headline: 'steady week',
+          topics: ['sleep'],
+          mood_trajectory: 'started flat, ended brighter',
+          follow_up: 'sleep routine',
+        },
+      },
+    ],
     scale_history: [
       { scale: 'phq2', score: 3, created_at: '2026-09-10' },
       { scale: 'phq2', score: 5, created_at: '2026-09-01' },
@@ -236,7 +265,10 @@ describe('GET /admin/api/caseworker/roster/:userId/catchup', () => {
       { risk_score: 20, severity: 'low', calculated_at: '2026-09-10' },
       { risk_score: 40, severity: 'moderate', calculated_at: '2026-09-01' },
     ],
-    mood_history: [{ mood: 6, created_at: '2026-09-10' }, { mood: 4, created_at: '2026-09-01' }],
+    mood_history: [
+      { mood: 6, created_at: '2026-09-10' },
+      { mood: 4, created_at: '2026-09-01' },
+    ],
     safety_plan: null,
   };
 
@@ -268,8 +300,12 @@ describe('GET /admin/api/caseworker/roster/:userId/catchup', () => {
 
   it('skips the LLM entirely for a client with no completed sessions', async () => {
     dbMocks.getClientEngagementSignals.mockResolvedValue({
-      last_session_at: null, ended_session_count: 0, last_checkin_mood: null,
-      open_crisis_count: 0, open_escalation_count: 0, has_safety_plan: false,
+      last_session_at: null,
+      ended_session_count: 0,
+      last_checkin_mood: null,
+      open_crisis_count: 0,
+      open_escalation_count: 0,
+      has_safety_plan: false,
     });
     const res = await request(appAs('caseworker', 8)).get('/admin/api/caseworker/roster/42/catchup');
     expect(res.status).toBe(200);
@@ -320,9 +356,13 @@ describe('composeCatchupContext', () => {
     const context = composeCatchupContext(
       { recent_summaries: [], scale_history: [], risk_history: [], mood_history: [], safety_plan: null },
       {
-        last_session_at: '2026-09-01', ended_session_count: 3, last_checkin_mood: 4,
-        open_crisis_count: 1, open_escalation_count: 2, has_safety_plan: true,
-      }
+        last_session_at: '2026-09-01',
+        ended_session_count: 3,
+        last_checkin_mood: 4,
+        open_crisis_count: 1,
+        open_escalation_count: 2,
+        has_safety_plan: true,
+      },
     );
     expect(context).toContain('Open crisis flags: 1');
     expect(context).toContain('Open escalations: 2');

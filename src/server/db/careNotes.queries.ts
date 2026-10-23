@@ -78,7 +78,7 @@ export function computeSignHash(note: {
         note_type: note.note_type,
         content: note.content,
         signed_at: note.signed_at,
-      })
+      }),
     )
     .digest('hex');
 }
@@ -120,17 +120,14 @@ export async function createCareNote(input: CreateCareNoteInput): Promise<CareNo
       input.seedModel ?? null,
       JSON.stringify(input.content),
       input.amendsNoteId ?? null,
-    ]
+    ],
   );
   return result.rows[0];
 }
 
 /** One note by id, or null. */
 export async function getCareNoteById(noteId: number): Promise<CareNoteRow | null> {
-  const result = await pool.query<CareNoteRow>(
-    `SELECT ${NOTE_COLUMNS} FROM care_notes WHERE note_id = $1`,
-    [noteId]
-  );
+  const result = await pool.query<CareNoteRow>(`SELECT ${NOTE_COLUMNS} FROM care_notes WHERE note_id = $1`, [noteId]);
   return result.rows[0] ?? null;
 }
 
@@ -148,20 +145,17 @@ export interface NoteViewer {
 export async function listCareNotesForClient(
   clientId: number,
   viewer: NoteViewer,
-  limit = 100
+  limit = 100,
 ): Promise<CareNoteRow[]> {
   const visibility =
-    viewer.role === 'therapist'
-      ? ''
-      : ` AND (note_type = 'case' OR shared_with_care_team = TRUE OR author_id = $3)`;
-  const params: unknown[] =
-    viewer.role === 'therapist' ? [clientId, limit] : [clientId, limit, viewer.userId];
+    viewer.role === 'therapist' ? '' : ` AND (note_type = 'case' OR shared_with_care_team = TRUE OR author_id = $3)`;
+  const params: unknown[] = viewer.role === 'therapist' ? [clientId, limit] : [clientId, limit, viewer.userId];
   const result = await pool.query<CareNoteRow>(
     `SELECT ${NOTE_COLUMNS} FROM care_notes
      WHERE client_id = $1${visibility}
      ORDER BY created_at DESC, note_id DESC
      LIMIT $2`,
-    params
+    params,
   );
   return result.rows;
 }
@@ -176,7 +170,7 @@ export async function listCareNotesForClient(
 export async function updateCareNoteDraft(
   noteId: number,
   authorId: number,
-  updates: { content?: Record<string, unknown>; caseNoteKind?: CaseNoteKind | null }
+  updates: { content?: Record<string, unknown>; caseNoteKind?: CaseNoteKind | null },
 ): Promise<CareNoteRow | null> {
   const setKind = updates.caseNoteKind !== undefined;
   const result = await pool.query<CareNoteRow>(
@@ -192,17 +186,17 @@ export async function updateCareNoteDraft(
       updates.content === undefined ? null : JSON.stringify(updates.content),
       updates.caseNoteKind ?? null,
       setKind,
-    ]
+    ],
   );
   return result.rows[0] ?? null;
 }
 
 /** Delete the author's own draft. Returns true when a row was deleted. */
 export async function deleteCareNoteDraft(noteId: number, authorId: number): Promise<boolean> {
-  const result = await pool.query(
-    `DELETE FROM care_notes WHERE note_id = $1 AND author_id = $2 AND status = 'draft'`,
-    [noteId, authorId]
-  );
+  const result = await pool.query(`DELETE FROM care_notes WHERE note_id = $1 AND author_id = $2 AND status = 'draft'`, [
+    noteId,
+    authorId,
+  ]);
   return (result.rowCount ?? 0) > 0;
 }
 
@@ -220,7 +214,7 @@ export async function signCareNote(noteId: number, authorId: number): Promise<Ca
       `SELECT ${NOTE_COLUMNS} FROM care_notes
        WHERE note_id = $1 AND author_id = $2 AND status = 'draft'
        FOR UPDATE`,
-      [noteId, authorId]
+      [noteId, authorId],
     );
     const note = locked.rows[0];
     if (!note) {
@@ -234,7 +228,7 @@ export async function signCareNote(noteId: number, authorId: number): Promise<Ca
        SET status = 'signed', signed_at = $3, sign_hash = $4, updated_at = now()
        WHERE note_id = $1 AND author_id = $2 AND status = 'draft'
        RETURNING ${NOTE_COLUMNS}`,
-      [noteId, authorId, signedAt, signHash]
+      [noteId, authorId, signedAt, signHash],
     );
     let signedRow = updated.rows[0] ?? null;
     if (note.amends_note_id !== null) {
@@ -242,7 +236,7 @@ export async function signCareNote(noteId: number, authorId: number): Promise<Ca
         `UPDATE care_notes SET status = 'amended', updated_at = now()
          WHERE note_id = $1 AND status = 'signed'
          RETURNING session_id`,
-        [note.amends_note_id]
+        [note.amends_note_id],
       );
       // Carry the session linkage onto the now-live amendment. The amendment
       // draft is created with session_id NULL because the signed original
@@ -256,7 +250,7 @@ export async function signCareNote(noteId: number, authorId: number): Promise<Ca
         const carried = await client.query<CareNoteRow>(
           `UPDATE care_notes SET session_id = $2 WHERE note_id = $1
            RETURNING ${NOTE_COLUMNS}`,
-          [noteId, inheritedSessionId]
+          [noteId, inheritedSessionId],
         );
         signedRow = carried.rows[0] ?? signedRow;
       }
@@ -281,10 +275,7 @@ export async function signCareNote(noteId: number, authorId: number): Promise<Ca
  * session_id to the amendment in the same transaction that flips the
  * original to 'amended', so the linkage is never lost.
  */
-export async function createCareNoteAmendment(
-  noteId: number,
-  authorId: number
-): Promise<CareNoteRow | null> {
+export async function createCareNoteAmendment(noteId: number, authorId: number): Promise<CareNoteRow | null> {
   const result = await pool.query<CareNoteRow>(
     `INSERT INTO care_notes
        (org_id, client_id, author_id, author_name, author_role, note_type,
@@ -294,7 +285,7 @@ export async function createCareNoteAmendment(
      FROM care_notes
      WHERE note_id = $1 AND author_id = $2 AND status = 'signed'
      RETURNING ${NOTE_COLUMNS}`,
-    [noteId, authorId]
+    [noteId, authorId],
   );
   return result.rows[0] ?? null;
 }
@@ -303,13 +294,13 @@ export async function createCareNoteAmendment(
 export async function setCareNoteShared(
   noteId: number,
   authorId: number,
-  shared: boolean
+  shared: boolean,
 ): Promise<CareNoteRow | null> {
   const result = await pool.query<CareNoteRow>(
     `UPDATE care_notes SET shared_with_care_team = $3, updated_at = now()
      WHERE note_id = $1 AND author_id = $2
      RETURNING ${NOTE_COLUMNS}`,
-    [noteId, authorId, shared]
+    [noteId, authorId, shared],
   );
   return result.rows[0] ?? null;
 }
@@ -321,30 +312,23 @@ export async function getLiveProgressNoteForSession(sessionId: string): Promise<
     `SELECT ${NOTE_COLUMNS} FROM care_notes
      WHERE session_id = $1 AND note_type = 'progress' AND status <> 'amended'
      LIMIT 1`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0] ?? null;
 }
 
 /** A client's most recent signed notes visible to the viewer (prep brief's
  *  recent-notes card). */
-export async function getRecentSignedNotes(
-  clientId: number,
-  viewer: NoteViewer,
-  limit = 3
-): Promise<CareNoteRow[]> {
+export async function getRecentSignedNotes(clientId: number, viewer: NoteViewer, limit = 3): Promise<CareNoteRow[]> {
   const visibility =
-    viewer.role === 'therapist'
-      ? ''
-      : ` AND (note_type = 'case' OR shared_with_care_team = TRUE OR author_id = $3)`;
-  const params: unknown[] =
-    viewer.role === 'therapist' ? [clientId, limit] : [clientId, limit, viewer.userId];
+    viewer.role === 'therapist' ? '' : ` AND (note_type = 'case' OR shared_with_care_team = TRUE OR author_id = $3)`;
+  const params: unknown[] = viewer.role === 'therapist' ? [clientId, limit] : [clientId, limit, viewer.userId];
   const result = await pool.query<CareNoteRow>(
     `SELECT ${NOTE_COLUMNS} FROM care_notes
      WHERE client_id = $1 AND status = 'signed'${visibility}
      ORDER BY signed_at DESC NULLS LAST, note_id DESC
      LIMIT $2`,
-    params
+    params,
   );
   return result.rows;
 }

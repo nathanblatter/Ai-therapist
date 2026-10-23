@@ -120,7 +120,9 @@ describe('requireClientAccess', () => {
   it('resolves a researcher session without a cached orgId via the users table, then compares', async () => {
     // No session.orgId: orgIdFor looks the caller up (userId 3 -> org 2),
     // then the target (42 -> org 2).
-    mocks.getOrganizationIdForUser.mockImplementation(async (id: number) => (id === 3 ? PRACTICE_ORG : id === 42 ? PRACTICE_ORG : null));
+    mocks.getOrganizationIdForUser.mockImplementation(async (id: number) =>
+      id === 3 ? PRACTICE_ORG : id === 42 ? PRACTICE_ORG : null,
+    );
     const res = await request(appAs('researcher', 3)).get('/users/42');
     expect(res.status).toBe(200);
   });
@@ -179,7 +181,10 @@ describe('requireSessionClientAccess', () => {
 
   it('passes a researcher when the session owner is in their org (one session query, no users lookup)', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'ended', user_id: 42, session_type: 'text', owner_organization_id: PRACTICE_ORG,
+      status: 'ended',
+      user_id: 42,
+      session_type: 'text',
+      owner_organization_id: PRACTICE_ORG,
     });
     const res = await request(appAs('researcher', 3, PRACTICE_ORG)).get('/sessions/s1');
     expect(res.status).toBe(200);
@@ -190,7 +195,10 @@ describe('requireSessionClientAccess', () => {
 
   it('404s (not 403) a researcher when the session owner is in another org', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'ended', user_id: 42, session_type: 'text', owner_organization_id: IRB_ORG,
+      status: 'ended',
+      user_id: 42,
+      session_type: 'text',
+      owner_organization_id: IRB_ORG,
     });
     const res = await request(appAs('researcher', 3, PRACTICE_ORG)).get('/sessions/s1');
     expect(res.status).toBe(404);
@@ -205,7 +213,10 @@ describe('requireSessionClientAccess', () => {
 
   it('404s a researcher when the owner org is unresolved (dangling owner row)', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'ended', user_id: 42, session_type: 'text', owner_organization_id: null,
+      status: 'ended',
+      user_id: 42,
+      session_type: 'text',
+      owner_organization_id: null,
     });
     const res = await request(appAs('researcher', 3, PRACTICE_ORG)).get('/sessions/s1');
     expect(res.status).toBe(404);
@@ -213,7 +224,10 @@ describe('requireSessionClientAccess', () => {
 
   it('anonymous session (null user_id): visible only to a researcher in the irb-study org', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'active', user_id: null, session_type: 'text', owner_organization_id: null,
+      status: 'active',
+      user_id: null,
+      session_type: 'text',
+      owner_organization_id: null,
     });
     const irb = await request(appAs('researcher', 3, IRB_ORG)).get('/sessions/s1');
     expect(irb.status).toBe(200);
@@ -225,7 +239,10 @@ describe('requireSessionClientAccess', () => {
   it('anonymous session fails closed when the irb-study org cannot be resolved', async () => {
     mocks.getIrbStudyOrgId.mockResolvedValue(null);
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'active', user_id: null, session_type: 'text', owner_organization_id: null,
+      status: 'active',
+      user_id: null,
+      session_type: 'text',
+      owner_organization_id: null,
     });
     const res = await request(appAs('researcher', 3, IRB_ORG)).get('/sessions/s1');
     expect(res.status).toBe(404);
@@ -252,7 +269,9 @@ describe('requireSessionClientAccess', () => {
 
   it('returns 404 for a therapist when the session has null user_id', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'active', user_id: null, session_type: 'text',
+      status: 'active',
+      user_id: null,
+      session_type: 'text',
     });
     const res = await request(appAs('therapist')).get('/sessions/s1');
     expect(res.status).toBe(404);
@@ -261,7 +280,9 @@ describe('requireSessionClientAccess', () => {
 
   it('allows a therapist assigned to the session owner', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'ended', user_id: 42, session_type: 'text',
+      status: 'ended',
+      user_id: 42,
+      session_type: 'text',
     });
     mocks.isAssigned.mockResolvedValue(true);
     const res = await request(appAs('therapist', 7)).get('/sessions/s1');
@@ -272,7 +293,9 @@ describe('requireSessionClientAccess', () => {
 
   it('returns 404 (not 403) for a therapist not assigned to the owner', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'ended', user_id: 42, session_type: 'text',
+      status: 'ended',
+      user_id: 42,
+      session_type: 'text',
     });
     mocks.isAssigned.mockResolvedValue(false);
     const res = await request(appAs('therapist')).get('/sessions/s1');
@@ -281,7 +304,9 @@ describe('requireSessionClientAccess', () => {
 
   it('coerces string user_id from the db row', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'ended', user_id: '42', session_type: 'text',
+      status: 'ended',
+      user_id: '42',
+      session_type: 'text',
     });
     mocks.isAssigned.mockResolvedValue(true);
     const res = await request(appAs('therapist', 7)).get('/sessions/s1');
@@ -291,7 +316,9 @@ describe('requireSessionClientAccess', () => {
 
   it('respects a custom param name', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({
-      status: 'ended', user_id: 42, session_type: 'text',
+      status: 'ended',
+      user_id: 42,
+      session_type: 'text',
     });
     mocks.isAssigned.mockResolvedValue(true);
     const res = await request(appAs('therapist')).get('/s/sess-9');
@@ -306,21 +333,15 @@ describe('therapistScopeId', () => {
   }
 
   it('returns the therapist userId for therapist sessions', async () => {
-    await expect(
-      therapistScopeId(fakeReq({ userId: 7, userRole: 'therapist' }))
-    ).resolves.toBe(7);
+    await expect(therapistScopeId(fakeReq({ userId: 7, userRole: 'therapist' }))).resolves.toBe(7);
   });
 
   it('returns null for researcher', async () => {
-    await expect(
-      therapistScopeId(fakeReq({ userId: 7, userRole: 'researcher' }))
-    ).resolves.toBeNull();
+    await expect(therapistScopeId(fakeReq({ userId: 7, userRole: 'researcher' }))).resolves.toBeNull();
   });
 
   it('returns null for demo and for missing sessions', async () => {
-    await expect(
-      therapistScopeId(fakeReq({ userId: 7, userRole: 'demo' }))
-    ).resolves.toBeNull();
+    await expect(therapistScopeId(fakeReq({ userId: 7, userRole: 'demo' }))).resolves.toBeNull();
     await expect(therapistScopeId(fakeReq({}))).resolves.toBeNull();
   });
 });
@@ -391,9 +412,17 @@ describe('mayCareTeamAccessSession', () => {
   const assigned = { caseworkerPolicy: 'assigned' as const };
 
   it('researcher: same-org owner passes, cross-org owner is denied (one session lookup)', async () => {
-    mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, owner_organization_id: PRACTICE_ORG });
-    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: PRACTICE_ORG })).resolves.toBe(true);
-    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(false);
+    mocks.getSessionAccessInfo.mockResolvedValue({
+      status: 'active',
+      user_id: 42,
+      owner_organization_id: PRACTICE_ORG,
+    });
+    await expect(
+      mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: PRACTICE_ORG }),
+    ).resolves.toBe(true);
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(
+      false,
+    );
     expect(mocks.getSessionAccessInfo).toHaveBeenCalledTimes(2);
     expect(mocks.getOrganizationIdForUser).not.toHaveBeenCalled();
     expect(mocks.isAssigned).not.toHaveBeenCalled();
@@ -401,29 +430,44 @@ describe('mayCareTeamAccessSession', () => {
 
   it('researcher: anonymous session is irb-study custody', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: null, owner_organization_id: null });
-    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(true);
-    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: PRACTICE_ORG })).resolves.toBe(false);
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(
+      true,
+    );
+    await expect(
+      mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: PRACTICE_ORG }),
+    ).resolves.toBe(false);
   });
 
   it('researcher: missing session or unresolved caller org is a deny', async () => {
     mocks.getSessionAccessInfo.mockResolvedValue(null);
-    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(false);
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(
+      false,
+    );
     mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, owner_organization_id: IRB_ORG });
-    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: null })).resolves.toBe(false);
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: null })).resolves.toBe(
+      false,
+    );
   });
 
   it('demo passes without any lookup; care-team branches ignore the org', async () => {
     await expect(mayCareTeamAccessSession('demo', 3, 's1', { ...assigned, callerOrgId: null })).resolves.toBe(true);
     expect(mocks.getSessionAccessInfo).not.toHaveBeenCalled();
 
-    mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, owner_organization_id: PRACTICE_ORG });
+    mocks.getSessionAccessInfo.mockResolvedValue({
+      status: 'active',
+      user_id: 42,
+      owner_organization_id: PRACTICE_ORG,
+    });
     mocks.isAssigned.mockResolvedValue(true);
-    await expect(mayCareTeamAccessSession('therapist', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(true);
+    await expect(mayCareTeamAccessSession('therapist', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(
+      true,
+    );
     expect(mocks.isAssigned).toHaveBeenCalledWith(3, 42);
-    await expect(mayCareTeamAccessSession('caseworker', 3, 's1', { caseworkerPolicy: 'deny', callerOrgId: PRACTICE_ORG })).resolves.toBe(false);
+    await expect(
+      mayCareTeamAccessSession('caseworker', 3, 's1', { caseworkerPolicy: 'deny', callerOrgId: PRACTICE_ORG }),
+    ).resolves.toBe(false);
   });
 });
-
 
 describe('requireMessageClientAccess', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -500,7 +544,13 @@ describe('requireBodyClientAccess', () => {
 
   it('401s when unauthenticated and 400s a missing client id for everyone', async () => {
     expect((await request(appAs(null)).post('/escalate').send({ client_id: 42 })).status).toBe(401);
-    expect((await request(appAs('researcher', 3, PRACTICE_ORG)).post('/escalate').send({})).status).toBe(400);
+    expect(
+      (
+        await request(appAs('researcher', 3, PRACTICE_ORG))
+          .post('/escalate')
+          .send({})
+      ).status,
+    ).toBe(400);
     expect((await request(appAs('therapist')).post('/escalate').send({ client_id: 'x' })).status).toBe(400);
     expect(mocks.getOrganizationIdForUser).not.toHaveBeenCalled();
     expect(mocks.isAssigned).not.toHaveBeenCalled();
@@ -508,7 +558,9 @@ describe('requireBodyClientAccess', () => {
 
   it('passes a researcher whose org matches the body client', async () => {
     mocks.getOrganizationIdForUser.mockResolvedValue(PRACTICE_ORG);
-    const res = await request(appAs('researcher', 3, PRACTICE_ORG)).post('/escalate').send({ client_id: 42 });
+    const res = await request(appAs('researcher', 3, PRACTICE_ORG))
+      .post('/escalate')
+      .send({ client_id: 42 });
     expect(res.status).toBe(200);
     expect(mocks.getOrganizationIdForUser).toHaveBeenCalledWith(42);
     expect(mocks.isAssigned).not.toHaveBeenCalled();
@@ -516,13 +568,17 @@ describe('requireBodyClientAccess', () => {
 
   it('404s (not 403) a researcher for a body client in another org', async () => {
     mocks.getOrganizationIdForUser.mockResolvedValue(IRB_ORG);
-    const res = await request(appAs('researcher', 3, PRACTICE_ORG)).post('/escalate').send({ client_id: 42 });
+    const res = await request(appAs('researcher', 3, PRACTICE_ORG))
+      .post('/escalate')
+      .send({ client_id: 42 });
     expect(res.status).toBe(404);
   });
 
   it('fails closed (500) for a researcher when the org lookup throws', async () => {
     mocks.getOrganizationIdForUser.mockRejectedValue(new Error('db down'));
-    const res = await request(appAs('researcher', 3, PRACTICE_ORG)).post('/escalate').send({ client_id: 42 });
+    const res = await request(appAs('researcher', 3, PRACTICE_ORG))
+      .post('/escalate')
+      .send({ client_id: 42 });
     expect(res.status).toBe(500);
   });
 
@@ -546,7 +602,11 @@ describe('requireEscalationAccess researcher org gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getEscalationById.mockResolvedValue({
-      escalation_id: 11, org_id: 5, client_id: 42, raised_by: 8, assigned_to: null,
+      escalation_id: 11,
+      org_id: 5,
+      client_id: 42,
+      raised_by: 8,
+      assigned_to: null,
     });
   });
 

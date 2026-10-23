@@ -2,15 +2,15 @@
 // 60-min window), process health, client error-beacon aggregation, and the
 // product funnel. Rendered on the Performance tab of the Analytics dashboard;
 // data comes from /admin/api/analytics/ops and /admin/api/analytics/funnel.
-import { Server, AlertTriangle, Clock, Cpu, Activity } from "react-feather";
-import useAdminFetch from "../hooks/useAdminFetch";
-import useAuth from "../hooks/useAuth";
-import TurnLatencyPanel from "./telemetry/TurnLatencyPanel";
-import Panel from "./ui/Panel";
-import StatCard from "./ui/StatCard";
+import { Server, AlertTriangle, Clock, Cpu, Activity } from 'react-feather';
+import useAdminFetch from '../hooks/useAdminFetch';
+import useAuth from '../hooks/useAuth';
+import TurnLatencyPanel from './telemetry/TurnLatencyPanel';
+import Panel from './ui/Panel';
+import StatCard from './ui/StatCard';
 // Canonical funnel shape lives in the server data layer (type-only import,
 // erased at build time).
-import type { FunnelCounts } from "../../../server/db/funnel.queries";
+import type { FunnelCounts } from '../../../server/db/funnel.queries';
 
 interface GroupErrorRates {
   count_4xx: number;
@@ -100,12 +100,16 @@ export default function OpsPanel() {
 
   if (opsLoading || funnelLoading) {
     return (
-      <Panel><p className="text-gray-500 text-center py-4">Loading ops telemetry...</p></Panel>
+      <Panel>
+        <p className="text-gray-500 text-center py-4">Loading ops telemetry...</p>
+      </Panel>
     );
   }
   if (error || !ops) {
     return (
-      <Panel><p className="text-red-600 text-center py-4">{error || 'No ops telemetry available'}</p></Panel>
+      <Panel>
+        <p className="text-red-600 text-center py-4">{error || 'No ops telemetry available'}</p>
+      </Panel>
     );
   }
 
@@ -122,13 +126,20 @@ export default function OpsPanel() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-xl font-bold flex items-center gap-2"><Server size={20} /> Ops Telemetry</h3>
+      <h3 className="text-xl font-bold flex items-center gap-2">
+        <Server size={20} /> Ops Telemetry
+      </h3>
       <p className="text-sm text-gray-600">
         In-process metrics over the last {ops.window_minutes} minutes (reset on deploy).
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <StatCard label="Request Rate" value={`${requestsPerMinute.toFixed(1)}/min`} sub={`${totalRequests} in window`} icon={Activity} />
+        <StatCard
+          label="Request Rate"
+          value={`${requestsPerMinute.toFixed(1)}/min`}
+          sub={`${totalRequests} in window`}
+          icon={Activity}
+        />
         <StatCard label="5xx Rate" value={`${rate5xx.toFixed(2)}%`} sub={`${total5xx} errors`} icon={AlertTriangle} />
         <StatCard label="API p95 Latency" value={formatMs(apiP95)} sub="participant API" icon={Clock} />
         <StatCard label="Memory (RSS)" value={`${rssMb} MB`} icon={Cpu} />
@@ -148,12 +159,14 @@ export default function OpsPanel() {
             </tr>
           </thead>
           <tbody>
-            {groups.map(group => (
+            {groups.map((group) => (
               <tr key={group} className="border-b last:border-0">
                 <td className="py-2 pr-4">{GROUP_LABELS[group] || group}</td>
                 <td className="py-2 pr-4">{ops.requests[group]}</td>
                 <td className="py-2 pr-4">{ops.errorRates[group]?.count_4xx ?? 0}</td>
-                <td className={`py-2 pr-4 ${(ops.errorRates[group]?.count_5xx ?? 0) > 0 ? 'text-red-600 font-semibold' : ''}`}>
+                <td
+                  className={`py-2 pr-4 ${(ops.errorRates[group]?.count_5xx ?? 0) > 0 ? 'text-red-600 font-semibold' : ''}`}
+                >
                   {ops.errorRates[group]?.count_5xx ?? 0}
                 </td>
                 <td className="py-2 pr-4">{formatMs(ops.latency[group]?.p50_ms ?? null)}</td>
@@ -182,7 +195,7 @@ export default function OpsPanel() {
               </tr>
             </thead>
             <tbody>
-              {ops.clientErrors.map(e => (
+              {ops.clientErrors.map((e) => (
                 <tr key={e.kind} className="border-b last:border-0">
                   <td className="py-2 pr-4 font-mono text-xs">{e.kind}</td>
                   <td className="py-2 pr-4">{e.count}</td>
@@ -198,17 +211,15 @@ export default function OpsPanel() {
         <Panel title={`OpenAI Spend (Last ${costs.days} Days)`}>
           {!costs.configured ? (
             <p className="text-sm text-gray-500 py-2">
-              Not configured. Set <code className="bg-gray-100 px-1 rounded">OPENAI_ADMIN_KEY</code> to an
-              OpenAI <em>admin</em> key (Settings &rarr; Organization &rarr; Admin keys) to show real spend
-              here. Admin keys cannot make model calls, and this key is only ever used server-side.
+              Not configured. Set <code className="bg-gray-100 px-1 rounded">OPENAI_ADMIN_KEY</code> to an OpenAI{' '}
+              <em>admin</em> key (Settings &rarr; Organization &rarr; Admin keys) to show real spend here. Admin keys
+              cannot make model calls, and this key is only ever used server-side.
             </p>
           ) : (
             <>
               <div className="flex items-baseline gap-3 mb-4">
                 <span className="text-3xl font-semibold text-gray-900">{formatUsd(costs.totalUsd)}</span>
-                <span className="text-sm text-gray-500">
-                  total &middot; the most recent day may be incomplete
-                </span>
+                <span className="text-sm text-gray-500">total &middot; the most recent day may be incomplete</span>
               </div>
               {costs.byLineItem.length === 0 ? (
                 <p className="text-gray-500 text-sm py-2">No spend recorded in this window.</p>
@@ -222,7 +233,7 @@ export default function OpsPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {costs.byLineItem.map(item => (
+                    {costs.byLineItem.map((item) => (
                       <tr key={item.lineItem} className="border-b last:border-0">
                         <td className="py-1 text-gray-700">{item.lineItem}</td>
                         <td className="py-1 text-right text-gray-900">{formatUsd(item.amountUsd)}</td>
@@ -248,14 +259,16 @@ export default function OpsPanel() {
             <p className="text-gray-500 text-sm py-2">No sessions in this window.</p>
           ) : (
             <div className="space-y-2">
-              {FUNNEL_STAGES.map(stage => {
+              {FUNNEL_STAGES.map((stage) => {
                 const count = funnelCounts[stage.key];
                 const pct = funnelBase > 0 ? (count / funnelBase) * 100 : 0;
                 return (
                   <div key={stage.key}>
                     <div className="flex justify-between text-sm mb-1">
                       <span className="text-gray-700">{stage.label}</span>
-                      <span className="text-gray-600">{count} ({pct.toFixed(0)}%)</span>
+                      <span className="text-gray-600">
+                        {count} ({pct.toFixed(0)}%)
+                      </span>
                     </div>
                     <div className="w-full bg-gray-100 rounded h-4">
                       <div

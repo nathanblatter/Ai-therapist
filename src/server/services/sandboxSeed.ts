@@ -140,11 +140,11 @@ export async function seedSandboxCaseload(input: SeedSandboxInput): Promise<Seed
 
     // --- pick personas: crisis + brand-new always, plus 4-7 others --------
     const mandatory = SANDBOX_PERSONAS.filter(
-      (p) => p.handle === CRISIS_PERSONA_HANDLE || p.handle === BRAND_NEW_PERSONA_HANDLE
+      (p) => p.handle === CRISIS_PERSONA_HANDLE || p.handle === BRAND_NEW_PERSONA_HANDLE,
     );
     const rest = shuffle(
       rng,
-      SANDBOX_PERSONAS.filter((p) => !mandatory.includes(p))
+      SANDBOX_PERSONAS.filter((p) => !mandatory.includes(p)),
     );
     const personas = [...mandatory, ...rest.slice(0, randInt(rng, [4, 7]))];
 
@@ -155,7 +155,7 @@ export async function seedSandboxCaseload(input: SeedSandboxInput): Promise<Seed
     const counterpartRes = await q(
       `INSERT INTO users (username, password, role, organization_id, is_sandbox, created_at)
        VALUES ($1, $2, $3, $4, TRUE, $5) RETURNING userid`,
-      [counterpartName, noLoginHash, counterpartRole, input.orgId, new Date(Date.now() - 80 * DAY_MS)]
+      [counterpartName, noLoginHash, counterpartRole, input.orgId, new Date(Date.now() - 80 * DAY_MS)],
     );
     const counterpartId: number = counterpartRes.rows[0].userid;
 
@@ -178,7 +178,7 @@ export async function seedSandboxCaseload(input: SeedSandboxInput): Promise<Seed
         await q(
           `INSERT INTO therapist_clients (therapist_id, client_id, assigned_by, member_role)
            VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-          [counterpartId, ids.clientId, input.ownerId, counterpartRole]
+          [counterpartId, ids.clientId, input.ownerId, counterpartRole],
         );
       }
     }
@@ -210,7 +210,7 @@ export async function seedSandboxCaseload(input: SeedSandboxInput): Promise<Seed
         crisisEventId,
         crisisSessionId,
         new Date(Date.now() - 1 * DAY_MS),
-      ]
+      ],
     );
     const escalationId: number = escalationRes.rows[0].escalation_id;
     await q(
@@ -222,7 +222,7 @@ export async function seedSandboxCaseload(input: SeedSandboxInput): Promise<Seed
         input.ownerRole === 'therapist' ? counterpartName : input.ownerUsername,
         JSON.stringify({ urgency: 'urgent' }),
         new Date(Date.now() - 1 * DAY_MS),
-      ]
+      ],
     );
 
     // --- work items: queue is populated for the owner on day one ----------
@@ -242,7 +242,7 @@ export async function seedSandboxCaseload(input: SeedSandboxInput): Promise<Seed
           JSON.stringify({ severity: 'medium', origin: 'session' }),
           String(crisisEventId),
           new Date(Date.now() - 2 * DAY_MS),
-        ]
+        ],
       );
     }
     await q(
@@ -260,13 +260,13 @@ export async function seedSandboxCaseload(input: SeedSandboxInput): Promise<Seed
         JSON.stringify({ urgency: 'urgent' }),
         String(escalationId),
         new Date(Date.now() - 1 * DAY_MS),
-      ]
+      ],
     );
 
     await client.query('COMMIT');
     log.info(
       { orgId: input.orgId, clients: clientIds.length, sessions: sessionCount, rows: rowCount },
-      'sandbox caseload seeded'
+      'sandbox caseload seeded',
     );
     return {
       clientIds,
@@ -288,7 +288,10 @@ export async function seedSandboxCaseload(input: SeedSandboxInput): Promise<Seed
 // Per-client seeding
 // ---------------------------------------------------------------------------
 
-type Q = (text: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>>; rowCount: number | null }>;
+type Q = (
+  text: string,
+  params?: unknown[],
+) => Promise<{ rows: Array<Record<string, unknown>>; rowCount: number | null }>;
 
 interface SeedClientResult {
   clientId: number;
@@ -303,7 +306,7 @@ async function seedClient(
   input: SeedSandboxInput,
   persona: SandboxPersona,
   clientIndex: number,
-  noLoginHash: string
+  noLoginHash: string,
 ): Promise<SeedClientResult> {
   const weeks = randInt(rng, persona.weeks);
   const sessionsN = randInt(rng, persona.sessions);
@@ -312,14 +315,14 @@ async function seedClient(
   const userRes = await q(
     `INSERT INTO users (username, password, role, organization_id, is_sandbox, created_at)
      VALUES ($1, $2, $3, $4, TRUE, $5) RETURNING userid`,
-    [username, noLoginHash, 'participant', input.orgId, new Date(Date.now() - (weeks * 7 + 3) * DAY_MS)]
+    [username, noLoginHash, 'participant', input.orgId, new Date(Date.now() - (weeks * 7 + 3) * DAY_MS)],
   );
   const clientId = userRes.rows[0].userid as number;
 
   await q(
     `INSERT INTO therapist_clients (therapist_id, client_id, assigned_by, member_role)
      VALUES ($1, $2, $1, $3) ON CONFLICT DO NOTHING`,
-    [input.ownerId, clientId, input.ownerRole]
+    [input.ownerId, clientId, input.ownerRole],
   );
 
   // --- sessions spread over the history window ---------------------------
@@ -327,10 +330,7 @@ async function seedClient(
   const sessionIds: string[] = [];
   const sessionDates: Date[] = [];
   for (let i = 0; i < sessionsN; i++) {
-    const daysAgo =
-      sessionsN === 1
-        ? 2
-        : Math.round(spanDays - (i * spanDays) / sessionsN - rng() * 2) + 1;
+    const daysAgo = sessionsN === 1 ? 2 : Math.round(spanDays - (i * spanDays) / sessionsN - rng() * 2) + 1;
     const startedAt = new Date(Date.now() - daysAgo * DAY_MS + (9 + Math.floor(rng() * 9)) * 3600_000);
     const durationMin = 25 + Math.floor(rng() * 25);
     const endedAt = new Date(startedAt.getTime() + durationMin * 60_000);
@@ -350,7 +350,7 @@ async function seedClient(
         JSON.stringify({ mood, topic: pick(rng, CHECKIN_TOPIC_POOL), goal: pick(rng, CHECKIN_GOAL_POOL) }),
         startedAt,
         endedAt,
-      ]
+      ],
     );
     sessionIds.push(sessionId);
     sessionDates.push(startedAt);
@@ -384,7 +384,7 @@ async function seedClient(
         reviewed ? input.ownerUsername : null,
         reviewed ? new Date(sessionDates[i].getTime() + DAY_MS) : null,
         new Date(sessionDates[i].getTime() + 45 * 60_000),
-      ]
+      ],
     );
   }
 
@@ -399,12 +399,7 @@ async function seedClient(
       await q(
         `INSERT INTO messages (session_id, role, message_type, content, content_redacted, created_at)
          VALUES ($1, $2, 'text', $3, $3, $4)`,
-        [
-          sessionIds[sessionIdx],
-          turn.role,
-          turn.text,
-          new Date(sessionDates[sessionIdx].getTime() + (t + 1) * 90_000),
-        ]
+        [sessionIds[sessionIdx], turn.role, turn.text, new Date(sessionDates[sessionIdx].getTime() + (t + 1) * 90_000)],
       );
     }
   }
@@ -425,7 +420,7 @@ async function seedClient(
           JSON.stringify({ item1: a, item2: score - a }),
           score,
           new Date(sessionDates[i].getTime() + 5 * 60_000),
-        ]
+        ],
       );
     }
   }
@@ -451,7 +446,7 @@ async function seedClient(
             severity,
             JSON.stringify(RISK_FACTOR_POOLS[factorKey]),
             new Date(sessionDates[i].getTime() + minute * 60_000),
-          ]
+          ],
         );
       }
     } else if (rng() < 0.7) {
@@ -463,7 +458,7 @@ async function seedClient(
           3 + Math.floor(rng() * 12),
           JSON.stringify(RISK_FACTOR_POOLS.quiet),
           new Date(sessionDates[i].getTime() + 10 * 60_000),
-        ]
+        ],
       );
     }
   }
@@ -477,27 +472,35 @@ async function seedClient(
     await q(
       `INSERT INTO crisis_events (session_id, event_type, severity, risk_score, triggered_by, trigger_method, risk_factors, created_at)
        VALUES ($1, 'flagged', 'medium', 46, 'system', 'auto', $2, $3)`,
-      [crisisSession, JSON.stringify(RISK_FACTOR_POOLS.passive), new Date(base + 9 * 60_000)]
+      [crisisSession, JSON.stringify(RISK_FACTOR_POOLS.passive), new Date(base + 9 * 60_000)],
     );
     await q(
       `INSERT INTO crisis_events (session_id, event_type, severity, previous_severity, risk_score, previous_risk_score, triggered_by, trigger_method, risk_factors, created_at)
        VALUES ($1, 'severity_changed', 'high', 'medium', 82, 46, 'system', 'auto', $2, $3)`,
-      [crisisSession, JSON.stringify(RISK_FACTOR_POOLS.active), new Date(base + 14 * 60_000)]
+      [crisisSession, JSON.stringify(RISK_FACTOR_POOLS.active), new Date(base + 14 * 60_000)],
     );
     await q(
       `INSERT INTO crisis_events (session_id, event_type, severity, previous_severity, risk_score, previous_risk_score, triggered_by, trigger_method, notes, created_at)
        VALUES ($1, 'unflagged', 'low', 'high', 20, 82, $2, 'manual', 'Safety plan built in session; sister engaged; care team notified. Monitoring continues.', $3)`,
-      [crisisSession, input.ownerUsername, new Date(base + 40 * 60_000)]
+      [crisisSession, input.ownerUsername, new Date(base + 40 * 60_000)],
     );
     await q(
       `INSERT INTO intervention_actions (session_id, action_type, risk_score, action_details, performed_by, performed_at, outcome)
        VALUES ($1, 'medium_risk_alert', 46, $2, 'system', $3, 'care_team_notified')`,
-      [crisisSession, JSON.stringify({ note: 'Care team notified of passive ideation disclosure.' }), new Date(base + 10 * 60_000)]
+      [
+        crisisSession,
+        JSON.stringify({ note: 'Care team notified of passive ideation disclosure.' }),
+        new Date(base + 10 * 60_000),
+      ],
     );
     await q(
       `INSERT INTO intervention_actions (session_id, action_type, risk_score, action_details, performed_by, performed_at, outcome)
        VALUES ($1, 'clinical_review', 82, $2, 'system', $3, 'safety_plan_created')`,
-      [crisisSession, JSON.stringify({ note: 'Safety plan co-built in session; 988 shared.' }), new Date(base + 16 * 60_000)]
+      [
+        crisisSession,
+        JSON.stringify({ note: 'Safety plan co-built in session; 988 shared.' }),
+        new Date(base + 16 * 60_000),
+      ],
     );
 
     // Recent UNRESOLVED flag on the latest session: the open item the queue
@@ -508,7 +511,7 @@ async function seedClient(
       `INSERT INTO crisis_events (session_id, event_type, severity, risk_score, triggered_by, trigger_method, risk_factors, notes, created_at)
        VALUES ($1, 'flagged', 'medium', 42, 'system', 'auto', $2, 'Sleep disruption persists post-anniversary; monitoring.', $3)
        RETURNING event_id`,
-      [sessionIds[latestIdx], JSON.stringify(RISK_FACTOR_POOLS.passive), new Date(latestBase + 12 * 60_000)]
+      [sessionIds[latestIdx], JSON.stringify(RISK_FACTOR_POOLS.passive), new Date(latestBase + 12 * 60_000)],
     );
     openCrisisEventId = openRes.rows[0].event_id as number;
     await q(
@@ -516,7 +519,7 @@ async function seedClient(
        SET crisis_flagged = TRUE, crisis_severity = 'medium', crisis_risk_score = 42,
            crisis_flagged_at = $2, crisis_flagged_by = 'system'
        WHERE session_id = $1`,
-      [sessionIds[latestIdx], new Date(latestBase + 12 * 60_000)]
+      [sessionIds[latestIdx], new Date(latestBase + 12 * 60_000)],
     );
 
     // Safety plan from the crisis session.
@@ -524,7 +527,7 @@ async function seedClient(
       await q(
         `INSERT INTO safety_plans (session_id, user_id, plan, created_at)
          VALUES ($1, $2, $3, $4)`,
-        [crisisSession, clientId, JSON.stringify(persona.safetyPlan), new Date(base + 20 * 60_000)]
+        [crisisSession, clientId, JSON.stringify(persona.safetyPlan), new Date(base + 20 * 60_000)],
       );
     }
   }
@@ -547,7 +550,7 @@ async function seedClient(
         new Date(sessionDates[assignedIdx].getTime() + 50 * 60_000),
         completed ? new Date(sessionDates[assignedIdx].getTime() + 3 * DAY_MS) : null,
         completed ? 'Done most days. Easier than expected.' : null,
-      ]
+      ],
     );
     if (practice.kind === 'worksheet') {
       await q(
@@ -569,7 +572,7 @@ async function seedClient(
           }),
           new Date(sessionDates[assignedIdx].getTime() + 50 * 60_000),
           new Date(sessionDates[assignedIdx].getTime() + 2 * DAY_MS),
-        ]
+        ],
       );
     }
   }
@@ -634,7 +637,11 @@ async function seedClient(
         caseNoteKind: persona.crisis && n === 0 ? 'safety_check' : pick(rng, kinds),
         sessionId: null,
         seedSource: null,
-        content: { narrative, contact_method: pick(rng, ['phone', 'in_app_message', 'in_person']), outcome: 'completed' },
+        content: {
+          narrative,
+          contact_method: pick(rng, ['phone', 'in_app_message', 'in_person']),
+          outcome: 'completed',
+        },
         signed: n < persona.caseNotes.length - 1 || rng() < 0.5,
         at: new Date(Date.now() - (persona.caseNotes.length - n) * 6 * DAY_MS),
       });
@@ -664,7 +671,7 @@ async function insertNote(
     content: Record<string, unknown>;
     signed: boolean;
     at: Date;
-  }
+  },
 ): Promise<void> {
   const inserted = await q(
     `INSERT INTO care_notes
@@ -685,7 +692,7 @@ async function insertNote(
       note.seedSource ? 'sandbox-fixture' : null,
       JSON.stringify(note.content),
       note.at,
-    ]
+    ],
   );
   if (!note.signed) return;
   const noteId = inserted.rows[0].note_id as number;
@@ -706,6 +713,6 @@ async function insertNote(
         content: note.content,
         signed_at: signedAt,
       }),
-    ]
+    ],
   );
 }

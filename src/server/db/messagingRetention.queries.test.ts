@@ -47,7 +47,7 @@ describe('deleteAgedThreadMessages', () => {
     const result = await deleteAgedThreadMessages(DELETE_INPUT);
 
     expect(result).toEqual({ messagesDeleted: 2, crisisEventsDeleted: 1 });
-    const sqls = clientQueryMock.mock.calls.map(c => String(c[0]));
+    const sqls = clientQueryMock.mock.calls.map((c) => String(c[0]));
     expect(sqls[0]).toBe('BEGIN');
     // Aged selection is retention-windowed and joins for sandbox exclusion.
     expect(sqls[1]).toContain(`now() - ($1 || ' days')::interval`);
@@ -84,7 +84,7 @@ describe('deleteAgedThreadMessages', () => {
     const result = await deleteAgedThreadMessages(DELETE_INPUT);
 
     expect(result).toEqual({ messagesDeleted: 0, crisisEventsDeleted: 0 });
-    const sqls = clientQueryMock.mock.calls.map(c => String(c[0]));
+    const sqls = clientQueryMock.mock.calls.map((c) => String(c[0]));
     expect(sqls).toEqual(['BEGIN', expect.stringContaining('SELECT tm.message_id'), 'COMMIT']);
   });
 
@@ -99,7 +99,7 @@ describe('deleteAgedThreadMessages', () => {
       .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
 
     await expect(deleteAgedThreadMessages(DELETE_INPUT)).rejects.toThrow('CHECK violation');
-    const sqls = clientQueryMock.mock.calls.map(c => String(c[0]));
+    const sqls = clientQueryMock.mock.calls.map((c) => String(c[0]));
     expect(sqls[sqls.length - 1]).toBe('ROLLBACK');
     expect(releaseMock).toHaveBeenCalled();
   });
@@ -138,14 +138,18 @@ describe('wipeAgedThreadMessageBodies', () => {
 describe('getMessageHistoryForClient', () => {
   it('is scoped by client_id and exposes participant-tier fields only (no risk scores)', async () => {
     queryMock.mockResolvedValueOnce({
-      rows: [{
-        thread_id: 1,
-        clinician_role: 'caseworker',
-        status: 'active',
-        created_at: '2026-08-01',
-        last_message_at: '2026-08-02',
-        messages: [{ message_id: 5, sender_role: 'participant', body: 'hi', created_at: '2026-08-02', flagged: false }],
-      }],
+      rows: [
+        {
+          thread_id: 1,
+          clinician_role: 'caseworker',
+          status: 'active',
+          created_at: '2026-08-01',
+          last_message_at: '2026-08-02',
+          messages: [
+            { message_id: 5, sender_role: 'participant', body: 'hi', created_at: '2026-08-02', flagged: false },
+          ],
+        },
+      ],
     });
 
     const threads = await getMessageHistoryForClient(42);
