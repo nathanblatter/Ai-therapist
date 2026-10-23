@@ -162,6 +162,50 @@ codebook labels "treat as identifiable data." Neither is in the default export.
 
 ---
 
+## 7. Cloud account boundary (production, AWS)
+
+Verified read-only against the live account on 2026-10-22 (ai-therapist-133).
+Production runs in AWS account `104181502887` (us-west-1), which is **shared
+with other lab projects**, so the boundary is a mix of what this project
+controls and what the account owner controls.
+
+**Where participant data physically lives**
+
+| Store | Service | Encryption at rest | Network exposure |
+| --- | --- | --- | --- |
+| Database `ai_therapist_prod` | RDS PostgreSQL instance `ai-therapist` | Yes (`StorageEncrypted`), 14-day automated backups | Port 5432 reachable only from the prod app host (its security group and elastic IP) and one fixed home IP used for manual migrations. The instance is flagged publicly accessible, so this security-group rule is the whole boundary. |
+| Session audio | S3 bucket `ai-therapist-recordings-prod` | Yes (SSE-S3, AES-256 default) | Public access blocked at the bucket level |
+| Application host | EC2 instance (docker compose, Caddy TLS) | Volume-level | 80/443 public (the app); SSH 22 is open to the world, key-only (`~/.ssh/ai-therapist-prod.pem`) |
+| Secrets | `/opt/ai-therapist/.env` on the host (mode 600) and the RDS master credential in Secrets Manager | n/a | Host login or Secrets Manager read |
+
+**Who can reach the raw data (outside the application's role model)**
+
+- The application itself: an IAM user `ai-therapist-prod-app` whose keys live
+  only in the host `.env` (object storage access).
+- Nathan Blatter (study developer): IAM user `nathan` in the `AITherapy`
+  group (EC2, RDS, Secrets Manager rights) and holder of the SSH key and the
+  home IP in the database rule. This is the custodian role.
+- **Account-level over-grant (disclosed):** the account also has an
+  `EC2-BastionHost-ForDBAndLambda` group carrying `IAMFullAccess` and
+  `AmazonS3FullAccess`, with members `nathan` and `ec2user-levi` (another lab
+  project). Anyone in that group can, in principle, read the recordings bucket
+  and grant themselves database access. Three further IAM users exist for other
+  lab projects (`semwise-admin`, `ta-lab-admin`, `ec2user-levi`) with no
+  direct grant to this project's resources. Trimming that group, enabling RDS
+  deletion protection, and closing SSH to the fixed IP only are **requested
+  changes owned by the account owner**, not something the study team can do
+  unilaterally; they are tracked in Flightdeck and this section is updated
+  when they land.
+- Nobody else. There is no console access for the PI or research assistants;
+  all study-staff access goes through the application roles in section 1 and is
+  audited per section 6.
+
+**Transit:** browser to app over TLS (Caddy, Let's Encrypt); app to RDS over
+TLS (`sslmode=require`); app to S3 over HTTPS; crisis pages travel over a
+private Tailscale network to the on-call bridge.
+
+---
+
 ## Known limitations (disclosed for accuracy)
 
 - Object storage relies on storage-/transport-level encryption; no additional
