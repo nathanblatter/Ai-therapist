@@ -15,6 +15,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 //      the participant's turns throughout.
 //   7. Failure handling: an upstream drop fails closed; a browser that never
 //      attaches or drops without ending gets the session ended.
+//   8. Reconnection (ai-therapist-245): a dropped browser socket re-attaches
+//      to the live upstream inside the window; a dropped upstream is
+//      re-dialled with xAI's conversation id, replays nothing, keeps usage
+//      assigned, queues steers, and fails closed past the window.
 //
 // Both sockets (xAI upstream and the browser client) are EventEmitter fakes.
 
@@ -111,7 +115,7 @@ async function flush(): Promise<void> {
 }
 
 /** Register, attach a fake browser socket, and bring the upstream to ready. */
-async function bringUp(opts: { openingPrompt?: string | null } = {}): Promise<{
+async function bringUp(opts: { openingPrompt?: string | null; reconnectWindowMs?: number; conversationId?: string | null } = {}): Promise<{
   client: InstanceType<typeof FakeWs>; upstream: InstanceType<typeof FakeWs>;
 }> {
   grokVoiceManager.registerPending(SESSION, {
@@ -119,6 +123,7 @@ async function bringUp(opts: { openingPrompt?: string | null } = {}): Promise<{
     apiKey: 'xai-test',
     sessionConfig: SESSION_CONFIG,
     openingPrompt: opts.openingPrompt === undefined ? 'OPENING' : opts.openingPrompt,
+    reconnectWindowMs: opts.reconnectWindowMs,
   });
   const client = new FakeWs();
   await grokVoiceManager.attachClient(SESSION, client as unknown as import('ws').default);
@@ -126,9 +131,21 @@ async function bringUp(opts: { openingPrompt?: string | null } = {}): Promise<{
   upstream.emit('message', Buffer.from(JSON.stringify({
     type: 'session.created', session: { id: 'x', model: 'grok-voice-3.0' },
   })));
+  if (opts.conversationId !== null) {
+    upstream.emit('message', Buffer.from(JSON.stringify({
+      type: 'conversation.created', conversation: { id: opts.conversationId ?? 'conv_1' },
+    })));
+  }
   upstream.emit('message', Buffer.from(JSON.stringify({ type: 'session.updated', session: SESSION_CONFIG })));
   await flush();
   return { client, upstream };
+}
+
+/** sideband:status-update payloads broadcast so far, in order. */
+function statusUpdates(): Array<{ status: string }> {
+  return broadcastMock.mock.calls
+    .filter((c: unknown[]) => c[1] === 'sideband:status-update')
+    .map((c: unknown[]) => c[2] as { status: string });
 }
 
 function fire(upstream: InstanceType<typeof FakeWs>, event: Record<string, unknown>): void {
@@ -477,8 +494,8 @@ describe('control surface', () => {
 });
 
 describe('failure handling', () => {
-  it('fails closed when xAI drops the socket mid-session', async () => {
-    const { client, upstream } = await bringUp();
+  it('fails closed when xAI drops the socket mid-session and there is no conversation id to resume', async () => {
+    const { client, upstream } = await bringUp({ conversationId: null });
     fire(upstream, { type: 'response.done', response: { id: 'r1' }, usage: { billable_audio_seconds: 30 } });
     await flush();
     upstream.emit('close', 1006, Buffer.from(''));
@@ -492,8 +509,8 @@ describe('failure handling', () => {
     expect(grokVoiceManager.owns(SESSION)).toBe(false);
   });
 
-  it('stops billing the moment the browser drops, then ends the session after the grace period', async () => {
-    const { client, upstream } = await bringUp();
+  it('with reconnection disabled, stops billing the moment the browser drops, then ends the session after the grace period', async () => {
+    const { client, upstream } = await bringUp({ reconnectWindowMs: 0 });
     client.emit('close');
     expect(upstream.close).toHaveBeenCalledWith(1000, 'client disconnected');
     expect(serverEndSessionMock).not.toHaveBeenCalled();
@@ -636,5 +653,243 @@ describe('refusal loops (ai-therapist-255)', () => {
     }
     await flush();
     expect(systemInjections(upstream)).toHaveLength(0);
+  });
+});
+
+describe('reconnection (ai-therapist-245)', () => {
+  it('keeps the upstream alive when the browser drops, re-attaches the next socket in place, and emits one status change per transition', async () => {
+    const { client, upstream } = await bringUp({ reconnectWindowMs: 60_000 });
+    const sentBefore = sent(upstream).length;
+    broadcastMock.mockClear();
+
+    client.emit('close');
+    await flush();
+    expect(upstream.close).not.toHaveBeenCalled();
+    expect(statusUpdates().map(s => s.status)).toEqual(['client_reconnecting']);
+
+    // Assistant audio in the gap is dropped; its transcript is still persisted.
+    fire(upstream, { type: 'response.output_audio.delta', delta: Buffer.from([1, 2, 3, 4]).toString('base64') });
+    fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'Still here.' });
+    fire(upstream, { type: 'response.output_audio_transcript.done', item_id: 'a1', transcript: 'Still here.' });
+    await flush();
+    expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({ role: 'assistant', content: 'Still here.' })]);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    const client2 = new FakeWs();
+    await grokVoiceManager.attachClient(SESSION, client2 as unknown as import('ws').default);
+    await flush();
+
+    // No second xAI dial, no second session.update, no second opening line.
+    expect(upstreams).toHaveLength(1);
+    expect(sent(upstream)).toHaveLength(sentBefore);
+    expect(sent(client2)).toContainEqual({ type: 'ready', model: 'grok-voice-3.0', resumed: true });
+    expect(statusUpdates().map(s => s.status)).toEqual(['client_reconnecting', 'connected']);
+
+    // Audio flows on the new socket; the window timer is gone.
+    client2.emit('message', Buffer.from([0, 1, 0, 1]), true);
+    expect(sent(upstream).at(-1)).toEqual({ type: 'input_audio_buffer.append', audio: Buffer.from([0, 1, 0, 1]).toString('base64') });
+    fire(upstream, { type: 'response.output_audio.delta', delta: Buffer.from([9, 9]).toString('base64') });
+    expect(binarySent(client2)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(serverEndSessionMock).not.toHaveBeenCalled();
+    expect(grokVoiceManager.getLinkStats(SESSION)).toMatchObject({ clientReconnects: 1, upstreamResumes: 0 });
+  });
+
+  it('ends the session when the browser does not come back inside the window, and refuses a later attach as ended', async () => {
+    const { client } = await bringUp({ reconnectWindowMs: 30_000 });
+    client.emit('close');
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(serverEndSessionMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(serverEndSessionMock).toHaveBeenCalledWith(SESSION, expect.objectContaining({ reason: 'client_disconnected' }));
+    expect(grokVoiceManager.owns(SESSION)).toBe(false);
+
+    const late = new FakeWs();
+    await grokVoiceManager.attachClient(SESSION, late as unknown as import('ws').default);
+    expect(late.close).toHaveBeenCalledWith(4410, 'session ended');
+    expect(upstreams).toHaveLength(1);
+  });
+
+  it('a participant end after a browser drop still closes upstream at once (no window)', async () => {
+    const { client, upstream } = await bringUp({ reconnectWindowMs: 60_000 });
+    client.emit('message', Buffer.from(JSON.stringify({ type: 'end' })), false);
+    expect(upstream.close).toHaveBeenCalledWith(1000, 'participant ended');
+    client.emit('close');
+    await flush();
+    expect(statusUpdates().map(s => s.status)).not.toContain('client_reconnecting');
+  });
+
+  it('re-dials xAI with the conversation id when the upstream drops, replays nothing, keeps usage assigned, and delivers queued steers', async () => {
+    const { client, upstream } = await bringUp({ reconnectWindowMs: 60_000, conversationId: 'conv_abc' });
+    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'I feel low.' });
+    fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'I hear you.' });
+    fire(upstream, { type: 'response.output_audio_transcript.done', item_id: 'a1', transcript: 'I hear you.' });
+    fire(upstream, { type: 'response.done', response: { id: 'r1' }, usage: { billable_audio_seconds: 40 } });
+    await flush();
+    broadcastMock.mockClear();
+    insertMessagesBatchMock.mockClear();
+    runCrisisPipelineMock.mockClear();
+
+    upstream.emit('close', 1006, Buffer.from(''));
+    await flush();
+
+    // Not final: a resume is in progress.
+    expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-3.0', 40, { finalized: false });
+    expect(serverEndSessionMock).not.toHaveBeenCalled();
+    expect(sent(client)).toContainEqual({ type: 'link', state: 'reconnecting' });
+    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting']);
+    expect(grokVoiceManager.isConnected(SESSION)).toBe(false);
+
+    // A crisis steer arriving in the gap is queued, not lost.
+    await expect(grokVoiceManager.tryInject(SESSION, 'system', 'STEER', true)).resolves.toBe(true);
+
+    await flush();
+    expect(upstreams).toHaveLength(2);
+    const upstream2 = upstreams[1];
+    expect(upstream2.url).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-latest&conversation_id=conv_abc');
+    expect(sent(upstream2)[0]).toEqual({ type: 'session.update', session: SESSION_CONFIG });
+
+    fire(upstream2, { type: 'session.created', session: { id: 'y', model: 'grok-voice-3.0' } });
+    fire(upstream2, { type: 'conversation.created', conversation: { id: 'conv_abc' } });
+    // xAI echoes the cached turns back as conversation.item.created (before
+    // session.updated, as observed live on 2026-10-23): ignored, counted.
+    fire(upstream2, { type: 'conversation.item.created', item: { id: 'u1', type: 'message', role: 'user' } });
+    fire(upstream2, { type: 'conversation.item.created', item: { id: 'a1', type: 'message', role: 'assistant' } });
+    fire(upstream2, { type: 'session.updated', session: SESSION_CONFIG });
+    // A re-reported transcript for an item already persisted is ignored too.
+    fire(upstream2, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'I feel low.' });
+    await flush();
+
+    expect(sent(client)).toContainEqual({ type: 'link', state: 'restored' });
+    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting', 'connected']);
+    expect(insertMessagesBatchMock).not.toHaveBeenCalled();
+    expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+    // No second opening line; the queued steer went out on the new leg.
+    const items = sent(upstream2).filter(m => m.type === 'conversation.item.create');
+    expect(items).toHaveLength(1);
+    expect(items[0].item.content[0].text).toBe('STEER');
+    expect(sent(upstream2).filter(m => m.type === 'response.create')).toHaveLength(1);
+    expect(grokVoiceManager.isConnected(SESSION)).toBe(true);
+    expect(grokVoiceManager.getLinkStats(SESSION)).toMatchObject({ conversationId: 'conv_abc', upstreamResumes: 1, replayedItems: 2 });
+
+    // New turns on the resumed leg are persisted and scored as usual.
+    fire(upstream2, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u2', transcript: 'Still low.' });
+    await flush();
+    expect(insertMessagesBatchMock).toHaveBeenCalledTimes(1);
+    expect(runCrisisPipelineMock).toHaveBeenCalledWith({ sessionId: SESSION, messageId: 42, content: 'Still low.' }, 'realtime');
+
+    // Usage: xAI restarted its counter for the new socket (5 < 40), so the
+    // previous leg's 40 is the offset and this leg's figure is assigned on
+    // top of it; a later 12 on the same leg makes 52, never 40 + 5 + 12.
+    fire(upstream2, { type: 'response.done', response: { id: 'r2' }, usage: { billable_audio_seconds: 5 } });
+    await flush();
+    expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-3.0', 45, { finalized: false });
+    fire(upstream2, { type: 'response.done', response: { id: 'r3' }, usage: { billable_audio_seconds: 12 } });
+    await flush();
+    expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-3.0', 52, { finalized: false });
+    expect(grokVoiceManager.getUsageSeconds(SESSION)).toBe(52);
+
+    // The stale first socket's late events are ignored entirely.
+    fire(upstream, { type: 'response.done', response: { id: 'r9' }, usage: { billable_audio_seconds: 999 } });
+    await flush();
+    expect(grokVoiceManager.getUsageSeconds(SESSION)).toBe(52);
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(serverEndSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('assigns the figure directly when xAI carries its cumulative counter across the resume', async () => {
+    const { upstream } = await bringUp({ reconnectWindowMs: 60_000 });
+    fire(upstream, { type: 'response.done', response: { id: 'r1' }, usage: { billable_audio_seconds: 40 } });
+    await flush();
+    upstream.emit('close', 1006, Buffer.from(''));
+    await flush();
+    const upstream2 = upstreams[1];
+    fire(upstream2, { type: 'session.updated', session: SESSION_CONFIG });
+    fire(upstream2, { type: 'response.done', response: { id: 'r2' }, usage: { billable_audio_seconds: 47 } });
+    await flush();
+    expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-3.0', 47, { finalized: false });
+  });
+
+  it('asks the model to pick up a reply the drop cut off', async () => {
+    const { upstream } = await bringUp({ reconnectWindowMs: 60_000 });
+    fire(upstream, { type: 'response.created' });
+    fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'Let me say' });
+    await flush();
+    upstream.emit('close', 1006, Buffer.from(''));
+    await flush();
+    expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({ role: 'assistant', content: 'Let me say' })]);
+    const upstream2 = upstreams[1];
+    fire(upstream2, { type: 'session.updated', session: SESSION_CONFIG });
+    await flush();
+    const items = sent(upstream2).filter(m => m.type === 'conversation.item.create');
+    expect(items).toHaveLength(1);
+    expect(items[0].item.role).toBe('system');
+    expect(items[0].item.content[0].text).toMatch(/cut off/);
+    expect(sent(upstream2).filter(m => m.type === 'response.create')).toHaveLength(1);
+  });
+
+  it('retries the re-dial with backoff, and fails closed when the window elapses with no upstream', async () => {
+    const { client, upstream } = await bringUp({ reconnectWindowMs: 30_000 });
+    fire(upstream, { type: 'response.done', response: { id: 'r1' }, usage: { billable_audio_seconds: 20 } });
+    await flush();
+    broadcastMock.mockClear();
+    upstream.emit('close', 1006, Buffer.from(''));
+    await flush();
+    expect(upstreams).toHaveLength(2);
+    // The re-dial attempt itself dies before opening.
+    upstreams[1].emit('close', 1006, Buffer.from(''));
+    await flush();
+    expect(upstreams).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(upstreams).toHaveLength(3);
+    upstreams[2].emit('close', 1006, Buffer.from(''));
+    await vi.advanceTimersByTimeAsync(2_100);
+    expect(upstreams).toHaveLength(4);
+    expect(serverEndSessionMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(recordLiveUsageMock).toHaveBeenCalledWith(SESSION, 'grok-voice-3.0', 20, { finalized: true, closeReason: 'connection_lost' });
+    expect(sent(client)).toContainEqual({ type: 'closed', reason: 'upstream_lost' });
+    expect(serverEndSessionMock).toHaveBeenCalledWith(SESSION, expect.objectContaining({ reason: 'upstream_lost' }));
+    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting']);
+    expect(grokVoiceManager.owns(SESSION)).toBe(false);
+    // The attempt that was in flight when the window elapsed is closed, not kept.
+    expect(upstreams[3].close).toHaveBeenCalledWith(1000, 'Session ended');
+  });
+
+  it('abandons a resume when the participant ends in the gap', async () => {
+    const { client, upstream } = await bringUp({ reconnectWindowMs: 60_000 });
+    upstream.emit('close', 1006, Buffer.from(''));
+    await flush();
+    expect(upstreams).toHaveLength(2);
+    client.emit('message', Buffer.from(JSON.stringify({ type: 'end' })), false);
+    await flush();
+    expect(upstreams[1].close).toHaveBeenCalledWith(1000, expect.any(String));
+    await grokVoiceManager.disconnect(SESSION);
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(upstreams).toHaveLength(2);
+  });
+
+  it('a browser drop during an upstream resume does not shorten or replace the resume deadline, and both come back', async () => {
+    const { client, upstream } = await bringUp({ reconnectWindowMs: 30_000 });
+    broadcastMock.mockClear();
+    upstream.emit('close', 1006, Buffer.from(''));
+    await flush();
+    client.emit('close');
+    await flush();
+    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting', 'client_reconnecting']);
+
+    const client2 = new FakeWs();
+    await grokVoiceManager.attachClient(SESSION, client2 as unknown as import('ws').default);
+    expect(sent(client2)).toEqual([
+      { type: 'ready', model: 'grok-voice-3.0', resumed: true },
+      { type: 'link', state: 'reconnecting' },
+    ]);
+    fire(upstreams[1], { type: 'session.updated', session: SESSION_CONFIG });
+    await flush();
+    expect(sent(client2)).toContainEqual({ type: 'link', state: 'restored' });
+    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting', 'client_reconnecting', 'connected', 'connected']);
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(serverEndSessionMock).not.toHaveBeenCalled();
   });
 });

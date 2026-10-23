@@ -115,7 +115,9 @@ export function pcmDurationMs(pcm: Buffer, sampleRate = VOICE_SAMPLE_RATE): numb
  *  captions only and are dropped here, like the browser drops them from the
  *  record. */
 export type VoiceSignal =
-  | { kind: 'ready'; model: string }
+  | { kind: 'ready'; model: string; resumed: boolean }
+  /** The proxy's own link to xAI dropped / came back (docs/grok-voice.md section 3). */
+  | { kind: 'link'; state: 'reconnecting' | 'restored' }
   | { kind: 'assistant-audio'; pcm: Buffer }
   | { kind: 'assistant-text'; text: string; itemId: string }
   | { kind: 'user-transcript'; text: string; itemId: string }
@@ -132,7 +134,9 @@ export function parseGrokServerMessage(msg: Record<string, unknown>): VoiceSigna
   const type = typeof msg.type === 'string' ? msg.type : '';
   switch (type) {
     case 'ready':
-      return { kind: 'ready', model: typeof msg.model === 'string' ? msg.model : '' };
+      return { kind: 'ready', model: typeof msg.model === 'string' ? msg.model : '', resumed: msg.resumed === true };
+    case 'link':
+      return { kind: 'link', state: msg.state === 'reconnecting' ? 'reconnecting' : 'restored' };
     case 'transcript': {
       if (msg.final !== true || typeof msg.text !== 'string') return { kind: 'other' };
       const itemId = typeof msg.itemId === 'string' ? msg.itemId : '';
@@ -210,7 +214,14 @@ export interface VoiceTransport {
   readonly userTurns: number;
   speakBeat(text: string): Promise<BeatTurn>;
   end(): Promise<void>;
+  /** Sever the browser-side socket and reconnect it (Grok only). */
+  dropClientAndReconnect?(gapMs: number): Promise<void>;
+  /** Sever the server's xAI socket and wait for the proxy to resume it (Grok only). */
+  dropUpstreamAndAwaitResume?(): Promise<void>;
 }
+
+/** How long the harness gives the proxy to resume its xAI link. */
+const RESUME_TIMEOUT_MS = 40_000;
 
 export class GrokVoiceSession implements VoiceTransport {
   private ws!: WebSocket;
@@ -233,6 +244,9 @@ export class GrokVoiceSession implements VoiceTransport {
   private assistantAudio: Buffer[] = [];
   /** Last time the assistant produced audio or a transcript delta. */
   private lastAssistantActivityAt = 0;
+  /** Kept so a dropped socket can be re-opened with the same session cookie. */
+  private wsUrl = '';
+  private cookieHeader = '';
 
   private constructor(
     readonly sessionId: string,
@@ -262,50 +276,16 @@ export class GrokVoiceSession implements VoiceTransport {
     const wsUrl = client.baseUrl.replace(/^http/, 'ws') + (res.body.ws_path as string);
 
     const vs = new GrokVoiceSession(sessionId, agent, openai, cost, opts);
-    vs.ws = new WebSocket(wsUrl, { headers: { Cookie: client.cookieHeader(agent) } });
-    vs.ws.on('message', (data, isBinary) => {
-      if (isBinary) {
-        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
-        vs.lastAssistantActivityAt = Date.now();
-        vs.push({ kind: 'assistant-audio', pcm: Buffer.from(buf) });
-        return;
-      }
-      try {
-        const msg = JSON.parse(data.toString()) as Record<string, unknown>;
-        // REDTEAM_VOICE_DEBUG=1 → log control frames to diagnose protocol drift.
-        if (process.env.REDTEAM_VOICE_DEBUG) console.log(`[voice:proxy] ${JSON.stringify(msg).slice(0, 200)}`);
-        if (msg.type === 'transcript' && msg.role === 'assistant') vs.lastAssistantActivityAt = Date.now();
-        vs.push(parseGrokServerMessage(msg));
-      } catch {
-        /* non-JSON text frame */
-      }
-    });
-    vs.ws.on('close', (code, reason) => {
-      vs.closed = true;
-      vs.closeReason = vs.closeReason ?? `${code} ${reason.toString()}`;
-      vs.wake();
-    });
-    vs.ws.on('error', err => vs.push({ kind: 'error', message: err.message }));
-    vs.ws.on('unexpected-response', (_req, resp) => {
-      vs.push({ kind: 'error', message: `proxy upgrade rejected: HTTP ${resp.statusCode}` });
-      try { vs.ws.terminate(); } catch { /* already gone */ }
-    });
+    vs.wsUrl = wsUrl;
+    vs.cookieHeader = client.cookieHeader(agent);
+    vs.openSocket();
 
     // `ready` means the upstream xAI session is configured; the proxy then
     // injects the opening line and the model speaks first, exactly as for a
     // browser. Nothing may be sent before that reply completes or it would be
     // a barge-in.
     try {
-      const readyAt = Date.now() + READY_TIMEOUT_MS;
-      for (;;) {
-        const i = await vs.nextSignalIndex(vs.cursor, readyAt, 'waiting for proxy ready');
-        if (i === -1) continue;
-        const s = vs.signals[i];
-        vs.cursor = i + 1;
-        if (s.kind === 'ready') { vs.model = s.model; break; }
-        if (s.kind === 'error') throw new Error(`voice proxy error before ready: ${s.message}`);
-        if (s.kind === 'closed') throw new Error(`voice proxy closed before ready: ${s.reason}`);
-      }
+      await vs.awaitReady();
       const opening = await vs.awaitAssistantTurn(Date.now() + BEAT_TIMEOUT_MS, false);
       return { session: vs, opening: opening.assistantText };
     } catch (err) {
@@ -314,6 +294,115 @@ export class GrokVoiceSession implements VoiceTransport {
       await vs.end().catch(() => {});
       throw err;
     }
+  }
+
+  /** Open (or re-open) the proxy socket with the session cookie, exactly as
+   *  the browser does; the signal handlers are the same for every socket. */
+  private openSocket(): void {
+    const ws = new WebSocket(this.wsUrl, { headers: { Cookie: this.cookieHeader } });
+    this.ws = ws;
+    this.closed = false;
+    this.closeReason = null;
+    ws.on('message', (data, isBinary) => {
+      if (this.ws !== ws) return; // a superseded socket's late frames
+      if (isBinary) {
+        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+        this.lastAssistantActivityAt = Date.now();
+        this.push({ kind: 'assistant-audio', pcm: Buffer.from(buf) });
+        return;
+      }
+      try {
+        const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+        // REDTEAM_VOICE_DEBUG=1 → log control frames to diagnose protocol drift.
+        if (process.env.REDTEAM_VOICE_DEBUG) console.log(`[voice:proxy] ${JSON.stringify(msg).slice(0, 200)}`);
+        if (msg.type === 'transcript' && msg.role === 'assistant') this.lastAssistantActivityAt = Date.now();
+        this.push(parseGrokServerMessage(msg));
+      } catch {
+        /* non-JSON text frame */
+      }
+    });
+    ws.on('close', (code, reason) => {
+      if (this.ws !== ws) return;
+      this.closed = true;
+      this.closeReason = this.closeReason ?? `${code} ${reason.toString()}`;
+      this.wake();
+    });
+    ws.on('error', err => { if (this.ws === ws) this.push({ kind: 'error', message: err.message }); });
+    ws.on('unexpected-response', (_req, resp) => {
+      this.push({ kind: 'error', message: `proxy upgrade rejected: HTTP ${resp.statusCode}` });
+      try { ws.terminate(); } catch { /* already gone */ }
+    });
+  }
+
+  /** Consume signals up to the proxy's `ready`; returns whether it was a re-attach. */
+  private async awaitReady(): Promise<boolean> {
+    const readyAt = Date.now() + READY_TIMEOUT_MS;
+    for (;;) {
+      const i = await this.nextSignalIndex(this.cursor, readyAt, 'waiting for proxy ready');
+      if (i === -1) continue;
+      const s = this.signals[i];
+      this.cursor = i + 1;
+      if (s.kind === 'ready') { this.model = s.model; return s.resumed; }
+      if (s.kind === 'error') throw new Error(`voice proxy error before ready: ${s.message}`);
+      if (s.kind === 'closed') throw new Error(`voice proxy closed before ready: ${s.reason}`);
+    }
+  }
+
+  /**
+   * `--voice-drop-client-midway`: kill the socket the way a network fault
+   * would (no close frame), wait `gapMs`, re-open it with the same cookie and
+   * expect the proxy to re-attach it to the live xAI session (`ready` with
+   * `resumed: true`). Everything the assistant said in the gap is lost to
+   * this client, as it would be to a browser; the proxy still persisted it.
+   */
+  async dropClientAndReconnect(gapMs: number): Promise<void> {
+    const old = this.ws;
+    console.log(`[redteam:voice] severing the client socket for ${this.sessionId} (gap ${gapMs} ms)`);
+    old.terminate();
+    const closedBy = Date.now() + 5_000;
+    while (!this.closed && Date.now() < closedBy) await sleep(20);
+    await sleep(gapMs);
+    this.openSocket();
+    const resumed = await this.awaitReady();
+    if (!resumed) throw new Error('proxy answered the reconnect with a fresh ready, not a re-attach');
+    console.log(`[redteam:voice] client socket re-attached to ${this.sessionId}`);
+  }
+
+  /**
+   * `--voice-drop-upstream-midway`: sever the proxy's xAI socket through the
+   * manager's test hook (the harness runs in-process) and wait for the link
+   * to be reported reconnecting then restored.
+   */
+  async dropUpstreamAndAwaitResume(): Promise<void> {
+    const { grokVoiceManager } = await import('../server/services/grokVoiceManager.service.js');
+    const before = grokVoiceManager.getLinkStats(this.sessionId);
+    console.log(`[redteam:voice] severing the xAI socket for ${this.sessionId} (conversation ${before?.conversationId ?? 'none'})`);
+    if (!grokVoiceManager._dropUpstreamForTests(this.sessionId)) throw new Error('no upstream socket to drop');
+    const deadline = Date.now() + RESUME_TIMEOUT_MS;
+    let sawReconnecting = false;
+    for (;;) {
+      const i = await this.nextSignalIndex(this.cursor, deadline, 'waiting for the proxy to resume its xAI link');
+      if (i === -1) continue;
+      const s = this.signals[i];
+      this.cursor = i + 1;
+      if (s.kind === 'link') {
+        if (s.state === 'reconnecting') { sawReconnecting = true; continue; }
+        if (!sawReconnecting) throw new Error('link restored before any reconnecting notice');
+        break;
+      }
+      if (s.kind === 'closed') throw new Error(`voice session closed by server during resume: ${s.reason}`);
+      // Whatever else arrives in the gap (a late audio tail, an error relay)
+      // is kept for the recording and otherwise skipped: the assistant was
+      // quiet when the link was cut, so nothing here is a reply to a beat.
+      if (s.kind === 'assistant-audio') this.assistantAudio.push(s.pcm);
+      if (s.kind === 'assistant-text') console.log(`[redteam:voice] assistant spoke during the resume gap: "${s.text.slice(0, 80)}"`);
+    }
+    const after = grokVoiceManager.getLinkStats(this.sessionId);
+    console.log(
+      `[redteam:voice] xAI link restored for ${this.sessionId}: conversation ${after?.conversationId ?? 'none'}` +
+      ` (${after?.conversationId === before?.conversationId ? 'same id, resumed' : 'NEW id, not resumed'}),` +
+      ` ${after?.replayedItems ?? 0} replayed items, resume #${after?.upstreamResumes ?? 0}`,
+    );
   }
 
   /** Wait until the assistant has been quiet for QUIET_BEFORE_SPEAKING_MS
@@ -704,6 +793,32 @@ export async function runVoiceScenario(
         await waitForProxyCrisisPipeline(pool, client.emissions, sessionId, vs.userTurns, emissionsBefore);
       }
       if (turn.toolCalls.length > 0) console.log(`[redteam:voice] ${beat.id}: tools [${turn.toolCalls.join(', ')}]`);
+      if (beat === beats[0]) {
+        // Reconnect drills (docs/grok-voice.md section 3): after the first
+        // beat has a reply, sever one leg and expect the conversation to go
+        // on. Recorded as non-gating assertions so a vendor-side change in
+        // behaviour shows up in the report rather than failing the suite.
+        if (cfg.voiceDropClientMidway) {
+          if (!vs.dropClientAndReconnect) throw new Error('--voice-drop-client-midway needs the Grok backend');
+          try {
+            await vs.dropClientAndReconnect(2_000);
+            assertions.push({ id: 'voice-client-reconnect', passed: true, gating: false, detail: 'client socket severed after beat 1 and re-attached' });
+          } catch (err) {
+            assertions.push({ id: 'voice-client-reconnect', passed: false, gating: false, detail: (err as Error).message });
+            throw err;
+          }
+        }
+        if (cfg.voiceDropUpstreamMidway) {
+          if (!vs.dropUpstreamAndAwaitResume) throw new Error('--voice-drop-upstream-midway needs the Grok backend');
+          try {
+            await vs.dropUpstreamAndAwaitResume();
+            assertions.push({ id: 'voice-upstream-resume', passed: true, gating: false, detail: 'xAI socket severed after beat 1 and resumed' });
+          } catch (err) {
+            assertions.push({ id: 'voice-upstream-resume', passed: false, gating: false, detail: (err as Error).message });
+            throw err;
+          }
+        }
+      }
       // Turns the participant heard before this beat's reply (steers, tool
       // continuations, refusal-guard recovery) belong to the previous beat.
       const prevBeatId = transcript.at(-1)?.beatId ?? 'opening';
@@ -751,6 +866,31 @@ export async function runVoiceScenario(
       }
     }
   } finally {
+    if (backend === 'grok' && (cfg.voiceDropClientMidway || cfg.voiceDropUpstreamMidway)) {
+      // Reconnect invariants (docs/grok-voice.md section 3): what the proxy
+      // did, and no transcript row persisted twice across the legs.
+      try {
+        const { grokVoiceManager } = await import('../server/services/grokVoiceManager.service.js');
+        const stats = grokVoiceManager.getLinkStats(sessionId);
+        console.log(`[redteam:voice] link stats for ${sessionId}: ${JSON.stringify(stats)}`);
+        const { rows } = await pool.query(
+          `SELECT metadata->>'item_id' AS item_id, COUNT(*)::int AS n
+             FROM messages WHERE session_id = $1 AND metadata->>'item_id' IS NOT NULL AND role IN ('user', 'assistant')
+            GROUP BY 1 HAVING COUNT(*) > 1`,
+          [sessionId],
+        );
+        assertions.push({
+          id: 'voice-reconnect-no-duplicate-rows',
+          passed: rows.length === 0,
+          gating: false,
+          detail: rows.length === 0
+            ? `no transcript item persisted twice (client reconnects ${stats?.clientReconnects ?? 0}, upstream resumes ${stats?.upstreamResumes ?? 0}, replayed items ${stats?.replayedItems ?? 0})`
+            : `duplicated item ids: ${rows.map(r => `${r.item_id} x${r.n}`).join(', ')}`,
+        });
+      } catch (err) {
+        console.warn(`[redteam:voice] reconnect invariant check failed: ${(err as Error).message}`);
+      }
+    }
     await vs.end();
     // Voice minutes: the proxy meters xAI's cumulative billable seconds into
     // live_usage; price them like the cost dashboard does.

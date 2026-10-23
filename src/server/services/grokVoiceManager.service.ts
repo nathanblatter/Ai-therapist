@@ -34,6 +34,22 @@
  *     `response.create` once every outstanding call has a result.
  *   - system-role `conversation.item.create` + `response.create` steers the
  *     model and makes it speak. `session.update` works mid-session.
+ *   - resumption (docs.x.ai, Speech to Speech, "Session Resumption", read
+ *     2026-10-23): with `resumption.enabled: true` in session.update, xAI
+ *     "caches conversation turns keyed by `conversation_id`"; the id arrives
+ *     in `conversation.created`; a re-dial with `?conversation_id=<id>` that
+ *     opts in again gets "the cached turns replay[ed] before your first new
+ *     turn, echoed back as `conversation.item.created` events"; "History is
+ *     dropped after 30 minutes of inactivity." Replayed items are ignored
+ *     here: they were persisted and scored on the first leg.
+ *
+ * Reconnection (ai-therapist-245, docs/grok-voice.md section 3): a lost
+ * BROWSER socket keeps the xAI session alive for `reconnectWindowMs` and the
+ * browser re-attaches to it; a lost xAI socket is re-dialled with the
+ * conversation id inside the same window. Past the window the session ends
+ * (fail closed), as before. Usage stays assigned from xAI's cumulative figure
+ * per leg, with an offset for the legs before it, never summed snapshot by
+ * snapshot.
  *
  * Public surface matches SidebandManager's control methods (VoiceSidebandDelegate)
  * so the ~20 existing call sites keep working unchanged through delegation.
@@ -64,6 +80,8 @@ export interface PendingGrokSession {
   refusalGuard?: GrokRefusalGuardConfig;
   /** Server-authored line delivered when a refusal loop survives the steer. */
   recoveryLine?: string;
+  /** How long a lost socket (either side) may be recovered; 0 disables. */
+  reconnectWindowMs?: number;
 }
 
 interface GrokSessionState {
@@ -108,14 +126,72 @@ interface GrokSessionState {
   /** Last persisted participant turn, for de-duplicating xAI's occasional
    *  repeated transcription.completed (ai-therapist-258). */
   lastUserTurn: { itemId: string; text: string; at: number; assistantTurnIndex: number } | null;
+
+  // --- Reconnection (ai-therapist-245) ---------------------------------------
+  /** xAI's conversation id from `conversation.created`; the resumption key. */
+  conversationId: string | null;
+  /** How long a lost socket may be recovered. 0 = fail closed at once. */
+  reconnectWindowMs: number;
+  /** `ready` has been sent at least once: a later session.updated is a leg, not a start. */
+  everReady: boolean;
+  /** An upstream re-dial is in progress. */
+  resuming: boolean;
+  /** The participant pressed end; no re-dial may complete after this. */
+  endRequested: boolean;
+  /** Backoff timer between re-dial attempts, and how many have been made. */
+  resumeTimer: NodeJS.Timeout | null;
+  resumeAttempt: number;
+  /** A reply was in flight when the upstream dropped; ask the model to pick it up. */
+  resumeInterrupted: boolean;
+  /** Steers that arrived while no upstream was open; delivered on resume. */
+  queuedSteers: Array<{ role: 'system' | 'user'; text: string; respond: boolean }>;
+  /** Item ids already persisted, so a replayed or repeated item is never a second row. */
+  seenUserItems: Set<string>;
+  seenAssistantItems: Set<string>;
+  /** Billable seconds confirmed on earlier upstream legs (see meterResponse). */
+  legBase: number;
+  /** Latest cumulative figure reported on the current leg. */
+  legSeconds: number;
+  /** No response.done seen yet on the current leg. */
+  legFresh: boolean;
+  /** Counters for the session record and the admin view. */
+  clientReconnects: number;
+  upstreamResumes: number;
+  /** Replayed `conversation.item.created` events seen on the latest resume. */
+  replayedItems: number;
 }
 
 /** Two completed user transcripts with identical text inside this window are
  *  one utterance reported twice, not two utterances. */
 const USER_TURN_DEDUPE_MS = 10_000;
 
+/** Default recovery window when the route passes none (system_config.grok_voice
+ *  reconnect_window_s is the configured value). */
+const DEFAULT_RECONNECT_WINDOW_MS = 75_000;
+
+/** Backoff before re-dial attempt n (index 0 = before the second attempt). */
+const RESUME_BACKOFF_MS = [500, 2_000, 5_000];
+
+/** Close codes for refused attaches. 44xx are ours; the browser treats them as
+ *  final (no retry) — see client/main/lib/grokVoiceClient.ts. */
+export const GROK_CLOSE_UNKNOWN_SESSION = 4404;
+export const GROK_CLOSE_ALREADY_ATTACHED = 4409;
+export const GROK_CLOSE_SESSION_ENDED = 4410;
+
 /** xAI answers a response.cancel that races the reply's own completion with
  *  this error. It is benign: nothing was playing, nothing is lost. */
+/** Bounded set insert: item ids are remembered for the session's lifetime, but a
+ *  multi-hour session must not grow without limit. */
+function rememberItem(set: Set<string>, id: string): void {
+  set.add(id);
+  if (set.size > 2000) {
+    for (const old of set) {
+      if (set.size <= 1000) break;
+      set.delete(old);
+    }
+  }
+}
+
 function isBenignCancelError(err: { code?: string; message?: string } | undefined): boolean {
   const m = err?.message ?? '';
   return /cancellation failed|no active response/i.test(m);
@@ -129,7 +205,12 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
   private readonly keepaliveMs = 20_000;
   /** How long a created session may wait for the browser's socket. */
   private readonly pendingTtlMs = 45_000;
-  /** After the browser drops without ending, how long before we end it. */
+  /**
+   * After the browser drops without ending, how long before we end it when
+   * reconnection is DISABLED (reconnect_window_s = 0). With a window, the
+   * window itself is the grace: the upstream stays open and the browser may
+   * re-attach (handleClientClose).
+   */
   private readonly clientLossGraceMs = 15_000;
   private readonly upstreamOpenTimeoutMs = 10_000;
 
@@ -172,25 +253,55 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       refusal: new GrokRefusalDetector(pending.refusalGuard ?? GROK_DEFAULT_REFUSAL_GUARD),
       recoveryLine: pending.recoveryLine ?? buildGrokRefusalRecoveryLine(null),
       lastUserTurn: null,
+      conversationId: null,
+      reconnectWindowMs: Math.max(0, pending.reconnectWindowMs ?? DEFAULT_RECONNECT_WINDOW_MS),
+      everReady: false,
+      resuming: false,
+      endRequested: false,
+      resumeTimer: null,
+      resumeAttempt: 0,
+      resumeInterrupted: false,
+      queuedSteers: [],
+      seenUserItems: new Set(),
+      seenAssistantItems: new Set(),
+      legBase: 0,
+      legSeconds: 0,
+      legFresh: true,
+      clientReconnects: 0,
+      upstreamResumes: 0,
+      replayedItems: 0,
     };
     this.sessions.set(sessionId, state);
     this.armOrphanTimer(sessionId, this.pendingTtlMs, 'client_never_connected');
   }
 
-  /** The browser's socket for a registered session. */
+  /**
+   * The browser's socket for a registered session. The first attach dials
+   * xAI; a later one — the browser lost its socket and came back inside the
+   * reconnect window — re-joins the live upstream session in place
+   * (ai-therapist-245). The upgrade handler has already applied the same
+   * cookie-authenticated ownership check either way.
+   */
   async attachClient(sessionId: string, client: WebSocket): Promise<void> {
     const state = this.sessions.get(sessionId);
     const short = sessionId.substring(0, 12);
-    if (!state || state.ended || this.endedSessions.has(sessionId)) {
-      console.warn(`[Grok] Client attach for unknown/ended session ${short}...; closing.`);
-      client.close(4404, 'unknown session');
+    if (this.endedSessions.has(sessionId) || state?.ended) {
+      // Includes a reconnect after the window: the session was ended and its
+      // upstream is gone, so the browser must run its end flow, not retry.
+      console.warn(`[Grok] Client attach for ended session ${short}...; refusing.`);
+      client.close(GROK_CLOSE_SESSION_ENDED, 'session ended');
+      return;
+    }
+    if (!state) {
+      console.warn(`[Grok] Client attach for unknown session ${short}...; closing.`);
+      client.close(GROK_CLOSE_UNKNOWN_SESSION, 'unknown session');
       return;
     }
     if (state.client && state.client.readyState === WebSocket.OPEN) {
       // One browser per session. A second tab replacing the first would leave
       // the first with a dead socket and no explanation; refuse instead.
       console.warn(`[Grok] Second client attach for ${short}... refused.`);
-      client.close(4409, 'already attached');
+      client.close(GROK_CLOSE_ALREADY_ATTACHED, 'already attached');
       return;
     }
     this.clearOrphanTimer(state);
@@ -199,6 +310,24 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     client.on('message', (data, isBinary) => this.handleClientMessage(sessionId, data, isBinary));
     client.on('close', () => void this.handleClientClose(sessionId));
     client.on('error', err => console.error(`[Grok] Client socket error for ${short}...:`, err.message));
+
+    if (state.everReady) {
+      // Re-attach. The xAI session never noticed: audio simply resumes. If the
+      // upstream is itself being re-dialled right now, the browser gets
+      // `ready` (its connect resolves) followed by the link state so it keeps
+      // showing "reconnecting" until the model is back.
+      state.clientReconnects += 1;
+      console.log(`[Grok] Client re-attached to ${short}... (reconnect ${state.clientReconnects})`);
+      this.sendToClient(sessionId, { type: 'ready', model: state.resolvedModel ?? state.model, resumed: true });
+      if (state.resuming) this.sendToClient(sessionId, { type: 'link', state: 'reconnecting' });
+      this.broadcastStatus(sessionId, 'connected', `Participant reconnected (${state.clientReconnects})`);
+      if (global.io) {
+        void broadcastAdminEventForSession(global.io, 'session:activity', {
+          sessionId, lastActivity: new Date(), deltaMessages: 0,
+        }, sessionId);
+      }
+      return;
+    }
 
     try {
       await this.openUpstream(sessionId);
@@ -210,18 +339,28 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     }
   }
 
-  private async openUpstream(sessionId: string): Promise<void> {
+  /**
+   * Dial xAI. With `resume`, the URL carries the cached conversation id (xAI:
+   * "Reopen the WebSocket with `?conversation_id=<id>` and opt in again") and
+   * the same session.update — which includes `resumption.enabled` — goes out,
+   * so both legs opt in as the docs require.
+   */
+  private async openUpstream(sessionId: string, resume = false): Promise<void> {
     const state = this.sessions.get(sessionId);
     if (!state) return;
     const short = sessionId.substring(0, 12);
-    const ws = new WebSocket(grokRealtimeUrl(state.model), {
+    const ws = new WebSocket(grokRealtimeUrl(state.model, resume ? state.conversationId : null), {
       headers: { Authorization: `Bearer ${state.apiKey}` },
     });
     state.upstream = ws;
 
-    ws.on('message', data => void this.handleUpstreamMessage(sessionId, data));
-    ws.on('error', err => void this.handleUpstreamError(sessionId, err));
-    ws.on('close', (code, reason) => void this.handleUpstreamClose(sessionId, code, reason));
+    // Every handler is bound to THIS socket: once a leg has been replaced
+    // (resume, or a participant end racing a re-dial) its late events are
+    // ignored rather than persisted, metered or treated as a fresh loss.
+    const current = () => this.sessions.get(sessionId)?.upstream === ws;
+    ws.on('message', data => { if (current()) void this.handleUpstreamMessage(sessionId, data); });
+    ws.on('error', err => { if (current()) void this.handleUpstreamError(sessionId, err); });
+    ws.on('close', (code, reason) => { if (current()) void this.handleUpstreamClose(sessionId, code, reason); });
     ws.on('unexpected-response', (_req, res) => {
       let body = '';
       res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
@@ -235,18 +374,35 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     });
 
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { cleanup(); reject(new Error(`xAI socket did not open within ${this.upstreamOpenTimeoutMs}ms`)); }, this.upstreamOpenTimeoutMs);
+      const timer = setTimeout(() => {
+        cleanup();
+        if (state.upstream === ws) state.upstream = null;
+        try { ws.terminate(); } catch { /* ignore */ }
+        reject(new Error(`xAI socket did not open within ${this.upstreamOpenTimeoutMs}ms`));
+      }, this.upstreamOpenTimeoutMs);
       timer.unref?.();
       const onOpen = () => { cleanup(); resolve(); };
-      const onFail = () => { cleanup(); reject(new Error('xAI socket closed before opening')); };
+      const onFail = () => {
+        cleanup();
+        if (state.upstream === ws) state.upstream = null;
+        reject(new Error('xAI socket closed before opening'));
+      };
       const cleanup = () => { clearTimeout(timer); ws.off('open', onOpen); ws.off('close', onFail); ws.off('error', onFail); };
       ws.once('open', onOpen);
       ws.once('close', onFail);
       ws.once('error', onFail);
     });
 
-    console.log(`[Grok] Upstream open for ${short}...; configuring session`);
-    this.sendUpstream(sessionId, { type: 'session.update', session: state.sessionConfig });
+    if (state.ended || state.endRequested || state.upstream !== ws) {
+      // The session ended (or the participant pressed end) while the socket
+      // was opening. Never leave a billable orphan at xAI.
+      try { ws.close(1000, 'Session ended'); } catch { /* ignore */ }
+      if (state.upstream === ws) state.upstream = null;
+      return;
+    }
+
+    console.log(`[Grok] Upstream open for ${short}...${resume ? ' (resumed leg)' : ''}; configuring session`);
+    state.upstream.send(JSON.stringify({ type: 'session.update', session: state.sessionConfig }));
     this.startKeepalive(sessionId);
   }
 
@@ -280,6 +436,8 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         // The participant pressed end. Stop billing immediately; the browser's
         // POST /end runs the rest of the teardown (and calls disconnect()).
         console.log(`[Grok] Client requested end for ${sessionId.substring(0, 12)}...`);
+        state.endRequested = true;
+        this.cancelResume(state);
         this.closeUpstream(state, 1000, 'participant ended');
         break;
       case 'mic':
@@ -301,11 +459,26 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     state.client = null;
     if (state.ended) return;
     console.log(`[Grok] Client socket closed for ${sessionId.substring(0, 12)}...`);
-    // No browser means no microphone and nobody listening; keeping the xAI
-    // session open would only bill. Close it now, then end the session unless
-    // the client's own POST /end lands first (disconnect() no-ops the timer).
-    this.closeUpstream(state, 1000, 'client disconnected');
-    this.armOrphanTimer(sessionId, this.clientLossGraceMs, 'client_disconnected');
+    if (state.endRequested || state.reconnectWindowMs <= 0) {
+      // The participant pressed end (POST /end is on its way), or reconnection
+      // is disabled. No browser means no microphone and nobody listening;
+      // keeping the xAI session open would only bill. Close it now, then end
+      // the session unless POST /end lands first (disconnect() clears the timer).
+      this.closeUpstream(state, 1000, 'client disconnected');
+      this.armOrphanTimer(sessionId, this.clientLossGraceMs, 'client_disconnected');
+      return;
+    }
+    // A network blip, a backgrounded tab, a laptop lid. Keep the xAI session
+    // alive for the window so the browser can re-attach to it in place
+    // (attachClient); the assistant's audio in between is dropped (nobody is
+    // listening), its transcript is still persisted. The window bounds the
+    // billing exposure; past it the session ends, fail closed.
+    this.broadcastStatus(sessionId, 'client_reconnecting',
+      `Participant socket lost; waiting up to ${Math.round(state.reconnectWindowMs / 1000)} s for a reconnect`);
+    // While the upstream is itself being resumed its deadline (the same timer
+    // slot) already bounds everything; the browser's window is armed when the
+    // resume completes (onUpstreamResumed).
+    if (!state.resuming) this.armOrphanTimer(sessionId, state.reconnectWindowMs, 'client_disconnected');
   }
 
   // -------------------------------------------------------------------------
@@ -356,9 +529,44 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         break;
       }
 
+      case 'conversation.created': {
+        // The resumption key: "capture the server's conversation.created.
+        // conversation.id and pass it back as ?conversation_id=<id>".
+        const conversation = event.conversation as { id?: string } | undefined;
+        if (conversation?.id && !state.conversationId) {
+          state.conversationId = conversation.id;
+          console.log(`[Grok] ${sessionId.substring(0, 12)}... conversation ${conversation.id} (resumable)`);
+        } else if (conversation?.id && state.conversationId && conversation.id !== state.conversationId) {
+          // xAI minted a NEW conversation for the re-dial: the cache was not
+          // honoured (expired, or the id was unknown). Record it so the live
+          // results are honest, and key any further resume to the new id.
+          console.warn(`[Grok] ${sessionId.substring(0, 12)}... resume produced a new conversation ${conversation.id} (was ${state.conversationId})`);
+          state.conversationId = conversation.id;
+        }
+        break;
+      }
+
+      case 'conversation.item.created':
+      case 'conversation.item.added': {
+        // On a resumed leg xAI echoes the cached turns back as these events
+        // before the first new turn (`.created` per the docs; live items on
+        // 3.0 arrive as `.added`, observed 2026-10-23). They were persisted,
+        // relayed and scored on the leg that produced them; replaying nothing
+        // is the contract. Counted while the resumed leg is being configured
+        // (live 2026-10-23: the replay arrives between the open and
+        // session.updated) so the record says what xAI actually replayed.
+        if (state.resuming) {
+          state.replayedItems += 1;
+          const item = event.item as { id?: string; type?: string; role?: string } | undefined;
+          console.log(`[Grok] ${sessionId.substring(0, 12)}... replayed item ${item?.id ?? '?'} (${item?.type ?? '?'}${item?.role ? `/${item.role}` : ''})`);
+        }
+        break;
+      }
+
       case 'session.updated': {
-        const first = !state.ready;
+        const first = !state.everReady;
         state.ready = true;
+        state.everReady = true;
         if (global.io) {
           void broadcastAdminEventForSession(global.io, 'session:openai-update', {
             sessionId, eventType: event.type, data: event,
@@ -367,6 +575,8 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         if (first) {
           this.sendToClient(sessionId, { type: 'ready', model: state.resolvedModel ?? state.model });
           await this.onSessionReady(sessionId);
+        } else if (state.resuming) {
+          await this.onUpstreamResumed(sessionId);
         }
         break;
       }
@@ -550,7 +760,9 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       // themselves after the assistant answered is NOT collapsed: the
       // assistant-turn counter has moved, and a repeated crisis utterance must
       // always be scored again.
-      const sameItem = prev?.itemId === itemId;
+      // An item id seen on an earlier leg (a resumed upstream replaying what
+      // it cached) is never a new utterance either (ai-therapist-245).
+      const sameItem = prev?.itemId === itemId || state.seenUserItems.has(itemId);
       const echoedBeforeAnyReply = prev
         && prev.text === text
         && now - prev.at < USER_TURN_DEDUPE_MS
@@ -560,6 +772,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
         return;
       }
       state.lastUserTurn = { itemId, text, at: now, assistantTurnIndex: state.assistantTurnIndex };
+      rememberItem(state.seenUserItems, itemId);
       state.userTurnIndex += 1;
     }
     this.emitTranscript(sessionId, { role: 'user', itemId, text, final: true });
@@ -601,6 +814,12 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     state.assistantText = '';
     state.assistantItemId = null;
     if (!text || !itemId) return;
+    if (state.seenAssistantItems.has(itemId)) {
+      // Already persisted (a resumed leg re-reporting an item). Never a second row.
+      console.log(`[Grok] duplicate assistant item dropped for ${sessionId.substring(0, 12)}... (${itemId})`);
+      return;
+    }
+    rememberItem(state.seenAssistantItems, itemId);
 
     state.assistantTurnIndex += 1;
     this.emitTranscript(sessionId, { role: 'assistant', itemId, text, final: true });
@@ -830,7 +1049,25 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
     const model = state.resolvedModel ?? state.model;
     if (typeof usage.billable_audio_seconds === 'number') {
-      state.billableSeconds = Math.max(state.billableSeconds, usage.billable_audio_seconds);
+      const secs = usage.billable_audio_seconds;
+      if (state.legFresh) {
+        // First figure on a new upstream leg. If xAI's counter carried across
+        // the resume (the figure is at least what the previous leg reached)
+        // it is still one cumulative session total: assign it. If it restarted
+        // from zero for the new socket, the previous leg's total becomes the
+        // offset and this leg's cumulative figure is assigned on top of it.
+        // Either way no two snapshots are ever added together.
+        state.legFresh = false;
+        if (state.legBase > 0) {
+          const carried = secs >= state.legBase;
+          console.log(`[Grok] ${sessionId.substring(0, 12)}... first usage on resumed leg: ${secs} s ` +
+            (carried ? `(counter carried across the resume; previous total ${state.legBase} s)` : `(counter restarted; offset ${state.legBase} s)`));
+          if (carried) state.legBase = 0;
+        }
+        state.legSeconds = 0;
+      }
+      state.legSeconds = Math.max(state.legSeconds, secs);
+      state.billableSeconds = Math.max(state.billableSeconds, state.legBase + state.legSeconds);
       const { recordLiveUsage } = await import('../db/liveUsage.queries.js');
       await recordLiveUsage(sessionId, model, state.billableSeconds, { finalized: false });
     }
@@ -926,6 +1163,16 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
   /** Best-effort steer: false means the guidance could NOT be delivered. */
   async tryInject(sessionId: string, role: 'system' | 'user', text: string, respond: boolean): Promise<boolean> {
+    const state = this.sessions.get(sessionId);
+    if (state && !state.ended && state.resuming) {
+      // The upstream is being re-dialled. A crisis steer must not be lost to
+      // the gap: it is delivered the moment the session is back (bounded by
+      // the reconnect window, after which the session ends and the queue dies
+      // with it).
+      state.queuedSteers.push({ role, text, respond });
+      console.log(`[Grok] steer queued during resume for ${sessionId.substring(0, 12)}... (${state.queuedSteers.length} pending)`);
+      return true;
+    }
     if (!this.isConnected(sessionId)) return false;
     try {
       await this.injectMessage(sessionId, role, text, respond);
@@ -993,6 +1240,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     const state = this.sessions.get(sessionId);
     if (!state) return;
     state.ended = true;
+    this.cancelResume(state);
     this.clearTimers(state);
     this.finalizeAssistantTurn(sessionId, 'disconnect');
     await this.persistFinalUsage(sessionId, 'close_requested');
@@ -1051,19 +1299,179 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     if (state.keepalive) { clearInterval(state.keepalive); state.keepalive = null; }
     if (state.ended) return;
 
+    const wasInFlight = state.responseInFlight;
+    state.responseInFlight = false;
     this.finalizeAssistantTurn(sessionId, 'upstream_closed');
-    await this.persistFinalUsage(sessionId, code === 1000 ? 'close_requested' : 'connection_lost');
+    if (code === 1000) {
+      await this.persistFinalUsage(sessionId, 'close_requested');
+      return;
+    }
 
     // We did not ask for this close (the participant-end and client-loss paths
-    // set the state before closing). The conversation cannot continue and there
-    // is no monitoring without the upstream, so fail closed: end the session
-    // and tell the participant why. (xAI's session resumption cache is a
-    // follow-up — see docs/grok-voice.md.)
-    if (code !== 1000) {
-      await this.failClosed(sessionId, 'upstream_lost',
-        'The connection to the voice service was lost. Nothing you shared was lost. ' +
-        'You can start a new session whenever you are ready.');
+    // set the state before closing). If xAI gave us a conversation id and the
+    // window allows it, re-dial with the id: xAI replays its cache and the
+    // conversation continues. Otherwise the conversation cannot continue and
+    // there is no monitoring without the upstream, so fail closed.
+    if (state.conversationId && state.reconnectWindowMs > 0 && !state.endRequested) {
+      // Snapshot, not final: the next leg's figure lands on top of it.
+      const { recordLiveUsage } = await import('../db/liveUsage.queries.js');
+      await recordLiveUsage(sessionId, state.resolvedModel ?? state.model, state.billableSeconds, { finalized: false });
+      if (state.resuming) {
+        // A re-dialled leg opened and died before it was configured. Try
+        // again; the window armed by beginResume still bounds the effort.
+        this.scheduleResumeAttempt(sessionId);
+      } else {
+        state.resumeInterrupted = wasInFlight;
+        this.beginResume(sessionId);
+      }
+      return;
     }
+    await this.persistFinalUsage(sessionId, 'connection_lost');
+    await this.failClosed(sessionId, 'upstream_lost',
+      'The connection to the voice service was lost. Nothing you shared was lost. ' +
+      'You can start a new session whenever you are ready.');
+  }
+
+  // -------------------------------------------------------------------------
+  // Upstream resumption (ai-therapist-245)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Start re-dialling xAI with the cached conversation id. Attempts back off
+   * (RESUME_BACKOFF_MS) and the whole effort is bounded by the reconnect
+   * window: when it elapses with no upstream, the orphan timer ends the
+   * session. One `sideband:status-update` marks the transition; the matching
+   * `connected` (or the fail-closed end) is the only other one.
+   */
+  private beginResume(sessionId: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.ended || state.resuming) return;
+    state.resuming = true;
+    state.resumeAttempt = 0;
+    state.replayedItems = 0;
+    const windowS = Math.round(state.reconnectWindowMs / 1000);
+    console.warn(`[Grok] Upstream lost for ${sessionId.substring(0, 12)}...; resuming conversation ${state.conversationId} (window ${windowS} s)`);
+    this.sendToClient(sessionId, { type: 'link', state: 'reconnecting' });
+    this.broadcastStatus(sessionId, 'upstream_reconnecting',
+      `Voice service connection lost; resuming conversation within ${windowS} s`);
+    this.armResumeDeadline(sessionId);
+    void this.attemptResume(sessionId);
+  }
+
+  /**
+   * The window for an upstream resume: past it, fail closed as before. Uses
+   * the orphan-timer slot, so a browser-loss timer is superseded by it; a
+   * browser that is also gone is covered because nothing can continue until
+   * the upstream is back, and its own window is armed at that point.
+   */
+  private armResumeDeadline(sessionId: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state) return;
+    this.armOrphanTimer(sessionId, state.reconnectWindowMs, 'upstream_lost');
+  }
+
+  private async attemptResume(sessionId: string): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.ended || !state.resuming || state.endRequested) return;
+    const short = sessionId.substring(0, 12);
+    state.resumeAttempt += 1;
+    try {
+      state.legFresh = true;
+      state.legBase = state.billableSeconds;
+      state.legSeconds = 0;
+      await this.openUpstream(sessionId, true);
+      // session.updated on the new leg completes the resume (onUpstreamResumed).
+    } catch (err) {
+      console.error(`[Grok] Resume attempt ${state.resumeAttempt} failed for ${short}...:`, err instanceof Error ? err.message : err);
+      this.scheduleResumeAttempt(sessionId);
+    }
+  }
+
+  /** Next re-dial after backoff (RESUME_BACKOFF_MS by attempts so far). */
+  private scheduleResumeAttempt(sessionId: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state || !state.resuming || state.ended || state.resumeTimer) return;
+    const delay = RESUME_BACKOFF_MS[Math.min(Math.max(0, state.resumeAttempt - 1), RESUME_BACKOFF_MS.length - 1)];
+    state.resumeTimer = setTimeout(() => {
+      state.resumeTimer = null;
+      void this.attemptResume(sessionId);
+    }, delay);
+    state.resumeTimer.unref?.();
+  }
+
+  /** The resumed leg is configured: deliver what waited, and carry on. */
+  private async onUpstreamResumed(sessionId: string): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.ended) return;
+    state.resuming = false;
+    state.upstreamResumes += 1;
+    this.clearOrphanTimer(state);
+    if (state.client && state.client.readyState !== WebSocket.OPEN) {
+      // The browser is gone too: its own window applies from here.
+      this.armOrphanTimer(sessionId, state.reconnectWindowMs, 'client_disconnected');
+    }
+    console.log(`[Grok] Upstream resumed for ${sessionId.substring(0, 12)}... (resume ${state.upstreamResumes}, ${state.replayedItems} replayed items)`);
+    this.sendToClient(sessionId, { type: 'link', state: 'restored' });
+    this.broadcastStatus(sessionId, 'connected',
+      `Voice service connection restored (resume ${state.upstreamResumes}, ${state.replayedItems} cached turns replayed)`);
+    await pool.query(
+      'UPDATE therapy_sessions SET sideband_connected = TRUE, sideband_error = NULL WHERE session_id = $1',
+      [sessionId],
+    ).catch(() => {});
+
+    const queued = state.queuedSteers.splice(0);
+    for (const steer of queued) {
+      try {
+        await this.injectMessage(sessionId, steer.role, steer.text, steer.respond);
+      } catch (err) {
+        console.error(`[Grok] Queued steer could not be delivered after resume for ${sessionId.substring(0, 12)}...:`, err);
+      }
+    }
+    if (state.resumeInterrupted && !queued.some(q => q.respond)) {
+      // The participant heard a reply stop mid-sentence. Ask the model to
+      // finish the thought rather than leave a silence it does not know about.
+      state.resumeInterrupted = false;
+      try {
+        await this.injectMessage(sessionId, 'system',
+          'The voice connection dropped for a moment and your last reply was cut off. ' +
+          'Briefly pick up where you left off in one or two sentences, then listen. ' +
+          'Do not mention the connection.', true);
+      } catch (err) {
+        console.error('[Grok] Post-resume continuation failed:', err);
+      }
+    }
+    state.resumeInterrupted = false;
+  }
+
+  private cancelResume(state: GrokSessionState): void {
+    state.resuming = false;
+    if (state.resumeTimer) { clearTimeout(state.resumeTimer); state.resumeTimer = null; }
+  }
+
+  /**
+   * Test hook (red-team harness `--voice-drop-upstream-midway`): sever the
+   * xAI socket the way a network fault would, so the resume path runs against
+   * the live API. Returns false when there is nothing to drop.
+   */
+  _dropUpstreamForTests(sessionId: string): boolean {
+    const state = this.sessions.get(sessionId);
+    const ws = state?.upstream;
+    if (!state || !ws) return false;
+    try { ws.terminate(); } catch { /* ignore */ }
+    return true;
+  }
+
+  /** What the harness and admin tooling may want to know about a session's links. */
+  getLinkStats(sessionId: string): { conversationId: string | null; clientReconnects: number; upstreamResumes: number; replayedItems: number; resuming: boolean } | null {
+    const state = this.sessions.get(sessionId);
+    if (!state) return null;
+    return {
+      conversationId: state.conversationId,
+      clientReconnects: state.clientReconnects,
+      upstreamResumes: state.upstreamResumes,
+      replayedItems: state.replayedItems,
+      resuming: state.resuming,
+    };
   }
 
   /** End an active session that can no longer be conducted or monitored. */
@@ -1091,6 +1499,14 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  /** One `sideband:status-update` per link transition (admin Live Monitoring). */
+  private broadcastStatus(sessionId: string, status: string, detail: string): void {
+    if (!global.io) return;
+    void broadcastAdminEventForSession(global.io, 'sideband:status-update', {
+      sessionId, status, error: status === 'connected' ? undefined : detail, detail, timestamp: new Date(),
+    }, sessionId);
+  }
 
   private sendToClient(sessionId: string, msg: GrokServerMessage): void {
     const client = this.sessions.get(sessionId)?.client;
@@ -1135,6 +1551,16 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     const timer = setTimeout(() => {
       const s = this.sessions.get(sessionId);
       if (!s || s.ended) return;
+      if (s.resuming) {
+        // The upstream never came back inside the window.
+        console.warn(`[Grok] Resume window elapsed for ${sessionId.substring(0, 12)}...; ending the session.`);
+        this.cancelResume(s);
+        void this.persistFinalUsage(sessionId, 'connection_lost').then(() =>
+          this.failClosed(sessionId, 'upstream_lost',
+            'The connection to the voice service was lost and could not be restored. ' +
+            'Nothing you shared was lost. You can start a new session whenever you are ready.'));
+        return;
+      }
       if (s.client && s.client.readyState === WebSocket.OPEN) return; // reattached in time
       console.warn(`[Grok] Session ${sessionId.substring(0, 12)}... orphaned (${reason}); ending it.`);
       void this.failClosed(sessionId, reason,
@@ -1168,6 +1594,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
   }
 
   private clearTimers(state: GrokSessionState): void {
+    if (state.resumeTimer) { clearTimeout(state.resumeTimer); state.resumeTimer = null; }
     if (state.keepalive) clearInterval(state.keepalive);
     state.phaseTimers.forEach(t => clearTimeout(t));
     this.clearOrphanTimer(state);

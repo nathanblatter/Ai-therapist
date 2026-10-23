@@ -17,14 +17,47 @@
 // The assistant audio is also routed into a MediaStream so the existing
 // VoiceOrb visualiser and the session-recording tee (audioTee.ts) work exactly
 // as they do for the WebRTC remote track.
+//
+// Reconnection (docs/grok-voice.md section 3): a dropped socket is re-opened
+// with backoff for up to RECONNECT_WINDOW_MS. The server keeps the xAI session
+// alive for its own (admin-configured) window and re-attaches the new socket
+// to it, so the conversation continues where it was; the audio graph is never
+// torn down in between. The server refuses with a 44xx close code when the
+// session is unknown, already attached or ended, and those are final. The
+// server also reports its own link to xAI (`link` messages), which the UI
+// shows the same way.
 
 import { GROK_SAMPLE_RATE, type GrokClientMessage, type GrokServerMessage } from '../../../shared/grokVoiceProtocol';
 
 export interface GrokVoiceHandlers {
   onMessage: (msg: GrokServerMessage) => void;
-  /** Transport closed. `clean` when the server said `closed` first. */
+  /**
+   * Transport is gone for good: the server said `closed`, refused a
+   * reconnect, or the reconnect window ran out. `clean` when the server said
+   * `closed` first. Never called for a drop that was recovered.
+   */
   onClose: (info: { code: number; reason: string; clean: boolean }) => void;
   onError: (message: string) => void;
+  /**
+   * Link state for the UI: `reconnecting` when this socket dropped and is
+   * being re-opened, or the server reports its xAI link down; `restored` once
+   * audio can flow again.
+   */
+  onLink?: (state: 'reconnecting' | 'restored') => void;
+}
+
+/** How long a dropped socket is retried before the session is given up. Just
+ *  under the server's default window (reconnect_window_s = 75) so a refusal
+ *  comes from us, with a clear reason, rather than from a race with its timer. */
+export const RECONNECT_WINDOW_MS = 70_000;
+/** Backoff before retry n (index 0 = before the first retry); the last value repeats. */
+const RECONNECT_BACKOFF_MS = [500, 1_000, 2_000, 4_000, 8_000];
+/** Each retry must reach `ready` within this. */
+const RECONNECT_READY_TIMEOUT_MS = 10_000;
+
+/** Close codes the server uses for refused attaches (grokVoiceManager.service.ts). */
+function isFinalCloseCode(code: number): boolean {
+  return code >= 4400 && code < 4500;
 }
 
 /** ~100 ms of PCM16 at the wire rate per frame: few enough frames, low latency. */
@@ -72,6 +105,9 @@ export class GrokVoiceClient {
   private ready = false;
   private closedByServer = false;
   private stopped = false;
+  private audioStarted = false;
+  private reconnecting = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly wsPath: string,
@@ -87,21 +123,38 @@ export class GrokVoiceClient {
   /** Open the socket and start the audio graph. Resolves on the `ready` message. */
   async connect(timeoutMs = 20_000): Promise<void> {
     if (this.stopped) throw new Error('client already stopped');
+    await this.openSocket(timeoutMs);
+  }
+
+  /**
+   * One socket attempt: open, (first time) start audio, wait for `ready`.
+   * Rejects on timeout, error, or a close before ready; the caller decides
+   * whether that is fatal (first connect) or one failed retry.
+   */
+  private openSocket(timeoutMs: number): Promise<void> {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${proto}//${window.location.host}${this.wsPath}`);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
 
-    await new Promise<void>((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       let settled = false;
+      // Set when this attempt gives up on its own (ready timeout): the close
+      // that follows is ours, not a drop to recover from.
+      let abandoned = false;
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
+        abandoned = true;
+        try { ws.close(1000, 'ready timeout'); } catch { /* ignore */ }
         reject(new Error('Voice service did not become ready in time'));
       }, timeoutMs);
 
       ws.onopen = () => {
+        if (this.audioStarted) return;
+        this.audioStarted = true;
         this.startAudio().catch(err => {
+          this.audioStarted = false;
           if (settled) return;
           settled = true;
           clearTimeout(timer);
@@ -130,6 +183,12 @@ export class GrokVoiceClient {
           this.flushPlayback();
         } else if (msg.type === 'closed') {
           this.closedByServer = true;
+        } else if (msg.type === 'link') {
+          // The server's own link to xAI. Nothing we say reaches the model
+          // while it is down; drop whatever was queued to play so the
+          // restored conversation does not start with stale audio.
+          if (msg.state === 'reconnecting') this.flushPlayback();
+          this.handlers.onLink?.(msg.state);
         } else if (msg.type === 'error' && !settled) {
           settled = true;
           clearTimeout(timer);
@@ -138,23 +197,71 @@ export class GrokVoiceClient {
         this.handlers.onMessage(msg);
       };
       ws.onerror = () => {
-        this.handlers.onError('Voice connection error');
         if (!settled) {
           settled = true;
           clearTimeout(timer);
           reject(new Error('Voice connection failed'));
+        } else if (!this.reconnecting) {
+          this.handlers.onError('Voice connection error');
         }
       };
       ws.onclose = (e: CloseEvent) => {
         this.ready = false;
+        if (this.ws === ws) this.ws = null;
+        if (abandoned) return;
         if (!settled) {
           settled = true;
           clearTimeout(timer);
           reject(new Error(`Voice connection closed before ready (${e.code})`));
+          return;
         }
-        this.handlers.onClose({ code: e.code, reason: e.reason, clean: this.closedByServer });
+        this.handleDrop(e.code, e.reason);
       };
     });
+  }
+
+  /** A socket that had reached `ready` closed. Recover it, or report the end. */
+  private handleDrop(code: number, reason: string): void {
+    if (this.stopped) return;
+    if (this.closedByServer || isFinalCloseCode(code)) {
+      this.handlers.onClose({ code, reason, clean: this.closedByServer });
+      return;
+    }
+    if (this.reconnecting) return; // a retry attempt closing is handled by its own promise
+    this.reconnecting = true;
+    this.flushPlayback();
+    this.handlers.onLink?.('reconnecting');
+    void this.reconnectLoop(code, reason);
+  }
+
+  private async reconnectLoop(code: number, reason: string): Promise<void> {
+    const deadline = Date.now() + RECONNECT_WINDOW_MS;
+    for (let attempt = 0; ; attempt++) {
+      const backoff = RECONNECT_BACKOFF_MS[Math.min(attempt, RECONNECT_BACKOFF_MS.length - 1)];
+      await new Promise<void>(res => { this.reconnectTimer = setTimeout(res, backoff); });
+      this.reconnectTimer = null;
+      if (this.stopped) return;
+      if (Date.now() > deadline) break;
+      try {
+        await this.openSocket(Math.min(RECONNECT_READY_TIMEOUT_MS, Math.max(1_000, deadline - Date.now())));
+        this.reconnecting = false;
+        this.handlers.onLink?.('restored');
+        return;
+      } catch (err) {
+        if (this.stopped) return;
+        const m = /closed before ready \((\d+)\)/.exec(err instanceof Error ? err.message : '');
+        const closeCode = m ? Number(m[1]) : 0;
+        if (isFinalCloseCode(closeCode)) {
+          // The server refused: unknown, already attached, or ended (the
+          // window ran out server-side). Final.
+          this.reconnecting = false;
+          this.handlers.onClose({ code: closeCode, reason: 'refused', clean: false });
+          return;
+        }
+      }
+    }
+    this.reconnecting = false;
+    this.handlers.onClose({ code, reason: reason || 'reconnect window elapsed', clean: false });
   }
 
   private async startAudio(): Promise<void> {
@@ -276,6 +383,8 @@ export class GrokVoiceClient {
     if (this.stopped) return;
     this.stopped = true;
     this.ready = false;
+    this.reconnecting = false;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.flushPlayback();
     try { this.captureNode?.disconnect(); } catch { /* ignore */ }
     if (this.captureNode && 'port' in this.captureNode) {

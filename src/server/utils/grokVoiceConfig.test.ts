@@ -147,6 +147,26 @@ describe('grokRealtimeUrl', () => {
     expect(grokRealtimeUrl('grok-voice-latest')).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-latest');
     expect(grokRealtimeUrl(GROK_CURRENT_MODEL)).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-3.0');
   });
+
+  // docs.x.ai "Session Resumption": "Reopen the WebSocket with ?conversation_id=<id>".
+  it('appends the cached conversation id for a resumed leg', () => {
+    expect(grokRealtimeUrl('grok-voice-3.0', 'conv_ab/c')).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-3.0&conversation_id=conv_ab%2Fc');
+    expect(grokRealtimeUrl('grok-voice-3.0', null)).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-3.0');
+  });
+});
+
+describe('session resumption (ai-therapist-245)', () => {
+  it('opts into xAI resumption on every session.update and clamps the reconnect window', () => {
+    const cfg = buildGrokSessionConfig({
+      model: 'grok-voice-3.0', voice: 'eve', language: 'en', languageName: 'English',
+      systemPrompt: CLINICAL_PROMPT, toolDefs: [],
+    });
+    expect(cfg.resumption).toEqual({ enabled: true });
+    expect(resolveGrokTuning({ reconnect_window_s: 90 }).reconnect_window_s).toBe(90);
+    expect(resolveGrokTuning({ reconnect_window_s: 0 }).reconnect_window_s).toBe(0);
+    expect(resolveGrokTuning({ reconnect_window_s: 5000 }).reconnect_window_s).toBe(600);
+    expect(resolveGrokTuning({ reconnect_window_s: 'x' }).reconnect_window_s).toBe(75);
+  });
 });
 
 describe('resolveGrokTuning — admin knobs', () => {
@@ -158,7 +178,7 @@ describe('resolveGrokTuning — admin knobs', () => {
 
   it('clamps to xAI ranges and forwards into session.update', () => {
     const t = resolveGrokTuning({ vad: { threshold: 5, silence_duration_ms: -10, prefix_padding_ms: 200.6 }, reasoning_effort: 'high', speed: 9 });
-    expect(t).toEqual({ vad: { threshold: 0.9, silence_duration_ms: 0, prefix_padding_ms: 201 }, reasoning_effort: 'high', speed: 1.5 });
+    expect(t).toEqual({ vad: { threshold: 0.9, silence_duration_ms: 0, prefix_padding_ms: 201 }, reasoning_effort: 'high', speed: 1.5, reconnect_window_s: 75 });
     const cfg = buildGrokSessionConfig({
       model: 'grok-voice-latest', voice: 'eve', language: null, languageName: null,
       systemPrompt: CLINICAL_PROMPT, toolDefs: [], tuning: t,

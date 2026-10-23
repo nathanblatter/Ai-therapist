@@ -336,6 +336,10 @@ export default function App() {
   // or the chat session is created — drives the "Connecting..." state on the
   // Start button and guards against double-clicks. Always cleared on error.
   const [isConnecting, setIsConnecting] = useState(false);
+  // Grok Voice link state (docs/grok-voice.md section 3): the browser socket
+  // or the server's xAI link dropped and is being recovered. Shown as a plain
+  // banner; the session itself continues when the link comes back.
+  const [voiceReconnecting, setVoiceReconnecting] = useState(false);
   // Early rate-limit check: fetched on mount so participants learn they've
   // hit the daily cap BEFORE going through consent + check-in.
   const [rateLimitInfo, setRateLimitInfo] = useState<{ limited: boolean; resetsAt: string | null }>({
@@ -1714,6 +1718,7 @@ export default function App() {
         // end_session, admin, or an upstream loss). Run the normal teardown via
         // the latest-ref unless a stopSession() is already doing it.
         liveFinalizedRef.current = true;
+        setVoiceReconnecting(false);
         if (!isTearingDownRef.current) {
           if (msg.reason !== 'ended') {
             toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
@@ -1840,11 +1845,20 @@ export default function App() {
 
     const client = new GrokVoiceClient(wsPath, ms, {
       onMessage: (msg) => handleGrokMessage(msg),
+      onLink: (state) => {
+        // Recoverable: the client retries its socket with backoff, or the
+        // server is re-dialling xAI. A brief banner, no teardown.
+        setVoiceReconnecting(state === 'reconnecting');
+        reportClientEvent('webrtc_disconnected', { stage: `grok_link_${state}` }, liveSessionIdRef.current);
+      },
       onClose: ({ code, reason, clean }) => {
+        setVoiceReconnecting(false);
         if (clean || isTearingDownRef.current) return;
+        // Not recovered: the reconnect window ran out, or the server refused
+        // the re-attach (4410: the session was already ended server-side).
         console.error(`[Grok] Voice socket dropped: ${code} ${reason}`);
         reportClientEvent('webrtc_disconnected', { stage: 'grok_socket_dropped', code }, liveSessionIdRef.current);
-        toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+        toast.error('The connection to your session was lost. The session has ended. You can start a new one whenever you are ready.');
         void stopSessionRef.current();
       },
       onError: (message) => {
@@ -1931,6 +1945,7 @@ export default function App() {
     grokMicRef.current?.getTracks().forEach((t) => t.stop());
     grokMicRef.current = null;
 
+    setVoiceReconnecting(false);
     setIsSessionActive(false);
     setLocalStream(null);
     setRemoteStream(null);
@@ -2810,6 +2825,18 @@ export default function App() {
               role="status"
             >
               Wrapping up your session... the AI is saying goodbye, and the session will close in a moment.
+            </div>
+          )}
+          {/* Grok Voice link recovery (docs/grok-voice.md section 3): the
+              socket dropped and is being re-opened, or the server is
+              re-dialling xAI. The session continues once it is back. */}
+          {isSessionActive && voiceReconnecting && (
+            <div
+              className="mb-2 flex items-center justify-center gap-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-3 py-2"
+              role="status"
+            >
+              <Loader size={14} className="animate-spin" aria-hidden="true" />
+              Reconnecting to your session... your conversation will continue in a moment.
             </div>
           )}
           {/* Delegated-work hint (session.delegation.created). Deliberately

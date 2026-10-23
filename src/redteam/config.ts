@@ -44,6 +44,13 @@ export interface RedteamConfig {
   /** Voice suite: drive persona turns through the typed-text path instead of
    *  TTS audio (cheaper, skips VAD; never the default). */
   voiceTextTurns: boolean;
+  /** Voice suite (Grok): sever the browser-side socket after the first
+   *  persona beat, reconnect it, and finish the scenario — exercises the
+   *  proxy's client re-attach path (docs/grok-voice.md section 3). */
+  voiceDropClientMidway: boolean;
+  /** Voice suite (Grok): sever the server's xAI socket after the first
+   *  persona beat so the proxy re-dials with xAI's conversation cache. */
+  voiceDropUpstreamMidway: boolean;
 }
 
 export const DEFAULTS = {
@@ -59,6 +66,8 @@ export const DEFAULTS = {
   gateDiff: false,
   gateQuality: false,
   voiceTextTurns: false,
+  voiceDropClientMidway: false,
+  voiceDropUpstreamMidway: false,
 };
 
 /** The chat therapy reply model (chatTherapy.service.ts) — used only for cost

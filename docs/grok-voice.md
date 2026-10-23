@@ -146,18 +146,97 @@ WS   /api/grok/voice/<session_id> cookie auth + ownership → attachClient()
    `end_session` tool backstop, admin end and the abandoned-session sweeper all
    arrive through that same call.
 
+### Reconnection (ai-therapist-245, 2026-10-23)
+
+Either socket can drop without the session ending, for a bounded window:
+`system_config.grok_voice.reconnect_window_s` (default 75, range 0–600, in
+the admin "Grok Voice Turn-Taking" panel; 0 restores the old fail-at-once
+behaviour). Past the window the session ends exactly as before, fail closed.
+
+**Browser socket drops** (tab backgrounded, Wi-Fi handoff, proxy hiccup):
+
+```
+browser WS closes (no `end` seen)   → upstream stays OPEN, orphan timer = window
+                                      admin: sideband:status-update { status: 'client_reconnecting' }
+browser re-opens WS /api/grok/voice/<id> (same cookie, same ownership check)
+                                    → attachClient() re-joins it to the live upstream
+                                      { type: 'ready', model, resumed: true }
+                                      admin: sideband:status-update { status: 'connected' }
+window elapses with no browser      → failClosed(client_disconnected); a later attach is refused 4410
+```
+
+Nothing is re-dialled and nothing is re-sent upstream: the xAI session never
+noticed. Assistant audio produced in the gap is dropped (nobody is listening);
+its transcript is still persisted and scored. The xAI session keeps billing
+during the gap, which is what the window bounds. The browser
+(`GrokVoiceClient`) retries with backoff (0.5 s, 1, 2, 4, 8, 8...) for 70 s —
+just inside the default server window — without touching its audio graph, and
+`App.tsx` shows a plain "Reconnecting to your session..." banner meanwhile. A
+44xx close code from the server (4404 unknown, 4409 already attached, 4410
+ended) is final: the client stops retrying and runs the normal end flow.
+
+**xAI socket drops** (non-1000 close while the session is live):
+
+```
+upstream closes                      → usage snapshot (not finalised)
+                                       browser: { type: 'link', state: 'reconnecting' }
+                                       admin: sideband:status-update { status: 'upstream_reconnecting' }
+re-dial wss://api.x.ai/v1/realtime?model=…&conversation_id=<id>
+  + the same session.update (which carries resumption.enabled)
+  backoff 0.5 s / 2 s / 5 s between failed attempts, bounded by the window
+session.updated on the new leg       → browser: { type: 'link', state: 'restored' }
+                                       admin: sideband:status-update { status: 'connected' }
+                                       queued steers delivered; a cut-off reply is asked to resume
+window elapses with no upstream      → usage finalised connection_lost; failClosed(upstream_lost)
+```
+
+This uses xAI's documented resumption (docs.x.ai, Speech to Speech, "Session
+Resumption", read 2026-10-23): `session.update` carries `resumption: {
+enabled: true }` ("the server caches conversation turns keyed by
+`conversation_id` and replays them on reconnect so the model stays conditioned
+on prior context"); the id arrives in `conversation.created` and the proxy
+keeps it; on reconnect "the cached turns replay before your first new turn,
+echoed back as `conversation.item.created` events"; "History is dropped after
+30 minutes of inactivity"; and "No history replays unless the resuming session
+also sends `resumption.enabled: true`" (hence the same config on every leg).
+What is persisted and replayed on xAI's side: "user and assistant transcripts,
+assistant tool calls, and your `function_call_output` results".
+
+**Invariants kept across either kind of reconnect** (unit-tested in
+`grokVoiceManager.service.test.ts` "reconnection"):
+
+- *No duplicate transcript rows.* Replayed `conversation.item.created` events
+  are ignored (counted for the record only); item ids already persisted are
+  remembered per session, so a re-reported transcript is dropped on top of the
+  existing 10 s same-text dedupe.
+- *Usage is assigned, never summed.* The browser reconnect changes nothing.
+  Across an upstream re-dial, the first `response.done` on the new leg decides
+  whether xAI carried its cumulative counter (figure at or above the previous
+  leg's total → assigned as-is) or restarted it for the new socket (below →
+  the previous leg's total becomes a fixed offset and the new leg's cumulative
+  figure is assigned on top). No two snapshots are ever added together. Events
+  from a superseded socket are ignored entirely.
+- *The crisis pipeline runs on every new participant turn after the
+  reconnect*, through the same `onUserTurn` join point. A steer that arrives
+  while the upstream is down is queued and delivered the moment the resumed
+  leg is configured, rather than reported undeliverable.
+- *One `sideband:status-update` per transition* for Live Monitoring:
+  `client_reconnecting` → `connected`, `upstream_reconnecting` → `connected`,
+  or the fail-closed end.
+- *A reconnect after the window is refused* (4410) and the session is already
+  ended; a participant `end` during a resume abandons the re-dial and closes
+  any socket it opened.
+
 ### Failure modes
 
 | What | Behaviour |
 |---|---|
 | Browser never attaches | pending expires (45 s) → `serverEndSession(reason: client_never_connected)` |
-| Browser socket drops without `end` | upstream closed at once (stop billing); session ended after 15 s unless `POST /end` lands first |
-| xAI closes the socket (non-1000) | usage finalised as `connection_lost`; browser told `closed: upstream_lost`; `serverEndSession` with a participant-facing message. Fails **closed**: no upstream means no monitoring |
+| Browser socket drops without `end` | upstream kept open for `reconnect_window_s`; browser re-attaches in place, or the session is ended (`client_disconnected`). With the window at 0: upstream closed at once, session ended after 15 s unless `POST /end` lands first |
+| xAI closes the socket (non-1000) | re-dialled with `conversation_id` inside the window (see above); when no conversation id was ever issued, or the window elapses: usage finalised as `connection_lost`, browser told `closed: upstream_lost`, `serverEndSession`. Fails **closed**: no upstream means no monitoring |
 | xAI `error` event | logged to `sideband_error`, relayed to the browser and the admin room; not treated as terminal |
 | Second browser for the same session | refused (4409). One participant, one socket |
-
-xAI offers a server-side `resumption` cache (30 min) that could survive a
-network blip without losing the conversation. Not wired yet — see §9.
+| Attach for an ended session | refused (4410); the browser runs its end flow instead of retrying |
 
 ## 4. Transcripts and the crisis join point
 
@@ -337,9 +416,14 @@ back to `eve` with a warning rather than failing the session.
 
 ## 10. Not done yet
 
-- **Resumption.** xAI can cache the session for 30 min (`resumption.enabled`)
-  so a client reconnect could continue the conversation. Today any socket
-  loss ends the session (fail closed).
+- ~~Resumption.~~ Done 2026-10-23 (ai-therapist-245 part 1): see section 3
+  "Reconnection". Both legs reconnect inside `reconnect_window_s`; the
+  red-team harness drills each (`--voice-drop-client-midway`,
+  `--voice-drop-upstream-midway`, docs/redteam.md). Still open from it:
+  the proxy is in-memory, so a reconnect only works to the container that
+  holds the session (see Multi-process below); and the window's billing
+  exposure is a per-session cost the study accepts knowingly (an idle xAI
+  session bills for the window, at most 75 s by default).
 - ~~Red-team voice suite.~~ Done 2026-10-22: `npm run redteam:voice` drives
   this proxy end to end as a headless browser (`src/redteam/voiceClient.ts`,
   `docs/redteam.md` "Voice suite"). Both voice scenarios pass live on
@@ -352,9 +436,37 @@ back to `eve` with a warning rather than failing the session.
 - **Multi-process.** The proxy is in-memory, like the sideband. During a
   blue-green window a Grok session lives on the container that accepted its
   socket; a container death ends the session (fail closed), it is not
-  re-attached.
+  re-attached. xAI's conversation cache would let another container resume
+  the conversation if the conversation id were persisted (it is in-memory
+  today); the browser's reconnect already lands wherever the cookie routes it.
 
-## 11. Verified against the live API (2026-09-20; re-verified on 3.0 2026-10-22)
+## 11. Verified against the live API (2026-09-20; re-verified on 3.0 2026-10-22; resumption 2026-10-23)
+
+Resumption drills (2026-10-23, `voice-first-session` on `grok-voice-3.0`
+through the harness, scratch DB, five live runs, USD 0.57 in total):
+
+- **Baseline with `resumption.enabled`** passed 4/4; xAI answered
+  `session.created` with a `conversation.created` carrying a UUID conversation
+  id, and new items arrive as `conversation.item.added`.
+- **`--voice-drop-client-midway`**: browser socket severed after beat 1 (no
+  close frame), re-opened 2 s later; the proxy re-attached it (`ready` with
+  `resumed: true`), no second xAI dial, no second opening line; 4/4 gating,
+  4 user and 5 assistant rows all with distinct item ids, 4 risk rows, usage
+  77 s finalised. (A first attempt stalled upstream before the drop — xAI
+  sent `response.created` and nothing more for 90 s — a vendor stall, not
+  the reconnect path.)
+- **`--voice-drop-upstream-midway`** (twice): the xAI socket terminated after
+  beat 1 closed with 1006; the proxy re-dialled with `conversation_id` and
+  the same session.update, and xAI **resumed the same conversation id**,
+  replaying the cached turns as three `conversation.item.created` events
+  (assistant opening line, participant beat 1, assistant reply) between the
+  socket open and `session.updated`. The proxy ignored them: no duplicate
+  rows (4/4 and 5/5 distinct item ids), the two post-resume turns were
+  scored (4 risk rows), and the conversation continued in context (the model
+  did not re-introduce itself). xAI **restarted `billable_audio_seconds`
+  for the new socket** (13 s on the resumed leg against 17 s before the
+  drop), so the offset rule in section 3 is what keeps the total honest
+  (91 s finalised for a 111 s run). 4/4 gating both times.
 
 Re-verification on Grok Voice 3.0 came from the red-team voice suite running
 through this proxy (`docs/redteam.md`): `session.created` now reports
