@@ -82,7 +82,11 @@ Redact only the 18 HIPAA Safe Harbor identifiers, preserving all other content. 
 const REDACTION_MODEL = "gpt-5";
 const REDACTION_TIMEOUT_MS = 15 * 60 * 1000;
 
-type ResponsesCreate = (opts: Record<string, unknown>) => Promise<{ output_text: string }>;
+type ResponsesReply = {
+    output_text: string;
+    usage?: { input_tokens?: number; output_tokens?: number };
+};
+type ResponsesCreate = (opts: Record<string, unknown>) => Promise<ResponsesReply>;
 
 function redactionClient(): { responses: { create: ResponsesCreate } } {
     return new OpenAI({ apiKey: OPENAI_API_KEY, timeout: REDACTION_TIMEOUT_MS }) as unknown as {
@@ -90,7 +94,36 @@ function redactionClient(): { responses: { create: ResponsesCreate } } {
     };
 }
 
-async function redactPHISinglePass(input: string): Promise<string> {
+/**
+ * One model call's token usage (ai-therapist-194). Redaction is the largest
+ * OpenAI cost line, and until this existed every redaction row in
+ * session_llm_usage carried NULL token counts, so its spend could only be
+ * estimated from call volume. Callers pass a `RedactionUsage[]` sink and get
+ * one entry per model call actually made — including retries and the per-item
+ * fallback — which is what recordLlmUsage needs for honest attribution.
+ */
+export interface RedactionUsage {
+    model: string;
+    tokensIn: number | null;
+    tokensOut: number | null;
+}
+
+export interface RedactionOptions {
+    /** Collects one entry per model call. Optional: callers that don't bill
+     *  against a session (e.g. an ad-hoc edit) may omit it. */
+    usage?: RedactionUsage[];
+}
+
+function noteUsage(sink: RedactionUsage[] | undefined, response: ResponsesReply): void {
+    if (!sink) return;
+    sink.push({
+        model: REDACTION_MODEL,
+        tokensIn: response.usage?.input_tokens ?? null,
+        tokensOut: response.usage?.output_tokens ?? null,
+    });
+}
+
+async function redactPHISinglePass(input: string, opts: RedactionOptions = {}): Promise<string> {
     const client = redactionClient();
 
     const response = await withFlex(REDACTION_MODEL, (tierParams) =>
@@ -107,16 +140,17 @@ async function redactPHISinglePass(input: string): Promise<string> {
             store: false,
             ...tierParams,
         }));
+    noteUsage(opts.usage, response);
 
     return response.output_text;
 }
 
-export default async function redactPHI(input: string): Promise<string> {
+export default async function redactPHI(input: string, opts: RedactionOptions = {}): Promise<string> {
     // First pass: redact PHI from original input
-    const firstPass = await redactPHISinglePass(input);
+    const firstPass = await redactPHISinglePass(input, opts);
 
     // Second pass: redact any PHI that might have been missed
-    const secondPass = await redactPHISinglePass(firstPass);
+    const secondPass = await redactPHISinglePass(firstPass, opts);
 
     return secondPass;
 }
@@ -166,7 +200,7 @@ function parseAnchoredBatch(outputText: string, expected: number): string[] {
     return out as string[];
 }
 
-async function redactBatchSinglePass(inputs: string[]): Promise<string[]> {
+async function redactBatchSinglePass(inputs: string[], opts: RedactionOptions): Promise<string[]> {
     const client = redactionClient();
 
     const response = await withFlex(REDACTION_MODEL, (tierParams) =>
@@ -180,13 +214,15 @@ async function redactBatchSinglePass(inputs: string[]): Promise<string[]> {
             store: false,
             ...tierParams,
         }));
+    // Recorded before parsing: a malformed reply was still a billed call.
+    noteUsage(opts.usage, response);
 
     return parseAnchoredBatch(response.output_text, inputs.length);
 }
 
 /** Per-item fallback pass with bounded concurrency — slower (one call per
  *  message) but immune to batch-shape failures. */
-async function redactItemsIndividually(inputs: string[]): Promise<string[]> {
+async function redactItemsIndividually(inputs: string[], opts: RedactionOptions): Promise<string[]> {
     const out = new Array<string>(inputs.length);
     const errors: unknown[] = [];
     const CONCURRENCY = 4;
@@ -203,7 +239,7 @@ async function redactItemsIndividually(inputs: string[]): Promise<string[]> {
                 continue;
             }
             try {
-                out[idx] = await redactPHISinglePass(inputs[idx]);
+                out[idx] = await redactPHISinglePass(inputs[idx], opts);
             } catch (err) {
                 errors.push(err); // collected, not thrown — a rejecting worker
                 return;           // must not leave sibling rejections unhandled
@@ -218,15 +254,15 @@ async function redactItemsIndividually(inputs: string[]): Promise<string[]> {
 /** One redaction pass over the batch: anchored batch call, one retry on a
  *  malformed reply, then the per-item fallback. Only infrastructure errors
  *  (network/auth) propagate — shape failures never sink the session. */
-async function redactBatchPassResilient(inputs: string[]): Promise<string[]> {
+async function redactBatchPassResilient(inputs: string[], opts: RedactionOptions): Promise<string[]> {
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-            return await redactBatchSinglePass(inputs);
+            return await redactBatchSinglePass(inputs, opts);
         } catch (err) {
             console.warn(`[Redaction] batch pass attempt ${attempt} failed (${err instanceof Error ? err.message : err}); ${attempt === 1 ? 'retrying batch' : 'falling back to per-item redaction'}`);
         }
     }
-    return redactItemsIndividually(inputs);
+    return redactItemsIndividually(inputs, opts);
 }
 
 /** Max items per model call. A whole-session batch must reproduce the entire
@@ -241,13 +277,16 @@ const BATCH_CHUNK_SIZE = 50;
  * chunk in the happy path, degrading to per-item calls when the model mangles
  * the batch shape). Returns a map of message id → redacted text.
  */
-export async function redactPHIBatch(items: Array<{ id: number; content: string | null }>): Promise<Map<number, string>> {
+export async function redactPHIBatch(
+    items: Array<{ id: number; content: string | null }>,
+    opts: RedactionOptions = {},
+): Promise<Map<number, string>> {
     const result = new Map<number, string>();
     for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
         const chunk = items.slice(start, start + BATCH_CHUNK_SIZE);
         const inputs = chunk.map(i => i.content ?? '');
-        const firstPass = await redactBatchPassResilient(inputs);
-        const secondPass = await redactBatchPassResilient(firstPass);
+        const firstPass = await redactBatchPassResilient(inputs, opts);
+        const secondPass = await redactBatchPassResilient(firstPass, opts);
         chunk.forEach((item, idx) => result.set(item.id, secondPass[idx]));
     }
     return result;

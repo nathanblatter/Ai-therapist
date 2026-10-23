@@ -2,7 +2,7 @@
 // slow double-pass model call per message, which gated live monitoring), we
 // redact the whole session in a single batched job once the session ends.
 import { pool } from '../config/db.js';
-import { redactPHIBatch } from './redaction.service.js';
+import { redactPHIBatch, type RedactionUsage } from './redaction.service.js';
 import { REDACTABLE_ROWS_SQL } from '../db/redactionScope.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
@@ -39,18 +39,19 @@ export async function redactSession(sessionId: string): Promise<void> {
 
   console.log(`Redacting session ${sessionId.substring(0, 12)}... (${rows.length} messages, batched)`);
 
+  // Every model call the job makes lands here with its measured token usage
+  // (ai-therapist-194): two per chunk in the happy path, more on a batch retry
+  // or the per-item fallback. One session_llm_usage row per call.
+  const usage: RedactionUsage[] = [];
   try {
-    const redacted = await redactPHIBatch(rows.map(r => ({ id: r.message_id, content: r.content })));
+    const redacted = await redactPHIBatch(rows.map(r => ({ id: r.message_id, content: r.content })), { usage });
     const redactedAt = new Date().toISOString();
 
-    // Cost tracking (ai-therapist-25c): redaction runs 2 model calls (double-pass)
-    // via the Responses API, which this codebase doesn't currently pull token
-    // usage out of — log the call count with tokens null rather than skip it.
+    // Cost tracking (ai-therapist-25c): fire-and-forget, measured tokens.
     import('../db/index.js')
-      .then(({ recordLlmUsage }) => Promise.all([
-        recordLlmUsage(sessionId, 'redaction', 'gpt-5', null, null),
-        recordLlmUsage(sessionId, 'redaction', 'gpt-5', null, null),
-      ]))
+      .then(({ recordLlmUsage }) => Promise.all(
+        usage.map(u => recordLlmUsage(sessionId, 'redaction', u.model, u.tokensIn, u.tokensOut)),
+      ))
       .catch(err => console.error('Failed to record redaction LLM usage (non-fatal):', err));
 
     // Persist each redacted message. A stale redaction_error from an earlier

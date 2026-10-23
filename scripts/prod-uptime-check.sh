@@ -17,8 +17,12 @@ set -u
 
 PROD_URL="https://ai.byuisresearch.com/health/deep"
 STATE_FILE="$HOME/docker-services/ai-therapist-uptime.state"
-ENV_FILE="$HOME/docker-services/.env"          # IMESSAGE_API_KEY
-PHONE_ENV_FILE="$HOME/deploy/Ai-therapist/.env" # CRISIS_ALERT_PHONE
+# Both secrets come from the stage deploy env, which already carries the
+# iMessage key and the on-call phone for crisis paging. ~/docker-services/.env
+# is consulted first for an override, but it never held IMESSAGE_API_KEY, so
+# the pager silently skipped every page from install day (ai-therapist-264).
+ENV_FILE="$HOME/docker-services/.env"           # optional overrides
+PHONE_ENV_FILE="$HOME/deploy/Ai-therapist/.env" # IMESSAGE_API_KEY + CRISIS_ALERT_PHONE
 IMESSAGE_API_URL="http://100.79.61.79:8899"
 REPAGE_SECONDS=3600
 
@@ -31,8 +35,8 @@ fi
 page() {
   local msg="$1"
   local key phone
-  key=$(grep -E '^IMESSAGE_API_KEY=' "$ENV_FILE" | cut -d= -f2-)
-  phone=$(grep -E '^CRISIS_ALERT_PHONE=' "$PHONE_ENV_FILE" | cut -d= -f2-)
+  key=$(grep -hE '^IMESSAGE_API_KEY=' "$ENV_FILE" "$PHONE_ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)
+  phone=$(grep -hE '^CRISIS_ALERT_PHONE=' "$ENV_FILE" "$PHONE_ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)
   [ -z "$key" ] || [ -z "$phone" ] && { echo "$(date -Iseconds) page skipped: key/phone missing"; return 1; }
   curl -s -m 10 -X POST "$IMESSAGE_API_URL/send" \
     -H "X-API-Key: $key" -H 'Content-Type: application/json' \

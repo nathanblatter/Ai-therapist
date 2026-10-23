@@ -8,9 +8,9 @@
 // real dollars across the product functions that spent them.
 //
 // The apportionment is an ESTIMATE and the UI must say so. It is honest about
-// its own blind spot: redaction currently records calls with NULL token counts
-// (see redaction.service.ts), so its share is inferred from call count rather
-// than tokens until that is fixed.
+// a historical blind spot: redaction rows written before ai-therapist-194
+// (2026-10) carry NULL token counts, so for windows that include them the
+// share is inferred from call count rather than tokens.
 import { pool } from '../config/db.js';
 
 export interface PurposeUsageRow {

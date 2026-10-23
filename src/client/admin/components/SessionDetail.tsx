@@ -82,6 +82,9 @@ interface SessionCost {
   tokens_in: number;
   tokens_out: number;
   estimated_cost_usd: number;
+  /** Metered voice cost across both eras (Realtime tokens + GPT-Live/Grok duration). */
+  voice_cost_usd?: number;
+  live_seconds?: number;
 }
 
 interface SessionDetailProps {
@@ -815,6 +818,8 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
                     <dd>{cost.tokens_in} / {cost.tokens_out}</dd>
                     <dt className="text-gray-500">Est. LLM cost</dt>
                     <dd>${cost.estimated_cost_usd.toFixed(4)}</dd>
+                    <dt className="text-gray-500">Voice cost (metered)</dt>
+                    <dd>${(cost.voice_cost_usd ?? 0).toFixed(4)}</dd>
                   </dl>
                 </div>
               )}

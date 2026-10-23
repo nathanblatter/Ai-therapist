@@ -1011,6 +1011,9 @@ export function demoCostAnalytics() {
       total_realtime_minutes: 186,
       total_realtime_responses: 638,
       total_realtime_cost_usd: 21.43,
+      total_live_seconds: 5_460,
+      total_live_cost_usd: 4.55,
+      total_voice_cost_usd: 25.98,
     },
     daily_spend: Array.from({ length: 14 }, (_, i) => ({
       date: iso(i * 24 * HOUR).slice(0, 10),
@@ -1019,6 +1022,8 @@ export function demoCostAnalytics() {
       tokens_out: 4_200 + ((i * 911) % 3_800),
       estimated_cost_usd: 0.18 + ((i * 7) % 22) * 0.011,
       realtime_cost_usd: 0.9 + ((i * 11) % 17) * 0.045,
+      live_cost_usd: 0.2 + ((i * 5) % 9) * 0.03,
+      voice_cost_usd: 1.1 + ((i * 11) % 17) * 0.045 + ((i * 5) % 9) * 0.03,
     })),
     feedback: { responses: 21, avg_helpfulness: 4.3, avg_ease: 4.6, avg_would_return: 4.1 },
   };

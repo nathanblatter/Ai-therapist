@@ -233,12 +233,19 @@ export async function getCostDashboard(days = 30): Promise<CostDashboard> {
 
   const { bySubsystem, caveats } = attribute(costs, usage, realtime.responses);
 
-  // Month-to-date from the daily buckets we already have.
+  // Month-to-date comes from its OWN window, never from the chart range
+  // (ai-therapist-218): deriving it from `costs.days` made the 7d view report
+  // a week of spend as the month and moved the cap warning with the range
+  // selector. The window is the day-of-month plus one day of slack so the
+  // 1st-of-month bucket is always inside it; when the chart range already
+  // covers that, the buckets in hand are reused.
+  const dayOfMonth = new Date().getUTCDate();
+  const monthWindowDays = dayOfMonth + 1;
+  const monthCosts = days >= monthWindowDays ? costs : await getCostsSummary(monthWindowDays);
   const monthPrefix = new Date().toISOString().slice(0, 7);
-  const monthToDate = costs.days
+  const monthToDate = (monthCosts.configured ? monthCosts.days : costs.days)
     .filter(d => d.date.startsWith(monthPrefix))
     .reduce((s, d) => s + d.amountUsd, 0);
-  const dayOfMonth = new Date().getUTCDate();
   const projectedMonth = dayOfMonth > 0 ? (monthToDate / dayOfMonth) * daysInThisMonth() : monthToDate;
 
   const capRisk: CostDashboard['budget']['capRisk'] =
