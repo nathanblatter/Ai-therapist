@@ -6,7 +6,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   X, User, Cpu, Shield, AlertTriangle, TrendingUp, TrendingDown, Minus,
-  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity, Clock, Eye, Target,
+  MessageCircle, List, Lock, BookOpen, Heart, FileText, Calendar, Activity, Clock, Eye, Target, Download,
 } from 'react-feather';
 import Panel from './ui/Panel';
 import StatCard from './ui/StatCard';
@@ -425,6 +425,55 @@ function TimelineEntry({ event, onViewSession }: { event: TimelineEvent; onViewS
   );
 }
 
+// ---------- chart download (ai-therapist-199 item 3) ----------
+
+/** "Download chart": the clinician-side chart bundle (zip) for one client.
+ *  Therapist/researcher only; the server writes a data_access_log row per
+ *  download, which the caption says plainly. */
+function ChartDownloadButton({ userId }: { userId: number }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const download = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/admin/api/clients/${userId}/chart.zip`, { credentials: 'include' });
+      if (!res.ok) throw new Error(res.status === 404 ? 'Chart not available for this participant.' : `Export failed (${res.status}).`);
+      const match = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = match?.[1] ?? `client-${userId}-chart.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Export failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-end gap-0.5 shrink-0">
+      <button
+        type="button"
+        onClick={download}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 px-3 min-h-[44px] rounded border border-gray-300 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        aria-label="Download chart"
+      >
+        <Download size={15} /> {busy ? 'Preparing…' : 'Download chart'}
+      </button>
+      <span className="text-[11px] text-gray-400">{error ?? 'Exports are logged in the access history.'}</span>
+      {error && <span className="sr-only" role="alert">{error}</span>}
+    </div>
+  );
+}
+
 // ---------- main component ----------
 
 export default function ParticipantProfile({ user, userRole, onClose, onViewSession, onNavigate }: ParticipantProfileProps) {
@@ -522,13 +571,18 @@ export default function ParticipantProfile({ user, userRole, onClose, onViewSess
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-gray-500 hover:text-gray-800 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
-            aria-label="Close participant profile"
-          >
-            <X size={22} />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {(userRole === 'therapist' || userRole === 'researcher') && (
+              <ChartDownloadButton userId={user.userid} />
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-500 hover:text-gray-800 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
+              aria-label="Close participant profile"
+            >
+              <X size={22} />
+            </button>
+          </div>
         </div>
       </div>
 

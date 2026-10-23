@@ -18,7 +18,13 @@ export const DATA_ACCESS_ACTION_LABELS: Record<string, string> = {
   audit_log_view: 'Access history viewed',
 };
 
-export function actionLabel(action: string): string {
+/** Label for one row; the chart bundle (ai-therapist-199) shares the
+ *  'export' action and is told apart by detail.kind. */
+export function actionLabel(action: string, detail?: unknown): string {
+  if (action === 'export' && detail && typeof detail === 'object' &&
+      (detail as { kind?: unknown }).kind === 'client_chart') {
+    return 'Chart exported';
+  }
   return DATA_ACCESS_ACTION_LABELS[action] ?? action;
 }
 
@@ -129,7 +135,7 @@ export default function ParticipantAccessHistory({ userId, pageSize = 25, onView
                       <span className="font-medium text-gray-900">{r.actor_username ?? (r.accessed_by !== null ? `user #${r.accessed_by}` : 'unknown')}</span>
                       {r.role && <span className="text-xs text-gray-500 ml-1">({r.role})</span>}
                     </td>
-                    <td className={TD}>{actionLabel(r.action)}</td>
+                    <td className={TD}>{actionLabel(r.action, r.detail)}</td>
                     <td className={`${TD} font-mono text-xs`}>
                       {r.session_id ? (
                         onViewSession ? (
