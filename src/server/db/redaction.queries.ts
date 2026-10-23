@@ -94,3 +94,53 @@ export async function recordRedactionApproval(
   await pool.query(MARK_REVIEWED_SQL, [messageId]);
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// Redaction review log reads (ai-therapist-197): who approved or corrected
+// which sampled message. No FK to messages, so the session/participant
+// context is a LEFT JOIN that goes null once the message is deleted.
+// ---------------------------------------------------------------------------
+
+export interface RedactionReviewLogRow {
+  review_id: number;
+  message_id: number;
+  reviewed_by: number | null;
+  reviewer_username: string | null;
+  action: 'approved' | 'corrected';
+  session_id: string | null;
+  participant_user_id: number | null;
+  created_at: string;
+}
+
+export interface RedactionReviewLogFilters {
+  reviewedBy?: number | null;
+  action?: 'approved' | 'corrected' | null;
+  limit: number;
+  offset: number;
+}
+
+export async function listRedactionReviewLog(
+  filters: RedactionReviewLogFilters
+): Promise<{ rows: RedactionReviewLogRow[]; total: number }> {
+  const where = `
+    WHERE ($1::int IS NULL OR rrl.reviewed_by = $1)
+      AND ($2::text IS NULL OR rrl.action = $2)`;
+  const params = [filters.reviewedBy ?? null, filters.action ?? null];
+  const [page, count] = await Promise.all([
+    pool.query<RedactionReviewLogRow>(
+      `SELECT rrl.review_id, rrl.message_id, rrl.reviewed_by, u.username AS reviewer_username,
+              rrl.action, m.session_id::text AS session_id, ts.user_id AS participant_user_id,
+              rrl.created_at::text AS created_at
+       FROM redaction_review_log rrl
+       LEFT JOIN users u ON u.userid = rrl.reviewed_by
+       LEFT JOIN messages m ON m.message_id = rrl.message_id
+       LEFT JOIN therapy_sessions ts ON ts.session_id = m.session_id
+       ${where}
+       ORDER BY rrl.review_id DESC
+       LIMIT $3 OFFSET $4`,
+      [...params, filters.limit, filters.offset]
+    ),
+    pool.query<{ count: string }>(`SELECT COUNT(*) AS count FROM redaction_review_log rrl ${where}`, params),
+  ]);
+  return { rows: page.rows, total: parseInt(count.rows[0].count, 10) };
+}

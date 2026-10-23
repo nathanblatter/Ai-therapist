@@ -17,7 +17,7 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: connectMock, on: vi.fn() },
 }));
 
-import { updateRedactedContent, recordRedactionApproval } from './redaction.queries.js';
+import { updateRedactedContent, recordRedactionApproval, listRedactionReviewLog } from './redaction.queries.js';
 
 beforeEach(() => {
   queryMock.mockReset();
@@ -115,5 +115,22 @@ describe('leak-check review queue (ai-therapist-262)', () => {
     expect(await recordRedactionApproval('42', 9)).toBe(true);
     const sqls = queryMock.mock.calls.map(c => c[0] as string);
     expect(sqls.at(-1)).toMatch(/jsonb_set\(metadata, '\{redaction_check,reviewed\}', 'true'::jsonb\)/);
+  });
+});
+
+describe('listRedactionReviewLog', () => {
+  it('pages the review log newest first with reviewer and session context joined', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ review_id: 9, action: 'corrected' }] })
+      .mockResolvedValueOnce({ rows: [{ count: '4' }] });
+    const page = await listRedactionReviewLog({ reviewedBy: 5, action: 'corrected', limit: 10, offset: 20 });
+    expect(page).toEqual({ rows: [{ review_id: 9, action: 'corrected' }], total: 4 });
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toMatch(/FROM redaction_review_log rrl/);
+    expect(sql).toMatch(/LEFT JOIN users u/);
+    expect(sql).toMatch(/LEFT JOIN messages m/);
+    expect(sql).toMatch(/ORDER BY rrl.review_id DESC/);
+    expect(params).toEqual([5, 'corrected', 10, 20]);
+    expect(queryMock.mock.calls[1][1]).toEqual([5, 'corrected']);
   });
 });
