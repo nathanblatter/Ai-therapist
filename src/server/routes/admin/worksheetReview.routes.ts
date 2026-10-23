@@ -101,11 +101,9 @@ export default function worksheetReviewRoutes(): Router {
       const instance = await getWorksheetInstanceForReview(id);
       if (!instance) return res.status(404).json({ error: 'worksheet instance not found' });
       if (instance.status !== 'completed' || instance.review_status !== 'pending') {
-        return res
-          .status(409)
-          .json({
-            error: `worksheet instance is ${instance.review_status === 'pending' ? 'not completed' : instance.review_status}`,
-          });
+        return res.status(409).json({
+          error: `worksheet instance is ${instance.review_status === 'pending' ? 'not completed' : instance.review_status}`,
+        });
       }
       const title = optionalText(req.body?.title, MAX_TITLE_CHARS) ?? instance.title;
       const leak = findParticipantContent(`${title}\n${content}`, instance.responses);

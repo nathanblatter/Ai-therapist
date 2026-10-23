@@ -7,15 +7,13 @@ vi.mock('../../config/db.js', () => ({
 }));
 
 const mocks = vi.hoisted(() => ({
-  getStudyOpsSummary: vi
-    .fn()
-    .mockResolvedValue({
-      enrollment: {},
-      arm_balance: {},
-      sessions_per_participant: {},
-      conditions: [],
-      deviations: {},
-    }),
+  getStudyOpsSummary: vi.fn().mockResolvedValue({
+    enrollment: {},
+    arm_balance: {},
+    sessions_per_participant: {},
+    conditions: [],
+    deviations: {},
+  }),
   listDeviations: vi.fn().mockResolvedValue([]),
   createDeviation: vi.fn().mockResolvedValue({ deviation_id: 1 }),
   updateDeviation: vi.fn().mockResolvedValue({ deviation_id: 1 }),
@@ -140,14 +138,12 @@ describe('deviation validation', () => {
   });
 
   it('rejects a non-string study identifier', async () => {
-    const res = await request(appAs('researcher'))
-      .put('/admin/api/study-ops/protocol')
-      .send({
-        enrollment_target: 40,
-        expected_sessions_per_participant: 4,
-        arm_imbalance_threshold: 0.1,
-        protocol_id: 42,
-      });
+    const res = await request(appAs('researcher')).put('/admin/api/study-ops/protocol').send({
+      enrollment_target: 40,
+      expected_sessions_per_participant: 4,
+      arm_imbalance_threshold: 0.1,
+      protocol_id: 42,
+    });
     expect(res.status).toBe(400);
   });
 });

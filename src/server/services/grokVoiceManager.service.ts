@@ -1685,9 +1685,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
   }
 
   /** What the harness and admin tooling may want to know about a session's links. */
-  getLinkStats(
-    sessionId: string,
-  ): {
+  getLinkStats(sessionId: string): {
     conversationId: string | null;
     clientReconnects: number;
     upstreamResumes: number;

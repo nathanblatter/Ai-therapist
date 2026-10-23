@@ -421,14 +421,12 @@ export default function chatRoutes(): Router {
             global.io
               .to(`session:${sessionId}`)
               .emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
-            global.io
-              .to(`session:${sessionId}`)
-              .emit('message:new', {
-                sessionId,
-                role: 'assistant',
-                message: MINOR_ELIGIBILITY_MESSAGE,
-                timestamp: new Date(),
-              });
+            global.io.to(`session:${sessionId}`).emit('message:new', {
+              sessionId,
+              role: 'assistant',
+              message: MINOR_ELIGIBILITY_MESSAGE,
+              timestamp: new Date(),
+            });
             return res.json({
               success: true,
               response: MINOR_ELIGIBILITY_MESSAGE,

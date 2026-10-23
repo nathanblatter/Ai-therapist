@@ -187,7 +187,9 @@ export default function grokSessionRoutes(): Router {
           .query<{
             config_key: string;
             config_value: unknown;
-          }>("SELECT config_key, config_value FROM system_config WHERE config_key IN ('grok_voice', 'grok_refusal_guard')")
+          }>(
+            "SELECT config_key, config_value FROM system_config WHERE config_key IN ('grok_voice', 'grok_refusal_guard')",
+          )
           .catch(() => ({ rows: [] as Array<{ config_key: string; config_value: unknown }> }));
         const knobs = new Map(knobRows.rows.map((r) => [r.config_key, r.config_value]));
         const tuning = resolveGrokTuning(knobs.get('grok_voice'));
