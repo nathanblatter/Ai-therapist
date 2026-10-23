@@ -287,7 +287,9 @@ function toResponsesTools(role: AssistantRole): Array<Record<string, unknown>> {
   }));
 }
 
-function systemPrompt(ctx: AssistantContext): string {
+/** Exported so the red-team harness can draw leak canaries from the REAL
+ *  prompt (src/redteam/assistantAssertions.ts) rather than a stale copy. */
+export function assistantSystemPrompt(ctx: AssistantContext): string {
   const toolNames = toolsFor(ctx.role).map((t) => t.name).join(', ');
   return [
     'You are the admin data assistant for a mental-health research platform. You answer staff questions strictly from the results of your tools, which run under the asker’s own access scope.',
@@ -353,7 +355,7 @@ export async function runAssistantTurn(
   const question = history.filter((m) => m.role === 'user').at(-1)?.content ?? '';
 
   const input: Array<Record<string, unknown>> = [
-    { role: 'system', content: systemPrompt(ctx) },
+    { role: 'system', content: assistantSystemPrompt(ctx) },
     ...history.map((m) => ({ role: m.role, content: m.content })),
   ];
 

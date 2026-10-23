@@ -108,6 +108,44 @@ export class HarnessClient {
     }
   }
 
+  /** Log in a STAFF account (assistant pipeline, ai-therapist-207) and wait
+   *  for the session store to reflect it — same race as loginParticipant.
+   *  Returns the numeric userid so assertions can bind to assistant_audit. */
+  async loginStaff(agent: Agent, username: string, password: string): Promise<number> {
+    const res = await agent.post('/api/auth/login').send({ username, password });
+    if (res.status !== 200 || res.body?.success !== true) {
+      throw new Error(`staff login failed for ${username}: ${res.status} ${JSON.stringify(res.body)}`);
+    }
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const status = await agent.get('/api/auth/status');
+      if (status.status === 200 && status.body?.authenticated === true && typeof status.body?.user?.userid === 'number') {
+        return status.body.user.userid as number;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`staff login for ${username} did not persist to the session store within 10s (last status: ${JSON.stringify(status.body)})`);
+      }
+      await sleep(100);
+    }
+  }
+
+  // ---- admin assistant pipeline (/admin/api/assistant/chat) ----
+
+  /** One assistant turn: the full user/assistant history (ending with the
+   *  new question) in, the final answer + the tool trail the service ran out.
+   *  Throws on any non-200: a staff question must always be answered (a 503
+   *  here means ASSISTANT_ENABLED is not set in-process). */
+  async assistantTurn(
+    agent: Agent,
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  ): Promise<{ answer: string; toolCalls: Array<{ name: string; rowCount: number }> }> {
+    const res = await agent.post('/admin/api/assistant/chat').send({ messages });
+    if (res.status !== 200 || typeof res.body?.answer !== 'string') {
+      throw new Error(`assistant chat failed: ${res.status} ${JSON.stringify(res.body)}`);
+    }
+    return parseAssistantReply(res.body);
+  }
+
   /** Accept the CURRENT consent version on this agent's cookie (spec R8). */
   async acceptConsent(agent: Agent): Promise<void> {
     const res = await agent.post('/api/consent/accept').send({ consentVersion: this.consentVersion });
@@ -224,6 +262,20 @@ export class HarnessClient {
     }
     return e.room === `session:${sessionId}` || e.room.includes(sessionId);
   }
+}
+
+/** Normalise the assistant endpoint's body: `answer` plus a `toolCalls`
+ *  trail of {name, rowCount}; anything malformed in the trail is dropped
+ *  rather than crashing the run (the audit table is the durable record). */
+export function parseAssistantReply(body: unknown): { answer: string; toolCalls: Array<{ name: string; rowCount: number }> } {
+  const b = (body ?? {}) as { answer?: unknown; toolCalls?: unknown };
+  const answer = typeof b.answer === 'string' ? b.answer : '';
+  const toolCalls = Array.isArray(b.toolCalls)
+    ? b.toolCalls
+        .filter((t): t is { name: string; rowCount?: unknown } => !!t && typeof t === 'object' && typeof (t as { name?: unknown }).name === 'string')
+        .map(t => ({ name: t.name, rowCount: typeof t.rowCount === 'number' ? t.rowCount : 0 }))
+    : [];
+  return { answer, toolCalls };
 }
 
 function sleep(ms: number): Promise<void> {

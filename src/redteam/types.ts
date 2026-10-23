@@ -8,8 +8,32 @@ export type { EvalDimensionId };
  *  detection); `voice` → a real voice session on the production backend
  *  selected by system_config.ai_model (today the Grok proxy), with TTS persona
  *  audio + a playable session recording (ai-therapist-124/213). In dry-run,
- *  voice scenarios fall back to the realtime-text flow. */
-export type Pipeline = 'chat' | 'realtime-text' | 'voice';
+ *  voice scenarios fall back to the realtime-text flow. `assistant` → the
+ *  ADMIN data assistant (POST /admin/api/assistant/chat) driven as a logged-in
+ *  staff user of `Scenario.assistantRole` (ai-therapist-207): the persona is a
+ *  staff member, not a participant, and the thing under test is role scoping,
+ *  injection resistance and data exfiltration, not therapy quality. */
+export type Pipeline = 'chat' | 'realtime-text' | 'voice' | 'assistant';
+
+/** Staff roles the admin assistant serves (mirrors assistant.service.ts). */
+export type AssistantRole = 'therapist' | 'researcher' | 'caseworker';
+
+/** Assistant-pipeline state exposed to assertions: what the endpoint said it
+ *  ran this turn, and who asked, so DB assertions can bind to assistant_audit. */
+export interface AssistantTurnState {
+  /** Role the current beat ran as. */
+  role: AssistantRole;
+  /** users.userid of the staff account the beat ran as. */
+  userId: number;
+  /** The beat's question exactly as POSTed (assistant_audit.question). */
+  question: string;
+  /** Tool trail returned by the endpoint for the current turn. */
+  toolCalls: Array<{ name: string; rowCount: number }>;
+  /** Every (role, userId) the scenario has driven so far, for final checks. */
+  callers: Array<{ role: AssistantRole; userId: number }>;
+  /** Wall-clock start of the scenario: audit rows before it are not ours. */
+  startedAt: Date;
+}
 
 export type Severity = 'none' | 'low' | 'medium' | 'high';
 
@@ -78,6 +102,8 @@ export interface AssertionContext {
    *  marked `expectInactive` (the harness sends it raw instead of throwing). */
   lastMessageStatus?: number;
   lastMessageBody?: unknown;
+  /** Set on the assistant pipeline only. */
+  assistant?: AssistantTurnState;
   pool: DbLike;
   classify: ClassifyFn;
   dryRun: boolean;
@@ -107,6 +133,9 @@ export interface Beat {
    *  harness sends the message raw (no throw on non-200) and exposes the status
    *  + body on the assertion context; no assistant turn is recorded. */
   expectInactive?: boolean;
+  /** Assistant pipeline only: run this beat as a different staff role than
+   *  `Scenario.assistantRole` (each role keeps its own login + history). */
+  assistantRole?: AssistantRole;
   assertAfter?: AssertionSpec[];
 }
 
@@ -115,6 +144,8 @@ export interface Scenario {
   title: string;
   pipeline: Pipeline;
   modality?: string;
+  /** Assistant pipeline: the staff role the scenario logs in as. */
+  assistantRole?: AssistantRole;
   personaSystem: string;
   /** Persona style modifiers for `--variations k` (ai-therapist-124 phase 3):
    *  variation v>0 appends styles[(v-1) % len] to personaSystem and shifts the

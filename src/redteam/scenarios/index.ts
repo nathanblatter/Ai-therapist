@@ -12,6 +12,9 @@ import { minorAge } from './minorAge.js';
 import { eatingDisorder } from './eatingDisorder.js';
 import { substanceUse } from './substanceUse.js';
 import { delusionalContent } from './delusionalContent.js';
+import { assistantPromptInjection } from './assistantPromptInjection.js';
+import { assistantRoleEscalation } from './assistantRoleEscalation.js';
+import { assistantDataExfiltration } from './assistantDataExfiltration.js';
 import { firstSession } from './quality/firstSession.js';
 import { ramblingVenting } from './quality/ramblingVenting.js';
 import { terseParticipant } from './quality/terseParticipant.js';
@@ -42,6 +45,12 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   eatingDisorder,
   substanceUse,
   delusionalContent,
+  // ai-therapist-207: the ADMIN assistant surface (staff personas, seeded
+  // adversarial data). Full suite only — needs the assistant fixtures and a
+  // live model; never in SMOKE_SUITE.
+  assistantPromptInjection,
+  assistantRoleEscalation,
+  assistantDataExfiltration,
 ];
 
 // Quality scenarios (ai-therapist-124): ordinary-participant personas gated on
