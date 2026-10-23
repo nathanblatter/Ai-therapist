@@ -4,8 +4,10 @@
 // alerts. The heavy lifting lives in services/sessionEval.service.ts,
 // services/evalCalibration.service.ts, and services/evalDrift.service.ts.
 import { Router } from 'express';
+import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { requireSessionClientAccess } from '../../middleware/caseload.js';
+import { requireSessionClientAccess, careTeamScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
+import { orgIdFor } from '../../middleware/org.js';
 import { parsePagination } from '../../utils/pagination.js';
 import {
   getSessionEval,
@@ -16,11 +18,52 @@ import {
   acknowledgeDriftAlert,
   listHarnessRuns,
   getHarnessRun,
+  getRatingQueueRowForSession,
+  hasHumanRating,
+  linkRatingToQueue,
+  listRatingQueue,
+  getRatingQueueCounts,
+  getRatingQueueRow,
+  claimRatingQueueRow,
+  skipRatingQueueRow,
+  countUnadjudicatedCrisisEvents,
+  type RatingQueueRow,
+  type RatingQueueStatus,
 } from '../../db/index.js';
 
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('evalsRoutes');
+
+/**
+ * Blind rating (eval program WP2): while a session sits open in the rating
+ * queue (queued / in_progress) a caller who has not stored their own rating
+ * must not see the judge's scores, rationale, or other humans' ratings. The
+ * gate is server-side so the UI cannot leak it; once the caller's rating is
+ * saved (or the queue row is rated/skipped) everything is returned.
+ */
+async function blindStateFor(sessionId: string, userId: number): Promise<{ queue: RatingQueueRow | null; blind: boolean }> {
+  const queue = await getRatingQueueRowForSession(sessionId);
+  if (!queue || (queue.status !== 'queued' && queue.status !== 'in_progress')) return { queue, blind: false };
+  return { queue, blind: !(await hasHumanRating(sessionId, userId)) };
+}
+
+/** Caseload / org scope for the rating-queue list, mirroring the crisis routes. */
+async function queueScopeFor(req: Request): Promise<{ scopeTherapistId: number | null; orgId: number | null }> {
+  const scopeTherapistId = await careTeamScopeId(req);
+  const orgId = scopeTherapistId === null ? await orgIdFor(req) : null;
+  return { scopeTherapistId, orgId };
+}
+
+/** 404-over-403 access to one queue row's session (researcher: org; therapist: caseload). */
+async function mayAccessQueueRow(req: Request, row: RatingQueueRow): Promise<boolean> {
+  return mayCareTeamAccessSession(req.session.userRole, req.session.userId, row.session_id, {
+    caseworkerPolicy: 'deny',
+    callerOrgId: await orgIdFor(req),
+  });
+}
+
+const QUEUE_STATUSES: ReadonlySet<string> = new Set(['queued', 'in_progress', 'rated', 'skipped', 'open']);
 
 export default function evalsRoutes(): Router {
   const router = Router();
@@ -100,7 +143,14 @@ export default function evalsRoutes(): Router {
     try {
       const evalRow = await getSessionEval(req.params.sessionId);
       if (!evalRow) return res.status(404).json({ error: 'No eval for this session yet' });
-      res.json({ eval: evalRow });
+      const { blind, queue } = await blindStateFor(req.params.sessionId, req.session.userId!);
+      if (blind) {
+        // Scores, rationale, comments and judge spread stay server-side until
+        // the caller's own rating is stored.
+        const { eval_id, session_id, judge_model, prompt_version, created_at } = evalRow;
+        return res.json({ eval: { eval_id, session_id, judge_model, prompt_version, created_at }, blind: true, queue });
+      }
+      res.json({ eval: evalRow, blind: false, queue });
     } catch (err) {
       log.error({ err }, 'Failed to fetch session eval');
       res.status(500).json({ error: 'Failed to fetch session eval' });
@@ -135,8 +185,21 @@ export default function evalsRoutes(): Router {
   // session (+ my_user_id so the UI can locate "my" rating).
   router.get('/admin/api/sessions/:sessionId/human-ratings', requireRole('therapist', 'researcher'), requireSessionClientAccess(), async (req, res) => {
     try {
-      const ratings = await getSessionHumanRatings(req.params.sessionId);
-      res.json({ ratings, my_user_id: req.session.userId });
+      const userId = req.session.userId!;
+      const [ratings, state] = await Promise.all([
+        getSessionHumanRatings(req.params.sessionId),
+        blindStateFor(req.params.sessionId, userId),
+      ]);
+      // Blind: other raters' scores are withheld until the caller has rated,
+      // so the second rating stays independent of the first.
+      const visible = state.blind ? ratings.filter(r => r.rater_user_id === userId) : ratings;
+      res.json({
+        ratings: visible,
+        my_user_id: userId,
+        blind: state.blind,
+        others_hidden: state.blind && visible.length < ratings.length,
+        queue: state.queue,
+      });
     } catch (err) {
       log.error({ err }, 'Failed to fetch human ratings');
       res.status(500).json({ error: 'Failed to fetch human ratings' });
@@ -167,7 +230,10 @@ export default function evalsRoutes(): Router {
         validation.overallNotes ?? null,
         HUMAN_RUBRIC_VERSION
       );
-      res.json({ rating });
+      // Queue link (WP2): the rater takes a free slot and the row becomes
+      // `rated` once every required rater has submitted.
+      const queue = await linkRatingToQueue(sessionId, req.session.userId!);
+      res.json({ rating, queue });
     } catch (err) {
       log.error({ err }, `Failed to save human rating for ${sessionId}`);
       res.status(500).json({ error: 'Failed to save human rating' });
@@ -178,18 +244,150 @@ export default function evalsRoutes(): Router {
   // agreement, plus judge-vs-judge agreement for the ensemble (migration 107).
   router.get('/admin/api/evals/calibration', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
-      const { computeCalibrationReport, computeJudgeAgreementReport } = await import('../../services/evalCalibration.service.js');
+      const { computeCalibrationReport, computeJudgeAgreementReport, computeHumanAgreementReport } = await import('../../services/evalCalibration.service.js');
       const { EVAL_PROMPT_VERSION } = await import('../../services/sessionEval.service.js');
       const promptVersion = req.query.promptVersion ? String(req.query.promptVersion) : EVAL_PROMPT_VERSION;
-      const [report, availableVersions, judgeAgreement] = await Promise.all([
+      const [report, availableVersions, judgeAgreement, humanAgreement] = await Promise.all([
         computeCalibrationReport(promptVersion),
         getCalibrationPromptVersions(),
         computeJudgeAgreementReport(promptVersion),
+        computeHumanAgreementReport(),
       ]);
-      res.json({ report, available_prompt_versions: availableVersions, judge_agreement: judgeAgreement });
+      res.json({
+        report,
+        available_prompt_versions: availableVersions,
+        judge_agreement: judgeAgreement,
+        human_agreement: humanAgreement,
+      });
     } catch (err) {
       log.error({ err }, 'Failed to compute calibration');
       res.status(500).json({ error: 'Failed to compute calibration' });
+    }
+  });
+
+  // ---- Rating queue (eval program WP2) ----------------------------------
+
+  // GET /admin/api/evals/rating-queue?scope=mine|all&status=open|queued|...
+  // Researchers see their org's queue; therapists the rows for sessions on
+  // their caseload. Also carries the status counts and the number of crisis
+  // events nobody has adjudicated yet (same scope).
+  router.get('/admin/api/evals/rating-queue', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const scope = await queueScopeFor(req);
+      const statusParam = typeof req.query.status === 'string' && QUEUE_STATUSES.has(req.query.status)
+        ? (req.query.status as RatingQueueStatus | 'open')
+        : undefined;
+      const { limit } = parsePagination(req.query, { defaultLimit: 200, maxLimit: 1000 });
+      const { getSecondRaterFraction } = await import('../../services/ratingSampler.service.js');
+      const [items, counts, unadjudicated, secondRaterFraction] = await Promise.all([
+        listRatingQueue({ ...scope, userId: req.session.userId!, mine: req.query.scope === 'mine', status: statusParam, limit }),
+        getRatingQueueCounts(scope),
+        countUnadjudicatedCrisisEvents(scope.scopeTherapistId, scope.orgId),
+        getSecondRaterFraction(),
+      ]);
+      res.json({
+        items,
+        counts,
+        unadjudicated_crisis_events: unadjudicated,
+        second_rater_fraction: secondRaterFraction,
+        my_user_id: req.session.userId,
+      });
+    } catch (err) {
+      log.error({ err }, 'Failed to list rating queue');
+      res.status(500).json({ error: 'Failed to list rating queue' });
+    }
+  });
+
+  // POST /admin/api/evals/rating-queue/sample - stratified sample into the
+  // queue (researcher-only). Body: { size, since?, seed?, dry_run? }.
+  router.post('/admin/api/evals/rating-queue/sample', requireRole('researcher'), async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const size = Number(body.size);
+      if (!Number.isInteger(size) || size < 1 || size > 500) {
+        return res.status(400).json({ error: 'size must be an integer 1..500' });
+      }
+      let since: Date | undefined;
+      if (body.since !== undefined && body.since !== null && body.since !== '') {
+        since = new Date(String(body.since));
+        if (Number.isNaN(since.getTime())) return res.status(400).json({ error: 'since must be a date' });
+      }
+      const seed = body.seed === undefined || body.seed === null ? undefined : Number(body.seed);
+      if (seed !== undefined && !Number.isInteger(seed)) return res.status(400).json({ error: 'seed must be an integer' });
+      const { enqueueStratifiedSample } = await import('../../services/ratingSampler.service.js');
+      const result = await enqueueStratifiedSample({
+        size,
+        since,
+        seed,
+        dryRun: body.dry_run === true,
+        enqueuedBy: req.session.userId ?? null,
+      });
+      res.json(result);
+    } catch (err) {
+      log.error({ err }, 'Failed to sample rating queue');
+      res.status(500).json({ error: 'Failed to sample rating queue' });
+    }
+  });
+
+  // POST /admin/api/evals/rating-queue/enqueue - push specific sessions
+  // (judge-disagreement list or by hand). Body: { session_ids, source }.
+  // Researcher-only and org-scoped: sessions outside the caller's org are
+  // reported as skipped, never enqueued.
+  router.post('/admin/api/evals/rating-queue/enqueue', requireRole('researcher'), async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const source = body.source === 'disagreement' ? 'disagreement' : body.source === 'manual' ? 'manual' : null;
+      if (!source) return res.status(400).json({ error: "source must be 'disagreement' or 'manual'" });
+      const ids: unknown = body.session_ids;
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > 200 || !ids.every(id => typeof id === 'string' && id)) {
+        return res.status(400).json({ error: 'session_ids must be 1..200 session ids' });
+      }
+      const callerOrgId = await orgIdFor(req);
+      const allowed: string[] = [];
+      const denied: string[] = [];
+      for (const id of ids as string[]) {
+        const ok = await mayCareTeamAccessSession(req.session.userRole, req.session.userId, id, { caseworkerPolicy: 'deny', callerOrgId });
+        (ok ? allowed : denied).push(id);
+      }
+      const { enqueueSessions } = await import('../../services/ratingSampler.service.js');
+      const result = await enqueueSessions(allowed, source, req.session.userId ?? null);
+      res.json({ inserted: result.inserted, skipped: [...result.skipped, ...denied] });
+    } catch (err) {
+      log.error({ err }, 'Failed to enqueue sessions for rating');
+      res.status(500).json({ error: 'Failed to enqueue sessions for rating' });
+    }
+  });
+
+  // POST /admin/api/evals/rating-queue/:id/claim - take the row (or its
+  // second-rater slot). 404 outside the caller's scope; 409 when not claimable.
+  router.post('/admin/api/evals/rating-queue/:id/claim', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid queue id' });
+      const row = await getRatingQueueRow(id);
+      if (!row || !(await mayAccessQueueRow(req, row))) return res.status(404).json({ error: 'Not found' });
+      const claimed = await claimRatingQueueRow(id, req.session.userId!);
+      if (!claimed) return res.status(409).json({ error: 'Queue item is not claimable (already rated, skipped, or fully assigned)' });
+      res.json({ item: claimed });
+    } catch (err) {
+      log.error({ err }, 'Failed to claim rating queue item');
+      res.status(500).json({ error: 'Failed to claim rating queue item' });
+    }
+  });
+
+  // POST /admin/api/evals/rating-queue/:id/skip - drop an open row.
+  router.post('/admin/api/evals/rating-queue/:id/skip', requireRole('therapist', 'researcher'), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid queue id' });
+      const row = await getRatingQueueRow(id);
+      if (!row || !(await mayAccessQueueRow(req, row))) return res.status(404).json({ error: 'Not found' });
+      const skipped = await skipRatingQueueRow(id, req.session.userId!);
+      if (!skipped) return res.status(409).json({ error: 'Queue item is not open' });
+      res.json({ item: skipped });
+    } catch (err) {
+      log.error({ err }, 'Failed to skip rating queue item');
+      res.status(500).json({ error: 'Failed to skip rating queue item' });
     }
   });
 

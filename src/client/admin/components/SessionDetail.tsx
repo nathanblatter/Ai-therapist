@@ -4,6 +4,7 @@ import ConversationBubble from "./ConversationBubble";
 import SessionInsightsPanel from "./SessionInsightsPanel";
 import SessionEvalPanel from "./SessionEvalPanel";
 import RiskTimeline from "./RiskTimeline";
+import SessionCrisisEvents from "./SessionCrisisEvents";
 import RiskCheckLadder from "./RiskCheckLadder";
 import { useSocket } from '../hooks/useSocket';
 import useAuth from '../hooks/useAuth';
@@ -761,6 +762,9 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
 
           {/* Structured C-SSRS-style ladder logged by run_risk_check (198) */}
           {!loading && <RiskCheckLadder sessionId={sessionId} />}
+
+          {/* Crisis events for this session with the WP2 adjudication widget */}
+          {!loading && <SessionCrisisEvents sessionId={sessionId} />}
 
           {/* LLM-judge quality scores (ended sessions only) */}
           {!loading && <SessionEvalPanel sessionId={sessionId} sessionStatus={session?.status} />}

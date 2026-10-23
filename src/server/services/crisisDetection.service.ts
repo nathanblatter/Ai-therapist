@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { pool } from '../config/db.js';
 import { getOpenAIKey } from '../config/secrets.js';
 import { recordCrisisEvent } from '../db/crisis.queries.js';
+import { CRISIS_EVENT_ADJUDICATIONS_SQL } from '../db/crisisAdjudications.queries.js';
 import { IRB_STUDY_ORG_ID_SQL } from '../db/organizations.queries.js';
 import { createLogger } from '../utils/logger.js';
 import type { HistoryMessage } from './minorSafeguard.service.js';
@@ -960,9 +961,10 @@ export async function logInterventionAction(sessionId: string, actionType: strin
  */
 export async function getSessionCrisisEvents(sessionId: string): Promise<unknown[]> {
   const result = await pool.query(
-    `SELECT * FROM crisis_events
-     WHERE session_id = $1
-     ORDER BY created_at DESC`,
+    `SELECT ce.*, ${CRISIS_EVENT_ADJUDICATIONS_SQL}
+     FROM crisis_events ce
+     WHERE ce.session_id = $1
+     ORDER BY ce.created_at DESC`,
     [sessionId]
   );
   return result.rows;

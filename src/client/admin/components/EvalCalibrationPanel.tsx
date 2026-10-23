@@ -57,11 +57,23 @@ interface JudgeAgreementReport {
   high_disagreement: Array<{ session_id: string; max_spread: number; judge_spread: Record<string, number> }>;
 }
 
+interface HumanAgreementReport {
+  rubric_version: string;
+  pair_count: number;
+  session_count: number;
+  pairs_needed: number;
+  target_pairs: number;
+  dimensions: Array<{ dimension: string; n: number; kappa: number | null; exact_agreement_pct: number | null; major_disagreement_pct: number | null }>;
+  overall_kappa: number | null;
+}
+
 interface CalibrationData {
   report: CalibrationReport;
   available_prompt_versions: string[];
   /** Absent on servers that predate migration 107. */
   judge_agreement?: JudgeAgreementReport;
+  /** Absent on servers that predate migration 114. */
+  human_agreement?: HumanAgreementReport;
 }
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -128,8 +140,9 @@ export default function EvalCalibrationPanel() {
     );
   }
 
-  const { report, available_prompt_versions, judge_agreement } = data;
+  const { report, available_prompt_versions, judge_agreement, human_agreement } = data;
   const calibrated = isCalibrated(report);
+  const pairsNeeded = Math.max(0, 20 - Math.min(...report.dimensions.map(d => d.n), 20));
 
   return (
     <div className="space-y-4">
@@ -155,8 +168,14 @@ export default function EvalCalibrationPanel() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-6 rounded-lg shadow">
-          <p className="text-sm text-gray-600">Paired ratings</p>
+          <p className="text-sm text-gray-600">Paired ratings (human vs judge)</p>
           <p className="text-3xl font-bold text-navy mt-2">{report.pair_count}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {pairsNeeded > 0 ? `${pairsNeeded} more needed on every dimension for the >= 20 rule` : '>= 20 on every dimension'}
+          </p>
+          <div className="mt-2 h-1.5 bg-gray-100 rounded">
+            <div className="h-1.5 bg-royal rounded" style={{ width: `${Math.min(100, (Math.min(...report.dimensions.map(d => d.n), 20) / 20) * 100)}%` }} />
+          </div>
         </div>
         <div className="bg-white p-6 rounded-lg shadow">
           <p className="text-sm text-gray-600">Sessions</p>
@@ -199,6 +218,8 @@ export default function EvalCalibrationPanel() {
         </table>
       </div>
 
+      {human_agreement && <HumanAgreementBlock agreement={human_agreement} />}
+
       {judge_agreement && <JudgeAgreementBlock agreement={judge_agreement} />}
 
       <div className="bg-white p-4 rounded-lg shadow">
@@ -217,6 +238,66 @@ export default function EvalCalibrationPanel() {
           version. Until then, run evals manually and keep rating sessions.
         </p>
       </div>
+    </div>
+  );
+}
+
+/** Human-vs-human inter-rater reliability over double-rated sessions (eval
+ *  program WP2): the second-rater fraction of the rating queue feeds this. */
+function HumanAgreementBlock({ agreement }: { agreement: HumanAgreementReport }) {
+  const { pair_count, session_count, pairs_needed, target_pairs, dimensions, overall_kappa } = agreement;
+  const progress = Math.min(100, (session_count / target_pairs) * 100);
+  return (
+    <div className="bg-white p-6 rounded-lg shadow space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h4 className="text-lg font-semibold flex items-center gap-2">
+          <Users size={18} /> Inter-rater reliability (human vs human)
+        </h4>
+        <span className="text-sm text-gray-600">
+          {session_count} double-rated session{session_count === 1 ? '' : 's'} · {pair_count} rater pair{pair_count === 1 ? '' : 's'} · overall κ{' '}
+          <span className={kappaClasses(overall_kappa)}>{overall_kappa === null ? 'n/a' : overall_kappa.toFixed(2)}</span>
+        </span>
+      </div>
+      <div>
+        <div className="flex justify-between text-xs text-gray-600 mb-1">
+          <span>Progress toward {target_pairs} double-rated sessions</span>
+          <span>{pairs_needed > 0 ? `${pairs_needed} to go` : 'target reached'}</span>
+        </div>
+        <div className="h-1.5 bg-gray-100 rounded">
+          <div className="h-1.5 bg-royal rounded" style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-600 border-b">
+              <th className="py-1 pr-4">Dimension</th>
+              <th className="py-1 pr-4">n</th>
+              <th className="py-1 pr-4">Weighted κ</th>
+              <th className="py-1 pr-4">Exact</th>
+              <th className="py-1 pr-4">Differ by 2+</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dimensions.map(d => (
+              <tr key={d.dimension} className="border-b last:border-0">
+                <td className="py-1 pr-4">{DIMENSION_LABELS[d.dimension] ?? d.dimension}</td>
+                <td className="py-1 pr-4">{d.n}</td>
+                <td className={`py-1 pr-4 ${kappaClasses(d.kappa)}`}>
+                  {d.kappa === null ? `n/a (n=${d.n})` : `${d.kappa.toFixed(2)} (${kappaBand(d.kappa)})`}
+                </td>
+                <td className="py-1 pr-4">{d.exact_agreement_pct === null ? '—' : `${d.exact_agreement_pct.toFixed(0)}%`}</td>
+                <td className="py-1 pr-4">{d.major_disagreement_pct === null ? '—' : `${d.major_disagreement_pct.toFixed(0)}%`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-gray-600">
+        Human-human κ is the ceiling for human-judge κ: a dimension where two trained raters cannot agree is a rubric
+        problem, not a judge problem. Double ratings come from the rating queue&apos;s second-rater fraction
+        (<code>evals.rating_second_rater_fraction</code>).
+      </p>
     </div>
   );
 }

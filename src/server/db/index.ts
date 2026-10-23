@@ -28,6 +28,8 @@ export * from './tools.queries.js';
 export * from './knowledge.queries.js';
 export * from './evals.queries.js';
 export * from './humanRatings.queries.js';
+export * from './ratingQueue.queries.js';
+export * from './crisisAdjudications.queries.js';
 export * from './pairwiseEvals.queries.js';
 export * from './driftAlerts.queries.js';
 export * from './caseProfile.queries.js';

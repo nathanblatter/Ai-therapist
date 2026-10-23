@@ -4,9 +4,11 @@
 // OpenAI/secrets imports so this stays cheap to unit-test.
 import {
   getCalibrationPairs,
+  getHumanRatingPairs,
   getSessionEvalJudgeRuns,
   getHighDisagreementEvals,
   type HumanRatingRubric,
+  type HumanRatingPairRow,
   type SessionEvalJudgeRow,
 } from '../db/index.js';
 import { EVAL_DIMENSIONS, medianScore } from './sessionEval.service.js';
@@ -139,6 +141,80 @@ export async function computeCalibrationReport(promptVersion: string): Promise<C
     dimensions,
     overall_kappa: quadraticWeightedKappa(pooledHuman, pooledLlm),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Human-human agreement (eval program WP2): inter-rater reliability over
+// double-rated sessions, reported next to human-judge kappa.
+// ---------------------------------------------------------------------------
+
+/** Paired ratings needed before the auto-run rule (kappa >= 0.6 on every
+ *  dimension) is considered measured, for both human-judge and human-human. */
+export const CALIBRATION_MIN_PAIRS = 20;
+
+export interface HumanAgreementDimension {
+  dimension: string;
+  n: number; // rater pairs with a valid score on both sides
+  kappa: number | null;
+  exact_agreement_pct: number | null;
+  /** % of pairs where the two humans differ by 2 or more points. */
+  major_disagreement_pct: number | null;
+}
+
+export interface HumanAgreementReport {
+  rubric_version: string;
+  /** Unordered rater pairs (a session with three raters contributes three). */
+  pair_count: number;
+  /** Distinct sessions with two or more raters. */
+  session_count: number;
+  /** Paired ratings still needed to reach CALIBRATION_MIN_PAIRS. */
+  pairs_needed: number;
+  target_pairs: number;
+  dimensions: HumanAgreementDimension[]; // EVAL_DIMENSIONS order
+  overall_kappa: number | null;
+}
+
+/** Pure: human-human weighted kappa per dimension over rater pairs. */
+export function computeHumanAgreement(pairs: HumanRatingPairRow[], rubricVersion: string): HumanAgreementReport {
+  const sessions = new Set(pairs.map(p => p.session_id));
+  const pooledA: number[] = [];
+  const pooledB: number[] = [];
+  const dimensions: HumanAgreementDimension[] = EVAL_DIMENSIONS.map(dim => {
+    const a: number[] = [];
+    const b: number[] = [];
+    for (const pair of pairs) {
+      const sa = pair.rubric_a?.[dim]?.score;
+      const sb = pair.rubric_b?.[dim]?.score;
+      if (isValidScore(sa) && isValidScore(sb)) {
+        a.push(sa);
+        b.push(sb);
+        pooledA.push(sa);
+        pooledB.push(sb);
+      }
+    }
+    const n = a.length;
+    return {
+      dimension: dim,
+      n,
+      kappa: quadraticWeightedKappa(a, b),
+      exact_agreement_pct: n ? (a.filter((v, i) => v === b[i]).length / n) * 100 : null,
+      major_disagreement_pct: n ? (a.filter((v, i) => Math.abs(v - b[i]) >= 2).length / n) * 100 : null,
+    };
+  });
+  return {
+    rubric_version: rubricVersion,
+    pair_count: pairs.length,
+    session_count: sessions.size,
+    pairs_needed: Math.max(0, CALIBRATION_MIN_PAIRS - sessions.size),
+    target_pairs: CALIBRATION_MIN_PAIRS,
+    dimensions,
+    overall_kappa: quadraticWeightedKappa(pooledA, pooledB),
+  };
+}
+
+/** DB-backed orchestrator for the admin calibration endpoint. */
+export async function computeHumanAgreementReport(): Promise<HumanAgreementReport> {
+  return computeHumanAgreement(await getHumanRatingPairs(HUMAN_RUBRIC_VERSION), HUMAN_RUBRIC_VERSION);
 }
 
 export interface HumanRubricValidation {

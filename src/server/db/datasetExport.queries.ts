@@ -591,3 +591,84 @@ export async function getAcousticFeaturesExport(asOf: string): Promise<DatasetRo
   );
   return rows;
 }
+
+/**
+ * human_ratings.csv — one row per (session, rater) human rubric rating
+ * (eval program WP2). Raters are identified by role and a per-session ordinal
+ * only; per-dimension notes and overall notes are never exported.
+ */
+export async function getHumanRatingsExport(asOf: string): Promise<DatasetRow[]> {
+  const { rows } = await pool.query(
+    `WITH sess AS (
+       SELECT ts.session_id, rp.pseudonym AS session_pseudo_id
+       FROM therapy_sessions ts
+       JOIN research_pseudonyms rp ON rp.entity_type = 'session' AND rp.entity_key = ts.session_id
+       WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1
+     )
+     SELECT
+       sess.session_pseudo_id AS session_pseudo_id,
+       COALESCE(ru.role, '') AS rater_role,
+       ROW_NUMBER() OVER (PARTITION BY hr.session_id ORDER BY hr.rating_id)::int AS rater_seq,
+       hr.rubric_version AS rubric_version,
+       (hr.rubric->'safety_protocol'->>'score')::int AS safety_protocol_score,
+       (hr.rubric->'empathy'->>'score')::int AS empathy_score,
+       (hr.rubric->'modality_fidelity'->>'score')::int AS modality_fidelity_score,
+       (hr.rubric->'disclaimer_compliance'->>'score')::int AS disclaimer_compliance_score,
+       (hr.rubric->'non_directiveness'->>'score')::int AS non_directiveness_score,
+       (hr.rubric->'clinical_claims'->>'score')::int AS clinical_claims_score,
+       COALESCE(q.source, '') AS queue_source,
+       COALESCE(q.stratum, '') AS stratum,
+       ${tsUtc('hr.updated_at')} AS rated_at
+     FROM session_human_ratings hr
+     JOIN sess ON sess.session_id = hr.session_id
+     LEFT JOIN users ru ON ru.userid = hr.rater_user_id
+     LEFT JOIN eval_rating_queue q ON q.session_id = hr.session_id
+     WHERE hr.updated_at <= $1
+     ORDER BY sess.session_pseudo_id, rater_seq`,
+    [asOf]
+  );
+  return rows;
+}
+
+/**
+ * crisis_adjudications.csv — one row per (crisis event, adjudicator) verdict
+ * (eval program WP2). Event columns mirror crisis_events.csv so rows join on
+ * (session_pseudo_id, occurred_at); adjudicators are identified by role only
+ * and the note is never exported.
+ */
+export async function getCrisisAdjudicationsExport(asOf: string): Promise<DatasetRow[]> {
+  const { rows } = await pool.query(
+    `WITH sess AS (
+       SELECT ts.session_id, ts.user_id, rp.pseudonym AS session_pseudo_id
+       FROM therapy_sessions ts
+       JOIN research_pseudonyms rp ON rp.entity_type = 'session' AND rp.entity_key = ts.session_id
+       WHERE ts.is_demo IS NOT TRUE AND ts.created_at <= $1
+     )
+     SELECT
+       COALESCE(sess.session_pseudo_id, '') AS session_pseudo_id,
+       COALESCE(pp.pseudonym, '') AS participant_id,
+       (ce.session_id IS NULL) AS thread_origin,
+       ce.event_type AS event_type,
+       ce.severity AS severity,
+       ce.risk_score AS risk_score,
+       ${tsUtc('ce.created_at')} AS occurred_at,
+       COALESCE(au.role, '') AS adjudicator_role,
+       a.verdict AS verdict,
+       ${tsUtc('a.adjudicated_at')} AS adjudicated_at
+     FROM crisis_event_adjudications a
+     JOIN crisis_events ce ON ce.event_id = a.crisis_event_id
+     LEFT JOIN sess ON sess.session_id = ce.session_id
+     LEFT JOIN users cu ON cu.userid = ce.client_user_id
+     LEFT JOIN users au ON au.userid = a.adjudicator_id
+     LEFT JOIN research_pseudonyms pp
+       ON pp.entity_type = 'participant'
+      AND pp.entity_key = COALESCE(sess.user_id, ce.client_user_id)::text
+     WHERE a.adjudicated_at <= $1
+       AND ((ce.session_id IS NOT NULL AND sess.session_id IS NOT NULL)
+         OR (ce.session_id IS NULL AND ce.client_user_id IS NOT NULL
+             AND cu.is_sandbox IS NOT TRUE AND ce.created_at <= $1))
+     ORDER BY COALESCE(sess.session_pseudo_id, ''), ce.created_at, ce.event_id, a.adjudicated_at, a.adjudication_id`,
+    [asOf]
+  );
+  return rows;
+}

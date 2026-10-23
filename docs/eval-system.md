@@ -169,6 +169,93 @@ per-session rating form in Session Detail.
   current prompt version. The panel shows a green "Calibration OK" badge only
   when that bar is met; otherwise amber "keep auto-run disabled".
 
+## Human rating queue, blind rating, crisis adjudication (eval program WP2, migration 114)
+
+The supply side for calibration (spec section 6 WP2, gap G2). Everything
+below is reachable from the admin UI: Evals -> **Rating queue** tab, plus
+the per-session and per-crisis-event widgets.
+
+### Rating queue (`eval_rating_queue`)
+
+- One row per session: `stratum`, `source` (`stratified` | `disagreement` |
+  `manual`), `status` (`queued` -> `in_progress` -> `rated` | `skipped`),
+  `assigned_to`, `second_rater_id`, `needs_second_rater`, `crisis_adjacent`.
+- **Sampler** (`ratingSampler.service.ts`): candidates are ended, non-demo,
+  non-sandbox sessions with at least one participant turn, ended since
+  `--since` (default 90 days), not already queued. Stratum =
+  `modality|risk_band|ISO-week` where modality is `voice` (realtime) or
+  `chat`, risk band is `none` / `low` (>= 25) / `moderate` (>= 50) / `high`
+  (>= 75) over `max(crisis_risk_score, max(risk_score_history))`, and the week
+  is from `ended_at`. Allocation: every non-empty stratum gets one slot
+  first, the rest is split by weight (1 per session, x3 for crisis-adjacent =
+  flagged, has a crisis event, or peak band >= moderate) with largest
+  remainder, capped at stratum size; within a stratum the draw is weighted
+  the same way. Each pick is marked `needs_second_rater` with probability
+  `evals.rating_second_rater_fraction` (default 0.2, seeded in 114). The whole
+  allocation is pure and seeded, so a preview and the real draw agree.
+- **CLI:** `npx tsx src/database/scripts/enqueueRatingSample.ts --size 40
+  [--since 2026-09-01] [--seed 7] [--dry-run]`.
+- **API** (researcher; therapist for sessions on their caseload; researchers
+  org-scoped with the IRB-custody rule for anonymous sessions; 404 never 403):
+  - `GET /admin/api/evals/rating-queue?scope=mine|all&status=open|queued|in_progress|rated|skipped`
+    -> `{items, counts, unadjudicated_crisis_events, second_rater_fraction}`
+  - `POST /admin/api/evals/rating-queue/sample` `{size, since?, seed?, dry_run?}` (researcher)
+  - `POST /admin/api/evals/rating-queue/enqueue` `{session_ids, source: disagreement|manual}` (researcher;
+    the Rating queue tab's "Enqueue judge-disagreement sessions" feeds the
+    calibration panel's high-disagreement list through this)
+  - `POST /admin/api/evals/rating-queue/:id/claim` (first claimant takes
+    `assigned_to`; a different user may take the second-rater slot; 409 when
+    not claimable), `POST .../:id/skip`.
+  - Saving a rating (`PUT /admin/api/sessions/:id/human-rating`) links the
+    rater to the queue row and flips it to `rated` once every required rater
+    (1, or 2 when `needs_second_rater`) has a stored rating.
+
+### Blind rating
+
+Enforced **server-side** in `evals.routes.ts`: while a session's queue row is
+`queued` or `in_progress` and the caller has no stored rating for it,
+`GET /admin/api/sessions/:id/eval` returns only `{eval_id, session_id,
+judge_model, prompt_version, created_at}` plus `blind: true` (no rubric,
+rationale, overall comments or judge spread), and
+`GET /admin/api/sessions/:id/human-ratings` returns only the caller's own
+rating (`others_hidden: true`). Once the rating is saved (or the row is
+rated/skipped) both endpoints return everything and the Session Detail panel
+shows the judge score beside each of the rater's scores. Sessions outside the
+queue behave as before. Reading the transcript to rate it is a
+`transcript_view` in the Data Access audit, logged by the session route as
+usual.
+
+### Crisis adjudication (`crisis_event_adjudications`)
+
+One verdict per (crisis event, adjudicator): `confirmed` | `false_positive` |
+`unclear`, optional note. Widget on every event card in Crisis Management
+(overview + events tab) and in Session Detail's "Crisis events" panel
+(`SessionCrisisEvents.tsx`). API: `PUT /admin/api/crisis/events/:eventId/adjudication`
+`{verdict, note?}` and `GET .../adjudications` (therapist on caseload,
+researcher in org; caseworkers read the verdicts on the dashboards but
+cannot write). The crisis list queries carry an `adjudications` JSON array
+(adjudicator id, verdict, time; never the note). The queue view shows the
+count of events still unadjudicated. This is the ground truth WP3's risk
+calibration joins on.
+
+### Inter-rater reliability
+
+`GET /admin/api/evals/calibration` now also returns `human_agreement`:
+quadratic weighted kappa per dimension over every unordered rater pair on a
+double-rated session (`getHumanRatingPairs`), exact and >= 2-point
+disagreement rates, and progress toward **20 double-rated sessions**
+(`CALIBRATION_MIN_PAIRS`). The panel renders it between the human-judge
+table and the judge-judge block and shows how many more paired ratings the
+>= 20 rule needs. Human-human kappa is the ceiling for human-judge kappa.
+
+### Export
+
+`human_ratings.csv` (session pseudonym, rater **role** + per-session ordinal,
+six scores, rubric version, queue source/stratum, rated_at) and
+`crisis_adjudications.csv` (crisis_events.csv columns + adjudicator role +
+verdict + time) join the de-identified bundle. No usernames, no rating notes,
+no adjudication notes.
+
 ## Pairwise A/B eval (ai-therapist-81)
 
 - **Table `session_eval_pairs`** (migration 051): one row per judged canonical
@@ -224,7 +311,8 @@ VALUES ('evals', '{
   "drift_min_window": 10,
   "drift_page_enabled": false,
   "judge_models": ["gpt-4o-mini", "gpt-5-mini"],
-  "self_consistency_runs": 1
-}', 'Session eval harness settings (v1 + v2 + ensemble)')
+  "self_consistency_runs": 1,
+  "rating_second_rater_fraction": 0.2
+}', 'Session eval harness settings (v1 + v2 + ensemble + rating queue)')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value;
 ```

@@ -15,6 +15,8 @@ vi.mock('../db/datasetExport.queries.js', () => ({
   getFeedbackExport: vi.fn(async () => mockRows.feedback ?? []),
   getEvalsExport: vi.fn(async () => mockRows.evals ?? []),
   getCrisisEventsExport: vi.fn(async () => mockRows.crisis ?? []),
+  getHumanRatingsExport: vi.fn(async () => mockRows.human_ratings ?? []),
+  getCrisisAdjudicationsExport: vi.fn(async () => mockRows.adjudications ?? []),
   getTranscriptsExport: vi.fn(async () => mockRows.transcripts ?? []),
   getFeedbackCommentsExport: vi.fn(async () => mockRows.comments ?? []),
   getSemanticMetricsExport: vi.fn(async () => mockRows.semantic_metrics ?? []),
@@ -95,13 +97,13 @@ describe('codebook / CSV registry (drift guard)', () => {
 });
 
 describe('buildDataset', () => {
-  it('assigns pseudonyms before selecting rows and includes all 11 default CSVs + codebook', async () => {
+  it('assigns pseudonyms before selecting rows and includes all 13 default CSVs + codebook', async () => {
     const result = await buildDataset('2026-08-31T23:59:59Z', { generatedAt: 'fixed' });
     expect(ensurePseudonyms).toHaveBeenCalledWith('2026-08-31T23:59:59Z');
     const names = result.main.map(f => f.name).sort();
     expect(names).toEqual([
-      'acoustic_features.csv', 'codebook.md', 'crisis_events.csv', 'evals.csv', 'feedback.csv',
-      'moods.csv', 'participants.csv', 'screeners.csv', 'semantic_metrics.csv',
+      'acoustic_features.csv', 'codebook.md', 'crisis_adjudications.csv', 'crisis_events.csv', 'evals.csv', 'feedback.csv',
+      'human_ratings.csv', 'moods.csv', 'participants.csv', 'screeners.csv', 'semantic_metrics.csv',
       'sessions.csv', 'surveys.csv', 'surveys_scored.csv',
     ]);
     expect(result.transcripts).toBeNull();
@@ -157,6 +159,32 @@ describe('PII exclusion (query source guard)', () => {
 
   it('excludes demo traffic in every query', () => {
     const occurrences = (queriesSrc.match(/is_demo IS NOT TRUE/g) ?? []).length;
-    expect(occurrences).toBeGreaterThanOrEqual(8);
+    expect(occurrences).toBeGreaterThanOrEqual(10);
+  });
+
+  // Eval program WP2: raters and adjudicators appear as a role, never a name,
+  // and no rating note / adjudication note leaves the database.
+  it('human_ratings.csv and crisis_adjudications.csv carry roles, verdicts and scores only', () => {
+    const ratings = DATASET_FILES.find(f => f.file === 'human_ratings.csv')!;
+    const adjud = DATASET_FILES.find(f => f.file === 'crisis_adjudications.csv')!;
+    expect(ratings.columns.map(c => c.name)).toEqual([
+      'session_pseudo_id', 'rater_role', 'rater_seq', 'rubric_version',
+      'safety_protocol_score', 'empathy_score', 'modality_fidelity_score', 'disclaimer_compliance_score',
+      'non_directiveness_score', 'clinical_claims_score', 'queue_source', 'stratum', 'rated_at',
+    ]);
+    expect(adjud.columns.map(c => c.name)).toEqual([
+      'session_pseudo_id', 'participant_id', 'thread_origin', 'event_type', 'severity', 'risk_score',
+      'occurred_at', 'adjudicator_role', 'verdict', 'adjudicated_at',
+    ]);
+    for (const col of [...ratings.columns, ...adjud.columns]) {
+      expect(col.name).not.toMatch(/note|username|user_id|rater_id|adjudicator_id/);
+    }
+    // The queries select the rater/adjudicator role, never a username or note column.
+    const wp2 = queriesSrc.slice(queriesSrc.indexOf('getHumanRatingsExport'));
+    expect(wp2).not.toMatch(/\.note\b/);
+    expect(wp2).not.toMatch(/overall_notes/);
+    expect(wp2).not.toMatch(/username/);
+    expect(wp2).toContain('ru.role');
+    expect(wp2).toContain('au.role');
   });
 });
