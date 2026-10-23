@@ -7,6 +7,7 @@
 import { pool } from '../config/db.js';
 import { projectRowsMetadata } from './metadataProjection.js';
 import { messageTextSql } from './adminSessions.queries.js';
+import { ownerOrgScopeSql } from './organizations.queries.js';
 
 export type ExportRow = Record<string, unknown>;
 
@@ -24,12 +25,13 @@ export interface ExportFilters {
 }
 
 // Researcher org restriction (caseworker portal C13): when orgId is set,
-// limit to sessions owned by that organization's users; anonymous sessions
-// stay included, so pre-org behavior is byte-identical at cutover.
+// limit to sessions owned by that organization's users. Anonymous sessions
+// (ts.user_id IS NULL) are irb-study custody and export only for that org,
+// the same predicate the list queries and by-id gates apply (ai-therapist-278).
 function orgClause(orgId: number | null | undefined, paramIndex: number): string {
   if (orgId === null || orgId === undefined) return '';
   return `
-      AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${paramIndex}))`;
+      AND ${ownerOrgScopeSql(`$${paramIndex}`, 'ts.user_id')}`;
 }
 
 /** Per-session metadata, no message content. */
@@ -134,7 +136,8 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
   if (f.sessionId) {
     // Org scoping must hold on the single-session fast path too: without the
     // EXISTS guard an org-scoped researcher could export any org's session by
-    // naming its id. Anonymous sessions stay included, matching orgClause.
+    // naming its id. Same owner-org predicate as orgClause (anonymous sessions
+    // are irb-study custody); the $2::int cast types the parameter.
     const result = await pool.query(`
       SELECT
         m.message_id as id,
@@ -149,8 +152,7 @@ export async function getFullExport(f: ExportFilters, contentColumn: ExportConte
         AND ($2::int IS NULL OR EXISTS (
           SELECT 1 FROM therapy_sessions ts
           WHERE ts.session_id = m.session_id
-            AND (ts.user_id IS NULL OR EXISTS (
-              SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $2))))
+            AND ${ownerOrgScopeSql('$2', 'ts.user_id')}))
       ORDER BY m.created_at ASC
     `, [f.sessionId, orgId ?? null]);
     return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;

@@ -515,7 +515,15 @@ io.on('connection', (socket: AuthSocket) => {
       const { sidebandManager } = await import('./services/sidebandManager.service.js');
       const activeSessions = sidebandManager.getActiveConnections();
 
-      let rows = await getSidebandConnectionsByIds(activeSessions);
+      // Org-bound researchers see only their organization's sessions (owner
+      // in their org, or anonymous and they are the irb-study org), the same
+      // resolution adminMayAccessSessionLive and GET /admin/api/sideband/status
+      // use: orgIdFor on the socket's express session, throwing (-> catch,
+      // empty list) rather than widening to an all-orgs read (ai-therapist-278).
+      const orgId = socket.userRole === 'researcher'
+        ? await orgIdFor(socket.request as unknown as Request)
+        : null;
+      let rows = await getSidebandConnectionsByIds(activeSessions, orgId);
 
       // Caseload RBAC: therapists only see their assigned clients' live
       // connections (mirrors the HTTP /admin/api/sideband/status filter).
