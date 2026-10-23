@@ -40,6 +40,7 @@ import adminConfigRoutes from "./routes/admin/config.routes.js";
 import analyticsRoutes from "./routes/admin/analytics.routes.js";
 import studyOpsRoutes from "./routes/admin/studyOps.routes.js";
 import irbPacketRoutes from "./routes/admin/irbPacket.routes.js";
+import weeklyDigestRoutes from "./routes/admin/weeklyDigest.routes.js";
 import exportRoutes from "./routes/admin/export.routes.js";
 import adminRateLimitsRoutes from "./routes/admin/rateLimits.routes.js";
 import rateLimitsRoutes from "./routes/public/rateLimits.routes.js";
@@ -763,6 +764,9 @@ app.use(studyOpsRoutes());
 // IRB continuing-review packet (JSON / printable HTML / zip) -> routes/admin/irbPacket.routes.ts.
 app.use(irbPacketRoutes());
 
+// Weekly PI digest (markdown + JSON archive, eval spec WP7) -> routes/admin/weeklyDigest.routes.ts.
+app.use(weeklyDigestRoutes());
+
 
 // Research-data export (JSON/CSV) -> routes/admin/export.routes.ts.
 app.use(exportRoutes());
@@ -1100,6 +1104,12 @@ if (isEntrypoint) {
       import('./services/harnessRunner.service.js')
         .then(m => m.startHarnessScheduler())
         .catch(err => log.error({ err }, 'Failed to start harness scheduler'));
+      // Weekly PI digest (config-gated via evals.digest_schedule, default off;
+      // eval spec WP7). Same stage-only gate: the digest reads eval tables
+      // that only fill where automatic evals run.
+      import('./services/weeklyDigest.service.js')
+        .then(m => m.startWeeklyDigestScheduler())
+        .catch(err => log.error({ err }, 'Failed to start weekly digest scheduler'));
     } else if (process.env.SOCKET_PG_ADAPTER !== 'off') {
       log.info('Automatic evals disabled (EVALS_ENABLED not set) — stage-only feature');
     }

@@ -211,6 +211,40 @@ per-session rating form in Session Detail.
   so eval noise cannot page the crisis on-call unless explicitly opted in
   (double-gated, fail-closed).
 
+## Weekly digest (eval spec WP7)
+
+- `weeklyDigest.service.ts` builds one PI-ready markdown document per
+  (organization, week ending Sunday UTC): sessions evaluated and per-dimension
+  score trend (this week vs the pooled prior four weeks, `session_evals`
+  consensus rows at the current `EVAL_PROMPT_VERSION`), judge agreement
+  (`computeJudgeAgreementReport`), drift alerts opened / acknowledged / open at
+  week end, harness pass rates per suite plus a nightly run-to-run diff
+  (`harness_runs`; the CLI's `diff.json` is file-only), crisis events by
+  severity and type with adjudication outcomes once `crisis_event_adjudications`
+  exists (until then the section prints "adjudication not yet enabled"),
+  human-judge calibration (kappa per dimension, paired count vs the 20-rating
+  rule, 0.6 target), a fixed open-gaps checklist read from `system_config.evals`,
+  and a footer with generated-at and git sha.
+- Scope and safety rules are the IRB packet's (docs/irb-packet.md): the
+  service calls `getIrbSafetyCounts` / `getIrbMonitoringCounts` and the digest
+  queries reuse `SESSION_SCOPE` from `irbPacket.queries.ts`. Aggregates only;
+  no participant, session or staff identifiers; free text passes through
+  `scrubIdentifiers`. No `data_access_log` row is written (no participant data
+  is accessed). Nothing is emailed - download the `.md` and forward it.
+- Archive: `weekly_digests` (migration 115: org_id, week_ending, markdown,
+  data JSONB, generated_at, generated_by = `scheduler` | username | `cli:user`).
+- Routes (researcher only, org-scoped, sandbox 404):
+  `GET /admin/api/evals/digests` (list + schedule), `GET .../digests/:id`
+  (JSON + markdown), `GET .../digests/:id.md` (download),
+  `POST .../digests/generate` (`{week_ending?}`), `PUT .../digests/schedule`.
+  UI: Evals view, "Weekly digest" panel (list, Generate, schedule, safe
+  markdown preview).
+- Schedule: `evals.digest_schedule = {enabled, weekday, hour_utc}` (default
+  disabled, Monday 06:00 UTC), run by an in-process 5-minute tick that is
+  debounced through the archive (`generated_by = 'scheduler'` within 6 days
+  means done). Same `EVALS_ENABLED` gate as the nightly harness.
+- CLI: `npx tsx src/database/scripts/generateWeeklyDigest.ts [--week-ending YYYY-MM-DD] [--org slug|id] [--print]`.
+
 ## Config keys (`system_config.evals`)
 
 ```sql
@@ -224,7 +258,8 @@ VALUES ('evals', '{
   "drift_min_window": 10,
   "drift_page_enabled": false,
   "judge_models": ["gpt-4o-mini", "gpt-5-mini"],
-  "self_consistency_runs": 1
+  "self_consistency_runs": 1,
+  "digest_schedule": { "enabled": false, "weekday": 1, "hour_utc": 6 }
 }', 'Session eval harness settings (v1 + v2 + ensemble)')
 ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value;
 ```
