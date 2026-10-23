@@ -262,7 +262,7 @@ describe('participant turns → crisis pipeline', () => {
     await vi.advanceTimersByTimeAsync(11_000);
     fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'c', transcript: 'I feel stuck lately.' });
     await flush();
-    expect(insertMessagesBatchMock).toHaveBeenCalledTimes(2);
+    expect(runCrisisPipelineMock).toHaveBeenCalledTimes(2);
 
     // Same words right after an assistant reply are a genuine repeat too
     // (a repeated crisis utterance must always be scored again).
@@ -272,7 +272,8 @@ describe('participant turns → crisis pipeline', () => {
     await flush();
     fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'd', transcript: 'I feel stuck lately.' });
     await flush();
-    expect(insertMessagesBatchMock).toHaveBeenCalledTimes(3);
+    // (insertMessagesBatch also persists the assistant row, so count user turns
+    // via the crisis pipeline, which runs once per accepted user turn.)
     expect(runCrisisPipelineMock).toHaveBeenCalledTimes(3);
   });
 
