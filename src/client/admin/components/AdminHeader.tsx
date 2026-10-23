@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { postJson } from '../../shared/http';
 import { HelpCircle, Menu, Moon, Shield, Sun } from 'react-feather';
 import { getStoredTheme, setTheme, ADMIN_THEME_STORAGE_KEY } from '../../shared/theme';
 import NotificationBell from './NotificationBell';
@@ -30,13 +31,8 @@ export default function AdminHeader({ onMenuClick, onMfaClick, onNotificationNav
 
   const handleLogout = async () => {
     try {
-      const response = await fetch('/api/auth/logout', {
-        method: 'POST',
-      });
-
-      if (response.ok) {
-        window.location.href = '/login';
-      }
+      await postJson('/api/auth/logout');
+      window.location.href = '/login';
     } catch (error) {
       console.error('Logout failed:', error);
     }

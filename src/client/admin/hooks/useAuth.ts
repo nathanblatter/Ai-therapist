@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getJson } from '../../shared/http';
 import { isCareTeamRole } from '../../../shared/roles';
 
 // Shared viewer identity for the admin SPA. Six components used to fire their
@@ -34,9 +35,8 @@ let inflight: Promise<AuthUser | null> | null = null;
 function fetchAuthUser(): Promise<AuthUser | null> {
   if (cachedUser !== undefined) return Promise.resolve(cachedUser);
   if (!inflight) {
-    inflight = fetch('/api/auth/status', { credentials: 'include' })
-      .then(r => (r.ok ? r.json() : null))
-      .then((data: { authenticated?: boolean; user?: AuthUser } | null) => {
+    inflight = getJson<{ authenticated?: boolean; user?: AuthUser }>('/api/auth/status')
+      .then(data => {
         cachedUser = data?.authenticated && data.user ? data.user : null;
         return cachedUser;
       })

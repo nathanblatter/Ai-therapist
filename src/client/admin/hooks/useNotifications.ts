@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSocket } from './useSocket';
 import useAdminFetch from './useAdminFetch';
-import { postJson } from '../../shared/http';
+import { getJson, postJson } from '../../shared/http';
 
 // In-app notification hook (caseworker portal): bell list + unread badge with
 // live refresh on notification:new, plus read/mark-all actions and the
@@ -97,9 +97,7 @@ export default function useNotifications(limit = 30) {
 }
 
 export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
-  const res = await fetch('/admin/api/notifications/preferences', { credentials: 'include' });
-  if (!res.ok) throw new Error(`Request failed (${res.status})`);
-  const data = (await res.json()) as { preferences: NotificationPreferences };
+  const data = await getJson<{ preferences: NotificationPreferences }>('/admin/api/notifications/preferences');
   return data.preferences;
 }
 
