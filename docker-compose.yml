@@ -4,6 +4,13 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Parity with prod (docker-compose.prod.yml): every key in the deploy
+    # checkout's .env reaches the app, so a setting verified on stage cannot be
+    # dark there because it was never allowlisted (ai-therapist-274). The
+    # explicit `environment:` block below still wins for the keys it names
+    # (compose precedence), which keeps the stage-only DATABASE_URL, PORT and
+    # DEMO_SITE fixed regardless of what the .env says.
+    env_file: .env
     environment:
       NODE_ENV: production
       PORT: 3067
