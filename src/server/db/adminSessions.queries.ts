@@ -4,6 +4,7 @@
 import { pool } from '../config/db.js';
 import { REDACTABLE_ROWS_SQL } from './redactionScope.js';
 import { projectRowsMetadata } from './metadataProjection.js';
+import { ownerOrgScopeSql } from './organizations.queries.js';
 
 export type AdminSessionRow = Record<string, unknown>;
 
@@ -14,8 +15,9 @@ export type MessageContentColumn = 'content' | 'content_redacted';
  *  scopeTherapistId (caseload RBAC): when set, restrict to the care-team
  *  member's assigned clients; null/undefined = unscoped, today's SQL.
  *  orgId (caseworker portal C13): when set (researchers), restrict to
- *  sessions owned by that organization's users; anonymous sessions stay
- *  visible, exactly as before org scoping existed. */
+ *  sessions owned by that organization's users; an anonymous session
+ *  (user_id NULL) is irb-study custody, visible to that org only
+ *  (ai-therapist-276, the by-id gate's rule). */
 export async function getActiveSessions(
   scopeTherapistId?: number | null,
   orgId?: number | null
@@ -29,7 +31,7 @@ export async function getActiveSessions(
   if (orgId !== null && orgId !== undefined) {
     params.push(orgId);
     scopeClause += `
-      AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${params.length}))`;
+      AND ${ownerOrgScopeSql(`$${params.length}`, 'ts.user_id')}`;
   }
   const result = await pool.query(`
     SELECT
@@ -83,7 +85,7 @@ export interface SessionListFilters {
  *  scopeTherapistId (caseload RBAC): when set, restrict to the care-team
  *  member's assigned clients; null/undefined = unscoped, today's SQL.
  *  orgId (caseworker portal C13): researcher org restriction; anonymous
- *  sessions stay visible. */
+ *  sessions are irb-study custody (ai-therapist-276). */
 export async function listSessions(
   f: SessionListFilters,
   scopeTherapistId?: number | null,
@@ -98,7 +100,7 @@ export async function listSessions(
   if (orgId !== null && orgId !== undefined) {
     extraParams.push(orgId);
     scopeClause += `
-        AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${16 + extraParams.length}))`;
+        AND ${ownerOrgScopeSql(`$${16 + extraParams.length}`, 'ts.user_id')}`;
   }
   const result = await pool.query(`
     WITH session_stats AS (
@@ -179,7 +181,7 @@ export async function listSessions(
  *  scopeTherapistId (caseload RBAC): when set, restrict to the care-team
  *  member's assigned clients; null/undefined = unscoped, today's SQL.
  *  orgId (caseworker portal C13): researcher org restriction; anonymous
- *  sessions stay visible. */
+ *  sessions are irb-study custody (ai-therapist-276). */
 export async function countSessions(
   f: SessionListFilters,
   scopeTherapistId?: number | null,
@@ -194,7 +196,7 @@ export async function countSessions(
   if (orgId !== null && orgId !== undefined) {
     extraParams.push(orgId);
     scopeClause += `
-      AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${11 + extraParams.length}))`;
+      AND ${ownerOrgScopeSql(`$${11 + extraParams.length}`, 'ts.user_id')}`;
   }
   const result = await pool.query<{ total: string }>(`
     SELECT COUNT(DISTINCT ts.session_id) as total

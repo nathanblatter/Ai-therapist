@@ -68,9 +68,29 @@ never an all-orgs read):
   `orgIdFor` in one helper (`adminMayAccessSessionLive` in
   `src/server/index.ts`) that also denies a missing session for every role.
 
-Still unscoped for researchers (not in 272): the `GET /admin/api/sideband/status`
-list (rows are already filtered to the caseload for therapists; researchers
-see every org's active sideband rows).
+**Follow-up, same day (ai-therapist-276): the LIST queries apply the by-id
+predicate.** Before 276 the org-scoped list queries treated an anonymous
+session (`therapy_sessions.user_id IS NULL`) as visible to EVERY org, so a
+practice-org researcher saw anonymous sessions in lists they could not open
+(the by-id gates 404 them). The lists now use the same rule, as one shared SQL
+predicate (`ownerOrgScopeSql` in `src/server/db/organizations.queries.ts`: the
+owner's `users.organization_id` equals the caller's org, OR the owner id is
+NULL and the caller's org is the irb-study org):
+
+- `getActiveSessions`, `listSessions`, `countSessions`
+  (`src/server/db/adminSessions.queries.ts`, behind `/admin/api/sessions*`).
+- `getAllCrisisData`, `getAllCrisisEvents` (`src/server/db/crisis.queries.ts`,
+  behind `/admin/api/crisis/all` and `/admin/api/crisis/events`); the
+  crisis_events clause keeps resolving the owner via
+  `COALESCE(ts.user_id, ce.client_user_id)`.
+- `getActiveCrisisSessions` (`src/server/services/crisisDetection.service.ts`,
+  behind `/admin/api/crisis/active`), which previously hid anonymous sessions
+  from every researcher, the irb-study org included.
+- `GET /admin/api/sideband/status`: `getActiveSidebandSessions` takes the
+  caller's org for researchers (resolved once via `orgIdFor`, fail closed);
+  the therapist caseload filter is unchanged.
+
+Therapist/caseworker branches of every query are byte-identical to before.
 
 ## 2026-08-28: care-team edges, caseworker tier, org scoping
 

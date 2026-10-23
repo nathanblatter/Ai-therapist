@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { pool } from '../config/db.js';
 import { getOpenAIKey } from '../config/secrets.js';
 import { recordCrisisEvent } from '../db/crisis.queries.js';
+import { IRB_STUDY_ORG_ID_SQL } from '../db/organizations.queries.js';
 import { createLogger } from '../utils/logger.js';
 import type { HistoryMessage } from './minorSafeguard.service.js';
 
@@ -973,7 +974,9 @@ export async function getSessionCrisisEvents(sessionId: string): Promise<unknown
 export async function getActiveCrisisSessions(orgId?: number | null): Promise<unknown[]> {
   // orgId scopes the read to one organization (org-bound researchers, C13);
   // null returns byte-identical rows to the pre-scoping query (care-team
-  // callers, who are further caseload-filtered by the route).
+  // callers, who are further caseload-filtered by the route). An anonymous
+  // session (user_id NULL, so no owner org) is irb-study custody: visible to
+  // that org only, the same rule as the by-id gates (ai-therapist-276).
   const result = await pool.query(
     `SELECT
        ts.session_id,
@@ -986,7 +989,8 @@ export async function getActiveCrisisSessions(orgId?: number | null): Promise<un
      FROM therapy_sessions ts
      LEFT JOIN users u ON ts.user_id = u.userid
      WHERE ts.crisis_flagged = TRUE
-       AND ($1::int IS NULL OR u.organization_id = $1)
+       AND ($1::int IS NULL OR u.organization_id = $1
+         OR (ts.user_id IS NULL AND $1 = ${IRB_STUDY_ORG_ID_SQL}))
      ORDER BY ts.crisis_risk_score DESC, ts.crisis_flagged_at DESC`,
     [orgId ?? null]
   );

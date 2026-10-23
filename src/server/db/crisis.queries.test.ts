@@ -15,8 +15,14 @@ beforeEach(() => {
   queryMock.mockReset().mockResolvedValue({ rows: [] });
 });
 
+// ai-therapist-276: the list clause is the by-id gate's rule — owner in the
+// caller's org, OR ownerless and the caller is the irb-study org (never
+// "anonymous is visible to every org").
+const CRISIS_OWNER = 'COALESCE(ts.user_id, ce.client_user_id)';
 const CRISIS_ORG_CLAUSE =
-  'COALESCE(ts.user_id, ce.client_user_id) IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = COALESCE(ts.user_id, ce.client_user_id)';
+  `(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ${CRISIS_OWNER} AND ou.organization_id = $1) OR (${CRISIS_OWNER} IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))`;
+const SESSION_ORG_CLAUSE =
+  "(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $1) OR (ts.user_id IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))";
 
 describe('getAllCrisisEvents org scoping', () => {
   it('is unscoped without a therapist scope or org', async () => {
@@ -38,8 +44,14 @@ describe('getAllCrisisEvents org scoping', () => {
     await getAllCrisisEvents(7, 3);
     const sql = String(queryMock.mock.calls[0][0]);
     expect(sql).toContain('therapist_clients');
-    expect(sql).toContain(CRISIS_ORG_CLAUSE);
+    expect(sql).toContain(CRISIS_ORG_CLAUSE.replaceAll('$1', '$2'));
     expect(queryMock.mock.calls[0][1]).toEqual([7, 3]);
+  });
+
+  it('never lets an anonymous event through to a non-irb-study org (276)', async () => {
+    await getAllCrisisEvents(null, 3);
+    const sql = String(queryMock.mock.calls[0][0]);
+    expect(sql).not.toContain('IS NULL OR EXISTS');
   });
 });
 
@@ -51,7 +63,7 @@ describe('getAllCrisisData org scoping', () => {
     expect(crisisSql).toContain('FROM crisis_events ce');
     expect(crisisSql).toContain(CRISIS_ORG_CLAUSE);
     for (const sql of [iaSql, rshSql]) {
-      expect(sql).toContain('ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id');
+      expect(sql).toContain(SESSION_ORG_CLAUSE);
       expect(sql).not.toContain('client_user_id');
     }
     for (const call of queryMock.mock.calls) {

@@ -23,9 +23,14 @@ const DEMO_PREDICATE = '(ts.is_demo IS NOT TRUE OR u.is_sandbox IS TRUE)';
 function caseloadClause(param: string) {
   return `AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = ${param} AND tc.client_id = ts.user_id)`;
 }
+// The researcher organization rule (ai-therapist-276): the owner's org equals
+// the caller's, OR the session is anonymous and the caller is the irb-study
+// org. Pinned as a literal so a drift in ownerOrgScopeSql shows up here too.
 function orgClause(param: string) {
-  return `AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = ${param}))`;
+  return `AND (EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = ${param}) OR (ts.user_id IS NULL AND ${param} = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))`;
 }
+/** The pre-276 clause that let every org see anonymous sessions. */
+const LOOSE_ANONYMOUS_CLAUSE = 'ts.user_id IS NULL OR EXISTS';
 
 const FILTERS: SessionListFilters = {
   search: 'alice',
@@ -81,6 +86,7 @@ describe('getActiveSessions', () => {
     const [sql, params] = lastCall();
     expect(sql).not.toContain('therapist_clients');
     expect(sql).toContain(orgClause('$1'));
+    expect(sql).not.toContain(LOOSE_ANONYMOUS_CLAUSE);
     expect(params).toEqual([3]);
   });
 
@@ -146,6 +152,7 @@ describe('listSessions', () => {
     const [sql, params] = lastCall();
     expect(sql).not.toContain('therapist_clients');
     expect(sql).toContain(orgClause('$17'));
+    expect(sql).not.toContain(LOOSE_ANONYMOUS_CLAUSE);
     expect(params.slice(16)).toEqual([3]);
   });
 
@@ -200,6 +207,7 @@ describe('countSessions', () => {
 
     await countSessions(FILTERS, null, 3);
     expect(lastCall()[0]).toContain(orgClause('$12'));
+    expect(lastCall()[0]).not.toContain(LOOSE_ANONYMOUS_CLAUSE);
     expect(lastCall()[1].slice(11)).toEqual([3]);
   });
 });

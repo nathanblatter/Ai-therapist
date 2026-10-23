@@ -27,6 +27,21 @@ export const IRB_STUDY_SLUG = 'irb-study';
  */
 export const IRB_STUDY_ORG_ID_SQL = `(SELECT org_id FROM organizations WHERE slug = '${IRB_STUDY_SLUG}')`;
 
+/**
+ * The researcher organization rule as a SQL predicate for list queries
+ * (ai-therapist-276), the same shape the by-id gates apply in
+ * middleware/caseload.ts#researcherOrgAllows: a row is visible when its
+ * owning participant's `users.organization_id` equals the caller's org
+ * (`orgParam`, e.g. `$2`), OR the row is ownerless (`ownerIdExpr IS NULL`,
+ * an anonymous session) and the caller's org is the irb-study org. The owner
+ * is resolved with an EXISTS over users so the expression works whatever
+ * alias (or none) the query joined, and `ou.organization_id = $N` is the
+ * first use of the parameter so pg types it as an integer.
+ */
+export function ownerOrgScopeSql(orgParam: string, ownerIdExpr: string): string {
+  return `(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ${ownerIdExpr} AND ou.organization_id = ${orgParam}) OR (${ownerIdExpr} IS NULL AND ${orgParam} = ${IRB_STUDY_ORG_ID_SQL}))`;
+}
+
 function slugify(name: string): string {
   const base = name
     .toLowerCase()

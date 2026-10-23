@@ -155,6 +155,36 @@ describe('caseload enforcement (ai-therapist-119)', () => {
     const res = await request(appAs('therapist')).get('/admin/api/sideband/status');
     expect(res.status).toBe(200);
     expect(res.body.sessions.map((s: { session_id: string }) => s.session_id)).toEqual(['mine']);
+    // The therapist read is the unscoped query (byte-identical to pre-276).
+    expect(dbMocks.getActiveSidebandSessions).toHaveBeenCalledWith(null);
+  });
+
+  it('scopes the sideband status list to the researcher organization in the query (ai-therapist-276)', async () => {
+    dbMocks.getActiveSidebandSessions.mockResolvedValueOnce([
+      { session_id: 'same-org', sideband_connected: true, status: 'active', user_id: 42 },
+      { session_id: 'anon', sideband_connected: false, status: 'active', user_id: null },
+    ]);
+    const res = await request(appAs('researcher', 7)).get('/admin/api/sideband/status');
+    expect(res.status).toBe(200);
+    expect(dbMocks.getActiveSidebandSessions).toHaveBeenCalledWith(7);
+    expect(dbMocks.getCaseloadClientIds).not.toHaveBeenCalled();
+    expect(res.body.total_active_sessions).toBe(2);
+    expect(res.body.sessions.map((s: { session_id: string }) => s.session_id)).toEqual(['same-org', 'anon']);
+  });
+
+  it('fails closed when the researcher org cannot be resolved (500, never an all-orgs read)', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      // No orgId stamped on the session -> orgIdFor does the lazy lookup.
+      req.session = { userId: 1, userRole: 'researcher', username: 'tester' } as unknown as typeof req.session;
+      next();
+    });
+    app.use(sidebandRoutes());
+    dbMocks.getOrganizationIdForUser.mockRejectedValueOnce(new Error('db down'));
+    const res = await request(app).get('/admin/api/sideband/status');
+    expect(res.status).toBe(500);
+    expect(dbMocks.getActiveSidebandSessions).not.toHaveBeenCalled();
   });
 });
 
