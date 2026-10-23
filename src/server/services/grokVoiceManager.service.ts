@@ -105,6 +105,20 @@ interface GrokSessionState {
   refusal: GrokRefusalDetector;
   /** Participant-facing text used when the steer does not break the loop. */
   recoveryLine: string;
+  /** Last persisted participant turn, for de-duplicating xAI's occasional
+   *  repeated transcription.completed (ai-therapist-258). */
+  lastUserTurn: { itemId: string; text: string; at: number; assistantTurnIndex: number } | null;
+}
+
+/** Two completed user transcripts with identical text inside this window are
+ *  one utterance reported twice, not two utterances. */
+const USER_TURN_DEDUPE_MS = 10_000;
+
+/** xAI answers a response.cancel that races the reply's own completion with
+ *  this error. It is benign: nothing was playing, nothing is lost. */
+function isBenignCancelError(err: { code?: string; message?: string } | undefined): boolean {
+  const m = err?.message ?? '';
+  return /cancellation failed|no active response/i.test(m);
 }
 
 export class GrokVoiceManager implements VoiceSidebandDelegate {
@@ -157,6 +171,7 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
       firstOutputAt: null,
       refusal: new GrokRefusalDetector(pending.refusalGuard ?? GROK_DEFAULT_REFUSAL_GUARD),
       recoveryLine: pending.recoveryLine ?? buildGrokRefusalRecoveryLine(null),
+      lastUserTurn: null,
     };
     this.sessions.set(sessionId, state);
     this.armOrphanTimer(sessionId, this.pendingTtlMs, 'client_never_connected');
@@ -459,6 +474,13 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
       case 'error': {
         const err = event.error as { code?: string; message?: string; type?: string } | undefined;
+        if (isBenignCancelError(err)) {
+          // Barge-in cancel landed after the reply already completed (seen in
+          // Sagers' 2026-09-22 sessions, ai-therapist-258). Not a session error:
+          // do not mark the session, alarm the admin view, or toast the participant.
+          console.log(`[Grok] benign cancel race for ${sessionId.substring(0, 12)}...: ${err?.message}`);
+          break;
+        }
         console.error(`[Grok] API error for ${sessionId.substring(0, 12)}...:`, err ?? event);
         await pool.query(
           'UPDATE therapy_sessions SET sideband_error = $1 WHERE session_id = $2',
@@ -518,7 +540,28 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
    */
   private onUserTurn(sessionId: string, itemId: string, text: string): void {
     const state = this.sessions.get(sessionId);
-    if (state) state.userTurnIndex += 1;
+    if (state) {
+      const prev = state.lastUserTurn;
+      const now = Date.now();
+      // Same item re-completed, or the same words again within seconds with no
+      // assistant reply in between: xAI reported one utterance twice.
+      // Persisting it would inflate message counts and double-score the crisis
+      // pipeline (ai-therapist-258). A participant genuinely repeating
+      // themselves after the assistant answered is NOT collapsed: the
+      // assistant-turn counter has moved, and a repeated crisis utterance must
+      // always be scored again.
+      const sameItem = prev?.itemId === itemId;
+      const echoedBeforeAnyReply = prev
+        && prev.text === text
+        && now - prev.at < USER_TURN_DEDUPE_MS
+        && prev.assistantTurnIndex === state.assistantTurnIndex;
+      if (sameItem || echoedBeforeAnyReply) {
+        console.log(`[Grok] duplicate user transcript dropped for ${sessionId.substring(0, 12)}... (${itemId})`);
+        return;
+      }
+      state.lastUserTurn = { itemId, text, at: now, assistantTurnIndex: state.assistantTurnIndex };
+      state.userTurnIndex += 1;
+    }
     this.emitTranscript(sessionId, { role: 'user', itemId, text, final: true });
 
     void (async () => {

@@ -248,6 +248,34 @@ describe('participant turns → crisis pipeline', () => {
     expect(runCrisisPipelineMock).toHaveBeenCalledWith({ sessionId: SESSION, messageId: null, content: 'help' }, 'realtime');
   });
 
+  // ai-therapist-258: xAI occasionally reports one utterance twice.
+  it('drops a duplicate completed transcript (same item id, or same text within 10 s)', async () => {
+    const { upstream } = await bringUp();
+    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'a', transcript: 'I feel stuck lately.' });
+    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'a', transcript: 'I feel stuck lately.' });
+    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'b', transcript: 'I feel stuck lately.' });
+    await flush();
+    expect(insertMessagesBatchMock).toHaveBeenCalledTimes(1);
+    expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
+
+    // Same words after the window is a genuine repeat and is kept.
+    await vi.advanceTimersByTimeAsync(11_000);
+    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'c', transcript: 'I feel stuck lately.' });
+    await flush();
+    expect(insertMessagesBatchMock).toHaveBeenCalledTimes(2);
+
+    // Same words right after an assistant reply are a genuine repeat too
+    // (a repeated crisis utterance must always be scored again).
+    fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a7', delta: 'I hear you.' });
+    fire(upstream, { type: 'response.output_audio_transcript.done', item_id: 'a7', transcript: 'I hear you.' });
+    fire(upstream, { type: 'response.done', response: { id: 'r7' }, usage: {} });
+    await flush();
+    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'd', transcript: 'I feel stuck lately.' });
+    await flush();
+    expect(insertMessagesBatchMock).toHaveBeenCalledTimes(3);
+    expect(runCrisisPipelineMock).toHaveBeenCalledTimes(3);
+  });
+
   it('relays the cumulative in-progress transcript as a non-final caption only', async () => {
     const { client, upstream } = await bringUp();
     fire(upstream, { type: 'conversation.item.input_audio_transcription.updated', item_id: 'i', transcript: 'I have been' });
@@ -287,6 +315,27 @@ describe('assistant turns', () => {
     expect(sent(client)).toContainEqual({ type: 'speech_started' });
     expect(sent(client)).toContainEqual({ type: 'transcript', role: 'assistant', itemId: 'a1', text: 'Let me explain how', final: true });
     expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({ role: 'assistant', content: 'Let me explain how' })]);
+  });
+});
+
+describe('upstream errors', () => {
+  // ai-therapist-258: the barge-in cancel can race the reply's own completion.
+  it('treats "Cancellation failed: no active response found" as benign', async () => {
+    const { client, upstream } = await bringUp();
+    queryMock.mockClear(); broadcastMock.mockClear();
+    fire(upstream, { type: 'error', error: { code: 'cancellation_failed', message: 'Cancellation failed: no active response found' } });
+    await flush();
+    expect(sent(client).some(m => m.type === 'error')).toBe(false);
+    expect(queryMock.mock.calls.some(c => String(c[0]).includes('sideband_error'))).toBe(false);
+    expect(broadcastMock).not.toHaveBeenCalledWith(expect.anything(), 'sideband:error', expect.anything(), SESSION);
+  });
+
+  it('still surfaces a real upstream error', async () => {
+    const { client, upstream } = await bringUp();
+    fire(upstream, { type: 'error', error: { code: 'server_error', message: 'upstream exploded' } });
+    await flush();
+    expect(sent(client)).toContainEqual(expect.objectContaining({ type: 'error', message: 'upstream exploded' }));
+    expect(queryMock.mock.calls.some(c => String(c[0]).includes('sideband_error'))).toBe(true);
   });
 });
 
