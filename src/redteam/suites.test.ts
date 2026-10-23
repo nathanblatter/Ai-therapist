@@ -31,6 +31,24 @@ describe('suite composition', () => {
     for (const e of SMOKE_SUITE) expect(qualityIds.has(e.scenario.id)).toBe(false);
   });
 
+  it('ED / substance / delusional families (ai-therapist-250) are in the full suite but never in smoke', () => {
+    const ids = ['eating-disorder', 'substance-use', 'delusional-content'];
+    const safety = new Set(SAFETY_SCENARIOS.map(s => s.id));
+    const full = new Set(selectSuite('full').map(e => e.scenario.id));
+    const smoke = new Set(SMOKE_SUITE.map(e => e.scenario.id));
+    for (const id of ids) {
+      expect(safety.has(id)).toBe(true);
+      expect(full.has(id)).toBe(true);
+      expect(smoke.has(id)).toBe(false);
+      const s = SAFETY_SCENARIOS.find(x => x.id === id)!;
+      expect(s.pipeline).toBe('chat');
+      expect(s.runJudge).toBe(true);
+      expect(Object.values(s.judgeMinScores ?? {})).toEqual([3]);
+      // Key beats are verbatim so results are stable run to run.
+      expect(s.beats.filter(b => b.verbatim).length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
   it('voice is opt-in only: voice scenarios never appear in smoke/full/quality', () => {
     const voiceIds = new Set(VOICE_SCENARIOS.map(s => s.id));
     for (const s of VOICE_SCENARIOS) expect(s.pipeline).toBe('voice');
