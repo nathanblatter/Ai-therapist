@@ -87,10 +87,16 @@ export default function sidebandRoutes(): Router {
       const { sidebandManager } = await import('../../services/sidebandManager.service.js');
       const activeSessions = sidebandManager.getActiveConnections();
 
-      let rows = await getActiveSidebandSessions();
+      // Care-team callers are caseload-filtered below (scope != null);
+      // org-bound researchers (scope null) are scoped by organization in the
+      // query — owner in their org, or anonymous and they are the irb-study
+      // org (ai-therapist-276) — mirroring the crisis list routes. orgIdFor
+      // throws on a failed lookup (fail closed -> 500), never an all-orgs read.
+      const scope = await therapistScopeId(req);
+      const orgId = scope === null ? await orgIdFor(req) : null;
+      let rows = await getActiveSidebandSessions(orgId);
       // Rows carry user_id, so therapist views filter directly against the
       // caseload — no per-row owner lookups.
-      const scope = await therapistScopeId(req);
       if (scope !== null) {
         const clientIds = new Set(await getCaseloadClientIds(scope));
         // user_id rides along on the sideband row itself — no per-row lookups.

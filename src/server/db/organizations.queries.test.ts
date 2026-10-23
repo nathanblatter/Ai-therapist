@@ -12,12 +12,28 @@ import {
   getIrbStudyOrgId,
   getOrganizationIdForUser,
   deleteSandboxOrganization,
+  ownerOrgScopeSql,
+  IRB_STUDY_ORG_ID_SQL,
   _clearIrbStudyOrgIdCache,
 } from './organizations.queries.js';
 
 beforeEach(() => {
   queryMock.mockReset();
   _clearIrbStudyOrgIdCache();
+});
+
+describe('ownerOrgScopeSql (ai-therapist-276)', () => {
+  it('is the by-id gate rule: owner in the caller org, or ownerless and caller is irb-study', () => {
+    expect(ownerOrgScopeSql('$2', 'ts.user_id')).toBe(
+      `(EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $2) OR (ts.user_id IS NULL AND $2 = ${IRB_STUDY_ORG_ID_SQL}))`
+    );
+  });
+
+  it('applies the owner expression verbatim (COALESCE owners for thread-origin crisis events)', () => {
+    const sql = ownerOrgScopeSql('$1', 'COALESCE(ts.user_id, ce.client_user_id)');
+    expect(sql).toContain('ou.userid = COALESCE(ts.user_id, ce.client_user_id) AND ou.organization_id = $1');
+    expect(sql).toContain('COALESCE(ts.user_id, ce.client_user_id) IS NULL AND $1 =');
+  });
 });
 
 describe('createOrganization', () => {

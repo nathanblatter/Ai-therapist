@@ -1,5 +1,6 @@
 // Data-access for crisis-management views and session crisis flags.
 import { pool } from '../config/db.js';
+import { ownerOrgScopeSql } from './organizations.queries.js';
 
 /** Anything that can run a parameterized query (the pool, or a transaction's
  *  PoolClient so callers can write the event atomically with other rows). */
@@ -174,7 +175,8 @@ export interface AllCrisisData {
  * scopeTherapistId (caseload RBAC): when set, restrict every list to sessions
  * of that care-team member's assigned clients; null/undefined = unscoped,
  * today's SQL. orgId (caseworker portal C13): researcher org restriction;
- * anonymous sessions stay visible. For crisis_events the org check resolves
+ * an anonymous session is irb-study custody, visible to that org only
+ * (ai-therapist-276). For crisis_events the org check resolves
  * the owning user via COALESCE(ts.user_id, ce.client_user_id) so
  * thread-origin events (076: session_id NULL, client_user_id set) are
  * org-restricted too instead of leaking cross-org as "anonymous".
@@ -195,9 +197,9 @@ export async function getAllCrisisData(
   if (orgId !== null && orgId !== undefined) {
     params.push(orgId);
     sessionScopeClause += `
-        AND (ts.user_id IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = $${params.length}))`;
+        AND ${ownerOrgScopeSql(`$${params.length}`, 'ts.user_id')}`;
     crisisScopeClause += `
-        AND (COALESCE(ts.user_id, ce.client_user_id) IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = COALESCE(ts.user_id, ce.client_user_id) AND ou.organization_id = $${params.length}))`;
+        AND ${ownerOrgScopeSql(`$${params.length}`, 'COALESCE(ts.user_id, ce.client_user_id)')}`;
   }
   const [crisisEvents, interventionActions, riskScoreHistory] = await Promise.all([
     pool.query(`
@@ -341,7 +343,7 @@ export async function hasInterventionAction(sessionId: string, actionType: strin
  *  scopeTherapistId (caseload RBAC): when set, restrict to the care-team
  *  member's assigned clients; null/undefined = unscoped, today's SQL.
  *  orgId (caseworker portal C13): researcher org restriction; anonymous
- *  sessions stay visible. Thread-origin events (076: session_id NULL) are
+ *  sessions are irb-study custody (ai-therapist-276). Thread-origin events (076: session_id NULL) are
  *  org-scoped via ce.client_user_id — COALESCE(ts.user_id, ce.client_user_id)
  *  — so they never leak cross-org as "anonymous". Demo sessions are excluded
  *  unless sandbox-owned (s7 — see getAllCrisisData). */
@@ -358,7 +360,7 @@ export async function getAllCrisisEvents(
   if (orgId !== null && orgId !== undefined) {
     params.push(orgId);
     scopeClause += `
-      AND (COALESCE(ts.user_id, ce.client_user_id) IS NULL OR EXISTS (SELECT 1 FROM users ou WHERE ou.userid = COALESCE(ts.user_id, ce.client_user_id) AND ou.organization_id = $${params.length}))`;
+      AND ${ownerOrgScopeSql(`$${params.length}`, 'COALESCE(ts.user_id, ce.client_user_id)')}`;
   }
   const result = await pool.query(`
     SELECT ce.*, ts.session_name, u.username

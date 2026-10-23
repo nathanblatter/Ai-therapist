@@ -33,8 +33,34 @@ vi.mock('openai', () => ({
 
 const {
   detectCrisisKeywords, analyzeMessageRisk, analyzeStandaloneRisk, flagSessionCrisis,
-  _sweepCounterSizeForTests,
+  getActiveCrisisSessions, _sweepCounterSizeForTests,
 } = await import('./crisisDetection.service.js');
+
+// /admin/api/crisis/active list (ai-therapist-276): the researcher org rule
+// is the by-id gate's — owner in the caller's org, or anonymous and the
+// caller is the irb-study org. A null org is the unscoped care-team read.
+describe('getActiveCrisisSessions org scoping', () => {
+  beforeEach(() => {
+    queryMock.mockReset().mockResolvedValue({ rows: [] });
+  });
+
+  it('binds the caller org once and admits anonymous sessions only for the irb-study org', async () => {
+    await getActiveCrisisSessions(3);
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('WHERE ts.crisis_flagged = TRUE');
+    expect(sql.replace(/\s+/g, ' ')).toContain(
+      "AND ($1::int IS NULL OR u.organization_id = $1 OR (ts.user_id IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))"
+    );
+    expect(params).toEqual([3]);
+  });
+
+  it('passes null for the unscoped (care-team) read', async () => {
+    await getActiveCrisisSessions(null);
+    expect(queryMock.mock.calls[0][1]).toEqual([null]);
+    await getActiveCrisisSessions();
+    expect(queryMock.mock.calls[1][1]).toEqual([null]);
+  });
+});
 
 function llmResponse(payload: Record<string, unknown>) {
   return { choices: [{ message: { content: JSON.stringify(payload) } }] };

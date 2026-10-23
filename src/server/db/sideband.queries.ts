@@ -2,25 +2,35 @@
 // (live mid-session instruction updates over a second OpenAI connection) is
 // currently disabled, so these run only when a connection is actually active.
 import { pool } from '../config/db.js';
+import { ownerOrgScopeSql } from './organizations.queries.js';
 
 export type SidebandSessionRow = Record<string, unknown>;
 
 /** Active sessions with their sideband connection state, newest first. */
-export async function getActiveSidebandSessions(): Promise<SidebandSessionRow[]> {
+export async function getActiveSidebandSessions(orgId?: number | null): Promise<SidebandSessionRow[]> {
+  // orgId (ai-therapist-276): org-bound researchers see only sessions whose
+  // owner is in their organization, or anonymous sessions when they are the
+  // irb-study org (the by-id gate's rule); null/undefined is the unscoped
+  // list, which the route then caseload-filters for care-team callers.
+  const orgScoped = orgId !== null && orgId !== undefined;
+  const orgClause = orgScoped
+    ? `
+      AND ${ownerOrgScopeSql('$1', 'ts.user_id')}`
+    : '';
   const result = await pool.query(`
     SELECT
-      session_id,
-      openai_call_id,
-      sideband_connected,
-      sideband_connected_at,
-      sideband_disconnected_at,
-      sideband_error,
-      status,
-      user_id
-    FROM therapy_sessions
-    WHERE status = 'active'
-    ORDER BY created_at DESC
-  `);
+      ts.session_id,
+      ts.openai_call_id,
+      ts.sideband_connected,
+      ts.sideband_connected_at,
+      ts.sideband_disconnected_at,
+      ts.sideband_error,
+      ts.status,
+      ts.user_id
+    FROM therapy_sessions ts
+    WHERE ts.status = 'active'${orgClause}
+    ORDER BY ts.created_at DESC
+  `, orgScoped ? [orgId] : []);
   return result.rows;
 }
 
