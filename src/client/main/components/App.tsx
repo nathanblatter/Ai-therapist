@@ -807,11 +807,16 @@ export default function App() {
       // Connect to Socket.io for remote session management
       socketRef.current = connectChatSocket(newSessionId);
 
-      // Add preamble message to chat (similar to realtime voice therapy)
+      // Opening preamble. The server authors and persists it now (it is the
+      // session's first assistant turn, so the model and the transcript both
+      // carry the disclaimer); the local copy is only a fallback for an older
+      // server that did not return one.
       setMessages([{
         id: crypto.randomUUID(),
         role: "assistant",
-        text: getPreambleForLanguage(sessionSettings.language, false),
+        text: typeof data.opening === 'string' && data.opening
+          ? data.opening
+          : getPreambleForLanguage(sessionSettings.language, false),
       }]);
 
       console.log(`Chat-only session started: ${newSessionId}`);
