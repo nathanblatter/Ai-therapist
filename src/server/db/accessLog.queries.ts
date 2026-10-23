@@ -7,6 +7,8 @@ import { pool } from '../config/db.js';
 export type DataAccessAction =
   | 'transcript_view'
   | 'recording_stream'
+  /** Whole-file download of a recording (ai-therapist-199): audio left the system. */
+  | 'recording_download'
   | 'export'
   | 'dataset_export'
   /** Reading a participant's access history (ai-therapist-197): the audit
@@ -64,6 +66,7 @@ export function logDataAccess(input: DataAccessLogInput): Promise<void> {
 export const DATA_ACCESS_ACTIONS: readonly DataAccessAction[] = [
   'transcript_view',
   'recording_stream',
+  'recording_download',
   'export',
   'dataset_export',
   'audit_log_view',

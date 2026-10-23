@@ -243,19 +243,28 @@ export default function adminSessionsRoutes(): Router {
       const meta = await headObject(rec.objectKey);
       if (!meta) return res.status(404).json({ error: 'Recording object missing' });
 
+      // `?download=1` serves the whole object as an attachment (ai-therapist-199
+      // item 4): the clinician egress path for audio. Distinguished in the
+      // audit log from a playback stream because a download leaves the system.
+      const isDownload = req.query.download === '1' || req.query.download === 'true';
+
       // Access audit (091, fire-and-forget): who streamed this recording.
       // Range requests during playback produce multiple rows for one listen;
       // the range detail lets analysis collapse them.
       void logDataAccess({
         accessedBy: req.session.userId ?? null,
         role: req.session.userRole ?? null,
-        action: 'recording_stream',
+        action: isDownload ? 'recording_download' : 'recording_stream',
         sessionId,
         detail: { range: req.headers.range ?? null },
       });
 
       const total = meta.contentLength;
-      const rangeHeader = req.headers.range;
+      const rangeHeader = isDownload ? undefined : req.headers.range;
+      if (isDownload) {
+        const ext = meta.contentType === 'audio/wav' || meta.contentType === 'audio/x-wav' ? 'wav' : 'audio';
+        res.setHeader('Content-Disposition', `attachment; filename="session-${sessionId.replace(/[^A-Za-z0-9_-]/g, '')}.${ext}"`);
+      }
 
       if (rangeHeader) {
         const match = /bytes=(\d+)-(\d*)/.exec(rangeHeader);

@@ -12,6 +12,7 @@ import type { DataAccessLogRow, ParticipantAccessActor } from '../../../server/d
 export const DATA_ACCESS_ACTION_LABELS: Record<string, string> = {
   transcript_view: 'Transcript viewed',
   recording_stream: 'Recording played',
+  recording_download: 'Recording downloaded',
   export: 'Session export',
   dataset_export: 'Dataset export',
   audit_log_view: 'Access history viewed',
