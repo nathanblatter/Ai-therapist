@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Box, Copy, Download, RefreshCw } from 'react-feather';
 import Panel from './ui/Panel';
+import { getJson, postJson, HttpError } from '../../shared/http';
 import { toast } from '../../shared/components/Toast';
 
 interface MintedLink {
@@ -52,12 +53,10 @@ export default function SandboxInvites() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/admin/api/sandbox/invites', { credentials: 'include' });
-      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-      const data = await res.json();
+      const data = await getJson<{ batches?: BatchRow[] }>('/admin/api/sandbox/invites');
       setBatches(data.batches ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load');
+      setError(e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
@@ -74,19 +73,12 @@ export default function SandboxInvites() {
     setMinting(true);
     setError(null);
     try {
-      const res = await fetch('/admin/api/sandbox/invites', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ count: n, role, ...(label.trim() ? { label: label.trim() } : {}) }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Mint failed (${res.status})`);
-      setMinted(data as MintResult);
+      const data = await postJson<MintResult>('/admin/api/sandbox/invites', { count: n, role, ...(label.trim() ? { label: label.trim() } : {}) });
+      setMinted(data);
       toast.success(`Minted ${data.links.length} sandbox link${data.links.length === 1 ? '' : 's'}.`);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Mint failed');
+      setError(e instanceof HttpError && !e.body?.error ? `Mint failed (${e.status})` : e instanceof Error ? e.message : 'Mint failed');
     } finally {
       setMinting(false);
     }

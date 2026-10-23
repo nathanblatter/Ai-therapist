@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Users, Plus, Edit2, Trash2, X, Save, Key, Search, Shield, Filter, Info, Eye, Cpu } from "react-feather";
+import { deleteJson, getJson, postJson } from "../../shared/http";
 
 const VOICE_OPTIONS = [
   { value: 'alloy', label: 'Alloy' },
@@ -124,11 +125,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/users');
-      if (!response.ok) {
-        throw new Error('Failed to fetch users');
-      }
-      const data = await response.json();
+      const data = await getJson<{ users: User[] }>('/api/users', { fallback: 'Failed to fetch users' });
       setUsers(data.users);
       setError(null);
     } catch (err: unknown) {
@@ -148,16 +145,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     }
 
     try {
-      const response = await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to create user');
-      }
+      await postJson('/api/users', formData, { fallback: 'Failed to create user' });
 
       setShowAddModal(false);
       setFormData({ username: '', password: '', role: 'participant' });
@@ -171,16 +159,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     setFormError(null);
 
     try {
-      const response = await fetch(`/api/users/${userid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to update user');
-      }
+      await postJson(`/api/users/${userid}`, updates, { method: 'PUT', fallback: 'Failed to update user' });
 
       setEditingUser(null);
       await fetchUsers();
@@ -195,14 +174,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     }
 
     try {
-      const response = await fetch(`/api/users/${userid}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to delete user');
-      }
+      await deleteJson(`/api/users/${userid}`, undefined, { fallback: 'Failed to delete user' });
 
       await fetchUsers();
     } catch (err: unknown) {
@@ -212,16 +184,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
 
   const toggleRiskContext = async (userid: number, enabled: boolean) => {
     try {
-      const response = await fetch(`/admin/api/users/${userid}/risk-context`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ enabled }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to update risk-context sharing');
-      }
+      await postJson(`/admin/api/users/${userid}/risk-context`, { enabled }, { fallback: 'Failed to update risk-context sharing' });
       await fetchUsers();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));

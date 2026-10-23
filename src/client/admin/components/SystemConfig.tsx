@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle } from 'react-feather';
+import { getJson, postJson } from '../../shared/http';
 // Canonical config-blob shapes are shared with the server (src/shared).
 // Fields the stored blob may omit are optional there; the form state below
 // keeps every field present and default-fills on read.
@@ -220,8 +221,7 @@ export default function SystemConfig() {
   const [grokVoices, setGrokVoices] = useState<Array<{ value: string; label: string; description: string }>>([]);
   useEffect(() => {
     if (!grokActive) return;
-    fetch('/api/config/voices', { credentials: 'include' })
-      .then(res => (res.ok ? res.json() : { voices: [] }))
+    getJson<{ voices?: Array<{ value: string; label: string; description: string }> }>('/api/config/voices')
       .then(data => setGrokVoices(data.voices ?? []))
       .catch(() => setGrokVoices([]));
   }, [grokActive]);
@@ -255,16 +255,12 @@ export default function SystemConfig() {
     setError(null);
 
     try {
-      const response = await fetch('/admin/api/config');
-      if (!response.ok) throw new Error('Failed to fetch configuration');
-
-      const data: SystemConfigData = await response.json();
+      const data = await getJson<SystemConfigData>('/admin/api/config', { fallback: 'Failed to fetch configuration' });
       setConfig(data);
 
       // Registered AI tools + usage counts (non-fatal if unavailable).
-      fetch('/admin/api/tools')
-        .then(res => (res.ok ? res.json() : null))
-        .then((t: { tools: AiToolInfo[] } | null) => { if (t) setAiTools(t.tools); })
+      getJson<{ tools: AiToolInfo[] }>('/admin/api/tools')
+        .then(t => setAiTools(t.tools))
         .catch(() => { /* tools panel just stays empty */ });
 
       // Populate form fields (default-fill the optional blob fields so the
@@ -327,90 +323,20 @@ export default function SystemConfig() {
     setSaveSuccess(null);
 
     try {
-      // Save crisis contact
-      const crisisResponse = await fetch('/admin/api/config/crisis_contact', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: crisisContact })
-      });
-      if (!crisisResponse.ok) throw new Error('Failed to save crisis contact');
+      const putConfig = (key: string, value: unknown, fallback: string) =>
+        postJson(`/admin/api/config/${key}`, { value }, { method: 'PUT', fallback });
 
-      // Save crisis alert (on-call paging)
-      const crisisAlertResponse = await fetch('/admin/api/config/crisis_alert', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: crisisAlert })
-      });
-      if (!crisisAlertResponse.ok) throw new Error('Failed to save crisis alert config');
-
-      // Save session limits
-      const limitsResponse = await fetch('/admin/api/config/session_limits', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: sessionLimits })
-      });
-      if (!limitsResponse.ok) throw new Error('Failed to save session limits');
-
-      // Save features
-      const featuresResponse = await fetch('/admin/api/config/features', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: features })
-      });
-      if (!featuresResponse.ok) throw new Error('Failed to save features');
-
-      // Save AI model
-      const modelResponse = await fetch('/admin/api/config/ai_model', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: aiModel })
-      });
-      if (!modelResponse.ok) throw new Error('Failed to save AI model');
-
-      // Save transcription model
-      const transcriptionResponse = await fetch('/admin/api/config/transcription_model', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: transcriptionModel })
-      });
-      if (!transcriptionResponse.ok) throw new Error('Failed to save transcription model');
-
-      // Save client logging
-      const grokResponse = await fetch('/admin/api/config/grok_voice', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: grokTuning })
-      });
-      if (!grokResponse.ok) throw new Error('Failed to save Grok Voice tuning');
-
-      const loggingResponse = await fetch('/admin/api/config/client_logging', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: clientLogging })
-      });
-      if (!loggingResponse.ok) throw new Error('Failed to save client logging');
-
-      // Save voices
-      const voicesResponse = await fetch('/admin/api/config/voices', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: voices })
-      });
-      if (!voicesResponse.ok) {
-        const errorData = await voicesResponse.json();
-        throw new Error(errorData.error || 'Failed to save voices');
-      }
-
-      // Save languages
-      const languagesResponse = await fetch('/admin/api/config/languages', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: languages })
-      });
-      if (!languagesResponse.ok) {
-        const errorData = await languagesResponse.json();
-        throw new Error(errorData.error || 'Failed to save languages');
-      }
+      await putConfig('crisis_contact', crisisContact, 'Failed to save crisis contact');
+      // Crisis alert (on-call paging)
+      await putConfig('crisis_alert', crisisAlert, 'Failed to save crisis alert config');
+      await putConfig('session_limits', sessionLimits, 'Failed to save session limits');
+      await putConfig('features', features, 'Failed to save features');
+      await putConfig('ai_model', aiModel, 'Failed to save AI model');
+      await putConfig('transcription_model', transcriptionModel, 'Failed to save transcription model');
+      await putConfig('grok_voice', grokTuning, 'Failed to save Grok Voice tuning');
+      await putConfig('client_logging', clientLogging, 'Failed to save client logging');
+      await putConfig('voices', voices, 'Failed to save voices');
+      await putConfig('languages', languages, 'Failed to save languages');
 
       setSaveSuccess('Configuration saved successfully!');
       setHasChanges(false);

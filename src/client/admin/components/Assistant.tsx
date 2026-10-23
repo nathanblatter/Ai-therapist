@@ -3,6 +3,7 @@
 // lookups ran. History lives in this tab only — the durable record is the
 // server-side assistant_audit table.
 import { useRef, useState, useEffect } from "react";
+import { postJson } from "../../shared/http";
 import { Send, MessageCircle, Database } from "react-feather";
 
 interface TurnToolCall { name: string; rowCount: number }
@@ -60,19 +61,12 @@ export default function Assistant({ role }: { role: string | null }) {
     setInput("");
     setBusy(true);
     try {
-      const res = await fetch("/admin/api/assistant/chat", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: next.slice(-12).map(({ role: r, content }) => ({ role: r, content })),
-        }),
-      });
-      const data = (await res.json().catch(() => null)) as
-        | { answer?: string; toolCalls?: TurnToolCall[]; error?: string }
-        | null;
-      if (!res.ok || !data?.answer) {
-        throw new Error(data?.error || `Request failed (${res.status})`);
+      const data = await postJson<{ answer?: string; toolCalls?: TurnToolCall[]; error?: string } | null>(
+        "/admin/api/assistant/chat",
+        { messages: next.slice(-12).map(({ role: r, content }) => ({ role: r, content })) }
+      );
+      if (!data?.answer) {
+        throw new Error(data?.error || "Request failed (empty answer)");
       }
       setMessages((prev) => [...prev, { role: "assistant", content: data.answer!, toolCalls: data.toolCalls }]);
     } catch (err) {

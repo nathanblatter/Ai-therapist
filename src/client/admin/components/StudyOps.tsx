@@ -3,6 +3,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
 } from 'recharts';
 import { RefreshCw, Play, Plus, AlertTriangle, CheckCircle, AlertCircle, Save } from 'react-feather';
+import { deleteJson, getJson, postJson, requestJson } from '../../shared/http';
 // Canonical protocol shape lives in the server data layer (type-only import,
 // erased at build time).
 import type { StudyProtocol } from '../../../server/db/studyOps.queries';
@@ -55,18 +56,14 @@ export default function StudyOps() {
     setLoading(true);
     setError(null);
     try {
-      const [sRes, dRes] = await Promise.all([
-        fetch('/admin/api/study-ops/summary'),
-        fetch(`/admin/api/study-ops/deviations?status=${statusFilter}`),
+      // The deviations list is best-effort: a failure there keeps the stale list.
+      const [s, d] = await Promise.all([
+        getJson<Summary>('/admin/api/study-ops/summary', { fallback: 'Failed to load summary' }),
+        getJson<{ deviations: Deviation[] }>(`/admin/api/study-ops/deviations?status=${statusFilter}`).catch(() => null),
       ]);
-      if (!sRes.ok) throw new Error('Failed to load summary');
-      const s = await sRes.json() as Summary;
       setSummary(s);
       setProtocolDraft(s.protocol);
-      if (dRes.ok) {
-        const d = await dRes.json() as { deviations: Deviation[] };
-        setDeviations(d.deviations);
-      }
+      if (d) setDeviations(d.deviations);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -81,9 +78,7 @@ export default function StudyOps() {
     setNotice(null);
     setError(null);
     try {
-      const res = await fetch('/admin/api/study-ops/scan', { method: 'POST' });
-      if (!res.ok) throw new Error('Scan failed');
-      const data = await res.json() as { inserted: number };
+      const data = await postJson<{ inserted: number }>('/admin/api/study-ops/scan', undefined, { fallback: 'Scan failed' });
       setNotice(`Scan complete: ${data.inserted} new deviation(s) flagged.`);
       await fetchAll();
     } catch (err) {
@@ -95,10 +90,7 @@ export default function StudyOps() {
 
   const patchDeviation = async (id: number, patch: Record<string, unknown>) => {
     try {
-      const res = await fetch(`/admin/api/study-ops/deviations/${id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
-      });
-      if (!res.ok) throw new Error('Update failed');
+      await requestJson(`/admin/api/study-ops/deviations/${id}`, { method: 'PATCH', body: patch, fallback: 'Update failed' });
       await fetchAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -108,8 +100,7 @@ export default function StudyOps() {
   const removeDeviation = async (id: number) => {
     if (!window.confirm('Delete this manual deviation?')) return;
     try {
-      const res = await fetch(`/admin/api/study-ops/deviations/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Delete failed (auto-flagged rows cannot be deleted)');
+      await deleteJson(`/admin/api/study-ops/deviations/${id}`, undefined, { fallback: 'Delete failed (auto-flagged rows cannot be deleted)' });
       await fetchAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -121,13 +112,7 @@ export default function StudyOps() {
     setNotice(null);
     setError(null);
     try {
-      const res = await fetch('/admin/api/study-ops/protocol', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(protocolDraft),
-      });
-      if (!res.ok) {
-        const d = await res.json() as { error?: string };
-        throw new Error(d.error || 'Failed to save protocol');
-      }
+      await postJson('/admin/api/study-ops/protocol', protocolDraft, { method: 'PUT', fallback: 'Failed to save protocol' });
       setNotice('Protocol targets saved.');
       await fetchAll();
     } catch (err) {
@@ -384,14 +369,11 @@ function AddDeviationForm({ onClose, onDone, setError }: {
     if (!description.trim()) { setError('Description is required'); return; }
     setSaving(true);
     try {
-      const res = await fetch('/admin/api/study-ops/deviations', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, severity, description, session_id: sessionId || null }),
-      });
-      if (!res.ok) {
-        const d = await res.json() as { error?: string };
-        throw new Error(d.error || 'Create failed');
-      }
+      await postJson(
+        '/admin/api/study-ops/deviations',
+        { category, severity, description, session_id: sessionId || null },
+        { fallback: 'Create failed' }
+      );
       setDescription(''); setSessionId('');
       onClose();
       onDone();

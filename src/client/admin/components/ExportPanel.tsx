@@ -7,6 +7,7 @@
 import { useState, useEffect } from "react";
 import { Download, Info } from "react-feather";
 import useAuth from "../hooks/useAuth";
+import { getJson, HttpError } from "../../shared/http";
 
 interface ExportSession {
   session_id: string;
@@ -34,9 +35,7 @@ export default function ExportPanel() {
     const fetchSessions = async () => {
       try {
         setLoadingSessions(true);
-        const response = await fetch('/admin/api/sessions?limit=1000');
-        if (!response.ok) throw new Error('Failed to fetch sessions');
-        const data = await response.json();
+        const data = await getJson<{ sessions?: ExportSession[] }>('/admin/api/sessions?limit=1000', { fallback: 'Failed to fetch sessions' });
         setSessions(data.sessions || []);
       } catch (err: unknown) {
         console.error('Error fetching sessions:', err);
@@ -49,11 +48,14 @@ export default function ExportPanel() {
   }, []);
 
   const checkRedactionStatus = async (sid: string): Promise<number> => {
-    const response = await fetch(`/admin/api/sessions/${sid}/redaction-status`, {
-      credentials: 'include'
-    });
-    const data = await response.json();
-    return data.pendingCount as number;
+    // A non-2xx status check never blocks the export (it has no pending
+    // count); only a network failure propagates to the export handler.
+    const data = await getJson<{ pendingCount?: number }>(`/admin/api/sessions/${sid}/redaction-status`)
+      .catch((err: unknown) => {
+        if (err instanceof HttpError) return {} as { pendingCount?: number };
+        throw err;
+      });
+    return data.pendingCount ?? 0;
   };
 
   const handleExport = async () => {

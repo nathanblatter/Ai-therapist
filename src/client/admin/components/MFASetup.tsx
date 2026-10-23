@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Shield, Key, Copy, CheckCircle, AlertTriangle } from 'react-feather';
 import { decodeCreationOptions, deviceName, encodeAttestation, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
+import { getJson, postJson } from '../../shared/http';
 
 interface PasskeyMeta { id: string; name: string; created_at: string }
 
@@ -16,12 +17,12 @@ function PasskeyCard() {
 
   const load = async () => {
     try {
-      const cfg = await fetch('/api/auth/squawk/config', { credentials: 'include' }).then((r) => r.json() as Promise<{ enabled: boolean }>);
+      const cfg = await getJson<{ enabled: boolean }>('/api/auth/squawk/config');
       if (!cfg.enabled) {
         setState({ enabled: false, linked: false, passkeys: [] });
         return;
       }
-      const data = await fetch('/api/auth/squawk/passkeys', { credentials: 'include' }).then((r) => r.json() as Promise<{ linked: boolean; passkeys: PasskeyMeta[] }>);
+      const data = await getJson<{ linked: boolean; passkeys: PasskeyMeta[] }>('/api/auth/squawk/passkeys');
       setState({ enabled: true, linked: data.linked, passkeys: data.passkeys ?? [] });
     } catch {
       setState({ enabled: false, linked: false, passkeys: [] });
@@ -37,19 +38,19 @@ function PasskeyCard() {
     setError(null);
     setMessage(null);
     try {
-      const beginResp = await fetch('/api/auth/squawk/passkeys/begin', { method: 'POST', credentials: 'include' });
-      const begin = (await beginResp.json()) as { challenge_id?: string; options?: { publicKey: Parameters<typeof decodeCreationOptions>[0] }; error?: string };
-      if (!beginResp.ok || !begin.challenge_id || !begin.options) throw new Error(begin.error || 'Could not start passkey registration.');
+      const begin = await postJson<{ challenge_id?: string; options?: { publicKey: Parameters<typeof decodeCreationOptions>[0] }; error?: string }>(
+        '/api/auth/squawk/passkeys/begin',
+        undefined,
+        { fallback: 'Could not start passkey registration.' }
+      );
+      if (!begin.challenge_id || !begin.options) throw new Error(begin.error || 'Could not start passkey registration.');
       const cred = await navigator.credentials.create({ publicKey: decodeCreationOptions(begin.options.publicKey) });
       if (!cred) throw new Error('No passkey was created.');
-      const finishResp = await fetch('/api/auth/squawk/passkeys/finish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ challenge_id: begin.challenge_id, name: deviceName(), credential: encodeAttestation(cred as PublicKeyCredential) }),
-      });
-      const finish = (await finishResp.json()) as { error?: string };
-      if (!finishResp.ok) throw new Error(finish.error || 'Passkey registration failed.');
+      await postJson(
+        '/api/auth/squawk/passkeys/finish',
+        { challenge_id: begin.challenge_id, name: deviceName(), credential: encodeAttestation(cred as PublicKeyCredential) },
+        { fallback: 'Passkey registration failed.' }
+      );
       setMessage('Passkey registered. From now on this account signs in with a passkey instead of a password.');
       await load();
     } catch (err) {
@@ -132,13 +133,7 @@ export default function MFASetup() {
     setError(null);
 
     try {
-      const response = await fetch('/api/mfa/status', {
-        credentials: 'include'
-      });
-
-      if (!response.ok) throw new Error('Failed to fetch MFA status');
-
-      const data = await response.json() as { mfa: MFAStatus };
+      const data = await getJson<{ mfa: MFAStatus }>('/api/mfa/status', { fallback: 'Failed to fetch MFA status' });
       setMfaStatus(data.mfa);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -152,17 +147,7 @@ export default function MFASetup() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/mfa/setup/init', {
-        method: 'POST',
-        credentials: 'include'
-      });
-
-      if (!response.ok) {
-        const data = await response.json() as { error?: string };
-        throw new Error(data.error || 'Failed to initialize MFA setup');
-      }
-
-      const data = await response.json() as { qrCode: string; secret: string };
+      const data = await postJson<{ qrCode: string; secret: string }>('/api/mfa/setup/init', undefined, { fallback: 'Failed to initialize MFA setup' });
       setQrCode(data.qrCode);
       setSecret(data.secret);
       setSetupStep('verify');
@@ -183,19 +168,7 @@ export default function MFASetup() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/mfa/setup/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ token })
-      });
-
-      if (!response.ok) {
-        const data = await response.json() as { error?: string };
-        throw new Error(data.error || 'Failed to verify token');
-      }
-
-      const data = await response.json() as { backupCodes: string[] };
+      const data = await postJson<{ backupCodes: string[] }>('/api/mfa/setup/verify', { token }, { fallback: 'Failed to verify token' });
       setBackupCodes(data.backupCodes);
       setSetupStep('complete');
       setSuccessMessage('MFA enabled successfully!');
@@ -223,17 +196,7 @@ export default function MFASetup() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/mfa/disable', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ password })
-      });
-
-      if (!response.ok) {
-        const data = await response.json() as { error?: string };
-        throw new Error(data.error || 'Failed to disable MFA');
-      }
+      await postJson('/api/mfa/disable', { password }, { fallback: 'Failed to disable MFA' });
 
       setSuccessMessage('MFA disabled successfully');
       setPassword('');
@@ -255,19 +218,7 @@ export default function MFASetup() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/mfa/regenerate-backup-codes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ password })
-      });
-
-      if (!response.ok) {
-        const data = await response.json() as { error?: string };
-        throw new Error(data.error || 'Failed to regenerate backup codes');
-      }
-
-      const data = await response.json() as { backupCodes: string[] };
+      const data = await postJson<{ backupCodes: string[] }>('/api/mfa/regenerate-backup-codes', { password }, { fallback: 'Failed to regenerate backup codes' });
       setBackupCodes(data.backupCodes);
       setSetupStep('complete');
       setSuccessMessage('Backup codes regenerated successfully!');

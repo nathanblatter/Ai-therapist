@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare } from "react-feather";
 import { formatDateTime } from "../../shared/format";
+import { getJson, postJson } from "../../shared/http";
 
 interface RedactionCheck {
   p_leak: number;
@@ -39,13 +40,7 @@ export default function RedactionReview() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/redact/api/messages", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch messages");
-      }
-      const data = await response.json();
+      const data = await getJson<{ messages: RedactMessage[]; flagged_unreviewed?: number }>("/redact/api/messages", { fallback: "Failed to fetch messages" });
       setMessages(data.messages);
       setFlaggedUnreviewed(Number(data.flagged_unreviewed ?? 0));
     } catch (err: unknown) {
@@ -73,18 +68,7 @@ export default function RedactionReview() {
     setSaving(messageId);
     setSaveSuccess(null);
     try {
-      const response = await fetch(`/redact/api/messages/${messageId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({ content_redacted: editValue }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to save");
-      }
+      await postJson(`/redact/api/messages/${messageId}`, { content_redacted: editValue }, { method: "PUT", fallback: "Failed to save" });
 
       // Update local state
       setMessages((prev) =>

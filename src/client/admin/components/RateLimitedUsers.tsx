@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getJson } from '../../shared/http';
 import { AlertCircle, RefreshCw, Clock, User } from 'react-feather';
 import { timeAgo } from '../../shared/format';
 
@@ -30,10 +31,7 @@ export default function RateLimitedUsers() {
     setError(null);
 
     try {
-      const response = await fetch('/admin/api/rate-limits/users');
-      if (!response.ok) throw new Error('Failed to fetch rate-limited users');
-
-      const data = await response.json();
+      const data = await getJson<{ rateLimitedUsers: RateLimitedUser[]; config: RateLimitConfig }>('/admin/api/rate-limits/users', { fallback: 'Failed to fetch rate-limited users' });
       setRateLimitedUsers(data.rateLimitedUsers);
       setConfig(data.config);
       setLastRefresh(new Date());

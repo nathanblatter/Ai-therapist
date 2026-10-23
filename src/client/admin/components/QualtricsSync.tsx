@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { RefreshCw, Clock, Link as LinkIcon, AlertTriangle, Repeat } from "react-feather";
 import useAdminFetch from "../hooks/useAdminFetch";
+import { postJson, HttpError } from "../../shared/http";
 import Panel from "./ui/Panel";
 import StatCard from "./ui/StatCard";
 import { toast } from "../../shared/components/Toast";
@@ -60,15 +61,7 @@ export default function QualtricsSync() {
   const runSync = async () => {
     setSyncing(true);
     try {
-      const res = await fetch("/admin/api/qualtrics/sync", { method: "POST" });
-      const body = (await res.json().catch(() => null)) as
-        | { success?: boolean; results?: SurveySyncResult[]; error?: string }
-        | null;
-      if (res.status === 409) {
-        toast.info(body?.error || 'A sync is already running.');
-        return;
-      }
-      if (!res.ok) throw new Error(body?.error || `Sync failed (HTTP ${res.status})`);
+      const body = await postJson<{ success?: boolean; results?: SurveySyncResult[]; error?: string } | null>("/admin/api/qualtrics/sync");
       const fetched = (body?.results ?? []).reduce((n, r) => n + r.fetched, 0);
       const linked = (body?.results ?? []).reduce((n, r) => n + r.linked, 0);
       if (body?.success === false) {
@@ -80,6 +73,14 @@ export default function QualtricsSync() {
       }
       refetch();
     } catch (err) {
+      if (err instanceof HttpError && err.status === 409) {
+        toast.info(err.body?.error ? err.message : 'A sync is already running.');
+        return;
+      }
+      if (err instanceof HttpError && !err.body?.error) {
+        toast.error(`Sync failed (HTTP ${err.status})`);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : "Sync failed");
     } finally {
       setSyncing(false);
