@@ -9,13 +9,12 @@ import {
   setAmbiencePreference,
   type SoundscapeHandle,
 } from '../lib/soundscape';
+import { createOrbTracker, nextOrbState, type OrbState } from '../lib/orbState';
 
 interface VoiceOrbProps {
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
 }
-
-type OrbState = 'idle' | 'listening' | 'speaking';
 
 const STATE_LABEL: Record<OrbState, string> = {
   idle: 'Mic muted — press the mic button to talk',
@@ -60,12 +59,15 @@ export default function VoiceOrb({ localStream, remoteStream }: VoiceOrbProps) {
 
     let raf = 0;
     let lastState: OrbState = 'idle';
+    const tracker = createOrbTracker();
     const tick = () => {
       const remoteLevel = readRemote ? readRemote() : 0;
       const micEnabled = localStream?.getAudioTracks()[0]?.enabled ?? false;
       const localLevel = micEnabled && readLocal ? readLocal() : 0;
 
-      const state: OrbState = remoteLevel > 0.02 ? 'speaking' : micEnabled ? 'listening' : 'idle';
+      // Hysteresis + hold so the label does not flip on every pause between
+      // words (ai-therapist-247); the pulse below still follows the raw level.
+      const state = nextOrbState(tracker, remoteLevel, micEnabled, performance.now());
       if (state !== lastState) {
         lastState = state;
         setOrbState(state);
