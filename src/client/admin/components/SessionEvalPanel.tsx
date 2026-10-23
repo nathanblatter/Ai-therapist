@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
+import { getJson, postJson, HttpError } from '../../shared/http';
 // Canonical eval shapes live in the server data layer (type-only import,
 // erased at build time).
 import type { EvalDimension } from '../../../server/db/evals.queries';
@@ -63,16 +64,14 @@ export default function SessionEvalPanel({ sessionId, sessionStatus }: SessionEv
   const fetchEval = useCallback(async () => {
     setNotFound(false);
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/eval`);
-      if (res.status === 404) {
+      const data = await getJson<{ eval: SessionEval }>(`/admin/api/sessions/${sessionId}/eval`);
+      setEvalRow(data.eval);
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 404) {
         setNotFound(true);
         setEvalRow(null);
         return;
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setEvalRow(data.eval);
-    } catch (err) {
       console.error('Failed to fetch session eval:', err);
     }
   }, [sessionId]);
@@ -84,21 +83,16 @@ export default function SessionEvalPanel({ sessionId, sessionStatus }: SessionEv
   const runEval = async (force: boolean) => {
     setRunning(true);
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/eval`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.details || data.error || 'Eval failed');
-        return;
-      }
+      const data = await postJson<{ eval: SessionEval }>(`/admin/api/sessions/${sessionId}/eval`, { force }, { fallback: 'Eval failed' });
       setEvalRow(data.eval);
       setNotFound(false);
       toast.success('Eval complete');
     } catch (err) {
+      if (err instanceof HttpError) {
+        // The eval route reports the judge failure under {details} ahead of {error}.
+        toast.error((typeof err.body?.details === 'string' && err.body.details) || err.message);
+        return;
+      }
       console.error('Eval run failed:', err);
       toast.error('Eval run failed');
     } finally {
@@ -220,9 +214,7 @@ function HumanRatingSection({ sessionId }: { sessionId: string }) {
 
   const fetchRatings = useCallback(async () => {
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/human-ratings`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await getJson<{ ratings?: HumanRating[]; my_user_id?: number | null }>(`/admin/api/sessions/${sessionId}/human-ratings`);
       setRatings(data.ratings ?? []);
       setMyUserId(data.my_user_id ?? null);
       const mine = (data.ratings ?? []).find((r: HumanRating) => r.rater_user_id === data.my_user_id);
@@ -249,20 +241,18 @@ function HumanRatingSection({ sessionId }: { sessionId: string }) {
         rubric[key] = { score: scores[key] };
         if (notes[key]?.trim()) rubric[key].note = notes[key].trim();
       }
-      const res = await fetch(`/admin/api/sessions/${sessionId}/human-rating`, {
-        method: 'PUT',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rubric, overall_notes: overallNotes || undefined }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error || 'Failed to save rating');
-        return;
-      }
+      await postJson(
+        `/admin/api/sessions/${sessionId}/human-rating`,
+        { rubric, overall_notes: overallNotes || undefined },
+        { method: 'PUT', fallback: 'Failed to save rating' }
+      );
       toast.success('Rating saved');
       await fetchRatings();
     } catch (err) {
+      if (err instanceof HttpError) {
+        toast.error(err.message);
+        return;
+      }
       console.error('Failed to save rating:', err);
       toast.error('Failed to save rating');
     } finally {

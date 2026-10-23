@@ -3,6 +3,7 @@
 // reasoning for each scored message, so a reviewer can see WHY a session
 // was (or wasn't) flagged. Backed by /admin/api/sessions/:id/risk-history.
 import { useState, useEffect, useCallback } from 'react';
+import { getJson, HttpError } from '../../shared/http';
 import { ChevronDown, ChevronRight, Activity } from 'react-feather';
 import { riskScoreTextClass } from '../../shared/severity';
 
@@ -54,13 +55,11 @@ export default function RiskTimeline({ sessionId }: RiskTimelineProps) {
   const fetchHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/risk-history`);
-      if (res.ok) {
-        const data = await res.json() as { history: RiskEntry[] };
-        setHistory(data.history);
-      }
-    } catch {
-      setHistory([]);
+      const data = await getJson<{ history: RiskEntry[] }>(`/admin/api/sessions/${sessionId}/risk-history`);
+      setHistory(data.history);
+    } catch (err) {
+      // A non-2xx keeps whatever was shown; a network failure clears it.
+      if (!(err instanceof HttpError)) setHistory([]);
     } finally {
       setLoading(false);
     }

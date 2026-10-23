@@ -3,10 +3,16 @@ import type { Socket } from 'socket.io-client';
 import { Activity, Users, MessageSquare, AlertTriangle, X, Radio, Tool, Volume2, Square, Play } from 'react-feather';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../../shared/components/Toast';
+import { getJson, postJson, HttpError } from '../../shared/http';
 import { severityBadgeClass } from '../../shared/severity';
 import { AudioStreamPlayer } from '../lib/audioStreamPlayer';
 
 // ---- Local types ----
+
+// Sideband routes report under {details} ahead of {error}; HttpError.message
+// already holds {error} (or the generic fallback).
+const sidebandErrorText = (err: HttpError) =>
+  (typeof err.body?.details === 'string' && err.body.details) || err.message;
 
 interface LiveSession {
   session_id: string;
@@ -126,9 +132,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/admin/api/tools', { credentials: 'include' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const data = await getJson<{ tools?: Array<{ name: string; description: string; enabled: boolean }> }>('/admin/api/tools');
         const tools = (data.tools || [])
           .filter((t: { enabled: boolean }) => t.enabled)
           .map((t: { name: string; description: string }) => ({ name: t.name, description: t.description }));
@@ -282,9 +286,9 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
 
     (async () => {
       try {
-        const res = await fetch(`/admin/api/sessions/${sid}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const data = await getJson<{ messages?: Array<{ message_id: number; role: 'user' | 'assistant'; message: string; created_at: string }> }>(
+          `/admin/api/sessions/${sid}`
+        );
         const dbTurns: TranscriptTurn[] = (data.messages || [])
           .filter((m: { role: string; message: string | null }) =>
             (m.role === 'user' || m.role === 'assistant') && (m.message ?? '').trim())
@@ -347,9 +351,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/admin/api/sessions/active');
-      if (!response.ok) throw new Error('Failed to fetch active sessions');
-      const data = await response.json();
+      const data = await getJson<{ sessions?: LiveSession[] }>('/admin/api/sessions/active', { fallback: 'Failed to fetch active sessions' });
       // Parse numeric fields to ensure they're numbers, not strings
       const sessions: LiveSession[] = (data.sessions || []).map((session: LiveSession) => ({
         ...session,
@@ -638,24 +640,17 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     }
 
     try {
-      const response = await fetch('/admin/api/sideband/update-session', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      if (response.ok) {
-        toast.success('Session config updated successfully');
-        setShowUpdateModal(false);
-        setUpdateInstructions('');
-        setAdvancedConfigText('');
-        setAdvancedConfigMode(false);
-      } else {
-        const error = await response.json();
-        toast.error(`Failed to update: ${error.details || error.error}`);
-      }
+      await postJson('/admin/api/sideband/update-session', body);
+      toast.success('Session config updated successfully');
+      setShowUpdateModal(false);
+      setUpdateInstructions('');
+      setAdvancedConfigText('');
+      setAdvancedConfigMode(false);
     } catch (error: unknown) {
+      if (error instanceof HttpError) {
+        toast.error(`Failed to update: ${sidebandErrorText(error)}`);
+        return;
+      }
       console.error('Error updating session:', error);
       toast.error('Failed to update session');
     }
@@ -664,20 +659,14 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   // Simple POST helper for the one-shot sideband controls.
   const postSideband = async (path: string, payload: Record<string, unknown>, successMsg: string) => {
     try {
-      const response = await fetch(`/admin/api/sideband/${path}`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) {
-        toast.success(successMsg);
-        return true;
-      }
-      const error = await response.json();
-      toast.error(`Failed: ${error.details || error.error}`);
-      return false;
+      await postJson(`/admin/api/sideband/${path}`, payload);
+      toast.success(successMsg);
+      return true;
     } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        toast.error(`Failed: ${sidebandErrorText(err)}`);
+        return false;
+      }
       console.error(`Error on ${path}:`, err);
       toast.error('Request failed');
       return false;
@@ -737,24 +726,18 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     if (!confirm('Are you sure you want to disconnect this sideband connection?')) return;
 
     try {
-      const response = await fetch('/admin/api/sideband/disconnect', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId })
-      });
-
-      if (response.ok) {
-        toast.success('Sideband connection disconnected');
-        setSidebandConnections(prev => prev.filter(c => c.sessionId !== sessionId));
-        if (selectedSidebandSession?.sessionId === sessionId) {
-          setSelectedSidebandSession(null);
-        }
-      } else {
-        const error = await response.json();
-        toast.error(`Failed to disconnect: ${error.message}`);
+      await postJson('/admin/api/sideband/disconnect', { sessionId });
+      toast.success('Sideband connection disconnected');
+      setSidebandConnections(prev => prev.filter(c => c.sessionId !== sessionId));
+      if (selectedSidebandSession?.sessionId === sessionId) {
+        setSelectedSidebandSession(null);
       }
     } catch (error: unknown) {
+      if (error instanceof HttpError) {
+        // The disconnect route reports under {message}, not {error}.
+        toast.error(`Failed to disconnect: ${error.body?.message}`);
+        return;
+      }
       console.error('Error disconnecting:', error);
       toast.error('Failed to disconnect');
     }
@@ -799,19 +782,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
     }
 
     try {
-      const response = await fetch(`/admin/api/sessions/${sessionId}/end`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to end session');
-      }
-
-      const data = await response.json();
+      const data = await postJson(`/admin/api/sessions/${sessionId}/end`, undefined, { fallback: 'Failed to end session' });
       console.log('Session ended successfully:', data);
 
       // Session will be removed via Socket.io event, no need to update state manually

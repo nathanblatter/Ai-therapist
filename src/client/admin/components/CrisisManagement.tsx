@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getJson, HttpError } from '../../shared/http';
 import { AlertTriangle, Activity, Users, FileText, TrendingUp, Clock, RefreshCw, ChevronDown, ChevronUp, ArrowUpCircle, MessageSquare } from 'react-feather';
 import EscalationComposer from './escalations/EscalationComposer';
 import FlaggedMessageRow, { useFlaggedMessageEvents } from './FlaggedMessageRow';
@@ -97,8 +98,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
   const flaggedMessages = useFlaggedMessageEvents();
 
   useEffect(() => {
-    fetch('/admin/api/adverse-events?status=draft', { credentials: 'include' })
-      .then(r => (r.ok ? r.json() : null))
+    getJson<{ counts?: { draft?: number } }>('/admin/api/adverse-events?status=draft')
       .then(d => { if (d?.counts) setAeDrafts(d.counts.draft ?? 0); })
       .catch(() => { /* best-effort */ });
   }, []);
@@ -111,16 +111,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/admin/api/crisis/all', {
-        credentials: 'include'
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.details || errorData.error || `HTTP ${response.status}`);
-      }
-
-      const crisisData = await response.json();
+      const crisisData = await getJson<CrisisData>('/admin/api/crisis/all');
       console.log('[CrisisManagement] Fetched data:', {
         clinicalReviews: crisisData.clinicalReviews?.length || 0,
         crisisEvents: crisisData.crisisEvents?.length || 0,
@@ -130,7 +121,9 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
       setData(crisisData);
     } catch (err: unknown) {
       console.error('[CrisisManagement] Error fetching data:', err);
-      setError(err instanceof Error ? err.message : String(err));
+      // The crisis route reports under {details} ahead of {error}.
+      const details = err instanceof HttpError && typeof err.body?.details === 'string' ? err.body.details : null;
+      setError(details || (err instanceof Error ? err.message : String(err)));
     } finally {
       setLoading(false);
     }

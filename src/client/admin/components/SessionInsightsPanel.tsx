@@ -9,6 +9,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, RefreshCw, CheckCircle, FileText, AlertTriangle } from 'react-feather';
 import PrepBrief from './PrepBrief';
+import { getJson, postJson } from '../../shared/http';
 import { isCareTeamRole } from '../../../shared/roles';
 // Canonical insight shapes live in the server data layer (type-only import,
 // erased at build time).
@@ -75,14 +76,9 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
     setLoading(true);
     setNotFound(false);
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/insights`);
-      if (res.ok) {
-        const data = await res.json() as Insights;
-        setInsights(data);
-        setNotesDraft(data.notes_for_next_session ?? '');
-      } else {
-        setNotFound(true);
-      }
+      const data = await getJson<Insights>(`/admin/api/sessions/${sessionId}/insights`);
+      setInsights(data);
+      setNotesDraft(data.notes_for_next_session ?? '');
     } catch {
       setNotFound(true);
     } finally {
@@ -100,8 +96,10 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
   const handleReview = async () => {
     setBusy(true);
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/insights/review`, { method: 'POST' });
-      if (res.ok) await fetchInsights();
+      await postJson(`/admin/api/sessions/${sessionId}/insights/review`);
+      await fetchInsights();
+    } catch {
+      /* a failed review request leaves the panel as it was */
     } finally {
       setBusy(false);
     }
@@ -110,11 +108,10 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
   const handleRegenerate = async () => {
     setBusy(true);
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/insights/regenerate`, { method: 'POST' });
-      if (res.ok) {
-        setInsights(await res.json() as Insights);
-        setNotFound(false);
-      }
+      setInsights(await postJson<Insights>(`/admin/api/sessions/${sessionId}/insights/regenerate`));
+      setNotFound(false);
+    } catch {
+      /* a failed regenerate leaves the current insights in place */
     } finally {
       setBusy(false);
     }
@@ -124,15 +121,11 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
     setBusy(true);
     setNotesSaved(false);
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/insights/notes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes: notesDraft }),
-      });
-      if (res.ok) {
-        setInsights(prev => (prev ? { ...prev, notes_for_next_session: notesDraft } : prev));
-        setNotesSaved(true);
-      }
+      await postJson(`/admin/api/sessions/${sessionId}/insights/notes`, { notes: notesDraft });
+      setInsights(prev => (prev ? { ...prev, notes_for_next_session: notesDraft } : prev));
+      setNotesSaved(true);
+    } catch {
+      /* a failed save leaves the draft in the textarea */
     } finally {
       setBusy(false);
     }
@@ -144,10 +137,8 @@ export default function SessionInsightsPanel({ sessionId, userRole, sessionStatu
     setBusy(true);
     setSeedError(null);
     try {
-      const res = await fetch(`/admin/api/sessions/${sessionId}/notes/from-insights`, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to start the progress note');
-      setInsights(prev => (prev ? { ...prev, authored_note: (data as { note: AuthoredNote }).note } : prev));
+      const data = await postJson<{ note: AuthoredNote }>(`/admin/api/sessions/${sessionId}/notes/from-insights`, undefined, { fallback: 'Failed to start the progress note' });
+      setInsights(prev => (prev ? { ...prev, authored_note: data.note } : prev));
     } catch (err: unknown) {
       setSeedError(err instanceof Error ? err.message : String(err));
     } finally {

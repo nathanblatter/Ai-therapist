@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import FilterBar from "./FilterBar";
 import { formatDateTime } from "../../shared/format";
+import { deleteJson, getJson } from "../../shared/http";
 
 interface Session {
   session_id: string;
@@ -62,10 +63,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
         )
       });
 
-      const response = await fetch(`/admin/api/sessions?${params}`);
-      if (!response.ok) throw new Error('Failed to fetch sessions');
-
-      const data = await response.json();
+      const data = await getJson<{ sessions: Session[]; pagination: Pagination }>(`/admin/api/sessions?${params}`, { fallback: 'Failed to fetch sessions' });
       setSessions(data.sessions);
       setPagination(data.pagination);
     } catch (err: unknown) {
@@ -108,14 +106,7 @@ export default function SessionList({ onViewSession }: SessionListProps) {
     }
 
     try {
-      const response = await fetch(`/admin/api/sessions/${sessionId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete session');
-      }
+      await deleteJson(`/admin/api/sessions/${sessionId}`, undefined, { fallback: 'Failed to delete session' });
 
       // Refresh the session list after successful deletion
       await fetchSessions();
