@@ -34,20 +34,28 @@ export async function getActiveSidebandSessions(orgId?: number | null): Promise<
   return result.rows;
 }
 
-/** Sideband connection rows for the given session ids (admin socket view). */
-export async function getSidebandConnectionsByIds(sessionIds: string[]): Promise<SidebandSessionRow[]> {
+/** Sideband connection rows for the given session ids (admin socket view).
+ *  orgId (ai-therapist-278): same researcher organization rule as
+ *  getActiveSidebandSessions; null/undefined is unscoped (care-team callers
+ *  are caseload-filtered by the socket handler). */
+export async function getSidebandConnectionsByIds(sessionIds: string[], orgId?: number | null): Promise<SidebandSessionRow[]> {
+  const orgScoped = orgId !== null && orgId !== undefined;
+  const orgClause = orgScoped
+    ? `
+      AND ${ownerOrgScopeSql('$2', 'ts.user_id')}`
+    : '';
   const result = await pool.query(`
     SELECT
-      session_id,
-      openai_call_id,
-      sideband_connected,
-      sideband_connected_at,
-      status,
-      user_id
-    FROM therapy_sessions
-    WHERE session_id = ANY($1)
-    ORDER BY sideband_connected_at DESC
-  `, [sessionIds]);
+      ts.session_id,
+      ts.openai_call_id,
+      ts.sideband_connected,
+      ts.sideband_connected_at,
+      ts.status,
+      ts.user_id
+    FROM therapy_sessions ts
+    WHERE ts.session_id = ANY($1)${orgClause}
+    ORDER BY ts.sideband_connected_at DESC
+  `, orgScoped ? [sessionIds, orgId] : [sessionIds]);
   return result.rows;
 }
 

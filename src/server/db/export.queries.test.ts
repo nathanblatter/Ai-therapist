@@ -9,7 +9,13 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-import { getAnonymizedExport, getFullExport, type ExportFilters } from './export.queries.js';
+import {
+  getAggregatedExport,
+  getAnonymizedExport,
+  getFullExport,
+  getMetadataExport,
+  type ExportFilters,
+} from './export.queries.js';
 
 const FILTERS: ExportFilters = {
   sessionId: null,
@@ -17,6 +23,19 @@ const FILTERS: ExportFilters = {
   endDate: null,
   crisisOnly: false,
 };
+
+/** The researcher organization rule (ai-therapist-278): owner in the caller's
+ *  org, or anonymous and the caller is the irb-study org. Pinned verbatim so a
+ *  drift back to "every org sees anonymous sessions" fails here. */
+function orgClause(param: string) {
+  return `AND (EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ts.user_id AND ou.organization_id = ${param}) OR (ts.user_id IS NULL AND ${param} = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))`;
+}
+/** The pre-278 clause that let every org export anonymous sessions. */
+const LOOSE_ANONYMOUS_CLAUSE = 'ts.user_id IS NULL OR EXISTS';
+
+function lastCall(): [string, unknown[]] {
+  return queryMock.mock.calls[queryMock.mock.calls.length - 1] as [string, unknown[]];
+}
 
 beforeEach(() => {
   queryMock.mockReset();
@@ -40,13 +59,60 @@ describe('getAnonymizedExport', () => {
   });
 });
 
+describe('researcher org scoping on the list exports (ai-therapist-278)', () => {
+  const SCOPED = { ...FILTERS, startDate: '2026-01-01', endDate: '2026-02-01', crisisOnly: true };
+
+  it('getMetadataExport appends the owner-org clause as $5 after the four filters', async () => {
+    await getMetadataExport(SCOPED, 3);
+    const [sql, params] = lastCall();
+    expect(sql).toContain(orgClause('$5'));
+    expect(sql).not.toContain(LOOSE_ANONYMOUS_CLAUSE);
+    expect(params).toEqual([null, '2026-01-01', '2026-02-01', true, 3]);
+  });
+
+  it('getAnonymizedExport appends the owner-org clause as $5', async () => {
+    await getAnonymizedExport(SCOPED, 'content_redacted', 3);
+    const [sql, params] = lastCall();
+    expect(sql).toContain(orgClause('$5'));
+    expect(sql).not.toContain(LOOSE_ANONYMOUS_CLAUSE);
+    expect(params).toEqual([null, '2026-01-01', '2026-02-01', true, 3]);
+  });
+
+  it('getAggregatedExport appends the owner-org clause as $4 after the three filters', async () => {
+    await getAggregatedExport(SCOPED, 'day', 3);
+    const [sql, params] = lastCall();
+    expect(sql).toContain(orgClause('$4'));
+    expect(sql).not.toContain(LOOSE_ANONYMOUS_CLAUSE);
+    expect(params).toEqual(['2026-01-01', '2026-02-01', true, 3]);
+  });
+
+  it('getFullExport (date range) appends the owner-org clause as $4', async () => {
+    await getFullExport(SCOPED, 'content_redacted', 3);
+    const [sql, params] = lastCall();
+    expect(sql).toContain(orgClause('$4'));
+    expect(sql).not.toContain(LOOSE_ANONYMOUS_CLAUSE);
+    expect(params).toEqual(['2026-01-01', '2026-02-01', true, 3]);
+  });
+
+  it('binds no org parameter when orgId is null or undefined', async () => {
+    await getMetadataExport(SCOPED, null);
+    expect(lastCall()[1]).toEqual([null, '2026-01-01', '2026-02-01', true]);
+    expect(lastCall()[0]).not.toContain('ou.organization_id');
+    await getAggregatedExport(SCOPED, 'week');
+    expect(lastCall()[1]).toEqual(['2026-01-01', '2026-02-01', true]);
+    expect(lastCall()[0]).not.toContain('ou.organization_id');
+  });
+});
+
 describe('getFullExport single-session fast path', () => {
   it('applies the researcher org restriction when orgId is set', async () => {
     await getFullExport({ ...FILTERS, sessionId: 'sess-1' }, 'content_redacted', 42);
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
     // Without this guard an org-scoped researcher could export ANY org's
-    // session content by naming its session id.
-    expect(sql).toContain('ou.organization_id = $2');
+    // session content by naming its session id. Same owner-org rule as the
+    // list exports: an anonymous session only for the irb-study org.
+    expect(sql).toContain(orgClause('$2'));
+    expect(sql).not.toContain(LOOSE_ANONYMOUS_CLAUSE);
     expect(sql).toContain('FROM therapy_sessions ts');
     expect(params).toEqual(['sess-1', 42]);
   });

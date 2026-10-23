@@ -397,36 +397,6 @@ export async function getCrisisEventClientInfo(eventId: number): Promise<CrisisE
   return result.rows[0] ?? null;
 }
 
-/** All currently crisis-flagged sessions (the active-crisis view), highest
- *  risk first. The active-crisis route historically read this list from
- *  services/crisisDetection.service.ts#getActiveCrisisSessions; this scoped
- *  variant lives here so caseload RBAC (ai-therapist-119) can filter it.
- *  scopeTherapistId: when set, restrict to the therapist's assigned clients;
- *  null/undefined = unscoped (researchers), matching the service's SQL. */
-export async function getActiveCrisisSessions(scopeTherapistId?: number | null): Promise<Record<string, unknown>[]> {
-  const scoped = scopeTherapistId !== null && scopeTherapistId !== undefined;
-  const scopeClause = scoped
-    ? `
-       AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.therapist_id = $1 AND tc.client_id = ts.user_id)`
-    : '';
-  const result = await pool.query(
-    `SELECT
-       ts.session_id,
-       ts.user_id,
-       ts.crisis_severity,
-       ts.crisis_risk_score,
-       ts.crisis_flagged_at,
-       ts.crisis_flagged_by,
-       u.username
-     FROM therapy_sessions ts
-     LEFT JOIN users u ON ts.user_id = u.userid
-     WHERE ts.crisis_flagged = TRUE${scopeClause}
-     ORDER BY ts.crisis_risk_score DESC, ts.crisis_flagged_at DESC`,
-    scoped ? [scopeTherapistId] : []
-  );
-  return result.rows;
-}
-
 // ---------- Post-session safety context (ai-therapist-256) ----------
 // Everything safety-relevant that happened inside one session, gathered for
 // the post-session summarizer so a generated summary can never read as a
