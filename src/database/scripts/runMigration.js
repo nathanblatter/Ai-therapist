@@ -13,7 +13,7 @@ async function runMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n🔄 Starting database migration to 3NF schema...\n');
+    console.log('\n==> Starting database migration to 3NF schema...\n');
 
     // Read and execute the migration SQL
     const migrationPath = path.join(__dirname, '../migrations', '003_normalize_schema.sql');

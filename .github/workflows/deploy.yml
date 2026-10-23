@@ -18,6 +18,8 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      - name: Lint (no emoji in docs/html)
+        run: npm run lint:emoji
       - name: Test
         run: npm test
 
@@ -26,6 +28,10 @@ jobs:
     # Runs in PARALLEL with verify (deploy still needs both): serializing added
     # verify's full duration to every deploy for no protection — a broken build
     # at worst wastes one ~$0.03 smoke run. Wall time ~3min → ~2min.
+    # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
+    # and redteam-nightly.yml (composite actions cannot declare services). The
+    # setup-node -> npm ci -> migrate+seed sequence lives in
+    # .github/actions/redteam-db-setup; keep the three copies of this block identical.
     services:
       postgres:
         image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod)
@@ -45,13 +51,7 @@ jobs:
       # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Set up red-team DB (migrate + seed)
-        run: bash scripts/redteam-db-setup.sh
+      - uses: ./.github/actions/redteam-db-setup
       - name: Red-team smoke suite
         run: npm run redteam:smoke
       - name: Upload results

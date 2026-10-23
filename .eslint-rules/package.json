@@ -1,0 +1,5 @@
+{
+  "type": "commonjs",
+  "private": true,
+  "description": "Local ESLint rules loaded via --rulesdir (see package.json lint script). CommonJS because ESLint 8 requires rule modules synchronously."
+}

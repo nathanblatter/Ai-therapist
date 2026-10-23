@@ -13,7 +13,7 @@ async function rollbackMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n⏪ Rolling back database migration 012 - Remove sideband connection tracking...\n');
+    console.log('\n==> Rolling back database migration 012 - Remove sideband connection tracking...\n');
 
     // Read and execute the rollback SQL
     const rollbackPath = path.join(__dirname, '../migrations', '012_add_sideband_connections_rollback.sql');

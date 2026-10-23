@@ -23,12 +23,12 @@ async function runMigration() {
     await client.query(migrationSQL);
     await client.query('COMMIT');
 
-    console.log('✅ Migration 019 completed successfully!');
+    console.log('OK: Migration 019 completed successfully!');
     console.log('System prompts configuration added to system_config table');
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Migration 019 failed:', error);
+    console.error('FAIL: Migration 019 failed:', error);
     throw error;
   } finally {
     client.release();

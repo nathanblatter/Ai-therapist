@@ -45,7 +45,7 @@ async function ingest() {
     for (const c of chunks) {
       total++;
       if (!c.content || !c.source) {
-        console.error(`  ✗ skipping malformed chunk (missing content/source)`);
+        console.error(`  FAIL: skipping malformed chunk (missing content/source)`);
         continue;
       }
       try {
@@ -69,9 +69,9 @@ async function ingest() {
         });
         ok++;
         const isActive = c.active ?? seed.defaultActive;
-        console.log(`  ${isActive ? '✓' : '⏳'} [${c.kind ?? seed.kind}] ${c.title ?? contentHash.slice(0, 8)}`);
+        console.log(`  ${isActive ? 'active ' : 'pending'} [${c.kind ?? seed.kind}] ${c.title ?? contentHash.slice(0, 8)}`);
       } catch (err) {
-        console.error(`  ✗ ${c.title ?? '(untitled)'}: ${err.message}`);
+        console.error(`  FAIL ${c.title ?? '(untitled)'}: ${err.message}`);
       }
     }
   }

@@ -9,9 +9,13 @@ permissions:
 jobs:
   redteam-full:
     runs-on: ubuntu-latest
+    # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
+    # and redteam-nightly.yml (composite actions cannot declare services). The
+    # setup-node -> npm ci -> migrate+seed sequence lives in
+    # .github/actions/redteam-db-setup; keep the three copies of this block identical.
     services:
       postgres:
-        image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod + deploy.yml)
+        image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod)
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: ai_therapist_redteam
@@ -28,13 +32,7 @@ jobs:
       # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Set up red-team DB (migrate + seed)
-        run: bash scripts/redteam-db-setup.sh
+      - uses: ./.github/actions/redteam-db-setup
       - name: Download previous nightly results (diff baseline)
         # actions/download-artifact cannot reach other workflow runs, so use the
         # gh CLI. Best-effort: a missing baseline just means no diff tonight.

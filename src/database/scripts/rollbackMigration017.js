@@ -23,12 +23,12 @@ async function rollbackMigration() {
     await client.query(rollbackSQL);
     await client.query('COMMIT');
 
-    console.log('✅ Migration 017 rolled back successfully!');
+    console.log('OK: Migration 017 rolled back successfully!');
     console.log('Voice and language configurations reverted to simple array structure');
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Rollback of migration 017 failed:', error);
+    console.error('FAIL: Rollback of migration 017 failed:', error);
     throw error;
   } finally {
     client.release();

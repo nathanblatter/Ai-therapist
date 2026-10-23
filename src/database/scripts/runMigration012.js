@@ -13,7 +13,7 @@ async function runMigration() {
   const client = await pool.connect();
 
   try {
-    console.log('\n🔄 Starting database migration 012 - Add sideband connection tracking...\n');
+    console.log('\n==> Starting database migration 012 - Add sideband connection tracking...\n');
 
     // Read and execute the migration SQL
     const migrationPath = path.join(__dirname, '../migrations', '012_add_sideband_connections.sql');

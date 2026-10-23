@@ -23,12 +23,12 @@ async function rollbackMigration() {
     await client.query(rollbackSQL);
     await client.query('COMMIT');
 
-    console.log('✅ Migration 019 rolled back successfully!');
+    console.log('OK: Migration 019 rolled back successfully!');
     console.log('System prompts configuration removed from system_config table');
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Rollback of migration 019 failed:', error);
+    console.error('FAIL: Rollback of migration 019 failed:', error);
     throw error;
   } finally {
     client.release();

@@ -1,0 +1,23 @@
+name: Red-team DB setup
+description: >-
+  Node 24 (npm cache), npm ci, then migrate + seed the red-team Postgres via
+  scripts/redteam-db-setup.sh. Shared by deploy.yml, deploy-prod.yml and
+  redteam-nightly.yml so the bootstrap sequence has one definition.
+
+  Two things deliberately stay in each calling job: `actions/checkout` (a local
+  action cannot be resolved until the repo is checked out) and the pgvector
+  `services:` + `env:` blocks (composite actions cannot declare services, and
+  the script reads DATABASE_URL from the job env). Keep those copies identical
+  across the three workflows; see the comment above each one.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: npm
+    - run: npm ci
+      shell: bash
+    - name: Set up red-team DB (migrate + seed)
+      run: bash scripts/redteam-db-setup.sh
+      shell: bash

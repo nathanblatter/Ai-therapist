@@ -93,5 +93,5 @@ function processQueue() {
 ## Verification
 1. Start the server, open a session as a researcher role
 2. Send a message — `content_redacted` should populate in under 1 second
-3. Check server logs: `🔒 Redacting message X...` and `Message X redacted successfully` should appear nearly immediately
+3. Check server logs: `Redacting message X...` and `Message X redacted successfully` should appear nearly immediately
 4. With multiple simultaneous sessions, confirm messages from different sessions are processed concurrently (check log timestamps)
