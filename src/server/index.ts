@@ -78,6 +78,7 @@ import notificationsRoutes from "./routes/admin/notifications.routes.js";
 import escalationsRoutes from "./routes/admin/escalations.routes.js";
 import notesRoutes from "./routes/admin/notes.routes.js";
 import practiceAssignmentsRoutes from "./routes/admin/practiceAssignments.routes.js";
+import clientChartRoutes from "./routes/admin/clientChart.routes.js";
 import adminMessagingRoutes from "./routes/admin/messaging.routes.js";
 import publicMessagingRoutes from "./routes/public/messaging.routes.js";
 import sandboxInvitesRoutes from "./routes/admin/sandboxInvites.routes.js";
@@ -815,6 +816,9 @@ app.use(notesRoutes());
 
 // Clinician homework (practice assignments) -> routes/admin/practiceAssignments.routes.ts
 app.use(practiceAssignmentsRoutes());
+
+// Clinician chart bundle (zip per client) -> routes/admin/clientChart.routes.ts
+app.use(clientChartRoutes());
 
 // Clinician messaging inbox/threads -> routes/admin/messaging.routes.ts
 app.use(adminMessagingRoutes());

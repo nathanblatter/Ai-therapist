@@ -20,6 +20,8 @@ export * from './userSessions.queries.js';
 export * from './crisis.queries.js';
 export * from './redaction.queries.js';
 export * from './accessLog.queries.js';
+// Clinician chart bundle reads (ai-therapist-199 item 3).
+export * from './clientChart.queries.js';
 export * from './assistantAudit.queries.js';
 export * from './insights.queries.js';
 export * from './tools.queries.js';

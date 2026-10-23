@@ -117,7 +117,27 @@ associate. Before pilot launch:
    therapist-set items in the same "Your practice" card with the
    completion note flowing back to the panel. Caseload (404) and org
    scoping apply; caseworkers are excluded (403).
-6. Smaller: therapist-facing onboarding docs; BAA paperwork from section 2;
+6. **Clinical data egress** — DONE 2026-10-23 (ai-therapist-199, items
+   1-4 complete). A therapist can get their clients' records out of the
+   system without a database admin: (1) copy and print for signed care
+   notes; (2) the clinician export in `deployment_mode=clinical`; (4)
+   recording download with its own `recording_download` audit action; and
+   (3) the client chart bundle, `GET /admin/api/clients/:userId/chart.zip`
+   ("Download chart" on the participant profile) — notes.csv (signed and
+   amended notes with signer, signed_at and sign hash), screeners.csv,
+   session_summaries.csv (date, modality, duration, summary fields, risk
+   band; no SOAP text), safety_plan.json (latest), crisis_history.csv
+   (events and interventions), assignments.csv, escalations.csv and a
+   README naming the client reference, the exporting clinician, the
+   generation time and the scope. Therapists (caseload, 404 otherwise) get
+   the full record; researchers (organization-scoped, 404 otherwise) get the
+   summary tier: note ledger without content, no safety plan, crisis free
+   text blanked. Caseworkers are 403. Every download writes one
+   `data_access_log` row (`action: export`, `detail.kind: client_chart`,
+   with the file manifest). This is the therapist-side counterpart of the
+   participant's own `/api/me/export`, so the pilot's off-ramp ("data
+   export + deletion at end", section 5) now exists on both sides.
+7. Smaller: therapist-facing onboarding docs; BAA paperwork from section 2;
    confirm `deployment_mode=clinical` hides the research surfaces end to
    end; email delivery for invite links.
 

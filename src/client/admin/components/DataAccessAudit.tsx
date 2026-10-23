@@ -163,7 +163,7 @@ function DataAccessTab({ onViewSession }: { onViewSession?: (sessionId: string) 
   const columns: Column<DataAccessLogRow>[] = [
     { key: 'when', label: 'When', className: 'whitespace-nowrap', render: r => formatDateTime(r.created_at) },
     { key: 'who', label: 'Who', render: r => <Actor username={r.actor_username} id={r.accessed_by} role={r.role} /> },
-    { key: 'action', label: 'Action', render: r => actionLabel(r.action) },
+    { key: 'action', label: 'Action', render: r => actionLabel(r.action, r.detail) },
     {
       key: 'participant', label: 'Participant',
       render: r => r.participant_user_id !== null ? (
