@@ -23,14 +23,12 @@ import {
   acknowledgeEscalation,
   resolveEscalation,
   reopenEscalation,
-  claimEscalation,
+  claimEscalationAudited,
   expireWorkItemsBySource,
   getUserById,
   getTherapistIdsForClient,
   getCrisisEventClientInfo,
   getSessionAccessInfo,
-  assignClientAudited,
-  CaseloadRoleError,
   type EscalationRow,
   type EscalationStatus,
   type EscalationUrgency,
@@ -456,24 +454,21 @@ export default function escalationsRoutes(): Router {
         if (orgId === null || orgId !== escalation.org_id) {
           return res.status(404).json({ error: 'Not found' });
         }
-        const updated = await claimEscalation(escalation.escalation_id, me);
-        if (!updated) return res.status(409).json({ error: 'Escalation is already assigned or resolved' });
-
-        // Grant caseload access so the claimer can act. Grant + audit row are
-        // ONE transaction (ai-therapist-145): this is a therapist gaining
-        // access to a participant they had no prior caseload edge to, so an
-        // unlogged grant must be impossible — if the audit insert fails, the
-        // grant rolls back with it.
-        try {
-          await assignClientAudited(me, escalation.client_id, me, {
-            actorUserId: me,
-            actorUsername: req.session.username ?? null,
-            detail: { via: 'escalation_claim', escalation_id: escalation.escalation_id },
-          });
-        } catch (err) {
-          if (!(err instanceof CaseloadRoleError)) throw err;
-          log.error({ err }, 'claim auto-assign rejected');
+        // Claim + caseload grant + audit row are ONE transaction
+        // (ai-therapist-145 / -154): this is a therapist gaining access to a
+        // participant they had no prior caseload edge to, so an unlogged
+        // grant must be impossible, and a failed grant must not leave the
+        // escalation assigned to someone who cannot see the client. A
+        // caseload-rule rejection (e.g. a researcher claiming) keeps the
+        // claim and logs, exactly as before.
+        const claimed = await claimEscalationAudited(escalation.escalation_id, me, {
+          actorUsername: req.session.username ?? null,
+        });
+        if (!claimed) return res.status(409).json({ error: 'Escalation is already assigned or resolved' });
+        if (claimed.grant === 'rejected') {
+          log.error({ err: claimed.grantError }, 'claim auto-assign rejected');
         }
+        const updated = claimed.escalation;
 
         await insertEscalationEvent({
           escalationId: escalation.escalation_id,

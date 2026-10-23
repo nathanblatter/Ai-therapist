@@ -209,7 +209,9 @@ All transitions are guarded `UPDATE ... WHERE status = $expected` (409 on lost r
 No-therapist case: `assigned_to = NULL` → org unassigned queue; any org therapist may
 `claim` (atomic `WHERE assigned_to IS NULL`); the claim handler also inserts a
 `therapist_clients` row + `caseload_audit_log` 'assign' entry (the claimer needs access to
-act) — flagged for Nathan (Q5). `urgency='emergency'` with no assignee notifies all org
+act) — flagged for Nathan (Q5). Claim, grant and audit row are one transaction
+(`claimEscalationAudited`, ai-therapist-154): a lost race writes nothing, a caseload-rule
+rejection commits the claim alone, any other failure rolls the claim back too. `urgency='emergency'` with no assignee notifies all org
 therapists. Rollback: drop both tables.
 
 ### 073_work_queue.sql
@@ -635,6 +637,14 @@ shared a progress note / caseworker signed a case note — in-app only, no work 
 
 Hard rules: sandbox users/orgs **never** receive email and **never** trigger
 `sendCrisisAlert` paging (in-app only); email bodies carry zero client PHI.
+
+Recipient gate (ai-therapist-154): there is no `users.email` column and no address
+verification, so the only address is an email-shaped username. `notification.service`
+emails one only when the `system_config` key `notification_email_recipients` has
+`enabled: true` and the username's domain is in its `allowed_domains` (seeded closed by
+migration 111; a missing or malformed row also means nobody). In-app delivery is
+unaffected; a gated-off user's digest backlog is stamped without sending, like a user with
+no address. A real verified-address column is the eventual fix.
 `notification.service.ts` is called only from `workQueue.service.ts` (single choke point);
 digest is an hourly sweep matching `digest_hour_local` via `utils/timezoneHelpers.ts`.
 

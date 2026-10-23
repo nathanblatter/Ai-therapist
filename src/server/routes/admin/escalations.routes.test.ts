@@ -20,7 +20,7 @@ const dbMocks = vi.hoisted(() => {
     acknowledgeEscalation: vi.fn(),
     resolveEscalation: vi.fn(),
     reopenEscalation: vi.fn(),
-    claimEscalation: vi.fn(),
+    claimEscalationAudited: vi.fn(),
     // workQueue.queries
     insertWorkItem: vi.fn(),
     expireWorkItemsBySource: vi.fn(),
@@ -30,7 +30,6 @@ const dbMocks = vi.hoisted(() => {
     getOrgTherapistIds: vi.fn(),
     getCrisisEventClientInfo: vi.fn(),
     getCaseworkerIdsForClient: vi.fn(),
-    assignClientAudited: vi.fn(),
     isAssigned: vi.fn(),
     getOrganizationIdForUser: vi.fn(),
     // imported by middleware/caseload.ts + utils/adminBroadcast.ts
@@ -97,7 +96,6 @@ beforeEach(() => {
   dbMocks.expireWorkItemsBySource.mockResolvedValue([]);
   dbMocks.insertEscalationEvent.mockResolvedValue({ event_id: 77, escalation_id: 11, event_type: 'comment' });
   dbMocks.listEscalationEvents.mockResolvedValue([]);
-  dbMocks.assignClientAudited.mockResolvedValue(undefined);
 });
 
 describe('POST /admin/api/escalations', () => {
@@ -412,19 +410,31 @@ describe('POST /admin/api/escalations/:id/comments', () => {
 describe('POST /admin/api/escalations/:id/claim', () => {
   beforeEach(() => {
     dbMocks.getEscalationById.mockResolvedValue(baseEscalation({ assigned_to: null }));
-    dbMocks.claimEscalation.mockResolvedValue(baseEscalation({ assigned_to: 8 }));
+    dbMocks.claimEscalationAudited.mockResolvedValue({ escalation: baseEscalation({ assigned_to: 8 }), grant: 'granted' });
   });
 
   it('lets a same-org therapist claim, auto-granting audited caseload access', async () => {
     const res = await request(appAs('therapist', 8)).post('/admin/api/escalations/11/claim');
     expect(res.status).toBe(200);
-    expect(dbMocks.claimEscalation).toHaveBeenCalledWith(11, 8);
-    // ai-therapist-145: grant + audit are one transactional call now.
-    expect(dbMocks.assignClientAudited).toHaveBeenCalledWith(
-      8, 42, 8,
-      expect.objectContaining({ detail: expect.objectContaining({ via: 'escalation_claim' }) })
-    );
+    expect(res.body.escalation.assigned_to).toBe(8);
+    // ai-therapist-145/-154: claim + grant + audit are one transactional call.
+    expect(dbMocks.claimEscalationAudited).toHaveBeenCalledWith(11, 8, { actorUsername: 'user8' });
     expect(dbMocks.insertEscalationEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'claimed' }));
+  });
+
+  it('still 200s (claim kept, no grant) when the caseload rules reject the claimer', async () => {
+    const grantError = new dbMocks.CaseloadRoleError('User 8 is not a therapist account');
+    dbMocks.claimEscalationAudited.mockResolvedValue({ escalation: baseEscalation({ assigned_to: 8 }), grant: 'rejected', grantError });
+    const res = await request(appAs('therapist', 8)).post('/admin/api/escalations/11/claim');
+    expect(res.status).toBe(200);
+    expect(dbMocks.insertEscalationEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'claimed' }));
+  });
+
+  it('500s with nothing else written when the transactional claim throws', async () => {
+    dbMocks.claimEscalationAudited.mockRejectedValue(new Error('audit insert failed'));
+    const res = await request(appAs('therapist', 8)).post('/admin/api/escalations/11/claim');
+    expect(res.status).toBe(500);
+    expect(dbMocks.insertEscalationEvent).not.toHaveBeenCalled();
   });
 
   it('404s a therapist from a different org', async () => {
@@ -434,7 +444,7 @@ describe('POST /admin/api/escalations/:id/claim', () => {
   });
 
   it('409s when someone else won the claim race', async () => {
-    dbMocks.claimEscalation.mockResolvedValue(null);
+    dbMocks.claimEscalationAudited.mockResolvedValue(null);
     expect((await request(appAs('therapist', 8)).post('/admin/api/escalations/11/claim')).status).toBe(409);
   });
 

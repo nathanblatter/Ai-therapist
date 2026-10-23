@@ -1,12 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+const { queryMock, clientQueryMock, releaseMock, connectMock } = vi.hoisted(() => {
+  const clientQueryMock = vi.fn();
+  const releaseMock = vi.fn();
+  const connectMock = vi.fn(async () => ({ query: clientQueryMock, release: releaseMock }));
+  return { queryMock: vi.fn(), clientQueryMock, releaseMock, connectMock };
+});
 vi.mock('../config/db.js', () => ({
-  pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
+  pool: { query: queryMock, connect: connectMock, on: vi.fn() },
 }));
 
 import {
   assignClient,
+  assignClientAudited,
   unassignClient,
   isAssigned,
   getCaseloadClientIds,
@@ -17,6 +23,52 @@ import {
 
 beforeEach(() => {
   queryMock.mockReset();
+  clientQueryMock.mockReset();
+  releaseMock.mockReset();
+  connectMock.mockClear();
+});
+
+/** First SQL keyword of every statement issued on the checked-out client. */
+const clientSql = () => clientQueryMock.mock.calls.map((c) => String(c[0]).trim().split(/\s+/)[0]);
+const VALID_PAIR = { therapist_role: 'therapist', client_role: 'participant', member_org: 1, client_org: 1 };
+
+describe('assignClientAudited (grant + audit in one transaction, ai-therapist-145)', () => {
+  it('validates, inserts the edge and the audit row, then COMMITs on one client', async () => {
+    clientQueryMock.mockImplementation(async (sql: string) =>
+      /SELECT/.test(sql) ? { rows: [VALID_PAIR] } : { rows: [], rowCount: 1 }
+    );
+    await assignClientAudited(1, 2, 1, { actorUserId: 1, actorUsername: 'dr_t', detail: { via: 'x' } });
+    expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'INSERT', 'INSERT', 'COMMIT']);
+    expect(queryMock).not.toHaveBeenCalled();
+    const audit = clientQueryMock.mock.calls[3] as [string, unknown[]];
+    expect(audit[0]).toContain('caseload_audit_log');
+    expect(audit[1]).toEqual(['assign', 1, 2, 1, 'dr_t', JSON.stringify({ via: 'x' })]);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ROLLBACKs the grant when the audit insert fails (no unlogged access)', async () => {
+    clientQueryMock.mockImplementation(async (sql: string) => {
+      if (/SELECT/.test(sql)) return { rows: [VALID_PAIR] };
+      if (/caseload_audit_log/.test(sql)) throw new Error('audit down');
+      return { rows: [], rowCount: 1 };
+    });
+    await expect(
+      assignClientAudited(1, 2, 1, { actorUserId: 1, actorUsername: 'dr_t' })
+    ).rejects.toThrow('audit down');
+    expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'INSERT', 'INSERT', 'ROLLBACK']);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ROLLBACKs before writing anything on a role violation', async () => {
+    clientQueryMock.mockResolvedValue({ rows: [] });
+    clientQueryMock.mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ ...VALID_PAIR, client_role: 'therapist' }] });
+    await expect(
+      assignClientAudited(1, 2, 1, { actorUserId: 1, actorUsername: 'dr_t' })
+    ).rejects.toBeInstanceOf(CaseloadRoleError);
+    expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'ROLLBACK']);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('assignClient', () => {

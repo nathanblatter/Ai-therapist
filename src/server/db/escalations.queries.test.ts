@@ -19,6 +19,7 @@ import {
   resolveEscalation,
   reopenEscalation,
   claimEscalation,
+  claimEscalationAudited,
   insertEscalationEvent,
 } from './escalations.queries.js';
 
@@ -96,6 +97,67 @@ describe('guarded transitions', () => {
     const sql = String(queryMock.mock.calls[0][0]);
     expect(sql).toContain('assigned_to IS NULL');
     expect(sql).toContain(`status <> 'resolved'`);
+  });
+});
+
+describe('claimEscalationAudited (claim + caseload grant + audit in one transaction, ai-therapist-154)', () => {
+  const clientSql = () => clientQueryMock.mock.calls.map((c) => String(c[0]).trim().split(/\s+/)[0]);
+  const CLAIMED = { ...ROW, assigned_to: 7 };
+  const VALID_PAIR = { therapist_role: 'therapist', client_role: 'participant', member_org: 1, client_org: 1 };
+
+  function script(opts: { claimed?: boolean; pair?: Record<string, unknown>; failOn?: RegExp } = {}) {
+    clientQueryMock.mockImplementation(async (sql: string) => {
+      if (opts.failOn && opts.failOn.test(sql)) throw new Error('db down');
+      if (/UPDATE escalations/.test(sql)) return { rows: opts.claimed === false ? [] : [CLAIMED] };
+      if (/^\s*SELECT/.test(sql)) return { rows: [opts.pair ?? VALID_PAIR] };
+      return { rows: [], rowCount: 1 };
+    });
+  }
+
+  it('claims, validates, inserts the edge + the assign audit row, then COMMITs', async () => {
+    script();
+    const result = await claimEscalationAudited(1, 7, { actorUsername: 'dr_t' });
+    expect(result).toEqual({ escalation: CLAIMED, grant: 'granted' });
+    expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'SELECT', 'INSERT', 'INSERT', 'COMMIT']);
+    expect(queryMock).not.toHaveBeenCalled();
+    const [claimSql, claimParams] = clientQueryMock.mock.calls[1] as [string, unknown[]];
+    expect(claimSql).toContain('assigned_to IS NULL');
+    expect(claimSql).toContain(`status <> 'resolved'`);
+    expect(claimParams).toEqual([1, 7]);
+    expect(clientQueryMock.mock.calls[3][1]).toEqual([7, 42, 7, 'therapist']);
+    const [auditSql, auditParams] = clientQueryMock.mock.calls[4] as [string, unknown[]];
+    expect(auditSql).toContain('caseload_audit_log');
+    expect(auditParams).toEqual(['assign', 7, 42, 7, 'dr_t', JSON.stringify({ via: 'escalation_claim', escalation_id: 1 })]);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null and writes nothing on a lost race', async () => {
+    script({ claimed: false });
+    await expect(claimEscalationAudited(1, 7, { actorUsername: 'dr_t' })).resolves.toBeNull();
+    expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'ROLLBACK']);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits the claim without a grant when the caseload rules reject the claimer', async () => {
+    script({ pair: { ...VALID_PAIR, therapist_role: 'researcher' } });
+    const result = await claimEscalationAudited(1, 7, { actorUsername: 'r1' });
+    expect(result?.grant).toBe('rejected');
+    expect(result?.escalation).toEqual(CLAIMED);
+    expect(result?.grantError?.name).toBe('CaseloadRoleError');
+    expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'SELECT', 'COMMIT']);
+  });
+
+  it('ROLLBACKs the claim too when the audit insert fails (no split state)', async () => {
+    script({ failOn: /caseload_audit_log/ });
+    await expect(claimEscalationAudited(1, 7, { actorUsername: 'dr_t' })).rejects.toThrow('db down');
+    expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'SELECT', 'INSERT', 'INSERT', 'ROLLBACK']);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ROLLBACKs the claim when the role lookup itself fails', async () => {
+    script({ failOn: /^\s*SELECT/ });
+    await expect(claimEscalationAudited(1, 7, { actorUsername: 'dr_t' })).rejects.toThrow('db down');
+    expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'SELECT', 'ROLLBACK']);
   });
 });
 

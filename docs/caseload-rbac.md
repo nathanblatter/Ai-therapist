@@ -120,6 +120,10 @@ see every org's active sideband rows).
   a `caseload_audit_log` 'assign' row (`{via:'escalation_claim'}`).
 - **Invites**: a consumed client invite now grants the inviter's
   `member_role` and organization; caseworkers may mint invites (intake).
+  The grant, its `caseload_audit_log` 'invite_consumed' row and the
+  `used_by` stamp commit in one transaction (`completeInviteGrant`,
+  ai-therapist-154); minting stays best-effort audited since it grants
+  nothing.
 - **Sandbox** (077): per-signup `kind='sandbox'` orgs with `users.is_sandbox`
   denormalized; sandbox data is excluded from research exports, crisis
   paging, AE drafting, retention/wipe sweeps, and email — see

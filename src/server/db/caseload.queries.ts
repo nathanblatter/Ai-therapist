@@ -6,6 +6,7 @@
 // the therapist_id column historically holds ANY care-team member's userid;
 // member_role selects the data tier.
 import { pool } from '../config/db.js';
+import type { PoolClient } from 'pg';
 import type { CareTeamRole, CareTeamMember } from '../../shared/roles.js';
 
 /** Thrown by assignClient when the member/client ids do not have the required
@@ -33,21 +34,25 @@ export interface CaseloadAssignment {
   assigned_at: string;
 }
 
+/** Anything with pg's `query` (the pool or a checked-out client), so the
+ *  helpers below run inside a caller's transaction when given a client. */
+type Queryable = Pick<PoolClient, 'query'>;
+
 /**
- * Assign a client to a care-team member's caseload. Idempotent (ON CONFLICT
- * DO NOTHING). Validates with a single query first and throws
- * CaseloadRoleError if memberId's account role does not match memberRole
- * (default 'therapist'), clientId is not role=participant, or — same-org
- * integrity, enforced at write time per C1 — the two accounts belong to
- * different organizations.
+ * The caseload-assignment invariants, checked with a single query (C1):
+ * memberId's account role must equal memberRole, clientId must be a
+ * participant, both must belong to the same organization, and caseworkers
+ * never hold caseload in a research org. Throws CaseloadRoleError otherwise.
+ * Exported so invite consumption and escalation claims can run the SAME rules
+ * inside their own transactions.
  */
-export async function assignClient(
+export async function assertAssignable(
+  q: Queryable,
   memberId: number,
   clientId: number,
-  assignedBy: number | null,
-  memberRole: CareTeamRole = 'therapist'
+  memberRole: CareTeamRole
 ): Promise<void> {
-  const roles = await pool.query(
+  const roles = await q.query(
     `SELECT
        (SELECT role FROM users WHERE userid = $1) AS therapist_role,
        (SELECT role FROM users WHERE userid = $2) AS client_role,
@@ -81,6 +86,59 @@ export async function assignClient(
       'Caseworker caseload assignments are not allowed in a research organization'
     );
   }
+}
+
+/** The idempotent therapist_clients insert (ON CONFLICT DO NOTHING), for use
+ *  inside a transaction after assertAssignable. */
+export async function insertAssignment(
+  q: Queryable,
+  memberId: number,
+  clientId: number,
+  assignedBy: number | null,
+  memberRole: CareTeamRole
+): Promise<void> {
+  await q.query(
+    `INSERT INTO therapist_clients (therapist_id, client_id, assigned_by, member_role)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT DO NOTHING`,
+    [memberId, clientId, assignedBy, memberRole]
+  );
+}
+
+/** One caseload_audit_log row on the caller's connection. Unlike
+ *  insertCaseloadAudit this THROWS, so inside a transaction a failed audit
+ *  insert rolls the grant it records back with it. */
+export async function insertCaseloadAuditRow(q: Queryable, input: CaseloadAuditInput): Promise<void> {
+  await q.query(
+    `INSERT INTO caseload_audit_log
+       (action, therapist_id, client_id, actor_user_id, actor_username, detail)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      input.action,
+      input.therapistId,
+      input.clientId,
+      input.actorUserId,
+      input.actorUsername,
+      input.detail === undefined ? null : JSON.stringify(input.detail),
+    ]
+  );
+}
+
+/**
+ * Assign a client to a care-team member's caseload. Idempotent (ON CONFLICT
+ * DO NOTHING). Validates with a single query first and throws
+ * CaseloadRoleError if memberId's account role does not match memberRole
+ * (default 'therapist'), clientId is not role=participant, or — same-org
+ * integrity, enforced at write time per C1 — the two accounts belong to
+ * different organizations.
+ */
+export async function assignClient(
+  memberId: number,
+  clientId: number,
+  assignedBy: number | null,
+  memberRole: CareTeamRole = 'therapist'
+): Promise<void> {
+  await assertAssignable(pool, memberId, clientId, memberRole);
   if (memberRole === 'therapist') {
     // member_role defaults to 'therapist' in the DB; keeping the historical
     // 3-parameter insert preserves byte-identical behavior for every
@@ -93,21 +151,17 @@ export async function assignClient(
     );
     return;
   }
-  await pool.query(
-    `INSERT INTO therapist_clients (therapist_id, client_id, assigned_by, member_role)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT DO NOTHING`,
-    [memberId, clientId, assignedBy, memberRole]
-  );
+  await insertAssignment(pool, memberId, clientId, assignedBy, memberRole);
 }
 
 /**
  * Access-grant + audit row in ONE transaction (ai-therapist-145). For grants
- * where the audit trail is the point — the escalation-claim auto-grant gives
- * a therapist access to a participant they had no prior edge to — a
- * fire-and-forget audit is not acceptable: if the audit INSERT fails, the
- * grant must fail with it rather than create unlogged access. Role/org
- * validation reuses assignClient's rules.
+ * where the audit trail is the point — a therapist gaining access to a
+ * participant they had no prior edge to — a fire-and-forget audit is not
+ * acceptable: if the audit INSERT fails, the grant must fail with it rather
+ * than create unlogged access. Role/org validation reuses assignClient's
+ * rules. (The escalation claim now does this inside its own transaction, see
+ * escalations.queries.claimEscalationAudited.)
  */
 export async function assignClientAudited(
   memberId: number,
@@ -119,58 +173,16 @@ export async function assignClientAudited(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const roles = await client.query(
-      `SELECT
-         (SELECT role FROM users WHERE userid = $1) AS therapist_role,
-         (SELECT role FROM users WHERE userid = $2) AS client_role,
-         (SELECT organization_id FROM users WHERE userid = $1) AS member_org,
-         (SELECT organization_id FROM users WHERE userid = $2) AS client_org,
-         (SELECT o.kind FROM organizations o
-            JOIN users u ON u.organization_id = o.org_id
-           WHERE u.userid = $1) AS member_org_kind`,
-      [memberId, clientId]
-    );
-    const { therapist_role, client_role, member_org, client_org, member_org_kind } = roles.rows[0] as {
-      therapist_role: string | null;
-      client_role: string | null;
-      member_org?: number | null;
-      client_org?: number | null;
-      member_org_kind?: string | null;
-    };
-    if (therapist_role !== memberRole) {
-      throw new CaseloadRoleError(`User ${memberId} is not a ${memberRole} account`);
-    }
-    if (client_role !== 'participant') {
-      throw new CaseloadRoleError(`User ${clientId} is not a participant account`);
-    }
-    if (member_org !== client_org) {
-      throw new CaseloadRoleError(
-        `User ${memberId} and user ${clientId} belong to different organizations`
-      );
-    }
-    if (memberRole === 'caseworker' && member_org_kind === 'research') {
-      throw new CaseloadRoleError(
-        'Caseworker caseload assignments are not allowed in a research organization'
-      );
-    }
-    await client.query(
-      `INSERT INTO therapist_clients (therapist_id, client_id, assigned_by, member_role)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT DO NOTHING`,
-      [memberId, clientId, assignedBy, memberRole]
-    );
-    await client.query(
-      `INSERT INTO caseload_audit_log
-         (action, therapist_id, client_id, actor_user_id, actor_username, detail)
-       VALUES ('assign', $1, $2, $3, $4, $5)`,
-      [
-        memberId,
-        clientId,
-        audit.actorUserId,
-        audit.actorUsername,
-        audit.detail === undefined ? null : JSON.stringify(audit.detail),
-      ]
-    );
+    await assertAssignable(client, memberId, clientId, memberRole);
+    await insertAssignment(client, memberId, clientId, assignedBy, memberRole);
+    await insertCaseloadAuditRow(client, {
+      action: 'assign',
+      therapistId: memberId,
+      clientId,
+      actorUserId: audit.actorUserId,
+      actorUsername: audit.actorUsername,
+      detail: audit.detail,
+    });
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);

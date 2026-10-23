@@ -6,6 +6,7 @@
 import { randomBytes, randomUUID } from 'crypto';
 import { pool } from '../config/db.js';
 import { hashToken } from '../utils/crypto.js';
+import { insertCaseloadAuditRow, type CaseloadAuditInput } from './caseload.queries.js';
 
 export type SandboxInviteRole = 'therapist' | 'caseworker';
 
@@ -101,6 +102,35 @@ export async function markSandboxInviteUsed(
     `UPDATE sandbox_invites SET used_by = $1, org_id = $2 WHERE invite_id = $3`,
     [userId, orgId, inviteId]
   );
+}
+
+/**
+ * markSandboxInviteUsed + its 'invite_consumed' caseload_audit_log row in ONE
+ * transaction (ai-therapist-154): the bookkeeping that turns a consumed
+ * sandbox invite into a recorded signup cannot land without its audit row.
+ * Throws on failure; the caller runs its compensating cleanup.
+ */
+export async function markSandboxInviteUsedAudited(
+  inviteId: number,
+  userId: number,
+  orgId: number,
+  audit: Omit<CaseloadAuditInput, 'action'>
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE sandbox_invites SET used_by = $1, org_id = $2 WHERE invite_id = $3`,
+      [userId, orgId, inviteId]
+    );
+    await insertCaseloadAuditRow(client, { ...audit, action: 'invite_consumed' });
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Release a consumed invite after a failed signup so the link stays valid. */
