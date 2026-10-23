@@ -396,6 +396,16 @@ npm run redteam:full -- --baseline latest --gate-diff                  # exit 1 
 Pure diff logic lives in `src/redteam/diff.ts` (unit-tested offline in
 `diff.test.ts`).
 
+### Nightly schedule on stage (in-app runner)
+
+`system_config.evals.harness_schedule` (Evals view, "Simulation runs") drives
+the in-process nightly runner. `suite` fires at `hour_utc`; `extra_suites`
+then run one after another, each at most once a night and only inside the
+three hours after `hour_utc`, never while another run is active. Stage runs
+`voice` then `replay`, so real-conversation regressions (production replay)
+are caught on schedule without CI, whose scratch database has no real
+sessions to replay.
+
 ### Pull-request quality gate (path-filtered)
 
 `.github/workflows/pr-verify.yml` has a second job, `quality-gate`, that runs

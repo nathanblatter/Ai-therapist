@@ -29,6 +29,8 @@ interface HarnessSchedule {
   suite: Suite;
   hour_utc: number;
   variations: number;
+  /** Extra suites that run one after another after the primary (within 3 h). */
+  extra_suites?: Suite[];
 }
 
 interface HarnessRun {
@@ -83,7 +85,7 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
   const [runVariations, setRunVariations] = useState(1);
   const [starting, setStarting] = useState(false);
   const [status, setStatus] = useState<RunnerStatus | null>(null);
-  const [schedule, setSchedule] = useState<HarnessSchedule>({ enabled: false, suite: 'voice', hour_utc: 9, variations: 1 });
+  const [schedule, setSchedule] = useState<HarnessSchedule>({ enabled: false, suite: 'voice', hour_utc: 9, variations: 1, extra_suites: [] });
   const [savingSchedule, setSavingSchedule] = useState(false);
   const wasRunning = useRef(false);
 
@@ -285,9 +287,30 @@ export default function SimulationRunsPanel({ onViewSession }: { onViewSession?:
               Save
             </button>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+            <span className="text-gray-600">Then also run:</span>
+            {SUITES.filter(s => s !== schedule.suite).map(s => {
+              const on = (schedule.extra_suites ?? []).includes(s);
+              return (
+                <label key={s} className="flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={e => {
+                      const next = new Set(schedule.extra_suites ?? []);
+                      if (e.target.checked) next.add(s); else next.delete(s);
+                      setSchedule({ ...schedule, extra_suites: [...next] });
+                    }}
+                  />
+                  {s}
+                </label>
+              );
+            })}
+          </div>
           <p className="mt-2 text-xs text-gray-500">
             {schedule.enabled
-              ? `Runs the ${schedule.suite} suite nightly at ${String(schedule.hour_utc).padStart(2, '0')}:00 UTC (${new Date(Date.UTC(2000, 0, 1, schedule.hour_utc)).toLocaleTimeString([], { hour: 'numeric' })} local).`
+              ? `Runs the ${schedule.suite} suite nightly at ${String(schedule.hour_utc).padStart(2, '0')}:00 UTC (${new Date(Date.UTC(2000, 0, 1, schedule.hour_utc)).toLocaleTimeString([], { hour: 'numeric' })} local)` +
+                ((schedule.extra_suites ?? []).length ? `, then ${(schedule.extra_suites ?? []).join(', ')} one after another within the following three hours.` : '.')
               : 'Disabled — runs only when started manually or by CI.'}
           </p>
         </div>
