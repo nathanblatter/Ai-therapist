@@ -8,6 +8,7 @@ import {
   getAllSystemConfig,
   getSystemConfigByKey,
   updateSystemConfig,
+  upsertSystemConfig,
   type VoiceOption,
   type LanguageOption,
 } from '../../db/index.js';
@@ -16,6 +17,47 @@ import { getSystemPrompt, invalidateConfigCache, DEFAULT_MODALITY_PRESETS } from
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('adminConfigRoutes');
+
+/**
+ * Keys the admin PUT may CREATE when the row is missing (ai-therapist-275):
+ * every key docs/system-config-keys.md lists as admin-editable through this
+ * route, with the description a freshly created row gets. Migration 110 seeds
+ * most of them, but a database that predates it (or a key such as
+ * live_backend_model that no migration seeds) must still be writable from the
+ * UI instead of 404ing after the form reports success.
+ *
+ * Deliberately absent:
+ *   crisis_alert  on-call paging; seeded by 044, semantics in docs/on-call-sop.md.
+ *                 Stays UPDATE-only so this route can never create a paging
+ *                 config that no migration or SOP placed.
+ *   content_retention, data_retention, study_protocol  own dedicated routes.
+ *   qualtrics.*, work_queue.*, sim_session_*  runtime-written internals.
+ * Any key outside the allowlist keeps today's behaviour: updated when the row
+ * exists, 404 when it does not.
+ */
+export const UPSERTABLE_CONFIG_KEYS: Readonly<Record<string, string>> = {
+  ai_model: 'Voice/session model id (grok-voice-* selects the Grok proxy, gpt-live-* GPT-Live)',
+  live_backend_model: 'Delegated reasoning model behind GPT-Live',
+  transcription_model: 'Transcription model (unused since migration 099: GPT-Live and Grok transcribe internally)',
+  transcription_context: 'Transcription prompt/keyword overrides (unused since migration 099)',
+  system_prompts: 'System prompts for realtime and chat sessions, plus modality presets',
+  features: 'Feature flags to enable/disable functionality',
+  session_limits: 'Session duration and frequency limits',
+  crisis_contact: 'Crisis contact information displayed to users',
+  crisis: 'Crisis risk assessor model and risk-check trigger score',
+  voices: 'Available voice options',
+  languages: 'Available language options',
+  client_logging: 'Enable client-side console logging for debugging',
+  deployment_mode: 'Deployment posture: research or clinical',
+  evals: 'Eval-system settings (drift monitoring, harness schedule)',
+  message_embeddings: 'Background embedding of redacted messages for semantic search',
+  redaction_verifier: 'LLM leak check on redacted transcripts',
+  attention_ranking: 'Needs-attention scoring for the caseworker dashboard roster',
+  email_notifications: 'Kill switch for all outbound email',
+  coping_strategies: 'Per-category overrides for the built-in coping technique library',
+  grok_voice: 'Grok Voice turn-taking and latency knobs forwarded to session.update',
+  grok_refusal_guard: 'Grok Voice refusal-loop breaker',
+};
 
 export default function adminConfigRoutes(): Router {
   const router = Router();
@@ -209,7 +251,16 @@ export default function adminConfigRoutes(): Router {
         value.chat.last_modified = now;
       }
 
-      const updated = await updateSystemConfig(key, value, req.session.username);
+      // Allowlisted keys are upserted so a fresh database (or one predating
+      // the seed migration) gets the row on first save; everything else is an
+      // UPDATE that 404s when the row is absent, so arbitrary keys cannot be
+      // created from the UI.
+      const description = Object.prototype.hasOwnProperty.call(UPSERTABLE_CONFIG_KEYS, key)
+        ? UPSERTABLE_CONFIG_KEYS[key]
+        : undefined;
+      const updated = description !== undefined
+        ? await upsertSystemConfig(key, value, req.session.username, description)
+        : await updateSystemConfig(key, value, req.session.username);
       if (!updated) {
         return res.status(404).json({ error: 'Configuration key not found' });
       }

@@ -66,3 +66,29 @@ export async function updateSystemConfig(
   );
   return result.rows[0] ?? null;
 }
+
+/**
+ * Write a config value, creating the row when it does not exist yet
+ * (ai-therapist-275). On insert the row takes `description`; on update the
+ * existing description is kept so a seeded explanation is never overwritten
+ * by an admin save. Callers decide which keys may be created: the admin PUT
+ * gates this behind its allowlist and keeps updateSystemConfig for the rest.
+ */
+export async function upsertSystemConfig(
+  key: string,
+  value: unknown,
+  updatedBy: string | undefined,
+  description: string | null = null
+): Promise<SystemConfigFullRow> {
+  const result = await pool.query<SystemConfigFullRow>(
+    `INSERT INTO system_config (config_key, config_value, description, updated_at, updated_by)
+     VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)
+     ON CONFLICT (config_key) DO UPDATE
+       SET config_value = EXCLUDED.config_value,
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = EXCLUDED.updated_by
+     RETURNING *`,
+    [key, JSON.stringify(value), description, updatedBy]
+  );
+  return result.rows[0];
+}
