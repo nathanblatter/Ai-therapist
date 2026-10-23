@@ -30,12 +30,12 @@ vi.mock('../../db/index.js', () => dbMocks);
 
 const { default: crisisRoutes } = await import('./crisis.routes.js');
 
-function appAs(role: string, userId = 1) {
+function appAs(role: string, userId = 1, orgId?: number) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { session: Record<string, unknown> }).session = {
-      userId, userRole: role, username: 'tester',
+      userId, userRole: role, username: 'tester', ...(orgId === undefined ? {} : { orgId }),
     };
     next();
   });
@@ -134,5 +134,30 @@ describe('GET /admin/api/users/:userId/risk-checks', () => {
     const res = await request(appAs('researcher')).get('/admin/api/users/abc/risk-checks');
     expect(res.status).toBe(400);
     expect(dbMocks.getParticipantRiskCheckLadders).not.toHaveBeenCalled();
+  });
+});
+
+// Query-string session ids go through mayCareTeamAccessSession; researchers
+// are organization-scoped there too (ai-therapist-272).
+describe('GET /admin/api/crisis/events?sessionId (researcher org scope)', () => {
+  const getSessionCrisisEvents = vi.fn(async () => []);
+  vi.doMock('../../services/crisisDetection.service.js', () => ({ getSessionCrisisEvents }));
+
+  beforeEach(() => getSessionCrisisEvents.mockClear());
+
+  it('same-org owner 200, cross-org owner 404, caseload ignored', async () => {
+    dbMocks.isAssigned.mockResolvedValue(false);
+    dbMocks.getSessionAccessInfo.mockResolvedValue({ user_id: 42, status: 'ended', owner_organization_id: 2 });
+    expect((await request(appAs('researcher', 1, 2)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(200);
+    expect(getSessionCrisisEvents).toHaveBeenCalledWith('sess_1');
+    expect(dbMocks.isAssigned).not.toHaveBeenCalled();
+    expect((await request(appAs('researcher', 1, 1)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(404);
+    expect(getSessionCrisisEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('anonymous session: irb-study researchers only', async () => {
+    dbMocks.getSessionAccessInfo.mockResolvedValue({ user_id: null, status: 'ended', owner_organization_id: null } as never);
+    expect((await request(appAs('researcher', 1, 2)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(404);
+    expect((await request(appAs('researcher', 1, 1)).get('/admin/api/crisis/events?sessionId=sess_1')).status).toBe(200);
   });
 });

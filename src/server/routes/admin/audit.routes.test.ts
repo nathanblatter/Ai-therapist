@@ -156,11 +156,21 @@ describe('GET /admin/api/audit/data-access/participant/:userId', () => {
 });
 
 describe('GET /admin/api/audit/redaction-review', () => {
-  it('returns a page for a researcher with validated filters', async () => {
+  it('returns an org-scoped page for a researcher with validated filters', async () => {
     const res = await request(appAs('researcher')).get('/admin/api/audit/redaction-review?reviewedBy=5&action=corrected');
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ rows: [], total: 0, limit: 50, offset: 0 });
-    expect(dbMocks.listRedactionReviewLog).toHaveBeenCalledWith({ reviewedBy: 5, action: 'corrected', limit: 50, offset: 0 });
+    expect(dbMocks.listRedactionReviewLog).toHaveBeenCalledWith({ reviewedBy: 5, action: 'corrected', limit: 50, offset: 0 }, 1);
+  });
+
+  it('scopes by the caller org, never unscoped (ai-therapist-272)', async () => {
+    dbMocks.getOrganizationIdForUser.mockResolvedValue(2);
+    expect((await request(appAs('researcher')).get('/admin/api/audit/redaction-review')).status).toBe(200);
+    expect(dbMocks.listRedactionReviewLog).toHaveBeenCalledWith(expect.anything(), 2);
+    // A failed org lookup 500s rather than widening to every organization.
+    dbMocks.getOrganizationIdForUser.mockRejectedValue(new Error('db down'));
+    expect((await request(appAs('researcher')).get('/admin/api/audit/redaction-review')).status).toBe(500);
+    expect(dbMocks.listRedactionReviewLog).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an unknown action and non-researchers', async () => {

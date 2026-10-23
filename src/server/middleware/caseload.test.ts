@@ -37,6 +37,7 @@ import {
   careNoteBelongsToClient,
   therapistScopeId,
   canAdminAccessSessionLive,
+  mayCareTeamAccessSession,
 } from './caseload.js';
 import type { Request } from 'express';
 
@@ -325,29 +326,101 @@ describe('therapistScopeId', () => {
 });
 
 describe('canAdminAccessSessionLive', () => {
-  it('always allows researcher', async () => {
-    await expect(canAdminAccessSessionLive('researcher', 7, null)).resolves.toBe(true);
-    expect(mocks.isAssigned).not.toHaveBeenCalled();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getIrbStudyOrgId.mockResolvedValue(IRB_ORG);
   });
 
-  it('allows therapist only when assigned', async () => {
+  it('allows a researcher when the session owner is in their org (owner org pre-loaded, no lookup)', async () => {
+    await expect(canAdminAccessSessionLive('researcher', 7, 42, PRACTICE_ORG, PRACTICE_ORG)).resolves.toBe(true);
+    expect(mocks.isAssigned).not.toHaveBeenCalled();
+    expect(mocks.getOrganizationIdForUser).not.toHaveBeenCalled();
+  });
+
+  it('denies a researcher when the session owner is in another org', async () => {
+    await expect(canAdminAccessSessionLive('researcher', 7, 42, PRACTICE_ORG, IRB_ORG)).resolves.toBe(false);
+  });
+
+  it('looks the owner org up when the caller did not pre-load it', async () => {
+    mocks.getOrganizationIdForUser.mockResolvedValue(PRACTICE_ORG);
+    await expect(canAdminAccessSessionLive('researcher', 7, 42, PRACTICE_ORG)).resolves.toBe(true);
+    expect(mocks.getOrganizationIdForUser).toHaveBeenCalledWith(42);
+    mocks.getOrganizationIdForUser.mockResolvedValue(IRB_ORG);
+    await expect(canAdminAccessSessionLive('researcher', 7, 42, PRACTICE_ORG)).resolves.toBe(false);
+  });
+
+  it('anonymous session: a researcher gets in only from the irb-study org', async () => {
+    await expect(canAdminAccessSessionLive('researcher', 7, null, IRB_ORG, null)).resolves.toBe(true);
+    await expect(canAdminAccessSessionLive('researcher', 7, null, PRACTICE_ORG, null)).resolves.toBe(false);
+  });
+
+  it('fails closed for a researcher with no resolvable org', async () => {
+    await expect(canAdminAccessSessionLive('researcher', 7, 42, null, PRACTICE_ORG)).resolves.toBe(false);
+    await expect(canAdminAccessSessionLive('researcher', 7, null, null, null)).resolves.toBe(false);
+    expect(mocks.getIrbStudyOrgId).not.toHaveBeenCalled();
+  });
+
+  it('allows therapist only when assigned (org ignored)', async () => {
     mocks.isAssigned.mockResolvedValue(true);
-    await expect(canAdminAccessSessionLive('therapist', 7, 42)).resolves.toBe(true);
+    await expect(canAdminAccessSessionLive('therapist', 7, 42, IRB_ORG, PRACTICE_ORG)).resolves.toBe(true);
     expect(mocks.isAssigned).toHaveBeenCalledWith(7, 42);
 
     mocks.isAssigned.mockResolvedValue(false);
-    await expect(canAdminAccessSessionLive('therapist', 7, 42)).resolves.toBe(false);
+    await expect(canAdminAccessSessionLive('therapist', 7, 42, PRACTICE_ORG, PRACTICE_ORG)).resolves.toBe(false);
   });
 
   it('denies therapist for null session owner or missing admin id', async () => {
-    await expect(canAdminAccessSessionLive('therapist', 7, null)).resolves.toBe(false);
-    await expect(canAdminAccessSessionLive('therapist', undefined, 42)).resolves.toBe(false);
+    await expect(canAdminAccessSessionLive('therapist', 7, null, IRB_ORG, null)).resolves.toBe(false);
+    await expect(canAdminAccessSessionLive('therapist', undefined, 42, IRB_ORG, IRB_ORG)).resolves.toBe(false);
   });
 
-  it('denies other and missing roles', async () => {
-    await expect(canAdminAccessSessionLive('participant', 7, 42)).resolves.toBe(false);
-    await expect(canAdminAccessSessionLive('demo', 7, 42)).resolves.toBe(false);
-    await expect(canAdminAccessSessionLive(undefined, 7, 42)).resolves.toBe(false);
+  it('denies caseworker, other and missing roles even in-org', async () => {
+    await expect(canAdminAccessSessionLive('caseworker', 7, 42, IRB_ORG, IRB_ORG)).resolves.toBe(false);
+    await expect(canAdminAccessSessionLive('participant', 7, 42, IRB_ORG, IRB_ORG)).resolves.toBe(false);
+    await expect(canAdminAccessSessionLive('demo', 7, 42, IRB_ORG, IRB_ORG)).resolves.toBe(false);
+    await expect(canAdminAccessSessionLive(undefined, 7, 42, IRB_ORG, IRB_ORG)).resolves.toBe(false);
+    expect(mocks.isAssigned).not.toHaveBeenCalled();
+  });
+});
+
+describe('mayCareTeamAccessSession', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getIrbStudyOrgId.mockResolvedValue(IRB_ORG);
+  });
+  const assigned = { caseworkerPolicy: 'assigned' as const };
+
+  it('researcher: same-org owner passes, cross-org owner is denied (one session lookup)', async () => {
+    mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, owner_organization_id: PRACTICE_ORG });
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: PRACTICE_ORG })).resolves.toBe(true);
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(false);
+    expect(mocks.getSessionAccessInfo).toHaveBeenCalledTimes(2);
+    expect(mocks.getOrganizationIdForUser).not.toHaveBeenCalled();
+    expect(mocks.isAssigned).not.toHaveBeenCalled();
+  });
+
+  it('researcher: anonymous session is irb-study custody', async () => {
+    mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: null, owner_organization_id: null });
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(true);
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: PRACTICE_ORG })).resolves.toBe(false);
+  });
+
+  it('researcher: missing session or unresolved caller org is a deny', async () => {
+    mocks.getSessionAccessInfo.mockResolvedValue(null);
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(false);
+    mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, owner_organization_id: IRB_ORG });
+    await expect(mayCareTeamAccessSession('researcher', 3, 's1', { ...assigned, callerOrgId: null })).resolves.toBe(false);
+  });
+
+  it('demo passes without any lookup; care-team branches ignore the org', async () => {
+    await expect(mayCareTeamAccessSession('demo', 3, 's1', { ...assigned, callerOrgId: null })).resolves.toBe(true);
+    expect(mocks.getSessionAccessInfo).not.toHaveBeenCalled();
+
+    mocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, owner_organization_id: PRACTICE_ORG });
+    mocks.isAssigned.mockResolvedValue(true);
+    await expect(mayCareTeamAccessSession('therapist', 3, 's1', { ...assigned, callerOrgId: IRB_ORG })).resolves.toBe(true);
+    expect(mocks.isAssigned).toHaveBeenCalledWith(3, 42);
+    await expect(mayCareTeamAccessSession('caseworker', 3, 's1', { caseworkerPolicy: 'deny', callerOrgId: PRACTICE_ORG })).resolves.toBe(false);
   });
 });
 

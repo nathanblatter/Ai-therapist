@@ -36,7 +36,22 @@ async function researcherMayAccess(
   ownerId: number | null,
   ownerOrgId?: number | null
 ): Promise<boolean> {
-  const callerOrgId = await orgIdFor(req);
+  return researcherOrgAllows(await orgIdFor(req), ownerId, ownerOrgId);
+}
+
+/**
+ * The researcher organization rule on already-resolved ids (ai-therapist-272),
+ * for callers that hold the caller's org without a Request (socket layer,
+ * body/query-addressed session guards). Same contract as researcherMayAccess:
+ * null caller org -> deny; ownerless (anonymous) resource -> irb-study org
+ * only; otherwise the owner's org must equal the caller's. `ownerOrgId`
+ * undefined asks for one users lookup by `ownerId`.
+ */
+export async function researcherOrgAllows(
+  callerOrgId: number | null,
+  ownerId: number | null,
+  ownerOrgId?: number | null
+): Promise<boolean> {
   if (callerOrgId === null) return false;
   if (ownerId === null) {
     return (await getIrbStudyOrgId()) === callerOrgId;
@@ -172,16 +187,22 @@ export async function careTeamScopeId(req: Request): Promise<number | null> {
 export const therapistScopeId = careTeamScopeId;
 
 /**
- * Socket-layer live-monitoring check: researcher always allowed; therapist
- * allowed only for assigned clients' sessions; caseworker explicitly denied
- * (live transcripts are full-tier content); everyone else denied.
+ * Socket-layer live-monitoring check: researcher allowed only when the
+ * session owner is in their organization (`callerOrgId`, resolved once by the
+ * caller from the socket's express session; anonymous session -> irb-study
+ * org only; `sessionOwnerOrgId` undefined asks for one users lookup —
+ * ai-therapist-272); therapist allowed only for assigned clients' sessions;
+ * caseworker explicitly denied (live transcripts are full-tier content);
+ * everyone else denied.
  */
 export async function canAdminAccessSessionLive(
   role: string | undefined,
   adminUserId: number | undefined,
-  sessionUserId: number | null
+  sessionUserId: number | null,
+  callerOrgId: number | null,
+  sessionOwnerOrgId?: number | null
 ): Promise<boolean> {
-  if (role === 'researcher') return true;
+  if (role === 'researcher') return researcherOrgAllows(callerOrgId, sessionUserId, sessionOwnerOrgId);
   if (role === 'caseworker') return false; // summaries tier: never live transcript streams
   if (role !== 'therapist') return false;
   if (adminUserId === undefined || sessionUserId === null) return false;
@@ -192,8 +213,11 @@ export async function canAdminAccessSessionLive(
  * Caseload guard for session ids arriving outside a :sessionId path param
  * (query string / request body), where requireSessionClientAccess cannot
  * apply. Single choke point for the per-route policies:
- *   - non-care-team roles (researcher, demo, ...) always pass — org scoping
- *     and requireRole gate them separately;
+ *   - a researcher passes only when the session exists and its owner is in
+ *     `opts.callerOrgId` (the caller's org, resolved once via orgIdFor);
+ *     an anonymous session only for the irb-study org (ai-therapist-272);
+ *   - other non-care-team roles (demo, ...) always pass — requireRole gates
+ *     them separately;
  *   - a therapist passes only when the session exists, has an owner, and
  *     that owner is on their caseload (404-never-403 semantics at the caller);
  *   - a caseworker follows `caseworkerPolicy`: 'assigned' = same caseload
@@ -205,8 +229,15 @@ export async function mayCareTeamAccessSession(
   role: string | undefined,
   userId: number | undefined,
   sessionId: string,
-  opts: { caseworkerPolicy: 'deny' | 'assigned' }
+  opts: { caseworkerPolicy: 'deny' | 'assigned'; callerOrgId: number | null }
 ): Promise<boolean> {
+  if (role === 'researcher') {
+    if (opts.callerOrgId === null) return false;
+    const info = await getSessionAccessInfo(String(sessionId));
+    if (!info) return false;
+    const ownerId = info.user_id === null || info.user_id === undefined ? null : Number(info.user_id);
+    return researcherOrgAllows(opts.callerOrgId, ownerId, info.owner_organization_id ?? null);
+  }
   if (!isCareTeamRole(role)) return true;
   if (role === 'caseworker' && opts.caseworkerPolicy === 'deny') return false;
   if (userId === undefined) return false;

@@ -33,9 +33,12 @@ const log = createLogger('crisisRoutes');
 // requireSessionClientAccess middleware only covers :sessionId path params).
 // Caseworkers pass when assigned — this surface is summaries-tier (payloads
 // are scrubbed below), so assignment is enough.
-function careTeamMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
+// Researchers are organization-scoped (ai-therapist-272): the session owner
+// must be in the caller's org, anonymous sessions irb-study only.
+async function careTeamMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
   return mayCareTeamAccessSession(req.session.userRole, req.session.userId, sessionId, {
     caseworkerPolicy: 'assigned',
+    callerOrgId: await orgIdFor(req),
   });
 }
 

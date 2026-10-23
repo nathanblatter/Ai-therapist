@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { broadcastAdminEventForSession } from '../../utils/adminBroadcast.js';
 import { requireSessionClientAccess, therapistScopeId, mayCareTeamAccessSession } from '../../middleware/caseload.js';
+import { orgIdFor } from '../../middleware/org.js';
 import {
   getActiveSidebandSessions,
   logSidebandAction,
@@ -32,9 +33,12 @@ const log = createLogger('sidebandRoutes');
 // helper passed ANY non-therapist, a latent bypass masked only by
 // requireRole('therapist','researcher') on every route). Mirrors the
 // middleware's 404-never-403 semantics.
-function therapistMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
+// Researchers are organization-scoped (ai-therapist-272): the session owner
+// must be in the caller's org, anonymous sessions irb-study only.
+async function therapistMayAccessSession(req: Request, sessionId: string): Promise<boolean> {
   return mayCareTeamAccessSession(req.session.userRole, req.session.userId, sessionId, {
     caseworkerPolicy: 'deny',
+    callerOrgId: await orgIdFor(req),
   });
 }
 

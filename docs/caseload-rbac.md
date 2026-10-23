@@ -27,10 +27,50 @@ propagates to the error handler (500) rather than widening to an all-orgs pass.
 `therapy_sessions.user_id IS NULL` has no participant org and is IRB-study
 custody — a researcher sees it only when their organization is the `irb-study`
 org (`IRB_STUDY_SLUG` / `getIrbStudyOrgId`); every other org gets 404. Care-team
-(therapist/caseworker) and demo branches are unchanged. Still global for
-researchers and out of scope here: `GET /admin/api/user-sessions` (login
-sessions), the `/redact/api/messages` review queue and its by-id
-correct/approve writes, and the `redaction-review` audit log.
+(therapist/caseworker) and demo branches are unchanged.
+
+**Follow-up, same day (ai-therapist-272): the remaining researcher-global
+surfaces are now organization-scoped**, with the same 404-never-403 and
+anonymous-session (irb-study custody) rules, at most one extra query per
+request, and every org lookup failing closed (a thrown `orgIdFor` -> 500,
+never an all-orgs read):
+
+- `GET /admin/api/user-sessions` and `DELETE /admin/api/user-sessions/:sid`:
+  `user_sessions.sess` is the express-session jsonb, so both queries
+  (`src/server/db/userSessions.queries.ts`) `LEFT JOIN users` on
+  `sess->>'userId'` and keep `u.organization_id = <caller org>`; a session
+  with no `userId` (anonymous participant / pre-login browser) is irb-study
+  custody; a `userId` whose user row is gone matches no org. The DELETE is
+  scoped the same way, so a sid outside the caller's org deletes nothing
+  and reads as 404.
+- `/redact/api/messages` review queue: `getRandomRedactedMessages` and
+  `countFlaggedUnreviewed` take the caller's org and add an `EXISTS` over
+  `therapy_sessions` + `users` (session owner in the caller's org, or
+  `user_id IS NULL` and the caller is the irb-study org). The by-id
+  `PUT /redact/api/messages/:id` and `POST /redact/api/messages/:id/approve`
+  writes sit behind `requireMessageClientAccess('id')` (one `getMessageOwner`
+  query) and 404 a message whose session owner is outside the caller's org
+  (non-numeric id -> 400).
+- `GET /admin/api/audit/redaction-review`: `listRedactionReviewLog` takes the
+  caller's org and joins the message's session owner; a log row with no owner
+  — an anonymous session, or a message deleted since the review — is
+  irb-study custody.
+- `mayCareTeamAccessSession` (query/body-addressed session guards in the
+  crisis and sideband routes) gained `opts.callerOrgId` (resolved once via
+  `orgIdFor(req)` in each route's wrapper): a researcher passes only when the
+  session exists and its owner is in that org (anonymous: irb-study only);
+  the care-team branches are unchanged.
+- `canAdminAccessSessionLive` (Socket.io `session:join` and
+  `admin:sendMessage`) gained `callerOrgId` + the owner's org: the researcher
+  branch applies the same rule (shared `researcherOrgAllows` helper), so a
+  researcher can no longer join another organization's live session room. The
+  socket layer resolves the org from the socket's express session via
+  `orgIdFor` in one helper (`adminMayAccessSessionLive` in
+  `src/server/index.ts`) that also denies a missing session for every role.
+
+Still unscoped for researchers (not in 272): the `GET /admin/api/sideband/status`
+list (rows are already filtered to the caseload for therapists; researchers
+see every org's active sideband rows).
 
 ## 2026-08-28: care-team edges, caseworker tier, org scoping
 

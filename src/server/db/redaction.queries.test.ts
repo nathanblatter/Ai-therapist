@@ -92,19 +92,34 @@ describe('leak-check review queue (ai-therapist-262)', () => {
   it('lists flagged-unreviewed rows first and exposes the verdict', async () => {
     queryMock.mockResolvedValueOnce({ rows: [] });
     const { getRandomRedactedMessages } = await import('./redaction.queries.js');
-    await getRandomRedactedMessages();
-    const [sql] = queryMock.mock.calls.at(-1) as [string];
+    await getRandomRedactedMessages(2);
+    const [sql, params] = queryMock.mock.calls.at(-1) as [string, unknown[]];
     expect(sql).toContain("metadata->'redaction_check' AS redaction_check");
     expect(sql).toMatch(/ORDER BY \(\(metadata->'redaction_check'->>'flagged'\) = 'true'/);
     expect(sql).toContain('RANDOM()');
+    expect(params).toEqual([2]);
   });
 
   it('counts only flagged rows nobody has reviewed', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ n: '3' }] });
     const { countFlaggedUnreviewed } = await import('./redaction.queries.js');
-    expect(await countFlaggedUnreviewed()).toBe(3);
-    const [sql] = queryMock.mock.calls.at(-1) as [string];
+    expect(await countFlaggedUnreviewed(2)).toBe(3);
+    const [sql, params] = queryMock.mock.calls.at(-1) as [string, unknown[]];
     expect(sql).toContain("->>'reviewed', 'false') <> 'true'");
+    expect(params).toEqual([2]);
+  });
+
+  it('scopes the queue and the count to the caller org, anonymous sessions irb-study only (ai-therapist-272)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ n: '0' }] });
+    const { getRandomRedactedMessages, countFlaggedUnreviewed } = await import('./redaction.queries.js');
+    await getRandomRedactedMessages(2);
+    await countFlaggedUnreviewed(2);
+    for (const call of queryMock.mock.calls) {
+      const sql = String(call[0]);
+      expect(sql).toMatch(/EXISTS \(\s*SELECT 1 FROM therapy_sessions ts\s+LEFT JOIN users u ON u.userid = ts.user_id\s+WHERE ts.session_id = messages.session_id/);
+      expect(sql).toContain('u.organization_id = $1');
+      expect(sql).toMatch(/ts.user_id IS NULL AND \$1 = \(SELECT org_id FROM organizations WHERE slug = 'irb-study'\)/);
+    }
   });
 
   it('marks the leak-check reviewed on approval', async () => {
@@ -130,7 +145,23 @@ describe('listRedactionReviewLog', () => {
     expect(sql).toMatch(/LEFT JOIN users u/);
     expect(sql).toMatch(/LEFT JOIN messages m/);
     expect(sql).toMatch(/ORDER BY rrl.review_id DESC/);
-    expect(params).toEqual([5, 'corrected', 10, 20]);
-    expect(queryMock.mock.calls[1][1]).toEqual([5, 'corrected']);
+    expect(params).toEqual([5, 'corrected', null, 10, 20]);
+    expect(queryMock.mock.calls[1][1]).toEqual([5, 'corrected', null]);
+  });
+
+  it('org-scopes page and count by the participant org, ownerless rows irb-study only (ai-therapist-272)', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ count: '0' }] });
+    await listRedactionReviewLog({ limit: 10, offset: 0 }, 2);
+    for (const call of queryMock.mock.calls) {
+      const sql = String(call[0]);
+      expect(sql).toMatch(/LEFT JOIN therapy_sessions ts ON ts.session_id = m.session_id/);
+      expect(sql).toMatch(/LEFT JOIN users pu ON pu.userid = ts.user_id/);
+      expect(sql).toMatch(/\$3::int IS NULL OR pu.organization_id = \$3/);
+      expect(sql).toMatch(/ts.user_id IS NULL AND \$3 = \(SELECT org_id FROM organizations WHERE slug = 'irb-study'\)/);
+    }
+    expect(queryMock.mock.calls[0][1]).toEqual([null, null, 2, 10, 0]);
+    expect(queryMock.mock.calls[1][1]).toEqual([null, null, 2]);
   });
 });

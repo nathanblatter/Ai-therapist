@@ -19,6 +19,14 @@ const ORG_COLUMNS = 'org_id, slug, name, kind, created_at::text AS created_at';
 /** Slug for the backfill org every pre-069 user belongs to. */
 export const IRB_STUDY_SLUG = 'irb-study';
 
+/**
+ * SQL scalar subquery for the irb-study org id, for org-scoped list queries
+ * that apply the anonymous-session rule inline (ai-therapist-272): an
+ * ownerless row is IRB-study custody, visible only when the caller's org IS
+ * this org. Resolves to NULL pre-069, so the comparison fails closed.
+ */
+export const IRB_STUDY_ORG_ID_SQL = `(SELECT org_id FROM organizations WHERE slug = '${IRB_STUDY_SLUG}')`;
+
 function slugify(name: string): string {
   const base = name
     .toLowerCase()
