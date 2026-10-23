@@ -17,7 +17,7 @@ import {
   type MailTransport,
 } from './emailer.service.js';
 
-const SMTP_KEYS = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_FROM'] as const;
+const SMTP_KEYS = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_FROM', 'EMAIL_API_URL', 'EMAIL_API_KEY'] as const;
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -44,6 +44,12 @@ function configureSmtpEnv() {
   process.env.SMTP_USER = 'mailer';
   process.env.SMTP_PASS = 'secret';
   process.env.EMAIL_FROM = 'alerts@example.com';
+}
+
+function configureEmailApiEnv() {
+  process.env.EMAIL_API_URL = 'http://email-api.test:4500/';
+  process.env.EMAIL_API_KEY = 'k-test';
+  process.env.EMAIL_FROM = 'AI Therapist <alerts@byuisresearch.com>';
 }
 
 const EMAIL = { to: 'cw@example.com', subject: 'Care team alert', text: 'body' };
@@ -124,4 +130,69 @@ describe('sendEmail', () => {
     _setTransportFactoryForTests(async () => ({ sendMail }));
     expect(await sendEmail(EMAIL)).toBe('sent');
   });
+
+  describe('email-api transport', () => {
+    const fetchMock = vi.fn();
+    beforeEach(() => {
+      fetchMock.mockReset();
+      vi.stubGlobal('fetch', fetchMock);
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function reply(status: number, body: unknown = {}) {
+      return { ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) };
+    }
+
+    it('POSTs /send with the key and the configured from address', async () => {
+      configureEmailApiEnv();
+      fetchMock.mockResolvedValue(reply(200, { status: 'sent' }));
+      expect(await sendEmail(EMAIL)).toBe('sent');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('http://email-api.test:4500/send');
+      expect(init.method).toBe('POST');
+      expect((init.headers as Record<string, string>)['X-API-Key']).toBe('k-test');
+      expect(JSON.parse(String(init.body))).toEqual({
+        from: 'AI Therapist <alerts@byuisresearch.com>',
+        to: ['cw@example.com'],
+        subject: 'Care team alert',
+        text: 'body',
+      });
+    });
+
+    it('treats 202 queued (email-api spooled it) as sent', async () => {
+      configureEmailApiEnv();
+      fetchMock.mockResolvedValue(reply(202, { status: 'queued', reason: 'relay_down' }));
+      expect(await sendEmail(EMAIL)).toBe('sent');
+    });
+
+    it('returns failed (never throws) on a non-2xx answer or a network error', async () => {
+      configureEmailApiEnv();
+      fetchMock.mockResolvedValue(reply(401, { error: 'unauthorized' }));
+      expect(await sendEmail(EMAIL)).toBe('failed');
+      fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
+      expect(await sendEmail(EMAIL)).toBe('failed');
+    });
+
+    it('takes precedence over SMTP when both are configured', async () => {
+      configureSmtpEnv();
+      configureEmailApiEnv();
+      fetchMock.mockResolvedValue(reply(200, { status: 'sent' }));
+      expect(await sendEmail(EMAIL)).toBe('sent');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('is not used without a key: falls through to SMTP', async () => {
+      configureSmtpEnv();
+      process.env.EMAIL_API_URL = 'http://email-api.test:4500';
+      const sendMail = vi.fn().mockResolvedValue({});
+      _setTransportFactoryForTests(async () => ({ sendMail }));
+      expect(await sendEmail(EMAIL)).toBe('sent');
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(sendMail).toHaveBeenCalledTimes(1);
+    });
+  });
 });
+
