@@ -16,7 +16,7 @@ const dbMocks = vi.hoisted(() => ({
   getAllCrisisEvents: vi.fn(),
   getCaseloadClientIds: vi.fn(async () => [42]),
   // Transitive: caseload middleware + org scoping.
-  getSessionAccessInfo: vi.fn(async () => ({ user_id: 42, status: 'ended' })),
+  getSessionAccessInfo: vi.fn(async () => ({ user_id: 42, status: 'ended', owner_organization_id: 1 })),
   isAssigned: vi.fn(async () => true),
   getMessageOwner: vi.fn(),
   getCareNoteById: vi.fn(),
@@ -68,7 +68,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   dbMocks.getSessionRiskCheckLadder.mockResolvedValue(LADDER);
   dbMocks.getParticipantRiskCheckLadders.mockResolvedValue([LADDER]);
-  dbMocks.getSessionAccessInfo.mockResolvedValue({ user_id: 42, status: 'ended' });
+  dbMocks.getSessionAccessInfo.mockResolvedValue({ user_id: 42, status: 'ended', owner_organization_id: 1 });
   dbMocks.getCaseloadClientIds.mockResolvedValue([42]);
   dbMocks.isAssigned.mockResolvedValue(true);
 });

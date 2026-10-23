@@ -91,11 +91,14 @@ export async function getSessionMessages(sessionId: string, redactedOnly = false
 /** The owning session + participant of a message (caseload enforcement). */
 export async function getMessageOwner(
   messageId: number | string
-): Promise<{ session_id: string; user_id: number | null } | null> {
-  const result = await pool.query<{ session_id: string; user_id: number | null }>(
-    `SELECT m.session_id, ts.user_id
+): Promise<{ session_id: string; user_id: number | null; owner_organization_id: number | null } | null> {
+  // owner_organization_id: the owner's users.organization_id, joined in so the
+  // caseload middleware's researcher org check costs no extra query.
+  const result = await pool.query<{ session_id: string; user_id: number | null; owner_organization_id: number | null }>(
+    `SELECT m.session_id, ts.user_id, u.organization_id AS owner_organization_id
      FROM messages m
      LEFT JOIN therapy_sessions ts ON ts.session_id = m.session_id
+     LEFT JOIN users u ON u.userid = ts.user_id
      WHERE m.message_id = $1`,
     [messageId]
   );
