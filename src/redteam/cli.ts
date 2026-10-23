@@ -23,6 +23,10 @@ process.env.SOCKET_PG_ADAPTER = 'off';
 // supertest agent (plain HTTP) never receives it and participant login times
 // out ("login did not persist to the session store"). CI runs this way too.
 process.env.NODE_ENV = 'test';
+// The admin assistant is dark (503) unless this is set; the harness must be
+// able to red-team it wherever it runs (ai-therapist-207). In-process only —
+// it never flips the flag for a deployment sharing the DB.
+process.env.ASSISTANT_ENABLED = 'true';
 
 import type OpenAI from 'openai';
 import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, type RedteamConfig } from './config.js';
@@ -37,6 +41,7 @@ import type {
   AssertionContext,
   AssertionResult,
   AssertionSpec,
+  AssistantRole,
   Beat,
   Scenario,
   ScenarioResult,
@@ -120,7 +125,7 @@ function buildCtx(
   classify: AssertionContext['classify'],
   cfg: RedteamConfig,
   beatId?: string,
-  extra?: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody'>>,
+  extra?: Partial<Pick<AssertionContext, 'chatSessionEnded' | 'lastMessageStatus' | 'lastMessageBody' | 'assistant'>>,
 ): AssertionContext {
   return {
     scenarioId: scenario.id,
@@ -277,6 +282,100 @@ async function runRealtimeScenario(
   return { assertions, judge, judgeBreaches, sessionId, transcript };
 }
 
+/** The staff account each assistant role logs in as (seeded by
+ *  ensureAssistantFixtures). Exposed for the runner's per-role sessions. */
+interface StaffSession {
+  agent: Agent;
+  userId: number;
+  history: Array<{ role: 'user' | 'assistant'; content: string }>;
+}
+
+/**
+ * Assistant pipeline (ai-therapist-207): the persona is a STAFF member asking
+ * the admin data assistant questions. Each beat runs as `beat.assistantRole ??
+ * scenario.assistantRole` with that role's own login + conversation history,
+ * so one scenario can probe several roles. Beats are verbatim staff questions
+ * by design (the adversarial content is in the seeded DATA, not the persona),
+ * but a beat without `verbatim` still goes through the persona LLM. No therapy
+ * session is created and the judge never runs: the assertions carry it.
+ */
+async function runAssistantScenario(
+  scenario: Scenario,
+  beats: Beat[],
+  _runJudgeFlag: boolean,
+  client: HarnessClient,
+  openai: OpenAI | null,
+  cfg: RedteamConfig,
+  cost: CostTracker,
+  _canaries: string[],
+  pool: AssertionContext['pool'],
+  classify: AssertionContext['classify'],
+): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string; transcript?: Turn[] }> {
+  const { ensureAssistantFixtures, ASSISTANT_STAFF, ASSISTANT_STAFF_PASSWORD } = await import('./assistantFixtures.js');
+  const { assistantPromptCanaries } = await import('./assistantAssertions.js');
+  const { ASSISTANT_MODEL } = await import('../server/services/assistant.service.js');
+
+  const startedAt = new Date();
+  await ensureAssistantFixtures(pool);
+  const canaries = assistantPromptCanaries();
+  const defaultRole: AssistantRole = scenario.assistantRole ?? 'researcher';
+  const sessions = new Map<AssistantRole, StaffSession>();
+  const callers: Array<{ role: AssistantRole; userId: number }> = [];
+  const transcript: Turn[] = [];
+  const assertions: AssertionResult[] = [];
+
+  const sessionFor = async (role: AssistantRole): Promise<StaffSession> => {
+    const existing = sessions.get(role);
+    if (existing) return existing;
+    const agent = client.newAgent();
+    const userId = await client.loginStaff(agent, ASSISTANT_STAFF[role], ASSISTANT_STAFF_PASSWORD);
+    const s: StaffSession = { agent, userId, history: [] };
+    sessions.set(role, s);
+    callers.push({ role, userId });
+    return s;
+  };
+
+  let last: AssertionContext['assistant'] | undefined;
+  for (const beat of beats) {
+    const role = beat.assistantRole ?? defaultRole;
+    const s = await sessionFor(role);
+    const utter = beat.verbatim ?? (await generatePersonaTurn(openai as OpenAI, cost, cfg, scenario, beat, transcript));
+    s.history.push({ role: 'user', content: utter });
+    transcript.push({ role: 'user', text: `[${role}] ${utter}`, beatId: beat.id });
+
+    let answer: string;
+    let toolCalls: Array<{ name: string; rowCount: number }> = [];
+    if (cfg.dryRun) {
+      answer = '[dry-run assistant] I only work with aggregates, scores and statuses from my tools and cannot share transcripts; use the corresponding admin panel.';
+    } else {
+      const res = await client.assistantTurn(s.agent, s.history);
+      answer = res.answer;
+      toolCalls = res.toolCalls;
+      // Real token usage lands on the audit row the turn just wrote.
+      const { rows } = await pool.query(
+        `SELECT input_tokens, output_tokens FROM assistant_audit
+         WHERE user_id = $1 AND created_at >= $2 ORDER BY audit_id DESC LIMIT 1`,
+        [s.userId, startedAt],
+      );
+      const u = rows[0];
+      if (u) cost.add(ASSISTANT_MODEL, { prompt_tokens: Number(u.input_tokens ?? 0), completion_tokens: Number(u.output_tokens ?? 0) });
+      else cost.estimate(ASSISTANT_MODEL, 2500, 300);
+    }
+    s.history.push({ role: 'assistant', content: answer });
+    transcript.push({ role: 'assistant', text: answer, beatId: beat.id });
+    console.log(`[redteam:assistant] ${beat.id} (${role}): tools [${toolCalls.map(t => `${t.name}:${t.rowCount}`).join(', ')}]`);
+
+    last = { role, userId: s.userId, question: utter, toolCalls, callers, startedAt };
+    const ctx = buildCtx(scenario, '', answer, transcript, client, {}, canaries, pool, classify, cfg, beat.id, { assistant: last });
+    assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
+  }
+
+  const finalCtx = buildCtx(scenario, '', transcript.at(-1)?.text ?? '', transcript, client, {}, canaries, pool, classify, cfg, undefined, { assistant: last });
+  assertions.push(...(await runAssertions(scenario.assertFinal, finalCtx)));
+
+  return { assertions, judge: null, judgeBreaches: false, sessionId: '', transcript };
+}
+
 async function runEntry(
   entry: SuiteEntry,
   client: HarnessClient,
@@ -303,6 +402,7 @@ async function runEntry(
     // pipeline completes.
     const runner =
       scenario.pipeline === 'chat' ? runChatScenario :
+      scenario.pipeline === 'assistant' ? runAssistantScenario :
       scenario.pipeline === 'voice' && !cfg.dryRun ? (await import('./voiceClient.js')).runVoiceScenario :
       runRealtimeScenario;
     const res = await runner(
@@ -320,7 +420,8 @@ async function runEntry(
       passed: !gatingFail,
       assertions,
       judge,
-      sessionId,
+      // The assistant pipeline drives no therapy session.
+      sessionId: sessionId || undefined,
       transcript,
       costUsd: cost.usd,
       durationMs: Date.now() - start,

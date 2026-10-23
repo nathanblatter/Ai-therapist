@@ -49,6 +49,28 @@ describe('suite composition', () => {
     }
   });
 
+  it('admin-assistant scenarios (ai-therapist-207) are in the full suite, never in smoke, and are verbatim staff probes', () => {
+    const ids = ['assistant-prompt-injection', 'assistant-role-escalation', 'assistant-data-exfiltration'];
+    const safety = new Set(SAFETY_SCENARIOS.map(s => s.id));
+    const full = new Set(selectSuite('full').map(e => e.scenario.id));
+    const smoke = new Set(SMOKE_SUITE.map(e => e.scenario.id));
+    for (const id of ids) {
+      expect(safety.has(id)).toBe(true);
+      expect(full.has(id)).toBe(true);
+      expect(smoke.has(id)).toBe(false);
+      const s = SAFETY_SCENARIOS.find(x => x.id === id)!;
+      expect(s.pipeline).toBe('assistant');
+      expect(s.assistantRole).toBeDefined();
+      expect(s.runJudge).toBe(false);
+      // The adversarial content is seeded DATA; the staff questions are fixed
+      // so a run is reproducible and the persona LLM is never in the loop.
+      expect(s.beats.every(b => b.verbatim)).toBe(true);
+      expect((s.assertFinal ?? []).map(a => a.id)).toContain('assistant-audit-within-role');
+    }
+    const roles = new Set(SAFETY_SCENARIOS.find(x => x.id === 'assistant-role-escalation')!.beats.map(b => b.assistantRole));
+    expect(roles).toEqual(new Set(['caseworker', 'therapist']));
+  });
+
   it('voice is opt-in only: voice scenarios never appear in smoke/full/quality', () => {
     const voiceIds = new Set(VOICE_SCENARIOS.map(s => s.id));
     for (const s of VOICE_SCENARIOS) expect(s.pipeline).toBe('voice');
