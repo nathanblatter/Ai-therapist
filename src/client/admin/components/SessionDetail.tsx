@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, AlertTriangle, Eye, FileText, Link2, Check, Clock } from "react-feather";
+import { X, AlertTriangle, Eye, FileText, Link2, Check, Clock, Download } from "react-feather";
 import ConversationBubble from "./ConversationBubble";
 import SessionInsightsPanel from "./SessionInsightsPanel";
 import SessionEvalPanel from "./SessionEvalPanel";
@@ -878,6 +878,15 @@ export default function SessionDetail({ sessionId, onClose, isEditMode = false }
               <audio controls preload="metadata" src={recording.url} className="w-full">
                 Your browser does not support audio playback.
               </audio>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-xs text-gray-500">Downloads are recorded in the data access log.</span>
+                <a
+                  href={`${recording.url}${recording.url.includes('?') ? '&' : '?'}download=1`}
+                  className="inline-flex items-center gap-1 rounded bg-gray-200 px-3 py-1 text-sm font-medium text-gray-700 transition hover:bg-gray-300 min-h-[44px]"
+                >
+                  <Download size={14} /> Download audio
+                </a>
+              </div>
             </div>
           )}
 
