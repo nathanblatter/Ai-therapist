@@ -14,6 +14,11 @@
 # Correctness: the key is validated against the costs endpoint BEFORE anything
 # is written, and every target is re-read and hash-compared AFTER writing, so a
 # partial or mangled write is reported rather than silently left in place.
+#
+# Strict mode is `set -eu` on purpose, NOT `pipefail`: this is POSIX sh (not
+# every /bin/sh has pipefail), and the hash-verify pipelines below rely on a
+# no-match `grep` (exit 1) yielding an empty value that is then REPORTED as a
+# write mismatch; pipefail would abort the script before that report.
 set -eu
 
 PROD_HOST="ubuntu@54.151.38.104"

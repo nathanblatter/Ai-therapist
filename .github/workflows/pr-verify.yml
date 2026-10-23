@@ -1,0 +1,36 @@
+name: PR verify
+# Fast, read-only gate for pull requests into main: the same typecheck / lint /
+# no-emoji / unit-test steps as the `verify` job in deploy.yml, without the
+# red-team smoke (which needs OPENAI_API_KEY and a Postgres service). The unit
+# tests mock the DB pool and vitest.config.ts injects a fake OPENAI_API_KEY, so
+# this job needs no secrets and no services.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Lint (no emoji in docs/html)
+        run: npm run lint:emoji
+      - name: Test
+        run: npm test
