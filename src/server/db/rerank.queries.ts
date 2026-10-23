@@ -27,9 +27,14 @@ export async function insertRerankDecision(input: InsertRerankDecisionInput): Pr
        (session_id, tool_name, query, candidates, chosen, used_fallback, model, latency_ms)
      VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8)`,
     [
-      input.sessionId, input.toolName, input.query,
-      JSON.stringify(input.candidates), JSON.stringify(input.chosen),
-      input.usedFallback, input.model, input.latencyMs,
+      input.sessionId,
+      input.toolName,
+      input.query,
+      JSON.stringify(input.candidates),
+      JSON.stringify(input.chosen),
+      input.usedFallback,
+      input.model,
+      input.latencyMs,
     ],
   );
 }
@@ -48,7 +53,11 @@ export interface RerankDecisionRow {
 }
 
 /** Recent rerank decisions, newest first, optionally filtered by tool and/or session. */
-export async function listRerankDecisions(filter: { toolName?: string | null; sessionId?: string | null; limit?: number }): Promise<RerankDecisionRow[]> {
+export async function listRerankDecisions(filter: {
+  toolName?: string | null;
+  sessionId?: string | null;
+  limit?: number;
+}): Promise<RerankDecisionRow[]> {
   const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
   const toolName = filter.toolName && filter.toolName !== 'all' ? filter.toolName : null;
   const sessionId = filter.sessionId && filter.sessionId.trim() ? filter.sessionId.trim() : null;
@@ -112,8 +121,8 @@ export async function getChunkRetrievalStats(): Promise<ChunkRetrievalStats[]> {
 
 export interface RerankStats {
   total: number;
-  fallback_rate: number;      // 0..1
-  movement_rate: number;      // fraction where chosen[0] !== the vec-rank-0 chunk
+  fallback_rate: number; // 0..1
+  movement_rate: number; // fraction where chosen[0] !== the vec-rank-0 chunk
   p95_latency_ms: number | null;
 }
 
@@ -131,12 +140,13 @@ export async function getRerankStats(filter: { toolName?: string | null; limit?:
   for (const r of rows) {
     if (r.used_fallback) fallbacks++;
     // The vector-order top chunk is the candidate with vec_rank 0.
-    const vecTop = r.candidates.find(c => c.vec_rank === 0)?.chunk_id;
+    const vecTop = r.candidates.find((c) => c.vec_rank === 0)?.chunk_id;
     if (vecTop != null && r.chosen.length > 0 && r.chosen[0] !== vecTop) moved++;
     if (typeof r.latency_ms === 'number') latencies.push(r.latency_ms);
   }
   latencies.sort((a, b) => a - b);
-  const p95 = latencies.length > 0 ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))] : null;
+  const p95 =
+    latencies.length > 0 ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))] : null;
 
   return {
     total,

@@ -43,12 +43,11 @@ async function rollbackMigration() {
       console.log('All sideband columns successfully removed\n');
     } else {
       console.warn('Some columns still exist:');
-      columnsResult.rows.forEach(row => {
+      columnsResult.rows.forEach((row) => {
         console.warn(`  - ${row.column_name}`);
       });
       console.log();
     }
-
   } catch (error) {
     console.error('\nRollback failed:', error.message);
     throw error;

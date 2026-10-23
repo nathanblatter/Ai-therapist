@@ -82,7 +82,13 @@ export function normalizeHarnessRun(run: HarnessRunRow, results: HarnessScenario
     const id = scenarioLabel(r.scenario_id, r.variation);
     const assertions: NormalizedScenario['assertions'] = {};
     for (const f of r.assertion_failures ?? []) assertions[f.id] = { passed: false, gating: true, detail: f.detail };
-    scenarios[id] = { id, passed: r.passed, assertions, judge: r.judge_scores ? { ...r.judge_scores } : null, error: r.error };
+    scenarios[id] = {
+      id,
+      passed: r.passed,
+      assertions,
+      judge: r.judge_scores ? { ...r.judge_scores } : null,
+      error: r.error,
+    };
   }
   const started = run.started_at instanceof Date ? run.started_at.toISOString() : String(run.started_at);
   return {
@@ -95,8 +101,19 @@ export function normalizeHarnessRun(run: HarnessRunRow, results: HarnessScenario
   };
 }
 
-export interface AssertionChange { scenario: string; assertion: string; gating: boolean; detail: string }
-export interface JudgeChange { scenario: string; dimension: string; before: number; after: number; delta: number }
+export interface AssertionChange {
+  scenario: string;
+  assertion: string;
+  gating: boolean;
+  detail: string;
+}
+export interface JudgeChange {
+  scenario: string;
+  dimension: string;
+  before: number;
+  after: number;
+  delta: number;
+}
 
 export interface RunDiff {
   baseline: { source: string; suite: string; startedAt: string | null; gitSha: string | null };
@@ -116,7 +133,11 @@ export interface RunDiff {
   hasRegressions: boolean;
 }
 
-export function diffRuns(baseline: NormalizedRun, current: NormalizedRun, dropThreshold = JUDGE_DROP_THRESHOLD): RunDiff {
+export function diffRuns(
+  baseline: NormalizedRun,
+  current: NormalizedRun,
+  dropThreshold = JUDGE_DROP_THRESHOLD,
+): RunDiff {
   const newlyFailing: AssertionChange[] = [];
   const newlyPassing: AssertionChange[] = [];
   const newlyErrored: RunDiff['newlyErrored'] = [];
@@ -129,15 +150,20 @@ export function diffRuns(baseline: NormalizedRun, current: NormalizedRun, dropTh
 
   for (const [id, cur] of Object.entries(current.scenarios)) {
     const base = baseline.scenarios[id];
-    if (!base) { newScenarios.push(id); continue; }
+    if (!base) {
+      newScenarios.push(id);
+      continue;
+    }
 
     for (const [aid, a] of Object.entries(cur.assertions)) {
       if (baseline.failuresOnly && !a.gating) continue;
       const b = base.assertions[aid];
       const basePassed = b ? b.passed : baseline.failuresOnly ? true : null;
       if (basePassed === null) continue; // assertion unknown in a full baseline: not comparable
-      if (!a.passed && basePassed) newlyFailing.push({ scenario: id, assertion: aid, gating: a.gating, detail: a.detail });
-      if (a.passed && !basePassed) newlyPassing.push({ scenario: id, assertion: aid, gating: a.gating, detail: b?.detail ?? '' });
+      if (!a.passed && basePassed)
+        newlyFailing.push({ scenario: id, assertion: aid, gating: a.gating, detail: a.detail });
+      if (a.passed && !basePassed)
+        newlyPassing.push({ scenario: id, assertion: aid, gating: a.gating, detail: b?.detail ?? '' });
     }
 
     if (cur.error && !base.error) newlyErrored.push({ scenario: id, error: cur.error });
@@ -153,12 +179,24 @@ export function diffRuns(baseline: NormalizedRun, current: NormalizedRun, dropTh
     }
   }
 
-  const hasRegressions = newlyFailing.some(f => f.gating) || newlyErrored.length > 0 || judgeDrops.length > 0;
+  const hasRegressions = newlyFailing.some((f) => f.gating) || newlyErrored.length > 0 || judgeDrops.length > 0;
   return {
-    baseline: { source: baseline.source, suite: baseline.suite, startedAt: baseline.startedAt, gitSha: baseline.gitSha },
+    baseline: {
+      source: baseline.source,
+      suite: baseline.suite,
+      startedAt: baseline.startedAt,
+      gitSha: baseline.gitSha,
+    },
     current: { suite: current.suite, startedAt: current.startedAt, gitSha: current.gitSha },
     suiteMismatch: baseline.suite !== current.suite,
-    newlyFailing, newlyPassing, newlyErrored, judgeDrops, judgeGains, missingScenarios, newScenarios, hasRegressions,
+    newlyFailing,
+    newlyPassing,
+    newlyErrored,
+    judgeDrops,
+    judgeGains,
+    missingScenarios,
+    newScenarios,
+    hasRegressions,
   };
 }
 
@@ -169,7 +207,9 @@ export function formatDiffMarkdown(diff: RunDiff): string {
   const lines: string[] = [];
   lines.push(`## Red-team diff vs baseline`);
   lines.push('');
-  lines.push(`Baseline: ${diff.baseline.source}${diff.suiteMismatch ? ` (WARNING: baseline suite \`${diff.baseline.suite}\` differs from current \`${diff.current.suite}\`)` : ''}`);
+  lines.push(
+    `Baseline: ${diff.baseline.source}${diff.suiteMismatch ? ` (WARNING: baseline suite \`${diff.baseline.suite}\` differs from current \`${diff.current.suite}\`)` : ''}`,
+  );
   lines.push('');
   lines.push(diff.hasRegressions ? `**REGRESSIONS DETECTED**` : `No regressions.`);
   lines.push('');
@@ -179,15 +219,32 @@ export function formatDiffMarkdown(diff: RunDiff): string {
     else lines.push(...rows);
     lines.push('');
   };
-  section('Newly failing assertions', diff.newlyFailing.map(f => `- \`${f.scenario}\` / \`${f.assertion}\`${f.gating ? '' : ' (non-gating)'}: ${f.detail}`));
-  section('Newly errored scenarios', diff.newlyErrored.map(e => `- \`${e.scenario}\`: ${e.error}`));
-  section(`Judge-score drops (>= ${JUDGE_DROP_THRESHOLD})`, diff.judgeDrops.map(j => `- \`${j.scenario}\` / ${j.dimension}: ${j.before} -> ${j.after} (${j.delta})`));
-  section('Newly passing assertions', diff.newlyPassing.map(f => `- \`${f.scenario}\` / \`${f.assertion}\``));
-  section(`Judge-score gains (>= ${JUDGE_DROP_THRESHOLD})`, diff.judgeGains.map(j => `- \`${j.scenario}\` / ${j.dimension}: ${j.before} -> ${j.after} (+${j.delta})`));
+  section(
+    'Newly failing assertions',
+    diff.newlyFailing.map(
+      (f) => `- \`${f.scenario}\` / \`${f.assertion}\`${f.gating ? '' : ' (non-gating)'}: ${f.detail}`,
+    ),
+  );
+  section(
+    'Newly errored scenarios',
+    diff.newlyErrored.map((e) => `- \`${e.scenario}\`: ${e.error}`),
+  );
+  section(
+    `Judge-score drops (>= ${JUDGE_DROP_THRESHOLD})`,
+    diff.judgeDrops.map((j) => `- \`${j.scenario}\` / ${j.dimension}: ${j.before} -> ${j.after} (${j.delta})`),
+  );
+  section(
+    'Newly passing assertions',
+    diff.newlyPassing.map((f) => `- \`${f.scenario}\` / \`${f.assertion}\``),
+  );
+  section(
+    `Judge-score gains (>= ${JUDGE_DROP_THRESHOLD})`,
+    diff.judgeGains.map((j) => `- \`${j.scenario}\` / ${j.dimension}: ${j.before} -> ${j.after} (+${j.delta})`),
+  );
   if (diff.missingScenarios.length || diff.newScenarios.length) {
     section('Scenario set changes', [
-      ...diff.missingScenarios.map(s => `- not run this time: \`${s}\``),
-      ...diff.newScenarios.map(s => `- new (no baseline): \`${s}\``),
+      ...diff.missingScenarios.map((s) => `- not run this time: \`${s}\``),
+      ...diff.newScenarios.map((s) => `- new (no baseline): \`${s}\``),
     ]);
   }
   return lines.join('\n');
@@ -195,9 +252,5 @@ export function formatDiffMarkdown(diff: RunDiff): string {
 
 /** Console rendering (same content, plain text). */
 export function formatDiffConsole(diff: RunDiff): string {
-  return formatDiffMarkdown(diff)
-    .replace(/^## /gm, '')
-    .replace(/^### /gm, '  ')
-    .replace(/\*\*/g, '')
-    .replace(/`/g, '');
+  return formatDiffMarkdown(diff).replace(/^## /gm, '').replace(/^### /gm, '  ').replace(/\*\*/g, '').replace(/`/g, '');
 }

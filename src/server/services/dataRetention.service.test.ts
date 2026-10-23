@@ -21,10 +21,7 @@ const messagingMocks = vi.hoisted(() => ({
 }));
 vi.mock('../db/messagingRetention.queries.js', () => messagingMocks);
 
-import {
-  getDataRetentionSettings,
-  enforceRetention,
-} from './dataRetention.service.js';
+import { getDataRetentionSettings, enforceRetention } from './dataRetention.service.js';
 
 const SETTINGS = {
   enabled: true,
@@ -70,7 +67,8 @@ describe('enforceRetention', () => {
     queryMock.mockImplementation((sql: string) =>
       sql.includes('SELECT config_value')
         ? Promise.resolve({ rows: [{ config_value: { ...SETTINGS, enabled: false } }] })
-        : Promise.resolve({ rows: [] }));
+        : Promise.resolve({ rows: [] }),
+    );
     const result = await enforceRetention('scheduler');
     expect(result.skipped).toBe(true);
     expect(mocks.getRecordingsToAgeOut).not.toHaveBeenCalled();
@@ -80,7 +78,8 @@ describe('enforceRetention', () => {
     queryMock.mockImplementation((sql: string) =>
       sql.includes('SELECT config_value')
         ? Promise.resolve({ rows: [{ config_value: { ...SETTINGS, enabled: false } }] })
-        : Promise.resolve({ rows: [] }));
+        : Promise.resolve({ rows: [] }),
+    );
     const result = await enforceRetention('manual', 'cli');
     expect(result.skipped).toBe(false);
   });
@@ -93,10 +92,15 @@ describe('enforceRetention', () => {
     const result = await enforceRetention('manual', 'cli');
     expect(deleteObjectMock).toHaveBeenCalledWith('rec/s1.wav');
     expect(mocks.clearRecordingColumns).toHaveBeenCalledWith('s1');
-    expect(mocks.insertDeletionLog).toHaveBeenCalledWith(expect.objectContaining({
-      artifactType: 'recording_object', artifactRef: 'rec/s1.wav',
-      reason: 'recording_retention', success: true, policySnapshot: expect.objectContaining({ recordings_retention_days: 90 }),
-    }));
+    expect(mocks.insertDeletionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactType: 'recording_object',
+        artifactRef: 'rec/s1.wav',
+        reason: 'recording_retention',
+        success: true,
+        policySnapshot: expect.objectContaining({ recordings_retention_days: 90 }),
+      }),
+    );
     expect(result.recordingsDeleted).toBe(1);
     expect(result.failures).toBe(0);
   });
@@ -145,9 +149,12 @@ describe('enforceRetention', () => {
     deleteObjectMock.mockRejectedValue(new Error('minio down'));
     const result = await enforceRetention('manual', 'cli');
     expect(mocks.clearRecordingColumns).not.toHaveBeenCalled();
-    expect(mocks.insertDeletionLog).toHaveBeenCalledWith(expect.objectContaining({
-      success: false, errorMessage: 'minio down',
-    }));
+    expect(mocks.insertDeletionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        errorMessage: 'minio down',
+      }),
+    );
     expect(result.failures).toBe(1);
     expect(result.recordingsDeleted).toBe(0);
   });
@@ -164,9 +171,12 @@ describe('enforceRetention', () => {
     const result = await enforceRetention('manual', 'cli');
     expect(result.recordingsDeleted).toBe(1);
     expect(result.graceDeleted).toBe(1);
-    expect(mocks.insertDeletionLog).toHaveBeenCalledWith(expect.objectContaining({
-      artifactRef: 'rec/s2.wav', reason: 'wiped_user_grace',
-    }));
+    expect(mocks.insertDeletionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactRef: 'rec/s2.wav',
+        reason: 'wiped_user_grace',
+      }),
+    );
     // s1 only processed once (age-out), not again under grace.
     expect(deleteObjectMock).toHaveBeenCalledTimes(2);
   });
@@ -177,7 +187,7 @@ describe('enforceRetention', () => {
     ]);
     deleteObjectMock.mockResolvedValue(undefined);
     await enforceRetention('manual', 'cli');
-    const updateCall = queryMock.mock.calls.find(c => String(c[0]).includes('UPDATE system_config'));
+    const updateCall = queryMock.mock.calls.find((c) => String(c[0]).includes('UPDATE system_config'));
     expect(updateCall).toBeTruthy();
     const payload = JSON.parse(updateCall![1][0]);
     expect(payload.last_run_deletions).toBe(1);
@@ -189,13 +199,15 @@ describe('enforceRetention', () => {
   it('ages out thread messages in the same pass on the recordings retention window', async () => {
     messagingMocks.deleteAgedThreadMessages.mockResolvedValue({ messagesDeleted: 3, crisisEventsDeleted: 1 });
     const result = await enforceRetention('manual', 'cli');
-    expect(messagingMocks.deleteAgedThreadMessages).toHaveBeenCalledWith(expect.objectContaining({
-      days: 90, // SAME window as recordings — one consistent records policy
-      runId: result.runId,
-      triggeredBy: 'manual',
-      triggeredByUser: 'cli',
-      policySnapshot: expect.objectContaining({ recordings_retention_days: 90 }),
-    }));
+    expect(messagingMocks.deleteAgedThreadMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        days: 90, // SAME window as recordings — one consistent records policy
+        runId: result.runId,
+        triggeredBy: 'manual',
+        triggeredByUser: 'cli',
+        policySnapshot: expect.objectContaining({ recordings_retention_days: 90 }),
+      }),
+    );
     expect(result.threadMessagesDeleted).toBe(3);
     expect(result.failures).toBe(0);
   });
@@ -203,7 +215,7 @@ describe('enforceRetention', () => {
   it('counts message deletions into last_run_deletions', async () => {
     messagingMocks.deleteAgedThreadMessages.mockResolvedValue({ messagesDeleted: 2, crisisEventsDeleted: 0 });
     await enforceRetention('manual', 'cli');
-    const updateCall = queryMock.mock.calls.find(c => String(c[0]).includes('UPDATE system_config'));
+    const updateCall = queryMock.mock.calls.find((c) => String(c[0]).includes('UPDATE system_config'));
     expect(JSON.parse(updateCall![1][0]).last_run_deletions).toBe(2);
   });
 
@@ -223,7 +235,8 @@ describe('enforceRetention', () => {
     queryMock.mockImplementation((sql: string) =>
       sql.includes('SELECT config_value')
         ? Promise.resolve({ rows: [{ config_value: { ...SETTINGS, enabled: false } }] })
-        : Promise.resolve({ rows: [] }));
+        : Promise.resolve({ rows: [] }),
+    );
     await enforceRetention('scheduler');
     expect(messagingMocks.deleteAgedThreadMessages).not.toHaveBeenCalled();
   });

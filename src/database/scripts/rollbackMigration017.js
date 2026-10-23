@@ -15,7 +15,7 @@ async function rollbackMigration() {
     // Read the rollback SQL file
     const rollbackSQL = fs.readFileSync(
       path.join(__dirname, '../migrations/017_update_voice_language_config_rollback.sql'),
-      'utf8'
+      'utf8',
     );
 
     // Execute the rollback
@@ -25,7 +25,6 @@ async function rollbackMigration() {
 
     console.log('OK: Migration 017 rolled back successfully!');
     console.log('Voice and language configurations reverted to simple array structure');
-
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('FAIL: Rollback of migration 017 failed:', error);

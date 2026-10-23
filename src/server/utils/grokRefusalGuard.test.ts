@@ -85,8 +85,8 @@ describe('GrokRefusalDetector', () => {
     const d = new GrokRefusalDetector();
     const unknown = 'That is not something I am going to get into here.';
     expect(d.observe(unknown)).toBe('none');
-    expect(d.observe(unknown)).toBe('none');   // streak 1: the repeat itself
-    expect(d.observe(unknown)).toBe('steer');  // streak 2
+    expect(d.observe(unknown)).toBe('none'); // streak 1: the repeat itself
+    expect(d.observe(unknown)).toBe('steer'); // streak 2
   });
 
   it('does nothing at all when the guard is disabled', () => {
@@ -96,10 +96,14 @@ describe('GrokRefusalDetector', () => {
   });
 
   it('honours configured thresholds and patterns', () => {
-    const d = new GrokRefusalDetector(resolveGrokRefusalGuard({
-      patterns: ['no puedo ayudarte con eso'], steerAfter: 1, recoverAfter: 2,
-    }));
-    expect(d.observe(CANNED)).toBe('none');          // English default list replaced
+    const d = new GrokRefusalDetector(
+      resolveGrokRefusalGuard({
+        patterns: ['no puedo ayudarte con eso'],
+        steerAfter: 1,
+        recoverAfter: 2,
+      }),
+    );
+    expect(d.observe(CANNED)).toBe('none'); // English default list replaced
     expect(d.observe('No puedo ayudarte con eso.')).toBe('steer');
     expect(d.observe('No puedo ayudarte con eso.')).toBe('recover');
   });
@@ -118,24 +122,35 @@ describe('resolveGrokRefusalGuard', () => {
   it('defaults an absent or unusable config', () => {
     expect(resolveGrokRefusalGuard(undefined)).toEqual(GROK_DEFAULT_REFUSAL_GUARD);
     expect(resolveGrokRefusalGuard('nonsense')).toEqual(GROK_DEFAULT_REFUSAL_GUARD);
-    expect(resolveGrokRefusalGuard({ patterns: [], maxChars: 'x', steerAfter: null })).toEqual(GROK_DEFAULT_REFUSAL_GUARD);
+    expect(resolveGrokRefusalGuard({ patterns: [], maxChars: 'x', steerAfter: null })).toEqual(
+      GROK_DEFAULT_REFUSAL_GUARD,
+    );
   });
 
   it('normalizes stored patterns so admins can type them naturally', () => {
-    expect(resolveGrokRefusalGuard({ patterns: ["I CAN'T help with that request", '  ', 7] }).patterns)
-      .toEqual(['i cant help with that request']);
+    expect(resolveGrokRefusalGuard({ patterns: ["I CAN'T help with that request", '  ', 7] }).patterns).toEqual([
+      'i cant help with that request',
+    ]);
   });
 
   it('clamps thresholds and keeps recovery strictly after the steer', () => {
-    expect(resolveGrokRefusalGuard({ steerAfter: 0, recoverAfter: 0 })).toMatchObject({ steerAfter: 1, recoverAfter: 2 });
-    expect(resolveGrokRefusalGuard({ steerAfter: 3, recoverAfter: 3 })).toMatchObject({ steerAfter: 3, recoverAfter: 4 });
+    expect(resolveGrokRefusalGuard({ steerAfter: 0, recoverAfter: 0 })).toMatchObject({
+      steerAfter: 1,
+      recoverAfter: 2,
+    });
+    expect(resolveGrokRefusalGuard({ steerAfter: 3, recoverAfter: 3 })).toMatchObject({
+      steerAfter: 3,
+      recoverAfter: 4,
+    });
     expect(resolveGrokRefusalGuard({ steerAfter: 999, maxChars: 5 })).toMatchObject({ steerAfter: 20, maxChars: 20 });
   });
 });
 
 describe('buildGrokRefusalRecoveryLine', () => {
   it('uses the configured crisis phrase and falls back to 988', () => {
-    expect(buildGrokRefusalRecoveryLine('call the campus line at 555-0100')).toContain('call the campus line at 555-0100');
+    expect(buildGrokRefusalRecoveryLine('call the campus line at 555-0100')).toContain(
+      'call the campus line at 555-0100',
+    );
     expect(buildGrokRefusalRecoveryLine(null)).toContain('988');
   });
 

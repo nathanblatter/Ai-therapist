@@ -7,9 +7,14 @@ import { isIdentifierBlockedError } from './safetyIdentifier.js';
 
 describe('isIdentifierBlockedError', () => {
   it('detects the blocked-identifier error from a response body', () => {
-    expect(isIdentifierBlockedError(null, JSON.stringify({
-      error: { code: 'identifier_blocked', message: 'The safety identifier is blocked.' },
-    }))).toBe(true);
+    expect(
+      isIdentifierBlockedError(
+        null,
+        JSON.stringify({
+          error: { code: 'identifier_blocked', message: 'The safety identifier is blocked.' },
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('detects it from a thrown Error message', () => {

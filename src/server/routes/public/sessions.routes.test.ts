@@ -92,7 +92,7 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
     expect(recorderMocks.appendChunk).toHaveBeenCalledWith(SESSION_ID, 'AAAA', 24000, 'participant');
   });
 
-  it('drops BOTH tracks when the owner\'s latest consent has recording_enabled=false', async () => {
+  it("drops BOTH tracks when the owner's latest consent has recording_enabled=false", async () => {
     dbMocks.isRecordingConsentedForSession.mockResolvedValue(false);
     for (const track of ['participant', 'mixed']) {
       const res = await request(makeApp())
@@ -118,7 +118,9 @@ describe('POST /api/sessions/:id/scale-response weekly cadence gate', () => {
 
   it('rejects with a structured 409 when the scale was administered within 7 days', async () => {
     dbMocks.getUserLatestScaleScore.mockResolvedValue({
-      score: 3, created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), session_id: 's0',
+      score: 3,
+      created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+      session_id: 's0',
     });
     const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/scale-response`).send(body);
     expect(res.status).toBe(409);
@@ -130,7 +132,9 @@ describe('POST /api/sessions/:id/scale-response weekly cadence gate', () => {
 
   it('stores the response when the last administration is at least 7 days old', async () => {
     dbMocks.getUserLatestScaleScore.mockResolvedValue({
-      score: 3, created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000), session_id: 's0',
+      score: 3,
+      created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      session_id: 's0',
     });
     const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/scale-response`).send(body);
     expect(res.status).toBe(200);

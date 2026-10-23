@@ -30,13 +30,14 @@ function toPositiveInt(raw: unknown): number | null {
  */
 export function parsePagination(
   query: Record<string, unknown>,
-  { defaultLimit, maxLimit, defaultOffset = 0 }: PaginationOptions
+  { defaultLimit, maxLimit, defaultOffset = 0 }: PaginationOptions,
 ): Pagination {
   const limit = Math.min(toPositiveInt(query.limit) ?? defaultLimit, maxLimit);
   const offsetRaw = Number(query.offset);
-  const offset = Number.isInteger(offsetRaw) && offsetRaw >= 0 && query.offset !== undefined && query.offset !== ''
-    ? offsetRaw
-    : defaultOffset;
+  const offset =
+    Number.isInteger(offsetRaw) && offsetRaw >= 0 && query.offset !== undefined && query.offset !== ''
+      ? offsetRaw
+      : defaultOffset;
   const page = toPositiveInt(query.page) ?? 1;
   return { limit, offset, page };
 }

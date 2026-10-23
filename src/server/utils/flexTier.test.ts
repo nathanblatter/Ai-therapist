@@ -7,8 +7,18 @@ import { isFlexEligible, flexParams, isFlexCapacityError, withFlex } from './fle
 describe('isFlexEligible', () => {
   it('accepts the documented eligible families', () => {
     for (const model of [
-      'gpt-6-astra', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4-mini',
-      'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'o3', 'o4-mini',
+      'gpt-6-astra',
+      'gpt-5.6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.5',
+      'gpt-5.4-mini',
+      'gpt-5.2',
+      'gpt-5.1',
+      'gpt-5',
+      'gpt-5-mini',
+      'gpt-5-nano',
+      'o3',
+      'o4-mini',
     ]) {
       expect(isFlexEligible(model), model).toBe(true);
     }
@@ -16,9 +26,17 @@ describe('isFlexEligible', () => {
 
   it('rejects the documented ineligible models', () => {
     for (const model of [
-      'gpt-4o-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'o3-mini',
-      'gpt-5-pro', 'gpt-5.2-pro', 'omni-moderation-latest', 'text-embedding-3-small',
-      'gpt-realtime-2.1-mini', 'gpt-transcribe',
+      'gpt-4o-mini',
+      'gpt-4o',
+      'gpt-4.1',
+      'gpt-4.1-mini',
+      'o3-mini',
+      'gpt-5-pro',
+      'gpt-5.2-pro',
+      'omni-moderation-latest',
+      'text-embedding-3-small',
+      'gpt-realtime-2.1-mini',
+      'gpt-transcribe',
     ]) {
       expect(isFlexEligible(model), model).toBe(false);
     }
@@ -63,7 +81,8 @@ describe('withFlex', () => {
   });
 
   it('retries on the default tier when flex has no capacity', async () => {
-    const call = vi.fn()
+    const call = vi
+      .fn()
       .mockRejectedValueOnce(Object.assign(new Error('Resource Unavailable'), { status: 429 }))
       .mockResolvedValueOnce('ok');
     await expect(withFlex('gpt-5', call)).resolves.toBe('ok');

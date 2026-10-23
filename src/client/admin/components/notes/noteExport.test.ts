@@ -17,7 +17,12 @@ const signed: CareNoteRow = {
   session_id: 'sess_abc',
   seed_source: 'ai_soap',
   seed_model: 'gpt-test',
-  content: { plan: 'Follow up <next week>', subjective: 'Reports low mood', assessment: 'Mild', objective: 'Flat affect' },
+  content: {
+    plan: 'Follow up <next week>',
+    subjective: 'Reports low mood',
+    assessment: 'Mild',
+    objective: 'Flat affect',
+  },
   status: 'signed',
   shared_with_care_team: false,
   signed_at: '2026-10-20T15:00:00.000Z',
@@ -44,7 +49,14 @@ describe('noteToPlainText', () => {
   });
 
   it('falls back to the client id and marks drafts unsigned', () => {
-    const draft: CareNoteRow = { ...signed, status: 'draft', signed_at: null, sign_hash: null, seed_source: null, seed_model: null };
+    const draft: CareNoteRow = {
+      ...signed,
+      status: 'draft',
+      signed_at: null,
+      sign_hash: null,
+      seed_source: null,
+      seed_model: null,
+    };
     const text = noteToPlainText(draft);
     expect(text).toContain('Client: #7');
     expect(text).toContain('Signature: Draft - unsigned');
@@ -54,7 +66,9 @@ describe('noteToPlainText', () => {
 
   it('uses the case-note field order for case notes', () => {
     const caseNote: CareNoteRow = {
-      ...signed, note_type: 'case', case_note_kind: 'safety_check',
+      ...signed,
+      note_type: 'case',
+      case_note_kind: 'safety_check',
       content: { outcome: 'Scheduled', narrative: 'Called client', contact_method: 'phone' },
     };
     const text = noteToPlainText(caseNote);

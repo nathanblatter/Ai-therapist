@@ -14,7 +14,9 @@ const dbMocks = vi.hoisted(() => ({
   logSidebandAction: vi.fn().mockResolvedValue(undefined),
   // Caseload middleware/guard deps (ai-therapist-119).
   isAssigned: vi.fn().mockResolvedValue(true),
-  getSessionAccessInfo: vi.fn().mockResolvedValue({ status: 'active', user_id: 42, session_type: 'realtime', owner_organization_id: 1 }),
+  getSessionAccessInfo: vi
+    .fn()
+    .mockResolvedValue({ status: 'active', user_id: 42, session_type: 'realtime', owner_organization_id: 1 }),
   getCaseloadClientIds: vi.fn().mockResolvedValue([42]),
   // Researcher org scoping (ai-therapist-272): caller org resolved via orgIdFor.
   getOrganizationIdForUser: vi.fn().mockResolvedValue(1),
@@ -63,12 +65,17 @@ function appAs(role: string | null, orgId = 1) {
 const SESSION_ID = 'sess-abc-123';
 
 beforeEach(() => {
-  Object.values(dbMocks).forEach(m => m.mockClear());
-  Object.values(sidebandMocks).forEach(m => m.mockClear());
+  Object.values(dbMocks).forEach((m) => m.mockClear());
+  Object.values(sidebandMocks).forEach((m) => m.mockClear());
   registryMocks.getEnabledToolDefinitions.mockClear();
   sidebandMocks.isConnected.mockReturnValue(true);
   dbMocks.isAssigned.mockResolvedValue(true);
-  dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: 42, session_type: 'realtime', owner_organization_id: 1 });
+  dbMocks.getSessionAccessInfo.mockResolvedValue({
+    status: 'active',
+    user_id: 42,
+    session_type: 'realtime',
+    owner_organization_id: 1,
+  });
   dbMocks.getCaseloadClientIds.mockResolvedValue([42]);
   dbMocks.getOrganizationIdForUser.mockResolvedValue(1);
   dbMocks.getIrbStudyOrgId.mockResolvedValue(1);
@@ -105,10 +112,7 @@ describe('caseload enforcement (ai-therapist-119)', () => {
 
   it('404s a therapist targeting a session with no owner (null user_id)', async () => {
     dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: null, session_type: 'realtime' });
-    await request(appAs('therapist'))
-      .post('/admin/api/sideband/interrupt')
-      .send({ sessionId: SESSION_ID })
-      .expect(404);
+    await request(appAs('therapist')).post('/admin/api/sideband/interrupt').send({ sessionId: SESSION_ID }).expect(404);
     expect(dbMocks.isAssigned).not.toHaveBeenCalled();
   });
 
@@ -129,7 +133,12 @@ describe('caseload enforcement (ai-therapist-119)', () => {
   });
 
   it('anonymous session: only an irb-study researcher may control it', async () => {
-    dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'active', user_id: null, session_type: 'realtime', owner_organization_id: null });
+    dbMocks.getSessionAccessInfo.mockResolvedValue({
+      status: 'active',
+      user_id: null,
+      session_type: 'realtime',
+      owner_organization_id: null,
+    });
     await request(appAs('researcher', 2))
       .post('/admin/api/sideband/interrupt')
       .send({ sessionId: SESSION_ID })
@@ -203,9 +212,15 @@ describe('POST /admin/api/sideband/trigger-tool', () => {
 
   it('rejects missing sessionId or toolName', async () => {
     const app = appAs('therapist');
-    await request(app).post('/admin/api/sideband/trigger-tool').send({ toolName: 'start_breathing_exercise' }).expect(400);
+    await request(app)
+      .post('/admin/api/sideband/trigger-tool')
+      .send({ toolName: 'start_breathing_exercise' })
+      .expect(400);
     await request(app).post('/admin/api/sideband/trigger-tool').send({ sessionId: SESSION_ID }).expect(400);
-    await request(app).post('/admin/api/sideband/trigger-tool').send({ sessionId: SESSION_ID, toolName: '   ' }).expect(400);
+    await request(app)
+      .post('/admin/api/sideband/trigger-tool')
+      .send({ sessionId: SESSION_ID, toolName: '   ' })
+      .expect(400);
     expect(sidebandMocks.triggerTool).not.toHaveBeenCalled();
   });
 
@@ -269,9 +284,11 @@ describe('POST /admin/api/sideband/trigger-tool', () => {
   });
 
   it('returns 409 (not success) when a model response is already in flight', async () => {
-    sidebandMocks.triggerTool.mockRejectedValueOnce(new Error(
-      'conversation_already_has_active_response: the model is still responding; wait for the current response to finish and retry',
-    ));
+    sidebandMocks.triggerTool.mockRejectedValueOnce(
+      new Error(
+        'conversation_already_has_active_response: the model is still responding; wait for the current response to finish and retry',
+      ),
+    );
     const res = await request(appAs('therapist'))
       .post('/admin/api/sideband/trigger-tool')
       .send({ sessionId: SESSION_ID, toolName: 'start_breathing_exercise' })

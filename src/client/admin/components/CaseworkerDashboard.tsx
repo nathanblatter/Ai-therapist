@@ -47,8 +47,7 @@ function RosterTable({ clients, onSelectClient }: { clients: RosterClient[]; onS
 export default function CaseworkerDashboard({ onSelectClient }: CaseworkerDashboardProps) {
   const { data, loading, error, refetch } = useAdminFetch<RosterResponse>('/admin/api/caseworker/roster');
 
-  const allClients: RosterClient[] =
-    data?.clients ?? data?.members?.flatMap((m) => m.clients) ?? [];
+  const allClients: RosterClient[] = data?.clients ?? data?.members?.flatMap((m) => m.clients) ?? [];
   const needsAttention = allClients.filter((c) => c.attention.score >= 50).length;
   const openCrisis = allClients.reduce((sum, c) => sum + c.open_crisis_count, 0);
   const openEscalations = allClients.reduce((sum, c) => sum + c.open_escalation_count, 0);

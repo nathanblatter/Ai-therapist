@@ -64,7 +64,7 @@ describe('isGrokVoiceModel — the admin switch', () => {
 describe('voice registry', () => {
   it('lists eve first as the default and has no duplicate ids', () => {
     expect(GROK_VOICES[0].value).toBe(GROK_DEFAULT_VOICE);
-    expect(new Set(GROK_VOICES.map(v => v.value)).size).toBe(GROK_VOICES.length);
+    expect(new Set(GROK_VOICES.map((v) => v.value)).size).toBe(GROK_VOICES.length);
   });
 
   it('resolves case-insensitively and falls back for GPT-Live voices', () => {
@@ -96,7 +96,12 @@ describe('buildGrokSessionConfig', () => {
   });
 
   it('uses server VAD and 24 kHz PCM on both legs', () => {
-    expect(config.turn_detection).toEqual({ type: 'server_vad', threshold: 0.85, silence_duration_ms: 500, prefix_padding_ms: 333 });
+    expect(config.turn_detection).toEqual({
+      type: 'server_vad',
+      threshold: 0.85,
+      silence_duration_ms: 500,
+      prefix_padding_ms: 333,
+    });
     expect(config.reasoning).toEqual({ effort: 'none' });
     const audio = config.audio as { input: { format: unknown; transcription: unknown }; output: { format: unknown } };
     expect(audio.input.format).toEqual({ type: 'audio/pcm', rate: 24000 });
@@ -119,16 +124,27 @@ describe('buildGrokSessionConfig', () => {
 
   it('coerces an unknown voice to the default', () => {
     expect(config.voice).toBe('ara');
-    expect(buildGrokSessionConfig({
-      model: 'grok-voice-latest', voice: 'cedar', language: null, languageName: null,
-      systemPrompt: CLINICAL_PROMPT, toolDefs: [],
-    }).voice).toBe(GROK_DEFAULT_VOICE);
+    expect(
+      buildGrokSessionConfig({
+        model: 'grok-voice-latest',
+        voice: 'cedar',
+        language: null,
+        languageName: null,
+        systemPrompt: CLINICAL_PROMPT,
+        toolDefs: [],
+      }).voice,
+    ).toBe(GROK_DEFAULT_VOICE);
   });
 });
 
 describe('buildGrokOpeningPrompt', () => {
   it('names the configured crisis line and the mic note', () => {
-    const text = buildGrokOpeningPrompt('en', { hotline: '988 Lifeline', phone: '988', text: 'HOME to 741741', enabled: true });
+    const text = buildGrokOpeningPrompt('en', {
+      hotline: '988 Lifeline',
+      phone: '988',
+      text: 'HOME to 741741',
+      enabled: true,
+    });
     expect(text).toMatch(/^Say this phrase exactly: '/);
     expect(text).toContain('call the 988 Lifeline crisis line at 988 or text HOME to 741741');
     expect(text).toContain('microphone is off by default');
@@ -150,7 +166,9 @@ describe('grokRealtimeUrl', () => {
 
   // docs.x.ai "Session Resumption": "Reopen the WebSocket with ?conversation_id=<id>".
   it('appends the cached conversation id for a resumed leg', () => {
-    expect(grokRealtimeUrl('grok-voice-3.0', 'conv_ab/c')).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-3.0&conversation_id=conv_ab%2Fc');
+    expect(grokRealtimeUrl('grok-voice-3.0', 'conv_ab/c')).toBe(
+      'wss://api.x.ai/v1/realtime?model=grok-voice-3.0&conversation_id=conv_ab%2Fc',
+    );
     expect(grokRealtimeUrl('grok-voice-3.0', null)).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-3.0');
   });
 });
@@ -158,8 +176,12 @@ describe('grokRealtimeUrl', () => {
 describe('session resumption (ai-therapist-245)', () => {
   it('opts into xAI resumption on every session.update and clamps the reconnect window', () => {
     const cfg = buildGrokSessionConfig({
-      model: 'grok-voice-3.0', voice: 'eve', language: 'en', languageName: 'English',
-      systemPrompt: CLINICAL_PROMPT, toolDefs: [],
+      model: 'grok-voice-3.0',
+      voice: 'eve',
+      language: 'en',
+      languageName: 'English',
+      systemPrompt: CLINICAL_PROMPT,
+      toolDefs: [],
     });
     expect(cfg.resumption).toEqual({ enabled: true });
     expect(resolveGrokTuning({ reconnect_window_s: 90 }).reconnect_window_s).toBe(90);
@@ -173,17 +195,38 @@ describe('resolveGrokTuning — admin knobs', () => {
   it('returns defaults for missing or garbage config', () => {
     expect(resolveGrokTuning(undefined)).toEqual(GROK_DEFAULT_TUNING);
     expect(resolveGrokTuning('nope')).toEqual(GROK_DEFAULT_TUNING);
-    expect(resolveGrokTuning({ vad: { threshold: 'x' }, reasoning_effort: 'medium', speed: null })).toEqual(GROK_DEFAULT_TUNING);
+    expect(resolveGrokTuning({ vad: { threshold: 'x' }, reasoning_effort: 'medium', speed: null })).toEqual(
+      GROK_DEFAULT_TUNING,
+    );
   });
 
   it('clamps to xAI ranges and forwards into session.update', () => {
-    const t = resolveGrokTuning({ vad: { threshold: 5, silence_duration_ms: -10, prefix_padding_ms: 200.6 }, reasoning_effort: 'high', speed: 9 });
-    expect(t).toEqual({ vad: { threshold: 0.9, silence_duration_ms: 0, prefix_padding_ms: 201 }, reasoning_effort: 'high', speed: 1.5, reconnect_window_s: 75 });
-    const cfg = buildGrokSessionConfig({
-      model: 'grok-voice-latest', voice: 'eve', language: null, languageName: null,
-      systemPrompt: CLINICAL_PROMPT, toolDefs: [], tuning: t,
+    const t = resolveGrokTuning({
+      vad: { threshold: 5, silence_duration_ms: -10, prefix_padding_ms: 200.6 },
+      reasoning_effort: 'high',
+      speed: 9,
     });
-    expect(cfg.turn_detection).toEqual({ type: 'server_vad', threshold: 0.9, silence_duration_ms: 0, prefix_padding_ms: 201 });
+    expect(t).toEqual({
+      vad: { threshold: 0.9, silence_duration_ms: 0, prefix_padding_ms: 201 },
+      reasoning_effort: 'high',
+      speed: 1.5,
+      reconnect_window_s: 75,
+    });
+    const cfg = buildGrokSessionConfig({
+      model: 'grok-voice-latest',
+      voice: 'eve',
+      language: null,
+      languageName: null,
+      systemPrompt: CLINICAL_PROMPT,
+      toolDefs: [],
+      tuning: t,
+    });
+    expect(cfg.turn_detection).toEqual({
+      type: 'server_vad',
+      threshold: 0.9,
+      silence_duration_ms: 0,
+      prefix_padding_ms: 201,
+    });
     expect(cfg.reasoning).toEqual({ effort: 'high' });
     expect((cfg.audio as { output: { speed: number } }).output.speed).toBe(1.5);
   });

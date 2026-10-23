@@ -12,7 +12,12 @@ export interface ThemeOption {
 }
 
 export const THEMES: ThemeOption[] = [
-  { value: 'default', label: 'Classic Blue', description: 'The original look', swatch: ['#002E5D', '#0047BA', '#BDD6E6'] },
+  {
+    value: 'default',
+    label: 'Classic Blue',
+    description: 'The original look',
+    swatch: ['#002E5D', '#0047BA', '#BDD6E6'],
+  },
   { value: 'sage', label: 'Sage', description: 'Calm greens', swatch: ['#22452F', '#3F7052', '#CDE3D2'] },
   { value: 'ocean', label: 'Ocean', description: 'Cool teals', swatch: ['#0C3A4A', '#0E7490', '#BFE5EF'] },
   { value: 'dusk', label: 'Dusk', description: 'Soft violets', swatch: ['#33294D', '#63549C', '#DAD3EC'] },

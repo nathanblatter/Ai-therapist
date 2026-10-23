@@ -37,13 +37,20 @@ async function main() {
   const options: RunEvalOptions = {
     force,
     judgeModel,
-    judgeModels: judgeModelsArg ? judgeModelsArg.split(',').map(m => m.trim()).filter(Boolean) : undefined,
+    judgeModels: judgeModelsArg
+      ? judgeModelsArg
+          .split(',')
+          .map((m) => m.trim())
+          .filter(Boolean)
+      : undefined,
     selfConsistencyRuns: selfConsistencyArg ? Number(selfConsistencyArg) : undefined,
   };
 
   if (!sessionId && !allEnded) {
-    console.log('Usage: npx tsx src/database/scripts/runEvals.ts (--session <id> | --all-ended) [--force] ' +
-      '[--judge-model <model> | --judge-models <m1,m2>] [--self-consistency <k>]');
+    console.log(
+      'Usage: npx tsx src/database/scripts/runEvals.ts (--session <id> | --all-ended) [--force] ' +
+        '[--judge-model <model> | --judge-models <m1,m2>] [--self-consistency <k>]',
+    );
     process.exitCode = 1;
     return;
   }
@@ -65,9 +72,9 @@ async function main() {
         console.log(`[Evals] per-judge scores (${runs.length} runs):`);
         for (const run of runs) {
           const label = run.runIndex > 0 ? `${run.judgeModel}#${run.runIndex + 1} (seed ${run.seed})` : run.judgeModel;
-          console.log(`  ${label}: ${EVAL_DIMENSIONS.map(d => `${d}=${run.rubric[d].score}`).join(' ')}`);
+          console.log(`  ${label}: ${EVAL_DIMENSIONS.map((d) => `${d}=${run.rubric[d].score}`).join(' ')}`);
         }
-        if (spread) console.log(`  spread (max-min): ${EVAL_DIMENSIONS.map(d => `${d}=${spread[d]}`).join(' ')}`);
+        if (spread) console.log(`  spread (max-min): ${EVAL_DIMENSIONS.map((d) => `${d}=${spread[d]}`).join(' ')}`);
       }
       for (const f of failed) console.log(`[Evals] judge ${f.judgeModel} run ${f.runIndex + 1} FAILED: ${f.error}`);
     }
@@ -85,7 +92,7 @@ async function main() {
 }
 
 main()
-  .catch(err => {
+  .catch((err) => {
     console.error('[Evals] fatal:', err);
     process.exitCode = 1;
   })

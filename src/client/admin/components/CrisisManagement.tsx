@@ -1,6 +1,18 @@
 import { useState, useEffect } from 'react';
 import { getJson, HttpError } from '../../shared/http';
-import { AlertTriangle, Activity, Users, FileText, TrendingUp, Clock, RefreshCw, ChevronDown, ChevronUp, ArrowUpCircle, MessageSquare } from 'react-feather';
+import {
+  AlertTriangle,
+  Activity,
+  Users,
+  FileText,
+  TrendingUp,
+  Clock,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  ArrowUpCircle,
+  MessageSquare,
+} from 'react-feather';
 import EscalationComposer from './escalations/EscalationComposer';
 import FlaggedMessageRow, { useFlaggedMessageEvents } from './FlaggedMessageRow';
 import RiskCheckLadder from './RiskCheckLadder';
@@ -81,7 +93,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
     clinicalReviews: [],
     crisisEvents: [],
     interventionActions: [],
-    riskScoreHistory: []
+    riskScoreHistory: [],
   });
   const [activeTab, setActiveTab] = useState('overview');
   const [expandedSessions, setExpandedSessions] = useState(new Set());
@@ -102,8 +114,12 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
 
   useEffect(() => {
     getJson<{ counts?: { draft?: number } }>('/admin/api/adverse-events?status=draft')
-      .then(d => { if (d?.counts) setAeDrafts(d.counts.draft ?? 0); })
-      .catch(() => { /* best-effort */ });
+      .then((d) => {
+        if (d?.counts) setAeDrafts(d.counts.draft ?? 0);
+      })
+      .catch(() => {
+        /* best-effort */
+      });
   }, []);
 
   useEffect(() => {
@@ -113,9 +129,9 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
   // Keep the adjudication widget's verdicts in the fetched copy after a save
   // so a re-render (filters, expand/collapse) does not drop them.
   const updateEventAdjudications = (eventId: string, next: AdjudicationSummary[]) => {
-    setData(prev => ({
+    setData((prev) => ({
       ...prev,
-      crisisEvents: prev.crisisEvents.map(e => (e.event_id === eventId ? { ...e, adjudications: next } : e)),
+      crisisEvents: prev.crisisEvents.map((e) => (e.event_id === eventId ? { ...e, adjudications: next } : e)),
     }));
   };
 
@@ -128,7 +144,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
         clinicalReviews: crisisData.clinicalReviews?.length || 0,
         crisisEvents: crisisData.crisisEvents?.length || 0,
         interventionActions: crisisData.interventionActions?.length || 0,
-        riskScoreHistory: crisisData.riskScoreHistory?.length || 0
+        riskScoreHistory: crisisData.riskScoreHistory?.length || 0,
       });
       setData(crisisData);
     } catch (err: unknown) {
@@ -161,14 +177,14 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
   // Filter crisis events. Message-origin events (origin='thread_message',
   // session_id NULL) are excluded from the session grouping — they render in
   // the dedicated Flagged Messages section below.
-  const filteredEvents = data.crisisEvents.filter(event => {
+  const filteredEvents = data.crisisEvents.filter((event) => {
     if (event.origin === 'thread_message' || event.session_id === null) return false;
     if (filterSeverity !== 'all' && event.severity !== filterSeverity) return false;
     return true;
   });
 
   // Filter clinical reviews
-  const filteredReviews = data.clinicalReviews.filter(review => {
+  const filteredReviews = data.clinicalReviews.filter((review) => {
     if (filterStatus !== 'all' && review.status !== filterStatus) return false;
     return true;
   });
@@ -232,9 +248,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
             <AlertTriangle className="text-red-600" size={32} />
             Crisis Management Dashboard
           </h1>
-          <p className="text-gray-600 mt-1">
-            Monitor and manage all crisis-related events, interventions, and reviews
-          </p>
+          <p className="text-gray-600 mt-1">Monitor and manage all crisis-related events, interventions, and reviews</p>
           {aeDrafts > 0 && (
             <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
               <FileText size={14} />
@@ -269,7 +283,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
               <p className="text-sm text-gray-600">Clinical Reviews</p>
               <p className="text-2xl font-bold text-blue-600">{data.clinicalReviews.length}</p>
               <p className="text-xs text-gray-500">
-                {data.clinicalReviews.filter(r => r.status === 'pending').length} pending
+                {data.clinicalReviews.filter((r) => r.status === 'pending').length} pending
               </p>
             </div>
             <FileText className="text-blue-500" size={32} />
@@ -306,8 +320,8 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
               { id: 'events', label: 'Crisis Events', icon: AlertTriangle },
               { id: 'reviews', label: 'Clinical Reviews', icon: FileText },
               { id: 'interventions', label: 'Interventions', icon: Activity },
-              { id: 'risk-history', label: 'Risk History', icon: TrendingUp }
-            ].map(tab => {
+              { id: 'risk-history', label: 'Risk History', icon: TrendingUp },
+            ].map((tab) => {
               const Icon = tab.icon;
               return (
                 <button
@@ -340,7 +354,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                     Flagged Messages
                   </h3>
                   <div className="space-y-2">
-                    {flaggedMessages.events.map(event => (
+                    {flaggedMessages.events.map((event) => (
                       <FlaggedMessageRow
                         key={event.event_id}
                         event={event}
@@ -353,42 +367,46 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
               <div>
                 <h3 className="text-lg font-semibold mb-4">Recent Crisis Activity</h3>
                 <div className="space-y-3">
-                  {data.crisisEvents.filter(e => e.origin !== 'thread_message').slice(0, 10).map(event => (
-                    <div key={event.event_id} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${getSeverityColor(event.severity)}`}>
-                              {event.severity || 'N/A'}
-                            </span>
-                            <span className="text-sm font-semibold text-gray-700">
-                              {event.event_type.replace(/_/g, ' ').toUpperCase()}
-                            </span>
-                            {event.risk_score && (
-                              <span className={`text-sm font-semibold ${getRiskScoreColor(event.risk_score)}`}>
-                                Risk: {event.risk_score}
+                  {data.crisisEvents
+                    .filter((e) => e.origin !== 'thread_message')
+                    .slice(0, 10)
+                    .map((event) => (
+                      <div key={event.event_id} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <span
+                                className={`px-3 py-1 rounded-full text-xs font-medium ${getSeverityColor(event.severity)}`}
+                              >
+                                {event.severity || 'N/A'}
                               </span>
-                            )}
+                              <span className="text-sm font-semibold text-gray-700">
+                                {event.event_type.replace(/_/g, ' ').toUpperCase()}
+                              </span>
+                              {event.risk_score && (
+                                <span className={`text-sm font-semibold ${getRiskScoreColor(event.risk_score)}`}>
+                                  Risk: {event.risk_score}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-600">
+                              Session: <code className="bg-white px-2 py-1 rounded text-xs">{event.session_id}</code>
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Triggered by {event.triggered_by} via {event.trigger_method} at{' '}
+                              {formatDate(event.created_at)}
+                            </p>
+                            {event.notes && <p className="text-sm text-gray-700 mt-2 italic">{event.notes}</p>}
+                            <CrisisAdjudication
+                              eventId={event.event_id}
+                              adjudications={event.adjudications}
+                              compact
+                              onSaved={(next) => updateEventAdjudications(event.event_id, next)}
+                            />
                           </div>
-                          <p className="text-sm text-gray-600">
-                            Session: <code className="bg-white px-2 py-1 rounded text-xs">{event.session_id}</code>
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Triggered by {event.triggered_by} via {event.trigger_method} at {formatDate(event.created_at)}
-                          </p>
-                          {event.notes && (
-                            <p className="text-sm text-gray-700 mt-2 italic">{event.notes}</p>
-                          )}
-                          <CrisisAdjudication
-                            eventId={event.event_id}
-                            adjudications={event.adjudications}
-                            compact
-                            onSaved={next => updateEventAdjudications(event.event_id, next)}
-                          />
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </div>
             </div>
@@ -433,16 +451,16 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                     {expandedSessions.has(sessionId) && (
                       <div className="border-t bg-gray-50 p-4">
                         <div className="space-y-3">
-                          {events.map(event => (
+                          {events.map((event) => (
                             <div key={event.event_id} className="bg-white p-4 rounded-lg border">
                               <div className="flex items-start justify-between mb-2">
                                 <div className="flex items-center gap-2">
-                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(event.severity)}`}>
+                                  <span
+                                    className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(event.severity)}`}
+                                  >
                                     {event.severity || 'N/A'}
                                   </span>
-                                  <span className="text-sm font-semibold">
-                                    {event.event_type.replace(/_/g, ' ')}
-                                  </span>
+                                  <span className="text-sm font-semibold">{event.event_type.replace(/_/g, ' ')}</span>
                                 </div>
                                 {event.risk_score && (
                                   <span className={`text-lg font-bold ${getRiskScoreColor(event.risk_score)}`}>
@@ -466,35 +484,39 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                               {Boolean(event.risk_factors) && (
                                 <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
                                   <strong>Risk Factors:</strong>
-                                  <pre className="mt-1 whitespace-pre-wrap">{JSON.stringify(event.risk_factors, null, 2)}</pre>
+                                  <pre className="mt-1 whitespace-pre-wrap">
+                                    {JSON.stringify(event.risk_factors, null, 2)}
+                                  </pre>
                                 </div>
                               )}
 
                               {Boolean(event.intervention_details) && (
                                 <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
                                   <strong>Intervention Details:</strong>
-                                  <pre className="mt-1 whitespace-pre-wrap">{JSON.stringify(event.intervention_details, null, 2)}</pre>
+                                  <pre className="mt-1 whitespace-pre-wrap">
+                                    {JSON.stringify(event.intervention_details, null, 2)}
+                                  </pre>
                                 </div>
                               )}
 
-                              {event.notes && (
-                                <p className="mt-2 text-sm italic text-gray-700">{event.notes}</p>
-                              )}
+                              {event.notes && <p className="mt-2 text-sm italic text-gray-700">{event.notes}</p>}
 
                               <CrisisAdjudication
                                 eventId={event.event_id}
                                 adjudications={event.adjudications}
-                                onSaved={next => updateEventAdjudications(event.event_id, next)}
+                                onSaved={(next) => updateEventAdjudications(event.event_id, next)}
                               />
 
                               <div className="mt-3">
                                 <button
-                                  onClick={() => setEscalateFor({
-                                    crisisEventId: Number(event.event_id),
-                                    sessionId: event.session_id,
-                                    clientId: event.client_user_id ?? event.user_id ?? null,
-                                    clientName: event.username ?? null,
-                                  })}
+                                  onClick={() =>
+                                    setEscalateFor({
+                                      crisisEventId: Number(event.event_id),
+                                      sessionId: event.session_id,
+                                      clientId: event.client_user_id ?? event.user_id ?? null,
+                                      clientName: event.username ?? null,
+                                    })
+                                  }
                                   className="inline-flex items-center gap-1.5 text-sm font-medium text-royal hover:text-navy"
                                 >
                                   <ArrowUpCircle size={15} />
@@ -517,9 +539,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                 ))}
 
                 {filteredEvents.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">
-                    No crisis events found
-                  </div>
+                  <div className="text-center py-12 text-gray-500">No crisis events found</div>
                 )}
               </div>
             </div>
@@ -556,7 +576,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {filteredReviews.map(review => (
+                    {filteredReviews.map((review) => (
                       <tr key={review.review_id} className="hover:bg-gray-50">
                         <td className="px-6 py-4">
                           <code className="text-xs bg-gray-100 px-2 py-1 rounded">
@@ -577,9 +597,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">
-                          {formatDate(review.requested_at)}
-                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{formatDate(review.requested_at)}</td>
                         <td className="px-6 py-4 text-sm">{review.assigned_to || 'Unassigned'}</td>
                       </tr>
                     ))}
@@ -587,9 +605,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                 </table>
 
                 {filteredReviews.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">
-                    No clinical reviews found
-                  </div>
+                  <div className="text-center py-12 text-gray-500">No clinical reviews found</div>
                 )}
               </div>
             </div>
@@ -611,16 +627,14 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {data.interventionActions.map(action => (
+                    {data.interventionActions.map((action) => (
                       <tr key={action.action_id} className="hover:bg-gray-50">
                         <td className="px-6 py-4">
                           <code className="text-xs bg-gray-100 px-2 py-1 rounded">
                             {action.session_id.substring(0, 12)}...
                           </code>
                         </td>
-                        <td className="px-6 py-4 text-sm font-medium">
-                          {action.action_type.replace(/_/g, ' ')}
-                        </td>
+                        <td className="px-6 py-4 text-sm font-medium">{action.action_type.replace(/_/g, ' ')}</td>
                         <td className="px-6 py-4">
                           {action.risk_score && (
                             <span className={`font-semibold ${getRiskScoreColor(action.risk_score)}`}>
@@ -629,9 +643,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                           )}
                         </td>
                         <td className="px-6 py-4 text-sm">{action.performed_by}</td>
-                        <td className="px-6 py-4 text-sm text-gray-600">
-                          {formatDate(action.performed_at)}
-                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{formatDate(action.performed_at)}</td>
                         <td className="px-6 py-4 text-sm">{action.outcome || 'N/A'}</td>
                       </tr>
                     ))}
@@ -639,9 +651,7 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                 </table>
 
                 {data.interventionActions.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">
-                    No interventions recorded
-                  </div>
+                  <div className="text-center py-12 text-gray-500">No interventions recorded</div>
                 )}
               </div>
             </div>
@@ -662,62 +672,64 @@ export default function CrisisManagement({ onOpenMessages }: CrisisManagementPro
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {data.riskScoreHistory.map(history => {
+                    {data.riskScoreHistory.map((history) => {
                       const f = (history.score_factors ?? {}) as Record<string, unknown>;
                       const method = typeof f.method === 'string' ? f.method : null;
                       const context = typeof f.llm_context === 'string' ? f.llm_context : null;
                       const reasoning = typeof f.llm_reasoning === 'string' ? f.llm_reasoning : null;
                       return (
-                      <tr key={history.history_id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4">
-                          <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                            {history.session_id.substring(0, 12)}...
-                          </code>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`text-lg font-bold ${getRiskScoreColor(history.risk_score)}`}>
-                            {history.risk_score}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(history.severity)}`}>
-                            {history.severity || 'N/A'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-600">
-                          {formatDate(history.calculated_at)}
-                        </td>
-                        <td className="px-6 py-4 max-w-md">
-                          <div className="flex flex-wrap items-center gap-1 mb-1">
-                            {method && (
-                              <span className="px-1.5 py-0.5 rounded text-xs font-mono bg-gray-100 text-gray-600">{method}</span>
-                            )}
-                            {context && (
-                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${context === 'genuine' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                                {context}
-                              </span>
-                            )}
-                          </div>
-                          {reasoning && <p className="text-xs text-gray-600">{reasoning}</p>}
-                          <details className="text-xs">
-                            <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
-                              Raw factors
-                            </summary>
-                            <pre className="mt-2 p-2 bg-gray-100 rounded overflow-x-auto">
-                              {JSON.stringify(history.score_factors, null, 2)}
-                            </pre>
-                          </details>
-                        </td>
-                      </tr>
+                        <tr key={history.history_id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4">
+                            <code className="text-xs bg-gray-100 px-2 py-1 rounded">
+                              {history.session_id.substring(0, 12)}...
+                            </code>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`text-lg font-bold ${getRiskScoreColor(history.risk_score)}`}>
+                              {history.risk_score}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(history.severity)}`}
+                            >
+                              {history.severity || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-600">{formatDate(history.calculated_at)}</td>
+                          <td className="px-6 py-4 max-w-md">
+                            <div className="flex flex-wrap items-center gap-1 mb-1">
+                              {method && (
+                                <span className="px-1.5 py-0.5 rounded text-xs font-mono bg-gray-100 text-gray-600">
+                                  {method}
+                                </span>
+                              )}
+                              {context && (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-xs font-medium ${context === 'genuine' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}
+                                >
+                                  {context}
+                                </span>
+                              )}
+                            </div>
+                            {reasoning && <p className="text-xs text-gray-600">{reasoning}</p>}
+                            <details className="text-xs">
+                              <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
+                                Raw factors
+                              </summary>
+                              <pre className="mt-2 p-2 bg-gray-100 rounded overflow-x-auto">
+                                {JSON.stringify(history.score_factors, null, 2)}
+                              </pre>
+                            </details>
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
                 </table>
 
                 {data.riskScoreHistory.length === 0 && (
-                  <div className="text-center py-12 text-gray-500">
-                    No risk score history recorded
-                  </div>
+                  <div className="text-center py-12 text-gray-500">No risk score history recorded</div>
                 )}
               </div>
             </div>

@@ -63,11 +63,14 @@ export default function logsRoutes(): Router {
 
       const userId = req.session?.userId || null;
       if (sessionIds.size > 0) {
-        log.info({
-          userId,
-          username: req.session?.username,
-          sessionCount: sessionIds.size,
-        }, 'Processing batch logs with user context');
+        log.info(
+          {
+            userId,
+            username: req.session?.username,
+            sessionCount: sessionIds.size,
+          },
+          'Processing batch logs with user context',
+        );
       }
 
       // Ensure every referenced session exists (with a default configuration)
@@ -98,7 +101,8 @@ export default function logsRoutes(): Router {
           const { isNonStudyUser } = await import('../../utils/harness.js');
           // Sandbox accounts' sessions are stamped is_demo too (C3/s7).
           await createActiveRealtimeSession(
-            sessionId, userId,
+            sessionId,
+            userId,
             isNonStudyUser(req.session?.userRole, req.session?.username) || req.session?.isSandbox === true,
           );
           recordSessionOwnership(req, sessionId);
@@ -135,8 +139,9 @@ export default function logsRoutes(): Router {
       res.sendStatus(200);
 
       setImmediate(() => {
-        void processInsertedMessages(insertedMessages).catch(err =>
-          log.error({ err }, 'post-persist crisis/emission processing failed'));
+        void processInsertedMessages(insertedMessages).catch((err) =>
+          log.error({ err }, 'post-persist crisis/emission processing failed'),
+        );
       });
     } catch (err) {
       log.error({ err }, 'Failed to insert batch logs into DB');
@@ -147,7 +152,7 @@ export default function logsRoutes(): Router {
   // Crisis detection + admin socket fan-out for freshly persisted messages.
   // Runs off the request path (fire-and-forget).
   async function processInsertedMessages(
-    insertedMessages: Awaited<ReturnType<typeof insertMessagesBatch>>
+    insertedMessages: Awaited<ReturnType<typeof insertMessagesBatch>>,
   ): Promise<void> {
     {
       // ========== MULTI-LAYERED CRISIS DETECTION ==========
@@ -172,31 +177,45 @@ export default function logsRoutes(): Router {
       // ========== END CRISIS DETECTION ==========
 
       // ========== SOCKET.IO EVENT EMISSION ==========
-      type MsgSummary = { message_id: number; role: string; message_type: string; content: string | null; content_redacted: string | null; created_at: Date };
+      type MsgSummary = {
+        message_id: number;
+        role: string;
+        message_type: string;
+        content: string | null;
+        content_redacted: string | null;
+        created_at: Date;
+      };
       const sessionGroups: Record<string, MsgSummary[]> = {};
-      insertedMessages.forEach(msg => {
+      insertedMessages.forEach((msg) => {
         if (!sessionGroups[msg.session_id]) sessionGroups[msg.session_id] = [];
         sessionGroups[msg.session_id].push({
           message_id: msg.message_id,
           role: msg.role,
           message_type: msg.message_type,
-          content: msg.content,                   // Original for therapists
+          content: msg.content, // Original for therapists
           content_redacted: msg.content_redacted, // Redacted for researchers (may be null initially)
           created_at: msg.created_at,
         });
       });
 
-      await Promise.all(Object.entries(sessionGroups).map(async ([sessionId, msgs]) => {
-        global.io.to(`session:${sessionId}`).emit('messages:new', { sessionId, messages: msgs });
-        // Emit the ABSOLUTE count (not a delta) so it reconciles the live count
-        // the sideband has been incrementing between flushes — no double-counting.
-        const totalMessages = await getSessionMessageCount(sessionId);
-        void broadcastAdminEventForSession(global.io, 'session:activity', {
-          sessionId,
-          totalMessages,
-          lastActivity: new Date(),
-        }, sessionId);
-      }));
+      await Promise.all(
+        Object.entries(sessionGroups).map(async ([sessionId, msgs]) => {
+          global.io.to(`session:${sessionId}`).emit('messages:new', { sessionId, messages: msgs });
+          // Emit the ABSOLUTE count (not a delta) so it reconciles the live count
+          // the sideband has been incrementing between flushes — no double-counting.
+          const totalMessages = await getSessionMessageCount(sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:activity',
+            {
+              sessionId,
+              totalMessages,
+              lastActivity: new Date(),
+            },
+            sessionId,
+          );
+        }),
+      );
       // ========== END SOCKET.IO EVENT EMISSION ==========
     }
   }

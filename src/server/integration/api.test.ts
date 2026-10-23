@@ -27,7 +27,10 @@ const SYSTEM_CONFIG_ROWS = [
   },
   {
     config_key: 'voices',
-    config_value: { voices: [{ value: 'cedar', label: 'Cedar', description: 'Warm', enabled: true }], default_voice: 'cedar' },
+    config_value: {
+      voices: [{ value: 'cedar', label: 'Cedar', description: 'Warm', enabled: true }],
+      default_voice: 'cedar',
+    },
   },
 ];
 
@@ -72,7 +75,10 @@ describe('public config routes', () => {
     // hasPreview, so it can hide the play control for voices that ship no clip.
     expect(res.body.voices).toEqual([
       expect.objectContaining({
-        value: 'cedar', label: 'Cedar', description: 'Warm', hasPreview: true,
+        value: 'cedar',
+        label: 'Cedar',
+        description: 'Warm',
+        hasPreview: true,
       }),
     ]);
     expect(res.body.default_voice).toBe('cedar');
@@ -197,7 +203,10 @@ describe('bug-report screenshots', () => {
   // ingest key keeps the route configured without touching the network.
   const UUID = '123e4567-e89b-12d3-a456-426614174000';
   let savedKey: string | undefined;
-  beforeAll(() => { savedKey = process.env.FLIGHTDECK_INGEST_KEY; process.env.FLIGHTDECK_INGEST_KEY = 'test-key'; });
+  beforeAll(() => {
+    savedKey = process.env.FLIGHTDECK_INGEST_KEY;
+    process.env.FLIGHTDECK_INGEST_KEY = 'test-key';
+  });
   afterAll(() => {
     if (savedKey === undefined) delete process.env.FLIGHTDECK_INGEST_KEY;
     else process.env.FLIGHTDECK_INGEST_KEY = savedKey;
@@ -211,9 +220,7 @@ describe('bug-report screenshots', () => {
   });
 
   it('rejects non-multipart bodies (400)', async () => {
-    const res = await request(app)
-      .post(`/api/bug-report/${UUID}/screenshots`)
-      .send({ nope: true });
+    const res = await request(app).post(`/api/bug-report/${UUID}/screenshots`).send({ nope: true });
     expect(res.status).toBe(400);
   });
 
@@ -446,9 +453,7 @@ describe('app wiring', () => {
 
   it('parses JSON bodies and validates input', async () => {
     // No session -> auth/validation should reject rather than 500 on a bad body.
-    const res = await request(app)
-      .post('/api/auth/login')
-      .send({ username: '', password: '' });
+    const res = await request(app).post('/api/auth/login').send({ username: '', password: '' });
     expect([400, 401]).toContain(res.status);
   });
 });

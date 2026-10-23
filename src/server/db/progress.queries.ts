@@ -20,7 +20,7 @@ export async function getUserLastSessionAt(userId: number): Promise<Date | null>
     `SELECT MAX(COALESCE(ended_at, created_at)) AS last_session_at
      FROM therapy_sessions
      WHERE user_id = $1 AND status = 'ended'`,
-    [userId]
+    [userId],
   );
   return result.rows[0]?.last_session_at ?? null;
 }
@@ -48,9 +48,9 @@ export async function getUserWeeklySessionCounts(userId: number, weeks = 8): Pro
       AND date_trunc('week', COALESCE(ts.ended_at, ts.created_at)) = w.week_start
      GROUP BY w.week_start
      ORDER BY w.week_start ASC`,
-    [userId, weeks]
+    [userId, weeks],
   );
-  return result.rows.map(row => ({ week_start: row.week_start, sessions: parseInt(row.sessions, 10) }));
+  return result.rows.map((row) => ({ week_start: row.week_start, sessions: parseInt(row.sessions, 10) }));
 }
 
 export interface OwnProgress {
@@ -68,15 +68,14 @@ export interface OwnProgress {
 /** Everything the participant progress home needs, fetched in parallel.
  *  Self-scoped by design: callers must pass the SESSION user's id. */
 export async function getOwnProgress(userId: number): Promise<OwnProgress> {
-  const [sessionCount, lastSessionAt, scaleHistory, moodTrajectory, weeklySessions, safetyPlan] =
-    await Promise.all([
-      countUserEndedSessions(userId),
-      getUserLastSessionAt(userId),
-      getUserScaleHistory(userId, 12),
-      getUserMoodTrajectory(userId, 30),
-      getUserWeeklySessionCounts(userId, 8),
-      getUserLatestSafetyPlan(userId),
-    ]);
+  const [sessionCount, lastSessionAt, scaleHistory, moodTrajectory, weeklySessions, safetyPlan] = await Promise.all([
+    countUserEndedSessions(userId),
+    getUserLastSessionAt(userId),
+    getUserScaleHistory(userId, 12),
+    getUserMoodTrajectory(userId, 30),
+    getUserWeeklySessionCounts(userId, 8),
+    getUserLatestSafetyPlan(userId),
+  ]);
   return {
     session_count: sessionCount,
     last_session_at: lastSessionAt,
@@ -110,7 +109,7 @@ export async function listUserWorksheetInstances(userId: number, limit = 50): Pr
      WHERE ts.user_id = $1
      ORDER BY wi.created_at DESC
      LIMIT $2`,
-    [userId, limit]
+    [userId, limit],
   );
   return result.rows;
 }

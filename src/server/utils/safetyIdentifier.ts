@@ -24,10 +24,9 @@ const cache = new Map<string, string>();
  * research team's contact details instead of "check your connection".
  */
 export function isIdentifierBlockedError(err: unknown, responseText?: string): boolean {
-  const haystack = [
-    err instanceof Error ? err.message : typeof err === 'string' ? err : '',
-    responseText ?? '',
-  ].join(' ').toLowerCase();
+  const haystack = [err instanceof Error ? err.message : typeof err === 'string' ? err : '', responseText ?? '']
+    .join(' ')
+    .toLowerCase();
   if (!haystack) return false;
   return (
     haystack.includes('identifier_blocked') ||
@@ -44,10 +43,7 @@ export async function safetyIdentifierForSession(sessionId: string): Promise<str
 
   let seed = `anon-session:${sessionId}`;
   try {
-    const result = await pool.query(
-      `SELECT user_id FROM therapy_sessions WHERE session_id = $1`,
-      [sessionId]
-    );
+    const result = await pool.query(`SELECT user_id FROM therapy_sessions WHERE session_id = $1`, [sessionId]);
     const userId = result.rows[0]?.user_id;
     if (userId) seed = `user:${userId}`;
   } catch {

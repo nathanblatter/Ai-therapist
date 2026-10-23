@@ -7,15 +7,27 @@ vi.mock('../../config/db.js', () => ({
 }));
 
 const mocks = vi.hoisted(() => ({
-  getStudyOpsSummary: vi.fn().mockResolvedValue({ enrollment: {}, arm_balance: {}, sessions_per_participant: {}, conditions: [], deviations: {} }),
+  getStudyOpsSummary: vi.fn().mockResolvedValue({
+    enrollment: {},
+    arm_balance: {},
+    sessions_per_participant: {},
+    conditions: [],
+    deviations: {},
+  }),
   listDeviations: vi.fn().mockResolvedValue([]),
   createDeviation: vi.fn().mockResolvedValue({ deviation_id: 1 }),
   updateDeviation: vi.fn().mockResolvedValue({ deviation_id: 1 }),
   deleteDeviation: vi.fn().mockResolvedValue(true),
   scanForDeviations: vi.fn().mockResolvedValue({ inserted: 0 }),
   getStudyProtocol: vi.fn().mockResolvedValue({
-    enrollment_target: 40, expected_sessions_per_participant: 4, study_start: null, study_end: null,
-    arm_imbalance_threshold: 0.15, protocol_id: '2025-519-BYU', principal_investigator: 'PI Name', study_title: null,
+    enrollment_target: 40,
+    expected_sessions_per_participant: 4,
+    study_start: null,
+    study_end: null,
+    arm_imbalance_threshold: 0.15,
+    protocol_id: '2025-519-BYU',
+    principal_investigator: 'PI Name',
+    study_title: null,
   }),
 }));
 vi.mock('../../db/index.js', () => mocks);
@@ -39,7 +51,7 @@ function appAs(role: string | null) {
   return app;
 }
 
-beforeEach(() => Object.values(mocks).forEach(m => m.mockClear()));
+beforeEach(() => Object.values(mocks).forEach((m) => m.mockClear()));
 
 describe('study-ops role guards', () => {
   it('summary is readable by therapist and researcher, not participant', async () => {
@@ -61,21 +73,24 @@ describe('study-ops role guards', () => {
 
 describe('deviation validation', () => {
   it('rejects an auto-only category on manual create', async () => {
-    const res = await request(appAs('researcher')).post('/admin/api/study-ops/deviations')
+    const res = await request(appAs('researcher'))
+      .post('/admin/api/study-ops/deviations')
       .send({ category: 'arm_imbalance', description: 'x' });
     expect(res.status).toBe(400);
     expect(mocks.createDeviation).not.toHaveBeenCalled();
   });
 
   it('accepts a valid manual deviation', async () => {
-    const res = await request(appAs('researcher')).post('/admin/api/study-ops/deviations')
+    const res = await request(appAs('researcher'))
+      .post('/admin/api/study-ops/deviations')
       .send({ category: 'procedure', severity: 'minor', description: 'consent form typo' });
     expect(res.status).toBe(201);
     expect(mocks.createDeviation).toHaveBeenCalled();
   });
 
   it('requires a description', async () => {
-    const res = await request(appAs('researcher')).post('/admin/api/study-ops/deviations')
+    const res = await request(appAs('researcher'))
+      .post('/admin/api/study-ops/deviations')
       .send({ category: 'procedure', description: '   ' });
     expect(res.status).toBe(400);
   });
@@ -87,7 +102,8 @@ describe('deviation validation', () => {
   });
 
   it('validates protocol numeric bounds', async () => {
-    const res = await request(appAs('researcher')).put('/admin/api/study-ops/protocol')
+    const res = await request(appAs('researcher'))
+      .put('/admin/api/study-ops/protocol')
       .send({ enrollment_target: 40, expected_sessions_per_participant: 4, arm_imbalance_threshold: 2 });
     expect(res.status).toBe(400);
   });
@@ -96,21 +112,38 @@ describe('deviation validation', () => {
     const base = { enrollment_target: 40, expected_sessions_per_participant: 4, arm_imbalance_threshold: 0.1 };
     let res = await request(appAs('researcher')).put('/admin/api/study-ops/protocol').send(base);
     expect(res.status).toBe(200);
-    expect(configMocks.updateSystemConfig).toHaveBeenLastCalledWith('study_protocol', expect.objectContaining({
-      protocol_id: '2025-519-BYU', principal_investigator: 'PI Name', study_title: null,
-    }), 'tester');
+    expect(configMocks.updateSystemConfig).toHaveBeenLastCalledWith(
+      'study_protocol',
+      expect.objectContaining({
+        protocol_id: '2025-519-BYU',
+        principal_investigator: 'PI Name',
+        study_title: null,
+      }),
+      'tester',
+    );
 
-    res = await request(appAs('researcher')).put('/admin/api/study-ops/protocol')
+    res = await request(appAs('researcher'))
+      .put('/admin/api/study-ops/protocol')
       .send({ ...base, principal_investigator: '', study_title: '  AI Therapist Phase 1 ' });
     expect(res.status).toBe(200);
-    expect(configMocks.updateSystemConfig).toHaveBeenLastCalledWith('study_protocol', expect.objectContaining({
-      protocol_id: '2025-519-BYU', principal_investigator: null, study_title: 'AI Therapist Phase 1',
-    }), 'tester');
+    expect(configMocks.updateSystemConfig).toHaveBeenLastCalledWith(
+      'study_protocol',
+      expect.objectContaining({
+        protocol_id: '2025-519-BYU',
+        principal_investigator: null,
+        study_title: 'AI Therapist Phase 1',
+      }),
+      'tester',
+    );
   });
 
   it('rejects a non-string study identifier', async () => {
-    const res = await request(appAs('researcher')).put('/admin/api/study-ops/protocol')
-      .send({ enrollment_target: 40, expected_sessions_per_participant: 4, arm_imbalance_threshold: 0.1, protocol_id: 42 });
+    const res = await request(appAs('researcher')).put('/admin/api/study-ops/protocol').send({
+      enrollment_target: 40,
+      expected_sessions_per_participant: 4,
+      arm_imbalance_threshold: 0.1,
+      protocol_id: 42,
+    });
     expect(res.status).toBe(400);
   });
 });

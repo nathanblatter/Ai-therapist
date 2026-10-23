@@ -21,7 +21,8 @@ export default function opsRoutes(): Router {
       const snapshot = opsMetrics.snapshot();
 
       const requests: Record<string, number> = {};
-      const errorRates: Record<string, { rate_4xx: number; rate_5xx: number; count_4xx: number; count_5xx: number }> = {};
+      const errorRates: Record<string, { rate_4xx: number; rate_5xx: number; count_4xx: number; count_5xx: number }> =
+        {};
       const latency: Record<string, { p50_ms: number | null; p95_ms: number | null }> = {};
       for (const [group, stats] of Object.entries(snapshot)) {
         requests[group] = stats.requests;

@@ -20,10 +20,23 @@
 /** crisis_events rows (+ joined session_name/username) — everything EXCEPT
  *  risk_factors, intervention_details, notes. */
 export const CRISIS_EVENT_SUMMARY_FIELDS = [
-  'event_id', 'session_id', 'session_name', 'user_id', 'username',
-  'client_user_id', 'origin', 'thread_message_id', 'thread_id',
-  'event_type', 'severity', 'previous_severity', 'risk_score',
-  'previous_risk_score', 'triggered_by', 'trigger_method', 'message_id',
+  'event_id',
+  'session_id',
+  'session_name',
+  'user_id',
+  'username',
+  'client_user_id',
+  'origin',
+  'thread_message_id',
+  'thread_id',
+  'event_type',
+  'severity',
+  'previous_severity',
+  'risk_score',
+  'previous_risk_score',
+  'triggered_by',
+  'trigger_method',
+  'message_id',
   'created_at',
   // WP2 adjudication verdicts (adjudicator id + verdict + timestamp; the
   // free-text note never rides on the list query).
@@ -33,14 +46,25 @@ export const CRISIS_EVENT_SUMMARY_FIELDS = [
 /** risk_score_history rows — everything EXCEPT score_factors (stage-2 LLM
  *  reasoning can quote messages). */
 export const RISK_HISTORY_SUMMARY_FIELDS = [
-  'history_id', 'session_id', 'session_name', 'message_id',
-  'risk_score', 'severity', 'calculated_at',
+  'history_id',
+  'session_id',
+  'session_name',
+  'message_id',
+  'risk_score',
+  'severity',
+  'calculated_at',
 ] as const;
 
 /** intervention_actions rows — everything EXCEPT action_details and notes. */
 export const INTERVENTION_SUMMARY_FIELDS = [
-  'action_id', 'session_id', 'session_name', 'action_type', 'risk_score',
-  'performed_by', 'performed_at', 'outcome',
+  'action_id',
+  'session_id',
+  'session_name',
+  'action_type',
+  'risk_score',
+  'performed_by',
+  'performed_at',
+  'outcome',
 ] as const;
 
 /** risk_check_steps rows (ai-therapist-198) — everything EXCEPT `answer`,
@@ -49,24 +73,47 @@ export const INTERVENTION_SUMMARY_FIELDS = [
  *  tier viewers still see which rungs were asked, the band each resolved to,
  *  and when — enough to know an assessment happened and where it landed. */
 export const RISK_CHECK_STEP_SUMMARY_FIELDS = [
-  'check_step_id', 'session_id', 'crisis_event_id', 'step', 'risk_band',
-  'sequence', 'created_at',
+  'check_step_id',
+  'session_id',
+  'crisis_event_id',
+  'step',
+  'risk_band',
+  'sequence',
+  'created_at',
 ] as const;
 
 /** Flagged message-origin crisis events (/api/admin/messaging/flagged) —
  *  everything EXCEPT risk_factors and notes. */
 export const FLAGGED_EVENT_SUMMARY_FIELDS = [
-  'event_id', 'origin', 'session_id', 'thread_message_id', 'thread_id',
-  'client_user_id', 'user_id', 'username', 'event_type', 'severity',
-  'risk_score', 'triggered_by', 'trigger_method', 'created_at',
+  'event_id',
+  'origin',
+  'session_id',
+  'thread_message_id',
+  'thread_id',
+  'client_user_id',
+  'user_id',
+  'username',
+  'event_type',
+  'severity',
+  'risk_score',
+  'triggered_by',
+  'trigger_method',
+  'created_at',
 ] as const;
 
 /** The assembled session-insights payload — summary, affect curve (derived
  *  non-verbatim affect, ai-therapist-86), safety plan, screeners, and the
  *  authored-note pointer; everything soap_* / notes_* stays therapist-only. */
 export const SESSION_INSIGHTS_SUMMARY_FIELDS = [
-  'session_id', 'user_id', 'summary', 'affect_curve', 'model',
-  'created_at', 'updated_at', 'safety_plan', 'scale_responses',
+  'session_id',
+  'user_id',
+  'summary',
+  'affect_curve',
+  'model',
+  'created_at',
+  'updated_at',
+  'safety_plan',
+  'scale_responses',
   'authored_note',
 ] as const;
 
@@ -75,7 +122,7 @@ export const SESSION_INSIGHTS_SUMMARY_FIELDS = [
  *  client "render if present" checks behave the same as before). */
 export function projectRows<T extends Record<string, unknown>>(
   rows: T[],
-  allow: readonly string[]
+  allow: readonly string[],
 ): Record<string, unknown>[] {
   return rows.map((row) => projectRow(row, allow));
 }
@@ -83,7 +130,7 @@ export function projectRows<T extends Record<string, unknown>>(
 /** Single-object variant of projectRows. */
 export function projectRow<T extends Record<string, unknown>>(
   row: T,
-  allow: readonly string[]
+  allow: readonly string[],
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const field of allow) {

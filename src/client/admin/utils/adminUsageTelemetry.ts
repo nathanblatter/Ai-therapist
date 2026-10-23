@@ -14,12 +14,7 @@
 // never throws, batched flushes with sendBeacon on page hide, capped per
 // page load, server rate-limits as a backstop.
 
-export type AdminUsageKind =
-  | 'view_open'
-  | 'view_heartbeat'
-  | 'overlay_open'
-  | 'js_error'
-  | 'api_error';
+export type AdminUsageKind = 'view_open' | 'view_heartbeat' | 'overlay_open' | 'js_error' | 'api_error';
 
 const FLUSH_MS = 15_000;
 const HEARTBEAT_MS = 30_000;
@@ -102,7 +97,9 @@ function flush(useBeacon = false): void {
       body,
       keepalive: true,
       credentials: 'include',
-    }).catch(() => { /* fire-and-forget */ });
+    }).catch(() => {
+      /* fire-and-forget */
+    });
   } catch {
     // Telemetry must never break the app.
   }

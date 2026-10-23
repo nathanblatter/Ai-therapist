@@ -22,8 +22,12 @@ export const DATA_ACCESS_ACTION_LABELS: Record<string, string> = {
 /** Label for one row; the chart bundle (ai-therapist-199) shares the
  *  'export' action and is told apart by detail.kind. */
 export function actionLabel(action: string, detail?: unknown): string {
-  if (action === 'export' && detail && typeof detail === 'object' &&
-      (detail as { kind?: unknown }).kind === 'client_chart') {
+  if (
+    action === 'export' &&
+    detail &&
+    typeof detail === 'object' &&
+    (detail as { kind?: unknown }).kind === 'client_chart'
+  ) {
     return 'Chart exported';
   }
   return DATA_ACCESS_ACTION_LABELS[action] ?? action;
@@ -59,7 +63,7 @@ export const TD = 'px-4 py-2 text-sm text-gray-700 align-top';
 export default function ParticipantAccessHistory({ userId, pageSize = 25, onViewSession }: Props) {
   const [offset, setOffset] = useState(0);
   const { data, loading, error } = useAdminFetch<HistoryResponse>(
-    `/admin/api/audit/data-access/participant/${userId}?limit=${pageSize}&offset=${offset}`
+    `/admin/api/audit/data-access/participant/${userId}?limit=${pageSize}&offset=${offset}`,
   );
 
   if (loading && !data) return <p className="text-sm text-gray-500">Loading access history…</p>;
@@ -78,7 +82,9 @@ export default function ParticipantAccessHistory({ userId, pageSize = 25, onView
   return (
     <div className="space-y-4">
       {data.actors.length === 0 ? (
-        <p className="text-sm text-gray-500">No staff member has viewed, played, or exported this participant&apos;s data.</p>
+        <p className="text-sm text-gray-500">
+          No staff member has viewed, played, or exported this participant&apos;s data.
+        </p>
       ) : (
         <div>
           <p className="text-xs font-medium text-gray-500 mb-2">By actor and action</p>
@@ -86,18 +92,32 @@ export default function ParticipantAccessHistory({ userId, pageSize = 25, onView
             <table className="min-w-full divide-y divide-gray-200" role="table">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className={TH} scope="col">Who</th>
-                  <th className={TH} scope="col">Role</th>
-                  <th className={TH} scope="col">Action</th>
-                  <th className={`${TH} text-right`} scope="col">Times</th>
-                  <th className={TH} scope="col">First</th>
-                  <th className={TH} scope="col">Most recent</th>
+                  <th className={TH} scope="col">
+                    Who
+                  </th>
+                  <th className={TH} scope="col">
+                    Role
+                  </th>
+                  <th className={TH} scope="col">
+                    Action
+                  </th>
+                  <th className={`${TH} text-right`} scope="col">
+                    Times
+                  </th>
+                  <th className={TH} scope="col">
+                    First
+                  </th>
+                  <th className={TH} scope="col">
+                    Most recent
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
-                {data.actors.map(a => (
+                {data.actors.map((a) => (
                   <tr key={`${a.accessed_by ?? 'none'}-${a.action}`}>
-                    <td className={`${TD} font-medium text-gray-900`}>{a.actor_username ?? (a.accessed_by !== null ? `user #${a.accessed_by}` : 'unknown')}</td>
+                    <td className={`${TD} font-medium text-gray-900`}>
+                      {a.actor_username ?? (a.accessed_by !== null ? `user #${a.accessed_by}` : 'unknown')}
+                    </td>
                     <td className={TD}>{a.role ?? '—'}</td>
                     <td className={TD}>{actionLabel(a.action)}</td>
                     <td className={`${TD} text-right tabular-nums`}>{a.count}</td>
@@ -115,25 +135,39 @@ export default function ParticipantAccessHistory({ userId, pageSize = 25, onView
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-medium text-gray-500">Every access, newest first</p>
-            <p className="text-xs text-gray-500">{offset + 1}–{pageEnd} of {total}</p>
+            <p className="text-xs text-gray-500">
+              {offset + 1}–{pageEnd} of {total}
+            </p>
           </div>
           <div className="overflow-x-auto border border-gray-200 rounded-lg">
             <table className="min-w-full divide-y divide-gray-200" role="table">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className={TH} scope="col">When</th>
-                  <th className={TH} scope="col">Who</th>
-                  <th className={TH} scope="col">Action</th>
-                  <th className={TH} scope="col">Session</th>
-                  <th className={TH} scope="col">Detail</th>
+                  <th className={TH} scope="col">
+                    When
+                  </th>
+                  <th className={TH} scope="col">
+                    Who
+                  </th>
+                  <th className={TH} scope="col">
+                    Action
+                  </th>
+                  <th className={TH} scope="col">
+                    Session
+                  </th>
+                  <th className={TH} scope="col">
+                    Detail
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
-                {data.rows.map(r => (
+                {data.rows.map((r) => (
                   <tr key={r.id}>
                     <td className={`${TD} whitespace-nowrap`}>{formatDateTime(r.created_at)}</td>
                     <td className={TD}>
-                      <span className="font-medium text-gray-900">{r.actor_username ?? (r.accessed_by !== null ? `user #${r.accessed_by}` : 'unknown')}</span>
+                      <span className="font-medium text-gray-900">
+                        {r.actor_username ?? (r.accessed_by !== null ? `user #${r.accessed_by}` : 'unknown')}
+                      </span>
                       {r.role && <span className="text-xs text-gray-500 ml-1">({r.role})</span>}
                     </td>
                     <td className={TD}>{actionLabel(r.action, r.detail)}</td>
@@ -146,7 +180,9 @@ export default function ParticipantAccessHistory({ userId, pageSize = 25, onView
                         ) : (
                           <span title={r.session_id}>{r.session_id.slice(0, 8)}…</span>
                         )
-                      ) : '—'}
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className={`${TD} text-xs text-gray-500`}>{detailSummary(r.detail) || '—'}</td>
                   </tr>

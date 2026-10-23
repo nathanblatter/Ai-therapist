@@ -9,11 +9,7 @@
 // All 503 when the integration is not configured (env-gated like /join-study).
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import {
-  getQualtricsSyncConfig,
-  getSyncRunStatus,
-  runSync,
-} from '../../services/qualtricsSync.service.js';
+import { getQualtricsSyncConfig, getSyncRunStatus, runSync } from '../../services/qualtricsSync.service.js';
 import { getSurveyDataOverview } from '../../services/surveyData.service.js';
 import { getQualtricsLinkageStats, getUnlinkedFinishedResponses } from '../../db/index.js';
 
@@ -43,9 +39,7 @@ export default function qualtricsSyncRoutes(): Router {
         success: failed.length === 0,
         results,
         // surfaced so the client toast can say WHICH survey failed and why
-        error: failed.length > 0
-          ? failed.map((f) => `${f.surveyRole}: ${f.error}`).join('; ')
-          : undefined,
+        error: failed.length > 0 ? failed.map((f) => `${f.surveyRole}: ${f.error}`).join('; ') : undefined,
       });
     } catch (error) {
       log.error({ err: error }, 'sync run failed');
@@ -62,15 +56,10 @@ export default function qualtricsSyncRoutes(): Router {
       });
     }
     try {
-      const [linkage, unlinked] = await Promise.all([
-        getQualtricsLinkageStats(),
-        getUnlinkedFinishedResponses(),
-      ]);
+      const [linkage, unlinked] = await Promise.all([getQualtricsLinkageStats(), getUnlinkedFinishedResponses()]);
       res.json({
         configured: true,
-        surveys: Object.fromEntries(
-          Object.entries(config.surveys).map(([role, id]) => [role, id])
-        ),
+        surveys: Object.fromEntries(Object.entries(config.surveys).map(([role, id]) => [role, id])),
         sync: getSyncRunStatus(),
         linkage,
         unlinked,
@@ -98,19 +87,14 @@ export default function qualtricsSyncRoutes(): Router {
       const userId = parseInt(req.params.userId, 10);
       if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
       try {
-        const { deleteParticipantSurveyData } = await import(
-          '../../services/qualtricsDeletion.service.js'
-        );
-        const result = await deleteParticipantSurveyData(
-          userId,
-          req.session.username ?? 'unknown-researcher'
-        );
+        const { deleteParticipantSurveyData } = await import('../../services/qualtricsDeletion.service.js');
+        const result = await deleteParticipantSurveyData(userId, req.session.username ?? 'unknown-researcher');
         res.status(result.remoteFailed > 0 ? 207 : 200).json(result);
       } catch (error) {
         log.error({ err: error }, '[QualtricsDeletion] request failed');
         res.status(500).json({ error: 'Deletion failed' });
       }
-    }
+    },
   );
 
   router.get('/admin/api/qualtrics/data', requireRole('researcher'), async (_req, res) => {

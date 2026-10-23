@@ -50,7 +50,7 @@ export async function assertAssignable(
   q: Queryable,
   memberId: number,
   clientId: number,
-  memberRole: CareTeamRole
+  memberRole: CareTeamRole,
 ): Promise<void> {
   const roles = await q.query(
     `SELECT
@@ -61,7 +61,7 @@ export async function assertAssignable(
        (SELECT o.kind FROM organizations o
           JOIN users u ON u.organization_id = o.org_id
          WHERE u.userid = $1) AS member_org_kind`,
-    [memberId, clientId]
+    [memberId, clientId],
   );
   const { therapist_role, client_role, member_org, client_org, member_org_kind } = roles.rows[0] as {
     therapist_role: string | null;
@@ -77,14 +77,10 @@ export async function assertAssignable(
     throw new CaseloadRoleError(`User ${clientId} is not a participant account`);
   }
   if (member_org !== client_org) {
-    throw new CaseloadRoleError(
-      `User ${memberId} and user ${clientId} belong to different organizations`
-    );
+    throw new CaseloadRoleError(`User ${memberId} and user ${clientId} belong to different organizations`);
   }
   if (memberRole === 'caseworker' && member_org_kind === 'research') {
-    throw new CaseloadRoleError(
-      'Caseworker caseload assignments are not allowed in a research organization'
-    );
+    throw new CaseloadRoleError('Caseworker caseload assignments are not allowed in a research organization');
   }
 }
 
@@ -95,13 +91,13 @@ export async function insertAssignment(
   memberId: number,
   clientId: number,
   assignedBy: number | null,
-  memberRole: CareTeamRole
+  memberRole: CareTeamRole,
 ): Promise<void> {
   await q.query(
     `INSERT INTO therapist_clients (therapist_id, client_id, assigned_by, member_role)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT DO NOTHING`,
-    [memberId, clientId, assignedBy, memberRole]
+    [memberId, clientId, assignedBy, memberRole],
   );
 }
 
@@ -120,7 +116,7 @@ export async function insertCaseloadAuditRow(q: Queryable, input: CaseloadAuditI
       input.actorUserId,
       input.actorUsername,
       input.detail === undefined ? null : JSON.stringify(input.detail),
-    ]
+    ],
   );
 }
 
@@ -136,7 +132,7 @@ export async function assignClient(
   memberId: number,
   clientId: number,
   assignedBy: number | null,
-  memberRole: CareTeamRole = 'therapist'
+  memberRole: CareTeamRole = 'therapist',
 ): Promise<void> {
   await assertAssignable(pool, memberId, clientId, memberRole);
   if (memberRole === 'therapist') {
@@ -147,7 +143,7 @@ export async function assignClient(
       `INSERT INTO therapist_clients (therapist_id, client_id, assigned_by)
        VALUES ($1, $2, $3)
        ON CONFLICT DO NOTHING`,
-      [memberId, clientId, assignedBy]
+      [memberId, clientId, assignedBy],
     );
     return;
   }
@@ -168,7 +164,7 @@ export async function assignClientAudited(
   clientId: number,
   assignedBy: number | null,
   audit: Omit<CaseloadAuditInput, 'action' | 'therapistId' | 'clientId'> & { detail?: unknown },
-  memberRole: CareTeamRole = 'therapist'
+  memberRole: CareTeamRole = 'therapist',
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -194,19 +190,19 @@ export async function assignClientAudited(
 
 /** Remove a client from a therapist's caseload. Returns true if a row was deleted. */
 export async function unassignClient(therapistId: number, clientId: number): Promise<boolean> {
-  const result = await pool.query(
-    'DELETE FROM therapist_clients WHERE therapist_id = $1 AND client_id = $2',
-    [therapistId, clientId]
-  );
+  const result = await pool.query('DELETE FROM therapist_clients WHERE therapist_id = $1 AND client_id = $2', [
+    therapistId,
+    clientId,
+  ]);
   return (result.rowCount ?? 0) > 0;
 }
 
 /** Is this client on this therapist's caseload? */
 export async function isAssigned(therapistId: number, clientId: number): Promise<boolean> {
-  const result = await pool.query(
-    'SELECT 1 FROM therapist_clients WHERE therapist_id = $1 AND client_id = $2',
-    [therapistId, clientId]
-  );
+  const result = await pool.query('SELECT 1 FROM therapist_clients WHERE therapist_id = $1 AND client_id = $2', [
+    therapistId,
+    clientId,
+  ]);
   return (result.rowCount ?? 0) > 0;
 }
 
@@ -214,7 +210,7 @@ export async function isAssigned(therapistId: number, clientId: number): Promise
 export async function getCaseloadClientIds(therapistId: number): Promise<number[]> {
   const result = await pool.query(
     'SELECT client_id FROM therapist_clients WHERE therapist_id = $1 ORDER BY client_id',
-    [therapistId]
+    [therapistId],
   );
   return result.rows.map((row: { client_id: number }) => row.client_id);
 }
@@ -222,15 +218,12 @@ export async function getCaseloadClientIds(therapistId: number): Promise<number[
 /** Care-team member ids for a client, optionally restricted to one
  *  member_role. Shared implementation behind the three role-specific exports
  *  below (kept as distinct names because the tiers they back differ). */
-async function getCareTeamMemberIds(
-  clientId: number,
-  role?: 'therapist' | 'caseworker'
-): Promise<number[]> {
+async function getCareTeamMemberIds(clientId: number, role?: 'therapist' | 'caseworker'): Promise<number[]> {
   const result = await pool.query(
     `SELECT therapist_id FROM therapist_clients
      WHERE client_id = $1 AND ($2::text IS NULL OR member_role = $2)
      ORDER BY therapist_id`,
-    [clientId, role ?? null]
+    [clientId, role ?? null],
   );
   return result.rows.map((row: { therapist_id: number }) => row.therapist_id);
 }
@@ -256,7 +249,7 @@ export async function getCareTeam(clientId: number): Promise<CareTeamMember[]> {
      JOIN users u ON u.userid = tc.therapist_id
      WHERE tc.client_id = $1
      ORDER BY tc.member_role, u.username`,
-    [clientId]
+    [clientId],
   );
   return result.rows;
 }
@@ -270,7 +263,7 @@ export async function listCaseload(therapistId: number): Promise<CaseloadClient[
      JOIN users u ON u.userid = tc.client_id
      WHERE tc.therapist_id = $1
      ORDER BY tc.assigned_at DESC, u.userid`,
-    [therapistId]
+    [therapistId],
   );
   return result.rows as CaseloadClient[];
 }
@@ -290,11 +283,10 @@ export async function listAllAssignments(orgId?: number | null): Promise<Caseloa
      JOIN users c ON c.userid = tc.client_id
      WHERE ($1::int IS NULL OR t.organization_id = $1)
      ORDER BY t.username, c.username`,
-    [orgId ?? null]
+    [orgId ?? null],
   );
   return result.rows as CaseloadAssignment[];
 }
-
 
 export type CaseloadAuditAction =
   | 'assign'
@@ -336,7 +328,7 @@ export async function insertCaseloadAudit(input: CaseloadAuditInput): Promise<vo
         input.actorUserId,
         input.actorUsername,
         input.detail === undefined ? null : JSON.stringify(input.detail),
-      ]
+      ],
     );
   } catch (err) {
     console.error('[caseload-audit] failed to record audit row:', err);
@@ -369,7 +361,7 @@ export async function listCaseloadAudit(limit = 200, orgId?: number | null): Pro
          AND u.organization_id = $2))
      ORDER BY audit_id DESC
      LIMIT $1`,
-    [limit, orgId ?? null]
+    [limit, orgId ?? null],
   );
   return result.rows as CaseloadAuditRow[];
 }

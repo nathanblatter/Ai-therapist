@@ -22,7 +22,16 @@ function mint(claims: Record<string, unknown>, kid = 'k1', alg = 'ES256'): strin
 }
 
 const now = 1_800_000_000;
-const good = { iss: 'https://squawk.test', sub: 'usr:abc', aud: 'svc_test', scope: 'role:participant', preferred_username: 'p0042', iat: now - 5, exp: now + 3600, jti: 'j1' };
+const good = {
+  iss: 'https://squawk.test',
+  sub: 'usr:abc',
+  aud: 'svc_test',
+  scope: 'role:participant',
+  preferred_username: 'p0042',
+  iat: now - 5,
+  exp: now + 3600,
+  jti: 'j1',
+};
 
 let jwksCalls = 0;
 beforeEach(() => {
@@ -32,7 +41,10 @@ beforeEach(() => {
     const url = String(input);
     if (url.endsWith('/.well-known/jwks.json')) {
       jwksCalls++;
-      return new Response(JSON.stringify({ keys: [{ ...jwk, kid: 'k1', alg: 'ES256', use: 'sig' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ keys: [{ ...jwk, kid: 'k1', alg: 'ES256', use: 'sig' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     }
     return new Response('{"error":"not_found"}', { status: 404 });
   }) as typeof fetch);
@@ -85,11 +97,17 @@ describe('service token and errors', () => {
       }
       if (url.includes('/v1/login/password')) {
         expect((init?.headers as Record<string, string>).authorization).toBe('Bearer svc-tok');
-        return new Response(JSON.stringify({ error: 'password_rejected', detail: 'wrong username or password' }), { status: 401 });
+        return new Response(JSON.stringify({ error: 'password_rejected', detail: 'wrong username or password' }), {
+          status: 401,
+        });
       }
       return new Response('{}', { status: 500 });
     }) as typeof fetch);
-    await expect(squawk.loginPassword('lc', 'p0042', 'nope')).rejects.toMatchObject({ name: 'SquawkError', status: 401, code: 'password_rejected' });
+    await expect(squawk.loginPassword('lc', 'p0042', 'nope')).rejects.toMatchObject({
+      name: 'SquawkError',
+      status: 401,
+      code: 'password_rejected',
+    });
     await expect(squawk.loginPassword('lc', 'p0042', 'nope')).rejects.toBeInstanceOf(squawk.SquawkError);
     expect(tokenCalls).toBe(1);
   });
@@ -102,7 +120,9 @@ describe('service token and errors', () => {
       const url = String(input);
       if (url.endsWith('/v1/token')) {
         tokenCalls++;
-        return new Response(JSON.stringify({ access_token: `svc-tok-${tokenCalls}`, expires_in: 900 }), { status: 200 });
+        return new Response(JSON.stringify({ access_token: `svc-tok-${tokenCalls}`, expires_in: 900 }), {
+          status: 200,
+        });
       }
       calls++;
       if (calls === 1) return new Response(JSON.stringify({ error: 'invalid_token' }), { status: 401 });

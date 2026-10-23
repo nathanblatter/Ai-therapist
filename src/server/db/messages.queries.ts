@@ -31,13 +31,13 @@ export async function insertMessage(
   messageType: string,
   content: string | null,
   contentRedacted: string | null,
-  metadata: Record<string, unknown> | null = null
+  metadata: Record<string, unknown> | null = null,
 ): Promise<MessageRow> {
   const result = await pool.query<MessageRow>(
     `INSERT INTO messages (session_id, role, message_type, content, content_redacted, metadata, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
      RETURNING *`,
-    [sessionId, role, messageType, content, contentRedacted, metadata]
+    [sessionId, role, messageType, content, contentRedacted, metadata],
   );
   return result.rows[0];
 }
@@ -54,7 +54,15 @@ export async function insertMessagesBatch(messages: InsertMessageInput[]): Promi
         `INSERT INTO messages (session_id, role, message_type, content, content_redacted, metadata, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`,
-        [msg.session_id, msg.role, msg.message_type, msg.content, msg.content_redacted, msg.metadata, msg.created_at || new Date()]
+        [
+          msg.session_id,
+          msg.role,
+          msg.message_type,
+          msg.content,
+          msg.content_redacted,
+          msg.metadata,
+          msg.created_at || new Date(),
+        ],
       );
       results.push(result.rows[0]);
     }
@@ -83,14 +91,14 @@ export async function getSessionMessages(sessionId: string, redactedOnly = false
      FROM messages
      WHERE session_id = $1
      ORDER BY created_at ASC`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows;
 }
 
 /** The owning session + participant of a message (caseload enforcement). */
 export async function getMessageOwner(
-  messageId: number | string
+  messageId: number | string,
 ): Promise<{ session_id: string; user_id: number | null; owner_organization_id: number | null } | null> {
   // owner_organization_id: the owner's users.organization_id, joined in so the
   // caseload middleware's researcher org check costs no extra query.
@@ -100,17 +108,16 @@ export async function getMessageOwner(
      LEFT JOIN therapy_sessions ts ON ts.session_id = m.session_id
      LEFT JOIN users u ON u.userid = ts.user_id
      WHERE m.message_id = $1`,
-    [messageId]
+    [messageId],
   );
   return result.rows[0] ?? null;
 }
 
 /** Number of messages in a session. */
 export async function getSessionMessageCount(sessionId: string): Promise<number> {
-  const result = await pool.query<{ count: string }>(
-    'SELECT COUNT(*) as count FROM messages WHERE session_id = $1',
-    [sessionId]
-  );
+  const result = await pool.query<{ count: string }>('SELECT COUNT(*) as count FROM messages WHERE session_id = $1', [
+    sessionId,
+  ]);
   return parseInt(result.rows[0].count);
 }
 
@@ -122,7 +129,7 @@ export async function updateMessage(
   messageId: number | string,
   newContent: string,
   fieldToUpdate: 'content' | 'content_redacted',
-  editMetadata: Record<string, unknown>
+  editMetadata: Record<string, unknown>,
 ): Promise<MessageRow> {
   if (fieldToUpdate !== 'content' && fieldToUpdate !== 'content_redacted') {
     throw new Error('fieldToUpdate must be either "content" or "content_redacted"');
@@ -145,7 +152,7 @@ export async function updateMessage(
              metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
          WHERE message_id = $4
          RETURNING *`,
-        [newContent, redactedContent, JSON.stringify(editMetadata), messageId]
+        [newContent, redactedContent, JSON.stringify(editMetadata), messageId],
       );
     } else {
       // Researcher edit: update only content_redacted.
@@ -155,7 +162,7 @@ export async function updateMessage(
              metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
          WHERE message_id = $3
          RETURNING *`,
-        [newContent, JSON.stringify(editMetadata), messageId]
+        [newContent, JSON.stringify(editMetadata), messageId],
       );
     }
 
@@ -181,7 +188,7 @@ export async function deleteMessage(messageId: number | string): Promise<Message
 
     const messageResult = await client.query<{ session_id: string }>(
       'SELECT session_id FROM messages WHERE message_id = $1',
-      [messageId]
+      [messageId],
     );
 
     if (messageResult.rows.length === 0) {
@@ -192,7 +199,7 @@ export async function deleteMessage(messageId: number | string): Promise<Message
 
     const countResult = await client.query<{ count: string }>(
       'SELECT COUNT(*) as count FROM messages WHERE session_id = $1',
-      [sessionId]
+      [sessionId],
     );
 
     const messageCount = parseInt(countResult.rows[0].count);
@@ -201,10 +208,9 @@ export async function deleteMessage(messageId: number | string): Promise<Message
       throw new Error('Cannot delete the last message in a session');
     }
 
-    const deleteResult = await client.query<MessageRow>(
-      'DELETE FROM messages WHERE message_id = $1 RETURNING *',
-      [messageId]
-    );
+    const deleteResult = await client.query<MessageRow>('DELETE FROM messages WHERE message_id = $1 RETURNING *', [
+      messageId,
+    ]);
 
     await client.query('COMMIT');
     return deleteResult.rows[0];

@@ -4,10 +4,10 @@
  * This service is used when voice is disabled in system configuration
  */
 
-import { getOpenAIKey } from "../config/secrets.js";
-import { insertTurnLatency, getActiveSessionIdsAmong } from "../db/index.js";
-import OpenAI from "openai";
-import dotenv from "dotenv";
+import { getOpenAIKey } from '../config/secrets.js';
+import { insertTurnLatency, getActiveSessionIdsAmong } from '../db/index.js';
+import OpenAI from 'openai';
+import dotenv from 'dotenv';
 dotenv.config();
 
 interface ChatMessage {
@@ -38,8 +38,12 @@ export interface ChatTurnResult {
 // (App.tsx). Only these ride back to the browser as toolEvents; data-only
 // tools (memory, RAG, logging) stay server-side.
 const CLIENT_RENDERED_TOOLS = new Set([
-  'show_resource_card', 'start_thought_record', 'show_journaling_prompt',
-  'display_session_recap', 'create_safety_plan', 'administer_scale',
+  'show_resource_card',
+  'start_thought_record',
+  'show_journaling_prompt',
+  'display_session_recap',
+  'create_safety_plan',
+  'administer_scale',
   'create_custom_worksheet',
 ]);
 
@@ -79,7 +83,10 @@ export class ChatSessionUnavailableError extends Error {
   /** Copy safe to show a participant verbatim. */
   readonly participantMessage: string;
 
-  constructor(reason: string, participantMessage = 'This conversation is no longer available. Please start a new session.') {
+  constructor(
+    reason: string,
+    participantMessage = 'This conversation is no longer available. Please start a new session.',
+  ) {
     super(reason);
     this.name = 'ChatSessionUnavailableError';
     this.participantMessage = participantMessage;
@@ -88,8 +95,10 @@ export class ChatSessionUnavailableError extends Error {
 
 /** Type guard usable across the dynamic-import boundary (instanceof survives, but be defensive). */
 export function isChatSessionUnavailableError(err: unknown): err is ChatSessionUnavailableError {
-  return err instanceof ChatSessionUnavailableError
-    || (err instanceof Error && (err as { code?: string }).code === 'session_unavailable');
+  return (
+    err instanceof ChatSessionUnavailableError ||
+    (err instanceof Error && (err as { code?: string }).code === 'session_unavailable')
+  );
 }
 
 /**
@@ -149,7 +158,7 @@ export async function rehydrateChatSession(sessionId: string): Promise<ChatHisto
   conversationHistory.set(sessionId, history);
   console.log(
     `[ChatTherapy] Session ${sessionId.substring(0, 12)}... rehydrated from DB ` +
-    `(${history.length - 1} prior message(s))`
+      `(${history.length - 1} prior message(s))`,
   );
   return history;
 }
@@ -163,8 +172,8 @@ export function initializeChatSession(sessionId: string, systemPrompt: string): 
   conversationHistory.set(sessionId, [
     {
       role: 'system',
-      content: systemPrompt
-    }
+      content: systemPrompt,
+    },
   ]);
   console.log(`[ChatTherapy] Session ${sessionId.substring(0, 12)}... initialized`);
 }
@@ -176,9 +185,9 @@ export function initializeChatSession(sessionId: string, systemPrompt: string): 
  * properties, no additionalProperties:false) — so strict is pinned off.
  */
 export function toResponsesTools(
-  defs: Array<{ name: string; description: string; parameters: Record<string, unknown> }>
+  defs: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
 ): Array<Record<string, unknown>> {
-  return defs.map(d => ({
+  return defs.map((d) => ({
     type: 'function',
     name: d.name,
     description: d.description,
@@ -196,33 +205,42 @@ let inlineModerationDisabled = false;
  *  the crisis pipeline until these scores earn a role via calibration. */
 function checkOutputModeration(sessionId: string, response: ResponsesResult): void {
   try {
-    const modOutput = (response as unknown as {
-      moderation?: { output?: { type?: string; flagged?: boolean; category_scores?: Record<string, number> } };
-    }).moderation?.output;
+    const modOutput = (
+      response as unknown as {
+        moderation?: { output?: { type?: string; flagged?: boolean; category_scores?: Record<string, number> } };
+      }
+    ).moderation?.output;
     if (!modOutput || modOutput.type === 'error') return;
     const scores = modOutput.category_scores ?? {};
     const selfHarmMax = Math.max(
-      scores['self-harm'] ?? 0, scores['self-harm/intent'] ?? 0, scores['self-harm/instructions'] ?? 0
+      scores['self-harm'] ?? 0,
+      scores['self-harm/intent'] ?? 0,
+      scores['self-harm/instructions'] ?? 0,
     );
     if (modOutput.flagged || selfHarmMax >= 0.4) {
-      console.warn('[ChatTherapy] output moderation elevated', JSON.stringify({
-        sessionId, flagged: modOutput.flagged === true,
-        self_harm: scores['self-harm'] ?? 0,
-        self_harm_intent: scores['self-harm/intent'] ?? 0,
-        self_harm_instructions: scores['self-harm/instructions'] ?? 0,
-      }));
+      console.warn(
+        '[ChatTherapy] output moderation elevated',
+        JSON.stringify({
+          sessionId,
+          flagged: modOutput.flagged === true,
+          self_harm: scores['self-harm'] ?? 0,
+          self_harm_intent: scores['self-harm/intent'] ?? 0,
+          self_harm_instructions: scores['self-harm/instructions'] ?? 0,
+        }),
+      );
     }
-  } catch { /* observational only */ }
+  } catch {
+    /* observational only */
+  }
 }
 
 /** Fire-and-forget cost tracking for one Responses call (telemetry audit). */
 function recordChatUsage(sessionId: string, usage: ResponsesResult['usage']): void {
   import('../db/index.js')
-    .then(({ recordLlmUsage }) => recordLlmUsage(
-      sessionId, 'chat', CHAT_MODEL,
-      usage?.input_tokens ?? null, usage?.output_tokens ?? null,
-    ))
-    .catch(err => console.error('[ChatTherapy] Failed to record LLM usage (non-fatal):', err));
+    .then(({ recordLlmUsage }) =>
+      recordLlmUsage(sessionId, 'chat', CHAT_MODEL, usage?.input_tokens ?? null, usage?.output_tokens ?? null),
+    )
+    .catch((err) => console.error('[ChatTherapy] Failed to record LLM usage (non-fatal):', err));
 }
 
 /**
@@ -238,7 +256,7 @@ function recordChatLatency(sessionId: string, turnIndex: number, startedAt: Date
     firstOutputAt: finishedAt,
     responseDoneAt: finishedAt,
     channel: 'chat',
-  }).catch(err => console.error('[ChatTherapy] Failed to record turn latency (non-fatal):', err));
+  }).catch((err) => console.error('[ChatTherapy] Failed to record turn latency (non-fatal):', err));
 }
 
 /**
@@ -287,10 +305,7 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
     // message. Order is load-bearing: injected guidance must reach the model
     // before the turn it is meant to steer, so we can no longer collapse all
     // system messages to a single leading one.
-    const input: ChatHistoryItem[] = [
-      ...messages,
-      { role: 'user', content: userMessage },
-    ];
+    const input: ChatHistoryItem[] = [...messages, { role: 'user', content: userMessage }];
 
     // Inline moderation (ai-therapist-167): free omni-moderation scores for
     // input AND generated output ride the same response — the output side is
@@ -303,7 +318,9 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
     try {
       const { safetyIdentifierForSession } = await import('../utils/safetyIdentifier.js');
       safetyIdentifier = await safetyIdentifierForSession(sessionId);
-    } catch { /* proceed without */ }
+    } catch {
+      /* proceed without */
+    }
 
     const callModel = async (toolChoice: 'auto' | 'none') => {
       const baseParams = {
@@ -320,7 +337,11 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
           moderation: { model: 'omni-moderation-latest' },
         });
       } catch (err) {
-        if (err instanceof Error && /moderation/i.test(err.message) && /unknown|unexpected|unsupported|invalid/i.test(err.message)) {
+        if (
+          err instanceof Error &&
+          /moderation/i.test(err.message) &&
+          /unknown|unexpected|unsupported|invalid/i.test(err.message)
+        ) {
           inlineModerationDisabled = true;
           console.error('[ChatTherapy] inline moderation param rejected; disabled for this process:', err.message);
           return client.responses.create(baseParams);
@@ -340,7 +361,7 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
     recordChatUsage(sessionId, response.usage);
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const calls = (response.output ?? []).filter(o => o.type === 'function_call' && o.name && o.call_id);
+      const calls = (response.output ?? []).filter((o) => o.type === 'function_call' && o.name && o.call_id);
       if (calls.length === 0) break;
 
       // Replay the model's raw output items VERBATIM (not reconstructed
@@ -368,7 +389,9 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
         }
 
         const outputItem: Record<string, unknown> = {
-          type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result),
+          type: 'function_call_output',
+          call_id: call.call_id,
+          output: JSON.stringify(result),
         };
         input.push(outputItem);
         turnItems.push(outputItem);
@@ -384,7 +407,7 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
 
     // Telemetry pass 3: log the full turn wall time (user request -> final
     // text, including any tool rounds). turn_index = this user turn's ordinal.
-    const turnIndex = messages.filter(m => (m as ChatMessage).role === 'user').length + 1;
+    const turnIndex = messages.filter((m) => (m as ChatMessage).role === 'user').length + 1;
     recordChatLatency(sessionId, turnIndex, turnStartedAt, new Date());
 
     // Persist the turn in order: user message, any tool call/output items,
@@ -398,12 +421,11 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
 
     console.log(
       `[ChatTherapy] Session ${sessionId.substring(0, 12)}... - Message exchanged` +
-      `${toolCallCount > 0 ? ` (${toolCallCount} tool call(s))` : ''}` +
-      ` (${messages.length - 1} items in history)`
+        `${toolCallCount > 0 ? ` (${toolCallCount} tool call(s))` : ''}` +
+        ` (${messages.length - 1} items in history)`,
     );
 
     return { text: assistantMessage, toolEvents };
-
   } catch (error: unknown) {
     console.error('[ChatTherapy] Error generating response:', error);
     const msg = error instanceof Error ? error.message : String(error);

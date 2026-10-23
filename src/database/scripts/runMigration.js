@@ -41,11 +41,10 @@ async function runMigration() {
     `);
 
     console.log('Verified tables:');
-    tablesResult.rows.forEach(row => {
+    tablesResult.rows.forEach((row) => {
       console.log(`  ${row.table_name}`);
     });
     console.log();
-
   } catch (error) {
     console.error('\nMigration failed:', error.message);
     console.error('\nYou can rollback using: node rollbackMigration.js\n');

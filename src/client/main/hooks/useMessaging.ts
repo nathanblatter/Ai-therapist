@@ -70,9 +70,11 @@ export function useMessagingUnread(enabled: boolean): number {
       try {
         const res = await fetch('/api/messaging/threads', { credentials: 'include' });
         if (!res.ok) return;
-        const data = await res.json() as { unread_total: number };
+        const data = (await res.json()) as { unread_total: number };
         if (!cancelled) setUnread(data.unread_total);
-      } catch { /* keep last value */ }
+      } catch {
+        /* keep last value */
+      }
     };
     void refresh();
     const interval = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);

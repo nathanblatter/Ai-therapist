@@ -69,7 +69,9 @@ async function ingest() {
         });
         ok++;
         const isActive = c.active ?? seed.defaultActive;
-        console.log(`  ${isActive ? 'active ' : 'pending'} [${c.kind ?? seed.kind}] ${c.title ?? contentHash.slice(0, 8)}`);
+        console.log(
+          `  ${isActive ? 'active ' : 'pending'} [${c.kind ?? seed.kind}] ${c.title ?? contentHash.slice(0, 8)}`,
+        );
       } catch (err) {
         console.error(`  FAIL ${c.title ?? '(untitled)'}: ${err.message}`);
       }
@@ -80,10 +82,10 @@ async function ingest() {
     `SELECT kind,
             COUNT(*) FILTER (WHERE active IS TRUE) AS active,
             COUNT(*) FILTER (WHERE active IS NOT TRUE) AS pending
-     FROM knowledge_chunks WHERE embedding IS NOT NULL GROUP BY kind ORDER BY kind`
+     FROM knowledge_chunks WHERE embedding IS NOT NULL GROUP BY kind ORDER BY kind`,
   );
   console.log(`Done: ${ok}/${total} embedded this run. Knowledge base by kind:`);
-  rows.forEach(r => console.log(`  ${r.kind}: ${r.active} active, ${r.pending} pending approval`));
+  rows.forEach((r) => console.log(`  ${r.kind}: ${r.active} active, ${r.pending} pending approval`));
 }
 
 ingest()

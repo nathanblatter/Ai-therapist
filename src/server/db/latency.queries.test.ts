@@ -19,13 +19,24 @@ describe('insertTurnLatency', () => {
     const responseDoneAt = new Date('2026-08-13T12:00:04.000Z');
 
     await insertTurnLatency({
-      sessionId: 'sess-1', turnIndex: 3, userDoneAt, firstOutputAt, responseDoneAt, channel: 'realtime',
+      sessionId: 'sess-1',
+      turnIndex: 3,
+      userDoneAt,
+      firstOutputAt,
+      responseDoneAt,
+      channel: 'realtime',
     });
 
-    expect(queryMock).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO turn_latency'),
-      ['sess-1', 3, userDoneAt, firstOutputAt, responseDoneAt, 1250, 4000, 'realtime']
-    );
+    expect(queryMock).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO turn_latency'), [
+      'sess-1',
+      3,
+      userDoneAt,
+      firstOutputAt,
+      responseDoneAt,
+      1250,
+      4000,
+      'realtime',
+    ]);
   });
 
   it('stores a null ttfa_ms when no first output was observed', async () => {
@@ -34,7 +45,11 @@ describe('insertTurnLatency', () => {
     const responseDoneAt = new Date('2026-08-13T12:00:02.000Z');
 
     await insertTurnLatency({
-      sessionId: 'sess-1', userDoneAt, firstOutputAt: null, responseDoneAt, channel: 'realtime',
+      sessionId: 'sess-1',
+      userDoneAt,
+      firstOutputAt: null,
+      responseDoneAt,
+      channel: 'realtime',
     });
 
     const params = queryMock.mock.calls[0][1] as unknown[];
@@ -61,13 +76,15 @@ describe('insertTurnLatency', () => {
 
   it('never throws when the insert fails (fire-and-forget)', async () => {
     queryMock.mockRejectedValueOnce(new Error('db down'));
-    await expect(insertTurnLatency({
-      sessionId: 'sess-1',
-      userDoneAt: new Date(),
-      firstOutputAt: new Date(),
-      responseDoneAt: new Date(),
-      channel: 'chat',
-    })).resolves.toBeUndefined();
+    await expect(
+      insertTurnLatency({
+        sessionId: 'sess-1',
+        userDoneAt: new Date(),
+        firstOutputAt: new Date(),
+        responseDoneAt: new Date(),
+        channel: 'chat',
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -76,7 +93,14 @@ describe('getLatencyStats', () => {
     queryMock.mockResolvedValueOnce({
       rows: [
         { channel: 'chat', turns: '12', p50_ttfa_ms: 2100, p95_ttfa_ms: 5000, p50_total_ms: 2100, p95_total_ms: 5000 },
-        { channel: 'realtime', turns: '40', p50_ttfa_ms: 800, p95_ttfa_ms: 1900, p50_total_ms: 6200, p95_total_ms: 14000 },
+        {
+          channel: 'realtime',
+          turns: '40',
+          p50_ttfa_ms: 800,
+          p95_ttfa_ms: 1900,
+          p50_total_ms: 6200,
+          p95_total_ms: 14000,
+        },
       ],
     });
 
@@ -85,8 +109,12 @@ describe('getLatencyStats', () => {
     expect(queryMock).toHaveBeenCalledWith(expect.stringContaining('FROM turn_latency'), [7]);
     expect(stats).toHaveLength(2);
     expect(stats[1]).toEqual({
-      channel: 'realtime', turns: 40,
-      p50_ttfa_ms: 800, p95_ttfa_ms: 1900, p50_total_ms: 6200, p95_total_ms: 14000,
+      channel: 'realtime',
+      turns: 40,
+      p50_ttfa_ms: 800,
+      p95_ttfa_ms: 1900,
+      p50_total_ms: 6200,
+      p95_total_ms: 14000,
     });
   });
 });
@@ -103,6 +131,6 @@ describe('getSessionLatency', () => {
     const rows = await getSessionLatency('sess-1');
 
     expect(queryMock).toHaveBeenCalledWith(expect.stringContaining('ORDER BY created_at ASC'), ['sess-1']);
-    expect(rows.map(r => r.turn_index)).toEqual([1, 2]);
+    expect(rows.map((r) => r.turn_index)).toEqual([1, 2]);
   });
 });

@@ -45,7 +45,12 @@ import {
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
-import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock, buildToolGuidanceBlock } from '../../utils/promptContext.js';
+import {
+  sanitizeCheckin,
+  buildCheckinBlock,
+  buildMemoryBlock,
+  buildToolGuidanceBlock,
+} from '../../utils/promptContext.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
@@ -58,7 +63,6 @@ import {
   LIVE_DEFAULT_BACKEND_MODEL,
 } from '../../utils/liveSessionConfig.js';
 import { sidebandManager } from '../../services/sidebandManager.service.js';
-
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -126,7 +130,7 @@ export default function liveSessionRoutes(): Router {
         if (!isLiveModel(aiModel)) {
           log.error(
             `system_config.ai_model is '${aiModel}', which is not a GPT-Live model. ` +
-            'Voice sessions cannot start until it is set to a gpt-live-* id.',
+              'Voice sessions cannot start until it is set to a gpt-live-* id.',
           );
           return res.status(409).json({
             error: 'live_not_active',
@@ -201,8 +205,9 @@ export default function liveSessionRoutes(): Router {
         userLanguage = userLanguage || 'en';
 
         if (userId) {
-          updateUserPreferences(userId, userVoice, userLanguage).catch(err =>
-            log.error({ err }, 'Failed to save user preferences'));
+          updateUserPreferences(userId, userVoice, userLanguage).catch((err) =>
+            log.error({ err }, 'Failed to save user preferences'),
+          );
         }
 
         // Assemble the clinical prompt exactly as the Realtime path does, so the
@@ -213,11 +218,13 @@ export default function liveSessionRoutes(): Router {
         const toolDefs = await toolRegistry.getEnabledToolDefinitions();
         const checkin = sanitizeCheckin(req.body?.checkin);
         const memoryBlock = await buildMemoryBlock(userId);
-        const toolGuidance = buildToolGuidanceBlock(toolDefs.map(t => t.name));
+        const toolGuidance = buildToolGuidanceBlock(toolDefs.map((t) => t.name));
         const proactiveOffering = await resolveProactiveOffering();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) +
-          toolGuidance + memoryBlock + buildCheckinBlock(checkin);
+          toolGuidance +
+          memoryBlock +
+          buildCheckinBlock(checkin);
         const activeModality = await getActiveModality();
 
         const systemConfig = await getSystemConfig();
@@ -231,8 +238,7 @@ export default function liveSessionRoutes(): Router {
         // retains the audio for 30 days — so it is enabled for demo, sandbox
         // and simulated sessions only, never for a real participant.
         const { isNonStudyUser } = await import('../../utils/harness.js');
-        const isDemoSession =
-          isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true;
+        const isDemoSession = isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true;
 
         // RECOVERY START. Set when the previous voice session was terminated by
         // OpenAI's content filter (session.closed reason 'content') and the
@@ -243,19 +249,21 @@ export default function liveSessionRoutes(): Router {
         const crisisLine = [
           crisisContact.phone ? `${crisisContact.phone}` : '988',
           crisisContact.text ? `or text ${crisisContact.text}` : '',
-        ].filter(Boolean).join(' ');
+        ]
+          .filter(Boolean)
+          .join(' ');
 
         if (isRecovery && !limitCheck.allowed) {
           log.warn(
             `Session limits BYPASSED for a crisis recovery start (reason: ${limitCheck.reason}). ` +
-            'A content-filter termination is a continuation, not a new session.',
+              'A content-filter termination is a continuation, not a new session.',
           );
         }
 
         if (isRecovery) {
           log.warn(
             `RECOVERY session start for user ${userId ?? 'anonymous'} — the previous voice ` +
-            'session was terminated by the content filter. Resuming in crisis-support mode.',
+              'session was terminated by the content filter. Resuming in crisis-support mode.',
           );
         }
 
@@ -294,7 +302,7 @@ export default function liveSessionRoutes(): Router {
           if (isIdentifierBlockedError(null, errorText)) {
             log.error(
               `BLOCKED SAFETY IDENTIFIER for user ${userId ?? 'anonymous'} — ` +
-              'participant cannot start sessions; study team must re-enroll or contact OpenAI.',
+                'participant cannot start sessions; study team must re-enroll or contact OpenAI.',
             );
             return res.status(403).json({ error: 'identifier_blocked' });
           }
@@ -329,8 +337,7 @@ export default function liveSessionRoutes(): Router {
           await setLiveSessionId(sessionId, liveSessionId);
 
           if (checkin) {
-            setSessionCheckin(sessionId, checkin).catch(err =>
-              log.error({ err }, 'Failed to store check-in'));
+            setSessionCheckin(sessionId, checkin).catch((err) => log.error({ err }, 'Failed to store check-in'));
           }
 
           recordConsent({
@@ -338,11 +345,21 @@ export default function liveSessionRoutes(): Router {
             userId,
             consentVersion: req.session!.consentVersion!,
             recordingEnabled: (systemConfig.features?.session_recording_enabled as boolean | undefined) ?? false,
-          }).catch(err => log.error({ err }, '[Consent] Failed to record per-session consent'));
+          }).catch((err) => log.error({ err }, '[Consent] Failed to record per-session consent'));
 
-          void broadcastAdminEvent(global.io, 'session:created', {
-            sessionId, userId, username, status: 'active', created_at: new Date(),
-          }, userId, 'summary');
+          void broadcastAdminEvent(
+            global.io,
+            'session:created',
+            {
+              sessionId,
+              userId,
+              username,
+              status: 'active',
+              created_at: new Date(),
+            },
+            userId,
+            'summary',
+          );
 
           await upsertSessionConfig(sessionId, {
             voice: userVoice,
@@ -392,41 +409,42 @@ export default function liveSessionRoutes(): Router {
           // the voice path, which it did not under Realtime.
           log.warn(
             'SIDEBAND_ENABLED=false — starting a voice session with NO crisis detection. ' +
-            'This switch is far more dangerous under GPT-Live than it was under Realtime.',
+              'This switch is far more dangerous under GPT-Live than it was under Realtime.',
           );
           // ...and queryable, not just loud in a log nobody reads. Without this
           // an intentionally unmonitored session is indistinguishable on the
           // row from one whose attach simply has not landed yet.
           await markSidebandUnmonitored(
-            sessionId, 'monitoring_disabled: SIDEBAND_ENABLED=false at session start',
+            sessionId,
+            'monitoring_disabled: SIDEBAND_ENABLED=false at session start',
           ).catch((e: unknown) => log.error({ err: e }, 'Failed to record the disabled sideband'));
         } else {
           try {
             await sidebandManager.connectAndWait(sessionId, liveSessionId, apiKey, {
-              model: aiModel, backendModel,
+              model: aiModel,
+              backendModel,
             });
           } catch (err) {
             log.error(
               { err },
-              `Sideband attach FAILED for ${sessionId} — refusing to start an unmonitored ` +
-              'voice session',
+              `Sideband attach FAILED for ${sessionId} — refusing to start an unmonitored ` + 'voice session',
             );
 
             // Hang up the OpenAI side so the participant's browser cannot keep
             // talking to a session we are not watching, and so we stop paying
             // for it.
-            await fetch(
-              `https://api.openai.com/v1/live/sessions/${encodeURIComponent(liveSessionId)}/hangup`,
-              { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` } },
-            ).catch((e: unknown) => log.error({ err: e }, 'hangup after failed attach also failed'));
+            await fetch(`https://api.openai.com/v1/live/sessions/${encodeURIComponent(liveSessionId)}/hangup`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${apiKey}` },
+            }).catch((e: unknown) => log.error({ err: e }, 'hangup after failed attach also failed'));
 
-            await updateSessionStatus(sessionId, 'ended', 'system')
-              .catch((e: unknown) => log.error({ err: e }, 'Failed to mark unmonitored session ended'));
+            await updateSessionStatus(sessionId, 'ended', 'system').catch((e: unknown) =>
+              log.error({ err: e }, 'Failed to mark unmonitored session ended'),
+            );
 
             return res.status(503).json({
               error: 'monitoring_unavailable',
-              message:
-                'We could not start your session right now. Please try again in a moment.',
+              message: 'We could not start your session right now. Please try again in a moment.',
             });
           }
         }
@@ -440,7 +458,7 @@ export default function liveSessionRoutes(): Router {
             sessionId,
             maxDurationMinutes: limitCheck.limits.max_duration_minutes,
             steer: (id, text, respond) => sidebandManager.tryInject(id, 'system', text, respond),
-            teardown: id => sidebandManager.disconnect(id),
+            teardown: (id) => sidebandManager.disconnect(id),
           });
         }
 
@@ -449,7 +467,7 @@ export default function liveSessionRoutes(): Router {
           sdp: sdpAnswer,
           voice: userVoice,
           language: userLanguage,
-          session_limits: limitCheck.allowed ? (limitCheck.limits || null) : null,
+          session_limits: limitCheck.allowed ? limitCheck.limits || null : null,
         });
       } catch (error) {
         log.error({ err: error }, 'Session creation error');

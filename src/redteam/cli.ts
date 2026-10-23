@@ -38,7 +38,15 @@ import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
 import { HarnessClient, type Agent } from './harnessClient.js';
 import { writeReports, printConsole, buildSummaryJson, type RunSummary } from './report.js';
-import { diffRuns, formatDiffConsole, formatDiffMarkdown, normalizeHarnessRun, normalizeSummary, type NormalizedRun, type RunDiff } from './diff.js';
+import {
+  diffRuns,
+  formatDiffConsole,
+  formatDiffMarkdown,
+  normalizeHarnessRun,
+  normalizeSummary,
+  type NormalizedRun,
+  type RunDiff,
+} from './diff.js';
 import { selectSuite, type SuiteEntry } from './scenarios/index.js';
 import type {
   AssertionContext,
@@ -82,20 +90,48 @@ function parseArgs(argv: string[]): RedteamConfig {
         cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' ? v : 'full';
         break;
       }
-      case '--scenario': cfg.scenarioId = next(); break;
-      case '--out': cfg.outDir = next(); break;
-      case '--judge-model': cfg.judgeModel = next(); cfg.judgeModelOverride = cfg.judgeModel; break;
-      case '--seed': cfg.seed = Number(next()); break;
-      case '--variations': cfg.variations = Math.max(1, Number(next()) || 1); break;
-      case '--allow-fail': cfg.allowFail = true; break;
-      case '--dry-run': cfg.dryRun = true; break;
-      case '--baseline': cfg.baseline = next(); break;
-      case '--gate-diff': cfg.gateDiff = true; break;
-      case '--gate-quality': cfg.gateQuality = true; break;
-      case '--voice-text-turns': cfg.voiceTextTurns = true; break;
-      case '--voice-drop-client-midway': cfg.voiceDropClientMidway = true; break;
-      case '--voice-drop-upstream-midway': cfg.voiceDropUpstreamMidway = true; break;
-      default: break;
+      case '--scenario':
+        cfg.scenarioId = next();
+        break;
+      case '--out':
+        cfg.outDir = next();
+        break;
+      case '--judge-model':
+        cfg.judgeModel = next();
+        cfg.judgeModelOverride = cfg.judgeModel;
+        break;
+      case '--seed':
+        cfg.seed = Number(next());
+        break;
+      case '--variations':
+        cfg.variations = Math.max(1, Number(next()) || 1);
+        break;
+      case '--allow-fail':
+        cfg.allowFail = true;
+        break;
+      case '--dry-run':
+        cfg.dryRun = true;
+        break;
+      case '--baseline':
+        cfg.baseline = next();
+        break;
+      case '--gate-diff':
+        cfg.gateDiff = true;
+        break;
+      case '--gate-quality':
+        cfg.gateQuality = true;
+        break;
+      case '--voice-text-turns':
+        cfg.voiceTextTurns = true;
+        break;
+      case '--voice-drop-client-midway':
+        cfg.voiceDropClientMidway = true;
+        break;
+      case '--voice-drop-upstream-midway':
+        cfg.voiceDropUpstreamMidway = true;
+        break;
+      default:
+        break;
     }
   }
   return cfg;
@@ -114,10 +150,10 @@ async function loadCanaries(): Promise<string[]> {
   const prompt = await getSystemPrompt('en', 'chat');
   const headings = prompt
     .split('\n')
-    .filter(l => l.startsWith('## '))
-    .map(l => l.trim());
+    .filter((l) => l.startsWith('## '))
+    .map((l) => l.trim());
   // De-dup and keep only reasonably distinctive headings.
-  return Array.from(new Set(headings)).filter(h => h.length >= 6);
+  return Array.from(new Set(headings)).filter((h) => h.length >= 6);
 }
 
 function buildCtx(
@@ -158,7 +194,12 @@ async function runAssertions(specs: AssertionSpec[] | undefined, ctx: AssertionC
       const r = await spec.run(ctx);
       out.push({ ...r, gating: spec.gating === false ? false : r.gating });
     } catch (err) {
-      out.push({ id: spec.id, passed: false, detail: `assertion threw: ${(err as Error).message}`, gating: spec.gating !== false });
+      out.push({
+        id: spec.id,
+        passed: false,
+        detail: `assertion threw: ${(err as Error).message}`,
+        gating: spec.gating !== false,
+      });
     }
   }
   return out;
@@ -175,7 +216,13 @@ async function runChatScenario(
   canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string; transcript?: Turn[] }> {
+): Promise<{
+  assertions: AssertionResult[];
+  judge: ScenarioResult['judge'];
+  judgeBreaches: boolean;
+  sessionId: string;
+  transcript?: Turn[];
+}> {
   const agent: Agent = client.newAgent();
   await client.loginParticipant(agent);
   await client.acceptConsent(agent);
@@ -216,13 +263,37 @@ async function runChatScenario(
       transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
     }
 
-    const ctx = buildCtx(scenario, sessionId, reply, transcript, client, {}, canaries, pool, classify, cfg, beat.id, extra);
+    const ctx = buildCtx(
+      scenario,
+      sessionId,
+      reply,
+      transcript,
+      client,
+      {},
+      canaries,
+      pool,
+      classify,
+      cfg,
+      beat.id,
+      extra,
+    );
     assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
   }
 
   await client.endChat(agent, sessionId);
 
-  const finalCtx = buildCtx(scenario, sessionId, transcript.at(-1)?.text ?? '', transcript, client, {}, canaries, pool, classify, cfg);
+  const finalCtx = buildCtx(
+    scenario,
+    sessionId,
+    transcript.at(-1)?.text ?? '',
+    transcript,
+    client,
+    {},
+    canaries,
+    pool,
+    classify,
+    cfg,
+  );
   assertions.push(...(await runAssertions(scenario.assertFinal, finalCtx)));
 
   let judge: ScenarioResult['judge'] = null;
@@ -232,7 +303,7 @@ async function runChatScenario(
     if (outcome) {
       judge = outcome.scores;
       assertions.push(...outcome.floorAssertions);
-      judgeBreaches = outcome.floorAssertions.some(a => !a.passed && a.gating);
+      judgeBreaches = outcome.floorAssertions.some((a) => !a.passed && a.gating);
     }
   }
   return { assertions, judge, judgeBreaches, sessionId, transcript };
@@ -249,7 +320,13 @@ async function runRealtimeScenario(
   canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string; transcript?: Turn[] }> {
+): Promise<{
+  assertions: AssertionResult[];
+  judge: ScenarioResult['judge'];
+  judgeBreaches: boolean;
+  sessionId: string;
+  transcript?: Turn[];
+}> {
   const agent: Agent = client.newAgent();
   await client.acceptConsent(agent);
   const sessionId = `redteam_rt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -265,7 +342,19 @@ async function runRealtimeScenario(
     transcript.push({ role: 'user', text: utter, beatId: beat.id });
     transcript.push({ role: 'assistant', text: SAFE_ASSISTANT_STUB, beatId: beat.id });
 
-    const ctx = buildCtx(scenario, sessionId, '', transcript, client, beatPostTimes, canaries, pool, classify, cfg, beat.id);
+    const ctx = buildCtx(
+      scenario,
+      sessionId,
+      '',
+      transcript,
+      client,
+      beatPostTimes,
+      canaries,
+      pool,
+      classify,
+      cfg,
+      beat.id,
+    );
     assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
   }
 
@@ -283,7 +372,7 @@ async function runRealtimeScenario(
     if (outcome) {
       judge = outcome.scores;
       assertions.push(...outcome.floorAssertions);
-      judgeBreaches = outcome.floorAssertions.some(a => !a.passed && a.gating);
+      judgeBreaches = outcome.floorAssertions.some((a) => !a.passed && a.gating);
     }
   }
   return { assertions, judge, judgeBreaches, sessionId, transcript };
@@ -317,7 +406,13 @@ async function runAssistantScenario(
   _canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string; transcript?: Turn[] }> {
+): Promise<{
+  assertions: AssertionResult[];
+  judge: ScenarioResult['judge'];
+  judgeBreaches: boolean;
+  sessionId: string;
+  transcript?: Turn[];
+}> {
   const { ensureAssistantFixtures, ASSISTANT_STAFF, ASSISTANT_STAFF_PASSWORD } = await import('./assistantFixtures.js');
   const { assistantPromptCanaries } = await import('./assistantAssertions.js');
   const { ASSISTANT_MODEL } = await import('../server/services/assistant.service.js');
@@ -353,7 +448,8 @@ async function runAssistantScenario(
     let answer: string;
     let toolCalls: Array<{ name: string; rowCount: number }> = [];
     if (cfg.dryRun) {
-      answer = '[dry-run assistant] I only work with aggregates, scores and statuses from my tools and cannot share transcripts; use the corresponding admin panel.';
+      answer =
+        '[dry-run assistant] I only work with aggregates, scores and statuses from my tools and cannot share transcripts; use the corresponding admin panel.';
     } else {
       const res = await client.assistantTurn(s.agent, s.history);
       answer = res.answer;
@@ -365,19 +461,40 @@ async function runAssistantScenario(
         [s.userId, startedAt],
       );
       const u = rows[0];
-      if (u) cost.add(ASSISTANT_MODEL, { prompt_tokens: Number(u.input_tokens ?? 0), completion_tokens: Number(u.output_tokens ?? 0) });
+      if (u)
+        cost.add(ASSISTANT_MODEL, {
+          prompt_tokens: Number(u.input_tokens ?? 0),
+          completion_tokens: Number(u.output_tokens ?? 0),
+        });
       else cost.estimate(ASSISTANT_MODEL, 2500, 300);
     }
     s.history.push({ role: 'assistant', content: answer });
     transcript.push({ role: 'assistant', text: answer, beatId: beat.id });
-    console.log(`[redteam:assistant] ${beat.id} (${role}): tools [${toolCalls.map(t => `${t.name}:${t.rowCount}`).join(', ')}]`);
+    console.log(
+      `[redteam:assistant] ${beat.id} (${role}): tools [${toolCalls.map((t) => `${t.name}:${t.rowCount}`).join(', ')}]`,
+    );
 
     last = { role, userId: s.userId, question: utter, toolCalls, callers, startedAt };
-    const ctx = buildCtx(scenario, '', answer, transcript, client, {}, canaries, pool, classify, cfg, beat.id, { assistant: last });
+    const ctx = buildCtx(scenario, '', answer, transcript, client, {}, canaries, pool, classify, cfg, beat.id, {
+      assistant: last,
+    });
     assertions.push(...(await runAssertions(beat.assertAfter, ctx)));
   }
 
-  const finalCtx = buildCtx(scenario, '', transcript.at(-1)?.text ?? '', transcript, client, {}, canaries, pool, classify, cfg, undefined, { assistant: last });
+  const finalCtx = buildCtx(
+    scenario,
+    '',
+    transcript.at(-1)?.text ?? '',
+    transcript,
+    client,
+    {},
+    canaries,
+    pool,
+    classify,
+    cfg,
+    undefined,
+    { assistant: last },
+  );
   assertions.push(...(await runAssertions(scenario.assertFinal, finalCtx)));
 
   return { assertions, judge: null, judgeBreaches: false, sessionId: '', transcript };
@@ -397,7 +514,7 @@ async function runEntry(
   const scenario = applyVariation(entry.scenario, variation);
   const vcfg: RedteamConfig = variation > 0 ? { ...cfg, seed: cfg.seed + variation } : cfg;
   const label = variation > 0 ? `${scenario.id}#v${variation + 1}` : scenario.id;
-  const beats = entry.beatIds ? scenario.beats.filter(b => entry.beatIds!.includes(b.id)) : scenario.beats;
+  const beats = entry.beatIds ? scenario.beats.filter((b) => entry.beatIds!.includes(b.id)) : scenario.beats;
   const runJudgeFlag = entry.judge ?? scenario.runJudge;
   const cost = new CostTracker();
   const classify = makeClassifier(openai, vcfg, cost);
@@ -408,17 +525,18 @@ async function runEntry(
     // in dry-run it falls back to the realtime-text flow so the offline
     // pipeline completes.
     const runner =
-      scenario.pipeline === 'chat' ? runChatScenario :
-      scenario.pipeline === 'assistant' ? runAssistantScenario :
-      scenario.pipeline === 'voice' && !cfg.dryRun ? (await import('./voiceClient.js')).runVoiceScenario :
-      runRealtimeScenario;
-    const res = await runner(
-      scenario, beats, runJudgeFlag, client, openai, vcfg, cost, canaries, pool, classify,
-    );
+      scenario.pipeline === 'chat'
+        ? runChatScenario
+        : scenario.pipeline === 'assistant'
+          ? runAssistantScenario
+          : scenario.pipeline === 'voice' && !cfg.dryRun
+            ? (await import('./voiceClient.js')).runVoiceScenario
+            : runRealtimeScenario;
+    const res = await runner(scenario, beats, runJudgeFlag, client, openai, vcfg, cost, canaries, pool, classify);
     const { assertions, judge, judgeBreaches, sessionId } = res;
     // Voice runner may not carry a transcript; chat/realtime always do.
     const transcript = (res as { transcript?: Turn[] }).transcript;
-    const gatingFail = assertions.some(a => !a.passed && a.gating) || judgeBreaches;
+    const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
     return {
       id: label,
       title: scenario.title,
@@ -457,7 +575,9 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  console.log(`[redteam] suite=${cfg.suite} scenarios=[${entries.map(e => e.scenario.id).join(', ')}] seed=${cfg.seed} dryRun=${cfg.dryRun}`);
+  console.log(
+    `[redteam] suite=${cfg.suite} scenarios=[${entries.map((e) => e.scenario.id).join(', ')}] seed=${cfg.seed} dryRun=${cfg.dryRun}`,
+  );
 
   // Boot the real server in-process (registers routes + sets global.io).
   const { app, io, httpServer } = await import('../server/index.js');
@@ -470,7 +590,7 @@ async function main(): Promise<void> {
   // Voice drives a WebSocket through the server's upgrade handler, which needs
   // a listener that outlives one request; bind an ephemeral loopback port for
   // that suite only. HTTP suites stay port-free.
-  if (!cfg.dryRun && entries.some(e => e.scenario.pipeline === 'voice')) {
+  if (!cfg.dryRun && entries.some((e) => e.scenario.pipeline === 'voice')) {
     const url = await client.listen(httpServer);
     console.log(`[redteam] voice: server listening on ${url} for the proxy WebSocket`);
   }
@@ -489,7 +609,9 @@ async function main(): Promise<void> {
       const vLabel = cfg.variations > 1 ? ` v${v + 1}/${cfg.variations}` : '';
       console.log(`\n[redteam] running ${entry.scenario.id}${vLabel} (${entry.scenario.pipeline})...`);
       const r = await runEntry(entry, client, openai, cfg, canaries, pool, v);
-      console.log(`[redteam] ${r.id}: ${r.passed ? 'PASS' : 'FAIL'} (${(r.durationMs / 1000).toFixed(1)}s, $${r.costUsd.toFixed(4)})`);
+      console.log(
+        `[redteam] ${r.id}: ${r.passed ? 'PASS' : 'FAIL'} (${(r.durationMs / 1000).toFixed(1)}s, $${r.costUsd.toFixed(4)})`,
+      );
       results.push(r);
     }
   }
@@ -499,13 +621,18 @@ async function main(): Promise<void> {
   if (!gitSha) {
     try {
       const { execSync } = await import('node:child_process');
-      gitSha = execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch { /* not a git checkout */ }
+      gitSha = execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim();
+    } catch {
+      /* not a git checkout */
+    }
   }
 
   // Judge label: what evaluateSession actually ran (the ensemble label from
   // the first judged scenario), else the pinned/default model.
-  const judgeLabel = results.find(r => r.judge?.judgeModel)?.judge?.judgeModel ?? cfg.judgeModelOverride ?? cfg.judgeModel;
+  const judgeLabel =
+    results.find((r) => r.judge?.judgeModel)?.judge?.judgeModel ?? cfg.judgeModelOverride ?? cfg.judgeModel;
 
   const summary: RunSummary = {
     startedAt,
@@ -525,18 +652,27 @@ async function main(): Promise<void> {
   let persistedRunId: number | null = null;
   try {
     const { insertHarnessRun } = await import('../server/db/index.js');
-    const trigger = process.env.REDTEAM_TRIGGER
-      ?? (process.env.GITHUB_ACTIONS ? (cfg.suite === 'smoke' ? 'ci-smoke' : 'ci-nightly') : 'manual');
+    const trigger =
+      process.env.REDTEAM_TRIGGER ??
+      (process.env.GITHUB_ACTIONS ? (cfg.suite === 'smoke' ? 'ci-smoke' : 'ci-nightly') : 'manual');
     persistedRunId = await insertHarnessRun({
-      startedAt, finishedAt,
-      suite: cfg.suite, seed: cfg.seed, variations: cfg.variations,
-      judgeModel: judgeLabel, gitSha, trigger, dryRun: cfg.dryRun,
-      scenarios: results.map(r => ({
+      startedAt,
+      finishedAt,
+      suite: cfg.suite,
+      seed: cfg.seed,
+      variations: cfg.variations,
+      judgeModel: judgeLabel,
+      gitSha,
+      trigger,
+      dryRun: cfg.dryRun,
+      scenarios: results.map((r) => ({
         scenarioId: r.id.replace(/#v\d+$/, ''),
         variation: r.variation,
         pipeline: r.pipeline,
         passed: r.passed,
-        assertionFailures: r.assertions.filter(a => !a.passed && a.gating).map(a => ({ id: a.id, detail: a.detail })),
+        assertionFailures: r.assertions
+          .filter((a) => !a.passed && a.gating)
+          .map((a) => ({ id: a.id, detail: a.detail })),
         judgeScores: r.judge ? (r.judge.scores as Record<string, number>) : null,
         sessionId: r.sessionId ?? null,
         error: r.error ?? null,
@@ -546,7 +682,9 @@ async function main(): Promise<void> {
     });
     console.log(`[redteam] persisted as harness run #${persistedRunId}`);
   } catch (err) {
-    console.warn(`[redteam] run not persisted (${(err as Error).message}) — apply migration 063 to enable the Simulation Runs panel`);
+    console.warn(
+      `[redteam] run not persisted (${(err as Error).message}) — apply migration 063 to enable the Simulation Runs panel`,
+    );
   }
 
   // Diff against a baseline (eval spec G4): newly failing/passing assertions
@@ -580,7 +718,10 @@ async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): 
     try {
       const { getLatestHarnessRunForSuite } = await import('../server/db/index.js');
       const latest = await getLatestHarnessRunForSuite(cfg.suite, persistedRunId);
-      if (!latest) { console.warn(`[redteam] no previous ${cfg.suite} run persisted in this DB — skipping diff`); return null; }
+      if (!latest) {
+        console.warn(`[redteam] no previous ${cfg.suite} run persisted in this DB — skipping diff`);
+        return null;
+      }
       return normalizeHarnessRun(latest.run, latest.results);
     } catch (err) {
       console.warn(`[redteam] could not load latest run from DB (${(err as Error).message}) — skipping diff`);
@@ -588,7 +729,10 @@ async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): 
     }
   }
   const path = cfg.baseline as string;
-  if (!fs.existsSync(path)) { console.warn(`[redteam] baseline ${path} not found — skipping diff`); return null; }
+  if (!fs.existsSync(path)) {
+    console.warn(`[redteam] baseline ${path} not found — skipping diff`);
+    return null;
+  }
   try {
     return normalizeSummary(JSON.parse(fs.readFileSync(path, 'utf8')), path);
   } catch (err) {
@@ -597,7 +741,11 @@ async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): 
   }
 }
 
-async function runBaselineDiff(cfg: RedteamConfig, summary: RunSummary, persistedRunId: number | null): Promise<RunDiff | null> {
+async function runBaselineDiff(
+  cfg: RedteamConfig,
+  summary: RunSummary,
+  persistedRunId: number | null,
+): Promise<RunDiff | null> {
   const baseline = await loadBaseline(cfg, persistedRunId);
   if (!baseline) return null;
   const current = normalizeSummary(buildSummaryJson(summary) as Parameters<typeof normalizeSummary>[0], 'this run');
@@ -613,7 +761,11 @@ async function runBaselineDiff(cfg: RedteamConfig, summary: RunSummary, persiste
   console.log('\n' + formatDiffConsole(diff));
   console.log(`[redteam] wrote ${diffJsonPath} and ${diffMdPath}`);
   if (process.env.GITHUB_STEP_SUMMARY) {
-    try { fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n'); } catch { /* best-effort */ }
+    try {
+      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n');
+    } catch {
+      /* best-effort */
+    }
   }
   return diff;
 }
@@ -622,12 +774,12 @@ async function runBaselineDiff(cfg: RedteamConfig, summary: RunSummary, persiste
  *  must process.exit — but a bare exit truncates buffered stdout on a pipe.
  *  Flush both streams first. */
 async function flushAndExit(code: number): Promise<never> {
-  await new Promise<void>(res => process.stdout.write('', () => res()));
-  await new Promise<void>(res => process.stderr.write('', () => res()));
+  await new Promise<void>((res) => process.stdout.write('', () => res()));
+  await new Promise<void>((res) => process.stderr.write('', () => res()));
   process.exit(code);
 }
 
-main().catch(async err => {
+main().catch(async (err) => {
   console.error('[redteam] fatal:', err);
   await flushAndExit(1);
 });

@@ -12,10 +12,7 @@ async function rollbackMigration() {
   try {
     console.log('Rolling back migration 031: drop knowledge_chunks...');
 
-    const sql = fs.readFileSync(
-      path.join(__dirname, '../migrations/031_knowledge_base_rollback.sql'),
-      'utf8'
-    );
+    const sql = fs.readFileSync(path.join(__dirname, '../migrations/031_knowledge_base_rollback.sql'), 'utf8');
 
     await client.query(sql);
 

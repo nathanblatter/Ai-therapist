@@ -36,7 +36,7 @@ let sentTotal = 0;
 export function reportClientEvent(
   kind: ClientEventKind,
   detail?: Record<string, unknown>,
-  sessionId?: string | null
+  sessionId?: string | null,
 ): void {
   try {
     if (sentTotal >= MAX_TOTAL) return;
@@ -61,7 +61,9 @@ export function reportClientEvent(
       headers: { 'Content-Type': 'application/json' },
       body,
       keepalive: true,
-    }).catch(() => { /* fire-and-forget */ });
+    }).catch(() => {
+      /* fire-and-forget */
+    });
   } catch {
     // Telemetry must never break the app.
   }

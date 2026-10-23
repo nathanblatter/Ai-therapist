@@ -12,10 +12,7 @@ export interface SessionRecordingUpdate {
 }
 
 /** Persist (or update) a session's recording metadata. */
-export async function setSessionRecording(
-  sessionId: string,
-  update: SessionRecordingUpdate,
-): Promise<void> {
+export async function setSessionRecording(sessionId: string, update: SessionRecordingUpdate): Promise<void> {
   await pool.query(
     `UPDATE therapy_sessions
         SET recording_object_key = COALESCE($2, recording_object_key),
@@ -40,10 +37,7 @@ export async function setSessionRecording(
  * Kept as an explicit second function rather than dynamic column names — two
  * tracks, two audited UPDATE statements.
  */
-export async function setSessionParticipantRecording(
-  sessionId: string,
-  update: SessionRecordingUpdate,
-): Promise<void> {
+export async function setSessionParticipantRecording(sessionId: string, update: SessionRecordingUpdate): Promise<void> {
   await pool.query(
     `UPDATE therapy_sessions
         SET participant_recording_object_key = COALESCE($2, participant_recording_object_key),
@@ -71,9 +65,7 @@ export interface SessionRecording {
 }
 
 /** Fetch a session's recording metadata, or null if none stored. */
-export async function getSessionRecording(
-  sessionId: string,
-): Promise<SessionRecording | null> {
+export async function getSessionRecording(sessionId: string): Promise<SessionRecording | null> {
   const res = await pool.query<{
     recording_object_key: string | null;
     recording_status: string | null;

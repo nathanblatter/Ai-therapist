@@ -27,7 +27,6 @@ async function runMigration() {
     console.log('  - Added language column to session_configurations');
     console.log('  - Default value: "en" (English)');
     console.log('  - Enables tracking language preferences for sessions\n');
-
   } catch (error) {
     console.error('\nMigration failed:', error.message);
     console.error('\nYou can rollback using: node migrations/rollbackMigration005.js\n');

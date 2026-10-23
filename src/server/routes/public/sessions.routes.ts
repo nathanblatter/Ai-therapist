@@ -54,7 +54,7 @@ export default function sessionsRoutes(): Router {
     if (track !== undefined && track !== 'mixed' && track !== 'participant') {
       return res.status(400).json({ error: 'invalid track' });
     }
-    const recordingTrack = track === 'participant' ? 'participant' as const : 'mixed' as const;
+    const recordingTrack = track === 'participant' ? ('participant' as const) : ('mixed' as const);
     // Only the session's owner may feed audio into its recording. Cookie
     // ownership avoids a DB hit on this hot path; logged-in owners whose
     // cookie was lost fall back to the user_id check.
@@ -112,8 +112,12 @@ export default function sessionsRoutes(): Router {
 
     const { SCALES } = await import('../../utils/scales.js');
     const def = scale ? SCALES[scale] : undefined;
-    if (!def || !Array.isArray(answers) || answers.length !== def.items.length ||
-        !answers.every(a => Number.isInteger(a) && a >= 0 && a <= 3)) {
+    if (
+      !def ||
+      !Array.isArray(answers) ||
+      answers.length !== def.items.length ||
+      !answers.every((a) => Number.isInteger(a) && a >= 0 && a <= 3)
+    ) {
       return res.status(400).json({ error: 'valid scale and answers[] required' });
     }
 
@@ -148,9 +152,19 @@ export default function sessionsRoutes(): Router {
       const { insertScaleResponse } = await import('../../db/index.js');
       await insertScaleResponse(sessionId, def.id, answers, score);
 
-      if (global.io) void broadcastAdminEventForSession(global.io, 'session:scale-completed', {
-        sessionId, scale: def.id, score, maxScore: def.max_score, completedAt: new Date(),
-      }, sessionId);
+      if (global.io)
+        void broadcastAdminEventForSession(
+          global.io,
+          'session:scale-completed',
+          {
+            sessionId,
+            scale: def.id,
+            score,
+            maxScore: def.max_score,
+            completedAt: new Date(),
+          },
+          sessionId,
+        );
 
       // Tell the live model directly over the sideband (ai-therapist-112) —
       // previously the model only learned the score if the participant's
@@ -161,7 +175,7 @@ export default function sessionsRoutes(): Router {
         sessionId,
         'system',
         `[${def.name} completed] Score ${score}/${def.max_score}. Item answers: ${answers.join(', ')}. ` +
-        `Respond supportively and naturally — do not read the score out as a verdict or diagnosis.`,
+          `Respond supportively and naturally — do not read the score out as a verdict or diagnosis.`,
         true,
       );
 
@@ -200,9 +214,17 @@ export default function sessionsRoutes(): Router {
 
       await completeWorksheetInstance(draft.instance_id, sessionId, responses);
 
-      if (global.io) void broadcastAdminEventForSession(global.io, 'session:worksheet-completed', {
-        sessionId, instanceId: draft.instance_id, completedAt: new Date(),
-      }, sessionId);
+      if (global.io)
+        void broadcastAdminEventForSession(
+          global.io,
+          'session:worksheet-completed',
+          {
+            sessionId,
+            instanceId: draft.instance_id,
+            completedAt: new Date(),
+          },
+          sessionId,
+        );
 
       // Inform the live model server-side (ai-therapist-112). The client
       // composes `summary` with the worksheet's section labels (it renders
@@ -233,8 +255,12 @@ export default function sessionsRoutes(): Router {
     const { kind, summary } = req.body as { kind?: string; summary?: string };
 
     const KINDS = new Set([
-      'exercise_completed', 'exercise_dismissed',
-      'thought_record', 'values_sort', 'fear_ladder', 'journal_private',
+      'exercise_completed',
+      'exercise_dismissed',
+      'thought_record',
+      'values_sort',
+      'fear_ladder',
+      'journal_private',
       'scale_result', // chat sessions report screener answers here (ai-therapist-118)
     ]);
     if (!kind || !KINDS.has(kind) || typeof summary !== 'string' || !summary.trim()) {
@@ -278,9 +304,18 @@ export default function sessionsRoutes(): Router {
         }
       }
 
-      if (global.io) void broadcastAdminEventForSession(global.io, 'session:tool-event', {
-        sessionId, kind, injected, at: new Date(),
-      }, sessionId);
+      if (global.io)
+        void broadcastAdminEventForSession(
+          global.io,
+          'session:tool-event',
+          {
+            sessionId,
+            kind,
+            injected,
+            at: new Date(),
+          },
+          sessionId,
+        );
 
       res.json({ success: true, injected });
     } catch (err) {
@@ -424,7 +459,8 @@ export default function sessionsRoutes(): Router {
       try {
         const { sidebandManager } = await import('../../services/sidebandManager.service.js');
         await sidebandManager.tryInject(
-          sessionId, 'system',
+          sessionId,
+          'system',
           '[The participant ended the session from their screen. The session is now closing.]',
           false,
         );
@@ -438,30 +474,36 @@ export default function sessionsRoutes(): Router {
       // completes — before it, content_redacted is null and the namer sees a
       // blank transcript and produces junk (ai-therapist wave1 bug 1).
       import('../../services/sessionRedaction.service.js')
-        .then(m => m.redactSession(sessionId))
+        .then((m) => m.redactSession(sessionId))
         .then(() => generateSessionNameAsync(sessionId))
-        .catch(e => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
+        .catch((e) => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
 
       // Finalize the audio recording (wrap buffered PCM → WAV → object
       // storage), then derive acoustic features from the participant track —
       // a flag-gated no-op until Phase 2 telemetry is enabled (migration 095).
       import('../../services/recorder.service.js')
-        .then(m => m.finalize(sessionId))
+        .then((m) => m.finalize(sessionId))
         .then(() => import('../../services/acousticFeatures.service.js'))
-        .then(m => m.generateAcousticFeaturesAsync(sessionId))
-        .catch(e => log.error({ err: e }, '[Recorder] finalize/acoustic failed'));
+        .then((m) => m.generateAcousticFeaturesAsync(sessionId))
+        .catch((e) => log.error({ err: e }, '[Recorder] finalize/acoustic failed'));
 
       // Memory summary + draft SOAP note (fire-and-forget).
       import('../../services/sessionInsights.service.js')
-        .then(m => m.generateSessionInsightsAsync(sessionId))
-        .catch(e => log.error({ err: e }, '[Insights] generation failed'));
+        .then((m) => m.generateSessionInsightsAsync(sessionId))
+        .catch((e) => log.error({ err: e }, '[Insights] generation failed'));
 
       // Quality eval (LLM judge) — no-op unless system_config.evals.auto_run_enabled.
       import('../../services/sessionEval.service.js')
-        .then(m => m.maybeAutoEvalSession(sessionId))
-        .catch(e => log.error({ err: e }, '[Evals] auto-eval failed'));
+        .then((m) => m.maybeAutoEvalSession(sessionId))
+        .catch((e) => log.error({ err: e }, '[Evals] auto-eval failed'));
 
-      void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedAt: new Date(), endedBy: 'user' }, sessionId, 'summary');
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:ended',
+        { sessionId, endedAt: new Date(), endedBy: 'user' },
+        sessionId,
+        'summary',
+      );
       global.io.to(`session:${sessionId}`).emit('session:status', { status: 'ended', endedBy: 'user' });
 
       res.json({ ...updatedSession, message: 'Session ended successfully' });

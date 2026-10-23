@@ -9,12 +9,7 @@
 // product subsystems as a clearly-labelled ESTIMATE. We never multiply tokens
 // by a hardcoded price list: those drift silently and would quietly contradict
 // the billing page.
-import {
-  getUsageByPurpose,
-  getRealtimeUsageTotals,
-  getSessionVolume,
-  type SessionVolume,
-} from '../db/index.js';
+import { getUsageByPurpose, getRealtimeUsageTotals, getSessionVolume, type SessionVolume } from '../db/index.js';
 import { getCostsSummary, type CostsSummary } from './openaiCosts.service.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -38,8 +33,12 @@ export function modelFamilyOf(lineItem: string): string | null {
   // cheaper than it is.
   if (model.startsWith('gpt-5.6')) return 'live-backend';
   if (/^gpt-5(-|$)/.test(model)) return 'gpt-5';
-  if (model.startsWith('gpt-4o-mini-transcribe') || model.startsWith('gpt-transcribe')
-      || model.startsWith('gpt-live-transcribe')) return 'transcribe';
+  if (
+    model.startsWith('gpt-4o-mini-transcribe') ||
+    model.startsWith('gpt-transcribe') ||
+    model.startsWith('gpt-live-transcribe')
+  )
+    return 'transcribe';
   // Must follow the gpt-live-transcribe check above: that is a transcription
   // model, not the full-duplex voice model, and startsWith('gpt-live') would
   // otherwise swallow it.
@@ -118,7 +117,7 @@ const MONTHLY_CAP_USD = Number(process.env.OPENAI_MONTHLY_CAP_USD || 120);
 function attribute(
   costs: CostsSummary,
   usage: Awaited<ReturnType<typeof getUsageByPurpose>>,
-  realtimeResponses: number
+  realtimeResponses: number,
 ): { bySubsystem: SubsystemCost[]; caveats: string[] } {
   const caveats: string[] = [];
 
@@ -134,9 +133,7 @@ function attribute(
   for (const row of usage) {
     const family = row.model ? modelFamilyOf(row.model) : null;
     if (!family) continue;
-    const sub = (SUBSYSTEMS as readonly string[]).includes(row.purpose)
-      ? (row.purpose as Subsystem)
-      : 'other';
+    const sub = (SUBSYSTEMS as readonly string[]).includes(row.purpose) ? (row.purpose as Subsystem) : 'other';
     if (row.tokensMissing) {
       // No token counts recorded — fall back to call count and say so.
       caveats.push(`${row.purpose}: token counts not recorded (${row.calls} calls); share estimated from call volume`);
@@ -172,7 +169,7 @@ function attribute(
     }
     // Shared model: split by measured weight; if we have no weights at all,
     // fall back to an even split and flag it.
-    const present = candidates.filter(c => (familyWeights?.get(c) ?? 0) > 0);
+    const present = candidates.filter((c) => (familyWeights?.get(c) ?? 0) > 0);
     if (present.length === 0) {
       const each = item.amountUsd / candidates.length;
       for (const c of candidates) {
@@ -191,22 +188,27 @@ function attribute(
   if (unattributed > 0) totals.set('other', (totals.get('other') ?? 0) + unattributed);
 
   const grand = [...totals.values()].reduce((a, b) => a + b, 0);
-  const bySubsystem = SUBSYSTEMS
-    .map(sub => ({
-      subsystem: sub,
-      amountUsd: round2(totals.get(sub) ?? 0),
-      share: grand > 0 ? (totals.get(sub) ?? 0) / grand : 0,
-      estimated: estimatedSubs.has(sub),
-    }))
-    .filter(s => s.amountUsd > 0)
+  const bySubsystem = SUBSYSTEMS.map((sub) => ({
+    subsystem: sub,
+    amountUsd: round2(totals.get(sub) ?? 0),
+    share: grand > 0 ? (totals.get(sub) ?? 0) / grand : 0,
+    estimated: estimatedSubs.has(sub),
+  }))
+    .filter((s) => s.amountUsd > 0)
     .sort((a, b) => b.amountUsd - a.amountUsd);
 
   return { bySubsystem, caveats: [...new Set(caveats)] };
 }
 
 const EMPTY: CostDashboard = {
-  configured: false, days: 30, totalUsd: 0, daily: [], byLineItem: [],
-  bySubsystem: [], attributionCaveats: [], fetchedAt: new Date(0).toISOString(),
+  configured: false,
+  days: 30,
+  totalUsd: 0,
+  daily: [],
+  byLineItem: [],
+  bySubsystem: [],
+  attributionCaveats: [],
+  fetchedAt: new Date(0).toISOString(),
   volume: { sessions: 0, endedSessions: 0, realtimeSessions: 0, chatSessions: 0, activeDays: 0, participants: 0 },
   unit: { usdPerSession: null, usdPerEndedSession: null, usdPerDay: 0 },
   budget: { monthlyCapUsd: MONTHLY_CAP_USD, monthToDateUsd: 0, projectedMonthUsd: 0, capRisk: 'ok' },
@@ -244,14 +246,12 @@ export async function getCostDashboard(days = 30): Promise<CostDashboard> {
   const monthCosts = days >= monthWindowDays ? costs : await getCostsSummary(monthWindowDays);
   const monthPrefix = new Date().toISOString().slice(0, 7);
   const monthToDate = (monthCosts.configured ? monthCosts.days : costs.days)
-    .filter(d => d.date.startsWith(monthPrefix))
+    .filter((d) => d.date.startsWith(monthPrefix))
     .reduce((s, d) => s + d.amountUsd, 0);
   const projectedMonth = dayOfMonth > 0 ? (monthToDate / dayOfMonth) * daysInThisMonth() : monthToDate;
 
   const capRisk: CostDashboard['budget']['capRisk'] =
-    monthToDate >= MONTHLY_CAP_USD * 0.8 ? 'critical'
-      : projectedMonth >= MONTHLY_CAP_USD * 0.8 ? 'warning'
-        : 'ok';
+    monthToDate >= MONTHLY_CAP_USD * 0.8 ? 'critical' : projectedMonth >= MONTHLY_CAP_USD * 0.8 ? 'warning' : 'ok';
 
   const spanDays = Math.max(1, costs.days.length);
 
@@ -283,5 +283,9 @@ function daysInThisMonth(): number {
   const now = new Date();
   return new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getUTCDate();
 }
-function round2(v: number): number { return Math.round(v * 100) / 100; }
-function round4(v: number): number { return Math.round(v * 10000) / 10000; }
+function round2(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+function round4(v: number): number {
+  return Math.round(v * 10000) / 10000;
+}

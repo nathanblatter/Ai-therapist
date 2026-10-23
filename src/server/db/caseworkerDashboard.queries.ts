@@ -113,7 +113,7 @@ export async function listCaseworkerRoster(memberId: number): Promise<RosterRow[
      ) sp ON TRUE
      WHERE tc.therapist_id = $1
      ORDER BY u.username`,
-    [memberId]
+    [memberId],
   );
   return result.rows;
 }
@@ -166,16 +166,18 @@ export async function getClientEngagementSignals(clientId: number): Promise<Clie
        SELECT TRUE AS has_safety_plan
        FROM safety_plans p WHERE p.user_id = c.client_id LIMIT 1
      ) sp ON TRUE`,
-    [clientId]
+    [clientId],
   );
-  return result.rows[0] ?? {
-    last_session_at: null,
-    ended_session_count: 0,
-    last_checkin_mood: null,
-    open_crisis_count: 0,
-    open_escalation_count: 0,
-    has_safety_plan: false,
-  };
+  return (
+    result.rows[0] ?? {
+      last_session_at: null,
+      ended_session_count: 0,
+      last_checkin_mood: null,
+      open_crisis_count: 0,
+      open_escalation_count: 0,
+      has_safety_plan: false,
+    }
+  );
 }
 
 export interface RosterClientDetail {
@@ -209,7 +211,7 @@ export async function getRosterClientDetail(clientId: number): Promise<RosterCli
        WHERE si.user_id = $1 AND si.summary IS NOT NULL
        ORDER BY si.created_at DESC
        LIMIT 5`,
-      [clientId]
+      [clientId],
     ),
     pool.query(
       `SELECT sr.scale, sr.score, sr.created_at::text AS created_at
@@ -218,7 +220,7 @@ export async function getRosterClientDetail(clientId: number): Promise<RosterCli
        WHERE ts.user_id = $1
        ORDER BY sr.created_at DESC
        LIMIT 40`,
-      [clientId]
+      [clientId],
     ),
     pool.query(
       `SELECT rsh.risk_score, rsh.severity, rsh.calculated_at::text AS calculated_at
@@ -227,7 +229,7 @@ export async function getRosterClientDetail(clientId: number): Promise<RosterCli
        WHERE ts.user_id = $1
        ORDER BY rsh.calculated_at DESC
        LIMIT 50`,
-      [clientId]
+      [clientId],
     ),
     pool.query(
       `SELECT (checkin->>'mood')::int AS mood, created_at::text AS created_at
@@ -235,12 +237,9 @@ export async function getRosterClientDetail(clientId: number): Promise<RosterCli
        WHERE user_id = $1 AND checkin IS NOT NULL
        ORDER BY created_at DESC
        LIMIT 30`,
-      [clientId]
+      [clientId],
     ),
-    pool.query(
-      `SELECT plan FROM safety_plans WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [clientId]
-    ),
+    pool.query(`SELECT plan FROM safety_plans WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [clientId]),
   ]);
   return {
     recent_summaries: summaries.rows,

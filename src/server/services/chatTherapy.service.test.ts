@@ -3,8 +3,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // Capture the input the Responses API is called with, so we can assert that
 // injected clinical guidance rides along in the right position.
 const {
-  createMock, getEnabledToolDefinitionsMock, executeLoggedToolCallMock, recordLlmUsageMock,
-  insertTurnLatencyMock, getSessionAccessInfoMock, getSessionConfigMock, getSessionMessagesMock,
+  createMock,
+  getEnabledToolDefinitionsMock,
+  executeLoggedToolCallMock,
+  recordLlmUsageMock,
+  insertTurnLatencyMock,
+  getSessionAccessInfoMock,
+  getSessionConfigMock,
+  getSessionMessagesMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
   getEnabledToolDefinitionsMock: vi.fn(),
@@ -39,8 +45,15 @@ vi.mock('../db/index.js', () => ({
 }));
 
 const {
-  initializeChatSession, sendMessage, injectGuidance, getConversationHistory, endChatSession,
-  toResponsesTools, isChatSessionUnavailableError, evictEndedChatSessions, getActiveSessionCount,
+  initializeChatSession,
+  sendMessage,
+  injectGuidance,
+  getConversationHistory,
+  endChatSession,
+  toResponsesTools,
+  isChatSessionUnavailableError,
+  evictEndedChatSessions,
+  getActiveSessionCount,
 } = await import('./chatTherapy.service.js');
 
 const SAMPLE_DEF = {
@@ -77,8 +90,8 @@ describe('injectGuidance', () => {
     const input = createMock.mock.calls[0][0].input as Array<{ role: string; content: string }>;
     // system prompt first, guidance somewhere before the final user message.
     expect(input[0]).toEqual({ role: 'system', content: 'SYSTEM PROMPT' });
-    const guidanceIdx = input.findIndex(m => m.content === 'CLINICAL GUIDANCE');
-    const lastUserIdx = input.map(m => m.role).lastIndexOf('user');
+    const guidanceIdx = input.findIndex((m) => m.content === 'CLINICAL GUIDANCE');
+    const lastUserIdx = input.map((m) => m.role).lastIndexOf('user');
     expect(guidanceIdx).toBeGreaterThan(0);
     expect(guidanceIdx).toBeLessThan(lastUserIdx);
     expect(input[lastUserIdx].content).toBe('hello there');
@@ -97,7 +110,7 @@ describe('evictEndedChatSessions (ai-therapist-224)', () => {
     const evicted = await evictEndedChatSessions();
 
     expect(getActiveSessionIdsAmongMock).toHaveBeenCalledWith(
-      expect.arrayContaining(['chat_live', 'chat_ended', 'chat_gone'])
+      expect.arrayContaining(['chat_live', 'chat_ended', 'chat_gone']),
     );
     expect(evicted).toBe(2);
     expect(getActiveSessionCount()).toBe(before - 2);
@@ -122,13 +135,15 @@ describe('evictEndedChatSessions (ai-therapist-224)', () => {
 describe('toResponsesTools', () => {
   it('converts realtime-shaped definitions to Responses function tools with strict off', () => {
     const tools = toResponsesTools([SAMPLE_DEF]);
-    expect(tools).toEqual([{
-      type: 'function',
-      name: 'show_resource_card',
-      description: 'Show a resource card.',
-      parameters: SAMPLE_DEF.parameters,
-      strict: false,
-    }]);
+    expect(tools).toEqual([
+      {
+        type: 'function',
+        name: 'show_resource_card',
+        description: 'Show a resource card.',
+        parameters: SAMPLE_DEF.parameters,
+        strict: false,
+      },
+    ]);
   });
 });
 
@@ -165,7 +180,12 @@ describe('chat tool calling (ai-therapist-118)', () => {
       .mockResolvedValueOnce({
         output_text: '',
         output: [
-          { type: 'function_call', call_id: 'call_1', name: 'show_resource_card', arguments: '{"resource_type":"suicide"}' },
+          {
+            type: 'function_call',
+            call_id: 'call_1',
+            name: 'show_resource_card',
+            arguments: '{"resource_type":"suicide"}',
+          },
           { type: 'function_call', call_id: 'call_2', name: 'remember_this', arguments: '{"fact":"has a dog"}' },
         ],
       })
@@ -176,9 +196,21 @@ describe('chat tool calling (ai-therapist-118)', () => {
     expect(text).toBe('here are some resources');
     expect(executeLoggedToolCallMock).toHaveBeenCalledTimes(2);
     expect(executeLoggedToolCallMock).toHaveBeenNthCalledWith(
-      1, sid, 'show_resource_card', { resource_type: 'suicide' }, 'call_1', 'chat');
+      1,
+      sid,
+      'show_resource_card',
+      { resource_type: 'suicide' },
+      'call_1',
+      'chat',
+    );
     expect(executeLoggedToolCallMock).toHaveBeenNthCalledWith(
-      2, sid, 'remember_this', { fact: 'has a dog' }, 'call_2', 'chat');
+      2,
+      sid,
+      'remember_this',
+      { fact: 'has a dog' },
+      'call_2',
+      'chat',
+    );
 
     // Only client-renderable tools ride back to the browser.
     expect(toolEvents).toEqual([
@@ -187,15 +219,21 @@ describe('chat tool calling (ai-therapist-118)', () => {
 
     // Second model call sees the function_call + function_call_output items.
     const secondInput = createMock.mock.calls[1][0].input as Array<Record<string, unknown>>;
-    expect(secondInput).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'function_call', call_id: 'call_1', name: 'show_resource_card' }),
-      expect.objectContaining({ type: 'function_call_output', call_id: 'call_1', output: JSON.stringify({ success: true }) }),
-      expect.objectContaining({ type: 'function_call_output', call_id: 'call_2' }),
-    ]));
+    expect(secondInput).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'function_call', call_id: 'call_1', name: 'show_resource_card' }),
+        expect.objectContaining({
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: JSON.stringify({ success: true }),
+        }),
+        expect.objectContaining({ type: 'function_call_output', call_id: 'call_2' }),
+      ]),
+    );
 
     // The function items persist in history so later turns keep the context.
     const history = getConversationHistory(sid) as Array<Record<string, unknown>>;
-    expect(history.some(h => h['type'] === 'function_call_output' && h['call_id'] === 'call_2')).toBe(true);
+    expect(history.some((h) => h['type'] === 'function_call_output' && h['call_id'] === 'call_2')).toBe(true);
     expect(history[history.length - 1]).toEqual({ role: 'assistant', content: 'here are some resources' });
     endChatSession(sid);
   });
@@ -267,8 +305,12 @@ describe('chat tool calling (ai-therapist-118)', () => {
     // replayed function_call WITHOUT its sibling reasoning item is a 400.
     const reasoningItem = { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'opaque-blob' };
     const callItem = {
-      type: 'function_call', id: 'fc_1', call_id: 'call_1',
-      name: 'show_resource_card', arguments: '{"resource_type":"anxiety"}', status: 'completed',
+      type: 'function_call',
+      id: 'fc_1',
+      call_id: 'call_1',
+      name: 'show_resource_card',
+      arguments: '{"resource_type":"anxiety"}',
+      status: 'completed',
     };
     createMock
       .mockResolvedValueOnce({ output_text: '', output: [reasoningItem, callItem] })
@@ -279,8 +321,8 @@ describe('chat tool calling (ai-therapist-118)', () => {
     // The second model call sees the EXACT items the model produced (extra
     // fields like id/status/encrypted_content intact), then the tool output.
     const secondInput = createMock.mock.calls[1][0].input as Array<Record<string, unknown>>;
-    const reasoningIdx = secondInput.findIndex(i => i === reasoningItem);
-    const callIdx = secondInput.findIndex(i => i === callItem);
+    const reasoningIdx = secondInput.findIndex((i) => i === reasoningItem);
+    const callIdx = secondInput.findIndex((i) => i === callItem);
     expect(reasoningIdx).toBeGreaterThan(-1);
     expect(callIdx).toBe(reasoningIdx + 1);
     expect(secondInput[callIdx + 1]).toMatchObject({ type: 'function_call_output', call_id: 'call_1' });
@@ -335,7 +377,7 @@ describe('lazy rehydration after a server restart (ai-therapist-222)', () => {
       { role: 'user', content: 'second thing I said' },
     ]);
     // The already-persisted turn is sent exactly once, not duplicated.
-    expect(input.filter(m => m.content === 'second thing I said')).toHaveLength(1);
+    expect(input.filter((m) => m.content === 'second thing I said')).toHaveLength(1);
 
     // And the rebuilt history is cached for the following turns.
     const history = getConversationHistory(sid) as Array<{ role: string; content: string }>;

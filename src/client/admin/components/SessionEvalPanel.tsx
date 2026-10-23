@@ -83,7 +83,9 @@ export default function SessionEvalPanel({ sessionId, sessionStatus }: SessionEv
   const fetchEval = useCallback(async () => {
     setNotFound(false);
     try {
-      const data = await getJson<{ eval: SessionEval; blind?: boolean; queue?: QueueRow | null }>(`/admin/api/sessions/${sessionId}/eval`);
+      const data = await getJson<{ eval: SessionEval; blind?: boolean; queue?: QueueRow | null }>(
+        `/admin/api/sessions/${sessionId}/eval`,
+      );
       setEvalRow(data.eval);
       setBlind(data.blind === true);
       setQueue(data.queue ?? null);
@@ -111,7 +113,11 @@ export default function SessionEvalPanel({ sessionId, sessionStatus }: SessionEv
   const runEval = async (force: boolean) => {
     setRunning(true);
     try {
-      const data = await postJson<{ eval: SessionEval }>(`/admin/api/sessions/${sessionId}/eval`, { force }, { fallback: 'Eval failed' });
+      const data = await postJson<{ eval: SessionEval }>(
+        `/admin/api/sessions/${sessionId}/eval`,
+        { force },
+        { fallback: 'Eval failed' },
+      );
       setEvalRow(data.eval);
       setNotFound(false);
       toast.success('Eval complete');
@@ -135,8 +141,7 @@ export default function SessionEvalPanel({ sessionId, sessionStatus }: SessionEv
   const judgeRubric = !blind && evalRow?.rubric ? evalRow.rubric : null;
   const avgScore = judgeRubric
     ? (
-        DIMENSION_LABELS.reduce((sum, [key]) => sum + (judgeRubric[key]?.score ?? 0), 0) /
-        DIMENSION_LABELS.length
+        DIMENSION_LABELS.reduce((sum, [key]) => sum + (judgeRubric[key]?.score ?? 0), 0) / DIMENSION_LABELS.length
       ).toFixed(1)
     : null;
   const queueOpen = queue && (queue.status === 'queued' || queue.status === 'in_progress');
@@ -152,7 +157,9 @@ export default function SessionEvalPanel({ sessionId, sessionStatus }: SessionEv
           {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
           <span className="font-semibold text-navy">Quality Eval (LLM judge)</span>
           {avgScore && (
-            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${scoreClasses(Math.round(Number(avgScore)))}`}>
+            <span
+              className={`px-2 py-0.5 rounded-full text-xs font-semibold ${scoreClasses(Math.round(Number(avgScore)))}`}
+            >
               avg {avgScore}/5
             </span>
           )}
@@ -227,7 +234,12 @@ export default function SessionEvalPanel({ sessionId, sessionStatus }: SessionEv
             </div>
           )}
 
-          <HumanRatingSection sessionId={sessionId} judgeRubric={judgeRubric} onRated={fetchEval} onQueueState={onQueueState} />
+          <HumanRatingSection
+            sessionId={sessionId}
+            judgeRubric={judgeRubric}
+            onRated={fetchEval}
+            onQueueState={onQueueState}
+          />
         </div>
       )}
     </div>
@@ -299,8 +311,8 @@ function HumanRatingSection({ sessionId, judgeRubric, onRated, onQueueState }: H
     fetchRatings();
   }, [fetchRatings]);
 
-  const mine = ratings.find(r => r.rater_user_id === myUserId);
-  const others = ratings.filter(r => r.rater_user_id !== myUserId);
+  const mine = ratings.find((r) => r.rater_user_id === myUserId);
+  const others = ratings.filter((r) => r.rater_user_id !== myUserId);
   const allChosen = DIMENSION_LABELS.every(([key]) => typeof scores[key] === 'number');
 
   const save = async () => {
@@ -315,7 +327,7 @@ function HumanRatingSection({ sessionId, judgeRubric, onRated, onQueueState }: H
       await postJson(
         `/admin/api/sessions/${sessionId}/human-rating`,
         { rubric, overall_notes: overallNotes || undefined },
-        { method: 'PUT', fallback: 'Failed to save rating' }
+        { method: 'PUT', fallback: 'Failed to save rating' },
       );
       toast.success('Rating saved');
       await fetchRatings();
@@ -345,9 +357,7 @@ function HumanRatingSection({ sessionId, judgeRubric, onRated, onQueueState }: H
         )}
       </div>
 
-      {showJudgeColumn && (
-        <p className="text-xs text-gray-500 mb-1">Judge score shown beside yours for comparison.</p>
-      )}
+      {showJudgeColumn && <p className="text-xs text-gray-500 mb-1">Judge score shown beside yours for comparison.</p>}
 
       <div className="space-y-2">
         {DIMENSION_LABELS.map(([key, label]) => (
@@ -364,11 +374,11 @@ function HumanRatingSection({ sessionId, judgeRubric, onRated, onQueueState }: H
                   </span>
                 )}
                 <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map(n => (
+                  {[1, 2, 3, 4, 5].map((n) => (
                     <button
                       key={n}
                       type="button"
-                      onClick={() => setScores(prev => ({ ...prev, [key]: n }))}
+                      onClick={() => setScores((prev) => ({ ...prev, [key]: n }))}
                       className={`w-7 h-7 rounded text-xs font-bold border transition ${
                         scores[key] === n
                           ? `${scoreClasses(n)} border-transparent`
@@ -385,7 +395,7 @@ function HumanRatingSection({ sessionId, judgeRubric, onRated, onQueueState }: H
             <input
               type="text"
               value={notes[key] ?? ''}
-              onChange={e => setNotes(prev => ({ ...prev, [key]: e.target.value }))}
+              onChange={(e) => setNotes((prev) => ({ ...prev, [key]: e.target.value }))}
               placeholder="Optional note"
               className="text-xs border border-gray-200 rounded px-2 py-1 w-full"
             />
@@ -395,7 +405,7 @@ function HumanRatingSection({ sessionId, judgeRubric, onRated, onQueueState }: H
 
       <textarea
         value={overallNotes}
-        onChange={e => setOverallNotes(e.target.value)}
+        onChange={(e) => setOverallNotes(e.target.value)}
         rows={2}
         maxLength={4000}
         placeholder="Overall notes (optional)"
@@ -421,7 +431,7 @@ function HumanRatingSection({ sessionId, judgeRubric, onRated, onQueueState }: H
         <div className="mt-4">
           <p className="text-xs font-semibold text-gray-600 mb-1">Other raters</p>
           <div className="space-y-1">
-            {others.map(r => (
+            {others.map((r) => (
               <div key={r.rating_id} className="text-xs">
                 <button
                   type="button"
@@ -430,7 +440,9 @@ function HumanRatingSection({ sessionId, judgeRubric, onRated, onQueueState }: H
                 >
                   {expandedOther === r.rating_id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                   <span className="font-medium">{r.rater_username ?? `user ${r.rater_user_id}`}</span>
-                  <span className="text-gray-500">· avg {avgRating(r.rubric)}/5 · {new Date(r.updated_at).toLocaleDateString()}</span>
+                  <span className="text-gray-500">
+                    · avg {avgRating(r.rubric)}/5 · {new Date(r.updated_at).toLocaleDateString()}
+                  </span>
                 </button>
                 {expandedOther === r.rating_id && (
                   <div className="mt-1 ml-4 space-y-0.5">

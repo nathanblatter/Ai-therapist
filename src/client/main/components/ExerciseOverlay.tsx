@@ -36,9 +36,12 @@ function BreathingExercise({ durationSeconds = 60, onClose }: { durationSeconds?
   const [phaseIndex, setPhaseIndex] = useState(0);
 
   useEffect(() => {
-    const tick = setInterval(() => setSecondsLeft(s => s - 1), 1000);
-    const phase = setInterval(() => setPhaseIndex(p => (p + 1) % BREATH_PHASES.length), PHASE_SECONDS * 1000);
-    return () => { clearInterval(tick); clearInterval(phase); };
+    const tick = setInterval(() => setSecondsLeft((s) => s - 1), 1000);
+    const phase = setInterval(() => setPhaseIndex((p) => (p + 1) % BREATH_PHASES.length), PHASE_SECONDS * 1000);
+    return () => {
+      clearInterval(tick);
+      clearInterval(phase);
+    };
   }, []);
 
   useEffect(() => {
@@ -58,7 +61,9 @@ function BreathingExercise({ durationSeconds = 60, onClose }: { durationSeconds?
           className={`absolute rounded-full bg-blue-500 bg-opacity-40 transition-transform ease-in-out ${phase.scale}`}
           style={{ width: 190, height: 190, transitionDuration: `${PHASE_SECONDS * 1000}ms` }}
         />
-        <p className="relative text-white text-2xl font-light" aria-live="polite">{phase.label}</p>
+        <p className="relative text-white text-2xl font-light" aria-live="polite">
+          {phase.label}
+        </p>
       </div>
       <p className="text-blue-100 text-sm">{Math.max(secondsLeft, 0)}s remaining — breathe with the circle</p>
     </div>
@@ -82,7 +87,10 @@ function GroundingExercise({ onClose }: { onClose: () => void }) {
     <div className="flex flex-col items-center gap-8 max-w-md text-center px-6">
       <div className="flex gap-2" aria-hidden="true">
         {GROUNDING_STEPS.map((s, i) => (
-          <div key={s.count} className={`h-1.5 w-10 rounded-full ${i <= stepIndex ? 'bg-blue-300' : 'bg-white bg-opacity-20'}`} />
+          <div
+            key={s.count}
+            className={`h-1.5 w-10 rounded-full ${i <= stepIndex ? 'bg-blue-300' : 'bg-white bg-opacity-20'}`}
+          />
         ))}
       </div>
       <div>
@@ -120,9 +128,12 @@ function BodyScan({ durationSeconds = 120, onClose }: { durationSeconds?: number
   const stepMs = Math.max(4000, Math.round((durationSeconds * 1000) / BODY_SCAN_STEPS.length));
 
   useEffect(() => {
-    const tick = setInterval(() => setSecondsLeft(s => s - 1), 1000);
-    const advance = setInterval(() => setStepIndex(i => i + 1), stepMs);
-    return () => { clearInterval(tick); clearInterval(advance); };
+    const tick = setInterval(() => setSecondsLeft((s) => s - 1), 1000);
+    const advance = setInterval(() => setStepIndex((i) => i + 1), stepMs);
+    return () => {
+      clearInterval(tick);
+      clearInterval(advance);
+    };
   }, [stepMs]);
 
   useEffect(() => {
@@ -135,11 +146,17 @@ function BodyScan({ durationSeconds = 120, onClose }: { durationSeconds?: number
     <div className="flex flex-col items-center gap-8 max-w-md text-center px-6">
       <div className="flex gap-1.5" aria-hidden="true">
         {BODY_SCAN_STEPS.map((s, i) => (
-          <div key={s.region} className={`h-1.5 w-6 rounded-full ${i <= stepIndex ? 'bg-blue-300' : 'bg-white bg-opacity-20'}`} />
+          <div
+            key={s.region}
+            className={`h-1.5 w-6 rounded-full ${i <= stepIndex ? 'bg-blue-300' : 'bg-white bg-opacity-20'}`}
+          />
         ))}
       </div>
       <div className="relative flex items-center justify-center" style={{ width: 200, height: 200 }}>
-        <div className="absolute rounded-full bg-blue-400 bg-opacity-20 animate-ping" style={{ width: 200, height: 200, animationDuration: '3s' }} />
+        <div
+          className="absolute rounded-full bg-blue-400 bg-opacity-20 animate-ping"
+          style={{ width: 200, height: 200, animationDuration: '3s' }}
+        />
         <div className="absolute rounded-full bg-blue-500 bg-opacity-30" style={{ width: 130, height: 130 }} />
       </div>
       <div>
@@ -157,9 +174,12 @@ function BodyScan({ durationSeconds = 120, onClose }: { durationSeconds?: number
 export default function ExerciseOverlay({ exercise, onFinish }: ExerciseOverlayProps) {
   if (!exercise) return null;
 
-  const label = exercise.type === 'breathing' ? 'Breathing exercise'
-    : exercise.type === 'body_scan' ? 'Body scan exercise'
-    : 'Grounding exercise';
+  const label =
+    exercise.type === 'breathing'
+      ? 'Breathing exercise'
+      : exercise.type === 'body_scan'
+        ? 'Body scan exercise'
+        : 'Grounding exercise';
 
   const complete = () => onFinish('completed');
 
@@ -178,7 +198,9 @@ export default function ExerciseOverlay({ exercise, onFinish }: ExerciseOverlayP
       >
         <X size={22} />
       </button>
-      {exercise.type === 'breathing' && <BreathingExercise durationSeconds={exercise.durationSeconds} onClose={complete} />}
+      {exercise.type === 'breathing' && (
+        <BreathingExercise durationSeconds={exercise.durationSeconds} onClose={complete} />
+      )}
       {exercise.type === 'grounding' && <GroundingExercise onClose={complete} />}
       {exercise.type === 'body_scan' && <BodyScan durationSeconds={exercise.durationSeconds} onClose={complete} />}
     </div>

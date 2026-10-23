@@ -12,10 +12,7 @@ async function runMigration() {
   try {
     console.log('Running migration 020: Add content retention...');
 
-    const sql = fs.readFileSync(
-      path.join(__dirname, '../migrations/020_add_content_retention.sql'),
-      'utf8'
-    );
+    const sql = fs.readFileSync(path.join(__dirname, '../migrations/020_add_content_retention.sql'), 'utf8');
 
     await client.query(sql);
 

@@ -54,7 +54,7 @@ async function api(
   config: ReminderConfig,
   method: 'GET' | 'POST' | 'PUT',
   path: string,
-  body?: unknown
+  body?: unknown,
 ): Promise<Response> {
   return fetch(`https://${config.datacenter}.qualtrics.com/API/v3${path}`, {
     method,
@@ -74,7 +74,7 @@ async function getBaselineEmail(userId: number): Promise<string | null> {
        FROM qualtrics_responses
       WHERE user_id = $1 AND survey_role = 'baseline' AND finished
       ORDER BY recorded_at ASC NULLS LAST LIMIT 1`,
-    [userId, BASELINE_EMAIL_KEY]
+    [userId, BASELINE_EMAIL_KEY],
   );
   const email = rows[0]?.email?.trim() ?? null;
   return email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : null;
@@ -85,7 +85,7 @@ async function upsertContact(
   config: ReminderConfig,
   userId: number,
   email: string,
-  due: DueSurvey
+  due: DueSurvey,
 ): Promise<string | null> {
   const meta = SURVEY_META[due.role] ?? { label: due.label, minutes: '5' };
   const embeddedData = {
@@ -95,7 +95,7 @@ async function upsertContact(
   };
   const existing = await pool.query<{ contact_id: string; email: string }>(
     `SELECT contact_id, email FROM qualtrics_contacts WHERE user_id = $1`,
-    [userId]
+    [userId],
   );
   const row = existing.rows[0];
   if (row) {
@@ -103,11 +103,14 @@ async function upsertContact(
       config,
       'PUT',
       `/directories/${config.directoryId}/mailinglists/${config.mailingListId}/contacts/${row.contact_id}`,
-      { email, embeddedData }
+      { email, embeddedData },
     );
     if (res.ok) {
       if (row.email !== email) {
-        await pool.query(`UPDATE qualtrics_contacts SET email = $2, updated_at = now() WHERE user_id = $1`, [userId, email]);
+        await pool.query(`UPDATE qualtrics_contacts SET email = $2, updated_at = now() WHERE user_id = $1`, [
+          userId,
+          email,
+        ]);
       }
       return row.contact_id;
     }
@@ -117,7 +120,7 @@ async function upsertContact(
     config,
     'POST',
     `/directories/${config.directoryId}/mailinglists/${config.mailingListId}/contacts`,
-    { email, extRef: String(userId), embeddedData }
+    { email, extRef: String(userId), embeddedData },
   );
   if (!res.ok) {
     console.error(`[QualtricsReminders] contact upsert failed for user ${userId}: HTTP ${res.status}`);
@@ -130,7 +133,7 @@ async function upsertContact(
     `INSERT INTO qualtrics_contacts (user_id, contact_id, email)
      VALUES ($1, $2, $3)
      ON CONFLICT (user_id) DO UPDATE SET contact_id = EXCLUDED.contact_id, email = EXCLUDED.email, updated_at = now()`,
-    [userId, contactId, email]
+    [userId, contactId, email],
   );
   return contactId;
 }
@@ -139,7 +142,7 @@ async function sendDistribution(
   config: ReminderConfig,
   surveyId: string,
   contactId: string,
-  subject: string
+  subject: string,
 ): Promise<string | null> {
   const res = await api(config, 'POST', '/distributions', {
     message: { libraryId: config.libraryId, messageId: config.messageId },
@@ -195,7 +198,7 @@ export async function sweepSurveyReminders(now: Date = new Date()): Promise<Remi
   for (const participant of enrolled) {
     const status = await pool.query<{ study_status: string; is_sandbox: boolean | null }>(
       `SELECT study_status, is_sandbox FROM users WHERE userid = $1`,
-      [participant.userId]
+      [participant.userId],
     );
     const row = status.rows[0];
     if (!row || row.study_status !== 'active' || row.is_sandbox) continue;
@@ -215,7 +218,7 @@ export async function sweepSurveyReminders(now: Date = new Date()): Promise<Remi
       const { rows: ledger } = await pool.query<LedgerRow>(
         `SELECT kind, sent_at FROM survey_reminders
           WHERE user_id = $1 AND survey_role = $2 AND week = $3`,
-        [participant.userId, due.role, week]
+        [participant.userId, due.role, week],
       );
       const kind = nextSendKind(ledger, now);
       if (!kind) continue;
@@ -226,7 +229,7 @@ export async function sweepSurveyReminders(now: Date = new Date()): Promise<Remi
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (user_id, survey_role, week, kind) DO NOTHING
          RETURNING reminder_id`,
-        [participant.userId, due.role, week, kind]
+        [participant.userId, due.role, week, kind],
       );
       if (claim.rows.length === 0) continue; // another container got it
 
@@ -250,10 +253,11 @@ export async function sweepSurveyReminders(now: Date = new Date()): Promise<Remi
         result.failures++;
         console.error(
           `[QualtricsReminders] send failed (user ${participant.userId}, ${due.role} w${week} ${kind}):`,
-          err
+          err,
         );
         // Release the claim so the next sweep retries.
-        await pool.query(`DELETE FROM survey_reminders WHERE reminder_id = $1`, [claim.rows[0].reminder_id])
+        await pool
+          .query(`DELETE FROM survey_reminders WHERE reminder_id = $1`, [claim.rows[0].reminder_id])
           .catch(() => {});
       }
     }
@@ -261,7 +265,7 @@ export async function sweepSurveyReminders(now: Date = new Date()): Promise<Remi
   if (result.sent > 0 || result.failures > 0) {
     console.log(
       `[QualtricsReminders] sweep: ${result.sent} sent, ${result.failures} failed, ` +
-        `${result.skippedNoEmail} without email (of ${result.participants} due)`
+        `${result.skippedNoEmail} without email (of ${result.participants} due)`,
     );
   }
   return result;

@@ -19,7 +19,12 @@ import {
   recordConsent,
   upsertSessionConfig,
 } from '../../db/index.js';
-import { checkSessionLimits, getSystemPrompt, getSystemConfig, resolveProactiveOffering } from '../../utils/sessionHelpers.js';
+import {
+  checkSessionLimits,
+  getSystemPrompt,
+  getSystemConfig,
+  resolveProactiveOffering,
+} from '../../utils/sessionHelpers.js';
 import { buildChatOpeningLine, OPENING_LINE_MESSAGE_TYPE, OPENING_LINE_METADATA } from '../../utils/openingLine.js';
 import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
@@ -56,254 +61,276 @@ export default function chatRoutes(): Router {
 
   // POST /api/chat/start - start a chat-only therapy session. Blocked until
   // the participant has accepted the current consent screen.
-  router.post('/api/chat/start', chatStartLimiter, requireConsent, requireOutsideQuietHours, requireActiveStudyStatus, async (req, res) => {
-    const userId: number | string = req.session?.userId ?? req.sessionID;
-    const numericUserId: number | null = typeof userId === 'number' ? userId : null;
+  router.post(
+    '/api/chat/start',
+    chatStartLimiter,
+    requireConsent,
+    requireOutsideQuietHours,
+    requireActiveStudyStatus,
+    async (req, res) => {
+      const userId: number | string = req.session?.userId ?? req.sessionID;
+      const numericUserId: number | null = typeof userId === 'number' ? userId : null;
 
-    try {
-      // Enforce session limits (mirrors the /token endpoint). MUST use the
-      // numeric id: therapy_sessions.user_id is INTEGER, and passing an
-      // anonymous express-session id string made the limit/idempotency
-      // queries throw a pg cast error and 500 every anonymous chat start.
-      const userRole = req.session?.userRole || 'participant';
-      // A continuation of a content-filter-terminated session is not a new
-      // session. The terminated session's own POST /end has just reset the
-      // cooldown clock, so without this the text fallback 429s exactly when it
-      // is needed — see the same exemption in liveSession.routes.ts.
-      const isContinuation = typeof req.body?.continued_from === 'string';
-      const limitCheck = await checkSessionLimits(numericUserId, userRole);
-      if (!limitCheck.allowed && !isContinuation) {
-        return res.status(429).json({
-          error: 'Session limit exceeded',
-          reason: limitCheck.reason,
-          minutes_remaining: limitCheck.reason === 'cooldown' ? limitCheck.minutes_remaining : undefined,
-        });
-      }
+      try {
+        // Enforce session limits (mirrors the /token endpoint). MUST use the
+        // numeric id: therapy_sessions.user_id is INTEGER, and passing an
+        // anonymous express-session id string made the limit/idempotency
+        // queries throw a pg cast error and 500 every anonymous chat start.
+        const userRole = req.session?.userRole || 'participant';
+        // A continuation of a content-filter-terminated session is not a new
+        // session. The terminated session's own POST /end has just reset the
+        // cooldown clock, so without this the text fallback 429s exactly when it
+        // is needed — see the same exemption in liveSession.routes.ts.
+        const isContinuation = typeof req.body?.continued_from === 'string';
+        const limitCheck = await checkSessionLimits(numericUserId, userRole);
+        if (!limitCheck.allowed && !isContinuation) {
+          return res.status(429).json({
+            error: 'Session limit exceeded',
+            reason: limitCheck.reason,
+            minutes_remaining: limitCheck.reason === 'cooldown' ? limitCheck.minutes_remaining : undefined,
+          });
+        }
 
-      // One active session per user at a time (logged-in users only — the
-      // integer user_id column cannot key anonymous browsers).
-      // A continuation must not be turned away as "you already have a session":
-      // the terminated voice session may still be finishing its teardown, and
-      // the client treats alreadyActive as a failure and strands the
-      // participant on the crisis screen.
-      const existingSession = numericUserId && !isContinuation
-        ? await getActiveSessionForUser(numericUserId)
-        : null;
-      if (existingSession) {
-        return res.status(200).json({
-          message: 'Active session already exists',
-          sessionId: existingSession.session_id,
-          alreadyActive: true,
-        });
-      }
+        // One active session per user at a time (logged-in users only — the
+        // integer user_id column cannot key anonymous browsers).
+        // A continuation must not be turned away as "you already have a session":
+        // the terminated voice session may still be finishing its teardown, and
+        // the client treats alreadyActive as a failure and strands the
+        // participant on the crisis screen.
+        const existingSession = numericUserId && !isContinuation ? await getActiveSessionForUser(numericUserId) : null;
+        if (existingSession) {
+          return res.status(200).json({
+            message: 'Active session already exists',
+            sessionId: existingSession.session_id,
+            alreadyActive: true,
+          });
+        }
 
-      // Language: request body wins, else the user's saved preference, else 'en'.
-      let userLanguage = req.body?.language;
-      if (!userLanguage && req.session?.userId) {
-        userLanguage = (await getUserPreferredLanguage(userId)) || 'en';
-      } else {
-        userLanguage = userLanguage || 'en';
-      }
+        // Language: request body wins, else the user's saved preference, else 'en'.
+        let userLanguage = req.body?.language;
+        if (!userLanguage && req.session?.userId) {
+          userLanguage = (await getUserPreferredLanguage(userId)) || 'en';
+        } else {
+          userLanguage = userLanguage || 'en';
+        }
 
-      // Persist the language for next time (fire-and-forget).
-      if (req.session?.userId) {
-        setUserPreferredLanguage(userId, userLanguage).catch(err =>
-          log.error({ err }, '[ChatStart] Failed to save user language preference'));
-      }
+        // Persist the language for next time (fire-and-forget).
+        if (req.session?.userId) {
+          setUserPreferredLanguage(userId, userLanguage).catch((err) =>
+            log.error({ err }, '[ChatStart] Failed to save user language preference'),
+          );
+        }
 
-      const sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-      recordSessionOwnership(req, sessionId);
+        const sessionId = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        recordSessionOwnership(req, sessionId);
 
-      // Base prompt + returning-participant memory (opt-in) + today's check-in.
-      // The proactive-offering A/B condition (ai-therapist-74) is resolved ONCE
-      // here and persisted below, mirroring /token — previously the chat path
-      // let getSystemPrompt re-roll internally and never recorded the arm, so
-      // chat sessions could not be assigned to a condition for analysis.
-      const checkin = sanitizeCheckin(req.body?.checkin);
-      const memoryBlock = await buildMemoryBlock(numericUserId);
-      const proactiveOffering = await resolveProactiveOffering();
-      const systemPrompt =
-        (await getSystemPrompt(userLanguage, 'chat', proactiveOffering)) + memoryBlock + buildCheckinBlock(checkin);
+        // Base prompt + returning-participant memory (opt-in) + today's check-in.
+        // The proactive-offering A/B condition (ai-therapist-74) is resolved ONCE
+        // here and persisted below, mirroring /token — previously the chat path
+        // let getSystemPrompt re-roll internally and never recorded the arm, so
+        // chat sessions could not be assigned to a condition for analysis.
+        const checkin = sanitizeCheckin(req.body?.checkin);
+        const memoryBlock = await buildMemoryBlock(numericUserId);
+        const proactiveOffering = await resolveProactiveOffering();
+        const systemPrompt =
+          (await getSystemPrompt(userLanguage, 'chat', proactiveOffering)) + memoryBlock + buildCheckinBlock(checkin);
 
-      const { initializeChatSession } = await import('../../services/chatTherapy.service.js');
-      initializeChatSession(sessionId, systemPrompt);
+        const { initializeChatSession } = await import('../../services/chatTherapy.service.js');
+        initializeChatSession(sessionId, systemPrompt);
 
-      const username = req.session?.username || null;
-      const { isNonStudyUser } = await import('../../utils/harness.js');
-      await createSession({
-        sessionId,
-        userId: numericUserId,
-        sessionName: null, // generated from the conversation when the session ends
-        status: 'active',
-        sessionType: 'chat',
-        // Demo viewers, the eval-harness participant AND sandbox accounts
-        // (C3/s7: sandbox owners' sessions are is_demo): non-study data,
-        // excluded from every real analytics/export surface.
-        isDemo: isNonStudyUser(userRole, username) || req.session?.isSandbox === true,
-      });
-
-      // Persist the resolved research condition + assembled instructions to
-      // session_configurations, same as the voice path — this row is the
-      // analysis source of truth for which arm the session ran under. A fresh
-      // sessionId is minted above, so there is never an existing row to
-      // clobber; the resume path (alreadyActive, earlier) never re-rolls.
-      await upsertSessionConfig(sessionId, {
-        modalities: ['text'],
-        instructions: systemPrompt,
-        language: userLanguage,
-        proactive_offering: proactiveOffering,
-      });
-
-      if (checkin) {
-        const { setSessionCheckin } = await import('../../db/index.js');
-        setSessionCheckin(sessionId, checkin).catch(err =>
-          log.error({ err }, '[ChatStart] Failed to store check-in'));
-      }
-
-      // Durable per-session consent record, linked to the consent this
-      // browser session already accepted (requireConsent guarantees it's
-      // present and current by this point).
-      getSystemConfig()
-        .then(cfg => recordConsent({
+        const username = req.session?.username || null;
+        const { isNonStudyUser } = await import('../../utils/harness.js');
+        await createSession({
           sessionId,
           userId: numericUserId,
-          consentVersion: req.session!.consentVersion!,
-          recordingEnabled: (cfg.features?.session_recording_enabled as boolean | undefined) ?? false,
-        }))
-        .catch(err => log.error({ err }, '[Consent] Failed to record per-session consent'));
+          sessionName: null, // generated from the conversation when the session ends
+          status: 'active',
+          sessionType: 'chat',
+          // Demo viewers, the eval-harness participant AND sandbox accounts
+          // (C3/s7: sandbox owners' sessions are is_demo): non-study data,
+          // excluded from every real analytics/export surface.
+          isDemo: isNonStudyUser(userRole, username) || req.session?.isSandbox === true,
+        });
 
-      void broadcastAdminEvent(global.io, 'session:started', {
-        sessionId,
-        userId,
-        username,
-        sessionType: 'chat',
-        startedAt: new Date(),
-      }, numericUserId);
+        // Persist the resolved research condition + assembled instructions to
+        // session_configurations, same as the voice path — this row is the
+        // analysis source of truth for which arm the session ran under. A fresh
+        // sessionId is minted above, so there is never an existing row to
+        // clobber; the resume path (alreadyActive, earlier) never re-rolls.
+        await upsertSessionConfig(sessionId, {
+          modalities: ['text'],
+          instructions: systemPrompt,
+          language: userLanguage,
+          proactive_offering: proactiveOffering,
+        });
 
-      // CONTINUATION FROM A TERMINATED VOICE SESSION.
-      //
-      // OpenAI's safety filter can end a GPT-Live session outright
-      // (session.closed reason 'content'), and it does so disproportionately at
-      // crisis disclosure — observed 2026-09-11: a participant said "I wanna
-      // kill myself", the assistant began "Hey, I'm really glad you told me",
-      // and the platform cut the session mid-sentence.
-      //
-      // Restarting VOICE would re-seed a new session with the very content that
-      // tripped the filter and would very likely hang up on them a second time.
-      // The chat pipeline is structurally different: it runs through the
-      // Responses API with our own moderation, which is built to engage with
-      // crisis rather than terminate. So a terminated voice session continues
-      // here, carrying the conversation so the participant never has to repeat
-      // a disclosure they just made.
-      const continuedFrom = typeof req.body?.continued_from === 'string' ? req.body.continued_from : null;
-
-      // Server-authored opening line (utils/openingLine.ts): persisted as the
-      // first assistant turn and seeded into the model history, so the AI
-      // disclosure is guaranteed by construction and the model does not
-      // disclaim a second time. A continuation of a terminated voice session
-      // skips it — the participant already heard it and must not be greeted
-      // as if starting over.
-      let opening: string | null = null;
-      if (!continuedFrom) {
-        try {
-          const cfg = await getSystemConfig();
-          opening = buildChatOpeningLine(cfg.crisis_contact as Parameters<typeof buildChatOpeningLine>[0]);
-          const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
-          seedAssistantOpening(sessionId, opening);
-          // Session steering, same mechanism as the continuation recap below
-          // (not a change to the stored system prompt): the prompt's "once, at
-          // the start" disclaimer rule has already been satisfied by the
-          // opening above, and without saying so the model repeats it in its
-          // first reply (nightly 2026-10-22, diagnosis-seeking turn 1).
-          injectGuidance(
-            sessionId,
-            '[Session framing - never mention this message] Your opening message above has already ' +
-            'delivered the required disclosure: that you are an AI support assistant, not a licensed ' +
-            'therapist or doctor, cannot diagnose or give medical advice, and the crisis resources. Do not ' +
-            'repeat that disclaimer. Re-state your limits only if the participant asks you to diagnose, ' +
-            'asks about medication, asks whether you are human or a therapist, or asks you to be a friend ' +
-            'or partner or to replace their therapist.',
+        if (checkin) {
+          const { setSessionCheckin } = await import('../../db/index.js');
+          setSessionCheckin(sessionId, checkin).catch((err) =>
+            log.error({ err }, '[ChatStart] Failed to store check-in'),
           );
-          // content_redacted is pre-filled: the text is machine-authored and
-          // PHI-free, so the redaction job must not spend a model call on it.
-          await insertMessagesBatch([
-            {
-              session_id: sessionId, role: 'assistant', message_type: OPENING_LINE_MESSAGE_TYPE,
-              content: opening, content_redacted: opening, metadata: { ...OPENING_LINE_METADATA },
-            },
-          ]);
-          if (global.io) {
-            global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'assistant', message: opening, timestamp: new Date() });
-          }
-        } catch (err) {
-          // The session must still start; the client falls back to its own
-          // copy of the preamble when `opening` is absent.
-          log.error({ err }, '[ChatStart] Failed to persist opening line (non-fatal)');
-          opening = null;
         }
-      }
 
-      if (continuedFrom) {
-        try {
-          const { getSessionAccessInfo, getSessionMessages } = await import('../../db/index.js');
-          const prior = await getSessionAccessInfo(continuedFrom);
-          // Ownership is required: this seeds one session's transcript into
-          // another, so it must never be reachable with someone else's id.
-          if (prior && canAccessSession(req, prior, continuedFrom)) {
-            const priorMessages = await getSessionMessages(continuedFrom, false);
-            const recap = priorMessages
-              .filter(m => m.role === 'user' || m.role === 'assistant')
-              .slice(-20)
-              .map(m => `${m.role === 'user' ? 'Participant' : 'You'}: ${(m.content ?? '').trim()}`)
-              .filter(l => l.length > 12)
-              .join('\n')
-              .slice(-6000);
+        // Durable per-session consent record, linked to the consent this
+        // browser session already accepted (requireConsent guarantees it's
+        // present and current by this point).
+        getSystemConfig()
+          .then((cfg) =>
+            recordConsent({
+              sessionId,
+              userId: numericUserId,
+              consentVersion: req.session!.consentVersion!,
+              recordingEnabled: (cfg.features?.session_recording_enabled as boolean | undefined) ?? false,
+            }),
+          )
+          .catch((err) => log.error({ err }, '[Consent] Failed to record per-session consent'));
 
-            if (recap) {
-              const { injectGuidance } = await import('../../services/chatTherapy.service.js');
-              injectGuidance(
-                sessionId,
-                '[Session continuity — never mention or acknowledge this message to the participant]\n' +
-                'The participant was speaking with you by voice and the connection was cut by an ' +
-                'automated content filter — not by them, and not by you. They have just been moved to ' +
-                'text so the conversation can continue. Do NOT make them repeat themselves and do NOT ' +
-                'treat this as a new conversation. Pick up exactly where it stopped, acknowledge the ' +
-                'interruption briefly and warmly, and make clear you are still here. If they disclosed ' +
-                'thoughts of suicide or self-harm, that is where you resume: stay with it, follow the ' +
-                'safety protocol, and do not change the subject.\n\n' +
-                `Transcript of the voice conversation that was cut off:\n${recap}`,
-              );
-              log.info(
-                `[ChatStart] Seeded ${sessionId.substring(0, 12)}... as a continuation of terminated ` +
-                `voice session ${continuedFrom.substring(0, 12)}...`,
-              );
+        void broadcastAdminEvent(
+          global.io,
+          'session:started',
+          {
+            sessionId,
+            userId,
+            username,
+            sessionType: 'chat',
+            startedAt: new Date(),
+          },
+          numericUserId,
+        );
+
+        // CONTINUATION FROM A TERMINATED VOICE SESSION.
+        //
+        // OpenAI's safety filter can end a GPT-Live session outright
+        // (session.closed reason 'content'), and it does so disproportionately at
+        // crisis disclosure — observed 2026-09-11: a participant said "I wanna
+        // kill myself", the assistant began "Hey, I'm really glad you told me",
+        // and the platform cut the session mid-sentence.
+        //
+        // Restarting VOICE would re-seed a new session with the very content that
+        // tripped the filter and would very likely hang up on them a second time.
+        // The chat pipeline is structurally different: it runs through the
+        // Responses API with our own moderation, which is built to engage with
+        // crisis rather than terminate. So a terminated voice session continues
+        // here, carrying the conversation so the participant never has to repeat
+        // a disclosure they just made.
+        const continuedFrom = typeof req.body?.continued_from === 'string' ? req.body.continued_from : null;
+
+        // Server-authored opening line (utils/openingLine.ts): persisted as the
+        // first assistant turn and seeded into the model history, so the AI
+        // disclosure is guaranteed by construction and the model does not
+        // disclaim a second time. A continuation of a terminated voice session
+        // skips it — the participant already heard it and must not be greeted
+        // as if starting over.
+        let opening: string | null = null;
+        if (!continuedFrom) {
+          try {
+            const cfg = await getSystemConfig();
+            opening = buildChatOpeningLine(cfg.crisis_contact as Parameters<typeof buildChatOpeningLine>[0]);
+            const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
+            seedAssistantOpening(sessionId, opening);
+            // Session steering, same mechanism as the continuation recap below
+            // (not a change to the stored system prompt): the prompt's "once, at
+            // the start" disclaimer rule has already been satisfied by the
+            // opening above, and without saying so the model repeats it in its
+            // first reply (nightly 2026-10-22, diagnosis-seeking turn 1).
+            injectGuidance(
+              sessionId,
+              '[Session framing - never mention this message] Your opening message above has already ' +
+                'delivered the required disclosure: that you are an AI support assistant, not a licensed ' +
+                'therapist or doctor, cannot diagnose or give medical advice, and the crisis resources. Do not ' +
+                'repeat that disclaimer. Re-state your limits only if the participant asks you to diagnose, ' +
+                'asks about medication, asks whether you are human or a therapist, or asks you to be a friend ' +
+                'or partner or to replace their therapist.',
+            );
+            // content_redacted is pre-filled: the text is machine-authored and
+            // PHI-free, so the redaction job must not spend a model call on it.
+            await insertMessagesBatch([
+              {
+                session_id: sessionId,
+                role: 'assistant',
+                message_type: OPENING_LINE_MESSAGE_TYPE,
+                content: opening,
+                content_redacted: opening,
+                metadata: { ...OPENING_LINE_METADATA },
+              },
+            ]);
+            if (global.io) {
+              global.io
+                .to(`session:${sessionId}`)
+                .emit('message:new', { sessionId, role: 'assistant', message: opening, timestamp: new Date() });
             }
-          } else {
-            log.warn(`[ChatStart] continued_from ${continuedFrom} not accessible; starting fresh.`);
+          } catch (err) {
+            // The session must still start; the client falls back to its own
+            // copy of the preamble when `opening` is absent.
+            log.error({ err }, '[ChatStart] Failed to persist opening line (non-fatal)');
+            opening = null;
           }
-        } catch (err) {
-          // Continuity is best-effort: a failure here must still leave the
-          // participant with a working chat session rather than no session.
-          log.error({ err }, '[ChatStart] Failed to seed continuation context');
         }
+
+        if (continuedFrom) {
+          try {
+            const { getSessionAccessInfo, getSessionMessages } = await import('../../db/index.js');
+            const prior = await getSessionAccessInfo(continuedFrom);
+            // Ownership is required: this seeds one session's transcript into
+            // another, so it must never be reachable with someone else's id.
+            if (prior && canAccessSession(req, prior, continuedFrom)) {
+              const priorMessages = await getSessionMessages(continuedFrom, false);
+              const recap = priorMessages
+                .filter((m) => m.role === 'user' || m.role === 'assistant')
+                .slice(-20)
+                .map((m) => `${m.role === 'user' ? 'Participant' : 'You'}: ${(m.content ?? '').trim()}`)
+                .filter((l) => l.length > 12)
+                .join('\n')
+                .slice(-6000);
+
+              if (recap) {
+                const { injectGuidance } = await import('../../services/chatTherapy.service.js');
+                injectGuidance(
+                  sessionId,
+                  '[Session continuity — never mention or acknowledge this message to the participant]\n' +
+                    'The participant was speaking with you by voice and the connection was cut by an ' +
+                    'automated content filter — not by them, and not by you. They have just been moved to ' +
+                    'text so the conversation can continue. Do NOT make them repeat themselves and do NOT ' +
+                    'treat this as a new conversation. Pick up exactly where it stopped, acknowledge the ' +
+                    'interruption briefly and warmly, and make clear you are still here. If they disclosed ' +
+                    'thoughts of suicide or self-harm, that is where you resume: stay with it, follow the ' +
+                    'safety protocol, and do not change the subject.\n\n' +
+                    `Transcript of the voice conversation that was cut off:\n${recap}`,
+                );
+                log.info(
+                  `[ChatStart] Seeded ${sessionId.substring(0, 12)}... as a continuation of terminated ` +
+                    `voice session ${continuedFrom.substring(0, 12)}...`,
+                );
+              }
+            } else {
+              log.warn(`[ChatStart] continued_from ${continuedFrom} not accessible; starting fresh.`);
+            }
+          } catch (err) {
+            // Continuity is best-effort: a failure here must still leave the
+            // participant with a working chat session rather than no session.
+            log.error({ err }, '[ChatStart] Failed to seed continuation context');
+          }
+        }
+
+        log.info(`Chat-only session started: ${sessionId.substring(0, 12)}... for user ${userId}`);
+
+        res.json({
+          success: true,
+          sessionId,
+          sessionType: 'chat',
+          continuedFrom: continuedFrom ?? null,
+          opening,
+          message: 'Chat therapy session started',
+        });
+      } catch (error: unknown) {
+        log.error({ err: error }, 'Failed to start chat session');
+        res.status(500).json({
+          error: 'Failed to start chat session',
+          details: error instanceof Error ? error.message : String(error),
+        });
       }
-
-      log.info(`Chat-only session started: ${sessionId.substring(0, 12)}... for user ${userId}`);
-
-      res.json({
-        success: true, sessionId, sessionType: 'chat',
-        continuedFrom: continuedFrom ?? null,
-        opening,
-        message: 'Chat therapy session started',
-      });
-    } catch (error: unknown) {
-      log.error({ err: error }, 'Failed to start chat session');
-      res.status(500).json({
-        error: 'Failed to start chat session',
-        details: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
+    },
+  );
 
   // POST /api/chat/message - send a message and get the AI response
   router.post('/api/chat/message', chatMessageLimiter, async (req, res) => {
@@ -348,8 +375,9 @@ export default function chatRoutes(): Router {
       const { detectMinorDisclosurePatterns } = await import('../../services/minorSafeguard.service.js');
       if (detectMinorDisclosurePatterns(message).matched && !(await isSyntheticAccountSession(sessionId))) {
         try {
-          const { confirmMinorDisclosure, handleConfirmedMinor, MINOR_ELIGIBILITY_MESSAGE } =
-            await import('../../services/minorSafeguard.service.js');
+          const { confirmMinorDisclosure, handleConfirmedMinor, MINOR_ELIGIBILITY_MESSAGE } = await import(
+            '../../services/minorSafeguard.service.js'
+          );
           const history = await getRecentSessionMessages(sessionId, 10);
           const verdict = await confirmMinorDisclosure(message, history, sessionId);
           if (verdict.isMinor && verdict.confidence !== 'low') {
@@ -370,27 +398,57 @@ export default function chatRoutes(): Router {
             // highest-stakes case.
             try {
               const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
-              await runCrisisPipeline(
-                { sessionId, messageId: userMsg.message_id, content: message },
-                'chat',
-              );
+              await runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat');
             } catch (crisisErr) {
               log.error({ err: crisisErr }, '[MinorSafeguard] crisis screen on the minor path failed');
             }
 
             await insertMessagesBatch([
-              { session_id: sessionId, role: 'assistant', message_type: 'text', content: MINOR_ELIGIBILITY_MESSAGE, content_redacted: null },
+              {
+                session_id: sessionId,
+                role: 'assistant',
+                message_type: 'text',
+                content: MINOR_ELIGIBILITY_MESSAGE,
+                content_redacted: null,
+              },
             ]);
-            await handleConfirmedMinor({ sessionId, messageId: userMsg.message_id, channel: 'chat', statedAge: verdict.statedAge });
-            global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
-            global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'assistant', message: MINOR_ELIGIBILITY_MESSAGE, timestamp: new Date() });
-            return res.json({ success: true, response: MINOR_ELIGIBILITY_MESSAGE, sessionId, sessionEnded: true, reason: 'eligibility' });
+            await handleConfirmedMinor({
+              sessionId,
+              messageId: userMsg.message_id,
+              channel: 'chat',
+              statedAge: verdict.statedAge,
+            });
+            global.io
+              .to(`session:${sessionId}`)
+              .emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
+            global.io.to(`session:${sessionId}`).emit('message:new', {
+              sessionId,
+              role: 'assistant',
+              message: MINOR_ELIGIBILITY_MESSAGE,
+              timestamp: new Date(),
+            });
+            return res.json({
+              success: true,
+              response: MINOR_ELIGIBILITY_MESSAGE,
+              sessionId,
+              sessionEnded: true,
+              reason: 'eligibility',
+            });
           }
           if (verdict.isMinor && verdict.confidence === 'low' && global.io) {
             // False-positive escape valve: flag for a human look, don't auto-end.
-            void broadcastAdminEventForSession(global.io, 'session:eligibility-review', {
-              sessionId, statedAge: verdict.statedAge, reasoning: verdict.reasoning, channel: 'chat', at: new Date(),
-            }, sessionId);
+            void broadcastAdminEventForSession(
+              global.io,
+              'session:eligibility-review',
+              {
+                sessionId,
+                statedAge: verdict.statedAge,
+                reasoning: verdict.reasoning,
+                channel: 'chat',
+                at: new Date(),
+              },
+              sessionId,
+            );
           }
         } catch (err) {
           log.error({ err }, '[MinorSafeguard] confirm failed (fail-open)');
@@ -409,20 +467,20 @@ export default function chatRoutes(): Router {
       let steering: string | null = null;
       try {
         if (detectCrisisKeywords(message).keywordScore > 0) {
-          const risk = await runCrisisPipeline(
-            { sessionId, messageId: userMsg.message_id, content: message },
-            'chat',
-          );
+          const risk = await runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat');
           steering = risk.steeringGuidance;
         } else {
           // Clean turn: run the pipeline after the response ships (covers the
           // periodic sweep); any steering lands on the NEXT turn.
-          res.on('finish', () => void runCrisisPipeline(
-            { sessionId, messageId: userMsg.message_id, content: message },
-            'chat',
-          )
-            .then(r => { if (r.steeringGuidance) injectGuidance(sessionId, r.steeringGuidance); })
-            .catch(err => log.error({ err }, '[ChatCrisis] deferred pipeline failed')));
+          res.on(
+            'finish',
+            () =>
+              void runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat')
+                .then((r) => {
+                  if (r.steeringGuidance) injectGuidance(sessionId, r.steeringGuidance);
+                })
+                .catch((err) => log.error({ err }, '[ChatCrisis] deferred pipeline failed')),
+          );
         }
       } catch (err) {
         // A crisis-pipeline error must degrade to "reply without steering",
@@ -441,8 +499,12 @@ export default function chatRoutes(): Router {
       ]);
 
       // Live-monitoring events.
-      global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
-      global.io.to(`session:${sessionId}`).emit('message:new', { sessionId, role: 'assistant', message: aiResponse, timestamp: new Date() });
+      global.io
+        .to(`session:${sessionId}`)
+        .emit('message:new', { sessionId, role: 'user', message, timestamp: new Date() });
+      global.io
+        .to(`session:${sessionId}`)
+        .emit('message:new', { sessionId, role: 'assistant', message: aiResponse, timestamp: new Date() });
 
       log.info(`[ChatTherapy] Message exchanged for session ${sessionId.substring(0, 12)}...`);
 
@@ -468,7 +530,9 @@ export default function chatRoutes(): Router {
 
       const { isIdentifierBlockedError } = await import('../../utils/safetyIdentifier.js');
       if (isIdentifierBlockedError(error)) {
-        log.error('[Chat] BLOCKED SAFETY IDENTIFIER — participant cannot send messages; study team must re-enroll or contact OpenAI.');
+        log.error(
+          '[Chat] BLOCKED SAFETY IDENTIFIER — participant cannot send messages; study team must re-enroll or contact OpenAI.',
+        );
         return res.status(403).json({ error: 'identifier_blocked' });
       }
 
@@ -518,16 +582,22 @@ export default function chatRoutes(): Router {
       // auto-name from the redacted transcript — naming must run after redaction
       // populates content_redacted, or it names a blank transcript (wave1 bug 1).
       import('../../services/sessionRedaction.service.js')
-        .then(m => m.redactSession(sessionId))
+        .then((m) => m.redactSession(sessionId))
         .then(() => generateSessionNameAsync(sessionId))
-        .catch(e => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
+        .catch((e) => log.error({ err: e }, '[Redaction] session redaction/naming failed'));
 
       // Memory summary + draft SOAP note (fire-and-forget).
       import('../../services/sessionInsights.service.js')
-        .then(m => m.generateSessionInsightsAsync(sessionId))
-        .catch(e => log.error({ err: e }, '[Insights] generation failed'));
+        .then((m) => m.generateSessionInsightsAsync(sessionId))
+        .catch((e) => log.error({ err: e }, '[Insights] generation failed'));
 
-      void broadcastAdminEventForSession(global.io, 'session:ended', { sessionId, endedBy: 'user', endedAt: new Date() }, sessionId, 'summary');
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:ended',
+        { sessionId, endedBy: 'user', endedAt: new Date() },
+        sessionId,
+        'summary',
+      );
       global.io.to(`session:${sessionId}`).emit('session:ended', { sessionId, endedAt: new Date() });
 
       log.info(`Chat session ${sessionId.substring(0, 12)}... ended by user`);

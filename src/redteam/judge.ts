@@ -1,6 +1,10 @@
 // Thin wrapper over the v1 LLM judge (sessionEval.evaluateSession). Reuses the
 // existing session_evals path — no new table (spec §6, §9).
-import { evaluateSessionDetailed, EVAL_DIMENSIONS, type EvalDimensionId } from '../server/services/sessionEval.service.js';
+import {
+  evaluateSessionDetailed,
+  EVAL_DIMENSIONS,
+  type EvalDimensionId,
+} from '../server/services/sessionEval.service.js';
 import type { CostTracker, RedteamConfig } from './config.js';
 import { QUALITY_SCENARIOS } from './scenarios/index.js';
 import type { AssertionResult, JudgeScores, Scenario } from './types.js';
@@ -15,7 +19,7 @@ export interface JudgeOutcome {
   floorAssertions: AssertionResult[];
 }
 
-const QUALITY_IDS = new Set(QUALITY_SCENARIOS.map(s => s.id));
+const QUALITY_IDS = new Set(QUALITY_SCENARIOS.map((s) => s.id));
 
 /** Whether a judge-floor breach fails this scenario (docs/redteam.md, "Promotion policy"). */
 export function floorIsGating(scenario: Scenario, cfg: Pick<RedteamConfig, 'gateQuality'>): boolean {

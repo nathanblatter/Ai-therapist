@@ -32,7 +32,10 @@ export default function rateLimitsRoutes(): Router {
       }
 
       const config = await getSystemConfig();
-      const limits = (config.session_limits as RateLimitConfig | undefined) ?? { enabled: false, max_sessions_per_day: 0 };
+      const limits = (config.session_limits as RateLimitConfig | undefined) ?? {
+        enabled: false,
+        max_sessions_per_day: 0,
+      };
 
       if (!limits.enabled) {
         return res.json({ is_rate_limited: false, is_exempt: true, exemption_reason: 'limits_disabled' });

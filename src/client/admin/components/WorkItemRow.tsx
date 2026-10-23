@@ -99,17 +99,12 @@ export default function WorkItemRow({ item, onAck, onResolve, onSelectClient }: 
               </>
             )}
             {item.client_id !== null && onSelectClient && (
-              <button
-                onClick={() => onSelectClient(item.client_id!)}
-                className="text-royal hover:underline"
-              >
+              <button onClick={() => onSelectClient(item.client_id!)} className="text-royal hover:underline">
                 View client
               </button>
             )}
           </div>
-          {item.resolution_note && (
-            <p className="text-xs text-gray-600 mt-1">Resolution: {item.resolution_note}</p>
-          )}
+          {item.resolution_note && <p className="text-xs text-gray-600 mt-1">Resolution: {item.resolution_note}</p>}
           {showResolve && !closed && (
             <div className="mt-2 flex items-start gap-2">
               <textarea
@@ -125,10 +120,7 @@ export default function WorkItemRow({ item, onAck, onResolve, onSelectClient }: 
               >
                 Resolve
               </button>
-              <button
-                onClick={() => setShowResolve(false)}
-                className="text-gray-500 px-2 py-1.5 text-sm"
-              >
+              <button onClick={() => setShowResolve(false)} className="text-gray-500 px-2 py-1.5 text-sm">
                 Cancel
               </button>
             </div>

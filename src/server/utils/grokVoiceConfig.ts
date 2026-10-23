@@ -76,37 +76,37 @@ export interface GrokVoice {
  * something to show. `eve` is xAI's documented default and is listed first.
  */
 export const GROK_VOICES: GrokVoice[] = [
-  { value: 'eve',     label: 'Eve',     description: 'Warm and steady (xAI default)', presentation: 'Feminine' },
-  { value: 'ara',     label: 'Ara',     description: 'Clear and gentle',              presentation: 'Feminine' },
-  { value: 'aurora',  label: 'Aurora',  description: 'Bright and open',               presentation: 'Feminine' },
-  { value: 'carina',  label: 'Carina',  description: 'Soft and unhurried',            presentation: 'Feminine' },
-  { value: 'celeste', label: 'Celeste', description: 'Calm and even',                 presentation: 'Feminine' },
-  { value: 'iris',    label: 'Iris',    description: 'Light and friendly',            presentation: 'Feminine' },
-  { value: 'liora',   label: 'Liora',   description: 'Measured and kind',             presentation: 'Feminine' },
-  { value: 'luna',    label: 'Luna',    description: 'Quiet and reassuring',          presentation: 'Feminine' },
-  { value: 'ursa',    label: 'Ursa',    description: 'Grounded and direct',           presentation: 'Feminine' },
-  { value: 'altair',  label: 'Altair',  description: 'Even and composed',             presentation: 'Masculine' },
-  { value: 'atlas',   label: 'Atlas',   description: 'Deep and steady',               presentation: 'Masculine' },
-  { value: 'castor',  label: 'Castor',  description: 'Relaxed and plain-spoken',      presentation: 'Masculine' },
-  { value: 'cosmo',   label: 'Cosmo',   description: 'Easygoing and warm',            presentation: 'Masculine' },
-  { value: 'helios',  label: 'Helios',  description: 'Clear and confident',           presentation: 'Masculine' },
-  { value: 'helix',   label: 'Helix',   description: 'Crisp and articulate',          presentation: 'Masculine' },
-  { value: 'kepler',  label: 'Kepler',  description: 'Thoughtful and low',            presentation: 'Masculine' },
-  { value: 'leo',     label: 'Leo',     description: 'Friendly and open',             presentation: 'Masculine' },
-  { value: 'lumen',   label: 'Lumen',   description: 'Soft and attentive',            presentation: 'Masculine' },
-  { value: 'lux',     label: 'Lux',     description: 'Bright and quick',              presentation: 'Masculine' },
-  { value: 'naksh',   label: 'Naksh',   description: 'Calm and resonant',             presentation: 'Masculine' },
-  { value: 'orion',   label: 'Orion',   description: 'Steady and grounded',           presentation: 'Masculine' },
-  { value: 'perseus', label: 'Perseus', description: 'Measured and clear',            presentation: 'Masculine' },
-  { value: 'rex',     label: 'Rex',     description: 'Plain and direct',              presentation: 'Masculine' },
-  { value: 'rigel',   label: 'Rigel',   description: 'Low and unhurried',             presentation: 'Masculine' },
-  { value: 'sal',     label: 'Sal',     description: 'Easy and conversational',       presentation: 'Masculine' },
-  { value: 'sirius',  label: 'Sirius',  description: 'Warm and assured',              presentation: 'Masculine' },
-  { value: 'zagan',   label: 'Zagan',   description: 'Deep and calm',                 presentation: 'Masculine' },
-  { value: 'zenith',  label: 'Zenith',  description: 'Clear and level',               presentation: 'Masculine' },
+  { value: 'eve', label: 'Eve', description: 'Warm and steady (xAI default)', presentation: 'Feminine' },
+  { value: 'ara', label: 'Ara', description: 'Clear and gentle', presentation: 'Feminine' },
+  { value: 'aurora', label: 'Aurora', description: 'Bright and open', presentation: 'Feminine' },
+  { value: 'carina', label: 'Carina', description: 'Soft and unhurried', presentation: 'Feminine' },
+  { value: 'celeste', label: 'Celeste', description: 'Calm and even', presentation: 'Feminine' },
+  { value: 'iris', label: 'Iris', description: 'Light and friendly', presentation: 'Feminine' },
+  { value: 'liora', label: 'Liora', description: 'Measured and kind', presentation: 'Feminine' },
+  { value: 'luna', label: 'Luna', description: 'Quiet and reassuring', presentation: 'Feminine' },
+  { value: 'ursa', label: 'Ursa', description: 'Grounded and direct', presentation: 'Feminine' },
+  { value: 'altair', label: 'Altair', description: 'Even and composed', presentation: 'Masculine' },
+  { value: 'atlas', label: 'Atlas', description: 'Deep and steady', presentation: 'Masculine' },
+  { value: 'castor', label: 'Castor', description: 'Relaxed and plain-spoken', presentation: 'Masculine' },
+  { value: 'cosmo', label: 'Cosmo', description: 'Easygoing and warm', presentation: 'Masculine' },
+  { value: 'helios', label: 'Helios', description: 'Clear and confident', presentation: 'Masculine' },
+  { value: 'helix', label: 'Helix', description: 'Crisp and articulate', presentation: 'Masculine' },
+  { value: 'kepler', label: 'Kepler', description: 'Thoughtful and low', presentation: 'Masculine' },
+  { value: 'leo', label: 'Leo', description: 'Friendly and open', presentation: 'Masculine' },
+  { value: 'lumen', label: 'Lumen', description: 'Soft and attentive', presentation: 'Masculine' },
+  { value: 'lux', label: 'Lux', description: 'Bright and quick', presentation: 'Masculine' },
+  { value: 'naksh', label: 'Naksh', description: 'Calm and resonant', presentation: 'Masculine' },
+  { value: 'orion', label: 'Orion', description: 'Steady and grounded', presentation: 'Masculine' },
+  { value: 'perseus', label: 'Perseus', description: 'Measured and clear', presentation: 'Masculine' },
+  { value: 'rex', label: 'Rex', description: 'Plain and direct', presentation: 'Masculine' },
+  { value: 'rigel', label: 'Rigel', description: 'Low and unhurried', presentation: 'Masculine' },
+  { value: 'sal', label: 'Sal', description: 'Easy and conversational', presentation: 'Masculine' },
+  { value: 'sirius', label: 'Sirius', description: 'Warm and assured', presentation: 'Masculine' },
+  { value: 'zagan', label: 'Zagan', description: 'Deep and calm', presentation: 'Masculine' },
+  { value: 'zenith', label: 'Zenith', description: 'Clear and level', presentation: 'Masculine' },
 ];
 
-const GROK_VOICE_INDEX = new Map(GROK_VOICES.map(v => [v.value, v]));
+const GROK_VOICE_INDEX = new Map(GROK_VOICES.map((v) => [v.value, v]));
 
 /** xAI's documented default. */
 export const GROK_DEFAULT_VOICE = 'eve';
@@ -142,9 +142,7 @@ export function resolveGrokVoice(requested: string | null | undefined): string {
  * covers what a single speech-to-speech model needs to know about SPEAKING.
  */
 export function buildGrokVoiceHeader(languageName: string | null): string {
-  const languageLine = languageName
-    ? `Speak ${languageName} unless the participant asks you to switch.`
-    : '';
+  const languageLine = languageName ? `Speak ${languageName} unless the participant asks you to switch.` : '';
   return `## Voice conversation
 You are speaking aloud with the participant in real time. Speak calmly and unhurriedly, in plain
 sentences a person can follow by ear: no Markdown, no headings, no lists, no stage directions.
@@ -331,7 +329,7 @@ export function buildGrokCrisisPhrase(crisis: CrisisContactLike | undefined): st
   const enabled = crisis?.enabled !== false && Boolean(crisis?.phone);
   return enabled
     ? `call the ${crisis?.hotline ?? '988 Suicide & Crisis Lifeline'} crisis line at ${crisis?.phone}` +
-      (crisis?.text ? ` or text ${crisis.text}` : '')
+        (crisis?.text ? ` or text ${crisis.text}` : '')
     : 'call or text 988 (Suicide and Crisis Lifeline), or call 911 for immediate danger';
 }
 
@@ -345,8 +343,9 @@ export function buildGrokOpeningPrompt(language: string, crisis: CrisisContactLi
     `Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to ` +
     `press the red mic toggle button to turn it on. Thanks again for being willing to talk, I'm glad you're here with me today.`;
 
-  const instruction = language === 'en'
-    ? `Say this phrase exactly: '${preamble}'`
-    : `Say this phrase exactly in ${LANGUAGE_NAMES[language] ?? language}: '${preamble}'`;
+  const instruction =
+    language === 'en'
+      ? `Say this phrase exactly: '${preamble}'`
+      : `Say this phrase exactly in ${LANGUAGE_NAMES[language] ?? language}: '${preamble}'`;
   return `${instruction} Say it immediately, before the participant speaks, then pause and listen.`;
 }

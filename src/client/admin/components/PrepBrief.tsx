@@ -9,7 +9,16 @@
 // ever shows what the server sent it.
 import { useState, useEffect, useCallback } from 'react';
 import { getJson } from '../../shared/http';
-import { ChevronDown, ChevronRight, AlertTriangle, Activity, CheckCircle, Circle, FileText, Shield } from 'react-feather';
+import {
+  ChevronDown,
+  ChevronRight,
+  AlertTriangle,
+  Activity,
+  CheckCircle,
+  Circle,
+  FileText,
+  Shield,
+} from 'react-feather';
 
 interface PrepAssignment {
   id: number;
@@ -76,7 +85,12 @@ interface PrepDigest {
   // Therapist tier only.
   clinician_note?: { notes: string; author: string; created_at: string } | null;
   last_session?: { session_id: string; ended_at: string; headline: string | null; follow_up: string | null } | null;
-  recent_crisis_flags?: { session_id: string; severity: string | null; flagged_at: string; unflagged_at: string | null }[];
+  recent_crisis_flags?: {
+    session_id: string;
+    severity: string | null;
+    flagged_at: string;
+    unflagged_at: string | null;
+  }[];
   recent_notes?: RecentNote[];
   // Caseworker tier only.
   engagement?: Engagement | null;
@@ -89,7 +103,7 @@ interface PrepDigest {
 function noteSnippet(note: RecentNote): string {
   const text =
     note.note_type === 'case'
-      ? note.content.narrative ?? ''
+      ? (note.content.narrative ?? '')
       : note.content.assessment || note.content.plan || note.content.subjective || '';
   return text.length > 160 ? `${text.slice(0, 160)}…` : text;
 }
@@ -125,14 +139,20 @@ export default function PrepBrief({ userId }: { userId: number }) {
   const openEscalations = digest?.open_escalations ?? [];
   const recentSummaries = digest?.recent_summaries ?? [];
   const isCaseworkerTier = digest?.tier === 'caseworker';
-  const hasContent = digest && (
-    digest.open_assignments.length > 0 || digest.completed_assignments.length > 0 ||
-    digest.screener_deltas.length > 0 || (digest.clinician_note ?? null) !== null ||
-    (digest.last_session ?? null) !== null || crisisFlags.length > 0 ||
-    recentNotes.length > 0 || openEscalations.length > 0 || recentSummaries.length > 0 ||
-    (digest.engagement ?? null) !== null || (digest.latest_case_note ?? null) !== null ||
-    isCaseworkerTier
-  );
+  const hasContent =
+    digest &&
+    (digest.open_assignments.length > 0 ||
+      digest.completed_assignments.length > 0 ||
+      digest.screener_deltas.length > 0 ||
+      (digest.clinician_note ?? null) !== null ||
+      (digest.last_session ?? null) !== null ||
+      crisisFlags.length > 0 ||
+      recentNotes.length > 0 ||
+      openEscalations.length > 0 ||
+      recentSummaries.length > 0 ||
+      (digest.engagement ?? null) !== null ||
+      (digest.latest_case_note ?? null) !== null ||
+      isCaseworkerTier);
 
   return (
     <div className="border border-gray-200 bg-white rounded-lg">
@@ -152,9 +172,7 @@ export default function PrepBrief({ userId }: { userId: number }) {
         <div className="px-3 pb-3 space-y-3 text-sm">
           {loading && <p className="text-gray-500">Loading prep digest…</p>}
           {failed && !loading && <p className="text-gray-500">Could not load the prep digest.</p>}
-          {digest && !hasContent && (
-            <p className="text-gray-500">Nothing on file for this participant yet.</p>
-          )}
+          {digest && !hasContent && <p className="text-gray-500">Nothing on file for this participant yet.</p>}
 
           {digest && openEscalations.length > 0 && (
             <div>
@@ -162,7 +180,7 @@ export default function PrepBrief({ userId }: { userId: number }) {
                 <AlertTriangle size={14} className="text-red-600" aria-hidden="true" /> Open escalations
               </h5>
               <ul className="space-y-0.5 text-gray-700">
-                {openEscalations.map(e => (
+                {openEscalations.map((e) => (
                   <li key={e.escalation_id}>
                     <span className="capitalize">{e.urgency}</span>: {e.reason}
                     <span className="text-xs text-gray-400">
@@ -199,10 +217,14 @@ export default function PrepBrief({ userId }: { userId: number }) {
                 <Activity size={14} aria-hidden="true" /> Engagement
               </h5>
               <p className="text-gray-700">
-                {digest.engagement.last_session_at
-                  ? <>Last session {shortDate(digest.engagement.last_session_at)}</>
-                  : <>No sessions yet</>}
-                {' · '}{digest.engagement.ended_session_count} completed session{digest.engagement.ended_session_count === 1 ? '' : 's'}
+                {digest.engagement.last_session_at ? (
+                  <>Last session {shortDate(digest.engagement.last_session_at)}</>
+                ) : (
+                  <>No sessions yet</>
+                )}
+                {' · '}
+                {digest.engagement.ended_session_count} completed session
+                {digest.engagement.ended_session_count === 1 ? '' : 's'}
                 {digest.engagement.last_checkin_mood !== null && (
                   <span className="text-gray-500"> · last check-in mood {digest.engagement.last_checkin_mood}</span>
                 )}
@@ -221,21 +243,29 @@ export default function PrepBrief({ userId }: { userId: number }) {
             <div>
               <h5 className="font-semibold text-gray-700 mb-1">Practice assignments</h5>
               <ul className="space-y-1 text-gray-700">
-                {digest.open_assignments.map(a => (
+                {digest.open_assignments.map((a) => (
                   <li key={a.id} className="flex items-start gap-1.5">
                     <Circle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
                     <span>
-                      {a.title} <span className="text-xs text-gray-400">assigned {shortDate(a.assigned_at)}{a.suggested_frequency ? ` · ${a.suggested_frequency}` : ''}</span>
+                      {a.title}{' '}
+                      <span className="text-xs text-gray-400">
+                        assigned {shortDate(a.assigned_at)}
+                        {a.suggested_frequency ? ` · ${a.suggested_frequency}` : ''}
+                      </span>
                     </span>
                   </li>
                 ))}
-                {digest.completed_assignments.map(a => (
+                {digest.completed_assignments.map((a) => (
                   <li key={a.id} className="flex items-start gap-1.5">
                     <CheckCircle size={13} className="text-green-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
                     <span>
                       {a.title}
-                      {a.completed_at && <span className="text-xs text-gray-400"> done {shortDate(a.completed_at)}</span>}
-                      {a.completion_note && <span className="text-xs text-gray-500 italic"> — &ldquo;{a.completion_note}&rdquo;</span>}
+                      {a.completed_at && (
+                        <span className="text-xs text-gray-400"> done {shortDate(a.completed_at)}</span>
+                      )}
+                      {a.completion_note && (
+                        <span className="text-xs text-gray-500 italic"> — &ldquo;{a.completion_note}&rdquo;</span>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -247,12 +277,17 @@ export default function PrepBrief({ userId }: { userId: number }) {
             <div>
               <h5 className="font-semibold text-gray-700 mb-1">Screener movement</h5>
               <ul className="space-y-0.5 text-gray-700">
-                {digest.screener_deltas.map(d => (
+                {digest.screener_deltas.map((d) => (
                   <li key={d.scale}>
                     <span className="font-mono uppercase">{d.scale}</span>: <strong>{d.latest_score}</strong>
-                    {d.previous_score !== null
-                      ? <> (was {d.previous_score} — {d.direction})</>
-                      : <span className="text-xs text-gray-400"> first recorded</span>}
+                    {d.previous_score !== null ? (
+                      <>
+                        {' '}
+                        (was {d.previous_score} — {d.direction})
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-400"> first recorded</span>
+                    )}
                     <span className="text-xs text-gray-400"> · {shortDate(d.latest_at)}</span>
                   </li>
                 ))}
@@ -263,13 +298,16 @@ export default function PrepBrief({ userId }: { userId: number }) {
           {digest?.last_session && (
             <div>
               <h5 className="font-semibold text-gray-700 mb-1">
-                Last session <span className="font-normal text-xs text-gray-400">{shortDate(digest.last_session.ended_at)}</span>
+                Last session{' '}
+                <span className="font-normal text-xs text-gray-400">{shortDate(digest.last_session.ended_at)}</span>
               </h5>
               <div className="text-gray-700">
                 {digest.last_session.headline && <p>&ldquo;{digest.last_session.headline}&rdquo;</p>}
-                {digest.last_session.follow_up
-                  ? <p className="text-gray-500">Open follow-up: {digest.last_session.follow_up}</p>
-                  : <p className="text-xs text-gray-400">No open follow-up recorded.</p>}
+                {digest.last_session.follow_up ? (
+                  <p className="text-gray-500">Open follow-up: {digest.last_session.follow_up}</p>
+                ) : (
+                  <p className="text-xs text-gray-400">No open follow-up recorded.</p>
+                )}
               </div>
             </div>
           )}
@@ -292,7 +330,7 @@ export default function PrepBrief({ userId }: { userId: number }) {
                 <FileText size={14} aria-hidden="true" /> Recent notes
               </h5>
               <ul className="space-y-1.5 text-gray-700">
-                {recentNotes.map(n => (
+                {recentNotes.map((n) => (
                   <li key={n.note_id}>
                     <span className="capitalize font-medium">
                       {n.note_type === 'case'
@@ -333,13 +371,11 @@ export default function PrepBrief({ userId }: { userId: number }) {
             <div>
               <h5 className="font-semibold text-gray-700 mb-1">Recent session summaries</h5>
               <ul className="space-y-1 text-gray-700">
-                {recentSummaries.map(s => (
+                {recentSummaries.map((s) => (
                   <li key={s.session_id}>
                     <span className="text-xs text-gray-400">{shortDate(s.ended_at)}</span>
                     {s.summary.headline && <> &ldquo;{s.summary.headline}&rdquo;</>}
-                    {s.summary.follow_up && (
-                      <span className="text-gray-500"> Follow-up: {s.summary.follow_up}</span>
-                    )}
+                    {s.summary.follow_up && <span className="text-gray-500"> Follow-up: {s.summary.follow_up}</span>}
                   </li>
                 ))}
               </ul>

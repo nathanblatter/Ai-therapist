@@ -6,10 +6,9 @@ import { pool } from '../config/db.js';
 export type StudyStatus = 'active' | 'paused' | 'withdrawn';
 
 export async function getStudyStatus(userId: number): Promise<StudyStatus> {
-  const { rows } = await pool.query<{ study_status: StudyStatus }>(
-    `SELECT study_status FROM users WHERE userid = $1`,
-    [userId]
-  );
+  const { rows } = await pool.query<{ study_status: StudyStatus }>(`SELECT study_status FROM users WHERE userid = $1`, [
+    userId,
+  ]);
   return rows[0]?.study_status ?? 'active';
 }
 
@@ -25,7 +24,7 @@ export async function getStudyStatusDetail(userId: number): Promise<StudyStatusD
   const { rows } = await pool.query<StudyStatusDetail>(
     `SELECT study_status, study_status_changed_at, study_status_source
        FROM users WHERE userid = $1`,
-    [userId]
+    [userId],
   );
   return rows[0] ?? null;
 }
@@ -35,18 +34,14 @@ export async function getStudyStatusDetail(userId: number): Promise<StudyStatusD
  * setting the same status twice is a no-op, which keeps the withdrawal-survey
  * ingest idempotent across webhook + bulk-sync overlap.
  */
-export async function setStudyStatus(
-  userId: number,
-  status: StudyStatus,
-  source: string
-): Promise<boolean> {
+export async function setStudyStatus(userId: number, status: StudyStatus, source: string): Promise<boolean> {
   const result = await pool.query(
     `UPDATE users
         SET study_status = $2,
             study_status_changed_at = now(),
             study_status_source = $3
       WHERE userid = $1 AND study_status IS DISTINCT FROM $2`,
-    [userId, status, source]
+    [userId, status, source],
   );
   return (result.rowCount ?? 0) > 0;
 }

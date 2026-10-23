@@ -24,16 +24,23 @@ export interface TurnLatencyInsert {
 
 /** Insert one measured turn. Best-effort: swallows its own errors. */
 export async function insertTurnLatency(row: TurnLatencyInsert): Promise<void> {
-  const ttfaMs = row.firstOutputAt
-    ? Math.max(0, row.firstOutputAt.getTime() - row.userDoneAt.getTime())
-    : null;
+  const ttfaMs = row.firstOutputAt ? Math.max(0, row.firstOutputAt.getTime() - row.userDoneAt.getTime()) : null;
   const totalMs = Math.max(0, row.responseDoneAt.getTime() - row.userDoneAt.getTime());
   try {
     await pool.query(
       `INSERT INTO turn_latency
          (session_id, turn_index, user_done_at, first_output_at, response_done_at, ttfa_ms, total_ms, channel)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [row.sessionId, row.turnIndex ?? null, row.userDoneAt, row.firstOutputAt, row.responseDoneAt, ttfaMs, totalMs, row.channel]
+      [
+        row.sessionId,
+        row.turnIndex ?? null,
+        row.userDoneAt,
+        row.firstOutputAt,
+        row.responseDoneAt,
+        ttfaMs,
+        totalMs,
+        row.channel,
+      ],
     );
   } catch (err) {
     console.error('[latency] Failed to record turn latency (non-fatal):', err);
@@ -52,9 +59,12 @@ export interface LatencyStatsRow {
 /** p50/p95 TTFA + total per channel over the last N days. */
 export async function getLatencyStats(days = 7): Promise<LatencyStatsRow[]> {
   const result = await pool.query<{
-    channel: LatencyChannel; turns: string;
-    p50_ttfa_ms: number | null; p95_ttfa_ms: number | null;
-    p50_total_ms: number | null; p95_total_ms: number | null;
+    channel: LatencyChannel;
+    turns: string;
+    p50_ttfa_ms: number | null;
+    p95_ttfa_ms: number | null;
+    p50_total_ms: number | null;
+    p95_total_ms: number | null;
   }>(
     // PERCENTILE_CONT ignores NULL inputs, so turns without an observed first
     // output (ttfa_ms NULL) still count toward the total_ms percentiles.
@@ -68,9 +78,9 @@ export async function getLatencyStats(days = 7): Promise<LatencyStatsRow[]> {
       WHERE created_at >= CURRENT_TIMESTAMP - ($1 || ' days')::INTERVAL
       GROUP BY channel
       ORDER BY channel`,
-    [days]
+    [days],
   );
-  return result.rows.map(r => ({ ...r, turns: parseInt(r.turns, 10) }));
+  return result.rows.map((r) => ({ ...r, turns: parseInt(r.turns, 10) }));
 }
 
 export interface SessionLatencyRow {
@@ -88,7 +98,7 @@ export async function getSessionLatency(sessionId: string): Promise<SessionLaten
        FROM turn_latency
       WHERE session_id = $1
       ORDER BY created_at ASC`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows;
 }
@@ -111,8 +121,12 @@ export interface LatencyDriftRow {
  */
 export async function getLatencyDrift(days = 7): Promise<LatencyDriftRow[]> {
   const result = await pool.query<{
-    channel: LatencyChannel; bucket: string; bucket_start: number; turns: string;
-    p50_ttfa_ms: number | null; p50_total_ms: number | null;
+    channel: LatencyChannel;
+    bucket: string;
+    bucket_start: number;
+    turns: string;
+    p50_ttfa_ms: number | null;
+    p50_total_ms: number | null;
   }>(
     `SELECT channel,
             CASE WHEN turn_index < 5 THEN '1-4'
@@ -128,7 +142,7 @@ export async function getLatencyDrift(days = 7): Promise<LatencyDriftRow[]> {
         AND turn_index IS NOT NULL
       GROUP BY channel, 2
       ORDER BY channel, bucket_start`,
-    [days]
+    [days],
   );
-  return result.rows.map(r => ({ ...r, turns: parseInt(r.turns, 10) }));
+  return result.rows.map((r) => ({ ...r, turns: parseInt(r.turns, 10) }));
 }

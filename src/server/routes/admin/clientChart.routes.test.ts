@@ -38,11 +38,25 @@ import clientChartRoutes from './clientChart.routes.js';
 const CLIENT = { userid: 42, username: 'p42', role: 'participant', organization_id: 5, is_sandbox: false };
 
 const NOTE = {
-  note_id: 1, org_id: 5, client_id: 42, author_id: 9, author_name: 'Dr T', author_role: 'therapist',
-  note_type: 'progress', case_note_kind: null, session_id: 's1', seed_source: null, seed_model: null,
-  content: { subjective: 'Client reported "a rough week"' }, status: 'signed', shared_with_care_team: false,
-  signed_at: '2026-10-20T10:00:00Z', sign_hash: 'abc123', amends_note_id: null,
-  created_at: '2026-10-20T09:00:00Z', updated_at: '2026-10-20T10:00:00Z',
+  note_id: 1,
+  org_id: 5,
+  client_id: 42,
+  author_id: 9,
+  author_name: 'Dr T',
+  author_role: 'therapist',
+  note_type: 'progress',
+  case_note_kind: null,
+  session_id: 's1',
+  seed_source: null,
+  seed_model: null,
+  content: { subjective: 'Client reported "a rough week"' },
+  status: 'signed',
+  shared_with_care_team: false,
+  signed_at: '2026-10-20T10:00:00Z',
+  sign_hash: 'abc123',
+  amends_note_id: null,
+  created_at: '2026-10-20T09:00:00Z',
+  updated_at: '2026-10-20T10:00:00Z',
 };
 
 function appAs(role: string | null, userId = 9, orgId: number | null = 5) {
@@ -94,8 +108,14 @@ async function download(app: express.Express) {
 }
 
 const EXPECTED_FULL = [
-  'notes.csv', 'screeners.csv', 'session_summaries.csv', 'crisis_history.csv',
-  'assignments.csv', 'escalations.csv', 'safety_plan.json', 'README.txt',
+  'notes.csv',
+  'screeners.csv',
+  'session_summaries.csv',
+  'crisis_history.csv',
+  'assignments.csv',
+  'escalations.csv',
+  'safety_plan.json',
+  'README.txt',
 ];
 
 beforeEach(() => {
@@ -109,46 +129,98 @@ beforeEach(() => {
   ]);
   dbMocks.getClientSessionSummaries.mockResolvedValue([
     {
-      session_id: 's1', session_name: 'Monday', session_type: 'realtime', modality: 'cbt',
-      started_at: new Date('2026-10-20T09:00:00Z'), ended_at: new Date('2026-10-20T09:45:00Z'),
-      duration_minutes: 45, crisis_flagged: true, crisis_severity: 'medium',
+      session_id: 's1',
+      session_name: 'Monday',
+      session_type: 'realtime',
+      modality: 'cbt',
+      started_at: new Date('2026-10-20T09:00:00Z'),
+      ended_at: new Date('2026-10-20T09:45:00Z'),
+      duration_minutes: 45,
+      crisis_flagged: true,
+      crisis_severity: 'medium',
       summary: { headline: 'Work stress', topics: ['work', 'sleep'], mood_trajectory: 'improving' },
     },
   ]);
   dbMocks.getUserLatestSafetyPlan.mockResolvedValue({
     plan: { warning_signs: ['isolation'], support_contacts: ['Sam 555-0100'] },
-    created_at: new Date('2026-10-19T00:00:00Z'), session_id: 's0',
+    created_at: new Date('2026-10-19T00:00:00Z'),
+    session_id: 's0',
   });
   dbMocks.getClientCrisisEvents.mockResolvedValue([
     {
-      event_id: 11, session_id: 's1', origin: 'session', event_type: 'flagged', severity: 'medium',
-      previous_severity: null, risk_score: 55, previous_risk_score: null, triggered_by: 'system',
-      trigger_method: 'auto', risk_factors: ['hopelessness'], notes: 'Participant said "I cannot keep going"',
+      event_id: 11,
+      session_id: 's1',
+      origin: 'session',
+      event_type: 'flagged',
+      severity: 'medium',
+      previous_severity: null,
+      risk_score: 55,
+      previous_risk_score: null,
+      triggered_by: 'system',
+      trigger_method: 'auto',
+      risk_factors: ['hopelessness'],
+      notes: 'Participant said "I cannot keep going"',
       created_at: new Date('2026-10-20T09:20:00Z'),
     },
   ]);
   dbMocks.getClientInterventionActions.mockResolvedValue([
     {
-      action_id: 21, session_id: 's1', action_type: 'medium_risk_alert', risk_score: 55, performed_by: 'system',
-      performed_at: new Date('2026-10-20T09:21:00Z'), outcome: 'alert sent', notes: 'quoted: "keep going"',
+      action_id: 21,
+      session_id: 's1',
+      action_type: 'medium_risk_alert',
+      risk_score: 55,
+      performed_by: 'system',
+      performed_at: new Date('2026-10-20T09:21:00Z'),
+      outcome: 'alert sent',
+      notes: 'quoted: "keep going"',
     },
   ]);
   dbMocks.listAssignmentsForClient.mockResolvedValue([
     {
-      id: 7, user_id: 42, session_id: null, title: 'Worry log', description: 'Note each worry.', kind: 'worksheet',
-      suggested_frequency: 'daily', status: 'assigned', assigned_at: new Date('2026-10-20T00:00:00Z'),
-      completed_at: null, completion_note: null, source: 'therapist', authored_by: 9, cancelled_at: null,
-      cancelled_by: null, cancel_reason: null, reissued_from: null, authored_by_username: 'user9',
+      id: 7,
+      user_id: 42,
+      session_id: null,
+      title: 'Worry log',
+      description: 'Note each worry.',
+      kind: 'worksheet',
+      suggested_frequency: 'daily',
+      status: 'assigned',
+      assigned_at: new Date('2026-10-20T00:00:00Z'),
+      completed_at: null,
+      completion_note: null,
+      source: 'therapist',
+      authored_by: 9,
+      cancelled_at: null,
+      cancelled_by: null,
+      cancel_reason: null,
+      reissued_from: null,
+      authored_by_username: 'user9',
       cancelled_by_username: null,
     },
   ]);
   dbMocks.listEscalations.mockResolvedValue([
     {
-      escalation_id: 3, org_id: 5, client_id: 42, raised_by: 9, raised_by_role: 'therapist', assigned_to: null,
-      reason: 'Missed two sessions', urgency: 'routine', crisis_event_id: null, session_id: null, note_id: null,
-      status: 'open', acknowledged_by: null, acknowledged_at: null, resolved_by: null, resolved_at: null,
-      resolution_note: null, created_at: '2026-10-21T00:00:00Z', updated_at: '2026-10-21T00:00:00Z',
-      client_username: 'p42', assigned_username: null,
+      escalation_id: 3,
+      org_id: 5,
+      client_id: 42,
+      raised_by: 9,
+      raised_by_role: 'therapist',
+      assigned_to: null,
+      reason: 'Missed two sessions',
+      urgency: 'routine',
+      crisis_event_id: null,
+      session_id: null,
+      note_id: null,
+      status: 'open',
+      acknowledged_by: null,
+      acknowledged_at: null,
+      resolved_by: null,
+      resolved_at: null,
+      resolution_note: null,
+      created_at: '2026-10-21T00:00:00Z',
+      updated_at: '2026-10-21T00:00:00Z',
+      client_username: 'p42',
+      assigned_username: null,
     },
   ]);
 });
@@ -174,7 +246,9 @@ describe('role matrix', () => {
     const res = await download(appAs('therapist', 9));
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toBe('application/zip');
-    expect(res.headers['content-disposition']).toMatch(/^attachment; filename="client-p42-chart-\d{4}-\d{2}-\d{2}\.zip"$/);
+    expect(res.headers['content-disposition']).toMatch(
+      /^attachment; filename="client-p42-chart-\d{4}-\d{2}-\d{2}\.zip"$/,
+    );
     expect(dbMocks.isAssigned).toHaveBeenCalledWith(9, 42);
 
     const entries = readZip(res.body as Buffer);
@@ -203,7 +277,7 @@ describe('role matrix', () => {
     expect(dbMocks.getUserLatestSafetyPlan).not.toHaveBeenCalled();
 
     const entries = readZip(res.body as Buffer);
-    expect(Object.keys(entries)).toEqual(EXPECTED_FULL.filter(n => n !== 'safety_plan.json'));
+    expect(Object.keys(entries)).toEqual(EXPECTED_FULL.filter((n) => n !== 'safety_plan.json'));
     expect(entries['notes.csv']).toContain('abc123');
     expect(entries['notes.csv']).not.toContain('a rough week');
     expect(entries['crisis_history.csv']).toContain('flagged');

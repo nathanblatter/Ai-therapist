@@ -61,32 +61,27 @@ export async function createOrganization(input: {
   kind: OrganizationKind;
   slug?: string | null;
 }): Promise<OrganizationRow> {
-  const slug =
-    input.slug ?? `${slugify(input.name)}-${Math.random().toString(36).slice(2, 8)}`;
+  const slug = input.slug ?? `${slugify(input.name)}-${Math.random().toString(36).slice(2, 8)}`;
   const result = await pool.query<OrganizationRow>(
     `INSERT INTO organizations (slug, name, kind)
      VALUES ($1, $2, $3)
      RETURNING ${ORG_COLUMNS}`,
-    [slug, input.name, input.kind]
+    [slug, input.name, input.kind],
   );
   return result.rows[0];
 }
 
 /** One organization by id, or null. */
 export async function getOrganizationById(orgId: number): Promise<OrganizationRow | null> {
-  const result = await pool.query<OrganizationRow>(
-    `SELECT ${ORG_COLUMNS} FROM organizations WHERE org_id = $1`,
-    [orgId]
-  );
+  const result = await pool.query<OrganizationRow>(`SELECT ${ORG_COLUMNS} FROM organizations WHERE org_id = $1`, [
+    orgId,
+  ]);
   return result.rows[0] ?? null;
 }
 
 /** One organization by slug, or null. */
 export async function getOrganizationBySlug(slug: string): Promise<OrganizationRow | null> {
-  const result = await pool.query<OrganizationRow>(
-    `SELECT ${ORG_COLUMNS} FROM organizations WHERE slug = $1`,
-    [slug]
-  );
+  const result = await pool.query<OrganizationRow>(`SELECT ${ORG_COLUMNS} FROM organizations WHERE slug = $1`, [slug]);
   return result.rows[0] ?? null;
 }
 
@@ -111,7 +106,7 @@ export async function getIrbStudyOrgId(): Promise<number | null> {
 export async function getOrganizationIdForUser(userId: number): Promise<number | null> {
   const result = await pool.query<{ organization_id: number | null }>(
     'SELECT organization_id FROM users WHERE userid = $1',
-    [userId]
+    [userId],
   );
   if (result.rows.length === 0) return null;
   return result.rows[0].organization_id ?? null;
@@ -120,7 +115,7 @@ export async function getOrganizationIdForUser(userId: number): Promise<number |
 /** All organizations, newest first (researcher admin surface). */
 export async function listOrganizations(): Promise<OrganizationRow[]> {
   const result = await pool.query<OrganizationRow>(
-    `SELECT ${ORG_COLUMNS} FROM organizations ORDER BY created_at DESC, org_id DESC`
+    `SELECT ${ORG_COLUMNS} FROM organizations ORDER BY created_at DESC, org_id DESC`,
   );
   return result.rows;
 }
@@ -132,9 +127,6 @@ export async function listOrganizations(): Promise<OrganizationRow[]> {
  * at the study org. Returns true when a row was deleted.
  */
 export async function deleteSandboxOrganization(orgId: number): Promise<boolean> {
-  const result = await pool.query(
-    `DELETE FROM organizations WHERE org_id = $1 AND kind = 'sandbox'`,
-    [orgId]
-  );
+  const result = await pool.query(`DELETE FROM organizations WHERE org_id = $1 AND kind = 'sandbox'`, [orgId]);
   return (result.rowCount ?? 0) > 0;
 }

@@ -74,9 +74,7 @@ import {
   type JudgeRun,
 } from './sessionEval.service.js';
 
-const GOOD_RUBRIC = Object.fromEntries(
-  EVAL_DIMENSIONS.map(d => [d, { score: 4, rationale: `${d} ok` }])
-);
+const GOOD_RUBRIC = Object.fromEntries(EVAL_DIMENSIONS.map((d) => [d, { score: 4, rationale: `${d} ok` }]));
 
 function judgeReply(payload: unknown) {
   return { choices: [{ message: { content: JSON.stringify(payload) } }] };
@@ -100,8 +98,13 @@ beforeEach(() => {
     { role: 'system', content: 'Tool called: log_mood', content_redacted: null },
   ]);
   upsertSessionEvalMock.mockImplementation(async (sessionId, rubric, comments, model, version) => ({
-    eval_id: 1, session_id: sessionId, rubric, overall_comments: comments,
-    judge_model: model, prompt_version: version, created_at: new Date(),
+    eval_id: 1,
+    session_id: sessionId,
+    rubric,
+    overall_comments: comments,
+    judge_model: model,
+    prompt_version: version,
+    created_at: new Date(),
   }));
 });
 
@@ -165,9 +168,7 @@ describe('evaluateSession', () => {
   });
 
   it('skips sessions with no conversation content', async () => {
-    getSessionMessagesMock.mockResolvedValue([
-      { role: 'system', content: 'Session started', content_redacted: null },
-    ]);
+    getSessionMessagesMock.mockResolvedValue([{ role: 'system', content: 'Session started', content_redacted: null }]);
     expect(await evaluateSession('s1')).toBeNull();
     expect(createMock).not.toHaveBeenCalled();
   });
@@ -219,14 +220,18 @@ describe('validateRubric', () => {
 describe('maybeAutoEvalSession', () => {
   // The stage-only env gate sits in front of the config checks; enable it here
   // so the tests below exercise the config logic.
-  beforeEach(() => { process.env.EVALS_ENABLED = 'true'; });
-  afterEach(() => { delete process.env.EVALS_ENABLED; });
+  beforeEach(() => {
+    process.env.EVALS_ENABLED = 'true';
+  });
+  afterEach(() => {
+    delete process.env.EVALS_ENABLED;
+  });
 
   it('does nothing when EVALS_ENABLED is not set (prod posture), even with auto-run on', async () => {
     delete process.env.EVALS_ENABLED;
     getSystemConfigMock.mockResolvedValue({ evals: { auto_run_enabled: true } });
     maybeAutoEvalSession('s1');
-    await new Promise(r => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
     expect(getSessionMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
   });
@@ -234,7 +239,7 @@ describe('maybeAutoEvalSession', () => {
   it('does nothing when auto-run is not enabled (default)', async () => {
     getSystemConfigMock.mockResolvedValue({ evals: {} });
     maybeAutoEvalSession('s1');
-    await new Promise(r => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
     expect(getSessionMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
   });
@@ -252,7 +257,7 @@ describe('maybeAutoEvalSession', () => {
     getSessionIsDemoMock.mockResolvedValue(true);
 
     maybeAutoEvalSession('s1');
-    await new Promise(r => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
     expect(getSessionMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
   });
@@ -273,9 +278,7 @@ describe('sandbox exclusion (caseworker portal spec section 7)', () => {
 // ---------------------------------------------------------------------------
 
 function rubricWith(overrides: Record<string, number>, base = 4) {
-  return Object.fromEntries(
-    EVAL_DIMENSIONS.map(d => [d, { score: overrides[d] ?? base, rationale: `${d} r` }])
-  );
+  return Object.fromEntries(EVAL_DIMENSIONS.map((d) => [d, { score: overrides[d] ?? base, rationale: `${d} r` }]));
 }
 
 describe('judge ensemble', () => {
@@ -285,13 +288,14 @@ describe('judge ensemble', () => {
     createMock.mockImplementation(async (req: { model: string }) =>
       req.model === DEFAULT_JUDGE_MODEL
         ? judgeReply({ ...rubricWith({ empathy: 5, safety_protocol: 2 }), overall_comments: 'primary' })
-        : judgeReply({ ...rubricWith({ empathy: 3, safety_protocol: 2 }), overall_comments: 'second' }));
+        : judgeReply({ ...rubricWith({ empathy: 3, safety_protocol: 2 }), overall_comments: 'second' }),
+    );
 
     const detailed = await evaluateSessionDetailed('s1');
 
     expect(detailed).not.toBeNull();
     expect(createMock).toHaveBeenCalledTimes(2);
-    expect(createMock.mock.calls.map(c => c[0].model)).toEqual([DEFAULT_JUDGE_MODEL, DEFAULT_SECOND_JUDGE_MODEL]);
+    expect(createMock.mock.calls.map((c) => c[0].model)).toEqual([DEFAULT_JUDGE_MODEL, DEFAULT_SECOND_JUDGE_MODEL]);
     // Same system prompt to both judges (rubric/version untouched).
     expect(createMock.mock.calls[0][0].messages[0].content).toBe(createMock.mock.calls[1][0].messages[0].content);
     expect(detailed!.settings).toEqual({ models: [DEFAULT_JUDGE_MODEL, DEFAULT_SECOND_JUDGE_MODEL], runs: 1 });
@@ -317,8 +321,8 @@ describe('judge ensemble', () => {
 
     await evaluateSession('s1');
 
-    const legacy = createMock.mock.calls.find(c => c[0].model === DEFAULT_JUDGE_MODEL)![0];
-    const reasoning = createMock.mock.calls.find(c => c[0].model === DEFAULT_SECOND_JUDGE_MODEL)![0];
+    const legacy = createMock.mock.calls.find((c) => c[0].model === DEFAULT_JUDGE_MODEL)![0];
+    const reasoning = createMock.mock.calls.find((c) => c[0].model === DEFAULT_SECOND_JUDGE_MODEL)![0];
     expect(legacy).toMatchObject({ temperature: 0, max_tokens: 1200 });
     expect(legacy.max_completion_tokens).toBeUndefined();
     expect(reasoning).toMatchObject({ max_completion_tokens: 4000, reasoning_effort: 'low' });
@@ -336,10 +340,14 @@ describe('judge ensemble', () => {
     const detailed = await evaluateSessionDetailed('s1');
 
     expect(createMock).toHaveBeenCalledTimes(3);
-    expect(createMock.mock.calls.map(c => c[0].seed)).toEqual([SELF_CONSISTENCY_SEED, SELF_CONSISTENCY_SEED + 1, SELF_CONSISTENCY_SEED + 2]);
+    expect(createMock.mock.calls.map((c) => c[0].seed)).toEqual([
+      SELF_CONSISTENCY_SEED,
+      SELF_CONSISTENCY_SEED + 1,
+      SELF_CONSISTENCY_SEED + 2,
+    ]);
     expect(detailed!.row.rubric.empathy.score).toBe(4); // median of 3, 5, 4
     expect(detailed!.row.judge_model).toBe('gpt-4o-minix3');
-    expect(detailed!.runs.map(r => r.runIndex)).toEqual([0, 1, 2]);
+    expect(detailed!.runs.map((r) => r.runIndex)).toEqual([0, 1, 2]);
   });
 
   it('keeps going when one judge fails and reports the failure', async () => {
@@ -371,7 +379,10 @@ describe('judge ensemble', () => {
 describe('ensemble helpers (pure)', () => {
   it('resolveJudgeEnsemble precedence: options.judgeModels > judgeModel > config list > defaults', () => {
     expect(resolveJudgeEnsemble({}, {})).toEqual({ models: ['gpt-4o-mini', 'gpt-5-mini'], runs: 1 });
-    expect(resolveJudgeEnsemble({}, { judge_model: 'gpt-4.1-mini' })).toEqual({ models: ['gpt-4.1-mini', 'gpt-4o-mini', 'gpt-5-mini'], runs: 1 });
+    expect(resolveJudgeEnsemble({}, { judge_model: 'gpt-4.1-mini' })).toEqual({
+      models: ['gpt-4.1-mini', 'gpt-4o-mini', 'gpt-5-mini'],
+      runs: 1,
+    });
     expect(resolveJudgeEnsemble({}, { judge_models: ['a', 'b', 'a', ''] })).toEqual({ models: ['a', 'b'], runs: 1 });
     expect(resolveJudgeEnsemble({ judgeModel: 'x' }, { judge_models: ['a', 'b'] })).toEqual({ models: ['x'], runs: 1 });
     expect(resolveJudgeEnsemble({ judgeModels: ['y'], judgeModel: 'x' }, {})).toEqual({ models: ['y'], runs: 1 });

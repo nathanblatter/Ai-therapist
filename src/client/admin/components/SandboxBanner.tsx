@@ -14,8 +14,8 @@ export default function SandboxBanner() {
     >
       <AlertTriangle size={16} className="shrink-0" aria-hidden="true" />
       <span>
-        <span className="font-semibold">Sandbox environment</span> — all client data is synthetic.
-        Do not enter real patient information.
+        <span className="font-semibold">Sandbox environment</span> — all client data is synthetic. Do not enter real
+        patient information.
       </span>
     </div>
   );

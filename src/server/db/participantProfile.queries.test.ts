@@ -68,7 +68,11 @@ describe('getUserProfileBundle', () => {
     const fact = { fact: 'Has a dog named Milo', session_id: 's1', created_at: new Date('2026-07-01') };
     mocks.getUserMemoriesWithDates.mockResolvedValue([fact]);
     mocks.countUserEndedSessions.mockResolvedValue(4);
-    mocks.getUserCaseProfile.mockResolvedValue({ user_id: 42, profile: { presenting_concerns: ['anxiety'] }, updated_at: new Date() });
+    mocks.getUserCaseProfile.mockResolvedValue({
+      user_id: 42,
+      profile: { presenting_concerns: ['anxiety'] },
+      updated_at: new Date(),
+    });
 
     const bundle = await getUserProfileBundle(42);
 

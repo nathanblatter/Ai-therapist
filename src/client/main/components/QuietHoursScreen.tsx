@@ -40,9 +40,8 @@ export default function QuietHoursScreen({ startHour, endHour }: QuietHoursScree
           </div>
 
           <p className="text-sm text-gray-700 mb-4">
-            New sessions are paused between {hourLabel(startHour)} and {hourLabel(endHour)}{' '}
-            Mountain Time as part of the study design. The app will be available again
-            at {hourLabel(endHour)}.
+            New sessions are paused between {hourLabel(startHour)} and {hourLabel(endHour)} Mountain Time as part of the
+            study design. The app will be available again at {hourLabel(endHour)}.
           </p>
 
           <div className="bg-red-50 rounded-xl p-4 mb-3">
@@ -53,22 +52,28 @@ export default function QuietHoursScreen({ startHour, endHour }: QuietHoursScree
               <li className="flex items-center gap-2">
                 <Phone size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
-                  <a href="tel:988" className="font-semibold underline">988</a> — Suicide &amp;
-                  Crisis Lifeline (call or text)
+                  <a href="tel:988" className="font-semibold underline">
+                    988
+                  </a>{' '}
+                  — Suicide &amp; Crisis Lifeline (call or text)
                 </span>
               </li>
               <li className="flex items-center gap-2">
                 <MessageSquare size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
                   Crisis Text Line — text HOME to{' '}
-                  <a href="sms:741741" className="font-semibold underline">741741</a>
+                  <a href="sms:741741" className="font-semibold underline">
+                    741741
+                  </a>
                 </span>
               </li>
               <li className="flex items-center gap-2">
                 <Phone size={14} className="text-red-500 flex-shrink-0" aria-hidden="true" />
                 <span>
                   BYU CAPS after-hours crisis line via BYU Police:{' '}
-                  <a href="tel:8014222222" className="font-semibold underline">801-422-2222</a>
+                  <a href="tel:8014222222" className="font-semibold underline">
+                    801-422-2222
+                  </a>
                 </span>
               </li>
             </ul>
@@ -76,9 +81,14 @@ export default function QuietHoursScreen({ startHour, endHour }: QuietHoursScree
 
           <p className="text-xs text-gray-500">
             If you are in immediate danger, call{' '}
-            <a href="tel:911" className="font-semibold underline">911</a>. During the day, BYU
-            Counseling and Psychological Services is at{' '}
-            <a href="tel:8014223035" className="font-semibold underline">801-422-3035</a>.
+            <a href="tel:911" className="font-semibold underline">
+              911
+            </a>
+            . During the day, BYU Counseling and Psychological Services is at{' '}
+            <a href="tel:8014223035" className="font-semibold underline">
+              801-422-3035
+            </a>
+            .
           </p>
         </div>
       </div>

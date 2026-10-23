@@ -117,9 +117,7 @@ describe('POST /api/chat/start', () => {
     // The integer user_id column cannot hold an express-session id string.
     expect(helperMocks.checkSessionLimits).toHaveBeenCalledWith(null, 'participant');
     expect(dbMocks.getActiveSessionForUser).not.toHaveBeenCalled();
-    expect(dbMocks.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: null })
-    );
+    expect(dbMocks.createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: null }));
   });
 
   it('uses the numeric user id for logged-in participants', async () => {
@@ -142,7 +140,7 @@ describe('POST /api/chat/start', () => {
     expect(helperMocks.getSystemPrompt).toHaveBeenCalledWith('en', 'chat', false);
     expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
       res.body.sessionId,
-      expect.objectContaining({ proactive_offering: false, modalities: ['text'], language: 'en' })
+      expect.objectContaining({ proactive_offering: false, modalities: ['text'], language: 'en' }),
     );
   });
 
@@ -159,7 +157,11 @@ describe('POST /api/chat/start', () => {
 
   it('returns 429 when session limits deny the start', async () => {
     helperMocks.checkSessionLimits.mockResolvedValue({
-      allowed: false, reason: 'daily_limit', message: 'no', limit: 3, current: 3,
+      allowed: false,
+      reason: 'daily_limit',
+      message: 'no',
+      limit: 3,
+      current: 3,
     });
     const res = await request(makeApp({ userId: 12, userRole: 'participant' }))
       .post('/api/chat/start')
@@ -184,7 +186,9 @@ describe('POST /api/chat/start opening line', () => {
     const [rows] = dbMocks.insertMessagesBatch.mock.calls[0];
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      session_id: res.body.sessionId, role: 'assistant', message_type: 'text',
+      session_id: res.body.sessionId,
+      role: 'assistant',
+      message_type: 'text',
       content: res.body.opening,
       // Pre-redacted: machine-authored, PHI-free, must not cost a redaction call.
       content_redacted: res.body.opening,

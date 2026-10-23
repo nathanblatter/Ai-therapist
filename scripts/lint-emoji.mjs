@@ -33,13 +33,17 @@ for (const file of walk(root)) {
   lines.forEach((line, i) => {
     for (const hit of findEmoji(line)) {
       problems++;
-      console.log(`${relative(root, file)}:${i + 1}:${hit.index + 1}: emoji ${hit.label} ("${hit.char}") is not allowed`);
+      console.log(
+        `${relative(root, file)}:${i + 1}:${hit.index + 1}: emoji ${hit.label} ("${hit.char}") is not allowed`,
+      );
     }
   });
 }
 
 if (problems) {
-  console.error(`\nlint-emoji: ${problems} problem(s) in ${files} file(s). No emojis (CLAUDE.md); typographic marks are listed in .eslint-rules/emoji-pattern.js.`);
+  console.error(
+    `\nlint-emoji: ${problems} problem(s) in ${files} file(s). No emojis (CLAUDE.md); typographic marks are listed in .eslint-rules/emoji-pattern.js.`,
+  );
   process.exit(1);
 }
 console.log(`lint-emoji: OK (${files} markdown/html files, no emoji)`);

@@ -49,19 +49,16 @@ const MESSAGE_COLUMNS = `message_id, thread_id, sender_id, sender_role, body,
 export async function getThreadById(threadId: number): Promise<MessageThreadRow | null> {
   const result = await pool.query<MessageThreadRow>(
     `SELECT ${THREAD_COLUMNS} FROM message_threads WHERE thread_id = $1`,
-    [threadId]
+    [threadId],
   );
   return result.rows[0] ?? null;
 }
 
 /** The (client, clinician) pair's thread, or null. */
-export async function getThreadForPair(
-  clientId: number,
-  clinicianId: number
-): Promise<MessageThreadRow | null> {
+export async function getThreadForPair(clientId: number, clinicianId: number): Promise<MessageThreadRow | null> {
   const result = await pool.query<MessageThreadRow>(
     `SELECT ${THREAD_COLUMNS} FROM message_threads WHERE client_id = $1 AND clinician_id = $2`,
-    [clientId, clinicianId]
+    [clientId, clinicianId],
   );
   return result.rows[0] ?? null;
 }
@@ -89,7 +86,7 @@ export async function getOrCreateThread(input: {
        frozen_reason = CASE WHEN message_threads.frozen_reason = 'unassigned'
                             THEN NULL ELSE message_threads.frozen_reason END
      RETURNING ${THREAD_COLUMNS}`,
-    [input.clientId, input.clinicianId, input.clinicianRole, input.orgId, input.isSandbox ?? false]
+    [input.clientId, input.clinicianId, input.clinicianRole, input.orgId, input.isSandbox ?? false],
   );
   return result.rows[0];
 }
@@ -123,7 +120,7 @@ export async function listThreadsForClinician(clinicianId: number): Promise<Thre
      ) lm ON TRUE
      WHERE t.clinician_id = $1
      ORDER BY t.last_message_at DESC NULLS LAST, t.thread_id DESC`,
-    [clinicianId]
+    [clinicianId],
   );
   return result.rows;
 }
@@ -151,7 +148,7 @@ export async function listThreadsForClient(clientId: number): Promise<ThreadList
      ) lm ON TRUE
      WHERE t.client_id = $1
      ORDER BY t.last_message_at DESC NULLS LAST, t.thread_id DESC`,
-    [clientId]
+    [clientId],
   );
   return result.rows;
 }
@@ -178,12 +175,9 @@ export async function insertThreadMessage(input: {
       `INSERT INTO thread_messages (thread_id, sender_id, sender_role, body, scan_status)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING ${MESSAGE_COLUMNS}`,
-      [input.threadId, input.senderId, input.senderRole, input.body, input.scanStatus ?? 'not_applicable']
+      [input.threadId, input.senderId, input.senderRole, input.body, input.scanStatus ?? 'not_applicable'],
     );
-    await client.query(
-      `UPDATE message_threads SET last_message_at = now() WHERE thread_id = $1`,
-      [input.threadId]
-    );
+    await client.query(`UPDATE message_threads SET last_message_at = now() WHERE thread_id = $1`, [input.threadId]);
     await client.query('COMMIT');
     return inserted.rows[0];
   } catch (err) {
@@ -197,7 +191,7 @@ export async function insertThreadMessage(input: {
 /** A thread's messages, oldest first, keyset-paginated by message_id. */
 export async function listThreadMessages(
   threadId: number,
-  options: { beforeMessageId?: number | null; limit?: number } = {}
+  options: { beforeMessageId?: number | null; limit?: number } = {},
 ): Promise<ThreadMessageRow[]> {
   const result = await pool.query<ThreadMessageRow>(
     `SELECT * FROM (
@@ -206,24 +200,20 @@ export async function listThreadMessages(
        ORDER BY message_id DESC
        LIMIT $3
      ) page ORDER BY message_id ASC`,
-    [threadId, options.beforeMessageId ?? null, options.limit ?? 50]
+    [threadId, options.beforeMessageId ?? null, options.limit ?? 50],
   );
   return result.rows;
 }
 
 /** Advance the caller's read pointer (never moves backwards). */
-export async function markThreadRead(
-  threadId: number,
-  userId: number,
-  lastReadMessageId: number
-): Promise<void> {
+export async function markThreadRead(threadId: number, userId: number, lastReadMessageId: number): Promise<void> {
   await pool.query(
     `INSERT INTO thread_read_state (thread_id, user_id, last_read_message_id, updated_at)
      VALUES ($1, $2, $3, now())
      ON CONFLICT (thread_id, user_id) DO UPDATE SET
        last_read_message_id = GREATEST(thread_read_state.last_read_message_id, EXCLUDED.last_read_message_id),
        updated_at = now()`,
-    [threadId, userId, lastReadMessageId]
+    [threadId, userId, lastReadMessageId],
   );
 }
 
@@ -239,7 +229,7 @@ export async function updateThreadMessageScan(
      *  by the scan's failure path so a late error can't clobber a good crisis
      *  flag back to scan_failed and null out its score (ai-therapist-141 #5). */
     onlyIfNotFlagged?: boolean;
-  }
+  },
 ): Promise<void> {
   const guard = update.onlyIfNotFlagged ? ` AND scan_status <> 'flagged'` : '';
   await pool.query(
@@ -247,7 +237,7 @@ export async function updateThreadMessageScan(
      SET scan_status = $2, risk_score = $3, risk_severity = $4,
          crisis_event_id = COALESCE($5, crisis_event_id)
      WHERE message_id = $1${guard}`,
-    [messageId, update.scanStatus, update.riskScore ?? null, update.riskSeverity ?? null, update.crisisEventId ?? null]
+    [messageId, update.scanStatus, update.riskScore ?? null, update.riskSeverity ?? null, update.crisisEventId ?? null],
   );
 }
 
@@ -260,10 +250,7 @@ export async function updateThreadMessageScan(
  * the claim safe across overlapping sweepers (e.g. a blue-green window): each
  * row is handed to exactly one sweep. Returns the claimed rows for re-scan.
  */
-export async function claimStaleScanMessages(
-  limit: number,
-  pendingGraceSeconds = 120
-): Promise<ThreadMessageRow[]> {
+export async function claimStaleScanMessages(limit: number, pendingGraceSeconds = 120): Promise<ThreadMessageRow[]> {
   const result = await pool.query<ThreadMessageRow>(
     `UPDATE thread_messages
      SET scan_status = 'pending'
@@ -279,7 +266,7 @@ export async function claimStaleScanMessages(
        FOR UPDATE SKIP LOCKED
      )
      RETURNING ${MESSAGE_COLUMNS}`,
-    [limit, pendingGraceSeconds]
+    [limit, pendingGraceSeconds],
   );
   return result.rows;
 }
@@ -288,14 +275,14 @@ export async function claimStaleScanMessages(
 export async function freezeThreadsForPair(
   clinicianId: number,
   clientId: number,
-  reason: ThreadFrozenReason
+  reason: ThreadFrozenReason,
 ): Promise<number[]> {
   const result = await pool.query<{ thread_id: number }>(
     `UPDATE message_threads
      SET status = 'frozen', frozen_at = now(), frozen_reason = $3
      WHERE clinician_id = $1 AND client_id = $2 AND status = 'active'
      RETURNING thread_id`,
-    [clinicianId, clientId, reason]
+    [clinicianId, clientId, reason],
   );
   return result.rows.map((row) => row.thread_id);
 }
@@ -311,14 +298,14 @@ export async function countUnreadForUser(userId: number): Promise<number> {
        AND tm.message_id > COALESCE(
          (SELECT trs.last_read_message_id FROM thread_read_state trs
           WHERE trs.thread_id = tm.thread_id AND trs.user_id = $1), 0)`,
-    [userId]
+    [userId],
   );
   return parseInt(result.rows[0]?.total ?? '0', 10);
 }
 
 /** Per-client unread counts for a clinician's roster (dashboard chips). */
 export async function countUnreadByClientForMember(
-  memberId: number
+  memberId: number,
 ): Promise<Array<{ client_id: number; unread_count: number }>> {
   const result = await pool.query<{ client_id: number; unread_count: number }>(
     `SELECT t.client_id, COUNT(*)::int AS unread_count
@@ -330,7 +317,7 @@ export async function countUnreadByClientForMember(
          (SELECT trs.last_read_message_id FROM thread_read_state trs
           WHERE trs.thread_id = tm.thread_id AND trs.user_id = $1), 0)
      GROUP BY t.client_id`,
-    [memberId]
+    [memberId],
   );
   return result.rows;
 }
@@ -345,7 +332,7 @@ export async function countUnreadByClientForMember(
 export async function listMessageOriginCrisisEvents(
   memberId?: number | null,
   orgId?: number | null,
-  limit = 100
+  limit = 100,
 ): Promise<Record<string, unknown>[]> {
   const params: unknown[] = [limit];
   let scopeClause = '';
@@ -365,7 +352,7 @@ export async function listMessageOriginCrisisEvents(
      WHERE ce.origin = 'thread_message'${scopeClause}
      ORDER BY ce.created_at DESC
      LIMIT $1`,
-    params
+    params,
   );
   return result.rows;
 }

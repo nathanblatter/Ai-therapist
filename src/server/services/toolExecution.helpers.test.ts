@@ -20,7 +20,7 @@ vi.mock('../utils/adminBroadcast.js', () => ({ broadcastAdminEventForSession: br
 import { executeLoggedToolCall } from './toolExecution.helpers.js';
 
 async function settle(): Promise<void> {
-  for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0));
+  for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
 beforeEach(() => {
@@ -45,13 +45,17 @@ describe('executeLoggedToolCall', () => {
     expect(r).toEqual({ result: { mood: 'ok' }, success: true });
     expect(executeToolMock).toHaveBeenCalledWith('log_mood', { mood: 'ok' }, { sessionId: 'sess_1', channel: 'chat' });
 
-    const types = insertMessagesBatchMock.mock.calls.map(c => c[0][0].message_type);
+    const types = insertMessagesBatchMock.mock.calls.map((c) => c[0][0].message_type);
     expect(types).toEqual(['tool_call', 'tool_response']);
     expect(insertMessagesBatchMock.mock.calls[1][0][0].metadata).toMatchObject({
-      tool_name: 'log_mood', call_id: 'call_1', response: { mood: 'ok' }, status: 'completed', channel: 'chat',
+      tool_name: 'log_mood',
+      call_id: 'call_1',
+      response: { mood: 'ok' },
+      status: 'completed',
+      channel: 'chat',
     });
     expect(insertToolInvocationMock).toHaveBeenCalledWith('sess_1', 'log_mood', { mood: 'ok' }, true);
-    const statuses = broadcastMock.mock.calls.map(c => c[2].status);
+    const statuses = broadcastMock.mock.calls.map((c) => c[2].status);
     expect(statuses).toEqual(['executing', 'completed']);
   });
 

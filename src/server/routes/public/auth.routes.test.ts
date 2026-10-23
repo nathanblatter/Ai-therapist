@@ -58,7 +58,7 @@ beforeEach(() => {
 });
 
 describe('POST /api/auth/login session handling', () => {
-  it('rotates the session id and drops the previous account\'s orgId/isSandbox', async () => {
+  it("rotates the session id and drops the previous account's orgId/isSandbox", async () => {
     const app = makeApp();
     const agent = request.agent(app);
 
@@ -68,7 +68,10 @@ describe('POST /api/auth/login session handling', () => {
     // New user WITHOUT an organization_id: with a stale orgId=99 left on the
     // session, orgIdFor would silently scope them to org 99.
     dbMocks.verifyCredentials.mockResolvedValue({
-      userid: 2, username: 'part1', role: 'participant', mfa_enabled: false,
+      userid: 2,
+      username: 'part1',
+      role: 'participant',
+      mfa_enabled: false,
     });
     const login = await agent.post('/api/auth/login').send({ username: 'part1', password: 'pw' });
     expect(login.status).toBe(200);
@@ -90,7 +93,10 @@ describe('POST /api/auth/login session handling', () => {
     await agent.post('/test/seed');
 
     dbMocks.verifyCredentials.mockResolvedValue({
-      userid: 3, username: 'part2', role: 'participant', mfa_enabled: false,
+      userid: 3,
+      username: 'part2',
+      role: 'participant',
+      mfa_enabled: false,
     });
     await agent.post('/api/auth/login').send({ username: 'part2', password: 'pw' });
 
@@ -105,7 +111,11 @@ describe('POST /api/auth/login session handling', () => {
     const agent = request.agent(app);
 
     dbMocks.verifyCredentials.mockResolvedValue({
-      userid: 4, username: 'cw', role: 'caseworker', mfa_enabled: false, organization_id: 7,
+      userid: 4,
+      username: 'cw',
+      role: 'caseworker',
+      mfa_enabled: false,
+      organization_id: 7,
     });
     await agent.post('/api/auth/login').send({ username: 'cw', password: 'pw' });
 

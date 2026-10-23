@@ -10,11 +10,23 @@ vi.mock('../config/secrets.js', () => ({ getOpenAIKey: async () => 'test-key' })
 import { embedText, embedTextBatch, EMBEDDING_MODEL } from './embeddings.service.js';
 
 function ok(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body), headers: new Headers() } as unknown as Response;
+  return {
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+    headers: new Headers(),
+  } as unknown as Response;
 }
 function status(code: number, retryAfter?: string): Response {
   const headers = new Headers(retryAfter ? { 'retry-after': retryAfter } : {});
-  return { ok: false, status: code, json: async () => ({}), text: async () => `status ${code}`, headers } as unknown as Response;
+  return {
+    ok: false,
+    status: code,
+    json: async () => ({}),
+    text: async () => `status ${code}`,
+    headers,
+  } as unknown as Response;
 }
 
 beforeEach(() => {
@@ -53,7 +65,7 @@ describe('embedText', () => {
   it('gives up after three retryable failures', async () => {
     vi.useFakeTimers();
     fetchMock.mockResolvedValue(status(503));
-    const p = embedText('x').catch(e => e);
+    const p = embedText('x').catch((e) => e);
     await vi.advanceTimersByTimeAsync(10_000);
     const err = await p;
     expect(String(err)).toContain('503');

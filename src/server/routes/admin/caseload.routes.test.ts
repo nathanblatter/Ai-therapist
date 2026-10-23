@@ -42,12 +42,14 @@ function appAs(role: string | null, userId = 1) {
 beforeEach(() => {
   dbMocks.assignClient.mockReset().mockResolvedValue(undefined);
   dbMocks.unassignClient.mockReset().mockResolvedValue(true);
-  dbMocks.listCaseload.mockReset().mockResolvedValue([
-    { userid: 42, username: 'p42', created_at: '2026-01-01', assigned_at: '2026-08-01' },
-  ]);
-  dbMocks.listAllAssignments.mockReset().mockResolvedValue([
-    { therapist_id: 1, therapist_username: 't1', client_id: 42, client_username: 'p42', assigned_at: '2026-08-01' },
-  ]);
+  dbMocks.listCaseload
+    .mockReset()
+    .mockResolvedValue([{ userid: 42, username: 'p42', created_at: '2026-01-01', assigned_at: '2026-08-01' }]);
+  dbMocks.listAllAssignments
+    .mockReset()
+    .mockResolvedValue([
+      { therapist_id: 1, therapist_username: 't1', client_id: 42, client_username: 'p42', assigned_at: '2026-08-01' },
+    ]);
   dbMocks.freezeThreadsForPair.mockReset().mockResolvedValue([]);
   dbMocks.getAllUsers.mockReset().mockResolvedValue([
     { userid: 1, username: 't1', role: 'therapist', created_at: '2026-01-01' },
@@ -91,9 +93,7 @@ describe('GET /admin/api/caseload/therapists', () => {
   it('returns only users with role=therapist', async () => {
     const res = await request(appAs('researcher')).get('/admin/api/caseload/therapists');
     expect(res.status).toBe(200);
-    expect(res.body.therapists).toEqual([
-      { userid: 1, username: 't1', created_at: '2026-01-01' },
-    ]);
+    expect(res.body.therapists).toEqual([{ userid: 1, username: 't1', created_at: '2026-01-01' }]);
   });
 });
 

@@ -51,11 +51,13 @@ async function main(): Promise<void> {
   }
   const user = process.env.USER || process.env.USERNAME || 'unknown';
   const row = await generateAndStoreWeeklyDigest({ weekEnding, orgId, generatedBy: `cli:${user}` });
-  console.log(`[WeeklyDigest] stored digest #${row.id} for org ${orgId}, week ending ${row.week_ending} (${row.markdown.length} chars)`);
+  console.log(
+    `[WeeklyDigest] stored digest #${row.id} for org ${orgId}, week ending ${row.week_ending} (${row.markdown.length} chars)`,
+  );
 }
 
 main()
-  .catch(err => {
+  .catch((err) => {
     console.error('[WeeklyDigest] failed:', err instanceof Error ? err.message : err);
     process.exitCode = 1;
   })

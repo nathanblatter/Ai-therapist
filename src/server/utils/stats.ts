@@ -10,7 +10,7 @@
 export function wilsonInterval(
   successes: number,
   n: number,
-  z = 1.959964
+  z = 1.959964,
 ): { p: number; lo: number; hi: number } | null {
   if (n === 0) return null;
   const p = successes / n;

@@ -14,7 +14,9 @@ const IRB = "(SELECT org_id FROM organizations WHERE slug = 'irb-study')";
 beforeEach(() => queryMock.mockReset());
 
 function expectScoped(sql: string, orgParam: string) {
-  expect(sql).toMatch(/LEFT JOIN users u\s+ON s\.sess->>'userId' ~ '\^\[0-9\]\+\$' AND u\.userid = \(s\.sess->>'userId'\)::int/);
+  expect(sql).toMatch(
+    /LEFT JOIN users u\s+ON s\.sess->>'userId' ~ '\^\[0-9\]\+\$' AND u\.userid = \(s\.sess->>'userId'\)::int/,
+  );
   expect(sql).toContain(`u.organization_id = ${orgParam}`);
   expect(sql).toContain(`s.sess->>'userId' IS NULL AND ${orgParam} = ${IRB}`);
 }

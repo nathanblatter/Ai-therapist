@@ -5,12 +5,7 @@
 // status = expected, returning null on a lost race so the route can 409.
 import { pool } from '../config/db.js';
 import type { StaffCommsRole, CareTeamRole } from '../../shared/roles.js';
-import {
-  CaseloadRoleError,
-  assertAssignable,
-  insertAssignment,
-  insertCaseloadAuditRow,
-} from './caseload.queries.js';
+import { CaseloadRoleError, assertAssignable, insertAssignment, insertCaseloadAuditRow } from './caseload.queries.js';
 
 export type EscalationUrgency = 'routine' | 'urgent' | 'emergency';
 export type EscalationStatus = 'open' | 'acknowledged' | 'resolved';
@@ -74,7 +69,7 @@ export interface CreateEscalationInput {
 /** Create an escalation and its 'created' event in one transaction. */
 export async function createEscalation(
   input: CreateEscalationInput,
-  actorUsername: string | null
+  actorUsername: string | null,
 ): Promise<EscalationRow> {
   const client = await pool.connect();
   try {
@@ -96,13 +91,13 @@ export async function createEscalation(
         input.crisisEventId ?? null,
         input.sessionId ?? null,
         input.noteId ?? null,
-      ]
+      ],
     );
     const row = inserted.rows[0];
     await client.query(
       `INSERT INTO escalation_events (escalation_id, event_type, actor_user_id, actor_username, detail)
        VALUES ($1, 'created', $2, $3, $4)`,
-      [row.escalation_id, input.raisedBy, actorUsername, JSON.stringify({ urgency: input.urgency })]
+      [row.escalation_id, input.raisedBy, actorUsername, JSON.stringify({ urgency: input.urgency })],
     );
     await client.query('COMMIT');
     return row;
@@ -118,7 +113,7 @@ export async function createEscalation(
 export async function getEscalationById(escalationId: number): Promise<EscalationRow | null> {
   const result = await pool.query<EscalationRow>(
     `SELECT ${ESCALATION_COLUMNS} FROM escalations WHERE escalation_id = $1`,
-    [escalationId]
+    [escalationId],
   );
   return result.rows[0] ?? null;
 }
@@ -156,9 +151,9 @@ function memberVisibilityClause(n: number, memberRole: 'therapist' | 'caseworker
 }
 
 /** Escalations newest first with client/assignee usernames joined. */
-export async function listEscalations(filters: EscalationListFilters): Promise<
-  Array<EscalationRow & { client_username: string | null; assigned_username: string | null }>
-> {
+export async function listEscalations(
+  filters: EscalationListFilters,
+): Promise<Array<EscalationRow & { client_username: string | null; assigned_username: string | null }>> {
   const where: string[] = [];
   const params: unknown[] = [];
   const add = (clause: (n: number) => string, value: unknown): void => {
@@ -192,7 +187,7 @@ export async function listEscalations(filters: EscalationListFilters): Promise<
      ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
      ORDER BY e.created_at DESC, e.escalation_id DESC
      LIMIT $${params.length}`,
-    params
+    params,
   );
   return result.rows;
 }
@@ -202,28 +197,25 @@ export async function listEscalations(filters: EscalationListFilters): Promise<
  *  rows the member can't open. */
 export async function countOpenEscalationsForMember(
   memberId: number,
-  memberRole: 'therapist' | 'caseworker' | null = null
+  memberRole: 'therapist' | 'caseworker' | null = null,
 ): Promise<number> {
   const result = await pool.query<{ total: string }>(
     `SELECT COUNT(*) AS total FROM escalations e
      WHERE e.status <> 'resolved'
        AND ${memberVisibilityClause(1, memberRole)}`,
-    [memberId]
+    [memberId],
   );
   return parseInt(result.rows[0]?.total ?? '0', 10);
 }
 
 /** open -> acknowledged. Null on a lost race (caller 409s). */
-export async function acknowledgeEscalation(
-  escalationId: number,
-  userId: number
-): Promise<EscalationRow | null> {
+export async function acknowledgeEscalation(escalationId: number, userId: number): Promise<EscalationRow | null> {
   const result = await pool.query<EscalationRow>(
     `UPDATE escalations
      SET status = 'acknowledged', acknowledged_by = $2, acknowledged_at = now(), updated_at = now()
      WHERE escalation_id = $1 AND status = 'open'
      RETURNING ${ESCALATION_COLUMNS}`,
-    [escalationId, userId]
+    [escalationId, userId],
   );
   return result.rows[0] ?? null;
 }
@@ -232,7 +224,7 @@ export async function acknowledgeEscalation(
 export async function resolveEscalation(
   escalationId: number,
   userId: number,
-  resolutionNote: string | null
+  resolutionNote: string | null,
 ): Promise<EscalationRow | null> {
   const result = await pool.query<EscalationRow>(
     `UPDATE escalations
@@ -240,7 +232,7 @@ export async function resolveEscalation(
          resolution_note = $3, updated_at = now()
      WHERE escalation_id = $1 AND status IN ('open', 'acknowledged')
      RETURNING ${ESCALATION_COLUMNS}`,
-    [escalationId, userId, resolutionNote]
+    [escalationId, userId, resolutionNote],
   );
   return result.rows[0] ?? null;
 }
@@ -253,23 +245,20 @@ export async function reopenEscalation(escalationId: number): Promise<Escalation
          resolved_by = NULL, resolved_at = NULL, resolution_note = NULL, updated_at = now()
      WHERE escalation_id = $1 AND status = 'resolved'
      RETURNING ${ESCALATION_COLUMNS}`,
-    [escalationId]
+    [escalationId],
   );
   return result.rows[0] ?? null;
 }
 
 /** Atomic claim of an unassigned, unresolved escalation. Null when someone
  *  else won the race or it is assigned/resolved (caller 409s). */
-export async function claimEscalation(
-  escalationId: number,
-  therapistId: number
-): Promise<EscalationRow | null> {
+export async function claimEscalation(escalationId: number, therapistId: number): Promise<EscalationRow | null> {
   const result = await pool.query<EscalationRow>(
     `UPDATE escalations
      SET assigned_to = $2, updated_at = now()
      WHERE escalation_id = $1 AND assigned_to IS NULL AND status <> 'resolved'
      RETURNING ${ESCALATION_COLUMNS}`,
-    [escalationId, therapistId]
+    [escalationId, therapistId],
   );
   return result.rows[0] ?? null;
 }
@@ -295,7 +284,7 @@ export interface ClaimEscalationResult {
 export async function claimEscalationAudited(
   escalationId: number,
   therapistId: number,
-  audit: { actorUsername: string | null; memberRole?: CareTeamRole }
+  audit: { actorUsername: string | null; memberRole?: CareTeamRole },
 ): Promise<ClaimEscalationResult | null> {
   const memberRole = audit.memberRole ?? 'therapist';
   const client = await pool.connect();
@@ -306,7 +295,7 @@ export async function claimEscalationAudited(
        SET assigned_to = $2, updated_at = now()
        WHERE escalation_id = $1 AND assigned_to IS NULL AND status <> 'resolved'
        RETURNING ${ESCALATION_COLUMNS}`,
-      [escalationId, therapistId]
+      [escalationId, therapistId],
     );
     const escalation = result.rows[0];
     if (!escalation) {
@@ -332,9 +321,7 @@ export async function claimEscalationAudited(
       });
     }
     await client.query('COMMIT');
-    return grantError
-      ? { escalation, grant: 'rejected', grantError }
-      : { escalation, grant: 'granted' };
+    return grantError ? { escalation, grant: 'rejected', grantError } : { escalation, grant: 'granted' };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw err;
@@ -372,7 +359,7 @@ export async function insertEscalationEvent(input: {
       input.actorUserId,
       input.actorUsername,
       input.detail === undefined ? null : JSON.stringify(input.detail),
-    ]
+    ],
   );
   return result.rows[0];
 }
@@ -385,7 +372,7 @@ export async function listEscalationEvents(escalationId: number): Promise<Escala
      FROM escalation_events
      WHERE escalation_id = $1
      ORDER BY created_at ASC, event_id ASC`,
-    [escalationId]
+    [escalationId],
   );
   return result.rows;
 }

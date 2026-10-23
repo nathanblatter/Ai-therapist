@@ -78,7 +78,7 @@ export async function getRatingCandidates(since: Date, limit = 5000): Promise<Ra
        AND NOT EXISTS (SELECT 1 FROM eval_rating_queue q WHERE q.session_id = ts.session_id)
      ORDER BY ts.session_id
      LIMIT $2`,
-    [since, limit]
+    [since, limit],
   );
   return result.rows;
 }
@@ -95,7 +95,7 @@ export interface NewRatingQueueRow {
  *  NOTHING). Returns the rows actually inserted. */
 export async function insertRatingQueueRows(
   rows: NewRatingQueueRow[],
-  enqueuedBy: number | null
+  enqueuedBy: number | null,
 ): Promise<RatingQueueRow[]> {
   if (rows.length === 0) return [];
   const result = await pool.query<RatingQueueRow>(
@@ -105,7 +105,7 @@ export async function insertRatingQueueRows(
        AS s(session_id text, stratum text, source text, needs_second_rater boolean, crisis_adjacent boolean)
      ON CONFLICT (session_id) DO NOTHING
      RETURNING *`,
-    [JSON.stringify(rows), enqueuedBy]
+    [JSON.stringify(rows), enqueuedBy],
   );
   return result.rows;
 }
@@ -133,7 +133,7 @@ export async function getRatingCandidatesByIds(sessionIds: string[]): Promise<Ra
        AND ts.is_demo IS NOT TRUE
        AND u.is_sandbox IS NOT TRUE
      ORDER BY ts.session_id`,
-    [sessionIds]
+    [sessionIds],
   );
   return result.rows;
 }
@@ -198,7 +198,7 @@ export async function listRatingQueue(opts: ListRatingQueueOptions): Promise<Rat
      ${where}
      ORDER BY (q.status IN ('queued', 'in_progress')) DESC, q.crisis_adjacent DESC, q.enqueued_at DESC, q.queue_id DESC
      LIMIT $${params.length}`,
-    params
+    params,
   );
   return result.rows;
 }
@@ -233,7 +233,7 @@ export async function getRatingQueueCounts(scope: RatingQueueScope): Promise<Rat
             COUNT(*) FILTER (WHERE needs_second_rater AND n_raters < 2 AND status <> 'skipped')::int AS awaiting_second_rater,
             COUNT(*) FILTER (WHERE n_raters >= 2)::int AS double_rated
      FROM rows`,
-    params
+    params,
   );
   return result.rows[0];
 }
@@ -269,7 +269,7 @@ export async function claimRatingQueueRow(queueId: number, userId: number): Prom
        AND (assigned_to IS NULL OR assigned_to = $2 OR second_rater_id = $2
             OR (needs_second_rater AND second_rater_id IS NULL AND assigned_to <> $2))
      RETURNING *`,
-    [queueId, userId]
+    [queueId, userId],
   );
   return result.rows[0] ?? null;
 }
@@ -281,7 +281,7 @@ export async function skipRatingQueueRow(queueId: number, userId: number): Promi
        SET status = 'skipped', skipped_at = CURRENT_TIMESTAMP, skipped_by = $2
      WHERE queue_id = $1 AND status IN ('queued', 'in_progress')
      RETURNING *`,
-    [queueId, userId]
+    [queueId, userId],
   );
   return result.rows[0] ?? null;
 }
@@ -309,16 +309,16 @@ export async function linkRatingToQueue(sessionId: string, raterUserId: number):
      FROM n
      WHERE q.session_id = $1 AND q.status <> 'skipped'
      RETURNING q.*`,
-    [sessionId, raterUserId]
+    [sessionId, raterUserId],
   );
   return result.rows[0] ?? null;
 }
 
 /** Has this user stored a rating for the session? (blind-mode gate) */
 export async function hasHumanRating(sessionId: string, raterUserId: number): Promise<boolean> {
-  const result = await pool.query(
-    'SELECT 1 FROM session_human_ratings WHERE session_id = $1 AND rater_user_id = $2',
-    [sessionId, raterUserId]
-  );
+  const result = await pool.query('SELECT 1 FROM session_human_ratings WHERE session_id = $1 AND rater_user_id = $2', [
+    sessionId,
+    raterUserId,
+  ]);
   return result.rows.length > 0;
 }

@@ -8,11 +8,19 @@
 // structured text to the clipboard, or a standalone printable document (the
 // browser's Save as PDF covers PDF). Both are client-side renderings of a
 // note the viewer already fetched, so no new data leaves the server.
-import { useEffect, useState } from "react";
-import { ArrowLeft, Check, Copy, Cpu, Edit3, FileText, Lock, Printer, Share2 } from "react-feather";
-import { NoteStatusBadge, type CareNote } from "./NotesPanel";
-import { postJson } from "../../../shared/http";
-import { CASE_ORDER, SOAP_ORDER, copyText, fieldLabel, noteToPlainText, printNote, type NoteExportContext } from "./noteExport";
+import { useEffect, useState } from 'react';
+import { ArrowLeft, Check, Copy, Cpu, Edit3, FileText, Lock, Printer, Share2 } from 'react-feather';
+import { NoteStatusBadge, type CareNote } from './NotesPanel';
+import { postJson } from '../../../shared/http';
+import {
+  CASE_ORDER,
+  SOAP_ORDER,
+  copyText,
+  fieldLabel,
+  noteToPlainText,
+  printNote,
+  type NoteExportContext,
+} from './noteExport';
 
 interface NoteDetailProps {
   note: CareNote;
@@ -24,12 +32,17 @@ interface NoteDetailProps {
   exportContext?: NoteExportContext;
 }
 
-
-export default function NoteDetail({ note: initialNote, currentUserId, onBack, onEditDraft, exportContext }: NoteDetailProps) {
+export default function NoteDetail({
+  note: initialNote,
+  currentUserId,
+  onBack,
+  onEditDraft,
+  exportContext,
+}: NoteDetailProps) {
   const [note, setNote] = useState<CareNote>(initialNote);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
+  const [copied, setCopied] = useState<'ok' | 'fail' | null>(null);
 
   useEffect(() => {
     if (!copied) return;
@@ -39,11 +52,11 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
 
   const handleCopy = async () => {
     const ok = await copyText(noteToPlainText(note, exportContext));
-    setCopied(ok ? "ok" : "fail");
+    setCopied(ok ? 'ok' : 'fail');
   };
 
   const isAuthor = currentUserId !== null && note.author_id === currentUserId;
-  const order = note.note_type === "progress" ? SOAP_ORDER : CASE_ORDER;
+  const order = note.note_type === 'progress' ? SOAP_ORDER : CASE_ORDER;
 
   const post = async (path: string, body?: Record<string, unknown>): Promise<CareNote | null> => {
     setBusy(true);
@@ -60,12 +73,12 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
   };
 
   const handleAmend = async () => {
-    const amendment = await post("amend");
+    const amendment = await post('amend');
     if (amendment) onEditDraft(amendment);
   };
 
   const handleShareToggle = async () => {
-    const updated = await post("share", { shared: !note.shared_with_care_team });
+    const updated = await post('share', { shared: !note.shared_with_care_team });
     if (updated) setNote(updated);
   };
 
@@ -87,8 +100,8 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
             title="Copy the note as plain text"
             aria-label="Copy note as plain text"
           >
-            {copied === "ok" ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
-            {copied === "ok" ? "Copied" : copied === "fail" ? "Copy failed" : "Copy"}
+            {copied === 'ok' ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+            {copied === 'ok' ? 'Copied' : copied === 'fail' ? 'Copy failed' : 'Copy'}
           </button>
           <button
             type="button"
@@ -105,21 +118,19 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
 
       <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2 mb-1">
         <FileText size={16} aria-hidden="true" />
-        {note.note_type === "progress" ? "Progress note" : "Case note"}
+        {note.note_type === 'progress' ? 'Progress note' : 'Case note'}
         {note.case_note_kind && (
-          <span className="text-xs font-normal text-gray-500 capitalize">
-            {note.case_note_kind.replace(/_/g, " ")}
-          </span>
+          <span className="text-xs font-normal text-gray-500 capitalize">{note.case_note_kind.replace(/_/g, ' ')}</span>
         )}
       </h4>
 
       {/* Provenance line */}
       <p className="text-xs text-gray-500 mb-3 flex items-center gap-1.5 flex-wrap">
-        {note.seed_source === "ai_soap" ? (
+        {note.seed_source === 'ai_soap' ? (
           <>
             <Cpu size={12} aria-hidden="true" />
-            Drafted by AI{note.seed_model ? ` (${note.seed_model})` : ""}, edited
-            {note.status === "draft" ? " by" : " and signed by"} {note.author_name}
+            Drafted by AI{note.seed_model ? ` (${note.seed_model})` : ''}, edited
+            {note.status === 'draft' ? ' by' : ' and signed by'} {note.author_name}
           </>
         ) : (
           <>
@@ -135,7 +146,7 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
           This note amends note #{note.amends_note_id}.
         </p>
       )}
-      {note.status === "amended" && (
+      {note.status === 'amended' && (
         <p className="mb-3 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-3 py-2">
           This note has been superseded by a signed amendment.
         </p>
@@ -145,7 +156,7 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
         {order.map((key) => {
           // content is Record<string, unknown> server-side; only render string fields.
           const value = note.content[key];
-          return typeof value === "string" && value ? (
+          return typeof value === 'string' && value ? (
             <div key={key}>
               <h5 className="text-sm font-semibold text-gray-700">{fieldLabel(key)}</h5>
               <p className="text-sm text-gray-800 whitespace-pre-wrap">{value}</p>
@@ -168,7 +179,7 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
 
       {isAuthor && (
         <div className="mt-4 flex gap-2 flex-wrap">
-          {note.status === "draft" && (
+          {note.status === 'draft' && (
             <button
               type="button"
               onClick={() => onEditDraft(note)}
@@ -177,7 +188,7 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
               <Edit3 size={15} aria-hidden="true" /> Edit draft
             </button>
           )}
-          {note.status === "signed" && (
+          {note.status === 'signed' && (
             <button
               type="button"
               onClick={handleAmend}
@@ -187,7 +198,7 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
               Amend
             </button>
           )}
-          {note.note_type === "progress" && note.status !== "amended" && (
+          {note.note_type === 'progress' && note.status !== 'amended' && (
             <button
               type="button"
               onClick={handleShareToggle}
@@ -196,7 +207,7 @@ export default function NoteDetail({ note: initialNote, currentUserId, onBack, o
               title="Shared progress notes are visible to caseworkers on the care team"
             >
               <Share2 size={15} aria-hidden="true" />
-              {note.shared_with_care_team ? "Unshare from care team" : "Share with care team"}
+              {note.shared_with_care_team ? 'Unshare from care team' : 'Share with care team'}
             </button>
           )}
         </div>

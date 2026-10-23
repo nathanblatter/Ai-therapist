@@ -16,10 +16,12 @@ function askQuestion(query) {
     output: process.stdout,
   });
 
-  return new Promise(resolve => rl.question(query, ans => {
-    rl.close();
-    resolve(ans);
-  }))
+  return new Promise((resolve) =>
+    rl.question(query, (ans) => {
+      rl.close();
+      resolve(ans);
+    }),
+  );
 }
 
 async function rollbackMigration() {
@@ -58,7 +60,6 @@ async function rollbackMigration() {
     console.log('  - user_sessions\n');
 
     console.log('The database has been reverted to the previous state.\n');
-
   } catch (error) {
     console.error('\nRollback failed:', error.message);
     throw error;

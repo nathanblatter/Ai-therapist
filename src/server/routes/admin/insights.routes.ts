@@ -27,116 +27,145 @@ export default function insightsRoutes(): Router {
   const router = Router();
 
   // GET /admin/api/sessions/:sessionId/insights
-  router.get('/admin/api/sessions/:sessionId/insights', requireRole('therapist', 'caseworker'), requireSessionClientAccess(), async (req, res) => {
-    try {
-      const [insights, safetyPlan, scaleResponses, authoredNote] = await Promise.all([
-        getSessionInsights(req.params.sessionId),
-        getSessionSafetyPlan(req.params.sessionId),
-        getSessionScaleResponses(req.params.sessionId),
-        getLiveProgressNoteForSession(req.params.sessionId),
-      ]);
-      if (!insights && !safetyPlan && scaleResponses.length === 0) {
-        return res.status(404).json({ error: 'No insights for this session (yet)' });
-      }
+  router.get(
+    '/admin/api/sessions/:sessionId/insights',
+    requireRole('therapist', 'caseworker'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const [insights, safetyPlan, scaleResponses, authoredNote] = await Promise.all([
+          getSessionInsights(req.params.sessionId),
+          getSessionSafetyPlan(req.params.sessionId),
+          getSessionScaleResponses(req.params.sessionId),
+          getLiveProgressNoteForSession(req.params.sessionId),
+        ]);
+        if (!insights && !safetyPlan && scaleResponses.length === 0) {
+          return res.status(404).json({ error: 'No insights for this session (yet)' });
+        }
 
-      const isCaseworker = req.session.userRole === 'caseworker';
+        const isCaseworker = req.session.userRole === 'caseworker';
 
-      // The therapist's live progress note for this session (seeded or
-      // hand-written). Caseworkers only see it when it is a shared progress
-      // note or their own — same rule as requireNoteAccess.
-      let authored_note: CareNoteRow | null = authoredNote;
-      if (isCaseworker && authored_note &&
-          !authored_note.shared_with_care_team && authored_note.author_id !== req.session.userId) {
-        authored_note = null;
-      }
+        // The therapist's live progress note for this session (seeded or
+        // hand-written). Caseworkers only see it when it is a shared progress
+        // note or their own — same rule as requireNoteAccess.
+        let authored_note: CareNoteRow | null = authoredNote;
+        if (
+          isCaseworker &&
+          authored_note &&
+          !authored_note.shared_with_care_team &&
+          authored_note.author_id !== req.session.userId
+        ) {
+          authored_note = null;
+        }
 
-      const payload: Record<string, unknown> = {
-        ...(insights ?? {}),
-        safety_plan: safetyPlan,
-        scale_responses: scaleResponses,
-        authored_note,
-      };
-      if (isCaseworker) {
-        // Summaries-tier ALLOWLIST projection (ai-therapist-146): summary,
-        // affect curve, safety plan, screeners, and the authored-note pointer
-        // only. The old delete-list approach silently forwarded any column a
-        // future migration added to session_insights (SELECT * feeds this
-        // payload); with the allowlist a new column stays therapist-only
-        // until deliberately added to SESSION_INSIGHTS_SUMMARY_FIELDS.
-        return res.json(projectRow(payload, SESSION_INSIGHTS_SUMMARY_FIELDS));
+        const payload: Record<string, unknown> = {
+          ...(insights ?? {}),
+          safety_plan: safetyPlan,
+          scale_responses: scaleResponses,
+          authored_note,
+        };
+        if (isCaseworker) {
+          // Summaries-tier ALLOWLIST projection (ai-therapist-146): summary,
+          // affect curve, safety plan, screeners, and the authored-note pointer
+          // only. The old delete-list approach silently forwarded any column a
+          // future migration added to session_insights (SELECT * feeds this
+          // payload); with the allowlist a new column stays therapist-only
+          // until deliberately added to SESSION_INSIGHTS_SUMMARY_FIELDS.
+          return res.json(projectRow(payload, SESSION_INSIGHTS_SUMMARY_FIELDS));
+        }
+        res.json(payload);
+      } catch (err) {
+        log.error({ err }, 'Failed to fetch session insights');
+        res.status(500).json({ error: 'Failed to fetch session insights' });
       }
-      res.json(payload);
-    } catch (err) {
-      log.error({ err }, 'Failed to fetch session insights');
-      res.status(500).json({ error: 'Failed to fetch session insights' });
-    }
-  });
+    },
+  );
 
   // POST /admin/api/sessions/:sessionId/insights/review - mark SOAP note reviewed
-  router.post('/admin/api/sessions/:sessionId/insights/review', requireRole('therapist'), requireSessionClientAccess(), async (req, res) => {
-    try {
-      const ok = await markSoapReviewed(req.params.sessionId, req.session.username ?? 'unknown');
-      if (!ok) {
-        return res.status(404).json({ error: 'No insights for this session' });
+  router.post(
+    '/admin/api/sessions/:sessionId/insights/review',
+    requireRole('therapist'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const ok = await markSoapReviewed(req.params.sessionId, req.session.username ?? 'unknown');
+        if (!ok) {
+          return res.status(404).json({ error: 'No insights for this session' });
+        }
+        res.json({ success: true });
+      } catch (err) {
+        log.error({ err }, 'Failed to mark SOAP note reviewed');
+        res.status(500).json({ error: 'Failed to mark SOAP note reviewed' });
       }
-      res.json({ success: true });
-    } catch (err) {
-      log.error({ err }, 'Failed to mark SOAP note reviewed');
-      res.status(500).json({ error: 'Failed to mark SOAP note reviewed' });
-    }
-  });
+    },
+  );
 
   // POST /admin/api/sessions/:sessionId/insights/regenerate
-  router.post('/admin/api/sessions/:sessionId/insights/regenerate', requireRole('therapist'), requireSessionClientAccess(), async (req, res) => {
-    try {
-      const { generateSessionInsights } = await import('../../services/sessionInsights.service.js');
-      // Force regeneration by bypassing the idempotency skip: clear first.
-      const { pool } = await import('../../config/db.js');
-      await pool.query('DELETE FROM session_insights WHERE session_id = $1', [req.params.sessionId]);
-      await generateSessionInsights(req.params.sessionId);
-      const insights = await getSessionInsights(req.params.sessionId);
-      if (!insights) {
-        return res.status(422).json({ error: 'Session has no conversation content to analyze' });
+  router.post(
+    '/admin/api/sessions/:sessionId/insights/regenerate',
+    requireRole('therapist'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const { generateSessionInsights } = await import('../../services/sessionInsights.service.js');
+        // Force regeneration by bypassing the idempotency skip: clear first.
+        const { pool } = await import('../../config/db.js');
+        await pool.query('DELETE FROM session_insights WHERE session_id = $1', [req.params.sessionId]);
+        await generateSessionInsights(req.params.sessionId);
+        const insights = await getSessionInsights(req.params.sessionId);
+        if (!insights) {
+          return res.status(422).json({ error: 'Session has no conversation content to analyze' });
+        }
+        res.json(insights);
+      } catch (err) {
+        log.error({ err }, 'Failed to regenerate session insights');
+        res.status(500).json({ error: 'Failed to regenerate session insights' });
       }
-      res.json(insights);
-    } catch (err) {
-      log.error({ err }, 'Failed to regenerate session insights');
-      res.status(500).json({ error: 'Failed to regenerate session insights' });
-    }
-  });
+    },
+  );
 
   // POST /admin/api/sessions/:sessionId/insights/notes - therapist guidance for the participant's NEXT session
-  router.post('/admin/api/sessions/:sessionId/insights/notes', requireRole('therapist'), requireSessionClientAccess(), async (req, res) => {
-    try {
-      const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().substring(0, 1000) : '';
-      const ok = await setSessionNotesForNextSession(req.params.sessionId, notes, req.session.username ?? 'unknown');
-      if (!ok) {
-        return res.status(404).json({ error: 'No insights row for this session yet — generate insights first' });
+  router.post(
+    '/admin/api/sessions/:sessionId/insights/notes',
+    requireRole('therapist'),
+    requireSessionClientAccess(),
+    async (req, res) => {
+      try {
+        const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().substring(0, 1000) : '';
+        const ok = await setSessionNotesForNextSession(req.params.sessionId, notes, req.session.username ?? 'unknown');
+        if (!ok) {
+          return res.status(404).json({ error: 'No insights row for this session yet — generate insights first' });
+        }
+        res.json({ success: true, notes });
+      } catch (err) {
+        log.error({ err }, 'Failed to save notes for next session');
+        res.status(500).json({ error: 'Failed to save notes for next session' });
       }
-      res.json({ success: true, notes });
-    } catch (err) {
-      log.error({ err }, 'Failed to save notes for next session');
-      res.status(500).json({ error: 'Failed to save notes for next session' });
-    }
-  });
+    },
+  );
 
   // POST /admin/api/users/:userId/risk-context - clinical/study-staff opt-in for
   // injecting this user's prior-crisis history into their future sessions
   // (default off). Widened to therapist+researcher (ai-therapist-91): the Users
   // tab and /api/users are researcher-only, so a therapist-only write route
   // makes the toggle unusable from the only screen that lists participants.
-  router.post('/admin/api/users/:userId/risk-context', requireRole('therapist', 'researcher', 'caseworker'), requireClientAccess(), async (req, res) => {
-    try {
-      const userId = parseInt(req.params.userId, 10);
-      if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
-      const enabled = req.body?.enabled === true;
-      await setUserRiskContextEnabled(userId, enabled);
-      res.json({ success: true, enabled });
-    } catch (err) {
-      log.error({ err }, 'Failed to update risk-context sharing flag');
-      res.status(500).json({ error: 'Failed to update risk-context sharing flag' });
-    }
-  });
+  router.post(
+    '/admin/api/users/:userId/risk-context',
+    requireRole('therapist', 'researcher', 'caseworker'),
+    requireClientAccess(),
+    async (req, res) => {
+      try {
+        const userId = parseInt(req.params.userId, 10);
+        if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
+        const enabled = req.body?.enabled === true;
+        await setUserRiskContextEnabled(userId, enabled);
+        res.json({ success: true, enabled });
+      } catch (err) {
+        log.error({ err }, 'Failed to update risk-context sharing flag');
+        res.status(500).json({ error: 'Failed to update risk-context sharing flag' });
+      }
+    },
+  );
 
   return router;
 }

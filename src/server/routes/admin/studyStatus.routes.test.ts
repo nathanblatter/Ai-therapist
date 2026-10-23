@@ -46,9 +46,15 @@ describe('role guards', () => {
   it('GET and POST are researcher-only', async () => {
     expect((await request(appAs('researcher')).get('/admin/api/users/42/study-status')).status).toBe(200);
     expect((await request(appAs('therapist')).get('/admin/api/users/42/study-status')).status).toBe(403);
-    expect((await request(appAs('therapist')).post('/admin/api/users/42/study-status').send({ status: 'active' })).status).toBe(403);
-    expect((await request(appAs('participant')).post('/admin/api/users/42/study-status').send({ status: 'active' })).status).toBe(403);
-    expect((await request(appAs(null)).post('/admin/api/users/42/study-status').send({ status: 'active' })).status).toBe(401);
+    expect(
+      (await request(appAs('therapist')).post('/admin/api/users/42/study-status').send({ status: 'active' })).status,
+    ).toBe(403);
+    expect(
+      (await request(appAs('participant')).post('/admin/api/users/42/study-status').send({ status: 'active' })).status,
+    ).toBe(403);
+    expect(
+      (await request(appAs(null)).post('/admin/api/users/42/study-status').send({ status: 'active' })).status,
+    ).toBe(401);
     expect(mocks.setStudyStatus).not.toHaveBeenCalled();
   });
 });
@@ -76,9 +82,7 @@ describe('GET /admin/api/users/:userId/study-status', () => {
 
 describe('POST /admin/api/users/:userId/study-status', () => {
   it('reactivates a paused participant with source admin:<username>', async () => {
-    const res = await request(appAs('researcher'))
-      .post('/admin/api/users/42/study-status')
-      .send({ status: 'active' });
+    const res = await request(appAs('researcher')).post('/admin/api/users/42/study-status').send({ status: 'active' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ success: true, study_status: 'active', changed: true });
     expect(mocks.setStudyStatus).toHaveBeenCalledWith(42, 'active', 'admin:coordinator');
@@ -86,36 +90,28 @@ describe('POST /admin/api/users/:userId/study-status', () => {
 
   it('accepts paused and withdrawn too', async () => {
     for (const status of ['paused', 'withdrawn']) {
-      const res = await request(appAs('researcher'))
-        .post('/admin/api/users/42/study-status')
-        .send({ status });
+      const res = await request(appAs('researcher')).post('/admin/api/users/42/study-status').send({ status });
       expect(res.status).toBe(200);
       expect(mocks.setStudyStatus).toHaveBeenCalledWith(42, status, 'admin:coordinator');
     }
   });
 
   it('rejects an invalid status without touching the row', async () => {
-    const res = await request(appAs('researcher'))
-      .post('/admin/api/users/42/study-status')
-      .send({ status: 'gone' });
+    const res = await request(appAs('researcher')).post('/admin/api/users/42/study-status').send({ status: 'gone' });
     expect(res.status).toBe(400);
     expect(mocks.setStudyStatus).not.toHaveBeenCalled();
   });
 
   it('404s when the user does not exist', async () => {
     mocks.getUserById.mockResolvedValue(null);
-    const res = await request(appAs('researcher'))
-      .post('/admin/api/users/999/study-status')
-      .send({ status: 'active' });
+    const res = await request(appAs('researcher')).post('/admin/api/users/999/study-status').send({ status: 'active' });
     expect(res.status).toBe(404);
     expect(mocks.setStudyStatus).not.toHaveBeenCalled();
   });
 
   it('reports changed:false on a same-status no-op', async () => {
     mocks.setStudyStatus.mockResolvedValue(false);
-    const res = await request(appAs('researcher'))
-      .post('/admin/api/users/42/study-status')
-      .send({ status: 'paused' });
+    const res = await request(appAs('researcher')).post('/admin/api/users/42/study-status').send({ status: 'paused' });
     expect(res.status).toBe(200);
     expect(res.body.changed).toBe(false);
   });

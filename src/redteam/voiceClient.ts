@@ -97,7 +97,7 @@ export function framePcm(pcm: Buffer, frameBytes = FRAME_BYTES): Buffer[] {
 /** Split a PCM buffer into base64 chunks of at most chunkBytes (16-bit
  *  aligned) for the recording upload route. */
 export function chunkBase64Pcm(pcm: Buffer, chunkBytes = UPLOAD_CHUNK_BYTES): string[] {
-  return framePcm(pcm, chunkBytes).map(f => f.toString('base64'));
+  return framePcm(pcm, chunkBytes).map((f) => f.toString('base64'));
 }
 
 /** ms of PCM16 silence at the voice sample rate (lets server VAD close the turn). */
@@ -162,11 +162,11 @@ export function parseGrokServerMessage(msg: Record<string, unknown>): VoiceSigna
 /** Sleep until `at` (epoch ms) — drift-free pacing for the frame stream. */
 function sleepUntil(at: number): Promise<void> {
   const ms = at - Date.now();
-  return ms <= 0 ? Promise.resolve() : new Promise(r => setTimeout(r, ms));
+  return ms <= 0 ? Promise.resolve() : new Promise((r) => setTimeout(r, ms));
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 // ---------------------------------------------------------------------------
@@ -266,7 +266,8 @@ export class GrokVoiceSession implements VoiceTransport {
     cost: CostTracker,
     opts: VoiceSessionOptions,
   ): Promise<{ session: GrokVoiceSession; opening: string }> {
-    if (!client.baseUrl) throw new Error('voice pipeline needs a listening server (HarnessClient.listen) for the WebSocket upgrade');
+    if (!client.baseUrl)
+      throw new Error('voice pipeline needs a listening server (HarnessClient.listen) for the WebSocket upgrade');
 
     const res = await agent.post('/api/grok/session').send({ language: 'en' });
     if (res.status !== 201 || typeof res.body?.session_id !== 'string' || typeof res.body?.ws_path !== 'string') {
@@ -327,10 +328,16 @@ export class GrokVoiceSession implements VoiceTransport {
       this.closeReason = this.closeReason ?? `${code} ${reason.toString()}`;
       this.wake();
     });
-    ws.on('error', err => { if (this.ws === ws) this.push({ kind: 'error', message: err.message }); });
+    ws.on('error', (err) => {
+      if (this.ws === ws) this.push({ kind: 'error', message: err.message });
+    });
     ws.on('unexpected-response', (_req, resp) => {
       this.push({ kind: 'error', message: `proxy upgrade rejected: HTTP ${resp.statusCode}` });
-      try { ws.terminate(); } catch { /* already gone */ }
+      try {
+        ws.terminate();
+      } catch {
+        /* already gone */
+      }
     });
   }
 
@@ -342,7 +349,10 @@ export class GrokVoiceSession implements VoiceTransport {
       if (i === -1) continue;
       const s = this.signals[i];
       this.cursor = i + 1;
-      if (s.kind === 'ready') { this.model = s.model; return s.resumed; }
+      if (s.kind === 'ready') {
+        this.model = s.model;
+        return s.resumed;
+      }
       if (s.kind === 'error') throw new Error(`voice proxy error before ready: ${s.message}`);
       if (s.kind === 'closed') throw new Error(`voice proxy closed before ready: ${s.reason}`);
     }
@@ -376,7 +386,9 @@ export class GrokVoiceSession implements VoiceTransport {
   async dropUpstreamAndAwaitResume(): Promise<void> {
     const { grokVoiceManager } = await import('../server/services/grokVoiceManager.service.js');
     const before = grokVoiceManager.getLinkStats(this.sessionId);
-    console.log(`[redteam:voice] severing the xAI socket for ${this.sessionId} (conversation ${before?.conversationId ?? 'none'})`);
+    console.log(
+      `[redteam:voice] severing the xAI socket for ${this.sessionId} (conversation ${before?.conversationId ?? 'none'})`,
+    );
     if (!grokVoiceManager._dropUpstreamForTests(this.sessionId)) throw new Error('no upstream socket to drop');
     const deadline = Date.now() + RESUME_TIMEOUT_MS;
     let sawReconnecting = false;
@@ -386,7 +398,10 @@ export class GrokVoiceSession implements VoiceTransport {
       const s = this.signals[i];
       this.cursor = i + 1;
       if (s.kind === 'link') {
-        if (s.state === 'reconnecting') { sawReconnecting = true; continue; }
+        if (s.state === 'reconnecting') {
+          sawReconnecting = true;
+          continue;
+        }
         if (!sawReconnecting) throw new Error('link restored before any reconnecting notice');
         break;
       }
@@ -395,13 +410,14 @@ export class GrokVoiceSession implements VoiceTransport {
       // is kept for the recording and otherwise skipped: the assistant was
       // quiet when the link was cut, so nothing here is a reply to a beat.
       if (s.kind === 'assistant-audio') this.assistantAudio.push(s.pcm);
-      if (s.kind === 'assistant-text') console.log(`[redteam:voice] assistant spoke during the resume gap: "${s.text.slice(0, 80)}"`);
+      if (s.kind === 'assistant-text')
+        console.log(`[redteam:voice] assistant spoke during the resume gap: "${s.text.slice(0, 80)}"`);
     }
     const after = grokVoiceManager.getLinkStats(this.sessionId);
     console.log(
       `[redteam:voice] xAI link restored for ${this.sessionId}: conversation ${after?.conversationId ?? 'none'}` +
-      ` (${after?.conversationId === before?.conversationId ? 'same id, resumed' : 'NEW id, not resumed'}),` +
-      ` ${after?.replayedItems ?? 0} replayed items, resume #${after?.upstreamResumes ?? 0}`,
+        ` (${after?.conversationId === before?.conversationId ? 'same id, resumed' : 'NEW id, not resumed'}),` +
+        ` ${after?.replayedItems ?? 0} replayed items, resume #${after?.upstreamResumes ?? 0}`,
     );
   }
 
@@ -426,9 +442,15 @@ export class GrokVoiceSession implements VoiceTransport {
     while (this.cursor < this.signals.length) {
       const s = this.signals[this.cursor++];
       switch (s.kind) {
-        case 'assistant-text': texts.push(s.text); break;
-        case 'assistant-audio': this.assistantAudio.push(s.pcm); break;
-        case 'tool-call': toolCalls.push(s.name); break;
+        case 'assistant-text':
+          texts.push(s.text);
+          break;
+        case 'assistant-audio':
+          this.assistantAudio.push(s.pcm);
+          break;
+        case 'tool-call':
+          toolCalls.push(s.name);
+          break;
         case 'user-transcript':
           // A trailing VAD fragment of the previous utterance; already scored
           // by the proxy, so it counts toward the expected risk rows.
@@ -439,7 +461,8 @@ export class GrokVoiceSession implements VoiceTransport {
           break;
         case 'closed':
           throw new Error(`voice session closed by server: ${s.reason}`);
-        default: break;
+        default:
+          break;
       }
     }
     if (this.assistantAudio.length > 0) {
@@ -470,7 +493,7 @@ export class GrokVoiceSession implements VoiceTransport {
       if (this.closed) throw new Error(`voice proxy socket closed (${this.closeReason ?? 'no reason'}) while ${what}`);
       if (Date.now() > deadline) throw new Error(`timeout ${what}`);
       if (Date.now() > softDeadline) return -1;
-      await new Promise<void>(res => {
+      await new Promise<void>((res) => {
         this.waiters.push(res);
         setTimeout(res, 100);
       });
@@ -593,7 +616,8 @@ export class GrokVoiceSession implements VoiceTransport {
     const frameMs = (FRAME_BYTES / 2 / VOICE_SAMPLE_RATE) * 1000;
     for (let i = 0; i < frames.length; i++) {
       await sleepUntil(t0 + i * frameMs);
-      if (this.closed) throw new Error(`voice proxy socket closed (${this.closeReason ?? 'no reason'}) while streaming audio`);
+      if (this.closed)
+        throw new Error(`voice proxy socket closed (${this.closeReason ?? 'no reason'}) while streaming audio`);
       this.ws.send(frames[i], { binary: true });
     }
 
@@ -612,7 +636,7 @@ export class GrokVoiceSession implements VoiceTransport {
    *  well under the route's 8mb JSON limit. */
   private async uploadPendingAudio(): Promise<void> {
     if (this.pendingPcm.length === 0) return;
-    const chunks = this.pendingPcm.flatMap(p => chunkBase64Pcm(p));
+    const chunks = this.pendingPcm.flatMap((p) => chunkBase64Pcm(p));
     this.pendingPcm = [];
 
     const MAX_BATCH_B64_BYTES = 2_000_000;
@@ -649,11 +673,19 @@ export class GrokVoiceSession implements VoiceTransport {
    *  finalize → WAV, redaction, insights). */
   async end(): Promise<void> {
     await this.uploadPendingAudio();
-    try { this.ws.send(JSON.stringify({ type: 'end' })); } catch { /* already closed */ }
+    try {
+      this.ws.send(JSON.stringify({ type: 'end' }));
+    } catch {
+      /* already closed */
+    }
     await this.agent.post(`/api/sessions/${this.sessionId}/end`).send({});
     const closeBy = Date.now() + 5_000;
     while (!this.closed && Date.now() < closeBy) await sleep(50);
-    try { this.ws.close(); } catch { /* already closed */ }
+    try {
+      this.ws.close();
+    } catch {
+      /* already closed */
+    }
   }
 }
 
@@ -696,13 +728,21 @@ export async function waitForProxyCrisisPipeline(
       break;
     }
     if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for the crisis pipeline on voice session ${sessionId} (${n}/${expectedRows} turns scored)`);
+      throw new Error(
+        `timed out waiting for the crisis pipeline on voice session ${sessionId} (${n}/${expectedRows} turns scored)`,
+      );
     }
     await sleep(200);
   }
   const band = latest == null ? 'none' : scoreToBand(latest);
   const seen = (event: string) =>
-    emissions.slice(sinceEmission).some(e => e.event === event && (e.room.includes(sessionId) || (e.payload as { sessionId?: string } | undefined)?.sessionId === sessionId));
+    emissions
+      .slice(sinceEmission)
+      .some(
+        (e) =>
+          e.event === event &&
+          (e.room.includes(sessionId) || (e.payload as { sessionId?: string } | undefined)?.sessionId === sessionId),
+      );
   const waitFor = async (event: string, ms: number) => {
     const until = Date.now() + ms;
     while (!seen(event) && Date.now() < until) await sleep(150);
@@ -727,14 +767,21 @@ export async function runVoiceScenario(
   canaries: string[],
   pool: AssertionContext['pool'],
   classify: AssertionContext['classify'],
-): Promise<{ assertions: AssertionResult[]; judge: ScenarioResult['judge']; judgeBreaches: boolean; sessionId: string }> {
+): Promise<{
+  assertions: AssertionResult[];
+  judge: ScenarioResult['judge'];
+  judgeBreaches: boolean;
+  sessionId: string;
+}> {
   if (!openai) throw new Error('voice pipeline requires a live OpenAI client (no dry-run path)');
 
   const { getAiModel } = await import('../server/db/index.js');
   const aiModel = await getAiModel();
   const backend = detectVoiceBackend(aiModel);
   if (!backend) {
-    throw new Error(`system_config.ai_model is '${aiModel}', which selects no voice backend; set it to a grok-voice-* or gpt-live-* id to run voice`);
+    throw new Error(
+      `system_config.ai_model is '${aiModel}', which selects no voice backend; set it to a grok-voice-* or gpt-live-* id to run voice`,
+    );
   }
 
   const agent: Agent = client.newAgent();
@@ -748,24 +795,38 @@ export async function runVoiceScenario(
   if (!((sysCfg.features?.session_recording_enabled as boolean | undefined) ?? false)) {
     console.warn(
       '[redteam:voice] features.session_recording_enabled is OFF — the run will complete ' +
-      'but no recording will persist. Enable it in system_config to keep playable recordings.',
+        'but no recording will persist. Enable it in system_config to keep playable recordings.',
     );
   }
 
   let vs: VoiceTransport;
   let opening: string;
   if (backend === 'grok') {
-    ({ session: vs, opening } = await GrokVoiceSession.start(client, agent, openai, cost, { textTurns: cfg.voiceTextTurns }));
+    ({ session: vs, opening } = await GrokVoiceSession.start(client, agent, openai, cost, {
+      textTurns: cfg.voiceTextTurns,
+    }));
   } else {
     // GPT-Live never speaks unprompted; the browser sends the opening line as
     // an instructions append. Same text the Grok route authors server-side.
     const { buildGrokOpeningPrompt } = await import('../server/utils/grokVoiceConfig.js');
-    const openingPrompt = buildGrokOpeningPrompt('en', sysCfg.crisis_contact as Parameters<typeof buildGrokOpeningPrompt>[1]);
+    const openingPrompt = buildGrokOpeningPrompt(
+      'en',
+      sysCfg.crisis_contact as Parameters<typeof buildGrokOpeningPrompt>[1],
+    );
     const { LiveVoiceSession } = await import('./liveVoiceClient.js');
-    ({ session: vs, opening } = await LiveVoiceSession.start(client, agent, openai, cost, { textTurns: cfg.voiceTextTurns }, openingPrompt));
+    ({ session: vs, opening } = await LiveVoiceSession.start(
+      client,
+      agent,
+      openai,
+      cost,
+      { textTurns: cfg.voiceTextTurns },
+      openingPrompt,
+    ));
   }
   const sessionId = vs.sessionId;
-  console.log(`[redteam:voice] ${sessionId} on ${vs.model} via ${backend} (${cfg.voiceTextTurns ? 'typed-text turns' : 'audio turns'})`);
+  console.log(
+    `[redteam:voice] ${sessionId} on ${vs.model} via ${backend} (${cfg.voiceTextTurns ? 'typed-text turns' : 'audio turns'})`,
+  );
   const transcript: Turn[] = [];
   const assertions: AssertionResult[] = [];
   const beatPostTimes: Record<string, Date> = {};
@@ -787,8 +848,14 @@ export async function runVoiceScenario(
         // The backend ended the session mid-beat; a turn it discarded before
         // transcribing will never be scored. Bounded wait, then let the beat's
         // assertions say what the server did and did not see.
-        await waitForProxyCrisisPipeline(pool, client.emissions, sessionId, vs.userTurns, emissionsBefore, 10_000)
-          .catch(err => console.warn(`[redteam:voice] ${(err as Error).message}`));
+        await waitForProxyCrisisPipeline(
+          pool,
+          client.emissions,
+          sessionId,
+          vs.userTurns,
+          emissionsBefore,
+          10_000,
+        ).catch((err) => console.warn(`[redteam:voice] ${(err as Error).message}`));
       } else {
         await waitForProxyCrisisPipeline(pool, client.emissions, sessionId, vs.userTurns, emissionsBefore);
       }
@@ -802,9 +869,19 @@ export async function runVoiceScenario(
           if (!vs.dropClientAndReconnect) throw new Error('--voice-drop-client-midway needs the Grok backend');
           try {
             await vs.dropClientAndReconnect(2_000);
-            assertions.push({ id: 'voice-client-reconnect', passed: true, gating: false, detail: 'client socket severed after beat 1 and re-attached' });
+            assertions.push({
+              id: 'voice-client-reconnect',
+              passed: true,
+              gating: false,
+              detail: 'client socket severed after beat 1 and re-attached',
+            });
           } catch (err) {
-            assertions.push({ id: 'voice-client-reconnect', passed: false, gating: false, detail: (err as Error).message });
+            assertions.push({
+              id: 'voice-client-reconnect',
+              passed: false,
+              gating: false,
+              detail: (err as Error).message,
+            });
             throw err;
           }
         }
@@ -812,9 +889,19 @@ export async function runVoiceScenario(
           if (!vs.dropUpstreamAndAwaitResume) throw new Error('--voice-drop-upstream-midway needs the Grok backend');
           try {
             await vs.dropUpstreamAndAwaitResume();
-            assertions.push({ id: 'voice-upstream-resume', passed: true, gating: false, detail: 'xAI socket severed after beat 1 and resumed' });
+            assertions.push({
+              id: 'voice-upstream-resume',
+              passed: true,
+              gating: false,
+              detail: 'xAI socket severed after beat 1 and resumed',
+            });
           } catch (err) {
-            assertions.push({ id: 'voice-upstream-resume', passed: false, gating: false, detail: (err as Error).message });
+            assertions.push({
+              id: 'voice-upstream-resume',
+              passed: false,
+              gating: false,
+              detail: (err as Error).message,
+            });
             throw err;
           }
         }
@@ -847,14 +934,19 @@ export async function runVoiceScenario(
           const r = await spec.run(ctx);
           assertions.push({ ...r, gating: spec.gating === false ? false : r.gating });
         } catch (err) {
-          assertions.push({ id: spec.id, passed: false, detail: `assertion threw: ${(err as Error).message}`, gating: spec.gating !== false });
+          assertions.push({
+            id: spec.id,
+            passed: false,
+            detail: `assertion threw: ${(err as Error).message}`,
+            gating: spec.gating !== false,
+          });
         }
       }
       if (turn.terminated) {
-        const remaining = beats.slice(beats.indexOf(beat) + 1).map(b => b.id);
+        const remaining = beats.slice(beats.indexOf(beat) + 1).map((b) => b.id);
         console.warn(
           `[redteam:voice] backend ended the session during beat '${beat.id}' (reason: ${turn.terminated}); ` +
-          (remaining.length ? `beats [${remaining.join(', ')}] not run` : 'it was the last beat'),
+            (remaining.length ? `beats [${remaining.join(', ')}] not run` : 'it was the last beat'),
         );
         assertions.push({
           id: 'voice-session-terminated-by-backend',
@@ -883,9 +975,10 @@ export async function runVoiceScenario(
           id: 'voice-reconnect-no-duplicate-rows',
           passed: rows.length === 0,
           gating: false,
-          detail: rows.length === 0
-            ? `no transcript item persisted twice (client reconnects ${stats?.clientReconnects ?? 0}, upstream resumes ${stats?.upstreamResumes ?? 0}, replayed items ${stats?.replayedItems ?? 0})`
-            : `duplicated item ids: ${rows.map(r => `${r.item_id} x${r.n}`).join(', ')}`,
+          detail:
+            rows.length === 0
+              ? `no transcript item persisted twice (client reconnects ${stats?.clientReconnects ?? 0}, upstream resumes ${stats?.upstreamResumes ?? 0}, replayed items ${stats?.replayedItems ?? 0})`
+              : `duplicated item ids: ${rows.map((r) => `${r.item_id} x${r.n}`).join(', ')}`,
         });
       } catch (err) {
         console.warn(`[redteam:voice] reconnect invariant check failed: ${(err as Error).message}`);
@@ -933,7 +1026,12 @@ export async function runVoiceScenario(
       const r = await spec.run(finalCtx);
       assertions.push({ ...r, gating: spec.gating === false ? false : r.gating });
     } catch (err) {
-      assertions.push({ id: spec.id, passed: false, detail: `assertion threw: ${(err as Error).message}`, gating: spec.gating !== false });
+      assertions.push({
+        id: spec.id,
+        passed: false,
+        detail: `assertion threw: ${(err as Error).message}`,
+        gating: spec.gating !== false,
+      });
     }
   }
 
@@ -944,7 +1042,7 @@ export async function runVoiceScenario(
     if (outcome) {
       judge = outcome.scores;
       assertions.push(...outcome.floorAssertions);
-      judgeBreaches = outcome.floorAssertions.some(a => !a.passed && a.gating);
+      judgeBreaches = outcome.floorAssertions.some((a) => !a.passed && a.gating);
     }
   }
   return { assertions, judge, judgeBreaches, sessionId };

@@ -115,7 +115,12 @@ describe('buildCaseProfileBlock (ai-therapist-47)', () => {
 
 describe('buildReturningSignalsBlock (ai-therapist-48)', () => {
   it('returns empty string when there is nothing to show', () => {
-    const block = buildReturningSignalsBlock({ scaleHistory: [], moodTrajectory: [], safetyPlan: null, thoughtRecord: null });
+    const block = buildReturningSignalsBlock({
+      scaleHistory: [],
+      moodTrajectory: [],
+      safetyPlan: null,
+      thoughtRecord: null,
+    });
     expect(block).toBe('');
   });
 
@@ -166,18 +171,22 @@ describe('buildScreenerCadenceBlock (weekly PHQ-2/GAD-2 cap)', () => {
   });
 
   it('forbids re-administering a screener taken within the last 7 days', () => {
-    const block = buildScreenerCadenceBlock([
-      { scale: 'phq2', score: 3, created_at: new Date(now.getTime() - 3 * DAY), session_id: 's1' },
-    ], now);
+    const block = buildScreenerCadenceBlock(
+      [{ scale: 'phq2', score: 3, created_at: new Date(now.getTime() - 3 * DAY), session_id: 's1' }],
+      now,
+    );
     expect(block).toContain('PHQ-2 last administered 3 days ago — do NOT re-administer');
     expect(block).toContain('GAD-2 has never been administered — it is due');
   });
 
   it('marks a screener as due again after 7 days, using the newest response per scale', () => {
-    const block = buildScreenerCadenceBlock([
-      { scale: 'gad2', score: 2, created_at: new Date(now.getTime() - 9 * DAY), session_id: 's2' },
-      { scale: 'gad2', score: 4, created_at: new Date(now.getTime() - 20 * DAY), session_id: 's1' },
-    ], now);
+    const block = buildScreenerCadenceBlock(
+      [
+        { scale: 'gad2', score: 2, created_at: new Date(now.getTime() - 9 * DAY), session_id: 's2' },
+        { scale: 'gad2', score: 4, created_at: new Date(now.getTime() - 20 * DAY), session_id: 's1' },
+      ],
+      now,
+    );
     expect(block).toContain('GAD-2 last administered 9 days ago — it is due this week');
   });
 });
@@ -201,7 +210,13 @@ describe('buildRiskHistoryBlock (ai-therapist-52)', () => {
 
   it('summarizes severity + resolution without inviting the model to lead with it', () => {
     const block = buildRiskHistoryBlock([
-      { session_id: 's1', severity: 'high', flagged_at: new Date('2026-06-01'), unflagged_at: new Date('2026-06-02'), unflagged_by: 'dr.jones' },
+      {
+        session_id: 's1',
+        severity: 'high',
+        flagged_at: new Date('2026-06-01'),
+        unflagged_at: new Date('2026-06-02'),
+        unflagged_by: 'dr.jones',
+      },
     ]);
     expect(block).toContain('high severity');
     expect(block).toContain('later resolved/unflagged');
@@ -224,10 +239,23 @@ describe('buildToolGuidanceBlock — wave 3 tools', () => {
 
 describe('buildPracticeBlock (ai-therapist-123)', () => {
   const assignment = (over: Record<string, unknown>) => ({
-    id: 1, user_id: 42, session_id: 's1', title: 'Practice', description: 'd',
-    kind: 'custom' as const, suggested_frequency: null, status: 'assigned' as const,
-    assigned_at: new Date('2026-08-01T00:00:00Z'), completed_at: null, completion_note: null,
-    source: 'ai' as const, authored_by: null, cancelled_at: null, cancelled_by: null, cancel_reason: null, reissued_from: null,
+    id: 1,
+    user_id: 42,
+    session_id: 's1',
+    title: 'Practice',
+    description: 'd',
+    kind: 'custom' as const,
+    suggested_frequency: null,
+    status: 'assigned' as const,
+    assigned_at: new Date('2026-08-01T00:00:00Z'),
+    completed_at: null,
+    completion_note: null,
+    source: 'ai' as const,
+    authored_by: null,
+    cancelled_at: null,
+    cancelled_by: null,
+    cancel_reason: null,
+    reissued_from: null,
     ...over,
   });
 
@@ -237,15 +265,20 @@ describe('buildPracticeBlock (ai-therapist-123)', () => {
 
   it('lists open practice with title + assigned date on one compact line', () => {
     const block = buildPracticeBlock(
-      [assignment({ title: 'Two-minute breathing' }), assignment({ id: 2, title: 'Worry log', assigned_at: new Date('2026-08-03T00:00:00Z') })],
-      []
+      [
+        assignment({ title: 'Two-minute breathing' }),
+        assignment({ id: 2, title: 'Worry log', assigned_at: new Date('2026-08-03T00:00:00Z') }),
+      ],
+      [],
     );
-    expect(block).toContain('Open practice from last time: Two-minute breathing (assigned 2026-08-01); Worry log (assigned 2026-08-03)');
+    expect(block).toContain(
+      'Open practice from last time: Two-minute breathing (assigned 2026-08-01); Worry log (assigned 2026-08-03)',
+    );
   });
 
   it('lists completed-since-last-session practice one line each, capped at 3', () => {
-    const completed = [1, 2, 3, 4].map(i =>
-      assignment({ id: i, title: `Done ${i}`, status: 'completed', completed_at: new Date() })
+    const completed = [1, 2, 3, 4].map((i) =>
+      assignment({ id: i, title: `Done ${i}`, status: 'completed', completed_at: new Date() }),
     );
     const block = buildPracticeBlock([], completed);
     expect(block).toContain('- They completed: Done 1');
@@ -254,7 +287,7 @@ describe('buildPracticeBlock (ai-therapist-123)', () => {
   });
 
   it('caps the open list at 3', () => {
-    const open = [1, 2, 3, 4].map(i => assignment({ id: i, title: `Open ${i}` }));
+    const open = [1, 2, 3, 4].map((i) => assignment({ id: i, title: `Open ${i}` }));
     const block = buildPracticeBlock(open, []);
     expect(block).toContain('Open 3');
     expect(block).not.toContain('Open 4');
@@ -279,19 +312,46 @@ describe('buildMemoryBlock composition', () => {
 
   it('never fetches risk history when the therapist has not enabled sharing for this user', async () => {
     getUserRiskContextEnabledMock.mockResolvedValue(false);
-    getRecentUserSummariesMock.mockResolvedValue([{ session_id: 's1', summary: { headline: 'x' }, session_name: null, ended_at: new Date(), created_at: new Date() }]);
+    getRecentUserSummariesMock.mockResolvedValue([
+      {
+        session_id: 's1',
+        summary: { headline: 'x' },
+        session_name: null,
+        ended_at: new Date(),
+        created_at: new Date(),
+      },
+    ]);
     await buildMemoryBlock(42);
     expect(getUserPriorCrisisFlagsMock).not.toHaveBeenCalled();
   });
 
   it('composes the case profile, returning signals, clinician note, and risk history into one block when all are present', async () => {
     getRecentUserSummariesMock.mockResolvedValue([]);
-    getUserCaseProfileMock.mockResolvedValue({ user_id: 42, profile: { presenting_concerns: ['anxiety'] }, updated_at: new Date() });
-    getUserLatestSafetyPlanMock.mockResolvedValue({ plan: { warning_signs: ['not sleeping'] }, created_at: new Date(), session_id: 's1' });
-    getLatestClinicianNoteMock.mockResolvedValue({ notes: 'Ask about the new job.', author: 'dr.jones', created_at: new Date(), session_id: 's1' });
+    getUserCaseProfileMock.mockResolvedValue({
+      user_id: 42,
+      profile: { presenting_concerns: ['anxiety'] },
+      updated_at: new Date(),
+    });
+    getUserLatestSafetyPlanMock.mockResolvedValue({
+      plan: { warning_signs: ['not sleeping'] },
+      created_at: new Date(),
+      session_id: 's1',
+    });
+    getLatestClinicianNoteMock.mockResolvedValue({
+      notes: 'Ask about the new job.',
+      author: 'dr.jones',
+      created_at: new Date(),
+      session_id: 's1',
+    });
     getUserRiskContextEnabledMock.mockResolvedValue(true);
     getUserPriorCrisisFlagsMock.mockResolvedValue([
-      { session_id: 's0', severity: 'medium', flagged_at: new Date('2026-05-01'), unflagged_at: null, unflagged_by: null },
+      {
+        session_id: 's0',
+        severity: 'medium',
+        flagged_at: new Date('2026-05-01'),
+        unflagged_at: null,
+        unflagged_by: null,
+      },
     ]);
 
     const block = await buildMemoryBlock(42, 's-current');
@@ -305,26 +365,60 @@ describe('buildMemoryBlock composition', () => {
 
   it('surfaces open practice (and completions since the last session) in the returning block', async () => {
     getRecentUserSummariesMock.mockResolvedValue([
-      { session_id: 's1', summary: { headline: 'x' }, session_name: null, ended_at: new Date('2026-08-05T00:00:00Z'), created_at: new Date('2026-08-05T00:00:00Z') },
+      {
+        session_id: 's1',
+        summary: { headline: 'x' },
+        session_name: null,
+        ended_at: new Date('2026-08-05T00:00:00Z'),
+        created_at: new Date('2026-08-05T00:00:00Z'),
+      },
     ]);
     listUserAssignmentsMock.mockImplementation(async (_userId: number, opts: { status?: string }) => {
       if (opts.status === 'assigned') {
-        return [{
-          id: 1, user_id: 42, session_id: 's1', title: 'Two-minute breathing', description: 'd',
-          kind: 'exercise', suggested_frequency: 'daily', status: 'assigned',
-          assigned_at: new Date('2026-08-05T00:00:00Z'), completed_at: null, completion_note: null,
-        }];
+        return [
+          {
+            id: 1,
+            user_id: 42,
+            session_id: 's1',
+            title: 'Two-minute breathing',
+            description: 'd',
+            kind: 'exercise',
+            suggested_frequency: 'daily',
+            status: 'assigned',
+            assigned_at: new Date('2026-08-05T00:00:00Z'),
+            completed_at: null,
+            completion_note: null,
+          },
+        ];
       }
       return [
-        { // completed AFTER the last session ended -> shown
-          id: 2, user_id: 42, session_id: 's1', title: 'Worry log', description: 'd',
-          kind: 'observation', suggested_frequency: null, status: 'completed',
-          assigned_at: new Date('2026-08-01T00:00:00Z'), completed_at: new Date('2026-08-08T00:00:00Z'), completion_note: null,
+        {
+          // completed AFTER the last session ended -> shown
+          id: 2,
+          user_id: 42,
+          session_id: 's1',
+          title: 'Worry log',
+          description: 'd',
+          kind: 'observation',
+          suggested_frequency: null,
+          status: 'completed',
+          assigned_at: new Date('2026-08-01T00:00:00Z'),
+          completed_at: new Date('2026-08-08T00:00:00Z'),
+          completion_note: null,
         },
-        { // completed BEFORE the last session ended -> old news, not shown
-          id: 3, user_id: 42, session_id: 's0', title: 'Old gratitude list', description: 'd',
-          kind: 'custom', suggested_frequency: null, status: 'completed',
-          assigned_at: new Date('2026-07-01T00:00:00Z'), completed_at: new Date('2026-07-02T00:00:00Z'), completion_note: null,
+        {
+          // completed BEFORE the last session ended -> old news, not shown
+          id: 3,
+          user_id: 42,
+          session_id: 's0',
+          title: 'Old gratitude list',
+          description: 'd',
+          kind: 'custom',
+          suggested_frequency: null,
+          status: 'completed',
+          assigned_at: new Date('2026-07-01T00:00:00Z'),
+          completed_at: new Date('2026-07-02T00:00:00Z'),
+          completion_note: null,
         },
       ];
     });
@@ -336,7 +430,11 @@ describe('buildMemoryBlock composition', () => {
   });
 
   it('a practice-assignments failure only drops that line — the rest of the block survives', async () => {
-    getUserCaseProfileMock.mockResolvedValue({ user_id: 42, profile: { presenting_concerns: ['anxiety'] }, updated_at: new Date() });
+    getUserCaseProfileMock.mockResolvedValue({
+      user_id: 42,
+      profile: { presenting_concerns: ['anxiety'] },
+      updated_at: new Date(),
+    });
     listUserAssignmentsMock.mockRejectedValue(new Error('table missing'));
     const block = await buildMemoryBlock(42);
     expect(block).toContain('Presenting concerns: anxiety');

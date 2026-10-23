@@ -111,11 +111,27 @@ describe('listSessions', () => {
     await listSessions(FILTERS);
     const [sql, params] = lastCall();
     expect(params).toEqual([
-      'alice', '2026-01-01', '2026-02-01', 2, 50, 25, 50,
-      ['alloy'], ['en'], ['voice'], ['ended'], ['user'], true, 'high', ['short'], 42,
+      'alice',
+      '2026-01-01',
+      '2026-02-01',
+      2,
+      50,
+      25,
+      50,
+      ['alloy'],
+      ['en'],
+      ['voice'],
+      ['ended'],
+      ['user'],
+      true,
+      'high',
+      ['short'],
+      42,
     ]);
     expect(sql).toContain(DEMO_PREDICATE);
-    expect(sql).toContain("($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')");
+    expect(sql).toContain(
+      "($1::TEXT IS NULL OR ts.session_id::TEXT ILIKE '%' || $1 || '%' OR ts.session_name ILIKE '%' || $1 || '%' OR u.username ILIKE '%' || $1 || '%')",
+    );
     expect(sql).toContain('($2::TIMESTAMP IS NULL OR ts.created_at >= $2)');
     expect(sql).toContain('($3::TIMESTAMP IS NULL OR ts.created_at <= $3)');
     expect(sql).toContain('($8::TEXT[] IS NULL OR sc.voice = ANY($8))');
@@ -127,7 +143,9 @@ describe('listSessions', () => {
     expect(sql).toContain('($14::TEXT IS NULL OR ts.crisis_severity = $14)');
     expect(sql).toContain('($16::INT IS NULL OR ts.user_id = $16)');
     // Message-count and duration filters apply to the aggregated CTE, not the raw rows.
-    expect(sql).toMatch(/SELECT \* FROM session_stats\s+WHERE\s+\(\$4::INT IS NULL OR total_messages >= \$4\)\s+AND \(\$5::INT IS NULL OR total_messages <= \$5\)\s+AND \(\$15::TEXT\[\] IS NULL OR duration_category = ANY\(\$15\)\)/);
+    expect(sql).toMatch(
+      /SELECT \* FROM session_stats\s+WHERE\s+\(\$4::INT IS NULL OR total_messages >= \$4\)\s+AND \(\$5::INT IS NULL OR total_messages <= \$5\)\s+AND \(\$15::TEXT\[\] IS NULL OR duration_category = ANY\(\$15\)\)/,
+    );
     expect(sql).toMatch(/ORDER BY start_time DESC\s+LIMIT \$6 OFFSET \$7/);
   });
 
@@ -181,8 +199,17 @@ describe('countSessions', () => {
     expect(sql).toContain('SELECT COUNT(DISTINCT ts.session_id) as total');
     expect(sql).toContain(DEMO_PREDICATE);
     expect(params).toEqual([
-      'alice', '2026-01-01', '2026-02-01',
-      ['alloy'], ['en'], ['voice'], ['ended'], ['user'], true, 'high', 42,
+      'alice',
+      '2026-01-01',
+      '2026-02-01',
+      ['alloy'],
+      ['en'],
+      ['voice'],
+      ['ended'],
+      ['user'],
+      true,
+      'high',
+      42,
     ]);
     expect(sql).toContain('($4::TEXT[] IS NULL OR sc.voice = ANY($4))');
     expect(sql).toContain('($5::TEXT[] IS NULL OR sc.language = ANY($5))');

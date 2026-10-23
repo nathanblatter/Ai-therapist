@@ -20,8 +20,7 @@ function sessionOrgScopeSql(orgParam: string): string {
 }
 
 /** Rows the leak-check flagged and no researcher has corrected or approved yet. */
-const FLAGGED_UNREVIEWED_SQL =
-  `(metadata->'redaction_check'->>'flagged') = 'true' AND COALESCE(metadata->'redaction_check'->>'reviewed', 'false') <> 'true'`;
+const FLAGGED_UNREVIEWED_SQL = `(metadata->'redaction_check'->>'flagged') = 'true' AND COALESCE(metadata->'redaction_check'->>'reviewed', 'false') <> 'true'`;
 
 /**
  * The review queue: leak-flagged messages first (ai-therapist-262), then a
@@ -38,7 +37,7 @@ export async function getRandomRedactedMessages(orgId: number): Promise<Record<s
       AND ${sessionOrgScopeSql('$1')}
     ORDER BY (${FLAGGED_UNREVIEWED_SQL}) DESC, RANDOM()
     LIMIT 20`,
-    [orgId]
+    [orgId],
   );
   return result.rows;
 }
@@ -49,7 +48,7 @@ export async function countFlaggedUnreviewed(orgId: number): Promise<number> {
     `SELECT COUNT(*)::text AS n FROM messages
      WHERE ${FLAGGED_UNREVIEWED_SQL} AND ${REDACTABLE_ROWS_SQL}
        AND ${sessionOrgScopeSql('$1')}`,
-    [orgId]
+    [orgId],
   );
   return Number(result.rows[0]?.n ?? 0);
 }
@@ -68,14 +67,14 @@ const MARK_REVIEWED_SQL = `
 export async function updateRedactedContent(
   messageId: string,
   contentRedacted: string,
-  reviewedBy: number | null
+  reviewedBy: number | null,
 ): Promise<boolean> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const result = await client.query(
       'UPDATE messages SET content_redacted = $1 WHERE message_id = $2 RETURNING message_id',
-      [contentRedacted, messageId]
+      [contentRedacted, messageId],
     );
     if ((result.rowCount ?? 0) === 0) {
       await client.query('ROLLBACK');
@@ -84,7 +83,7 @@ export async function updateRedactedContent(
     await client.query(
       `INSERT INTO redaction_review_log (message_id, reviewed_by, action)
        VALUES ($1, $2, 'corrected')`,
-      [messageId, reviewedBy]
+      [messageId, reviewedBy],
     );
     await client.query(MARK_REVIEWED_SQL, [messageId]);
     await client.query('COMMIT');
@@ -102,15 +101,12 @@ export async function updateRedactedContent(
  * looked at the sampled message and approved the auto-redaction as-is.
  * Returns false if the message does not exist.
  */
-export async function recordRedactionApproval(
-  messageId: string,
-  reviewedBy: number | null
-): Promise<boolean> {
+export async function recordRedactionApproval(messageId: string, reviewedBy: number | null): Promise<boolean> {
   const result = await pool.query(
     `INSERT INTO redaction_review_log (message_id, reviewed_by, action)
      SELECT message_id, $2, 'approved' FROM messages WHERE message_id = $1
      RETURNING review_id`,
-    [messageId, reviewedBy]
+    [messageId, reviewedBy],
   );
   if ((result.rowCount ?? 0) === 0) return false;
   await pool.query(MARK_REVIEWED_SQL, [messageId]);
@@ -146,7 +142,7 @@ export interface RedactionReviewLogFilters {
 
 export async function listRedactionReviewLog(
   filters: RedactionReviewLogFilters,
-  orgId: number | null = null
+  orgId: number | null = null,
 ): Promise<{ rows: RedactionReviewLogRow[]; total: number }> {
   const from = `
     FROM redaction_review_log rrl
@@ -168,7 +164,7 @@ export async function listRedactionReviewLog(
        ${from} ${where}
        ORDER BY rrl.review_id DESC
        LIMIT $4 OFFSET $5`,
-      [...params, filters.limit, filters.offset]
+      [...params, filters.limit, filters.offset],
     ),
     pool.query<{ count: string }>(`SELECT COUNT(*) AS count ${from} ${where}`, params),
   ]);

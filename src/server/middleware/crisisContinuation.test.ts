@@ -61,9 +61,7 @@ describe('quiet hours vs a crisis continuation', () => {
     // where we hang up and stay hung up.
     const next = vi.fn() as unknown as NextFunction;
     const r = res();
-    requireOutsideQuietHours(
-      reqWith({ recovery: true }, { userRole: 'participant' }), r, next,
-    );
+    requireOutsideQuietHours(reqWith({ recovery: true }, { userRole: 'participant' }), r, next);
     expect(next).toHaveBeenCalledOnce();
     expect(r.status).not.toHaveBeenCalled();
   });
@@ -71,9 +69,7 @@ describe('quiet hours vs a crisis continuation', () => {
   it('lets a text continuation through', () => {
     const next = vi.fn() as unknown as NextFunction;
     const r = res();
-    requireOutsideQuietHours(
-      reqWith({ continued_from: 'live_abc' }, { userRole: 'participant' }), r, next,
-    );
+    requireOutsideQuietHours(reqWith({ continued_from: 'live_abc' }, { userRole: 'participant' }), r, next);
     expect(next).toHaveBeenCalledOnce();
     expect(r.status).not.toHaveBeenCalled();
   });

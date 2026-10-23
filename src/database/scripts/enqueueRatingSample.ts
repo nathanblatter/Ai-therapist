@@ -24,7 +24,9 @@ async function main() {
   const dryRun = process.argv.includes('--dry-run');
 
   if (!Number.isInteger(size) || size < 1) {
-    console.log('Usage: npx tsx src/database/scripts/enqueueRatingSample.ts --size <n> [--since <ISO date>] [--seed <int>] [--dry-run]');
+    console.log(
+      'Usage: npx tsx src/database/scripts/enqueueRatingSample.ts --size <n> [--since <ISO date>] [--seed <int>] [--dry-run]',
+    );
     process.exitCode = 1;
     return;
   }
@@ -40,23 +42,25 @@ async function main() {
   console.log(
     `[RatingQueue] ${result.dry_run ? 'DRY RUN - ' : ''}since ${result.since} · seed ${result.seed} · ` +
       `${result.candidate_count} candidates · ${result.picks.length} picked · ` +
-      `second-rater fraction ${result.second_rater_fraction}`
+      `second-rater fraction ${result.second_rater_fraction}`,
   );
   console.log('[RatingQueue] allocation (stratum: allocated / candidates, crisis-adjacent):');
   for (const a of result.allocations) {
     console.log(`  ${a.stratum}: ${a.allocated} / ${a.candidates} (${a.crisis_adjacent} crisis-adjacent)`);
   }
-  const second = result.picks.filter(p => p.needs_second_rater).length;
-  const crisis = result.picks.filter(p => p.crisis_adjacent).length;
+  const second = result.picks.filter((p) => p.needs_second_rater).length;
+  const crisis = result.picks.filter((p) => p.crisis_adjacent).length;
   console.log(`[RatingQueue] picks: ${result.picks.length} (${crisis} crisis-adjacent, ${second} need a second rater)`);
   if (!result.dry_run) {
-    console.log(`[RatingQueue] inserted ${result.inserted.length} queue row(s)` +
-      (result.inserted.length < result.picks.length ? ' (the rest were already queued)' : ''));
+    console.log(
+      `[RatingQueue] inserted ${result.inserted.length} queue row(s)` +
+        (result.inserted.length < result.picks.length ? ' (the rest were already queued)' : ''),
+    );
   }
 }
 
 main()
-  .catch(err => {
+  .catch((err) => {
     console.error('[RatingQueue] failed:', err);
     process.exitCode = 1;
   })

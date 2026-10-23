@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
-import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare } from "react-feather";
-import { formatDateTime } from "../../shared/format";
-import { getJson, postJson } from "../../shared/http";
+import { useState, useEffect } from 'react';
+import { RefreshCw, Save, Check, AlertCircle, User, MessageSquare } from 'react-feather';
+import { formatDateTime } from '../../shared/format';
+import { getJson, postJson } from '../../shared/http';
 
 interface RedactionCheck {
   p_leak: number;
@@ -31,7 +31,7 @@ export default function RedactionReview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [flaggedUnreviewed, setFlaggedUnreviewed] = useState<number>(0);
@@ -40,7 +40,9 @@ export default function RedactionReview() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getJson<{ messages: RedactMessage[]; flagged_unreviewed?: number }>("/redact/api/messages", { fallback: "Failed to fetch messages" });
+      const data = await getJson<{ messages: RedactMessage[]; flagged_unreviewed?: number }>('/redact/api/messages', {
+        fallback: 'Failed to fetch messages',
+      });
       setMessages(data.messages);
       setFlaggedUnreviewed(Number(data.flagged_unreviewed ?? 0));
     } catch (err: unknown) {
@@ -56,28 +58,28 @@ export default function RedactionReview() {
 
   const handleEdit = (message: RedactMessage) => {
     setEditingId(message.message_id);
-    setEditValue(message.content_redacted || "");
+    setEditValue(message.content_redacted || '');
   };
 
   const handleCancel = () => {
     setEditingId(null);
-    setEditValue("");
+    setEditValue('');
   };
 
   const handleSave = async (messageId: string) => {
     setSaving(messageId);
     setSaveSuccess(null);
     try {
-      await postJson(`/redact/api/messages/${messageId}`, { content_redacted: editValue }, { method: "PUT", fallback: "Failed to save" });
+      await postJson(
+        `/redact/api/messages/${messageId}`,
+        { content_redacted: editValue },
+        { method: 'PUT', fallback: 'Failed to save' },
+      );
 
       // Update local state
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.message_id === messageId ? { ...m, content_redacted: editValue } : m
-        )
-      );
+      setMessages((prev) => prev.map((m) => (m.message_id === messageId ? { ...m, content_redacted: editValue } : m)));
       setEditingId(null);
-      setEditValue("");
+      setEditValue('');
       setSaveSuccess(messageId);
       setTimeout(() => setSaveSuccess(null), 2000);
     } catch (err: unknown) {
@@ -95,16 +97,13 @@ export default function RedactionReview() {
       <header className="bg-white border-b shadow-sm">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Redaction Verification
-            </h1>
-            <p className="text-sm text-gray-600 mt-1">
-              Review and edit redacted message content
-            </p>
+            <h1 className="text-2xl font-bold text-gray-900">Redaction Verification</h1>
+            <p className="text-sm text-gray-600 mt-1">Review and edit redacted message content</p>
             {flaggedUnreviewed > 0 && (
               <p className="text-sm text-amber-700 mt-1 flex items-center gap-1.5">
                 <AlertCircle size={14} />
-                {flaggedUnreviewed} message{flaggedUnreviewed === 1 ? '' : 's'} flagged by the leak-check await review; they are listed first.
+                {flaggedUnreviewed} message{flaggedUnreviewed === 1 ? '' : 's'} flagged by the leak-check await review;
+                they are listed first.
               </p>
             )}
           </div>
@@ -113,7 +112,7 @@ export default function RedactionReview() {
             disabled={loading}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
-            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
             Load More
           </button>
         </div>
@@ -130,10 +129,7 @@ export default function RedactionReview() {
 
         {loading && messages.length === 0 ? (
           <div className="text-center py-12">
-            <RefreshCw
-              size={32}
-              className="animate-spin mx-auto text-gray-400"
-            />
+            <RefreshCw size={32} className="animate-spin mx-auto text-gray-400" />
             <p className="mt-4 text-gray-600">Loading messages...</p>
           </div>
         ) : messages.length === 0 ? (
@@ -143,33 +139,20 @@ export default function RedactionReview() {
         ) : (
           <div className="space-y-4">
             {messages.map((message) => (
-              <div
-                key={message.message_id}
-                className="bg-white rounded-lg border shadow-sm overflow-hidden"
-              >
+              <div key={message.message_id} className="bg-white rounded-lg border shadow-sm overflow-hidden">
                 {/* Message Header */}
                 <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span
                       className={`flex items-center gap-1.5 px-2 py-1 rounded text-sm font-medium ${
-                        message.role === "user"
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-green-100 text-green-700"
+                        message.role === 'user' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
                       }`}
                     >
-                      {message.role === "user" ? (
-                        <User size={14} />
-                      ) : (
-                        <MessageSquare size={14} />
-                      )}
+                      {message.role === 'user' ? <User size={14} /> : <MessageSquare size={14} />}
                       {message.role}
                     </span>
-                    <span className="text-sm text-gray-500">
-                      {message.message_type}
-                    </span>
-                    <span className="text-sm text-gray-400">
-                      {formatDate(message.created_at)}
-                    </span>
+                    <span className="text-sm text-gray-500">{message.message_type}</span>
+                    <span className="text-sm text-gray-400">{formatDate(message.created_at)}</span>
                     {message.redaction_check?.flagged && !message.redaction_check.reviewed && (
                       <span
                         className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-800"
@@ -180,9 +163,7 @@ export default function RedactionReview() {
                       </span>
                     )}
                   </div>
-                  <span className="text-xs text-gray-400 font-mono">
-                    ID: {message.message_id}
-                  </span>
+                  <span className="text-xs text-gray-400 font-mono">ID: {message.message_id}</span>
                 </div>
 
                 {/* Message Content */}
@@ -223,9 +204,7 @@ export default function RedactionReview() {
                     >
                       <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800">
                         {message.content_redacted || (
-                          <span className="text-gray-400 italic">
-                            (empty - click to edit)
-                          </span>
+                          <span className="text-gray-400 italic">(empty - click to edit)</span>
                         )}
                       </pre>
                       <p className="text-xs text-gray-400 mt-2 opacity-0 group-hover:opacity-100 transition">
@@ -255,7 +234,7 @@ export default function RedactionReview() {
               disabled={loading}
               className="inline-flex items-center gap-2 px-6 py-3 bg-white border rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
-              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
               Load New Batch (Random Order)
             </button>
           </div>

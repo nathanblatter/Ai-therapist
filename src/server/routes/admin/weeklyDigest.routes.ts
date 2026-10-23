@@ -95,9 +95,14 @@ export default function weeklyDigestRoutes(): Router {
       const weekEnding = raw === undefined || raw === null || raw === '' ? defaultWeekEnding() : raw;
       if (!isValidWeekEnding(weekEnding)) return res.status(400).json({ error: 'week_ending must be YYYY-MM-DD' });
       const ageDays = (Date.now() - new Date(`${weekEnding}T23:59:59.999Z`).getTime()) / 86_400_000;
-      if (ageDays > MAX_WEEKS_BACK * 7) return res.status(400).json({ error: `week_ending may not be more than ${MAX_WEEKS_BACK} weeks ago` });
+      if (ageDays > MAX_WEEKS_BACK * 7)
+        return res.status(400).json({ error: `week_ending may not be more than ${MAX_WEEKS_BACK} weeks ago` });
       if (ageDays < -7) return res.status(400).json({ error: 'week_ending may not be in the future' });
-      const row = await generateAndStoreWeeklyDigest({ weekEnding, orgId, generatedBy: req.session?.username ?? 'researcher' });
+      const row = await generateAndStoreWeeklyDigest({
+        weekEnding,
+        orgId,
+        generatedBy: req.session?.username ?? 'researcher',
+      });
       res.status(201).json({ digest: row });
     } catch (err) {
       log.error({ err }, 'Failed to generate weekly digest');

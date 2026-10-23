@@ -70,9 +70,7 @@ describe('sweepAbandonedSessions', () => {
   });
 
   it('finalizes every abandoned session found: ends it, disconnects sideband, redacts, uploads recording', async () => {
-    queryMock
-      .mockResolvedValueOnce({ rows: [{ session_id: 'abandoned-1' }] }) // the sweep SELECT
-    ;
+    queryMock.mockResolvedValueOnce({ rows: [{ session_id: 'abandoned-1' }] }); // the sweep SELECT
 
     const result = await sweepAbandonedSessions();
 

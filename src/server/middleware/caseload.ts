@@ -31,11 +31,7 @@ import { orgIdFor } from './org.js';
  * @param ownerOrgId the participant's organization_id when the caller already
  *   loaded it (joined row); `undefined` asks for a lookup by `ownerId`.
  */
-async function researcherMayAccess(
-  req: Request,
-  ownerId: number | null,
-  ownerOrgId?: number | null
-): Promise<boolean> {
+async function researcherMayAccess(req: Request, ownerId: number | null, ownerOrgId?: number | null): Promise<boolean> {
   return researcherOrgAllows(await orgIdFor(req), ownerId, ownerOrgId);
 }
 
@@ -50,7 +46,7 @@ async function researcherMayAccess(
 export async function researcherOrgAllows(
   callerOrgId: number | null,
   ownerId: number | null,
-  ownerOrgId?: number | null
+  ownerOrgId?: number | null,
 ): Promise<boolean> {
   if (callerOrgId === null) return false;
   if (ownerId === null) {
@@ -200,7 +196,7 @@ export async function canAdminAccessSessionLive(
   adminUserId: number | undefined,
   sessionUserId: number | null,
   callerOrgId: number | null,
-  sessionOwnerOrgId?: number | null
+  sessionOwnerOrgId?: number | null,
 ): Promise<boolean> {
   if (role === 'researcher') return researcherOrgAllows(callerOrgId, sessionUserId, sessionOwnerOrgId);
   if (role === 'caseworker') return false; // summaries tier: never live transcript streams
@@ -229,7 +225,7 @@ export async function mayCareTeamAccessSession(
   role: string | undefined,
   userId: number | undefined,
   sessionId: string,
-  opts: { caseworkerPolicy: 'deny' | 'assigned'; callerOrgId: number | null }
+  opts: { caseworkerPolicy: 'deny' | 'assigned'; callerOrgId: number | null },
 ): Promise<boolean> {
   if (role === 'researcher') {
     if (opts.callerOrgId === null) return false;
@@ -245,7 +241,6 @@ export async function mayCareTeamAccessSession(
   if (!info || info.user_id === null || info.user_id === undefined) return false;
   return isAssigned(userId, Number(info.user_id));
 }
-
 
 /**
  * Gate a `:messageId`-addressed route (message edit/delete). demo passes

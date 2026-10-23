@@ -2,48 +2,48 @@
 // over the caller's own data access. Read-only; every answer shows which
 // lookups ran. History lives in this tab only — the durable record is the
 // server-side assistant_audit table.
-import { useRef, useState, useEffect } from "react";
-import { postJson } from "../../shared/http";
-import { Send, MessageCircle, Database } from "react-feather";
+import { useRef, useState, useEffect } from 'react';
+import { postJson } from '../../shared/http';
+import { Send, MessageCircle, Database } from 'react-feather';
 
-interface TurnToolCall { name: string; rowCount: number }
+interface TurnToolCall {
+  name: string;
+  rowCount: number;
+}
 interface ChatMessage {
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: string;
   toolCalls?: TurnToolCall[];
 }
 
 const QUICK_PROMPTS: Record<string, string[]> = {
   researcher: [
-    "How is survey completion looking this week?",
-    "Any crisis events in the last 7 days?",
-    "Summarize the instrument aggregates.",
+    'How is survey completion looking this week?',
+    'Any crisis events in the last 7 days?',
+    'Summarize the instrument aggregates.',
   ],
   therapist: [
     "Summarize my caseload's recent activity.",
-    "Which of my clients have open escalations?",
+    'Which of my clients have open escalations?',
     "Who on my caseload hasn't had a session in 10 days?",
   ],
-  caseworker: [
-    "What's in my work queue?",
-    "Which of my clients had a risk signal this week?",
-  ],
+  caseworker: ["What's in my work queue?", 'Which of my clients had a risk signal this week?'],
 };
 
 const TOOL_LABELS: Record<string, string> = {
-  study_overview: "study overview",
-  survey_completion: "survey completion",
-  session_stats: "session stats",
-  crisis_events: "crisis events",
-  escalations: "escalations",
-  work_queue: "work queue",
-  caseload_roster: "caseload roster",
-  user_lookup: "user lookup",
+  study_overview: 'study overview',
+  survey_completion: 'survey completion',
+  session_stats: 'session stats',
+  crisis_events: 'crisis events',
+  escalations: 'escalations',
+  work_queue: 'work queue',
+  caseload_roster: 'caseload roster',
+  user_lookup: 'user lookup',
 };
 
 export default function Assistant({ role }: { role: string | null }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -56,21 +56,21 @@ export default function Assistant({ role }: { role: string | null }) {
     const question = text.trim();
     if (!question || busy) return;
     setError(null);
-    const next: ChatMessage[] = [...messages, { role: "user", content: question }];
+    const next: ChatMessage[] = [...messages, { role: 'user', content: question }];
     setMessages(next);
-    setInput("");
+    setInput('');
     setBusy(true);
     try {
       const data = await postJson<{ answer?: string; toolCalls?: TurnToolCall[]; error?: string } | null>(
-        "/admin/api/assistant/chat",
-        { messages: next.slice(-12).map(({ role: r, content }) => ({ role: r, content })) }
+        '/admin/api/assistant/chat',
+        { messages: next.slice(-12).map(({ role: r, content }) => ({ role: r, content })) },
       );
       if (!data?.answer) {
-        throw new Error(data?.error || "Request failed (empty answer)");
+        throw new Error(data?.error || 'Request failed (empty answer)');
       }
-      setMessages((prev) => [...prev, { role: "assistant", content: data.answer!, toolCalls: data.toolCalls }]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer!, toolCalls: data.toolCalls }]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      setError(err instanceof Error ? err.message : 'Request failed');
       setMessages((prev) => prev.slice(0, -1));
       setInput(question);
     } finally {
@@ -78,7 +78,7 @@ export default function Assistant({ role }: { role: string | null }) {
     }
   };
 
-  const prompts = QUICK_PROMPTS[role ?? ""] ?? [];
+  const prompts = QUICK_PROMPTS[role ?? ''] ?? [];
 
   return (
     <div className="h-full flex flex-col p-4 md:p-6 max-w-3xl mx-auto w-full">
@@ -87,8 +87,8 @@ export default function Assistant({ role }: { role: string | null }) {
           <MessageCircle size={20} aria-hidden="true" /> Assistant
         </h1>
         <p className="text-sm text-gray-500">
-          Ask about the data your role can already see. The assistant works with aggregates,
-          scores, and statuses only, and never with session transcripts or message content.
+          Ask about the data your role can already see. The assistant works with aggregates, scores, and statuses only,
+          and never with session transcripts or message content.
         </p>
       </div>
 
@@ -110,16 +110,16 @@ export default function Assistant({ role }: { role: string | null }) {
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
+          <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
             <div
               className={
-                m.role === "user"
-                  ? "bg-blue-600 text-white rounded-lg px-3 py-2 max-w-[85%] text-sm whitespace-pre-wrap"
-                  : "bg-gray-100 text-gray-900 rounded-lg px-3 py-2 max-w-[85%] text-sm whitespace-pre-wrap"
+                m.role === 'user'
+                  ? 'bg-blue-600 text-white rounded-lg px-3 py-2 max-w-[85%] text-sm whitespace-pre-wrap'
+                  : 'bg-gray-100 text-gray-900 rounded-lg px-3 py-2 max-w-[85%] text-sm whitespace-pre-wrap'
               }
             >
               {m.content}
-              {m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0 && (
+              {m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-gray-200 flex items-center gap-1.5 flex-wrap text-xs text-gray-500">
                   <Database size={12} aria-hidden="true" />
                   {m.toolCalls.map((t, j) => (
@@ -160,8 +160,7 @@ export default function Assistant({ role }: { role: string | null }) {
         </button>
       </form>
       <p className="mt-2 text-xs text-gray-400">
-        Answers are computed from your own data access. Verify anything consequential in the
-        underlying panel.
+        Answers are computed from your own data access. Verify anything consequential in the underlying panel.
       </p>
     </div>
   );

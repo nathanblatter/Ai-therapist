@@ -99,9 +99,13 @@ describe('POST /admin/api/users/:userId/notes', () => {
     expect(res.status).toBe(201);
     expect(dbMocks.createCareNote).toHaveBeenCalledWith(
       expect.objectContaining({
-        orgId: 5, clientId: 42, authorId: 9, authorRole: 'therapist',
-        noteType: 'progress', content: { subjective: 'S', plan: 'P' },
-      })
+        orgId: 5,
+        clientId: 42,
+        authorId: 9,
+        authorRole: 'therapist',
+        noteType: 'progress',
+        content: { subjective: 'S', plan: 'P' },
+      }),
     );
   });
 
@@ -112,7 +116,7 @@ describe('POST /admin/api/users/:userId/notes', () => {
       .send({ note_type: 'case', content: { narrative: 'Called client, left voicemail' } });
     expect(res.status).toBe(201);
     expect(dbMocks.createCareNote).toHaveBeenCalledWith(
-      expect.objectContaining({ noteType: 'case', authorRole: 'caseworker', caseNoteKind: 'other' })
+      expect.objectContaining({ noteType: 'case', authorRole: 'caseworker', caseNoteKind: 'other' }),
     );
   });
 
@@ -127,10 +131,22 @@ describe('POST /admin/api/users/:userId/notes', () => {
 
   it('400s invalid content shapes (empty SOAP, missing narrative, bad kind)', async () => {
     const app = appAs('therapist', 9);
-    expect((await request(app).post('/admin/api/users/42/notes').send({ note_type: 'progress', content: {} })).status).toBe(400);
-    expect((await request(app).post('/admin/api/users/42/notes').send({ note_type: 'case', content: {} })).status).toBe(400);
-    expect((await request(app).post('/admin/api/users/42/notes').send({ note_type: 'case', case_note_kind: 'bogus', content: { narrative: 'x' } })).status).toBe(400);
-    expect((await request(app).post('/admin/api/users/42/notes').send({ note_type: 'nope', content: {} })).status).toBe(400);
+    expect(
+      (await request(app).post('/admin/api/users/42/notes').send({ note_type: 'progress', content: {} })).status,
+    ).toBe(400);
+    expect((await request(app).post('/admin/api/users/42/notes').send({ note_type: 'case', content: {} })).status).toBe(
+      400,
+    );
+    expect(
+      (
+        await request(app)
+          .post('/admin/api/users/42/notes')
+          .send({ note_type: 'case', case_note_kind: 'bogus', content: { narrative: 'x' } })
+      ).status,
+    ).toBe(400);
+    expect((await request(app).post('/admin/api/users/42/notes').send({ note_type: 'nope', content: {} })).status).toBe(
+      400,
+    );
   });
 
   it('404s when the client is not on the author caseload', async () => {
@@ -153,17 +169,25 @@ describe('POST /admin/api/users/:userId/notes', () => {
 
   it('400s a session_id that does not exist or has no logged-in owner', async () => {
     dbMocks.getSessionAccessInfo.mockResolvedValue(null);
-    expect((await request(appAs('therapist', 9))
-      .post('/admin/api/users/42/notes')
-      .send({ note_type: 'progress', session_id: 'missing', content: { subjective: 'S' } })).status).toBe(400);
+    expect(
+      (
+        await request(appAs('therapist', 9))
+          .post('/admin/api/users/42/notes')
+          .send({ note_type: 'progress', session_id: 'missing', content: { subjective: 'S' } })
+      ).status,
+    ).toBe(400);
     dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'ended', user_id: null, session_type: 'voice' });
-    expect((await request(appAs('therapist', 9))
-      .post('/admin/api/users/42/notes')
-      .send({ note_type: 'progress', session_id: 'anon', content: { subjective: 'S' } })).status).toBe(400);
+    expect(
+      (
+        await request(appAs('therapist', 9))
+          .post('/admin/api/users/42/notes')
+          .send({ note_type: 'progress', session_id: 'anon', content: { subjective: 'S' } })
+      ).status,
+    ).toBe(400);
     expect(dbMocks.createCareNote).not.toHaveBeenCalled();
   });
 
-  it("accepts a session_id owned by the client and passes it through", async () => {
+  it('accepts a session_id owned by the client and passes it through', async () => {
     dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'ended', user_id: 42, session_type: 'voice' });
     dbMocks.createCareNote.mockResolvedValue(baseNote({ session_id: 'sess-1' }));
     const res = await request(appAs('therapist', 9))
@@ -225,38 +249,53 @@ describe('PUT /admin/api/notes/:noteId', () => {
       .put('/admin/api/notes/21')
       .send({ content: { subjective: 'S2' } });
     expect(res.status).toBe(200);
-    expect(dbMocks.updateCareNoteDraft).toHaveBeenCalledWith(21, 9, expect.objectContaining({ content: { subjective: 'S2' } }));
+    expect(dbMocks.updateCareNoteDraft).toHaveBeenCalledWith(
+      21,
+      9,
+      expect.objectContaining({ content: { subjective: 'S2' } }),
+    );
   });
 
   it('403s a care-team therapist who is not the author', async () => {
     dbMocks.getCareNoteById.mockResolvedValue(baseNote({ author_id: 8 }));
-    const res = await request(appAs('therapist', 9)).put('/admin/api/notes/21').send({ content: { plan: 'x' } });
+    const res = await request(appAs('therapist', 9))
+      .put('/admin/api/notes/21')
+      .send({ content: { plan: 'x' } });
     expect(res.status).toBe(403);
     expect(dbMocks.updateCareNoteDraft).not.toHaveBeenCalled();
   });
 
   it('supports explicitly clearing case_note_kind with null', async () => {
-    const caseNote = baseNote({ note_type: 'case', author_role: 'caseworker', author_id: 2, case_note_kind: 'referral' });
+    const caseNote = baseNote({
+      note_type: 'case',
+      author_role: 'caseworker',
+      author_id: 2,
+      case_note_kind: 'referral',
+    });
     dbMocks.getCareNoteById.mockResolvedValue(caseNote);
     dbMocks.updateCareNoteDraft.mockResolvedValue({ ...caseNote, case_note_kind: null });
-    const res = await request(appAs('caseworker', 2))
-      .put('/admin/api/notes/21')
-      .send({ case_note_kind: null });
+    const res = await request(appAs('caseworker', 2)).put('/admin/api/notes/21').send({ case_note_kind: null });
     expect(res.status).toBe(200);
     expect(dbMocks.updateCareNoteDraft).toHaveBeenCalledWith(21, 2, expect.objectContaining({ caseNoteKind: null }));
   });
 
   it('still 400s a null kind on a progress note and bogus kinds on case notes', async () => {
     dbMocks.getCareNoteById.mockResolvedValue(baseNote()); // progress
-    expect((await request(appAs('therapist', 9)).put('/admin/api/notes/21').send({ case_note_kind: null })).status).toBe(400);
+    expect(
+      (await request(appAs('therapist', 9)).put('/admin/api/notes/21').send({ case_note_kind: null })).status,
+    ).toBe(400);
     dbMocks.getCareNoteById.mockResolvedValue(baseNote({ note_type: 'case', author_role: 'caseworker', author_id: 2 }));
-    expect((await request(appAs('caseworker', 2)).put('/admin/api/notes/21').send({ case_note_kind: 'bogus' })).status).toBe(400);
+    expect(
+      (await request(appAs('caseworker', 2)).put('/admin/api/notes/21').send({ case_note_kind: 'bogus' })).status,
+    ).toBe(400);
     expect(dbMocks.updateCareNoteDraft).not.toHaveBeenCalled();
   });
 
   it('409s edits to a signed note (immutable; amend instead)', async () => {
     dbMocks.getCareNoteById.mockResolvedValue(baseNote({ status: 'signed' }));
-    const res = await request(appAs('therapist', 9)).put('/admin/api/notes/21').send({ content: { plan: 'x' } });
+    const res = await request(appAs('therapist', 9))
+      .put('/admin/api/notes/21')
+      .send({ content: { plan: 'x' } });
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/amend/i);
   });
@@ -281,7 +320,9 @@ describe('DELETE /admin/api/notes/:noteId', () => {
 describe('POST /admin/api/notes/:noteId/sign', () => {
   it('signs the author draft and expires its awaiting-signature work item', async () => {
     dbMocks.getCareNoteById.mockResolvedValue(baseNote());
-    dbMocks.signCareNote.mockResolvedValue(baseNote({ status: 'signed', signed_at: '2026-08-27T01:00:00Z', sign_hash: 'abc' }));
+    dbMocks.signCareNote.mockResolvedValue(
+      baseNote({ status: 'signed', signed_at: '2026-08-27T01:00:00Z', sign_hash: 'abc' }),
+    );
     const res = await request(appAs('therapist', 9)).post('/admin/api/notes/21/sign');
     expect(res.status).toBe(200);
     expect(res.body.note.status).toBe('signed');
@@ -292,7 +333,7 @@ describe('POST /admin/api/notes/:noteId/sign', () => {
   it('marks the AI SOAP draft reviewed when signing a seeded note', async () => {
     dbMocks.getCareNoteById.mockResolvedValue(baseNote({ seed_source: 'ai_soap', session_id: 'sess-1' }));
     dbMocks.signCareNote.mockResolvedValue(
-      baseNote({ status: 'signed', seed_source: 'ai_soap', session_id: 'sess-1' })
+      baseNote({ status: 'signed', seed_source: 'ai_soap', session_id: 'sess-1' }),
     );
     const res = await request(appAs('therapist', 9)).post('/admin/api/notes/21/sign');
     expect(res.status).toBe(200);
@@ -340,7 +381,9 @@ describe('POST /admin/api/notes/:noteId/share', () => {
 
   it('400s sharing a case note (always care-team visible)', async () => {
     dbMocks.getCareNoteById.mockResolvedValue(baseNote({ note_type: 'case', author_role: 'caseworker', author_id: 2 }));
-    expect((await request(appAs('caseworker', 2)).post('/admin/api/notes/21/share').send({ shared: true })).status).toBe(400);
+    expect(
+      (await request(appAs('caseworker', 2)).post('/admin/api/notes/21/share').send({ shared: true })).status,
+    ).toBe(400);
   });
 });
 
@@ -362,15 +405,21 @@ describe('POST /admin/api/sessions/:sessionId/notes/from-insights', () => {
     expect(res.body.existing).toBe(false);
     expect(dbMocks.createCareNote).toHaveBeenCalledWith(
       expect.objectContaining({
-        noteType: 'progress', seedSource: 'ai_soap', seedModel: 'test-model',
-        sessionId: 'sess-1', clientId: 42,
+        noteType: 'progress',
+        seedSource: 'ai_soap',
+        seedModel: 'test-model',
+        sessionId: 'sess-1',
+        clientId: 42,
         content: { subjective: 'S', objective: 'O', assessment: 'A', plan: 'P' },
-      })
+      }),
     );
     expect(dbMocks.insertWorkItem).toHaveBeenCalledWith(
       expect.objectContaining({
-        itemType: 'note_awaiting_signature', assigneeId: 9, sourceTable: 'care_notes', sourceId: '21',
-      })
+        itemType: 'note_awaiting_signature',
+        assigneeId: 9,
+        sourceTable: 'care_notes',
+        sourceId: '21',
+      }),
     );
   });
 
@@ -394,14 +443,20 @@ describe('POST /admin/api/sessions/:sessionId/notes/from-insights', () => {
 
   it('422s when there is no AI SOAP draft or no logged-in participant', async () => {
     dbMocks.getSessionInsights.mockResolvedValue(null);
-    expect((await request(appAs('therapist', 9)).post('/admin/api/sessions/sess-1/notes/from-insights')).status).toBe(422);
+    expect((await request(appAs('therapist', 9)).post('/admin/api/sessions/sess-1/notes/from-insights')).status).toBe(
+      422,
+    );
     dbMocks.getSessionInsights.mockResolvedValue({ soap_note: { plan: 'P' } });
     dbMocks.getSessionAccessInfo.mockResolvedValue({ status: 'ended', user_id: null, session_type: 'text' });
     // Care-team session gate 404s null-owner sessions before the handler.
-    expect((await request(appAs('therapist', 9)).post('/admin/api/sessions/sess-1/notes/from-insights')).status).toBe(404);
+    expect((await request(appAs('therapist', 9)).post('/admin/api/sessions/sess-1/notes/from-insights')).status).toBe(
+      404,
+    );
   });
 
   it('is therapist-only (caseworkers 403)', async () => {
-    expect((await request(appAs('caseworker', 2)).post('/admin/api/sessions/sess-1/notes/from-insights')).status).toBe(403);
+    expect((await request(appAs('caseworker', 2)).post('/admin/api/sessions/sess-1/notes/from-insights')).status).toBe(
+      403,
+    );
   });
 });

@@ -66,49 +66,77 @@ export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
   const has = (name: string) => enabledToolNames.includes(name);
   const lines: string[] = [];
   if (has('start_thought_record')) {
-    lines.push('- When they agree to work through a thought record, CALL start_thought_record to open the on-screen form. Never walk through one only in speech.');
+    lines.push(
+      '- When they agree to work through a thought record, CALL start_thought_record to open the on-screen form. Never walk through one only in speech.',
+    );
   }
   if (has('log_mood')) {
     lines.push('- Whenever they give a mood rating ("about a 4 out of 10"), CALL log_mood with it.');
   }
   if (has('remember_this')) {
-    lines.push('- When they ask you to remember something for future conversations, CALL remember_this. You CAN store facts this way — the privacy rules above are about not repeating or leaking data, and this tool enforces the participant\'s own consent. Never claim you cannot remember things without calling it.');
+    lines.push(
+      "- When they ask you to remember something for future conversations, CALL remember_this. You CAN store facts this way — the privacy rules above are about not repeating or leaking data, and this tool enforces the participant's own consent. Never claim you cannot remember things without calling it.",
+    );
   }
   if (has('recall_previous_sessions')) {
-    lines.push('- When they reference past conversations, CALL recall_previous_sessions before saying you have no access.');
+    lines.push(
+      '- When they reference past conversations, CALL recall_previous_sessions before saying you have no access.',
+    );
   }
   if (has('switch_language')) {
-    lines.push('- When the conversation language changes (they ask, or start speaking another language), CALL switch_language with the new language — then continue in it.');
+    lines.push(
+      '- When the conversation language changes (they ask, or start speaking another language), CALL switch_language with the new language — then continue in it.',
+    );
   }
   if (has('end_session')) {
-    lines.push('- When they say they want to end and you have said goodbye, CALL end_session. Do not leave them to find the button.');
+    lines.push(
+      '- When they say they want to end and you have said goodbye, CALL end_session. Do not leave them to find the button.',
+    );
   }
   if (has('flag_notable_moment')) {
-    lines.push('- When you notice a breakthrough, or a technique clearly landing or failing, silently CALL flag_notable_moment.');
+    lines.push(
+      '- When you notice a breakthrough, or a technique clearly landing or failing, silently CALL flag_notable_moment.',
+    );
   }
   if (has('start_breathing_exercise') || has('start_grounding_exercise') || has('start_body_scan')) {
-    lines.push('- When they accept a breathing, grounding, or body-scan exercise, CALL the matching start_* tool so the guided visual appears — do not narrate it unaided.');
+    lines.push(
+      '- When they accept a breathing, grounding, or body-scan exercise, CALL the matching start_* tool so the guided visual appears — do not narrate it unaided.',
+    );
   }
   if (has('start_values_sort')) {
-    lines.push('- When exploring what matters to them or they feel stuck/disconnected, offer the values card-sort and CALL start_values_sort — you\'ll get their picks back to build on.');
+    lines.push(
+      "- When exploring what matters to them or they feel stuck/disconnected, offer the values card-sort and CALL start_values_sort — you'll get their picks back to build on.",
+    );
   }
   if (has('start_fear_ladder')) {
-    lines.push('- When working on avoidance or planning exposure, offer to build a fear ladder and CALL start_fear_ladder — you\'ll get the ranked situations back.');
+    lines.push(
+      "- When working on avoidance or planning exposure, offer to build a fear ladder and CALL start_fear_ladder — you'll get the ranked situations back.",
+    );
   }
   if (has('find_worksheet')) {
-    lines.push('- When a written exercise would help, CALL find_worksheet to pick the fitting one, then call the render tool it returns (start_thought_record / show_journaling_prompt).');
+    lines.push(
+      '- When a written exercise would help, CALL find_worksheet to pick the fitting one, then call the render tool it returns (start_thought_record / show_journaling_prompt).',
+    );
   }
   if (has('review_practice')) {
-    lines.push('- Early on with a returning participant, consider calling review_practice to see what they were asked to work on last time, then ask how it went.');
+    lines.push(
+      '- Early on with a returning participant, consider calling review_practice to see what they were asked to work on last time, then ask how it went.',
+    );
   }
   if (has('assign_practice')) {
-    lines.push('- When you and the participant AGREE on a small between-session practice, CALL assign_practice so it shows up on their home screen — never assign one they did not agree to.');
+    lines.push(
+      '- When you and the participant AGREE on a small between-session practice, CALL assign_practice so it shows up on their home screen — never assign one they did not agree to.',
+    );
   }
   if (has('compare_screener_trend')) {
-    lines.push('- After administer_scale finishes, CALL compare_screener_trend before commenting on the result, so you know how it compares to their last one.');
+    lines.push(
+      '- After administer_scale finishes, CALL compare_screener_trend before commenting on the result, so you know how it compares to their last one.',
+    );
   }
   if (has('retrieve_safety_plan')) {
-    lines.push('- If risk or distress rises, CALL retrieve_safety_plan to check whether they already have one before offering to build a new one.');
+    lines.push(
+      '- If risk or distress rises, CALL retrieve_safety_plan to check whether they already have one before offering to build a new one.',
+    );
   }
   if (lines.length === 0) return '';
   return `\n\n## Using your tools (important)\nYour function tools show real interactive cards and forms on the participant's screen and save information for their care team. When a request matches a tool, CALL the tool — describing it verbally instead is a failure. Specifically:\n${lines.join('\n')}`;
@@ -118,12 +146,13 @@ export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
 export function buildCaseProfileBlock(profile: CaseProfile | null): string {
   if (!profile) return '';
   const lines: string[] = [];
-  if (profile.presenting_concerns?.length) lines.push(`- Presenting concerns: ${profile.presenting_concerns.join(', ')}`);
+  if (profile.presenting_concerns?.length)
+    lines.push(`- Presenting concerns: ${profile.presenting_concerns.join(', ')}`);
   if (profile.recurring_themes?.length) lines.push(`- Recurring themes: ${profile.recurring_themes.join(', ')}`);
   if (profile.stressors?.length) lines.push(`- Stressors: ${profile.stressors.join(', ')}`);
   if (profile.support_system?.length) lines.push(`- Support system: ${profile.support_system.join(', ')}`);
   if (profile.coping_repertoire?.length) {
-    const ranked = profile.coping_repertoire.map(c => `${c.technique} (${c.helpfulness.replace('_', ' ')})`);
+    const ranked = profile.coping_repertoire.map((c) => `${c.technique} (${c.helpfulness.replace('_', ' ')})`);
     lines.push(`- Coping repertoire, most helpful first: ${ranked.join(', ')}`);
   }
   if (profile.values?.length) lines.push(`- Values: ${profile.values.join(', ')}`);
@@ -161,7 +190,7 @@ export function buildReturningSignalsBlock(input: {
 
   if (input.moodTrajectory.length > 0) {
     const chrono = [...input.moodTrajectory].reverse(); // oldest first for a readable trend
-    lines.push(`- Recent mood points: ${chrono.map(p => `${p.mood}/10`).join(' -> ')}`);
+    lines.push(`- Recent mood points: ${chrono.map((p) => `${p.mood}/10`).join(' -> ')}`);
   }
 
   if (input.safetyPlan) {
@@ -188,7 +217,7 @@ export function buildReturningSignalsBlock(input: {
 export function buildScreenerCadenceBlock(scaleHistory: ScaleScorePoint[], now: Date = new Date()): string {
   const labels: Record<string, string> = { phq2: 'PHQ-2', gad2: 'GAD-2' };
   const lines = Object.entries(labels).map(([scale, label]) => {
-    const latest = scaleHistory.find(p => p.scale === scale);
+    const latest = scaleHistory.find((p) => p.scale === scale);
     if (!latest) {
       return `- ${label} has never been administered — it is due; consider administering it at a natural moment.`;
     }
@@ -211,7 +240,7 @@ export function buildClinicianNoteBlock(note: { notes: string } | null): string 
 /** Prior crisis-flag history — only ever built when a therapist has opted the user in (ai-therapist-52). */
 export function buildRiskHistoryBlock(flags: PriorCrisisFlag[]): string {
   if (flags.length === 0) return '';
-  const lines = flags.map(f => {
+  const lines = flags.map((f) => {
     const when = f.flagged_at.toISOString().slice(0, 10);
     const resolution = f.unflagged_at ? 'later resolved/unflagged' : 'no recorded resolution';
     return `- ${when}: ${f.severity ?? 'unknown'} severity (${resolution})`;
@@ -227,7 +256,7 @@ export function buildRiskHistoryBlock(flags: PriorCrisisFlag[]): string {
 export function buildPracticeBlock(open: PracticeAssignment[], completedSinceLast: PracticeAssignment[]): string {
   const lines: string[] = [];
   if (open.length > 0) {
-    const items = open.slice(0, 3).map(a => `${a.title} (assigned ${a.assigned_at.toISOString().slice(0, 10)})`);
+    const items = open.slice(0, 3).map((a) => `${a.title} (assigned ${a.assigned_at.toISOString().slice(0, 10)})`);
     lines.push(`- Open practice from last time: ${items.join('; ')}`);
   }
   for (const a of completedSinceLast.slice(0, 3)) {
@@ -269,7 +298,7 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
       clinician_note: clinicianNote,
       prior_crisis_flags: riskFlags,
     } = bundle;
-    const facts = bundle.memories.map(m => m.fact);
+    const facts = bundle.memories.map((m) => m.fact);
 
     // Practice assignments (ai-therapist-123): best-effort, individually
     // guarded — a failure here must not cost the rest of the memory block.
@@ -286,18 +315,26 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
       const lastSessionAt = summaries[0]
         ? (summaries[0].ended_at ?? summaries[0].created_at)
         : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      completedSinceLast = completed.filter(a => a.completed_at !== null && a.completed_at >= lastSessionAt);
+      completedSinceLast = completed.filter((a) => a.completed_at !== null && a.completed_at >= lastSessionAt);
     } catch (err) {
       log.error({ err }, `Failed to load practice assignments for user ${userId}`);
     }
 
-    const hasAnyContext = summaries.length > 0 || facts.length > 0 || !!caseProfileRow ||
-      scaleHistory.length > 0 || moodTrajectory.length > 0 || !!safetyPlan || !!thoughtRecord ||
-      !!clinicianNote || riskFlags.length > 0 ||
-      openAssignments.length > 0 || completedSinceLast.length > 0;
+    const hasAnyContext =
+      summaries.length > 0 ||
+      facts.length > 0 ||
+      !!caseProfileRow ||
+      scaleHistory.length > 0 ||
+      moodTrajectory.length > 0 ||
+      !!safetyPlan ||
+      !!thoughtRecord ||
+      !!clinicianNote ||
+      riskFlags.length > 0 ||
+      openAssignments.length > 0 ||
+      completedSinceLast.length > 0;
     if (!hasAnyContext) return '';
 
-    const entries = summaries.map(row => {
+    const entries = summaries.map((row) => {
       const s = row.summary;
       const date = (row.ended_at ?? row.created_at).toISOString().slice(0, 10);
       const parts: string[] = [];
@@ -308,12 +345,12 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
       return `- ${date}${s.headline ? ` ("${s.headline}")` : ''}: ${parts.join(' | ')}`;
     });
 
-    const factsBlock = facts.length > 0
-      ? `\nThings they explicitly asked you to remember:\n${facts.map(f => `- ${f}`).join('\n')}`
-      : '';
-    const entriesBlock = entries.length > 0
-      ? `\nContext from recent conversations, most recent first:\n${entries.join('\n')}`
-      : '';
+    const factsBlock =
+      facts.length > 0
+        ? `\nThings they explicitly asked you to remember:\n${facts.map((f) => `- ${f}`).join('\n')}`
+        : '';
+    const entriesBlock =
+      entries.length > 0 ? `\nContext from recent conversations, most recent first:\n${entries.join('\n')}` : '';
     const caseProfileBlock = buildCaseProfileBlock(caseProfileRow?.profile ?? null);
     const signalsBlock = buildReturningSignalsBlock({ scaleHistory, moodTrajectory, safetyPlan, thoughtRecord });
     const screenerCadenceBlock = buildScreenerCadenceBlock(scaleHistory);

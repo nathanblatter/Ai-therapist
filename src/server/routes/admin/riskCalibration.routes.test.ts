@@ -28,9 +28,14 @@ vi.mock('../../services/riskCalibration.service.js', async (importOriginal) => {
 import riskCalibrationRoutes from './riskCalibration.routes.js';
 
 const run = (id: number, orgId: number) => ({
-  run_id: id, org_id: orgId, started_at: new Date('2026-10-23T06:00:00Z'), finished_at: new Date('2026-10-23T06:00:10Z'),
-  params: { sample_size: 50 }, report: { labels: { insufficient_labels: true, scored_messages: 558, positives: 0, negatives: 555 }, advisory: true },
-  recommended_thresholds: { advisory: true }, created_by: 'res1',
+  run_id: id,
+  org_id: orgId,
+  started_at: new Date('2026-10-23T06:00:00Z'),
+  finished_at: new Date('2026-10-23T06:00:10Z'),
+  params: { sample_size: 50 },
+  report: { labels: { insufficient_labels: true, scored_messages: 558, positives: 0, negatives: 555 }, advisory: true },
+  recommended_thresholds: { advisory: true },
+  created_by: 'res1',
 });
 
 function appAs(session: Record<string, unknown> | null, router = riskCalibrationRoutes()) {
@@ -50,7 +55,9 @@ beforeEach(() => {
   mocks.getOrganizationIdForUser.mockResolvedValue(1);
   mocks.getIrbStudyOrgId.mockResolvedValue(1);
   mocks.listRiskCalibrationRuns.mockImplementation(async (orgId: number) => [run(1, orgId)]);
-  mocks.getRiskCalibrationRun.mockImplementation(async (id: number, orgId: number) => (id === 1 && orgId === 1 ? run(1, 1) : null));
+  mocks.getRiskCalibrationRun.mockImplementation(async (id: number, orgId: number) =>
+    id === 1 && orgId === 1 ? run(1, 1) : null,
+  );
   mocks.runAndStoreRiskCalibration.mockImplementation(async (i: { orgId: number }) => run(2, i.orgId));
 });
 
@@ -97,13 +104,20 @@ describe('org scope', () => {
   });
 
   it('starts a run for the session org with the caller as creator, normalised params, and never logs data access', async () => {
-    const res = await request(appAs(researcher(5))).post('/admin/api/risk-calibration/runs')
+    const res = await request(appAs(researcher(5)))
+      .post('/admin/api/risk-calibration/runs')
       .send({ sample_size: '10', since: '2026-01-01', dry_run: true, orgId: 1, budget_usd: 50 });
     expect(res.status).toBe(201);
     const call = mocks.runAndStoreRiskCalibration.mock.calls[0][0];
     expect(call.orgId).toBe(5);
     expect(call.createdBy).toBe('res1');
-    expect(call.params).toMatchObject({ sample_size: 10, since: '2026-01-01T00:00:00.000Z', dry_run: true, unflagged_as_negative: true, budget_usd: 0.5 });
+    expect(call.params).toMatchObject({
+      sample_size: 10,
+      since: '2026-01-01T00:00:00.000Z',
+      dry_run: true,
+      unflagged_as_negative: true,
+      budget_usd: 0.5,
+    });
     expect(res.body.run.org_id).toBe(5);
     expect(mocks.logDataAccess).not.toHaveBeenCalled();
   });
@@ -112,18 +126,28 @@ describe('org scope', () => {
     const bad = await request(appAs(researcher())).post('/admin/api/risk-calibration/runs').send({ sample_size: 9999 });
     expect(bad.status).toBe(400);
     expect(bad.body.error).toMatch(/sample_size/);
-    const badWindow = await request(appAs(researcher())).post('/admin/api/risk-calibration/runs').send({ since: '2026-12-01', until: '2026-01-01' });
+    const badWindow = await request(appAs(researcher()))
+      .post('/admin/api/risk-calibration/runs')
+      .send({ since: '2026-12-01', until: '2026-01-01' });
     expect(badWindow.status).toBe(400);
     expect(mocks.runAndStoreRiskCalibration).not.toHaveBeenCalled();
   });
 
   it('refuses a second concurrent run with 409', async () => {
     let release: () => void = () => {};
-    mocks.runAndStoreRiskCalibration.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve(run(3, 1)); }));
+    mocks.runAndStoreRiskCalibration.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(run(3, 1));
+        }),
+    );
     const router = riskCalibrationRoutes();
     // supertest is lazy: .then() is what actually sends the first request.
-    const first = request(appAs(researcher(), router)).post('/admin/api/risk-calibration/runs').send({}).then(r => r);
-    await new Promise(r => setTimeout(r, 50));
+    const first = request(appAs(researcher(), router))
+      .post('/admin/api/risk-calibration/runs')
+      .send({})
+      .then((r) => r);
+    await new Promise((r) => setTimeout(r, 50));
     const second = await request(appAs(researcher(), router)).post('/admin/api/risk-calibration/runs').send({});
     expect(second.status).toBe(409);
     release();
@@ -133,7 +157,9 @@ describe('org scope', () => {
 
   it('500s (never widens) when org resolution fails', async () => {
     mocks.getOrganizationIdForUser.mockRejectedValueOnce(new Error('db down'));
-    const res = await request(appAs({ userId: 9, userRole: 'researcher', username: 'res1' })).get('/admin/api/risk-calibration/runs');
+    const res = await request(appAs({ userId: 9, userRole: 'researcher', username: 'res1' })).get(
+      '/admin/api/risk-calibration/runs',
+    );
     expect(res.status).toBe(500);
     expect(mocks.listRiskCalibrationRuns).not.toHaveBeenCalled();
   });

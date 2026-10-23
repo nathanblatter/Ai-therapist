@@ -24,7 +24,7 @@ export async function getRecordingsToAgeOut(days: number): Promise<RecordingRow[
         AND is_demo IS NOT TRUE
         AND created_at < now() - ($1 || ' days')::interval
       ORDER BY created_at, session_id`,
-    [days]
+    [days],
   );
   return result.rows;
 }
@@ -44,7 +44,7 @@ export async function getOrphanedRecordingsPastGrace(graceDays: number): Promise
         AND status = 'ended'
         AND COALESCE(ended_at, created_at) < now() - ($1 || ' days')::interval
       ORDER BY created_at, session_id`,
-    [graceDays]
+    [graceDays],
   );
   return result.rows;
 }
@@ -64,7 +64,7 @@ export async function clearRecordingColumns(sessionId: string): Promise<void> {
             participant_recording_sample_rate = NULL,
             participant_recording_size_bytes = NULL
       WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
 }
 
@@ -90,10 +90,18 @@ export async function insertDeletionLog(input: DeletionLogInput): Promise<void> 
         policy_snapshot, triggered_by, triggered_by_user, success, error_message)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
-      input.runId, input.artifactType, input.artifactRef, input.sessionId, input.userId,
-      input.reason, JSON.stringify(input.policySnapshot), input.triggeredBy,
-      input.triggeredByUser, input.success, input.errorMessage,
-    ]
+      input.runId,
+      input.artifactType,
+      input.artifactRef,
+      input.sessionId,
+      input.userId,
+      input.reason,
+      JSON.stringify(input.policySnapshot),
+      input.triggeredBy,
+      input.triggeredByUser,
+      input.success,
+      input.errorMessage,
+    ],
   );
 }
 
@@ -113,14 +121,17 @@ export interface DeletionLogRow {
 }
 
 /** Paged deletion-log view for the admin surface. */
-export async function getDataDeletionLog(limit = 50, offset = 0): Promise<{ entries: DeletionLogRow[]; total: number }> {
+export async function getDataDeletionLog(
+  limit = 50,
+  offset = 0,
+): Promise<{ entries: DeletionLogRow[]; total: number }> {
   const entries = await pool.query<DeletionLogRow>(
     `SELECT deletion_id, run_id, executed_at, artifact_type, artifact_ref, session_id,
             user_id, reason, triggered_by, triggered_by_user, success, error_message
        FROM data_deletion_log
       ORDER BY executed_at DESC, deletion_id DESC
       LIMIT $1 OFFSET $2`,
-    [limit, offset]
+    [limit, offset],
   );
   const totalRes = await pool.query<{ count: string }>(`SELECT COUNT(*) AS count FROM data_deletion_log`);
   return { entries: entries.rows, total: parseInt(totalRes.rows[0].count, 10) };

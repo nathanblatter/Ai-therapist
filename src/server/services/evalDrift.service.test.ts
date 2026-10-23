@@ -70,7 +70,7 @@ describe('checkEvalDrift', () => {
   it('alerts only when the drop meets the threshold', async () => {
     getEvalBucketsMock.mockResolvedValue([bucket]);
     getRecentDimensionScoresMock.mockImplementation(async (dim: string) =>
-      dim === 'empathy' ? driftingScores : stableScores
+      dim === 'empathy' ? driftingScores : stableScores,
     );
 
     const result = await checkEvalDrift();
@@ -98,7 +98,7 @@ describe('checkEvalDrift', () => {
   it('does not page when drift_page_enabled is false (default)', async () => {
     getEvalBucketsMock.mockResolvedValue([bucket]);
     getRecentDimensionScoresMock.mockImplementation(async (dim: string) =>
-      dim === 'empathy' ? driftingScores : stableScores
+      dim === 'empathy' ? driftingScores : stableScores,
     );
 
     await checkEvalDrift();
@@ -110,7 +110,7 @@ describe('checkEvalDrift', () => {
     getSystemConfigMock.mockResolvedValue({ evals: { drift_page_enabled: true } });
     getEvalBucketsMock.mockResolvedValue([bucket]);
     getRecentDimensionScoresMock.mockImplementation(async (dim: string) =>
-      dim === 'empathy' ? driftingScores : stableScores
+      dim === 'empathy' ? driftingScores : stableScores,
     );
 
     await checkEvalDrift();

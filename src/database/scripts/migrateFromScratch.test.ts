@@ -39,8 +39,7 @@ const LISTING = [
   '036_drop_conversation_logs_table.sql',
 ];
 
-const fileNames = (steps: PlanStep[]) =>
-  steps.map((s) => (s.kind === 'raw' ? `(raw) ${s.label}` : s.file));
+const fileNames = (steps: PlanStep[]) => steps.map((s) => (s.kind === 'raw' ? `(raw) ${s.label}` : s.file));
 
 describe('listMigrationFiles', () => {
   it('keeps forward .sql/.js files only, ordered by prefix then filename', () => {
@@ -111,7 +110,11 @@ describe('buildPlan', () => {
 
   it('--to below 010 produces no stub', () => {
     const plan = buildPlan(files, { to: 3 });
-    expect(fileNames(plan)).toEqual(['001_create_users_table.sql', '003_normalize_schema.sql', '002_insert_initial_user.js']);
+    expect(fileNames(plan)).toEqual([
+      '001_create_users_table.sql',
+      '003_normalize_schema.sql',
+      '002_insert_initial_user.js',
+    ]);
     expect(plan.some((s) => s.kind === 'raw')).toBe(false);
   });
 

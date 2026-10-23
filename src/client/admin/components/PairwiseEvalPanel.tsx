@@ -41,7 +41,7 @@ export default function PairwiseEvalPanel() {
 
   useEffect(() => {
     getJson<PairwiseData>('/admin/api/analytics/pairwise', { fallback: 'Failed to fetch pairwise analytics' })
-      .then(d => setData(d))
+      .then((d) => setData(d))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'))
       .finally(() => setLoading(false));
   }, []);
@@ -78,7 +78,10 @@ export default function PairwiseEvalPanel() {
         <div className="bg-white p-6 rounded-lg shadow">
           <p className="text-gray-500">
             No pairwise results yet — run{' '}
-            <code className="bg-gray-100 px-1 rounded">npx tsx src/database/scripts/runPairwiseEvals.ts --axis ai_model</code>.
+            <code className="bg-gray-100 px-1 rounded">
+              npx tsx src/database/scripts/runPairwiseEvals.ts --axis ai_model
+            </code>
+            .
           </p>
         </div>
       )}
@@ -107,11 +110,15 @@ export default function PairwiseEvalPanel() {
                   : '';
                 return (
                   <tr key={i} className="border-b last:border-0">
-                    <td className="py-2 pr-4 font-mono text-xs">{c.arm_x} vs {c.arm_y}</td>
+                    <td className="py-2 pr-4 font-mono text-xs">
+                      {c.arm_x} vs {c.arm_y}
+                    </td>
                     <td className="py-2 pr-4">{c.total}</td>
                     <td className="py-2 pr-4">{c.wins_x}</td>
                     <td className="py-2 pr-4">{c.wins_y}</td>
-                    <td className="py-2 pr-4">{c.ties} ({c.inconsistent})</td>
+                    <td className="py-2 pr-4">
+                      {c.ties} ({c.inconsistent})
+                    </td>
                     <td className={`py-2 pr-4 ${winClass}`}>{pct(c.win_rate_x)}</td>
                     <td className="py-2 pr-4 text-gray-600">
                       {c.ci_lo === null ? '—' : `[${pct(c.ci_lo)}, ${pct(c.ci_hi)}]`}
@@ -125,10 +132,13 @@ export default function PairwiseEvalPanel() {
       ))}
 
       <p className="text-xs text-gray-500">
-        Win-rate X = wins_x / (wins_x + wins_y); ties and position-inconsistent verdicts are excluded from
-        the interval (they answer "when the judge picked a side, how often was it X?"). A 95% Wilson CI that
-        excludes 50% is significant (≈ p&lt;.05). Run a batch:{' '}
-        <code className="bg-gray-100 px-1 rounded">npx tsx src/database/scripts/runPairwiseEvals.ts --axis ai_model</code>.
+        Win-rate X = wins_x / (wins_x + wins_y); ties and position-inconsistent verdicts are excluded from the interval
+        (they answer "when the judge picked a side, how often was it X?"). A 95% Wilson CI that excludes 50% is
+        significant (≈ p&lt;.05). Run a batch:{' '}
+        <code className="bg-gray-100 px-1 rounded">
+          npx tsx src/database/scripts/runPairwiseEvals.ts --axis ai_model
+        </code>
+        .
       </p>
     </div>
   );

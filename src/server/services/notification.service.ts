@@ -27,11 +27,7 @@ import {
   type WorkItemRow,
   type NotificationRow,
 } from '../db/index.js';
-import {
-  workItemSuppressesEmail,
-  recipientSuppressesEmail,
-  emailSuppressedWorkItemIds,
-} from './suppression.js';
+import { workItemSuppressesEmail, recipientSuppressesEmail, emailSuppressedWorkItemIds } from './suppression.js';
 import { therapistRoom, caseworkerRoom } from '../utils/adminBroadcast.js';
 import { immediateEmail, digestEmail } from './emailTemplates.js';
 import { sendEmail } from './emailer.service.js';
@@ -116,7 +112,7 @@ export async function loadNotificationEmailGate(): Promise<NotificationEmailGate
  */
 export function notificationAddressFor(
   username: string | undefined | null,
-  gate: NotificationEmailGate
+  gate: NotificationEmailGate,
 ): string | null {
   const address = emailAddressForUsername(username);
   if (!address || !gate.enabled) return null;
@@ -149,10 +145,7 @@ function emitNotificationNew(role: string | null | undefined, row: NotificationR
  * (non-sandbox only) immediate email per the delivery policy. Never throws —
  * a notification failure must not break the producer that enqueued the item.
  */
-export async function notifyWorkItem(
-  item: WorkItemRow,
-  recipients: NotificationRecipient[]
-): Promise<void> {
+export async function notifyWorkItem(item: WorkItemRow, recipients: NotificationRecipient[]): Promise<void> {
   const gate = await loadNotificationEmailGate();
   for (const recipient of recipients) {
     try {
@@ -196,21 +189,22 @@ export async function notifyWorkItem(
         await markNotificationsEmailed([inserted.notification_id]);
       }
     } catch (err) {
-      log.error({ err, userId: recipient.userId, itemId: item.item_id },
-        '[notify] failed to notify recipient');
+      log.error({ err, userId: recipient.userId, itemId: item.item_id }, '[notify] failed to notify recipient');
     }
   }
 }
 
 /** Local hour in the deployment timezone (matches utils/timezoneHelpers). */
 export function localHour(now: Date = new Date()): number {
-  return Number(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Denver',
-      hour: 'numeric',
-      hour12: false,
-    }).format(now)
-  ) % 24;
+  return (
+    Number(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Denver',
+        hour: 'numeric',
+        hour12: false,
+      }).format(now),
+    ) % 24
+  );
 }
 
 /**
@@ -252,7 +246,7 @@ export async function runDigestSweep(now: Date = new Date()): Promise<void> {
           .filter((id): id is number => id !== null && Number.isFinite(id));
         const sandboxItemIds = new Set(await emailSuppressedWorkItemIds(workItemIds));
         const emailable = pending.filter(
-          (row) => row.work_item_id == null || !sandboxItemIds.has(Number(row.work_item_id))
+          (row) => row.work_item_id == null || !sandboxItemIds.has(Number(row.work_item_id)),
         );
 
         const address = notificationAddressFor(user.username, gate);

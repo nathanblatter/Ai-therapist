@@ -116,19 +116,19 @@ describe('leak-check review queue (ai-therapist-262)', () => {
     await countFlaggedUnreviewed(2);
     for (const call of queryMock.mock.calls) {
       const sql = String(call[0]);
-      expect(sql).toMatch(/EXISTS \(\s*SELECT 1 FROM therapy_sessions ts\s+LEFT JOIN users u ON u.userid = ts.user_id\s+WHERE ts.session_id = messages.session_id/);
+      expect(sql).toMatch(
+        /EXISTS \(\s*SELECT 1 FROM therapy_sessions ts\s+LEFT JOIN users u ON u.userid = ts.user_id\s+WHERE ts.session_id = messages.session_id/,
+      );
       expect(sql).toContain('u.organization_id = $1');
       expect(sql).toMatch(/ts.user_id IS NULL AND \$1 = \(SELECT org_id FROM organizations WHERE slug = 'irb-study'\)/);
     }
   });
 
   it('marks the leak-check reviewed on approval', async () => {
-    queryMock
-      .mockResolvedValueOnce({ rows: [{ review_id: 1 }], rowCount: 1 })
-      .mockResolvedValueOnce({ rowCount: 1 });
+    queryMock.mockResolvedValueOnce({ rows: [{ review_id: 1 }], rowCount: 1 }).mockResolvedValueOnce({ rowCount: 1 });
     const { recordRedactionApproval } = await import('./redaction.queries.js');
     expect(await recordRedactionApproval('42', 9)).toBe(true);
-    const sqls = queryMock.mock.calls.map(c => c[0] as string);
+    const sqls = queryMock.mock.calls.map((c) => c[0] as string);
     expect(sqls.at(-1)).toMatch(/jsonb_set\(metadata, '\{redaction_check,reviewed\}', 'true'::jsonb\)/);
   });
 });
@@ -150,9 +150,7 @@ describe('listRedactionReviewLog', () => {
   });
 
   it('org-scopes page and count by the participant org, ownerless rows irb-study only (ai-therapist-272)', async () => {
-    queryMock
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ count: '0' }] });
+    queryMock.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ count: '0' }] });
     await listRedactionReviewLog({ limit: 10, offset: 0 }, 2);
     for (const call of queryMock.mock.calls) {
       const sql = String(call[0]);

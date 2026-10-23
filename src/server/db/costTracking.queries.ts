@@ -14,7 +14,15 @@
 import { pool } from '../config/db.js';
 import { estimateLiveCostUsd } from './liveUsage.queries.js';
 
-export type LlmUsagePurpose = 'insights' | 'redaction' | 'crisis' | 'eligibility' | 'rerank' | 'chat' | 'live_delegation' | 'grok_voice';
+export type LlmUsagePurpose =
+  | 'insights'
+  | 'redaction'
+  | 'crisis'
+  | 'eligibility'
+  | 'rerank'
+  | 'chat'
+  | 'live_delegation'
+  | 'grok_voice';
 
 // Rough, hand-maintained $/1M-token rates for the models this app calls
 // LLMs with for insights/redaction/crisis (all OpenAI as of writing). This is
@@ -77,7 +85,7 @@ export function estimateRealtimeCostUsd(u: RealtimeUsageTokens): number {
 export async function insertRealtimeUsage(
   sessionId: string,
   responseId: string | null,
-  tokens: RealtimeUsageTokens
+  tokens: RealtimeUsageTokens,
 ): Promise<void> {
   try {
     await pool.query(
@@ -85,11 +93,14 @@ export async function insertRealtimeUsage(
          (session_id, response_id, input_tokens, output_tokens, input_audio_tokens, output_audio_tokens, cached_tokens)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
-        sessionId, responseId,
-        tokens.inputTokens, tokens.outputTokens,
-        tokens.inputAudioTokens, tokens.outputAudioTokens,
+        sessionId,
+        responseId,
+        tokens.inputTokens,
+        tokens.outputTokens,
+        tokens.inputAudioTokens,
+        tokens.outputAudioTokens,
         tokens.cachedTokens,
-      ]
+      ],
     );
   } catch (err) {
     console.error('[costTracking] Failed to record realtime usage (non-fatal):', err);
@@ -114,13 +125,13 @@ export async function recordLlmUsage(
   purpose: LlmUsagePurpose,
   model: string | null,
   tokensIn: number | null,
-  tokensOut: number | null
+  tokensOut: number | null,
 ): Promise<void> {
   try {
     await pool.query(
       `INSERT INTO session_llm_usage (session_id, purpose, model, tokens_in, tokens_out)
        VALUES ($1, $2, $3, $4, $5)`,
-      [sessionId, purpose, model, tokensIn, tokensOut]
+      [sessionId, purpose, model, tokensIn, tokensOut],
     );
   } catch (err) {
     console.error('[costTracking] Failed to record LLM usage (non-fatal):', err);
@@ -150,15 +161,19 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
     pool.query<{ minutes: number | null }>(
       `SELECT EXTRACT(EPOCH FROM (COALESCE(ended_at, CURRENT_TIMESTAMP) - created_at)) / 60 AS minutes
        FROM therapy_sessions WHERE session_id = $1`,
-      [sessionId]
+      [sessionId],
     ),
     pool.query<{ purpose: LlmUsagePurpose; model: string | null; tokens_in: number | null; tokens_out: number | null }>(
       'SELECT purpose, model, tokens_in, tokens_out FROM session_llm_usage WHERE session_id = $1',
-      [sessionId]
+      [sessionId],
     ),
     pool.query<{
-      responses: string; input_tokens: string; output_tokens: string;
-      input_audio_tokens: string; output_audio_tokens: string; cached_tokens: string;
+      responses: string;
+      input_tokens: string;
+      output_tokens: string;
+      input_audio_tokens: string;
+      output_audio_tokens: string;
+      cached_tokens: string;
     }>(
       `SELECT COUNT(*) AS responses,
               COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -167,15 +182,24 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
               COALESCE(SUM(output_audio_tokens), 0) AS output_audio_tokens,
               COALESCE(SUM(cached_tokens), 0) AS cached_tokens
        FROM realtime_usage WHERE session_id = $1`,
-      [sessionId]
+      [sessionId],
     ),
     pool.query<{ model: string | null; duration_seconds: number | null }>(
       'SELECT model, duration_seconds::float8 AS duration_seconds FROM live_usage WHERE session_id = $1',
-      [sessionId]
+      [sessionId],
     ),
   ]);
 
-  const callsByPurpose: Record<LlmUsagePurpose, number> = { insights: 0, redaction: 0, crisis: 0, eligibility: 0, rerank: 0, chat: 0, live_delegation: 0, grok_voice: 0 };
+  const callsByPurpose: Record<LlmUsagePurpose, number> = {
+    insights: 0,
+    redaction: 0,
+    crisis: 0,
+    eligibility: 0,
+    rerank: 0,
+    chat: 0,
+    live_delegation: 0,
+    grok_voice: 0,
+  };
   let tokensIn = 0;
   let tokensOut = 0;
   let estimatedCost = 0;
@@ -217,7 +241,9 @@ export async function getSessionCostSummary(sessionId: string): Promise<SessionC
   };
 }
 
-function round4(v: number): number { return Math.round(v * 10000) / 10000; }
+function round4(v: number): number {
+  return Math.round(v * 10000) / 10000;
+}
 
 export interface DailySpendRow {
   date: string;
@@ -239,8 +265,12 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
   const safeDays = days;
   const [result, realtimeResult, liveResult] = await Promise.all([
     pool.query<{
-      date: string; purpose: LlmUsagePurpose; model: string | null;
-      calls: string; tokens_in: string; tokens_out: string;
+      date: string;
+      purpose: LlmUsagePurpose;
+      model: string | null;
+      calls: string;
+      tokens_in: string;
+      tokens_out: string;
     }>(
       // Cast DATE(created_at) to text: pg returns a bare DATE as a JS Date object,
       // which breaks the Map dedup below (Date keys never match) and the string
@@ -254,11 +284,15 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
        WHERE created_at >= CURRENT_DATE - ($1 || ' days')::INTERVAL
        GROUP BY DATE(created_at), purpose, model
        ORDER BY date DESC`,
-      [safeDays]
+      [safeDays],
     ),
     pool.query<{
-      date: string; input_tokens: string; output_tokens: string;
-      input_audio_tokens: string; output_audio_tokens: string; cached_tokens: string;
+      date: string;
+      input_tokens: string;
+      output_tokens: string;
+      input_audio_tokens: string;
+      output_audio_tokens: string;
+      cached_tokens: string;
     }>(
       `SELECT DATE(created_at)::text AS date,
               COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -269,7 +303,7 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
        FROM realtime_usage
        WHERE created_at >= CURRENT_DATE - ($1 || ' days')::INTERVAL
        GROUP BY DATE(created_at)`,
-      [safeDays]
+      [safeDays],
     ),
     pool.query<{ date: string; model: string | null; seconds: number | null }>(
       // Grouped by model too: Grok and GPT-Live bill at different per-minute
@@ -279,14 +313,22 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
        FROM live_usage
        WHERE created_at >= CURRENT_DATE - ($1 || ' days')::INTERVAL
        GROUP BY DATE(created_at), model`,
-      [safeDays]
+      [safeDays],
     ),
   ]);
 
   const byDate = new Map<string, DailySpendRow>();
   const dayFor = (date: string): DailySpendRow => {
-    const existing = byDate.get(date) ??
-      { date, calls: 0, tokens_in: 0, tokens_out: 0, estimated_cost_usd: 0, realtime_cost_usd: 0, live_cost_usd: 0, voice_cost_usd: 0 };
+    const existing = byDate.get(date) ?? {
+      date,
+      calls: 0,
+      tokens_in: 0,
+      tokens_out: 0,
+      estimated_cost_usd: 0,
+      realtime_cost_usd: 0,
+      live_cost_usd: 0,
+      voice_cost_usd: 0,
+    };
     byDate.set(date, existing);
     return existing;
   };
@@ -295,7 +337,11 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
     existing.calls += parseInt(row.calls, 10);
     existing.tokens_in += parseInt(row.tokens_in, 10);
     existing.tokens_out += parseInt(row.tokens_out, 10);
-    existing.estimated_cost_usd += estimateCostUsd(row.model, parseInt(row.tokens_in, 10), parseInt(row.tokens_out, 10));
+    existing.estimated_cost_usd += estimateCostUsd(
+      row.model,
+      parseInt(row.tokens_in, 10),
+      parseInt(row.tokens_out, 10),
+    );
   }
   for (const row of realtimeResult.rows) {
     dayFor(row.date).realtime_cost_usd += estimateRealtimeCostUsd({
@@ -310,7 +356,7 @@ export async function getDailySpend(days = 30): Promise<DailySpendRow[]> {
     dayFor(row.date).live_cost_usd += estimateLiveCostUsd(row.model, Number(row.seconds ?? 0));
   }
   return Array.from(byDate.values())
-    .map(r => ({
+    .map((r) => ({
       ...r,
       estimated_cost_usd: round4(r.estimated_cost_usd),
       realtime_cost_usd: round4(r.realtime_cost_usd),
@@ -340,20 +386,30 @@ export interface CostTotals {
 /** All-time totals for the admin analytics headline stats. */
 export async function getCostTotals(): Promise<CostTotals> {
   const [usageResult, durationResult, realtimeResult, liveResult] = await Promise.all([
-    pool.query<{ purpose: LlmUsagePurpose; model: string | null; calls: string; tokens_in: string; tokens_out: string }>(
+    pool.query<{
+      purpose: LlmUsagePurpose;
+      model: string | null;
+      calls: string;
+      tokens_in: string;
+      tokens_out: string;
+    }>(
       `SELECT purpose, model, COUNT(*) AS calls,
               COALESCE(SUM(tokens_in), 0) AS tokens_in,
               COALESCE(SUM(tokens_out), 0) AS tokens_out
        FROM session_llm_usage
-       GROUP BY purpose, model`
+       GROUP BY purpose, model`,
     ),
     pool.query<{ total_minutes: number | null }>(
       `SELECT SUM(EXTRACT(EPOCH FROM (ended_at - created_at)) / 60) AS total_minutes
-       FROM therapy_sessions WHERE ended_at IS NOT NULL AND is_demo IS NOT TRUE`
+       FROM therapy_sessions WHERE ended_at IS NOT NULL AND is_demo IS NOT TRUE`,
     ),
     pool.query<{
-      responses: string; input_tokens: string; output_tokens: string;
-      input_audio_tokens: string; output_audio_tokens: string; cached_tokens: string;
+      responses: string;
+      input_tokens: string;
+      output_tokens: string;
+      input_audio_tokens: string;
+      output_audio_tokens: string;
+      cached_tokens: string;
     }>(
       `SELECT COUNT(*) AS responses,
               COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -361,16 +417,19 @@ export async function getCostTotals(): Promise<CostTotals> {
               COALESCE(SUM(input_audio_tokens), 0) AS input_audio_tokens,
               COALESCE(SUM(output_audio_tokens), 0) AS output_audio_tokens,
               COALESCE(SUM(cached_tokens), 0) AS cached_tokens
-       FROM realtime_usage`
+       FROM realtime_usage`,
     ),
     pool.query<{ model: string | null; seconds: number | null }>(
       `SELECT model, COALESCE(SUM(duration_seconds), 0)::float8 AS seconds
        FROM live_usage
-       GROUP BY model`
+       GROUP BY model`,
     ),
   ]);
 
-  let totalCalls = 0, tokensIn = 0, tokensOut = 0, estimatedCost = 0;
+  let totalCalls = 0,
+    tokensIn = 0,
+    tokensOut = 0,
+    estimatedCost = 0;
   for (const row of usageResult.rows) {
     totalCalls += parseInt(row.calls, 10);
     tokensIn += parseInt(row.tokens_in, 10);

@@ -46,7 +46,7 @@ export function userRoom(userId: number): string {
  *  'user'; the clinician's to 'assistant' (the counterpart voice). */
 async function threadHistoryLines(
   threadId: number,
-  excludeMessageId: number
+  excludeMessageId: number,
 ): Promise<Array<{ role: string; content: string }>> {
   const recent = await listThreadMessages(threadId, { limit: 10 });
   return recent
@@ -100,10 +100,7 @@ function emitScanned(thread: MessageThreadRow, messageId: number, flagged: boole
  * never throws (callers `void` it). Clinician messages are never scanned —
  * the send route inserts them as 'not_applicable' and does not call this.
  */
-export async function scanThreadMessage(
-  message: ThreadMessageRow,
-  thread: MessageThreadRow
-): Promise<void> {
+export async function scanThreadMessage(message: ThreadMessageRow, thread: MessageThreadRow): Promise<void> {
   try {
     // Sandbox short-circuit (docs/caseworker-portal.md §7 exclusion point 8):
     // demo caseloads exercise the messaging UI without waking the LLM, the
@@ -152,7 +149,7 @@ export async function scanThreadMessage(
     if (severity === 'high' && !alreadyRecorded) {
       await pageOnCall(
         `CRISIS MESSAGE ALERT: high-severity risk flagged in a client message ` +
-          `(score ${risk.riskScore}/100). Review the crisis dashboard.`
+          `(score ${risk.riskScore}/100). Review the crisis dashboard.`,
       ).catch((err) => log.error({ err }, '[scan] on-call page failed for high-severity message'));
     }
 
@@ -217,14 +214,14 @@ export async function scanThreadMessage(
           detectedAt: new Date(),
         },
         thread.client_id,
-        'summary'
+        'summary',
       );
     }
 
     emitScanned(thread, message.message_id, true);
     log.info(
       `[scan] message ${message.message_id} (thread ${thread.thread_id}) flagged ${severity} ` +
-        `(score ${risk.riskScore}, event ${crisisEventId})`
+        `(score ${risk.riskScore}, event ${crisisEventId})`,
     );
   } catch (err) {
     log.error({ err }, `[scan] scan failed for message ${message.message_id}; marking scan_failed`);
@@ -281,7 +278,11 @@ export async function sweepStaleScans(): Promise<number> {
 export function startMessageScanSweeper(): void {
   if (sweepTimer) return;
   // Boot pass, slightly delayed so migrations/warmup settle.
-  setTimeout(() => { void sweepStaleScans(); }, 15_000);
-  sweepTimer = setInterval(() => { void sweepStaleScans(); }, SWEEP_INTERVAL_MS);
+  setTimeout(() => {
+    void sweepStaleScans();
+  }, 15_000);
+  sweepTimer = setInterval(() => {
+    void sweepStaleScans();
+  }, SWEEP_INTERVAL_MS);
   if (typeof sweepTimer.unref === 'function') sweepTimer.unref();
 }

@@ -30,8 +30,11 @@ function appAs(role: string | null, userId = 9) {
 }
 
 const PREFS = {
-  user_id: 9, email_mode: 'digest', urgent_email_immediate: true,
-  digest_hour_local: 8, in_app_enabled: true,
+  user_id: 9,
+  email_mode: 'digest',
+  urgent_email_immediate: true,
+  digest_hour_local: 8,
+  in_app_enabled: true,
 };
 
 beforeEach(() => {
@@ -101,7 +104,8 @@ describe('notification preferences', () => {
       .send({ email_mode: 'immediate', digest_hour_local: 7 });
     expect(res.status).toBe(200);
     expect(dbMocks.upsertNotificationPreferences).toHaveBeenCalledWith(9, {
-      email_mode: 'immediate', digest_hour_local: 7,
+      email_mode: 'immediate',
+      digest_hour_local: 7,
     });
   });
 
@@ -112,9 +116,7 @@ describe('notification preferences', () => {
     [{ urgent_email_immediate: 'yes' }],
     [{ in_app_enabled: 1 }],
   ])('rejects invalid preferences %j with 400', async (body) => {
-    const res = await request(appAs('caseworker', 9))
-      .put('/admin/api/notifications/preferences')
-      .send(body);
+    const res = await request(appAs('caseworker', 9)).put('/admin/api/notifications/preferences').send(body);
     expect(res.status).toBe(400);
     expect(dbMocks.upsertNotificationPreferences).not.toHaveBeenCalled();
   });

@@ -9,9 +9,18 @@ import express from 'express';
 import request from 'supertest';
 
 const {
-  listMock, countsMock, getByIdMock, submitMock,
-  insertDraftMock, isAssignedMock, isSandboxMock, auditMock, enqueueMock,
-  getSessionAccessInfoMock, draftFromCrisisMock, getOrgForUserMock,
+  listMock,
+  countsMock,
+  getByIdMock,
+  submitMock,
+  insertDraftMock,
+  isAssignedMock,
+  isSandboxMock,
+  auditMock,
+  enqueueMock,
+  getSessionAccessInfoMock,
+  draftFromCrisisMock,
+  getOrgForUserMock,
 } = vi.hoisted(() => ({
   listMock: vi.fn(),
   countsMock: vi.fn(),
@@ -108,8 +117,13 @@ describe('GET /admin/api/adverse-events', () => {
   it('404s a sandbox account (stopgap kept alongside org scoping)', async () => {
     const app = express();
     app.use((req, _res, next) => {
-      (req as unknown as { session: Record<string, unknown> }).session =
-        { userId: 5, userRole: 'therapist', username: 'sb', orgId: 4, isSandbox: true };
+      (req as unknown as { session: Record<string, unknown> }).session = {
+        userId: 5,
+        userRole: 'therapist',
+        username: 'sb',
+        orgId: 4,
+        isSandbox: true,
+      };
       next();
     });
     app.use(adverseEventsRoutes());
@@ -139,7 +153,11 @@ describe('GET /admin/api/adverse-events', () => {
     getOrgForUserMock.mockRejectedValueOnce(new Error('db down'));
     const app = express();
     app.use((req, _res, next) => {
-      (req as unknown as { session: Record<string, unknown> }).session = { userId: 9, userRole: 'researcher', username: 'res1' };
+      (req as unknown as { session: Record<string, unknown> }).session = {
+        userId: 9,
+        userRole: 'researcher',
+        username: 'res1',
+      };
       next();
     });
     app.use(adverseEventsRoutes());
@@ -155,11 +173,18 @@ describe('GET /admin/api/adverse-events/:id', () => {
     getByIdMock.mockResolvedValueOnce(null);
     const res = await request(appAs('caseworker', 7, 'cw1')).get('/admin/api/adverse-events/5');
     expect(res.status).toBe(404);
-    expect(getByIdMock).toHaveBeenCalledWith(5, { orgId: 1, careTeam: { role: 'caseworker', memberId: 7, username: 'cw1' } });
+    expect(getByIdMock).toHaveBeenCalledWith(5, {
+      orgId: 1,
+      careTeam: { role: 'caseworker', memberId: 7, username: 'cw1' },
+    });
   });
 
   it('returns a caseworker their own report with the transcript excerpt scrubbed', async () => {
-    getByIdMock.mockResolvedValueOnce({ report_id: 5, created_by: 'cw1', transcript_excerpt: 'Participant: [redacted]' });
+    getByIdMock.mockResolvedValueOnce({
+      report_id: 5,
+      created_by: 'cw1',
+      transcript_excerpt: 'Participant: [redacted]',
+    });
     const res = await request(appAs('caseworker', 7, 'cw1')).get('/admin/api/adverse-events/5');
     expect(res.status).toBe(200);
     expect(res.body.report_id).toBe(5);
@@ -167,7 +192,11 @@ describe('GET /admin/api/adverse-events/:id', () => {
   });
 
   it('leaves the transcript excerpt intact for a therapist', async () => {
-    getByIdMock.mockResolvedValueOnce({ report_id: 5, created_by: 'cw1', transcript_excerpt: 'Participant: [redacted]' });
+    getByIdMock.mockResolvedValueOnce({
+      report_id: 5,
+      created_by: 'cw1',
+      transcript_excerpt: 'Participant: [redacted]',
+    });
     const res = await request(appAs('therapist')).get('/admin/api/adverse-events/5');
     expect(res.status).toBe(200);
     expect(res.body.transcript_excerpt).toBe('Participant: [redacted]');
@@ -176,17 +205,20 @@ describe('GET /admin/api/adverse-events/:id', () => {
   describe('cross-organization (org B reading org A)', () => {
     const orgARow = { report_id: 5, organization_id: 1, created_by: 'system', summary: 'org A report' };
 
-    it.each(['researcher', 'therapist'] as const)('404s a %s from org 2 on an org 1 report, and 200s org 1', async (role) => {
-      visibleOnlyToOrg1(orgARow);
-      const denied = await request(appAs(role, 9, 'orgb', 2)).get('/admin/api/adverse-events/5');
-      expect(denied.status).toBe(404);
-      expect(denied.body).toEqual({ error: 'not found' });
-      expect(getByIdMock).toHaveBeenLastCalledWith(5, expect.objectContaining({ orgId: 2 }));
+    it.each(['researcher', 'therapist'] as const)(
+      '404s a %s from org 2 on an org 1 report, and 200s org 1',
+      async (role) => {
+        visibleOnlyToOrg1(orgARow);
+        const denied = await request(appAs(role, 9, 'orgb', 2)).get('/admin/api/adverse-events/5');
+        expect(denied.status).toBe(404);
+        expect(denied.body).toEqual({ error: 'not found' });
+        expect(getByIdMock).toHaveBeenLastCalledWith(5, expect.objectContaining({ orgId: 2 }));
 
-      const allowed = await request(appAs(role, 9, 'orga', 1)).get('/admin/api/adverse-events/5');
-      expect(allowed.status).toBe(200);
-      expect(allowed.body.summary).toBe('org A report');
-    });
+        const allowed = await request(appAs(role, 9, 'orga', 1)).get('/admin/api/adverse-events/5');
+        expect(allowed.status).toBe(200);
+        expect(allowed.body.summary).toBe('org A report');
+      },
+    );
 
     it('404s the print/export view across orgs', async () => {
       visibleOnlyToOrg1(orgARow);
@@ -242,20 +274,21 @@ describe('review/lifecycle endpoints stay closed to caseworkers', () => {
     ['post', '/admin/api/sessions/s1/adverse-events'],
   ] as const)('403s a caseworker on %s %s', async (method, path) => {
     const agent = request(appAs('caseworker', 7, 'cw1'));
-    const res = await (method === 'patch' ? agent.patch(path).send({ summary: 'x' })
-      : method === 'post' ? agent.post(path)
-      : agent.get(path));
+    const res = await (method === 'patch'
+      ? agent.patch(path).send({ summary: 'x' })
+      : method === 'post'
+        ? agent.post(path)
+        : agent.get(path));
     expect(res.status).toBe(403);
   });
 });
 
 describe('POST /admin/api/sessions/:sessionId/adverse-events (manual session filing)', () => {
-  it("404s a therapist filing from a session outside their caseload (never 403; no transcript leak)", async () => {
+  it('404s a therapist filing from a session outside their caseload (never 403; no transcript leak)', async () => {
     // Session owned by client 55, who is NOT on this therapist's caseload.
     getSessionAccessInfoMock.mockResolvedValueOnce({ user_id: 55 });
     isAssignedMock.mockResolvedValueOnce(false);
-    const res = await request(appAs('therapist', 7, 'ther1'))
-      .post('/admin/api/sessions/s1/adverse-events');
+    const res = await request(appAs('therapist', 7, 'ther1')).post('/admin/api/sessions/s1/adverse-events');
     expect(res.status).toBe(404);
     // The caseload guard must short-circuit before the draft assembler runs,
     // so no redacted transcript excerpt is ever built or returned.
@@ -267,8 +300,7 @@ describe('POST /admin/api/sessions/:sessionId/adverse-events (manual session fil
     isAssignedMock.mockResolvedValueOnce(true);
     draftFromCrisisMock.mockResolvedValueOnce(77);
     getByIdMock.mockResolvedValueOnce({ report_id: 77, status: 'draft' });
-    const res = await request(appAs('therapist', 7, 'ther1'))
-      .post('/admin/api/sessions/s1/adverse-events');
+    const res = await request(appAs('therapist', 7, 'ther1')).post('/admin/api/sessions/s1/adverse-events');
     expect(res.status).toBe(201);
     expect(res.body.report_id).toBe(77);
     expect(draftFromCrisisMock).toHaveBeenCalledWith('s1', expect.objectContaining({ triggerSource: 'manual' }));
@@ -279,8 +311,7 @@ describe('POST /admin/api/sessions/:sessionId/adverse-events (manual session fil
     getOrgForUserMock.mockResolvedValue(1); // session owner 55 is in org 1
     draftFromCrisisMock.mockResolvedValueOnce(88);
     getByIdMock.mockResolvedValueOnce({ report_id: 88, status: 'draft' });
-    const res = await request(appAs('researcher', 9, 'res1', 1))
-      .post('/admin/api/sessions/s1/adverse-events');
+    const res = await request(appAs('researcher', 9, 'res1', 1)).post('/admin/api/sessions/s1/adverse-events');
     expect(res.status).toBe(201);
     // Researcher passes the care-team gate without a caseload lookup.
     expect(isAssignedMock).not.toHaveBeenCalled();
@@ -289,8 +320,7 @@ describe('POST /admin/api/sessions/:sessionId/adverse-events (manual session fil
   it("404s a researcher filing from another organization's session (never 403; no draft)", async () => {
     getSessionAccessInfoMock.mockResolvedValue({ user_id: 55, owner_organization_id: 1 });
     getOrgForUserMock.mockResolvedValue(1); // owner in org 1, caller in org 2
-    const res = await request(appAs('researcher', 9, 'res2', 2))
-      .post('/admin/api/sessions/s1/adverse-events');
+    const res = await request(appAs('researcher', 9, 'res2', 2)).post('/admin/api/sessions/s1/adverse-events');
     expect(res.status).toBe(404);
     expect(draftFromCrisisMock).not.toHaveBeenCalled();
   });
@@ -323,29 +353,35 @@ describe('POST /admin/api/clients/:userId/adverse-events (caseworker filing)', (
     expect(res.status).toBe(201);
     expect(res.body.report_id).toBe(42);
     expect(isAssignedMock).toHaveBeenCalledWith(7, 33);
-    expect(insertDraftMock).toHaveBeenCalledWith(expect.objectContaining({
-      userId: 33,
-      sessionId: null,
-      crisisEventId: null,
-      triggerSource: 'manual',
-      severity: 'high',
-      createdBy: 'cw1',
-      transcriptExcerpt: null,
-      actionsTaken: [expect.objectContaining({ action: 'Called client back', by: 'cw1' })],
-    }));
-    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'adverse_event_filed',
-      therapistId: 7,
-      clientId: 33,
-      actorUsername: 'cw1',
-      detail: expect.objectContaining({ report_id: 42 }),
-    }));
-    expect(enqueueMock).toHaveBeenCalledWith(expect.objectContaining({
-      itemType: 'adverse_event',
-      sourceTable: 'adverse_event_reports',
-      sourceId: '42',
-      clientId: 33,
-    }));
+    expect(insertDraftMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 33,
+        sessionId: null,
+        crisisEventId: null,
+        triggerSource: 'manual',
+        severity: 'high',
+        createdBy: 'cw1',
+        transcriptExcerpt: null,
+        actionsTaken: [expect.objectContaining({ action: 'Called client back', by: 'cw1' })],
+      }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'adverse_event_filed',
+        therapistId: 7,
+        clientId: 33,
+        actorUsername: 'cw1',
+        detail: expect.objectContaining({ report_id: 42 }),
+      }),
+    );
+    expect(enqueueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemType: 'adverse_event',
+        sourceTable: 'adverse_event_reports',
+        sourceId: '42',
+        clientId: 33,
+      }),
+    );
   });
 
   it('404s a caseworker filing for a client NOT on their caseload (never 403)', async () => {
@@ -364,7 +400,9 @@ describe('POST /admin/api/clients/:userId/adverse-events (caseworker filing)', (
     const app = appAs('caseworker', 7, 'cw1');
     const noSummary = await request(app).post('/admin/api/clients/33/adverse-events').send({ severity: 'high' });
     expect(noSummary.status).toBe(400);
-    const badSeverity = await request(app).post('/admin/api/clients/33/adverse-events').send({ summary: 'x', severity: 'catastrophic' });
+    const badSeverity = await request(app)
+      .post('/admin/api/clients/33/adverse-events')
+      .send({ summary: 'x', severity: 'catastrophic' });
     expect(badSeverity.status).toBe(400);
     expect(insertDraftMock).not.toHaveBeenCalled();
   });

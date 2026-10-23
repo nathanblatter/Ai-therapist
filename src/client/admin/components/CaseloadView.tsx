@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState } from 'react';
 import {
   Users,
   UserPlus,
@@ -11,14 +11,14 @@ import {
   XCircle,
   Plus,
   AlertTriangle,
-} from "react-feather";
-import useAdminFetch from "../hooks/useAdminFetch";
-import { postJson, requestJson } from "../../shared/http";
-import EscalationComposer from "./escalations/EscalationComposer";
-import { isCareTeamRole } from "../../../shared/roles";
+} from 'react-feather';
+import useAdminFetch from '../hooks/useAdminFetch';
+import { postJson, requestJson } from '../../shared/http';
+import EscalationComposer from './escalations/EscalationComposer';
+import { isCareTeamRole } from '../../../shared/roles';
 // Canonical caseload row shape lives in the server data layer (type-only
 // import, erased at build time).
-import type { CaseloadClient } from "../../../server/db/caseload.queries";
+import type { CaseloadClient } from '../../../server/db/caseload.queries';
 
 // Caseload view (caseload RBAC MVP, ai-therapist-119; caseworker portal).
 // - Care-team mode (therapist OR caseworker): their own assigned-client list
@@ -65,7 +65,7 @@ interface CaseloadViewProps {
 // accept either a bare array or the first array-valued key among `keys`.
 function pickArray<T>(data: unknown, keys: string[]): T[] {
   if (Array.isArray(data)) return data as T[];
-  if (data && typeof data === "object") {
+  if (data && typeof data === 'object') {
     for (const key of keys) {
       const value = (data as Record<string, unknown>)[key];
       if (Array.isArray(value)) return value as T[];
@@ -74,17 +74,17 @@ function pickArray<T>(data: unknown, keys: string[]): T[] {
   return [];
 }
 
-function inviteStatus(invite: InviteRow): "pending" | "used" | "expired" {
-  if (invite.status === "used" || invite.status === "expired" || invite.status === "pending") {
+function inviteStatus(invite: InviteRow): 'pending' | 'used' | 'expired' {
+  if (invite.status === 'used' || invite.status === 'expired' || invite.status === 'pending') {
     return invite.status;
   }
-  if (invite.used_at) return "used";
-  if (new Date(invite.expires_at).getTime() < Date.now()) return "expired";
-  return "pending";
+  if (invite.used_at) return 'used';
+  if (new Date(invite.expires_at).getTime() < Date.now()) return 'expired';
+  return 'pending';
 }
 
-function InviteStatusBadge({ status }: { status: "pending" | "used" | "expired" }) {
-  if (status === "used") {
+function InviteStatusBadge({ status }: { status: 'pending' | 'used' | 'expired' }) {
+  if (status === 'used') {
     return (
       <span className="px-2 py-1 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
         <Check size={12} aria-hidden="true" />
@@ -92,7 +92,7 @@ function InviteStatusBadge({ status }: { status: "pending" | "used" | "expired" 
       </span>
     );
   }
-  if (status === "expired") {
+  if (status === 'expired') {
     return (
       <span className="px-2 py-1 inline-flex items-center gap-1 text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-500">
         <XCircle size={12} aria-hidden="true" />
@@ -117,34 +117,31 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
     data: caseloadData,
     loading: caseloadLoading,
     error: caseloadError,
-  } = useAdminFetch<unknown>("/admin/api/caseload");
+  } = useAdminFetch<unknown>('/admin/api/caseload');
   const {
     data: invitesData,
     loading: invitesLoading,
     error: invitesError,
     refetch: refetchInvites,
-  } = useAdminFetch<unknown>("/admin/api/caseload/invites");
+  } = useAdminFetch<unknown>('/admin/api/caseload/invites');
 
-  const [inviteLabel, setInviteLabel] = useState("");
+  const [inviteLabel, setInviteLabel] = useState('');
   const [creatingInvite, setCreatingInvite] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   // Per-client escalation composer target (caseworker portal slice B).
   const [escalateClient, setEscalateClient] = useState<CaseloadClient | null>(null);
-  const isCaseworker = userRole === "caseworker";
+  const isCaseworker = userRole === 'caseworker';
 
   const clients = useMemo(
-    () => pickArray<CaseloadClient>(caseloadData, ["caseload", "clients", "users"]),
-    [caseloadData]
+    () => pickArray<CaseloadClient>(caseloadData, ['caseload', 'clients', 'users']),
+    [caseloadData],
   );
-  const invites = useMemo(
-    () => pickArray<InviteRow>(invitesData, ["invites"]),
-    [invitesData]
-  );
+  const invites = useMemo(() => pickArray<InviteRow>(invitesData, ['invites']), [invitesData]);
 
   const toAbsoluteLink = (link: string): string =>
-    link.startsWith("http") ? link : `${window.location.origin}${link}`;
+    link.startsWith('http') ? link : `${window.location.origin}${link}`;
 
   const handleCreateInvite = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -154,15 +151,15 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
     setCreatingInvite(true);
     try {
       const data = await postJson<{ link?: string; url?: string; inviteUrl?: string }>(
-        "/admin/api/caseload/invites",
+        '/admin/api/caseload/invites',
         { label: inviteLabel.trim() || null },
-        { fallback: "Failed to create invite" }
+        { fallback: 'Failed to create invite' },
       );
       const link: string | undefined = data.link ?? data.url ?? data.inviteUrl;
       if (link) {
         setCreatedLink(toAbsoluteLink(link));
       }
-      setInviteLabel("");
+      setInviteLabel('');
       refetchInvites();
     } catch (err: unknown) {
       setInviteError(err instanceof Error ? err.message : String(err));
@@ -178,7 +175,7 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     } catch {
-      setInviteError("Could not copy to clipboard; copy the link manually.");
+      setInviteError('Could not copy to clipboard; copy the link manually.');
     }
   };
 
@@ -187,7 +184,7 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900">My Caseload</h2>
         <p className="text-gray-600 mt-1">
-          {clients.length} assigned {clients.length === 1 ? "client" : "clients"}
+          {clients.length} assigned {clients.length === 1 ? 'client' : 'clients'}
         </p>
       </div>
 
@@ -198,7 +195,11 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
       )}
 
       {/* Client list */}
-      <div className="bg-white rounded-lg shadow overflow-hidden mb-8" role="region" aria-label="Assigned clients table">
+      <div
+        className="bg-white rounded-lg shadow overflow-hidden mb-8"
+        role="region"
+        aria-label="Assigned clients table"
+      >
         {caseloadLoading ? (
           <div className="text-center py-8 text-gray-500">Loading caseload...</div>
         ) : (
@@ -206,20 +207,35 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
             <table className="min-w-full divide-y divide-gray-200" role="table">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    scope="col"
+                  >
                     User ID
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    scope="col"
+                  >
                     Username
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    scope="col"
+                  >
                     Account Created
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    scope="col"
+                  >
                     Assigned
                   </th>
                   {isCaseworker && (
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                    <th
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      scope="col"
+                    >
                       Actions
                     </th>
                   )}
@@ -296,7 +312,7 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
             aria-label="Create invite link"
           >
             <Plus size={16} aria-hidden="true" />
-            {creatingInvite ? "Creating..." : "Create Invite"}
+            {creatingInvite ? 'Creating...' : 'Create Invite'}
           </button>
         </form>
 
@@ -322,7 +338,7 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
                 aria-label="Copy invite link"
               >
                 {copiedLink ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
-                {copiedLink ? "Copied" : "Copy Link"}
+                {copiedLink ? 'Copied' : 'Copy Link'}
               </button>
             </div>
           </div>
@@ -343,16 +359,28 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
             <table className="min-w-full divide-y divide-gray-200" role="table">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    scope="col"
+                  >
                     Label
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    scope="col"
+                  >
                     Created
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    scope="col"
+                  >
                     Expires
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" scope="col">
+                  <th
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    scope="col"
+                  >
                     Status
                   </th>
                 </tr>
@@ -361,7 +389,11 @@ function TherapistCaseload({ userRole }: { userRole: string | null }) {
                 {invites.map((invite) => (
                   <tr key={invite.invite_id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {invite.label || <span className="text-gray-400" aria-hidden="true">—</span>}
+                      {invite.label || (
+                        <span className="text-gray-400" aria-hidden="true">
+                          —
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(invite.created_at).toLocaleString()}
@@ -408,35 +440,28 @@ function ResearcherMatrix() {
     loading: assignmentsLoading,
     error: assignmentsError,
     refetch: refetchAssignments,
-  } = useAdminFetch<unknown>("/admin/api/caseload");
+  } = useAdminFetch<unknown>('/admin/api/caseload');
   const {
     data: therapistsData,
     loading: therapistsLoading,
     error: therapistsError,
-  } = useAdminFetch<unknown>("/admin/api/caseload/therapists");
+  } = useAdminFetch<unknown>('/admin/api/caseload/therapists');
   // Full roster for the "available participants" column; researchers are
   // unscoped on /api/users.
-  const {
-    data: usersData,
-    loading: usersLoading,
-    error: usersError,
-  } = useAdminFetch<unknown>("/api/users");
+  const { data: usersData, loading: usersLoading, error: usersError } = useAdminFetch<unknown>('/api/users');
 
   const [selectedTherapistId, setSelectedTherapistId] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingClientId, setPendingClientId] = useState<number | null>(null);
 
   const assignments = useMemo(
-    () => pickArray<Assignment>(assignmentsData, ["assignments", "caseload"]),
-    [assignmentsData]
+    () => pickArray<Assignment>(assignmentsData, ['assignments', 'caseload']),
+    [assignmentsData],
   );
-  const therapists = useMemo(
-    () => pickArray<TherapistRow>(therapistsData, ["therapists", "users"]),
-    [therapistsData]
-  );
+  const therapists = useMemo(() => pickArray<TherapistRow>(therapistsData, ['therapists', 'users']), [therapistsData]);
   const participants = useMemo(
-    () => pickArray<RosterUser>(usersData, ["users"]).filter((u) => u.role === "participant"),
-    [usersData]
+    () => pickArray<RosterUser>(usersData, ['users']).filter((u) => u.role === 'participant'),
+    [usersData],
   );
 
   const activeTherapistId = selectedTherapistId ?? therapists[0]?.userid ?? null;
@@ -444,15 +469,12 @@ function ResearcherMatrix() {
 
   const assignedToActive = useMemo(
     () => assignments.filter((a) => a.therapist_id === activeTherapistId),
-    [assignments, activeTherapistId]
+    [assignments, activeTherapistId],
   );
-  const assignedClientIds = useMemo(
-    () => new Set(assignedToActive.map((a) => a.client_id)),
-    [assignedToActive]
-  );
+  const assignedClientIds = useMemo(() => new Set(assignedToActive.map((a) => a.client_id)), [assignedToActive]);
   const availableParticipants = useMemo(
     () => participants.filter((p) => !assignedClientIds.has(p.userid)),
-    [participants, assignedClientIds]
+    [participants, assignedClientIds],
   );
 
   const caseloadCountByTherapist = useMemo(() => {
@@ -463,13 +485,13 @@ function ResearcherMatrix() {
     return counts;
   }, [assignments]);
 
-  const mutateAssignment = async (method: "POST" | "DELETE", therapistId: number, clientId: number) => {
+  const mutateAssignment = async (method: 'POST' | 'DELETE', therapistId: number, clientId: number) => {
     setActionError(null);
     setPendingClientId(clientId);
     try {
       await requestJson(`/admin/api/caseload/${therapistId}/${clientId}`, {
         method,
-        fallback: method === "POST" ? "Failed to assign client" : "Failed to unassign client",
+        fallback: method === 'POST' ? 'Failed to assign client' : 'Failed to unassign client',
       });
       refetchAssignments();
     } catch (err: unknown) {
@@ -519,7 +541,7 @@ function ResearcherMatrix() {
             </label>
             <select
               id="therapist-picker"
-              value={activeTherapistId ?? ""}
+              value={activeTherapistId ?? ''}
               onChange={(e) => setSelectedTherapistId(Number(e.target.value))}
               aria-label="Select therapist"
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
@@ -538,7 +560,7 @@ function ResearcherMatrix() {
               <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                 <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2">
                   <UserCheck size={16} aria-hidden="true" />
-                  Assigned to {activeTherapist?.username ?? "therapist"} ({assignedToActive.length})
+                  Assigned to {activeTherapist?.username ?? 'therapist'} ({assignedToActive.length})
                 </h3>
               </div>
               <ul className="divide-y divide-gray-200">
@@ -546,16 +568,16 @@ function ResearcherMatrix() {
                   <li key={a.client_id} className="px-6 py-3 flex items-center justify-between hover:bg-gray-50">
                     <div>
                       <p className="text-sm font-medium text-gray-900">{a.client_username}</p>
-                      <p className="text-xs text-gray-500">
-                        Assigned {new Date(a.assigned_at).toLocaleDateString()}
-                      </p>
+                      <p className="text-xs text-gray-500">Assigned {new Date(a.assigned_at).toLocaleDateString()}</p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => activeTherapistId !== null && mutateAssignment("DELETE", activeTherapistId, a.client_id)}
+                      onClick={() =>
+                        activeTherapistId !== null && mutateAssignment('DELETE', activeTherapistId, a.client_id)
+                      }
                       disabled={pendingClientId === a.client_id}
                       className="text-red-600 hover:text-red-800 disabled:opacity-50 flex items-center gap-1 min-h-[44px]"
-                      aria-label={`Unassign ${a.client_username} from ${activeTherapist?.username ?? "therapist"}`}
+                      aria-label={`Unassign ${a.client_username} from ${activeTherapist?.username ?? 'therapist'}`}
                     >
                       <UserMinus size={16} aria-hidden="true" />
                       Unassign
@@ -572,7 +594,11 @@ function ResearcherMatrix() {
             </div>
 
             {/* Available participants */}
-            <div className="bg-white rounded-lg shadow overflow-hidden" role="region" aria-label="Available participants">
+            <div
+              className="bg-white rounded-lg shadow overflow-hidden"
+              role="region"
+              aria-label="Available participants"
+            >
               <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                 <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2">
                   <Users size={16} aria-hidden="true" />
@@ -585,10 +611,12 @@ function ResearcherMatrix() {
                     <p className="text-sm font-medium text-gray-900">{p.username}</p>
                     <button
                       type="button"
-                      onClick={() => activeTherapistId !== null && mutateAssignment("POST", activeTherapistId, p.userid)}
+                      onClick={() =>
+                        activeTherapistId !== null && mutateAssignment('POST', activeTherapistId, p.userid)
+                      }
                       disabled={pendingClientId === p.userid}
                       className="text-royal hover:text-blue-700 disabled:opacity-50 flex items-center gap-1 min-h-[44px]"
-                      aria-label={`Assign ${p.username} to ${activeTherapist?.username ?? "therapist"}`}
+                      aria-label={`Assign ${p.username} to ${activeTherapist?.username ?? 'therapist'}`}
                     >
                       <UserPlus size={16} aria-hidden="true" />
                       Assign
@@ -611,7 +639,7 @@ function ResearcherMatrix() {
 }
 
 export default function CaseloadView({ userRole }: CaseloadViewProps) {
-  if (userRole === "researcher") {
+  if (userRole === 'researcher') {
     return <ResearcherMatrix />;
   }
   if (isCareTeamRole(userRole)) {

@@ -7,12 +7,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { poolQueryMock } = vi.hoisted(() => ({ poolQueryMock: vi.fn() }));
 vi.mock('../config/db.js', () => ({ pool: { query: poolQueryMock } }));
 
-const {
-  summarizeRiskCheckSteps,
-  getParticipantRiskCheckLadders,
-  getSessionRiskCheckLadder,
-  sessionHasRiskCheck,
-} = await import('./riskCheck.queries.js');
+const { summarizeRiskCheckSteps, getParticipantRiskCheckLadders, getSessionRiskCheckLadder, sessionHasRiskCheck } =
+  await import('./riskCheck.queries.js');
 
 type Row = Parameters<typeof summarizeRiskCheckSteps>[1][number];
 
@@ -74,8 +70,12 @@ describe('summarizeRiskCheckSteps', () => {
   it('handles an empty ladder without inventing a band', () => {
     const ladder = summarizeRiskCheckSteps('s1', []);
     expect(ladder).toMatchObject({
-      session_id: 's1', resolved_band: null, furthest_step: null,
-      completed: false, started_at: null, last_step_at: null,
+      session_id: 's1',
+      resolved_band: null,
+      furthest_step: null,
+      completed: false,
+      started_at: null,
+      last_step_at: null,
     });
   });
 
@@ -121,7 +121,7 @@ describe('getParticipantRiskCheckLadders', () => {
       rowCount: 2,
     });
     const ladders = await getParticipantRiskCheckLadders(7);
-    expect(ladders.map(l => l.session_id)).toEqual(['new', 'old']);
+    expect(ladders.map((l) => l.session_id)).toEqual(['new', 'old']);
     expect(ladders[0].resolved_band).toBe('high');
     // Ownership enforced by the join, not by a caller-supplied session list.
     const sql = String(poolQueryMock.mock.calls[0][0]);

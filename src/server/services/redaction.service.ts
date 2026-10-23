@@ -1,6 +1,6 @@
-import {getOpenAIKey} from "../config/secrets.js";
-import OpenAI from "openai";
-import { withFlex } from "../utils/flexTier.js";
+import { getOpenAIKey } from '../config/secrets.js';
+import OpenAI from 'openai';
+import { withFlex } from '../utils/flexTier.js';
 
 const OPENAI_API_KEY = await getOpenAIKey();
 
@@ -79,19 +79,19 @@ Redact only the 18 HIPAA Safe Harbor identifiers, preserving all other content. 
 // the flex tier halves its cost (ai-therapist-180). REDACTION_TIMEOUT_MS is
 // raised well above the SDK's 10-minute default because flex trades latency
 // for price.
-const REDACTION_MODEL = "gpt-5";
+const REDACTION_MODEL = 'gpt-5';
 const REDACTION_TIMEOUT_MS = 15 * 60 * 1000;
 
 type ResponsesReply = {
-    output_text: string;
-    usage?: { input_tokens?: number; output_tokens?: number };
+  output_text: string;
+  usage?: { input_tokens?: number; output_tokens?: number };
 };
 type ResponsesCreate = (opts: Record<string, unknown>) => Promise<ResponsesReply>;
 
 function redactionClient(): { responses: { create: ResponsesCreate } } {
-    return new OpenAI({ apiKey: OPENAI_API_KEY, timeout: REDACTION_TIMEOUT_MS }) as unknown as {
-        responses: { create: ResponsesCreate };
-    };
+  return new OpenAI({ apiKey: OPENAI_API_KEY, timeout: REDACTION_TIMEOUT_MS }) as unknown as {
+    responses: { create: ResponsesCreate };
+  };
 }
 
 /**
@@ -103,56 +103,57 @@ function redactionClient(): { responses: { create: ResponsesCreate } } {
  * fallback — which is what recordLlmUsage needs for honest attribution.
  */
 export interface RedactionUsage {
-    model: string;
-    tokensIn: number | null;
-    tokensOut: number | null;
+  model: string;
+  tokensIn: number | null;
+  tokensOut: number | null;
 }
 
 export interface RedactionOptions {
-    /** Collects one entry per model call. Optional: callers that don't bill
-     *  against a session (e.g. an ad-hoc edit) may omit it. */
-    usage?: RedactionUsage[];
+  /** Collects one entry per model call. Optional: callers that don't bill
+   *  against a session (e.g. an ad-hoc edit) may omit it. */
+  usage?: RedactionUsage[];
 }
 
 function noteUsage(sink: RedactionUsage[] | undefined, response: ResponsesReply): void {
-    if (!sink) return;
-    sink.push({
-        model: REDACTION_MODEL,
-        tokensIn: response.usage?.input_tokens ?? null,
-        tokensOut: response.usage?.output_tokens ?? null,
-    });
+  if (!sink) return;
+  sink.push({
+    model: REDACTION_MODEL,
+    tokensIn: response.usage?.input_tokens ?? null,
+    tokensOut: response.usage?.output_tokens ?? null,
+  });
 }
 
 async function redactPHISinglePass(input: string, opts: RedactionOptions = {}): Promise<string> {
-    const client = redactionClient();
+  const client = redactionClient();
 
-    const response = await withFlex(REDACTION_MODEL, (tierParams) =>
-        client.responses.create({
-            model: REDACTION_MODEL,
-            reasoning: { effort: "low" },
-            instructions: prompt,
-            input: input,
-            // store defaults to TRUE on the Responses API. This call carries the
-            // one payload in the system that is by definition un-redacted
-            // participant content, so it must never become 30-day application
-            // state on OpenAI's side. Explicit here rather than relying on an
-            // org-level ZDR posture (see IRB Q8, unconfirmed).
-            store: false,
-            ...tierParams,
-        }));
-    noteUsage(opts.usage, response);
+  const response = await withFlex(REDACTION_MODEL, (tierParams) =>
+    client.responses.create({
+      model: REDACTION_MODEL,
+      reasoning: { effort: 'low' },
+      instructions: prompt,
+      input: input,
+      // store defaults to TRUE on the Responses API. This call carries the
+      // one payload in the system that is by definition un-redacted
+      // participant content, so it must never become 30-day application
+      // state on OpenAI's side. Explicit here rather than relying on an
+      // org-level ZDR posture (see IRB Q8, unconfirmed).
+      store: false,
+      ...tierParams,
+    }),
+  );
+  noteUsage(opts.usage, response);
 
-    return response.output_text;
+  return response.output_text;
 }
 
 export default async function redactPHI(input: string, opts: RedactionOptions = {}): Promise<string> {
-    // First pass: redact PHI from original input
-    const firstPass = await redactPHISinglePass(input, opts);
+  // First pass: redact PHI from original input
+  const firstPass = await redactPHISinglePass(input, opts);
 
-    // Second pass: redact any PHI that might have been missed
-    const secondPass = await redactPHISinglePass(firstPass, opts);
+  // Second pass: redact any PHI that might have been missed
+  const secondPass = await redactPHISinglePass(firstPass, opts);
 
-    return secondPass;
+  return secondPass;
 }
 
 // ---- Batched (per-session) redaction ----
@@ -165,104 +166,111 @@ export default async function redactPHI(input: string, opts: RedactionOptions = 
 // retry + per-item fallback means one bad batch can no longer strand every
 // message unredacted.
 
-const batchInstructions = prompt + `
+const batchInstructions =
+  prompt +
+  `
 
 BATCH MODE: The input is a JSON array of objects, each {"i": <index>, "text": <message>}. Apply the redaction rules above INDEPENDENTLY to each object's "text". Return ONLY a JSON array of objects {"i": <same index>, "text": <redacted message>} — one object per input object, same "i" values, no index missing, duplicated, added, merged, or split. "text" must always be a JSON string (use "" for empty input text, never null). Output valid JSON only — no markdown fences, no commentary.`;
 
 /** Strip ```json ... ``` fences a model may wrap JSON output in. */
 function stripCodeFences(text: string): string {
-    const t = text.trim();
-    const fenced = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
-    return fenced ? fenced[1].trim() : t;
+  const t = text.trim();
+  const fenced = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  return fenced ? fenced[1].trim() : t;
 }
 
 /** Validate an anchored batch reply: every input index exactly once, all
  *  strings (a model-emitted null must never become the literal "null"). */
 function parseAnchoredBatch(outputText: string, expected: number): string[] {
-    const parsed = JSON.parse(stripCodeFences(outputText)) as unknown;
-    if (!Array.isArray(parsed) || parsed.length !== expected) {
-        throw new Error(`Batch redaction returned ${Array.isArray(parsed) ? `${parsed.length} items` : 'a non-array'}, expected ${expected}`);
+  const parsed = JSON.parse(stripCodeFences(outputText)) as unknown;
+  if (!Array.isArray(parsed) || parsed.length !== expected) {
+    throw new Error(
+      `Batch redaction returned ${Array.isArray(parsed) ? `${parsed.length} items` : 'a non-array'}, expected ${expected}`,
+    );
+  }
+  const out = new Array<string | undefined>(expected);
+  for (const el of parsed) {
+    const item = el as { i?: unknown; text?: unknown };
+    if (typeof item?.i !== 'number' || !Number.isInteger(item.i) || item.i < 0 || item.i >= expected) {
+      throw new Error('Batch redaction returned an element with a missing/invalid index');
     }
-    const out = new Array<string | undefined>(expected);
-    for (const el of parsed) {
-        const item = el as { i?: unknown; text?: unknown };
-        if (typeof item?.i !== 'number' || !Number.isInteger(item.i) || item.i < 0 || item.i >= expected) {
-            throw new Error('Batch redaction returned an element with a missing/invalid index');
-        }
-        if (typeof item.text !== 'string') {
-            throw new Error(`Batch redaction returned a non-string text for index ${item.i}`);
-        }
-        if (out[item.i] !== undefined) {
-            throw new Error(`Batch redaction returned index ${item.i} more than once`);
-        }
-        out[item.i] = item.text;
+    if (typeof item.text !== 'string') {
+      throw new Error(`Batch redaction returned a non-string text for index ${item.i}`);
     }
-    return out as string[];
+    if (out[item.i] !== undefined) {
+      throw new Error(`Batch redaction returned index ${item.i} more than once`);
+    }
+    out[item.i] = item.text;
+  }
+  return out as string[];
 }
 
 async function redactBatchSinglePass(inputs: string[], opts: RedactionOptions): Promise<string[]> {
-    const client = redactionClient();
+  const client = redactionClient();
 
-    const response = await withFlex(REDACTION_MODEL, (tierParams) =>
-        client.responses.create({
-            model: REDACTION_MODEL,
-            reasoning: { effort: "low" },
-            instructions: batchInstructions,
-            input: JSON.stringify(inputs.map((text, i) => ({ i, text }))),
-            // See redactPHISinglePass: un-redacted participant content must not
-            // be stored as application state (store defaults to true).
-            store: false,
-            ...tierParams,
-        }));
-    // Recorded before parsing: a malformed reply was still a billed call.
-    noteUsage(opts.usage, response);
+  const response = await withFlex(REDACTION_MODEL, (tierParams) =>
+    client.responses.create({
+      model: REDACTION_MODEL,
+      reasoning: { effort: 'low' },
+      instructions: batchInstructions,
+      input: JSON.stringify(inputs.map((text, i) => ({ i, text }))),
+      // See redactPHISinglePass: un-redacted participant content must not
+      // be stored as application state (store defaults to true).
+      store: false,
+      ...tierParams,
+    }),
+  );
+  // Recorded before parsing: a malformed reply was still a billed call.
+  noteUsage(opts.usage, response);
 
-    return parseAnchoredBatch(response.output_text, inputs.length);
+  return parseAnchoredBatch(response.output_text, inputs.length);
 }
 
 /** Per-item fallback pass with bounded concurrency — slower (one call per
  *  message) but immune to batch-shape failures. */
 async function redactItemsIndividually(inputs: string[], opts: RedactionOptions): Promise<string[]> {
-    const out = new Array<string>(inputs.length);
-    const errors: unknown[] = [];
-    const CONCURRENCY = 4;
-    let next = 0;
-    async function worker() {
-        while (next < inputs.length && errors.length === 0) {
-            const idx = next++;
-            if (inputs[idx] === '') {
-                // The batch prompt handles empty text explicitly; the base
-                // prompt doesn't, and a model may answer with prose ("There is
-                // no text to redact") that would then be STORED as redacted
-                // content. Empty in, empty out.
-                out[idx] = '';
-                continue;
-            }
-            try {
-                out[idx] = await redactPHISinglePass(inputs[idx], opts);
-            } catch (err) {
-                errors.push(err); // collected, not thrown — a rejecting worker
-                return;           // must not leave sibling rejections unhandled
-            }
-        }
+  const out = new Array<string>(inputs.length);
+  const errors: unknown[] = [];
+  const CONCURRENCY = 4;
+  let next = 0;
+  async function worker() {
+    while (next < inputs.length && errors.length === 0) {
+      const idx = next++;
+      if (inputs[idx] === '') {
+        // The batch prompt handles empty text explicitly; the base
+        // prompt doesn't, and a model may answer with prose ("There is
+        // no text to redact") that would then be STORED as redacted
+        // content. Empty in, empty out.
+        out[idx] = '';
+        continue;
+      }
+      try {
+        out[idx] = await redactPHISinglePass(inputs[idx], opts);
+      } catch (err) {
+        errors.push(err); // collected, not thrown — a rejecting worker
+        return; // must not leave sibling rejections unhandled
+      }
     }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, inputs.length) }, worker));
-    if (errors.length > 0) throw errors[0];
-    return out;
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, inputs.length) }, worker));
+  if (errors.length > 0) throw errors[0];
+  return out;
 }
 
 /** One redaction pass over the batch: anchored batch call, one retry on a
  *  malformed reply, then the per-item fallback. Only infrastructure errors
  *  (network/auth) propagate — shape failures never sink the session. */
 async function redactBatchPassResilient(inputs: string[], opts: RedactionOptions): Promise<string[]> {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-            return await redactBatchSinglePass(inputs, opts);
-        } catch (err) {
-            console.warn(`[Redaction] batch pass attempt ${attempt} failed (${err instanceof Error ? err.message : err}); ${attempt === 1 ? 'retrying batch' : 'falling back to per-item redaction'}`);
-        }
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      return await redactBatchSinglePass(inputs, opts);
+    } catch (err) {
+      console.warn(
+        `[Redaction] batch pass attempt ${attempt} failed (${err instanceof Error ? err.message : err}); ${attempt === 1 ? 'retrying batch' : 'falling back to per-item redaction'}`,
+      );
     }
-    return redactItemsIndividually(inputs, opts);
+  }
+  return redactItemsIndividually(inputs, opts);
 }
 
 /** Max items per model call. A whole-session batch must reproduce the entire
@@ -278,16 +286,16 @@ const BATCH_CHUNK_SIZE = 50;
  * the batch shape). Returns a map of message id → redacted text.
  */
 export async function redactPHIBatch(
-    items: Array<{ id: number; content: string | null }>,
-    opts: RedactionOptions = {},
+  items: Array<{ id: number; content: string | null }>,
+  opts: RedactionOptions = {},
 ): Promise<Map<number, string>> {
-    const result = new Map<number, string>();
-    for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
-        const chunk = items.slice(start, start + BATCH_CHUNK_SIZE);
-        const inputs = chunk.map(i => i.content ?? '');
-        const firstPass = await redactBatchPassResilient(inputs, opts);
-        const secondPass = await redactBatchPassResilient(firstPass, opts);
-        chunk.forEach((item, idx) => result.set(item.id, secondPass[idx]));
-    }
-    return result;
+  const result = new Map<number, string>();
+  for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
+    const chunk = items.slice(start, start + BATCH_CHUNK_SIZE);
+    const inputs = chunk.map((i) => i.content ?? '');
+    const firstPass = await redactBatchPassResilient(inputs, opts);
+    const secondPass = await redactBatchPassResilient(firstPass, opts);
+    chunk.forEach((item, idx) => result.set(item.id, secondPass[idx]));
+  }
+  return result;
 }

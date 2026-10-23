@@ -43,10 +43,7 @@ let sentTotal = 0;
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Apply the server-delivered feature flags (both default off). */
-export function configureEngagementTelemetry(flags: {
-  interactionTiming?: boolean;
-  engagementEvents?: boolean;
-}): void {
+export function configureEngagementTelemetry(flags: { interactionTiming?: boolean; engagementEvents?: boolean }): void {
   interactionTimingEnabled = flags.interactionTiming === true;
   engagementEventsEnabled = flags.engagementEvents === true;
 }
@@ -62,10 +59,7 @@ function enabledFor(kind: EngagementEventKind): boolean {
 }
 
 /** Queue one engagement event. Safe to call from anywhere; never throws. */
-export function recordEngagementEvent(
-  kind: EngagementEventKind,
-  detail?: Record<string, unknown>
-): void {
+export function recordEngagementEvent(kind: EngagementEventKind, detail?: Record<string, unknown>): void {
   try {
     if (!enabledFor(kind) || sentTotal >= MAX_TOTAL) return;
     sentTotal += 1;
@@ -83,7 +77,7 @@ export function recordEngagementEvent(
 export function recordTurnTiming(
   latencyMs: number | null,
   messageChars: number,
-  modality: 'chat' | 'realtime_text'
+  modality: 'chat' | 'realtime_text',
 ): void {
   recordEngagementEvent('turn_timing', {
     latency_ms: latencyMs === null ? null : Math.round(latencyMs),
@@ -109,7 +103,9 @@ function flush(useBeacon = false): void {
       body,
       keepalive: true,
       credentials: 'include',
-    }).catch(() => { /* fire-and-forget */ });
+    }).catch(() => {
+      /* fire-and-forget */
+    });
   } catch {
     // Telemetry must never break the app.
   }

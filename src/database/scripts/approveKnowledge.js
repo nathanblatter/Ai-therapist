@@ -35,13 +35,15 @@ async function main() {
     // Status only (always read-only, regardless of --dry-run)
     const counts = await getKnowledgeStatusCounts();
     console.log('Knowledge base status (active / pending):');
-    counts.forEach(c => console.log(`  ${c.kind}: ${c.active} active, ${c.pending} pending`));
-    const pending = (await pool.query(
-      `SELECT kind, topic, title FROM knowledge_chunks WHERE active IS NOT TRUE ORDER BY kind, topic, title`
-    )).rows;
+    counts.forEach((c) => console.log(`  ${c.kind}: ${c.active} active, ${c.pending} pending`));
+    const pending = (
+      await pool.query(
+        `SELECT kind, topic, title FROM knowledge_chunks WHERE active IS NOT TRUE ORDER BY kind, topic, title`,
+      )
+    ).rows;
     if (pending.length) {
       console.log(`\nPending (${pending.length}):`);
-      pending.forEach(p => console.log(`  [${p.kind}/${p.topic ?? '-'}] ${p.title}`));
+      pending.forEach((p) => console.log(`  [${p.kind}/${p.topic ?? '-'}] ${p.title}`));
       console.log('\nApprove with: --all | --kind <kind> | --topic <topic> (add --dry-run to preview first)');
     } else {
       console.log('\nNothing pending.');
@@ -57,11 +59,15 @@ async function main() {
   if (dryRun) {
     const rows = await previewPendingKnowledgeChunks(filter);
     if (rows.length === 0) {
-      console.log(`[dry run] Nothing matches${kind ? ` kind=${kind}` : ''}${topic ? ` topic=${topic}` : ''} — 0 chunks would be approved.`);
+      console.log(
+        `[dry run] Nothing matches${kind ? ` kind=${kind}` : ''}${topic ? ` topic=${topic}` : ''} — 0 chunks would be approved.`,
+      );
       return;
     }
-    console.log(`[dry run] Would approve ${rows.length} chunk(s)${kind ? ` kind=${kind}` : ''}${topic ? ` topic=${topic}` : ''}:`);
-    rows.forEach(r => console.log(`  [${r.kind}/${r.topic ?? '-'}] ${r.title}`));
+    console.log(
+      `[dry run] Would approve ${rows.length} chunk(s)${kind ? ` kind=${kind}` : ''}${topic ? ` topic=${topic}` : ''}:`,
+    );
+    rows.forEach((r) => console.log(`  [${r.kind}/${r.topic ?? '-'}] ${r.title}`));
     console.log('\nNo changes written. Re-run without --dry-run to approve.');
     return;
   }
@@ -79,4 +85,10 @@ async function main() {
   console.log(`Approved ${n} chunk(s)${kind ? ` kind=${kind}` : ''}${topic ? ` topic=${topic}` : ''} as ${actor}.`);
 }
 
-main().then(() => pool.end()).catch(e => { console.error(e); pool.end(); process.exit(1); });
+main()
+  .then(() => pool.end())
+  .catch((e) => {
+    console.error(e);
+    pool.end();
+    process.exit(1);
+  });

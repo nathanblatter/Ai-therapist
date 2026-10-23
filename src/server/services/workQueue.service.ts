@@ -28,11 +28,7 @@ import {
 import type { CareTeamRole, StaffCommsRole } from '../../shared/roles.js';
 import { therapistRoom, caseworkerRoom, ADMIN_BROADCAST_ROOM } from '../utils/adminBroadcast.js';
 import { denverDateStamp } from '../utils/timezoneHelpers.js';
-import {
-  notifyWorkItem,
-  runDigestSweep,
-  type NotificationRecipient,
-} from './notification.service.js';
+import { notifyWorkItem, runDigestSweep, type NotificationRecipient } from './notification.service.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('workQueue');
@@ -68,7 +64,7 @@ export interface EnqueueWorkItemOptions {
 
 async function resolveRecipients(
   item: WorkItemRow,
-  assigneeRole: StaffCommsRole | null | undefined
+  assigneeRole: StaffCommsRole | null | undefined,
 ): Promise<NotificationRecipient[]> {
   const recipients: NotificationRecipient[] = [];
   if (item.assignee_id !== null) {
@@ -133,8 +129,10 @@ export async function enqueueWorkItem(opts: EnqueueWorkItemOptions): Promise<Wor
     const client = clientId !== null ? await getUserById(clientId) : null;
     const orgId = opts.orgId ?? client?.organization_id ?? (await getIrbStudyOrgId());
     if (typeof orgId !== 'number') {
-      log.error({ itemType: opts.itemType, sourceId: opts.sourceId },
-        '[queue] could not resolve org for work item; dropping');
+      log.error(
+        { itemType: opts.itemType, sourceId: opts.sourceId },
+        '[queue] could not resolve org for work item; dropping',
+      );
       return null;
     }
     const isSandbox = opts.isSandbox ?? client?.is_sandbox ?? false;
@@ -170,8 +168,7 @@ export async function enqueueWorkItem(opts: EnqueueWorkItemOptions): Promise<Wor
     await notifyWorkItem(item, recipients);
     return item;
   } catch (err) {
-    log.error({ err, itemType: opts.itemType, sourceId: opts.sourceId },
-      '[queue] enqueueWorkItem failed');
+    log.error({ err, itemType: opts.itemType, sourceId: opts.sourceId }, '[queue] enqueueWorkItem failed');
     return null;
   }
 }
@@ -221,7 +218,7 @@ export const DEFAULT_SWEEP_THRESHOLDS: SweepThresholds = {
  */
 export async function runWorkItemSweep(
   thresholds: SweepThresholds = DEFAULT_SWEEP_THRESHOLDS,
-  _now: Date = new Date() // kept for signature stability (scheduler passes it)
+  _now: Date = new Date(), // kept for signature stability (scheduler passes it)
 ): Promise<void> {
   // --- inactivity: expire stale items for re-engaged clients first ---------
   try {
@@ -233,7 +230,7 @@ export async function runWorkItemSweep(
            WHERE ts.user_id = wi.client_id
              AND ts.created_at > now() - ($1 || ' days')::interval
          )`,
-      [thresholds.inactivity_days]
+      [thresholds.inactivity_days],
     );
   } catch (err) {
     log.error({ err }, '[sweep] inactivity expiry failed');
@@ -250,7 +247,7 @@ export async function runWorkItemSweep(
            WHERE ts.user_id = tc.client_id
              AND ts.created_at > now() - ($1 || ' days')::interval
          )`,
-      [thresholds.inactivity_days]
+      [thresholds.inactivity_days],
     );
     for (const row of inactive.rows) {
       // Per-CLIENT source id (no date): one open inactivity item per client.
@@ -299,7 +296,7 @@ export async function runWorkItemSweep(
          AND cur.score - prev.score >= $1
          AND cur.created_at > now() - INTERVAL '30 days'
          AND EXISTS (SELECT 1 FROM therapist_clients tc WHERE tc.client_id = cur.client_id)`,
-      [thresholds.screener_worsen_delta]
+      [thresholds.screener_worsen_delta],
     );
     for (const row of worsening.rows) {
       await enqueueWorkItem({
@@ -340,7 +337,7 @@ export async function runWorkItemSweep(
            (SELECT trs.last_read_message_id FROM thread_read_state trs
             WHERE trs.thread_id = t.thread_id AND trs.user_id = t.clinician_id), 0)
        GROUP BY t.thread_id, t.client_id, t.clinician_id, t.clinician_role`,
-      [thresholds.stale_unread_days]
+      [thresholds.stale_unread_days],
     );
     for (const row of stale.rows) {
       await enqueueWorkItem({
@@ -391,7 +388,7 @@ async function claimWorkItemSweepDate(today: string): Promise<boolean> {
            updated_by = 'work-queue-scheduler'
        WHERE system_config.config_value <> EXCLUDED.config_value
      RETURNING config_key`,
-    [SWEEP_STATE_KEY, today]
+    [SWEEP_STATE_KEY, today],
   );
   return (result.rowCount ?? 0) > 0;
 }
@@ -399,13 +396,14 @@ async function claimWorkItemSweepDate(today: string): Promise<boolean> {
 async function schedulerTick(): Promise<void> {
   const now = new Date();
   await runDigestSweep(now);
-  const hour = Number(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Denver',
-      hour: 'numeric',
-      hour12: false,
-    }).format(now)
-  ) % 24;
+  const hour =
+    Number(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Denver',
+        hour: 'numeric',
+        hour12: false,
+      }).format(now),
+    ) % 24;
   const today = denverDateStamp(now);
   if (hour < WORK_ITEM_SWEEP_HOUR || lastWorkItemSweepDate === today) return;
 

@@ -126,7 +126,7 @@
 }
 
 /* sage — calm light preset */
-:root[data-theme="sage"] {
+:root[data-theme='sage'] {
   --c-navy: 34 69 47;
   --c-royal: 63 112 82;
   --c-lightBlue: 205 227 210;
@@ -137,7 +137,7 @@
 }
 
 /* ocean — calm light preset */
-:root[data-theme="ocean"] {
+:root[data-theme='ocean'] {
   --c-navy: 12 58 74;
   --c-royal: 14 116 144;
   --c-lightBlue: 191 229 239;
@@ -148,7 +148,7 @@
 }
 
 /* dusk — calm light preset */
-:root[data-theme="dusk"] {
+:root[data-theme='dusk'] {
   --c-navy: 51 41 77;
   --c-royal: 99 84 156;
   --c-lightBlue: 218 211 236;
@@ -159,7 +159,7 @@
 }
 
 /* dark — full dark mode (used by participants and the admin portal) */
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   --c-white: 31 41 55;
   --c-navy: 11 41 70;
   --c-royal: 29 95 214;
@@ -280,39 +280,111 @@
 /* Dark-mode fixups: a few utilities are dual-use (e.g. text-white as
  * "light text on colored button" vs white as a themeable surface), so
  * they get explicit values instead of the flipped ramp. */
-[data-theme="dark"] .text-white { color: #fff; }
-[data-theme="dark"] .text-navy { color: rgb(var(--c-lightBlue)); }
-[data-theme="dark"] .text-royal { color: #8AB4F8; }
-[data-theme="dark"] .bg-gray-600 { background-color: #4B5563; }
-[data-theme="dark"] .bg-gray-700 { background-color: #374151; }
-[data-theme="dark"] .bg-gray-800 { background-color: #374151; }
-[data-theme="dark"] .bg-gray-900 { background-color: #1F2937; }
-[data-theme="dark"] .hover\:bg-gray-600:hover { background-color: #6B7280; }
-[data-theme="dark"] .hover\:bg-gray-700:hover { background-color: #4B5563; }
-[data-theme="dark"] .hover\:bg-gray-800:hover { background-color: #1F2937; }
-[data-theme="dark"] .hover\:bg-gray-900:hover { background-color: #4B5563; }
-[data-theme="dark"] .text-red-500 { color: #f87171; }
-[data-theme="dark"] .text-red-600 { color: #f87171; }
-[data-theme="dark"] .text-red-700 { color: #fca5a5; }
-[data-theme="dark"] .text-green-500 { color: #4ade80; }
-[data-theme="dark"] .text-green-600 { color: #4ade80; }
-[data-theme="dark"] .text-green-700 { color: #86efac; }
-[data-theme="dark"] .text-blue-500 { color: #60a5fa; }
-[data-theme="dark"] .text-blue-600 { color: #60a5fa; }
-[data-theme="dark"] .text-blue-700 { color: #93c5fd; }
-[data-theme="dark"] .text-yellow-500 { color: #facc15; }
-[data-theme="dark"] .text-yellow-600 { color: #facc15; }
-[data-theme="dark"] .text-yellow-700 { color: #fde047; }
-[data-theme="dark"] .text-purple-500 { color: #c084fc; }
-[data-theme="dark"] .text-purple-600 { color: #c084fc; }
-[data-theme="dark"] .text-purple-700 { color: #d8b4fe; }
-[data-theme="dark"] .text-indigo-500 { color: #818cf8; }
-[data-theme="dark"] .text-indigo-600 { color: #818cf8; }
-[data-theme="dark"] .text-indigo-700 { color: #a5b4fc; }
-[data-theme="dark"] .text-amber-500 { color: #fbbf24; }
-[data-theme="dark"] .text-amber-600 { color: #fbbf24; }
-[data-theme="dark"] .text-amber-700 { color: #fcd34d; }
-[data-theme="dark"] .text-emerald-500 { color: #34d399; }
-[data-theme="dark"] .text-emerald-600 { color: #34d399; }
-[data-theme="dark"] .text-emerald-700 { color: #6ee7b7; }
-[data-theme="dark"] body { color: rgb(229 231 235); }
+[data-theme='dark'] .text-white {
+  color: #fff;
+}
+[data-theme='dark'] .text-navy {
+  color: rgb(var(--c-lightBlue));
+}
+[data-theme='dark'] .text-royal {
+  color: #8ab4f8;
+}
+[data-theme='dark'] .bg-gray-600 {
+  background-color: #4b5563;
+}
+[data-theme='dark'] .bg-gray-700 {
+  background-color: #374151;
+}
+[data-theme='dark'] .bg-gray-800 {
+  background-color: #374151;
+}
+[data-theme='dark'] .bg-gray-900 {
+  background-color: #1f2937;
+}
+[data-theme='dark'] .hover\:bg-gray-600:hover {
+  background-color: #6b7280;
+}
+[data-theme='dark'] .hover\:bg-gray-700:hover {
+  background-color: #4b5563;
+}
+[data-theme='dark'] .hover\:bg-gray-800:hover {
+  background-color: #1f2937;
+}
+[data-theme='dark'] .hover\:bg-gray-900:hover {
+  background-color: #4b5563;
+}
+[data-theme='dark'] .text-red-500 {
+  color: #f87171;
+}
+[data-theme='dark'] .text-red-600 {
+  color: #f87171;
+}
+[data-theme='dark'] .text-red-700 {
+  color: #fca5a5;
+}
+[data-theme='dark'] .text-green-500 {
+  color: #4ade80;
+}
+[data-theme='dark'] .text-green-600 {
+  color: #4ade80;
+}
+[data-theme='dark'] .text-green-700 {
+  color: #86efac;
+}
+[data-theme='dark'] .text-blue-500 {
+  color: #60a5fa;
+}
+[data-theme='dark'] .text-blue-600 {
+  color: #60a5fa;
+}
+[data-theme='dark'] .text-blue-700 {
+  color: #93c5fd;
+}
+[data-theme='dark'] .text-yellow-500 {
+  color: #facc15;
+}
+[data-theme='dark'] .text-yellow-600 {
+  color: #facc15;
+}
+[data-theme='dark'] .text-yellow-700 {
+  color: #fde047;
+}
+[data-theme='dark'] .text-purple-500 {
+  color: #c084fc;
+}
+[data-theme='dark'] .text-purple-600 {
+  color: #c084fc;
+}
+[data-theme='dark'] .text-purple-700 {
+  color: #d8b4fe;
+}
+[data-theme='dark'] .text-indigo-500 {
+  color: #818cf8;
+}
+[data-theme='dark'] .text-indigo-600 {
+  color: #818cf8;
+}
+[data-theme='dark'] .text-indigo-700 {
+  color: #a5b4fc;
+}
+[data-theme='dark'] .text-amber-500 {
+  color: #fbbf24;
+}
+[data-theme='dark'] .text-amber-600 {
+  color: #fbbf24;
+}
+[data-theme='dark'] .text-amber-700 {
+  color: #fcd34d;
+}
+[data-theme='dark'] .text-emerald-500 {
+  color: #34d399;
+}
+[data-theme='dark'] .text-emerald-600 {
+  color: #34d399;
+}
+[data-theme='dark'] .text-emerald-700 {
+  color: #6ee7b7;
+}
+[data-theme='dark'] body {
+  color: rgb(229 231 235);
+}

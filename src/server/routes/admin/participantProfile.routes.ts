@@ -62,9 +62,9 @@ function composeBriefContext(bundle: Bundle): string {
     const s = row.summary as Record<string, unknown>;
     lines.push(
       `Session (${row.ended_at ?? row.created_at}): ${String(s.headline ?? '')}. ` +
-      `Topics: ${Array.isArray(s.topics) ? s.topics.join(', ') : 'n/a'}. ` +
-      `Mood trajectory: ${String(s.mood_trajectory ?? 'n/a')}.` +
-      (s.follow_up ? ` Open follow-up: ${String(s.follow_up)}` : '')
+        `Topics: ${Array.isArray(s.topics) ? s.topics.join(', ') : 'n/a'}. ` +
+        `Mood trajectory: ${String(s.mood_trajectory ?? 'n/a')}.` +
+        (s.follow_up ? ` Open follow-up: ${String(s.follow_up)}` : ''),
     );
   }
 
@@ -80,13 +80,13 @@ function composeBriefContext(bundle: Bundle): string {
     const [latest, prev] = points;
     lines.push(
       `${scale.toUpperCase()} latest: ${latest.score}` +
-      (prev ? ` (previous ${prev.score}, delta ${latest.score - prev.score})` : '')
+        (prev ? ` (previous ${prev.score}, delta ${latest.score - prev.score})` : ''),
     );
   }
 
   const moods = [...bundle.mood_trajectory]
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .map(m => m.mood);
+    .map((m) => m.mood);
   if (moods.length >= 2) {
     const recent = moods.slice(-3);
     const dir = recent[recent.length - 1] - recent[0];
@@ -98,7 +98,7 @@ function composeBriefContext(bundle: Bundle): string {
     if (new Date(f.flagged_at).getTime() >= cutoff) {
       lines.push(
         `Crisis flag ${f.flagged_at} severity ${f.severity ?? 'unknown'}: ` +
-        (f.unflagged_at ? `resolved ${f.unflagged_at}` : 'UNRESOLVED')
+          (f.unflagged_at ? `resolved ${f.unflagged_at}` : 'UNRESOLVED'),
       );
     }
   }
@@ -177,9 +177,14 @@ export default function participantProfileRoutes(): Router {
       // Cost tracking: same best-effort pattern as sessionInsights. Attribute
       // to the latest session (purpose 'insights' — no new purpose enum).
       recordLlmUsage(
-        bundle.summaries[0]?.session_id ?? null, 'insights', BRIEF_MODEL,
-        response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
-      ).catch(() => { /* recordLlmUsage already swallows; belt and braces */ });
+        bundle.summaries[0]?.session_id ?? null,
+        'insights',
+        BRIEF_MODEL,
+        response.usage?.prompt_tokens ?? null,
+        response.usage?.completion_tokens ?? null,
+      ).catch(() => {
+        /* recordLlmUsage already swallows; belt and braces */
+      });
 
       const brief = response.choices[0]?.message?.content?.trim() || null;
       if (brief) briefCache.set(userId, { key: cacheKey, brief });
@@ -193,58 +198,63 @@ export default function participantProfileRoutes(): Router {
   // GET /admin/api/users/:userId/sessions - per-user session history.
   // Caseworker-allowed (summaries tier): rows are session metadata/aggregates
   // only, and requireClientAccess row-scopes to the member's caseload.
-  router.get('/admin/api/users/:userId/sessions', requireRole('therapist', 'researcher', 'caseworker'), requireClientAccess(), async (req, res) => {
-    try {
-      const userId = parseInt(req.params.userId, 10);
-      if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
+  router.get(
+    '/admin/api/users/:userId/sessions',
+    requireRole('therapist', 'researcher', 'caseworker'),
+    requireClientAccess(),
+    async (req, res) => {
+      try {
+        const userId = parseInt(req.params.userId, 10);
+        if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid user id' });
 
-      const { page: pageNum, limit: limitNum } = parsePagination(req.query, { defaultLimit: 25, maxLimit: 100 });
-      const filters = {
-        search: null,
-        startDate: null,
-        endDate: null,
-        minMessages: null,
-        maxMessages: null,
-        limit: limitNum,
-        offset: (pageNum - 1) * limitNum,
-        voices: null,
-        languages: null,
-        durations: null,
-        sessionTypes: null,
-        statuses: null,
-        endedBy: null,
-        crisisFlagged: null,
-        crisisSeverity: null,
-        userId,
-      };
+        const { page: pageNum, limit: limitNum } = parsePagination(req.query, { defaultLimit: 25, maxLimit: 100 });
+        const filters = {
+          search: null,
+          startDate: null,
+          endDate: null,
+          minMessages: null,
+          maxMessages: null,
+          limit: limitNum,
+          offset: (pageNum - 1) * limitNum,
+          voices: null,
+          languages: null,
+          durations: null,
+          sessionTypes: null,
+          statuses: null,
+          endedBy: null,
+          crisisFlagged: null,
+          crisisSeverity: null,
+          userId,
+        };
 
-      // Same scoping as the main session browser (sessions.routes.ts):
-      // care-team members are caseload-scoped; researchers are org-scoped
-      // (C13) so another org's participant history reads as empty.
-      const scope = await careTeamScopeId(req);
-      const orgId = scope === null ? await orgIdFor(req) : null;
-      const [sessions, totalCount] = await Promise.all([
-        listSessions(filters, scope, orgId),
-        countSessions(filters, scope, orgId),
-      ]);
+        // Same scoping as the main session browser (sessions.routes.ts):
+        // care-team members are caseload-scoped; researchers are org-scoped
+        // (C13) so another org's participant history reads as empty.
+        const scope = await careTeamScopeId(req);
+        const orgId = scope === null ? await orgIdFor(req) : null;
+        const [sessions, totalCount] = await Promise.all([
+          listSessions(filters, scope, orgId),
+          countSessions(filters, scope, orgId),
+        ]);
 
-      const extras = await getSessionScoreExtras(sessions.map(s => String(s.session_id)));
-      const extrasById = new Map(extras.map(e => [e.session_id, e]));
-      const enriched = sessions.map(s => ({
-        ...s,
-        eval_score: extrasById.get(String(s.session_id))?.eval_score ?? null,
-        feedback_rating: extrasById.get(String(s.session_id))?.feedback_rating ?? null,
-      }));
+        const extras = await getSessionScoreExtras(sessions.map((s) => String(s.session_id)));
+        const extrasById = new Map(extras.map((e) => [e.session_id, e]));
+        const enriched = sessions.map((s) => ({
+          ...s,
+          eval_score: extrasById.get(String(s.session_id))?.eval_score ?? null,
+          feedback_rating: extrasById.get(String(s.session_id))?.feedback_rating ?? null,
+        }));
 
-      res.json({
-        sessions: enriched,
-        pagination: { page: pageNum, limit: limitNum, totalCount },
-      });
-    } catch (err) {
-      log.error({ err }, 'Failed to fetch participant sessions');
-      res.status(500).json({ error: 'Failed to fetch participant sessions' });
-    }
-  });
+        res.json({
+          sessions: enriched,
+          pagination: { page: pageNum, limit: limitNum, totalCount },
+        });
+      } catch (err) {
+        log.error({ err }, 'Failed to fetch participant sessions');
+        res.status(500).json({ error: 'Failed to fetch participant sessions' });
+      }
+    },
+  );
 
   return router;
 }

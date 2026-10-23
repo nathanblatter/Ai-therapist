@@ -181,7 +181,12 @@ function tally<T>(rows: T[], key: (r: T) => string): Record<string, number> {
   return out;
 }
 
-function resolutionOf(r: { status: string; closed_at: Date | null; submitted_at: Date | null; last_action: string | null }): string {
+function resolutionOf(r: {
+  status: string;
+  closed_at: Date | null;
+  submitted_at: Date | null;
+  last_action: string | null;
+}): string {
   if (r.status === 'closed') return `closed${r.last_action ? ` (last action: ${r.last_action})` : ''}`;
   if (r.status === 'submitted') return 'submitted to IRB, awaiting closure';
   return 'draft - not yet submitted';
@@ -217,7 +222,7 @@ export async function buildIrbPacket(input: BuildIrbPacketInput): Promise<IrbPac
       getIrbDataAccessCounts(w),
     ]);
 
-  const aeRecords: IrbPacketAdverseEvent[] = aes.map(r => ({
+  const aeRecords: IrbPacketAdverseEvent[] = aes.map((r) => ({
     report_id: r.report_id,
     occurred_at: iso(r.occurred_at) ?? '',
     severity: r.severity,
@@ -229,7 +234,7 @@ export async function buildIrbPacket(input: BuildIrbPacketInput): Promise<IrbPac
     closed_at: iso(r.closed_at),
     resolution: resolutionOf(r),
   }));
-  const devRecords: IrbPacketDeviation[] = deviations.map(r => ({
+  const devRecords: IrbPacketDeviation[] = deviations.map((r) => ({
     deviation_id: r.deviation_id,
     occurred_at: iso(r.occurred_at) ?? '',
     source: r.source,
@@ -264,20 +269,20 @@ export async function buildIrbPacket(input: BuildIrbPacketInput): Promise<IrbPac
     safety,
     adverse_events: {
       total: aeRecords.length,
-      by_severity: tally(aeRecords, r => r.severity),
-      by_status: tally(aeRecords, r => r.status),
-      by_category: tally(aeRecords, r => r.category),
+      by_severity: tally(aeRecords, (r) => r.severity),
+      by_status: tally(aeRecords, (r) => r.status),
+      by_category: tally(aeRecords, (r) => r.category),
       records: aeRecords,
     },
     deviations: {
       total: devRecords.length,
-      by_severity: tally(devRecords, r => r.severity),
-      by_status: tally(devRecords, r => r.status),
-      by_category: tally(devRecords, r => r.category),
+      by_severity: tally(devRecords, (r) => r.severity),
+      by_status: tally(devRecords, (r) => r.status),
+      by_category: tally(devRecords, (r) => r.category),
       records: devRecords,
     },
     consent: {
-      versions: consentVersions.map(v => {
+      versions: consentVersions.map((v) => {
         const sup = iso(v.superseded_at);
         return {
           version: v.version,
@@ -292,7 +297,7 @@ export async function buildIrbPacket(input: BuildIrbPacketInput): Promise<IrbPac
     },
     monitoring: {
       drift_alerts: monitoring.drift_alerts,
-      harness_runs: monitoring.harness_runs.map(h => ({ ...h, last_run_at: iso(h.last_run_at) })),
+      harness_runs: monitoring.harness_runs.map((h) => ({ ...h, last_run_at: iso(h.last_run_at) })),
     },
     data_access: {
       counts: dataAccess,
@@ -311,20 +316,42 @@ export interface IrbPacketFile {
   content: string;
 }
 
-const col = (name: string, type: DatasetColumn['type'] = 'string'): DatasetColumn => ({ name, type, source: 'irb_packet' });
+const col = (name: string, type: DatasetColumn['type'] = 'string'): DatasetColumn => ({
+  name,
+  type,
+  source: 'irb_packet',
+});
 
 const AE_COLUMNS = [
-  col('report_id', 'int'), col('occurred_at', 'timestamp'), col('severity'), col('category'),
-  col('trigger_source'), col('status'), col('summary'), col('submitted_at', 'timestamp'),
-  col('closed_at', 'timestamp'), col('resolution'),
+  col('report_id', 'int'),
+  col('occurred_at', 'timestamp'),
+  col('severity'),
+  col('category'),
+  col('trigger_source'),
+  col('status'),
+  col('summary'),
+  col('submitted_at', 'timestamp'),
+  col('closed_at', 'timestamp'),
+  col('resolution'),
 ];
 const DEVIATION_COLUMNS = [
-  col('deviation_id', 'int'), col('occurred_at', 'timestamp'), col('source'), col('category'),
-  col('severity'), col('status'), col('description'), col('resolved_at', 'timestamp'),
+  col('deviation_id', 'int'),
+  col('occurred_at', 'timestamp'),
+  col('source'),
+  col('category'),
+  col('severity'),
+  col('status'),
+  col('description'),
+  col('resolved_at', 'timestamp'),
 ];
 const CONSENT_COLUMNS = [
-  col('version'), col('audience'), col('effective_at', 'timestamp'), col('superseded_at', 'timestamp'),
-  col('in_force_at_end', 'bool'), col('acceptances_in_window', 'int'), col('acceptances_total', 'int'),
+  col('version'),
+  col('audience'),
+  col('effective_at', 'timestamp'),
+  col('superseded_at', 'timestamp'),
+  col('in_force_at_end', 'bool'),
+  col('acceptances_in_window', 'int'),
+  col('acceptances_total', 'int'),
 ];
 
 function renderReadme(p: IrbPacket): string {
@@ -361,9 +388,18 @@ function renderReadme(p: IrbPacket): string {
 export function buildIrbPacketFiles(p: IrbPacket): IrbPacketFile[] {
   return [
     { name: 'packet.json', content: JSON.stringify(p, null, 2) + '\n' },
-    { name: 'adverse_events.csv', content: toCsv(AE_COLUMNS, p.adverse_events.records as unknown as Record<string, unknown>[]) },
-    { name: 'deviations.csv', content: toCsv(DEVIATION_COLUMNS, p.deviations.records as unknown as Record<string, unknown>[]) },
-    { name: 'consent_versions.csv', content: toCsv(CONSENT_COLUMNS, p.consent.versions as unknown as Record<string, unknown>[]) },
+    {
+      name: 'adverse_events.csv',
+      content: toCsv(AE_COLUMNS, p.adverse_events.records as unknown as Record<string, unknown>[]),
+    },
+    {
+      name: 'deviations.csv',
+      content: toCsv(DEVIATION_COLUMNS, p.deviations.records as unknown as Record<string, unknown>[]),
+    },
+    {
+      name: 'consent_versions.csv',
+      content: toCsv(CONSENT_COLUMNS, p.consent.versions as unknown as Record<string, unknown>[]),
+    },
     { name: 'README.md', content: renderReadme(p) },
   ];
 }
@@ -411,9 +447,9 @@ function day(d: string | null | undefined): string {
 }
 
 function table(headers: string[], rows: unknown[][], emptyText = 'None in this period.'): string {
-  const head = `<thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead>`;
+  const head = `<thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>`;
   const body = rows.length
-    ? rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')
+    ? rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')
     : `<tr><td colspan="${headers.length}" class="muted">${esc(emptyText)}</td></tr>`;
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }
@@ -423,7 +459,9 @@ function kv(pairs: [string, unknown][]): string {
 }
 
 function tallyRows(t: Record<string, number>): unknown[][] {
-  return Object.entries(t).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, v]);
+  return Object.entries(t)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => [k, v]);
 }
 
 function pct(x: number | null): string {
@@ -432,20 +470,25 @@ function pct(x: number | null): string {
 
 export function renderIrbPacketHtml(p: IrbPacket): string {
   const notSet = '(not set - fill by hand)';
-  const armsBy = (dim: IrbArmCount['dimension']) => p.enrollment.arms.filter(a => a.dimension === dim);
+  const armsBy = (dim: IrbArmCount['dimension']) => p.enrollment.arms.filter((a) => a.dimension === dim);
 
   const sections: string[] = [];
 
-  sections.push(`<section><h2>1. Study</h2>${kv([
-    ['Protocol', p.study.protocol_id ?? notSet],
-    ['Principal investigator', p.study.principal_investigator ?? notSet],
-    ['Study title', p.study.study_title ?? notSet],
-    ['Deployment mode', p.study.deployment_mode],
-    ['Enrollment target', p.study.enrollment_target],
-    ['Expected sessions per participant', p.study.expected_sessions_per_participant],
-    ['Protocol study window', `${day(p.study.study_start)} to ${day(p.study.study_end)}`],
-    ['Organization', `${p.meta.organization.name ?? p.meta.organization.id}${p.meta.organization.is_irb_study_org ? ' (IRB study org; anonymous sessions included)' : ''}`],
-  ])}</section>`);
+  sections.push(
+    `<section><h2>1. Study</h2>${kv([
+      ['Protocol', p.study.protocol_id ?? notSet],
+      ['Principal investigator', p.study.principal_investigator ?? notSet],
+      ['Study title', p.study.study_title ?? notSet],
+      ['Deployment mode', p.study.deployment_mode],
+      ['Enrollment target', p.study.enrollment_target],
+      ['Expected sessions per participant', p.study.expected_sessions_per_participant],
+      ['Protocol study window', `${day(p.study.study_start)} to ${day(p.study.study_end)}`],
+      [
+        'Organization',
+        `${p.meta.organization.name ?? p.meta.organization.id}${p.meta.organization.is_irb_study_org ? ' (IRB study org; anonymous sessions included)' : ''}`,
+      ],
+    ])}</section>`,
+  );
 
   const e = p.enrollment;
   sections.push(`<section><h2>2. Enrollment</h2>${kv([
@@ -458,8 +501,19 @@ export function renderIrbPacketHtml(p: IrbPacket): string {
     ['Anonymous (unenrolled) sessions in period', e.anonymous_sessions_in_window],
   ])}
   <h3>Arm balance (in-period sessions)</h3>
-  ${table(['proactive_offering', 'sessions', 'participants'], armsBy('proactive_offering').map(a => [a.value, a.sessions, a.participants]), 'No arm data in this period.')}
-  ${armsBy('ai_model').length ? `<h3>Model condition</h3>${table(['ai_model', 'sessions', 'participants'], armsBy('ai_model').map(a => [a.value, a.sessions, a.participants]))}` : ''}
+  ${table(
+    ['proactive_offering', 'sessions', 'participants'],
+    armsBy('proactive_offering').map((a) => [a.value, a.sessions, a.participants]),
+    'No arm data in this period.',
+  )}
+  ${
+    armsBy('ai_model').length
+      ? `<h3>Model condition</h3>${table(
+          ['ai_model', 'sessions', 'participants'],
+          armsBy('ai_model').map((a) => [a.value, a.sessions, a.participants]),
+        )}`
+      : ''
+  }
   </section>`);
 
   const s = p.sessions;
@@ -469,14 +523,23 @@ export function renderIrbPacketHtml(p: IrbPacket): string {
     ['Mean duration (minutes, ended sessions)', s.mean_duration_minutes ?? '-'],
   ])}
   <div class="cols">
-    <div><h3>By session type</h3>${table(['type', 'n'], s.by_session_type.map(x => [x.value, x.n]))}</div>
-    <div><h3>By modality</h3>${table(['modality', 'n'], s.by_modality.map(x => [x.value, x.n]))}</div>
+    <div><h3>By session type</h3>${table(
+      ['type', 'n'],
+      s.by_session_type.map((x) => [x.value, x.n]),
+    )}</div>
+    <div><h3>By modality</h3>${table(
+      ['modality', 'n'],
+      s.by_modality.map((x) => [x.value, x.n]),
+    )}</div>
   </div></section>`);
 
   const sf = p.safety;
   sections.push(`<section><h2>4. Safety monitoring</h2>
   <h3>Crisis events (by type and severity)</h3>
-  ${table(['event_type', 'severity', 'n'], sf.crisis_events.map(x => [x.event_type, x.severity, x.n]))}
+  ${table(
+    ['event_type', 'severity', 'n'],
+    sf.crisis_events.map((x) => [x.event_type, x.severity, x.n]),
+  )}
   <h3>Flagged sessions and outcomes</h3>${kv([
     ['Sessions flagged in period', sf.flagged_sessions.total],
     ['Unflagged after review', sf.flagged_sessions.unflagged_before_end],
@@ -485,8 +548,14 @@ export function renderIrbPacketHtml(p: IrbPacket): string {
     ['On-call pages sent', sf.pages_sent],
   ])}
   <div class="cols">
-    <div><h3>Interventions by type</h3>${table(['action_type', 'n'], sf.interventions.map(x => [x.action_type, x.n]))}</div>
-    <div><h3>Care-team escalations</h3>${table(['status', 'urgency', 'n'], sf.escalations.map(x => [x.status, x.urgency, x.n]))}</div>
+    <div><h3>Interventions by type</h3>${table(
+      ['action_type', 'n'],
+      sf.interventions.map((x) => [x.action_type, x.n]),
+    )}</div>
+    <div><h3>Care-team escalations</h3>${table(
+      ['status', 'urgency', 'n'],
+      sf.escalations.map((x) => [x.status, x.urgency, x.n]),
+    )}</div>
   </div></section>`);
 
   const ae = p.adverse_events;
@@ -498,8 +567,20 @@ export function renderIrbPacketHtml(p: IrbPacket): string {
   </div>
   <h3>Register (${ae.total})</h3>
   <p class="muted small">De-identified: no participant reference, session id or transcript text. Full reports are in the adverse-event register.</p>
-  ${table(['#', 'occurred', 'severity', 'category', 'trigger', 'status', 'summary', 'resolution', 'closed'],
-    ae.records.map(r => [r.report_id, fmt(r.occurred_at), r.severity, r.category, r.trigger_source, r.status, r.summary, r.resolution, fmt(r.closed_at)]))}
+  ${table(
+    ['#', 'occurred', 'severity', 'category', 'trigger', 'status', 'summary', 'resolution', 'closed'],
+    ae.records.map((r) => [
+      r.report_id,
+      fmt(r.occurred_at),
+      r.severity,
+      r.category,
+      r.trigger_source,
+      r.status,
+      r.summary,
+      r.resolution,
+      fmt(r.closed_at),
+    ]),
+  )}
   </section>`);
 
   const dv = p.deviations;
@@ -510,15 +591,44 @@ export function renderIrbPacketHtml(p: IrbPacket): string {
     <div><h3>By category</h3>${table(['category', 'n'], tallyRows(dv.by_category))}</div>
   </div>
   <h3>Register (${dv.total})</h3>
-  ${table(['#', 'occurred', 'source', 'category', 'severity', 'status', 'description', 'resolved'],
-    dv.records.map(r => [r.deviation_id, fmt(r.occurred_at), r.source, r.category, r.severity, r.status, r.description, fmt(r.resolved_at)]))}
+  ${table(
+    ['#', 'occurred', 'source', 'category', 'severity', 'status', 'description', 'resolved'],
+    dv.records.map((r) => [
+      r.deviation_id,
+      fmt(r.occurred_at),
+      r.source,
+      r.category,
+      r.severity,
+      r.status,
+      r.description,
+      fmt(r.resolved_at),
+    ]),
+  )}
   </section>`);
 
   sections.push(`<section><h2>7. Consent</h2>
   <p class="small">Versions in force at any point in the period. Acceptances are by participants in scope.</p>
-  ${table(['version', 'audience', 'effective', 'superseded', 'in force at period end', 'acceptances in period', 'acceptances total'],
-    p.consent.versions.map(v => [v.version, v.audience, fmt(v.effective_at), fmt(v.superseded_at), v.in_force_at_end ? 'yes' : 'no', v.acceptances_in_window, v.acceptances_total]),
-    'No consent document in force in this period.')}
+  ${table(
+    [
+      'version',
+      'audience',
+      'effective',
+      'superseded',
+      'in force at period end',
+      'acceptances in period',
+      'acceptances total',
+    ],
+    p.consent.versions.map((v) => [
+      v.version,
+      v.audience,
+      fmt(v.effective_at),
+      fmt(v.superseded_at),
+      v.in_force_at_end ? 'yes' : 'no',
+      v.acceptances_in_window,
+      v.acceptances_total,
+    ]),
+    'No consent document in force in this period.',
+  )}
   </section>`);
 
   const m = p.monitoring;
@@ -530,14 +640,21 @@ export function renderIrbPacketHtml(p: IrbPacket): string {
     ['Paged on-call', m.drift_alerts.paged_in_window],
   ])}
   <h3>Red-team / simulation harness runs</h3>
-  ${table(['suite', 'runs', 'scenarios', 'passed', 'pass rate', 'last run'],
-    m.harness_runs.map(h => [h.suite, h.runs, h.scenarios, h.passed, pct(h.pass_rate), fmt(h.last_run_at)]), 'No harness runs in this period.')}
+  ${table(
+    ['suite', 'runs', 'scenarios', 'passed', 'pass rate', 'last run'],
+    m.harness_runs.map((h) => [h.suite, h.runs, h.scenarios, h.passed, pct(h.pass_rate), fmt(h.last_run_at)]),
+    'No harness runs in this period.',
+  )}
   </section>`);
 
   const da = p.data_access;
   sections.push(`<section><h2>9. Data access</h2>
   <p class="small">Who viewed participant data, by action and role (counts from the append-only access log). Total: ${esc(da.total)}.</p>
-  ${table(['action', 'role', 'n'], da.counts.map(x => [x.action, x.role, x.n]), 'No logged access in this period.')}
+  ${table(
+    ['action', 'role', 'n'],
+    da.counts.map((x) => [x.action, x.role, x.n]),
+    'No logged access in this period.',
+  )}
   </section>`);
 
   sections.push(`<section><h2>10. Data-security incidents</h2>

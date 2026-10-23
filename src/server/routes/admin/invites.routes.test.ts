@@ -59,9 +59,7 @@ describe('POST /admin/api/caseload/invites', () => {
   });
 
   it('mints an invite for the calling therapist and returns the one-time /join link', async () => {
-    const res = await request(appAs('therapist'))
-      .post('/admin/api/caseload/invites')
-      .send({ label: 'JB' });
+    const res = await request(appAs('therapist')).post('/admin/api/caseload/invites').send({ label: 'JB' });
 
     expect(res.status).toBe(200);
     expect(res.body.link).toBe(`/join/${RAW_TOKEN}`);
@@ -77,8 +75,12 @@ describe('POST /admin/api/caseload/invites', () => {
   });
 
   it('rejects a non-positive or garbage ttlHours with 400', async () => {
-    expect((await request(appAs('therapist')).post('/admin/api/caseload/invites').send({ ttlHours: 0 })).status).toBe(400);
-    expect((await request(appAs('therapist')).post('/admin/api/caseload/invites').send({ ttlHours: 'soon' })).status).toBe(400);
+    expect((await request(appAs('therapist')).post('/admin/api/caseload/invites').send({ ttlHours: 0 })).status).toBe(
+      400,
+    );
+    expect(
+      (await request(appAs('therapist')).post('/admin/api/caseload/invites').send({ ttlHours: 'soon' })).status,
+    ).toBe(400);
     expect(mocks.createInvite).not.toHaveBeenCalled();
   });
 
@@ -109,9 +111,7 @@ describe('GET /admin/api/caseload/invites', () => {
 
     expect(res.status).toBe(200);
     expect(mocks.listInvites).toHaveBeenCalledWith(1);
-    expect(res.body.invites.map((i: { state: string }) => i.state)).toEqual([
-      'pending', 'used', 'expired', 'used',
-    ]);
+    expect(res.body.invites.map((i: { state: string }) => i.state)).toEqual(['pending', 'used', 'expired', 'used']);
     for (const invite of res.body.invites) {
       expect(invite.token_hash).toBeUndefined();
     }

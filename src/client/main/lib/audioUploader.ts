@@ -37,21 +37,33 @@ export function createAudioUploader(
       headers: { 'Content-Type': 'application/json' },
       body,
       keepalive: true,
-    }).then((res) => {
-      // 410 = the server already finalized this recording (session ended or
-      // auto-terminated); stop uploading instead of streaming into the void.
-      if (res.status === 410) {
-        dead = true;
-        clearInterval(timer);
-        buf = [];
-      }
-    }).catch(() => { /* best-effort; dropped audio just shortens the recording */ });
+    })
+      .then((res) => {
+        // 410 = the server already finalized this recording (session ended or
+        // auto-terminated); stop uploading instead of streaming into the void.
+        if (res.status === 410) {
+          dead = true;
+          clearInterval(timer);
+          buf = [];
+        }
+      })
+      .catch(() => {
+        /* best-effort; dropped audio just shortens the recording */
+      });
   };
 
   const timer = setInterval(() => flush(false), flushMs);
 
   return {
-    push: (pcm, sr) => { if (!dead) { sampleRate = sr; buf.push(pcm); } },
-    stop: () => { clearInterval(timer); flush(true); },
+    push: (pcm, sr) => {
+      if (!dead) {
+        sampleRate = sr;
+        buf.push(pcm);
+      }
+    },
+    stop: () => {
+      clearInterval(timer);
+      flush(true);
+    },
   };
 }

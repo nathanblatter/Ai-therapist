@@ -114,7 +114,12 @@ export interface IrbArmCount {
 
 /** In-window sessions (and distinct participants) per arm value. */
 export async function getIrbArmCounts(w: IrbWindow): Promise<IrbArmCount[]> {
-  const r = await pool.query<{ dimension: IrbArmCount['dimension']; value: string; sessions: string; participants: string }>(
+  const r = await pool.query<{
+    dimension: IrbArmCount['dimension'];
+    value: string;
+    sessions: string;
+    participants: string;
+  }>(
     `SELECT dimension, value, COUNT(*) AS sessions,
             COUNT(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL) AS participants
        FROM (
@@ -132,7 +137,12 @@ export async function getIrbArmCounts(w: IrbWindow): Promise<IrbArmCount[]> {
       GROUP BY dimension, value ORDER BY dimension, value`,
     params(w),
   );
-  return r.rows.map(x => ({ dimension: x.dimension, value: x.value, sessions: n(x.sessions), participants: n(x.participants) }));
+  return r.rows.map((x) => ({
+    dimension: x.dimension,
+    value: x.value,
+    sessions: n(x.sessions),
+    participants: n(x.participants),
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -179,8 +189,8 @@ export async function getIrbSessionCounts(w: IrbWindow): Promise<IrbSessionCount
     total: n(t?.total),
     ended: n(t?.ended),
     mean_duration_minutes: mean != null && Number.isFinite(mean) ? Math.round(mean * 10) / 10 : null,
-    by_session_type: types.rows.map(x => ({ value: x.value ?? 'unknown', n: n(x.n) })),
-    by_modality: modalities.rows.map(x => ({ value: x.value ?? 'unknown', n: n(x.n) })),
+    by_session_type: types.rows.map((x) => ({ value: x.value ?? 'unknown', n: n(x.n) })),
+    by_modality: modalities.rows.map((x) => ({ value: x.value ?? 'unknown', n: n(x.n) })),
   };
 }
 
@@ -243,9 +253,9 @@ export async function getIrbSafetyCounts(w: IrbWindow): Promise<IrbSafetyCounts>
     ),
   ]);
   const f = flagged.rows[0] ?? {};
-  const interventions = actions.rows.map(x => ({ action_type: x.action_type, n: n(x.n) }));
+  const interventions = actions.rows.map((x) => ({ action_type: x.action_type, n: n(x.n) }));
   return {
-    crisis_events: events.rows.map(x => ({ event_type: x.event_type, severity: x.severity ?? 'unknown', n: n(x.n) })),
+    crisis_events: events.rows.map((x) => ({ event_type: x.event_type, severity: x.severity ?? 'unknown', n: n(x.n) })),
     flagged_sessions: {
       total: n(f.total),
       unflagged_before_end: n(f.unflagged_before_end),
@@ -253,8 +263,8 @@ export async function getIrbSafetyCounts(w: IrbWindow): Promise<IrbSafetyCounts>
       with_adverse_event_report: n(f.with_adverse_event_report),
     },
     interventions,
-    pages_sent: interventions.find(i => i.action_type === 'crisis_sms_alert')?.n ?? 0,
-    escalations: escalations.rows.map(x => ({ status: x.status, urgency: x.urgency, n: n(x.n) })),
+    pages_sent: interventions.find((i) => i.action_type === 'crisis_sms_alert')?.n ?? 0,
+    escalations: escalations.rows.map((x) => ({ status: x.status, urgency: x.urgency, n: n(x.n) })),
   };
 }
 
@@ -360,7 +370,7 @@ export async function getIrbConsentVersions(w: IrbWindow): Promise<IrbConsentVer
       ORDER BY d.audience, d.effective_at`,
     params(w),
   );
-  return r.rows.map(x => ({
+  return r.rows.map((x) => ({
     version: x.version,
     audience: x.audience,
     effective_at: x.effective_at,
@@ -422,7 +432,7 @@ export async function getIrbMonitoringCounts(w: IrbWindow): Promise<IrbMonitorin
       open_at_end: n(d.open_at_end),
       paged_in_window: n(d.paged_in_window),
     },
-    harness_runs: harness.rows.map(x => {
+    harness_runs: harness.rows.map((x) => {
       const scenarios = n(x.scenarios);
       const passed = n(x.passed);
       return {
@@ -461,5 +471,5 @@ export async function getIrbDataAccessCounts(w: IrbWindow): Promise<IrbDataAcces
       GROUP BY 1, 2 ORDER BY 1, 2`,
     [w.from, w.to, w.orgId],
   );
-  return r.rows.map(x => ({ action: x.action, role: x.role ?? 'unknown', n: n(x.n) }));
+  return r.rows.map((x) => ({ action: x.action, role: x.role ?? 'unknown', n: n(x.n) }));
 }

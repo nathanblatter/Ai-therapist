@@ -4,16 +4,11 @@
 // src/client/shared/theme-tokens.css, so existing utility classes keep
 // working while a [data-theme] attribute on <html> re-skins the whole UI.
 const STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
-const varScale = (family) =>
-  Object.fromEntries(STEPS.map((s) => [s, `rgb(var(--c-${family}-${s}) / <alpha-value>)`]));
+const varScale = (family) => Object.fromEntries(STEPS.map((s) => [s, `rgb(var(--c-${family}-${s}) / <alpha-value>)`]));
 const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
 
 export default {
-  content: [
-    "./src/client/main/index.html",
-    "./src/client/admin/admin.html",
-    "./src/client/**/*.{jsx,tsx,js,ts}"
-  ],
+  content: ['./src/client/main/index.html', './src/client/admin/admin.html', './src/client/**/*.{jsx,tsx,js,ts}'],
   theme: {
     extend: {
       colors: {

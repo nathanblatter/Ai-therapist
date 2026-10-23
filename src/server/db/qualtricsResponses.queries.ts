@@ -29,7 +29,7 @@ export async function upsertQualtricsResponse(r: QualtricsResponseUpsert): Promi
        recorded_at = EXCLUDED.recorded_at,
        answers = EXCLUDED.answers,
        synced_at = now()`,
-    [r.responseId, r.surveyId, r.surveyRole, r.userId, r.studySid, r.finished, r.recordedAt, JSON.stringify(r.answers)]
+    [r.responseId, r.surveyId, r.surveyRole, r.userId, r.studySid, r.finished, r.recordedAt, JSON.stringify(r.answers)],
   );
 }
 
@@ -39,7 +39,7 @@ export async function resolveStudySidToUserId(studySid: string): Promise<number 
   const { rows } = await pool.query(
     `SELECT userid FROM users
      WHERE userid = $1 AND role = 'participant' AND is_sandbox IS NOT TRUE`,
-    [Number(studySid)]
+    [Number(studySid)],
   );
   return rows[0]?.userid ?? null;
 }
@@ -47,10 +47,9 @@ export async function resolveStudySidToUserId(studySid: string): Promise<number 
 /** Enrollment anchor for the survey schedule: when the participant's account
  *  was created from their baseline survey (earliest, if somehow several). */
 export async function getEnrollmentAnchor(userId: number): Promise<Date | null> {
-  const { rows } = await pool.query(
-    'SELECT min(registered_at) AS anchor FROM qualtrics_signups WHERE user_id = $1',
-    [userId]
-  );
+  const { rows } = await pool.query('SELECT min(registered_at) AS anchor FROM qualtrics_signups WHERE user_id = $1', [
+    userId,
+  ]);
   return rows[0]?.anchor ?? null;
 }
 
@@ -64,7 +63,7 @@ export async function getFinishedResponsesForUser(userId: number): Promise<Finis
   const { rows } = await pool.query(
     `SELECT survey_role AS "surveyRole", recorded_at AS "recordedAt"
      FROM qualtrics_responses WHERE user_id = $1 AND finished`,
-    [userId]
+    [userId],
   );
   return rows;
 }
@@ -88,7 +87,7 @@ export async function getLinkedSurveyRows(): Promise<LinkedSurveyRow[]> {
      FROM qualtrics_responses qr
      JOIN users u ON u.userid = qr.user_id
      WHERE qr.finished AND qr.user_id IS NOT NULL
-     ORDER BY qr.recorded_at ASC`
+     ORDER BY qr.recorded_at ASC`,
   );
   return rows;
 }
@@ -107,7 +106,7 @@ export async function getEnrolledParticipants(): Promise<EnrollmentRow[]> {
      JOIN users u ON u.userid = qs.user_id
      WHERE qs.user_id IS NOT NULL
      GROUP BY qs.user_id, u.username
-     ORDER BY min(qs.registered_at) ASC`
+     ORDER BY min(qs.registered_at) ASC`,
   );
   return rows;
 }
@@ -128,7 +127,7 @@ export async function getEnrollmentFunnel(): Promise<EnrollmentFunnel> {
        (SELECT count(*) FROM qualtrics_responses WHERE survey_role = 'baseline' AND finished) AS baseline,
        (SELECT count(*) FROM qualtrics_signups WHERE registered_at IS NOT NULL) AS accounts,
        (SELECT count(*) FROM qualtrics_responses
-        WHERE finished AND user_id IS NULL AND survey_role <> 'baseline') AS unlinked`
+        WHERE finished AND user_id IS NULL AND survey_role <> 'baseline') AS unlinked`,
   );
   return {
     baselineFinished: Number(rows[0].baseline),
@@ -161,7 +160,7 @@ export async function getSurveyAnswersForExport(asOf: string): Promise<SurveyAns
        AND qr.recorded_at <= $1::timestamptz
        AND u.is_sandbox IS NOT TRUE
      ORDER BY rp.pseudonym, qr.recorded_at`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }
@@ -170,7 +169,7 @@ export async function getSurveyAnswersForExport(asOf: string): Promise<SurveyAns
 export async function findUserIdForBaselineResponse(responseId: string): Promise<number | null> {
   const { rows } = await pool.query(
     'SELECT user_id FROM qualtrics_signups WHERE response_id = $1 AND user_id IS NOT NULL',
-    [responseId]
+    [responseId],
   );
   return rows[0]?.user_id ?? null;
 }
@@ -202,7 +201,7 @@ export async function getQualtricsLinkageStats(): Promise<SurveyLinkageStats[]> 
             to_char(max(recorded_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_recorded_at
      FROM qualtrics_responses
      GROUP BY survey_role
-     ORDER BY survey_role`
+     ORDER BY survey_role`,
   );
   return rows.map((r) => ({
     surveyRole: r.survey_role,
@@ -226,7 +225,7 @@ export async function getUnlinkedFinishedResponses(limit = 50): Promise<Unlinked
      WHERE finished AND user_id IS NULL
      ORDER BY recorded_at DESC NULLS LAST
      LIMIT $1`,
-    [limit]
+    [limit],
   );
   return rows.map((r) => ({
     responseId: r.response_id,
@@ -261,7 +260,7 @@ export async function getSurveyResponsesExport(asOf: string): Promise<SurveyExpo
        AND qr.recorded_at <= $1::timestamptz
        AND u.is_sandbox IS NOT TRUE
      ORDER BY rp.pseudonym, qr.recorded_at`,
-    [asOf]
+    [asOf],
   );
   return rows;
 }

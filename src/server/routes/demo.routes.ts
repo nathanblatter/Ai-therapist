@@ -116,7 +116,7 @@ export default function demoRoutes(): Router {
     res.json(demoCrisisAll());
   });
   router.get('/admin/api/crisis/active', (_req, res) => {
-    res.json({ sessions: demoActiveSessions().sessions.filter(s => s.crisis_flagged) });
+    res.json({ sessions: demoActiveSessions().sessions.filter((s) => s.crisis_flagged) });
   });
   router.get('/admin/api/crisis/events', (_req, res) => {
     res.json({ events: demoCrisisAll().crisisEvents });
@@ -170,7 +170,7 @@ export default function demoRoutes(): Router {
       const headers = Object.keys(rows[0]);
       const csv = [
         headers.join(','),
-        ...rows.map(r => headers.map(h => JSON.stringify((r as Record<string, unknown>)[h] ?? '')).join(',')),
+        ...rows.map((r) => headers.map((h) => JSON.stringify((r as Record<string, unknown>)[h] ?? '')).join(',')),
       ].join('\n');
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', 'attachment; filename="demo-export.csv"');

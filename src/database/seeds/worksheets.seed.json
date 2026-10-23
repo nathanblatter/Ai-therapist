@@ -15,7 +15,10 @@
     "source": "Expressive writing (standard clinical exercise)",
     "source_url": "https://www.nimh.nih.gov/health/topics/caring-for-your-mental-health",
     "license": "Concept — public domain; exercise scaffold",
-    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "Write a letter you will never send to the person on your mind. Say everything you haven't been able to say." }
+    "metadata": {
+      "render_tool": "show_journaling_prompt",
+      "prompt": "Write a letter you will never send to the person on your mind. Say everything you haven't been able to say."
+    }
   },
   {
     "topic": "values",
@@ -24,7 +27,10 @@
     "source": "Acceptance and commitment therapy — values clarification (standard clinical exercise)",
     "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
     "license": "Concept — public domain; exercise scaffold",
-    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "What matters most to you in the area of life that feels hardest right now, and what is one small step that would honor it?" }
+    "metadata": {
+      "render_tool": "show_journaling_prompt",
+      "prompt": "What matters most to you in the area of life that feels hardest right now, and what is one small step that would honor it?"
+    }
   },
   {
     "topic": "anxiety",
@@ -33,6 +39,9 @@
     "source": "Cognitive behavioral therapy — stimulus control for worry (standard clinical exercise)",
     "source_url": "https://www.nimh.nih.gov/health/publications/generalized-anxiety-disorder-gad",
     "license": "Concept — public domain; exercise scaffold",
-    "metadata": { "render_tool": "show_journaling_prompt", "prompt": "List the worries on your mind right now. We'll set them aside together for a scheduled worry time." }
+    "metadata": {
+      "render_tool": "show_journaling_prompt",
+      "prompt": "List the worries on your mind right now. We'll set them aside together for a scheduled worry time."
+    }
   }
 ]

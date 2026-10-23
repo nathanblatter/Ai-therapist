@@ -61,7 +61,11 @@ export default function riskCalibrationRoutes(): Router {
       res.json({
         runs,
         current_bands: CURRENT_BANDS,
-        defaults: { sample_size: DEFAULT_SAMPLE_SIZE, max_sample_size: MAX_SAMPLE_SIZE, budget_usd: MISS_RATE_BUDGET_USD },
+        defaults: {
+          sample_size: DEFAULT_SAMPLE_SIZE,
+          max_sample_size: MAX_SAMPLE_SIZE,
+          budget_usd: MISS_RATE_BUDGET_USD,
+        },
       });
     } catch (err) {
       log.error({ err }, 'Failed to list risk calibration runs');
@@ -101,7 +105,8 @@ export default function riskCalibrationRoutes(): Router {
           sample_size: body.sample_size === undefined ? undefined : Number(body.sample_size),
           seed: body.seed === undefined ? undefined : Number(body.seed),
           dry_run: body.dry_run === true,
-          unflagged_as_negative: body.unflagged_as_negative === undefined ? undefined : body.unflagged_as_negative === true,
+          unflagged_as_negative:
+            body.unflagged_as_negative === undefined ? undefined : body.unflagged_as_negative === true,
         });
       } catch (err) {
         return res.status(400).json({ error: err instanceof Error ? err.message : 'Invalid parameters' });
@@ -109,7 +114,11 @@ export default function riskCalibrationRoutes(): Router {
       if (running) return res.status(409).json({ error: 'A calibration run is already in progress' });
       running = true;
       try {
-        const run = await runAndStoreRiskCalibration({ orgId, params, createdBy: req.session?.username ?? 'researcher' });
+        const run = await runAndStoreRiskCalibration({
+          orgId,
+          params,
+          createdBy: req.session?.username ?? 'researcher',
+        });
         res.status(201).json({ run });
       } finally {
         running = false;

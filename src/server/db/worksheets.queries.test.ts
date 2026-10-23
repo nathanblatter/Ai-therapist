@@ -32,10 +32,34 @@ beforeEach(() => {
 
 describe('listWorksheetInstancesForReview', () => {
   it('selects completed, still-pending instances newest first with a pseudo-reference and no answers', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [
-      { instance_id: 2, session_id: 's2', user_id: 9, template_chunk_id: null, template_title: 'Evidence list', title: 'T', section_count: 2, created_at: new Date(), completed_at: new Date(), total_count: '2' },
-      { instance_id: 1, session_id: 's1', user_id: 9, template_chunk_id: 21, template_title: null, title: 'T', section_count: 3, created_at: new Date(), completed_at: new Date(), total_count: '2' },
-    ] });
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        {
+          instance_id: 2,
+          session_id: 's2',
+          user_id: 9,
+          template_chunk_id: null,
+          template_title: 'Evidence list',
+          title: 'T',
+          section_count: 2,
+          created_at: new Date(),
+          completed_at: new Date(),
+          total_count: '2',
+        },
+        {
+          instance_id: 1,
+          session_id: 's1',
+          user_id: 9,
+          template_chunk_id: 21,
+          template_title: null,
+          title: 'T',
+          section_count: 3,
+          created_at: new Date(),
+          completed_at: new Date(),
+          total_count: '2',
+        },
+      ],
+    });
     const { rows, total } = await listWorksheetInstancesForReview({ limit: 500, offset: -3 });
     const [sql, params] = queryMock.mock.calls[0];
     expect(sql).toMatch(/w\.status = 'completed' AND w\.review_status = 'pending'/);
@@ -45,7 +69,7 @@ describe('listWorksheetInstancesForReview', () => {
     expect(sql).not.toMatch(/username/);
     expect(params).toEqual([200, 0]); // clamped
     expect(total).toBe(2);
-    expect(rows.map(r => r.instance_id)).toEqual([2, 1]);
+    expect(rows.map((r) => r.instance_id)).toEqual([2, 1]);
     expect(rows[0]).not.toHaveProperty('total_count');
   });
 
@@ -118,7 +142,7 @@ describe('promoteWorksheetToKnowledgeChunk', () => {
     const result = await promoteWorksheetToKnowledgeChunk(input);
     expect(result).toEqual({ outcome: 'promoted', chunk_id: 99 });
 
-    const calls = clientQuery.mock.calls.map(c => c[0] as string);
+    const calls = clientQuery.mock.calls.map((c) => c[0] as string);
     expect(calls[0]).toBe('BEGIN');
     expect(calls[1]).toMatch(/FOR UPDATE/);
     expect(calls[2]).toMatch(/INSERT INTO knowledge_chunks/);
@@ -137,7 +161,10 @@ describe('promoteWorksheetToKnowledgeChunk', () => {
     expect(meta.sections).toEqual([{ type: 'textarea' }]);
     expect(meta.render_tool).toBe('show_journaling_prompt');
     expect(meta.provenance).toEqual({
-      worksheet_instance_id: 7, reviewer: 'nathan', template_kind: 'vetted_template', promoted_at: expect.any(String),
+      worksheet_instance_id: 7,
+      reviewer: 'nathan',
+      template_kind: 'vetted_template',
+      promoted_at: expect.any(String),
     });
     expect(insertParams[4]).toBe('abc');
     expect(insertParams[5]).toBe('[0.1,0.2]');
@@ -153,8 +180,8 @@ describe('promoteWorksheetToKnowledgeChunk', () => {
       .mockResolvedValueOnce({ rows: [{ status: 'completed', review_status: 'promoted', promoted_chunk_id: '99' }] })
       .mockResolvedValueOnce({});
     expect(await promoteWorksheetToKnowledgeChunk(input)).toEqual({ outcome: 'already_promoted', chunk_id: 99 });
-    const calls = clientQuery.mock.calls.map(c => c[0] as string);
-    expect(calls.some(s => s.includes('INSERT'))).toBe(false);
+    const calls = clientQuery.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((s) => s.includes('INSERT'))).toBe(false);
     expect(calls[calls.length - 1]).toBe('ROLLBACK');
     expect(release).toHaveBeenCalled();
   });
@@ -166,10 +193,7 @@ describe('promoteWorksheetToKnowledgeChunk', () => {
       .mockResolvedValueOnce({});
     expect(await promoteWorksheetToKnowledgeChunk(input)).toEqual({ outcome: 'not_pending' });
     clientQuery.mockReset();
-    clientQuery
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({});
+    clientQuery.mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({});
     expect(await promoteWorksheetToKnowledgeChunk(input)).toEqual({ outcome: 'not_pending' });
   });
 
@@ -180,8 +204,8 @@ describe('promoteWorksheetToKnowledgeChunk', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({});
     expect(await promoteWorksheetToKnowledgeChunk(input)).toEqual({ outcome: 'duplicate_content' });
-    const calls = clientQuery.mock.calls.map(c => c[0] as string);
-    expect(calls.some(s => s.includes('UPDATE worksheet_instances'))).toBe(false);
+    const calls = clientQuery.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((s) => s.includes('UPDATE worksheet_instances'))).toBe(false);
     expect(calls[calls.length - 1]).toBe('ROLLBACK');
   });
 
@@ -192,7 +216,7 @@ describe('promoteWorksheetToKnowledgeChunk', () => {
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({});
     await expect(promoteWorksheetToKnowledgeChunk(input)).rejects.toThrow('boom');
-    expect(clientQuery.mock.calls.map(c => c[0])).toContain('ROLLBACK');
+    expect(clientQuery.mock.calls.map((c) => c[0])).toContain('ROLLBACK');
     expect(release).toHaveBeenCalled();
   });
 });

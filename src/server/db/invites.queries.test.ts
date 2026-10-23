@@ -44,12 +44,24 @@ beforeEach(() => {
 
 describe('completeInviteGrant (grant + audit + used_by in one transaction, ai-therapist-154)', () => {
   const clientSql = () => clientQueryMock.mock.calls.map((c) => String(c[0]).trim().split(/\s+/)[0]);
-  const INPUT = { inviteId: 7, memberId: 3, memberRole: 'caseworker' as const, clientId: 42, clientUsername: 'newclient' };
-  const VALID_PAIR = { therapist_role: 'caseworker', client_role: 'participant', member_org: 1, client_org: 1, member_org_kind: 'clinical' };
+  const INPUT = {
+    inviteId: 7,
+    memberId: 3,
+    memberRole: 'caseworker' as const,
+    clientId: 42,
+    clientUsername: 'newclient',
+  };
+  const VALID_PAIR = {
+    therapist_role: 'caseworker',
+    client_role: 'participant',
+    member_org: 1,
+    client_org: 1,
+    member_org_kind: 'clinical',
+  };
 
   it('validates the pair, inserts the edge, the invite_consumed audit row and the used_by stamp, then COMMITs', async () => {
     clientQueryMock.mockImplementation(async (sql: string) =>
-      /^\s*SELECT/.test(sql) ? { rows: [VALID_PAIR] } : { rows: [], rowCount: 1 }
+      /^\s*SELECT/.test(sql) ? { rows: [VALID_PAIR] } : { rows: [], rowCount: 1 },
     );
     await completeInviteGrant(INPUT);
     expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'INSERT', 'INSERT', 'UPDATE', 'COMMIT']);
@@ -59,8 +71,18 @@ describe('completeInviteGrant (grant + audit + used_by in one transaction, ai-th
     expect(edgeParams).toEqual([3, 42, 3, 'caseworker']);
     const [auditSql, auditParams] = clientQueryMock.mock.calls[3] as [string, unknown[]];
     expect(auditSql).toContain('caseload_audit_log');
-    expect(auditParams).toEqual(['invite_consumed', 3, 42, 42, 'newclient', JSON.stringify({ invite_id: 7, member_role: 'caseworker' })]);
-    expect(clientQueryMock.mock.calls[4]).toEqual(['UPDATE client_invites SET used_by = $1 WHERE invite_id = $2', [42, 7]]);
+    expect(auditParams).toEqual([
+      'invite_consumed',
+      3,
+      42,
+      42,
+      'newclient',
+      JSON.stringify({ invite_id: 7, member_role: 'caseworker' }),
+    ]);
+    expect(clientQueryMock.mock.calls[4]).toEqual([
+      'UPDATE client_invites SET used_by = $1 WHERE invite_id = $2',
+      [42, 7],
+    ]);
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });
 
@@ -87,7 +109,8 @@ describe('completeInviteGrant (grant + audit + used_by in one transaction, ai-th
 
   it('throws CaseloadRoleError and writes nothing when the inviter no longer holds the role', async () => {
     clientQueryMock.mockResolvedValue({ rows: [] });
-    clientQueryMock.mockResolvedValueOnce({ rows: [] })
+    clientQueryMock
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ ...VALID_PAIR, therapist_role: 'participant' }] });
     await expect(completeInviteGrant(INPUT)).rejects.toBeInstanceOf(CaseloadRoleError);
     expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'ROLLBACK']);

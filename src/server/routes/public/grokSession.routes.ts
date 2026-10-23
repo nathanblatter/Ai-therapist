@@ -40,7 +40,12 @@ import {
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
-import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock, buildToolGuidanceBlock } from '../../utils/promptContext.js';
+import {
+  sanitizeCheckin,
+  buildCheckinBlock,
+  buildMemoryBlock,
+  buildToolGuidanceBlock,
+} from '../../utils/promptContext.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
 import { requireActiveStudyStatus } from '../../middleware/studyStatus.js';
@@ -94,7 +99,7 @@ export default function grokSessionRoutes(): Router {
         if (!hasXaiKey()) {
           log.error(
             `system_config.ai_model is '${aiModel}' but XAI_API_KEY is not set. ` +
-            'Voice sessions cannot start until the key is configured or the model is switched back.',
+              'Voice sessions cannot start until the key is configured or the model is switched back.',
           );
           return res.status(409).json({
             error: 'grok_not_configured',
@@ -148,8 +153,9 @@ export default function grokSessionRoutes(): Router {
         userLanguage = userLanguage || 'en';
 
         if (userId) {
-          updateUserPreferences(userId, userVoice, userLanguage).catch(err =>
-            log.error({ err }, 'Failed to save user preferences'));
+          updateUserPreferences(userId, userVoice, userLanguage).catch((err) =>
+            log.error({ err }, 'Failed to save user preferences'),
+          );
         }
 
         // The clinical prompt, assembled exactly as the GPT-Live route does so
@@ -159,27 +165,33 @@ export default function grokSessionRoutes(): Router {
         const toolDefs = await toolRegistry.getEnabledToolDefinitions();
         const checkin = sanitizeCheckin(req.body?.checkin);
         const memoryBlock = await buildMemoryBlock(userId);
-        const toolGuidance = buildToolGuidanceBlock(toolDefs.map(t => t.name));
+        const toolGuidance = buildToolGuidanceBlock(toolDefs.map((t) => t.name));
         const proactiveOffering = await resolveProactiveOffering();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) +
-          toolGuidance + memoryBlock + buildCheckinBlock(checkin);
+          toolGuidance +
+          memoryBlock +
+          buildCheckinBlock(checkin);
         const activeModality = await getActiveModality();
         const systemConfig = await getSystemConfig();
 
         const { isNonStudyUser } = await import('../../utils/harness.js');
-        const isDemoSession =
-          isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true;
+        const isDemoSession = isNonStudyUser(userRole, req.session?.username) || req.session?.isSandbox === true;
 
         // Turn-taking knobs (system_config.grok_voice) and the refusal-loop
         // thresholds (system_config.grok_refusal_guard, its own key because the
         // admin turn-taking form PUTs grok_voice whole). Read directly, not via
         // the ~10-minute getSystemConfig cache: these exist to be tuned between
         // back-to-back test sessions and must take effect on the next start.
-        const knobRows = await pool.query<{ config_key: string; config_value: unknown }>(
-          "SELECT config_key, config_value FROM system_config WHERE config_key IN ('grok_voice', 'grok_refusal_guard')",
-        ).catch(() => ({ rows: [] as Array<{ config_key: string; config_value: unknown }> }));
-        const knobs = new Map(knobRows.rows.map(r => [r.config_key, r.config_value]));
+        const knobRows = await pool
+          .query<{
+            config_key: string;
+            config_value: unknown;
+          }>(
+            "SELECT config_key, config_value FROM system_config WHERE config_key IN ('grok_voice', 'grok_refusal_guard')",
+          )
+          .catch(() => ({ rows: [] as Array<{ config_key: string; config_value: unknown }> }));
+        const knobs = new Map(knobRows.rows.map((r) => [r.config_key, r.config_value]));
         const tuning = resolveGrokTuning(knobs.get('grok_voice'));
         const refusalGuard = resolveGrokRefusalGuard(knobs.get('grok_refusal_guard'));
 
@@ -205,8 +217,7 @@ export default function grokSessionRoutes(): Router {
           await createActiveRealtimeSession(sessionId, userId, isDemoSession);
 
           if (checkin) {
-            setSessionCheckin(sessionId, checkin).catch(err =>
-              log.error({ err }, 'Failed to store check-in'));
+            setSessionCheckin(sessionId, checkin).catch((err) => log.error({ err }, 'Failed to store check-in'));
           }
 
           recordConsent({
@@ -214,11 +225,21 @@ export default function grokSessionRoutes(): Router {
             userId,
             consentVersion: req.session!.consentVersion!,
             recordingEnabled: (systemConfig.features?.session_recording_enabled as boolean | undefined) ?? false,
-          }).catch(err => log.error({ err }, '[Consent] Failed to record per-session consent'));
+          }).catch((err) => log.error({ err }, '[Consent] Failed to record per-session consent'));
 
-          void broadcastAdminEvent(global.io, 'session:created', {
-            sessionId, userId, username, status: 'active', created_at: new Date(),
-          }, userId, 'summary');
+          void broadcastAdminEvent(
+            global.io,
+            'session:created',
+            {
+              sessionId,
+              userId,
+              username,
+              status: 'active',
+              created_at: new Date(),
+            },
+            userId,
+            'summary',
+          );
 
           await upsertSessionConfig(sessionId, {
             voice: userVoice,
@@ -264,7 +285,7 @@ export default function grokSessionRoutes(): Router {
             sessionId,
             maxDurationMinutes: limitCheck.limits.max_duration_minutes,
             steer: (id, text, respond) => grokVoiceManager.tryInject(id, 'system', text, respond),
-            teardown: id => grokVoiceManager.disconnect(id),
+            teardown: (id) => grokVoiceManager.disconnect(id),
           });
         }
 

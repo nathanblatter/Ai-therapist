@@ -16,14 +16,16 @@ beforeEach(() => {
 describe('getFunnel', () => {
   it('returns all six stages from the aggregate row', async () => {
     queryMock.mockResolvedValueOnce({
-      rows: [{
-        created: 100,
-        with_checkin: 80,
-        connected: 75,
-        with_user_turn: 60,
-        with_tool_use: 25,
-        ended_gracefully: 50,
-      }],
+      rows: [
+        {
+          created: 100,
+          with_checkin: 80,
+          connected: 75,
+          with_user_turn: 60,
+          with_tool_use: 25,
+          ended_gracefully: 50,
+        },
+      ],
     });
 
     const funnel = await getFunnel(30);
@@ -65,6 +67,6 @@ describe('getFunnel', () => {
     await getFunnel(30);
     const [sql] = queryMock.mock.calls[0] as [string];
     expect(sql).toContain('ended_by IS NOT NULL');
-    expect(sql).toContain(">= 60");
+    expect(sql).toContain('>= 60');
   });
 });

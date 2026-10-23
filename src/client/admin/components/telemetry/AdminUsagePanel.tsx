@@ -3,18 +3,35 @@
 // window. Reads /admin/api/telemetry/admin-usage (researcher-only), fed by
 // the de-identified admin_usage_events table (migration 096) — role cohorts
 // only, never a person.
-import { useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Eye, EyeOff, Layers, AlertTriangle } from "react-feather";
-import useAdminFetch from "../../hooks/useAdminFetch";
-import Panel from "../ui/Panel";
-import StatCard from "../ui/StatCard";
-import { formatVisible, SERIES_PRIMARY, GRID_STROKE, AXIS_TICK } from "./telemetryFormat";
+import { useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Eye, EyeOff, Layers, AlertTriangle } from 'react-feather';
+import useAdminFetch from '../../hooks/useAdminFetch';
+import Panel from '../ui/Panel';
+import StatCard from '../ui/StatCard';
+import { formatVisible, SERIES_PRIMARY, GRID_STROKE, AXIS_TICK } from './telemetryFormat';
 
-interface KindStat { kind: string; count: number; last_seen: string }
-interface ReachRow { view: string; opens: number }
-interface ByRoleRow { view: string; role: string; opens: number; visible_ms: number }
-interface AdminUsageData { days: number; kinds: KindStat[]; reach: ReachRow[]; byRole: ByRoleRow[] }
+interface KindStat {
+  kind: string;
+  count: number;
+  last_seen: string;
+}
+interface ReachRow {
+  view: string;
+  opens: number;
+}
+interface ByRoleRow {
+  view: string;
+  role: string;
+  opens: number;
+  visible_ms: number;
+}
+interface AdminUsageData {
+  days: number;
+  kinds: KindStat[];
+  reach: ReachRow[];
+  byRole: ByRoleRow[];
+}
 
 // Every view id the admin shell can report (AdminApp.tsx nav ids plus the
 // header-launched MFA view). A view in this list with no opens in the window
@@ -64,7 +81,7 @@ export default function AdminUsagePanel() {
 
   const windowPicker = (
     <div className="flex gap-1" role="group" aria-label="Window">
-      {WINDOWS.map(w => (
+      {WINDOWS.map((w) => (
         <button
           key={w}
           type="button"
@@ -79,20 +96,29 @@ export default function AdminUsagePanel() {
   );
 
   if (loading) {
-    return <Panel><p className="text-gray-500 text-center py-4">Loading admin usage telemetry...</p></Panel>;
+    return (
+      <Panel>
+        <p className="text-gray-500 text-center py-4">Loading admin usage telemetry...</p>
+      </Panel>
+    );
   }
   if (error || !data) {
-    return <Panel><p className="text-red-600 text-center py-4">{error || 'No admin usage telemetry available'}</p></Panel>;
+    return (
+      <Panel>
+        <p className="text-red-600 text-center py-4">{error || 'No admin usage telemetry available'}</p>
+      </Panel>
+    );
   }
 
   const totalOpens = data.reach.reduce((a, r) => a + r.opens, 0);
-  const seenViews = new Set(data.reach.map(r => r.view));
-  const deadViews = Object.keys(KNOWN_ADMIN_VIEWS).filter(v => !seenViews.has(v));
-  const jsErrors = data.kinds.find(k => k.kind === 'js_error')?.count ?? 0;
-  const apiErrors = data.kinds.find(k => k.kind === 'api_error')?.count ?? 0;
+  const seenViews = new Set(data.reach.map((r) => r.view));
+  const deadViews = Object.keys(KNOWN_ADMIN_VIEWS).filter((v) => !seenViews.has(v));
+  const jsErrors = data.kinds.find((k) => k.kind === 'js_error')?.count ?? 0;
+  const apiErrors = data.kinds.find((k) => k.kind === 'api_error')?.count ?? 0;
 
-  const roles = ROLE_ORDER.filter(r => data.byRole.some(b => b.role === r))
-    .concat(Array.from(new Set(data.byRole.map(b => b.role))).filter(r => !ROLE_ORDER.includes(r)));
+  const roles = ROLE_ORDER.filter((r) => data.byRole.some((b) => b.role === r)).concat(
+    Array.from(new Set(data.byRole.map((b) => b.role))).filter((r) => !ROLE_ORDER.includes(r)),
+  );
   const byView = new Map<string, { opens: number; visible_ms: number; perRole: Record<string, number> }>();
   for (const row of data.byRole) {
     const entry = byView.get(row.view) ?? { opens: 0, visible_ms: 0, perRole: {} };
@@ -105,14 +131,16 @@ export default function AdminUsagePanel() {
     .map(([view, v]) => ({ view, ...v }))
     .sort((a, b) => b.opens - a.opens || a.view.localeCompare(b.view));
 
-  const chartData = data.reach.slice(0, 15).map(r => ({ name: viewLabel(r.view), opens: r.opens }));
+  const chartData = data.reach.slice(0, 15).map((r) => ({ name: viewLabel(r.view), opens: r.opens }));
   const chartHeight = Math.max(160, chartData.length * 28 + 40);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h3 className="text-xl font-bold flex items-center gap-2"><Layers size={20} /> Admin Usage</h3>
+          <h3 className="text-xl font-bold flex items-center gap-2">
+            <Layers size={20} /> Admin Usage
+          </h3>
           <p className="text-sm text-gray-600">
             De-identified screen usage over the last {data.days} days: role cohorts only, no per-person history.
           </p>
@@ -130,12 +158,17 @@ export default function AdminUsagePanel() {
       <Panel title="Opens by Screen">
         {chartData.length === 0 ? (
           <p className="text-gray-500 text-sm py-2">
-            No view opens recorded in this window. The stream is on when
-            features.telemetry_admin_usage is true (System Config).
+            No view opens recorded in this window. The stream is on when features.telemetry_admin_usage is true (System
+            Config).
           </p>
         ) : (
           <ResponsiveContainer width="100%" height={chartHeight}>
-            <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }} barCategoryGap={6}>
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ left: 8, right: 24, top: 4, bottom: 4 }}
+              barCategoryGap={6}
+            >
               <CartesianGrid horizontal={false} stroke={GRID_STROKE} />
               <XAxis type="number" tick={AXIS_TICK} axisLine={false} tickLine={false} allowDecimals={false} />
               <YAxis type="category" dataKey="name" width={140} tick={AXIS_TICK} axisLine={false} tickLine={false} />
@@ -158,19 +191,27 @@ export default function AdminUsagePanel() {
               <tr className="text-left text-gray-600 border-b">
                 <th className="py-2 pr-4">Screen</th>
                 <th className="py-2 pr-4 text-right">Opens</th>
-                {roles.map(r => <th key={r} className="py-2 pr-4 text-right capitalize">{r}</th>)}
+                {roles.map((r) => (
+                  <th key={r} className="py-2 pr-4 text-right capitalize">
+                    {r}
+                  </th>
+                ))}
                 <th className="py-2 pr-4 text-right">Visible time</th>
               </tr>
             </thead>
             <tbody>
-              {viewRows.map(row => (
+              {viewRows.map((row) => (
                 <tr key={row.view} className="border-b last:border-0">
                   <td className="py-2 pr-4">{viewLabel(row.view)}</td>
                   <td className="py-2 pr-4 text-right">{row.opens}</td>
-                  {roles.map(r => (
-                    <td key={r} className="py-2 pr-4 text-right text-gray-700">{row.perRole[r] ?? 0}</td>
+                  {roles.map((r) => (
+                    <td key={r} className="py-2 pr-4 text-right text-gray-700">
+                      {row.perRole[r] ?? 0}
+                    </td>
                   ))}
-                  <td className="py-2 pr-4 text-right text-gray-700">{row.visible_ms > 0 ? formatVisible(row.visible_ms) : '-'}</td>
+                  <td className="py-2 pr-4 text-right text-gray-700">
+                    {row.visible_ms > 0 ? formatVisible(row.visible_ms) : '-'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -186,8 +227,10 @@ export default function AdminUsagePanel() {
           <p className="text-gray-500 text-sm py-2">Every known screen was opened at least once.</p>
         ) : (
           <ul className="flex flex-wrap gap-2">
-            {deadViews.map(v => (
-              <li key={v} className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-700">{viewLabel(v)}</li>
+            {deadViews.map((v) => (
+              <li key={v} className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-700">
+                {viewLabel(v)}
+              </li>
             ))}
           </ul>
         )}
@@ -206,7 +249,7 @@ export default function AdminUsagePanel() {
               </tr>
             </thead>
             <tbody>
-              {data.kinds.map(k => (
+              {data.kinds.map((k) => (
                 <tr key={k.kind} className="border-b last:border-0">
                   <td className="py-2 pr-4 font-mono text-xs">{k.kind}</td>
                   <td className="py-2 pr-4 text-right">{k.count}</td>

@@ -21,10 +21,7 @@ import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('qualtricsWebhookRoutes');
 
-async function secretMatches(
-  req: { get(name: string): string | undefined },
-  hash: string
-): Promise<boolean> {
+async function secretMatches(req: { get(name: string): string | undefined }, hash: string): Promise<boolean> {
   const provided = req.get('X-API-TOKEN') ?? req.get('X-Webhook-Token');
   if (typeof provided !== 'string' || provided.length === 0 || provided.length > 512) return false;
   return bcrypt.compare(provided, hash);
@@ -49,8 +46,10 @@ export default function qualtricsWebhookRoutes(): Router {
 
     const { surveyId, responseId } = req.body ?? {};
     if (
-      typeof surveyId !== 'string' || !/^SV_[A-Za-z0-9]+$/.test(surveyId) ||
-      typeof responseId !== 'string' || !/^R_[A-Za-z0-9]+$/.test(responseId)
+      typeof surveyId !== 'string' ||
+      !/^SV_[A-Za-z0-9]+$/.test(surveyId) ||
+      typeof responseId !== 'string' ||
+      !/^R_[A-Za-z0-9]+$/.test(responseId)
     ) {
       return res.status(400).json({ error: 'surveyId and responseId are required' });
     }

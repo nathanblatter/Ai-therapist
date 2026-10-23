@@ -100,12 +100,12 @@ function mean(xs: number[]): number | null {
  *  dimension pair when either side is missing that key or has a non-1..5 score. */
 export async function computeCalibrationReport(promptVersion: string): Promise<CalibrationReport> {
   const pairs = await getCalibrationPairs(promptVersion, HUMAN_RUBRIC_VERSION);
-  const sessions = new Set(pairs.map(p => p.session_id));
+  const sessions = new Set(pairs.map((p) => p.session_id));
 
   const pooledHuman: number[] = [];
   const pooledLlm: number[] = [];
 
-  const dimensions: DimensionCalibration[] = EVAL_DIMENSIONS.map(dim => {
+  const dimensions: DimensionCalibration[] = EVAL_DIMENSIONS.map((dim) => {
     const human: number[] = [];
     const llm: number[] = [];
     for (const pair of pairs) {
@@ -176,10 +176,10 @@ export interface HumanAgreementReport {
 
 /** Pure: human-human weighted kappa per dimension over rater pairs. */
 export function computeHumanAgreement(pairs: HumanRatingPairRow[], rubricVersion: string): HumanAgreementReport {
-  const sessions = new Set(pairs.map(p => p.session_id));
+  const sessions = new Set(pairs.map((p) => p.session_id));
   const pooledA: number[] = [];
   const pooledB: number[] = [];
-  const dimensions: HumanAgreementDimension[] = EVAL_DIMENSIONS.map(dim => {
+  const dimensions: HumanAgreementDimension[] = EVAL_DIMENSIONS.map((dim) => {
     const a: number[] = [];
     const b: number[] = [];
     for (const pair of pairs) {
@@ -240,7 +240,7 @@ export function validateHumanRubric(body: unknown): HumanRubricValidation {
   }
   const keys = Object.keys(rubric as Record<string, unknown>);
   const expected = [...EVAL_DIMENSIONS];
-  if (keys.length !== expected.length || !expected.every(k => keys.includes(k))) {
+  if (keys.length !== expected.length || !expected.every((k) => keys.includes(k))) {
     return { ok: false, error: `rubric must contain exactly these keys: ${expected.join(', ')}` };
   }
 
@@ -332,7 +332,10 @@ function collectScores(rows: SessionEvalJudgeRow[], dim: string): ScoreMap {
     const score = row.rubric?.[dim]?.score;
     if (!isValidScore(score)) continue;
     let bySession = out.get(row.judge_model);
-    if (!bySession) { bySession = new Map(); out.set(row.judge_model, bySession); }
+    if (!bySession) {
+      bySession = new Map();
+      out.set(row.judge_model, bySession);
+    }
     const list = bySession.get(row.session_id) ?? [];
     list.push(score);
     bySession.set(row.session_id, list);
@@ -358,7 +361,7 @@ export function computeJudgeAgreement(
     if (!judges.includes(row.judge_model)) judges.push(row.judge_model);
     sessions.add(row.session_id);
   }
-  const perDim = new Map<string, ScoreMap>(EVAL_DIMENSIONS.map(d => [d, collectScores(rows, d)]));
+  const perDim = new Map<string, ScoreMap>(EVAL_DIMENSIONS.map((d) => [d, collectScores(rows, d)]));
 
   const pairs: JudgePairAgreement[] = [];
   for (let i = 0; i < judges.length; i++) {
@@ -367,7 +370,7 @@ export function computeJudgeAgreement(
       const pooledA: number[] = [];
       const pooledB: number[] = [];
       const shared = new Set<string>();
-      const dimensions: JudgePairDimension[] = EVAL_DIMENSIONS.map(dim => {
+      const dimensions: JudgePairDimension[] = EVAL_DIMENSIONS.map((dim) => {
         const scores = perDim.get(dim)!;
         const a: number[] = [];
         const b: number[] = [];
@@ -392,7 +395,13 @@ export function computeJudgeAgreement(
           major_disagreement_pct: n ? (a.filter((v, idx) => Math.abs(v - b[idx]) >= 2).length / n) * 100 : null,
         };
       });
-      pairs.push({ judge_a: ja, judge_b: jb, n: shared.size, dimensions, overall_kappa: quadraticWeightedKappa(pooledA, pooledB) });
+      pairs.push({
+        judge_a: ja,
+        judge_b: jb,
+        n: shared.size,
+        dimensions,
+        overall_kappa: quadraticWeightedKappa(pooledA, pooledB),
+      });
     }
   }
 
@@ -400,7 +409,7 @@ export function computeJudgeAgreement(
   for (const judge of judges) {
     let maxRuns = 1;
     const multi = new Set<string>();
-    const dimensions: SelfConsistencyDimension[] = EVAL_DIMENSIONS.map(dim => {
+    const dimensions: SelfConsistencyDimension[] = EVAL_DIMENSIONS.map((dim) => {
       const spreads: number[] = [];
       let exact = 0;
       for (const [sessionId, runs] of perDim.get(dim)!.get(judge) ?? []) {
@@ -423,7 +432,7 @@ export function computeJudgeAgreement(
     session_count: sessions.size,
     pairs,
     self_consistency,
-    high_disagreement: highDisagreement.map(h => ({
+    high_disagreement: highDisagreement.map((h) => ({
       session_id: h.session_id,
       max_spread: Object.values(h.judge_spread).reduce((m, v) => Math.max(m, Number(v) || 0), 0),
       judge_spread: h.judge_spread,

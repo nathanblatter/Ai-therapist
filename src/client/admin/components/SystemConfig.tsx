@@ -94,9 +94,22 @@ interface SystemConfigData {
 // the server-side proxy. Switching is this one field — no redeploy, and each
 // new session picks up the current value.
 const REALTIME_MODEL_OPTIONS = [
-  { model: 'gpt-live-1', tier: 'OpenAI GPT-Live', description: 'Full-duplex voice model; delegates reasoning to the backend in live_backend_model' },
-  { model: 'grok-voice-3.0', tier: 'xAI Grok Voice', description: 'Grok Voice 3.0 (pinned release) via the server-side proxy; needs XAI_API_KEY on the server' },
-  { model: 'grok-voice-latest', tier: 'xAI Grok Voice', description: 'Speech-to-speech model via the server-side proxy, following xAI\'s latest release (3.0 since 2026-10-14); needs XAI_API_KEY on the server' },
+  {
+    model: 'gpt-live-1',
+    tier: 'OpenAI GPT-Live',
+    description: 'Full-duplex voice model; delegates reasoning to the backend in live_backend_model',
+  },
+  {
+    model: 'grok-voice-3.0',
+    tier: 'xAI Grok Voice',
+    description: 'Grok Voice 3.0 (pinned release) via the server-side proxy; needs XAI_API_KEY on the server',
+  },
+  {
+    model: 'grok-voice-latest',
+    tier: 'xAI Grok Voice',
+    description:
+      "Speech-to-speech model via the server-side proxy, following xAI's latest release (3.0 since 2026-10-14); needs XAI_API_KEY on the server",
+  },
   { model: 'gpt-realtime-2.1-mini', tier: 'Legacy', description: 'Realtime API (no longer wired to a session path)' },
   { model: 'gpt-realtime-2.1', tier: 'Legacy', description: 'Realtime API (no longer wired to a session path)' },
 ];
@@ -113,7 +126,13 @@ const PINNED_DESCRIPTION = 'Pinned snapshot (admin-entered)';
 // Free-text "pinned snapshot" card rendered under each model radio list
 // (ai-therapist-61): lets a researcher enter an exact dated model string so
 // the model stays frozen for a study period instead of floating with the alias.
-function PinnedModelOption({ radioGroup, currentModel, presetModels, placeholder, onSelect }: {
+function PinnedModelOption({
+  radioGroup,
+  currentModel,
+  presetModels,
+  placeholder,
+  onSelect,
+}: {
   radioGroup: string;
   currentModel: string;
   presetModels: string[];
@@ -131,8 +150,8 @@ function PinnedModelOption({ radioGroup, currentModel, presetModels, placeholder
         <div>
           <p className="font-medium text-gray-900">Pinned snapshot</p>
           <p className="text-xs text-gray-500">
-            Enter an exact dated model string to freeze the model for a study period.
-            Upgrades then become a deliberate config change instead of following the alias.
+            Enter an exact dated model string to freeze the model for a study period. Upgrades then become a deliberate
+            config change instead of following the alias.
           </p>
         </div>
         <input
@@ -170,36 +189,36 @@ export default function SystemConfig() {
     hotline: '',
     phone: '',
     text: '',
-    enabled: true
+    enabled: true,
   });
 
   const [crisisAlert, setCrisisAlert] = useState<CrisisAlert>({
     enabled: true,
-    phone: null
+    phone: null,
   });
 
   const [sessionLimits, setSessionLimits] = useState<SessionLimitsForm>({
     max_duration_minutes: 30,
     max_sessions_per_day: 3,
     cooldown_minutes: 30,
-    enabled: true
+    enabled: true,
   });
 
   const [features, setFeatures] = useState<Features>({
     voice_enabled: true,
     chat_enabled: true,
     session_recording_enabled: false,
-    output_modalities: ["audio"]
+    output_modalities: ['audio'],
   });
 
   const [aiModel, setAiModel] = useState<AiModel>({
     model: 'gpt-realtime-2.1-mini',
-    description: 'Latest cost-effective realtime model'
+    description: 'Latest cost-effective realtime model',
   });
 
   const [transcriptionModel, setTranscriptionModel] = useState<AiModel>({
     model: 'gpt-4o-mini-transcribe',
-    description: 'Latest cost-effective transcription model'
+    description: 'Latest cost-effective transcription model',
   });
 
   // Grok Voice turn-taking knobs (system_config.grok_voice; docs/grok-voice.md).
@@ -211,7 +230,7 @@ export default function SystemConfig() {
   });
 
   const [clientLogging, setClientLogging] = useState<ClientLogging>({
-    enabled: false
+    enabled: false,
   });
 
   // The voice backend follows aiModel. Under Grok the participant picker is
@@ -223,18 +242,18 @@ export default function SystemConfig() {
   useEffect(() => {
     if (!grokActive) return;
     getJson<{ voices?: Array<{ value: string; label: string; description: string }> }>('/api/config/voices')
-      .then(data => setGrokVoices(data.voices ?? []))
+      .then((data) => setGrokVoices(data.voices ?? []))
       .catch(() => setGrokVoices([]));
   }, [grokActive]);
 
   const [voices, setVoices] = useState<VoicesForm>({
     voices: [],
-    default_voice: 'cedar'
+    default_voice: 'cedar',
   });
 
   const [languages, setLanguages] = useState<LanguagesForm>({
     languages: [],
-    default_language: 'en'
+    default_language: 'en',
   });
 
   // New voice/language form states
@@ -244,7 +263,7 @@ export default function SystemConfig() {
     value: '',
     label: '',
     description: '',
-    systemPromptAddition: ''
+    systemPromptAddition: '',
   });
 
   useEffect(() => {
@@ -261,8 +280,10 @@ export default function SystemConfig() {
 
       // Registered AI tools + usage counts (non-fatal if unavailable).
       getJson<{ tools: AiToolInfo[] }>('/admin/api/tools')
-        .then(t => setAiTools(t.tools))
-        .catch(() => { /* tools panel just stays empty */ });
+        .then((t) => setAiTools(t.tools))
+        .catch(() => {
+          /* tools panel just stays empty */
+        });
 
       // Populate form fields (default-fill the optional blob fields so the
       // form state always has every input's value present).
@@ -294,7 +315,7 @@ export default function SystemConfig() {
       }
       if (data.grok_voice?.value) {
         const v = data.grok_voice.value as Partial<typeof grokTuning>;
-        setGrokTuning(prev => ({ ...prev, ...v, vad: { ...prev.vad, ...(v.vad ?? {}) } }));
+        setGrokTuning((prev) => ({ ...prev, ...v, vad: { ...prev.vad, ...(v.vad ?? {}) } }));
       }
       if (data.voices) {
         setVoices({ voices: [], default_voice: 'cedar', ...data.voices.value });
@@ -358,28 +379,29 @@ export default function SystemConfig() {
   };
 
   const updateCrisisContact = (field: keyof CrisisContact, value: string | boolean) => {
-    setCrisisContact(prev => ({ ...prev, [field]: value }));
+    setCrisisContact((prev) => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
   const updateCrisisAlert = (field: keyof CrisisAlert, value: string | boolean | null) => {
-    setCrisisAlert(prev => ({ ...prev, [field]: value }));
+    setCrisisAlert((prev) => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
   const updateSessionLimits = (field: keyof SessionLimits, value: number | boolean) => {
-    setSessionLimits(prev => ({ ...prev, [field]: value }));
+    setSessionLimits((prev) => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
   const updateFeatures = (field: keyof Features, value: boolean | string[]) => {
-    setFeatures(prev => ({ ...prev, [field]: value }));
+    setFeatures((prev) => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
   const toggleTool = (name: string, enabled: boolean) => {
     const disabled = new Set(features.disabled_tools ?? []);
-    if (enabled) disabled.delete(name); else disabled.add(name);
+    if (enabled) disabled.delete(name);
+    else disabled.add(name);
     updateFeatures('disabled_tools', Array.from(disabled));
   };
 
@@ -394,7 +416,7 @@ export default function SystemConfig() {
   };
 
   const updateClientLogging = (field: keyof ClientLogging, value: boolean) => {
-    setClientLogging(prev => ({ ...prev, [field]: value }));
+    setClientLogging((prev) => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
@@ -542,9 +564,7 @@ export default function SystemConfig() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Hotline Name
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Hotline Name</label>
             <input
               type="text"
               value={crisisContact.hotline}
@@ -555,9 +575,7 @@ export default function SystemConfig() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Phone Number
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
             <input
               type="text"
               value={crisisContact.phone}
@@ -568,9 +586,7 @@ export default function SystemConfig() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Crisis Text Line (optional)
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Crisis Text Line (optional)</label>
             <input
               type="text"
               value={crisisContact.text}
@@ -586,9 +602,9 @@ export default function SystemConfig() {
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">On-Call Crisis Paging</h3>
         <p className="text-sm text-gray-600 mb-4">
-          When a session is flagged HIGH severity, an SMS pages this phone via the iMessage relay —
-          in addition to the admin dashboard toast, which only reaches someone with the dashboard open.
-          Failure to send never blocks the session.
+          When a session is flagged HIGH severity, an SMS pages this phone via the iMessage relay — in addition to the
+          admin dashboard toast, which only reaches someone with the dashboard open. Failure to send never blocks the
+          session.
         </p>
 
         <div className="space-y-4">
@@ -606,9 +622,7 @@ export default function SystemConfig() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              On-Call Phone Number
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">On-Call Phone Number</label>
             <input
               type="text"
               value={crisisAlert.phone ?? ''}
@@ -651,9 +665,7 @@ export default function SystemConfig() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Max Duration (minutes)
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Duration (minutes)</label>
               <input
                 type="number"
                 value={sessionLimits.max_duration_minutes}
@@ -666,9 +678,7 @@ export default function SystemConfig() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Max Sessions/Day
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Sessions/Day</label>
               <input
                 type="number"
                 value={sessionLimits.max_sessions_per_day}
@@ -681,9 +691,7 @@ export default function SystemConfig() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Cooldown (minutes)
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Cooldown (minutes)</label>
               <input
                 type="number"
                 value={sessionLimits.cooldown_minutes}
@@ -702,16 +710,18 @@ export default function SystemConfig() {
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">AI Model Selection</h3>
         <p className="text-sm text-gray-600 mb-4">
-          Choose the voice model for all therapy sessions. This also selects the voice backend (OpenAI GPT-Live or xAI Grok Voice). Changes apply to all new sessions immediately.
+          Choose the voice model for all therapy sessions. This also selects the voice backend (OpenAI GPT-Live or xAI
+          Grok Voice). Changes apply to all new sessions immediately.
         </p>
         <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
           <p className="text-sm text-yellow-800">
-            <strong> Important:</strong> Changing the model affects all active and future sessions. Different models have different costs and capabilities.
+            <strong> Important:</strong> Changing the model affects all active and future sessions. Different models
+            have different costs and capabilities.
           </p>
         </div>
 
         <div className="space-y-3">
-          {REALTIME_MODEL_OPTIONS.map(opt => (
+          {REALTIME_MODEL_OPTIONS.map((opt) => (
             <div
               key={opt.model}
               onClick={() => updateAiModel(opt.model, opt.description)}
@@ -723,7 +733,9 @@ export default function SystemConfig() {
             >
               <div>
                 <p className="font-medium text-gray-900">{opt.model}</p>
-                <p className="text-xs text-gray-500">{opt.tier} — {opt.description}</p>
+                <p className="text-xs text-gray-500">
+                  {opt.tier} — {opt.description}
+                </p>
               </div>
               <input
                 type="radio"
@@ -737,14 +749,14 @@ export default function SystemConfig() {
           <PinnedModelOption
             radioGroup="ai_model"
             currentModel={aiModel.model}
-            presetModels={REALTIME_MODEL_OPTIONS.map(o => o.model)}
+            presetModels={REALTIME_MODEL_OPTIONS.map((o) => o.model)}
             placeholder="e.g. gpt-realtime-2025-08-28"
             onSelect={(model) => updateAiModel(model, PINNED_DESCRIPTION)}
           />
         </div>
         <p className="text-xs text-gray-500 mt-3">
-          For research reproducibility the exact model string used is recorded on every
-          session; pin a dated snapshot here during data-collection periods (see docs/model-pinning.md).
+          For research reproducibility the exact model string used is recorded on every session; pin a dated snapshot
+          here during data-collection periods (see docs/model-pinning.md).
         </p>
       </div>
 
@@ -752,12 +764,12 @@ export default function SystemConfig() {
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Transcription Model</h3>
         <p className="text-sm text-gray-600 mb-4">
-          Model that transcribes participant audio. This transcription feeds crisis
-          detection and the redaction pipeline, so accuracy matters. Applies to new sessions.
+          Model that transcribes participant audio. This transcription feeds crisis detection and the redaction
+          pipeline, so accuracy matters. Applies to new sessions.
         </p>
 
         <div className="space-y-3">
-          {TRANSCRIPTION_MODEL_OPTIONS.map(opt => (
+          {TRANSCRIPTION_MODEL_OPTIONS.map((opt) => (
             <div
               key={opt.model}
               onClick={() => updateTranscriptionModel(opt.model, opt.description)}
@@ -769,7 +781,9 @@ export default function SystemConfig() {
             >
               <div>
                 <p className="font-medium text-gray-900">{opt.model}</p>
-                <p className="text-xs text-gray-500">{opt.tier} — {opt.description}</p>
+                <p className="text-xs text-gray-500">
+                  {opt.tier} — {opt.description}
+                </p>
               </div>
               <input
                 type="radio"
@@ -783,7 +797,7 @@ export default function SystemConfig() {
           <PinnedModelOption
             radioGroup="transcription_model"
             currentModel={transcriptionModel.model}
-            presetModels={TRANSCRIPTION_MODEL_OPTIONS.map(o => o.model)}
+            presetModels={TRANSCRIPTION_MODEL_OPTIONS.map((o) => o.model)}
             placeholder="e.g. gpt-4o-transcribe-2025-06-11"
             onSelect={(model) => updateTranscriptionModel(model, PINNED_DESCRIPTION)}
           />
@@ -795,14 +809,16 @@ export default function SystemConfig() {
         <div className="mb-6 bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-1">Voice Configuration</h3>
           <p className="text-sm text-gray-600 mb-4">
-            The AI model above is xAI Grok Voice, so participants choose from xAI&apos;s built-in voices.
-            This roster comes from the server code (not from this page); the OpenAI voice list is
-            hidden while Grok is active and comes back when the model is switched to GPT-Live.
+            The AI model above is xAI Grok Voice, so participants choose from xAI&apos;s built-in voices. This roster
+            comes from the server code (not from this page); the OpenAI voice list is hidden while Grok is active and
+            comes back when the model is switched to GPT-Live.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {grokVoices.map(voice => (
+            {grokVoices.map((voice) => (
               <div key={voice.value} className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm font-medium text-gray-900">{voice.label} <span className="text-xs text-gray-500">({voice.value})</span></p>
+                <p className="text-sm font-medium text-gray-900">
+                  {voice.label} <span className="text-xs text-gray-500">({voice.value})</span>
+                </p>
                 <p className="text-xs text-gray-500">{voice.description}</p>
               </div>
             ))}
@@ -812,113 +828,115 @@ export default function SystemConfig() {
 
       {/* Voice Management — OpenAI catalogue (system_config.voices) */}
       {!grokActive && (
-      <div className="mb-6 bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Voice Configuration</h3>
-        <p className="text-sm text-gray-600 mb-4">
-          Manage available OpenAI voices for therapy sessions. Users can only select from enabled voices.
-          (Hidden automatically while the AI model is xAI Grok Voice.)
-        </p>
-
-        {/* Voice List */}
-        <div className="space-y-3 mb-6">
-          {voices.voices && voices.voices.map((voice, index) => (
-            <div key={voice.value} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-              <input
-                type="checkbox"
-                checked={voice.enabled}
-                onChange={() => toggleVoiceEnabled(index)}
-                disabled={voices.voices.filter(v => v.enabled).length === 1 && voice.enabled}
-                className="mt-1 w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
-                title={voices.voices.filter(v => v.enabled).length === 1 && voice.enabled ? "At least one voice must be enabled" : ""}
-              />
-              <div className="flex-1 grid grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  value={voice.label}
-                  onChange={(e) => updateVoiceField(index, 'label', e.target.value)}
-                  placeholder="Label (e.g., Cedar)"
-                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
-                />
-                <input
-                  type="text"
-                  value={voice.description || ''}
-                  onChange={(e) => updateVoiceField(index, 'description', e.target.value)}
-                  placeholder="Description (e.g., Warm & natural)"
-                  className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
-                />
-                <div className="flex items-center gap-2">
-                  <code className="text-xs bg-gray-200 px-2 py-1 rounded flex-1">{voice.value}</code>
-                  {(!voice.enabled && voice.value !== voices.default_voice) && (
-                    <button
-                      onClick={() => deleteVoice(index)}
-                      className="text-red-600 hover:text-red-800 text-xs font-medium"
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Default Voice Selector */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Default Voice
-          </label>
-          <select
-            value={voices.default_voice}
-            onChange={(e) => setVoices({...voices, default_voice: e.target.value})}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
-          >
-            {voices.voices && voices.voices
-              .filter(v => v.enabled)
-              .map(voice => (
-                <option key={voice.value} value={voice.value}>
-                  {voice.label}
-                </option>
-              ))}
-          </select>
-          <p className="text-xs text-gray-500 mt-1">
-            Used when a user's saved preference is unavailable
+        <div className="mb-6 bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Voice Configuration</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Manage available OpenAI voices for therapy sessions. Users can only select from enabled voices. (Hidden
+            automatically while the AI model is xAI Grok Voice.)
           </p>
-        </div>
 
-        {/* Add New Voice Form */}
-        <div className="border-t border-gray-200 pt-6">
-          <h4 className="text-sm font-semibold text-gray-900 mb-3">Add New Voice</h4>
-          <div className="grid grid-cols-3 gap-3">
-            <input
-              type="text"
-              value={newVoice.value}
-              onChange={(e) => setNewVoice({...newVoice, value: e.target.value})}
-              placeholder="Voice code (e.g., nova)"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
-            />
-            <input
-              type="text"
-              value={newVoice.label}
-              onChange={(e) => setNewVoice({...newVoice, label: e.target.value})}
-              placeholder="Label (e.g., Nova)"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
-            />
-            <input
-              type="text"
-              value={newVoice.description}
-              onChange={(e) => setNewVoice({...newVoice, description: e.target.value})}
-              placeholder="Description"
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
-            />
+          {/* Voice List */}
+          <div className="space-y-3 mb-6">
+            {voices.voices &&
+              voices.voices.map((voice, index) => (
+                <div key={voice.value} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                  <input
+                    type="checkbox"
+                    checked={voice.enabled}
+                    onChange={() => toggleVoiceEnabled(index)}
+                    disabled={voices.voices.filter((v) => v.enabled).length === 1 && voice.enabled}
+                    className="mt-1 w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+                    title={
+                      voices.voices.filter((v) => v.enabled).length === 1 && voice.enabled
+                        ? 'At least one voice must be enabled'
+                        : ''
+                    }
+                  />
+                  <div className="flex-1 grid grid-cols-3 gap-3">
+                    <input
+                      type="text"
+                      value={voice.label}
+                      onChange={(e) => updateVoiceField(index, 'label', e.target.value)}
+                      placeholder="Label (e.g., Cedar)"
+                      className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
+                    />
+                    <input
+                      type="text"
+                      value={voice.description || ''}
+                      onChange={(e) => updateVoiceField(index, 'description', e.target.value)}
+                      placeholder="Description (e.g., Warm & natural)"
+                      className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
+                    />
+                    <div className="flex items-center gap-2">
+                      <code className="text-xs bg-gray-200 px-2 py-1 rounded flex-1">{voice.value}</code>
+                      {!voice.enabled && voice.value !== voices.default_voice && (
+                        <button
+                          onClick={() => deleteVoice(index)}
+                          className="text-red-600 hover:text-red-800 text-xs font-medium"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
           </div>
-          <button
-            onClick={addNewVoiceToList}
-            className="mt-3 px-4 py-2 bg-royal text-white rounded-lg hover:bg-blue-800 text-sm font-medium"
-          >
-            Add Voice
-          </button>
+
+          {/* Default Voice Selector */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Default Voice</label>
+            <select
+              value={voices.default_voice}
+              onChange={(e) => setVoices({ ...voices, default_voice: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
+            >
+              {voices.voices &&
+                voices.voices
+                  .filter((v) => v.enabled)
+                  .map((voice) => (
+                    <option key={voice.value} value={voice.value}>
+                      {voice.label}
+                    </option>
+                  ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">Used when a user's saved preference is unavailable</p>
+          </div>
+
+          {/* Add New Voice Form */}
+          <div className="border-t border-gray-200 pt-6">
+            <h4 className="text-sm font-semibold text-gray-900 mb-3">Add New Voice</h4>
+            <div className="grid grid-cols-3 gap-3">
+              <input
+                type="text"
+                value={newVoice.value}
+                onChange={(e) => setNewVoice({ ...newVoice, value: e.target.value })}
+                placeholder="Voice code (e.g., nova)"
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
+              />
+              <input
+                type="text"
+                value={newVoice.label}
+                onChange={(e) => setNewVoice({ ...newVoice, label: e.target.value })}
+                placeholder="Label (e.g., Nova)"
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
+              />
+              <input
+                type="text"
+                value={newVoice.description}
+                onChange={(e) => setNewVoice({ ...newVoice, description: e.target.value })}
+                placeholder="Description"
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
+              />
+            </div>
+            <button
+              onClick={addNewVoiceToList}
+              className="mt-3 px-4 py-2 bg-royal text-white rounded-lg hover:bg-blue-800 text-sm font-medium"
+            >
+              Add Voice
+            </button>
+          </div>
         </div>
-      </div>
       )}
 
       {/* Language Management */}
@@ -930,73 +948,75 @@ export default function SystemConfig() {
 
         {/* Language List */}
         <div className="space-y-4 mb-6">
-          {languages.languages && languages.languages.map((language, index) => (
-            <div key={language.value} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-start gap-3 mb-3">
-                <input
-                  type="checkbox"
-                  checked={language.enabled}
-                  onChange={() => toggleLanguageEnabled(index)}
-                  disabled={languages.languages.filter(l => l.enabled).length === 1 && language.enabled}
-                  className="mt-1 w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
-                  title={languages.languages.filter(l => l.enabled).length === 1 && language.enabled ? "At least one language must be enabled" : ""}
-                />
-                <div className="flex-1 grid grid-cols-2 gap-3">
+          {languages.languages &&
+            languages.languages.map((language, index) => (
+              <div key={language.value} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-start gap-3 mb-3">
                   <input
-                    type="text"
-                    value={language.label}
-                    onChange={(e) => updateLanguageField(index, 'label', e.target.value)}
-                    placeholder="Label (e.g., English)"
-                    className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
+                    type="checkbox"
+                    checked={language.enabled}
+                    onChange={() => toggleLanguageEnabled(index)}
+                    disabled={languages.languages.filter((l) => l.enabled).length === 1 && language.enabled}
+                    className="mt-1 w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+                    title={
+                      languages.languages.filter((l) => l.enabled).length === 1 && language.enabled
+                        ? 'At least one language must be enabled'
+                        : ''
+                    }
                   />
-                  <div className="flex items-center gap-2">
-                    <code className="text-xs bg-gray-200 px-2 py-1 rounded flex-1">{language.value}</code>
-                    {(!language.enabled && language.value !== languages.default_language) && (
-                      <button
-                        onClick={() => deleteLanguage(index)}
-                        className="text-red-600 hover:text-red-800 text-xs font-medium"
-                      >
-                        Delete
-                      </button>
-                    )}
+                  <div className="flex-1 grid grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      value={language.label}
+                      onChange={(e) => updateLanguageField(index, 'label', e.target.value)}
+                      placeholder="Label (e.g., English)"
+                      className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-royal focus:border-royal"
+                    />
+                    <div className="flex items-center gap-2">
+                      <code className="text-xs bg-gray-200 px-2 py-1 rounded flex-1">{language.value}</code>
+                      {!language.enabled && language.value !== languages.default_language && (
+                        <button
+                          onClick={() => deleteLanguage(index)}
+                          className="text-red-600 hover:text-red-800 text-xs font-medium"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
+                <div className="ml-7">
+                  <label className="block text-xs text-gray-600 mb-1">System Prompt Addition</label>
+                  <textarea
+                    value={language.systemPromptAddition || ''}
+                    onChange={(e) => updateLanguageField(index, 'systemPromptAddition', e.target.value)}
+                    placeholder="e.g., \n\n**IMPORTANT: Please respond in English.**"
+                    rows={2}
+                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs font-mono focus:ring-1 focus:ring-royal focus:border-royal"
+                  />
+                </div>
               </div>
-              <div className="ml-7">
-                <label className="block text-xs text-gray-600 mb-1">System Prompt Addition</label>
-                <textarea
-                  value={language.systemPromptAddition || ''}
-                  onChange={(e) => updateLanguageField(index, 'systemPromptAddition', e.target.value)}
-                  placeholder="e.g., \n\n**IMPORTANT: Please respond in English.**"
-                  rows={2}
-                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs font-mono focus:ring-1 focus:ring-royal focus:border-royal"
-                />
-              </div>
-            </div>
-          ))}
+            ))}
         </div>
 
         {/* Default Language Selector */}
         <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Default Language
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Default Language</label>
           <select
             value={languages.default_language}
-            onChange={(e) => setLanguages({...languages, default_language: e.target.value})}
+            onChange={(e) => setLanguages({ ...languages, default_language: e.target.value })}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
           >
-            {languages.languages && languages.languages
-              .filter(l => l.enabled)
-              .map(language => (
-                <option key={language.value} value={language.value}>
-                  {language.label}
-                </option>
-              ))}
+            {languages.languages &&
+              languages.languages
+                .filter((l) => l.enabled)
+                .map((language) => (
+                  <option key={language.value} value={language.value}>
+                    {language.label}
+                  </option>
+                ))}
           </select>
-          <p className="text-xs text-gray-500 mt-1">
-            Used when a user's saved preference is unavailable
-          </p>
+          <p className="text-xs text-gray-500 mt-1">Used when a user's saved preference is unavailable</p>
         </div>
 
         {/* Add New Language Form */}
@@ -1012,21 +1032,21 @@ export default function SystemConfig() {
             <input
               type="text"
               value={newLanguage.value}
-              onChange={(e) => setNewLanguage({...newLanguage, value: e.target.value})}
+              onChange={(e) => setNewLanguage({ ...newLanguage, value: e.target.value })}
               placeholder="Language code (e.g., pt-BR)"
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
             />
             <input
               type="text"
               value={newLanguage.label}
-              onChange={(e) => setNewLanguage({...newLanguage, label: e.target.value})}
+              onChange={(e) => setNewLanguage({ ...newLanguage, label: e.target.value })}
               placeholder="Label (e.g., Português (Brasil))"
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-royal focus:border-royal"
             />
           </div>
           <textarea
             value={newLanguage.systemPromptAddition}
-            onChange={(e) => setNewLanguage({...newLanguage, systemPromptAddition: e.target.value})}
+            onChange={(e) => setNewLanguage({ ...newLanguage, systemPromptAddition: e.target.value })}
             placeholder="System prompt addition for this language..."
             rows={3}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-1 focus:ring-royal focus:border-royal mb-3"
@@ -1048,13 +1068,15 @@ export default function SystemConfig() {
         </p>
 
         {/* Current Mode Indicator */}
-        <div className={`mb-4 p-4 rounded-lg border-2 ${
-          features.voice_enabled
-            ? 'bg-purple-50 border-purple-300'
-            : 'bg-blue-50 border-blue-300'
-        }`}>
+        <div
+          className={`mb-4 p-4 rounded-lg border-2 ${
+            features.voice_enabled ? 'bg-purple-50 border-purple-300' : 'bg-blue-50 border-blue-300'
+          }`}
+        >
           <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${features.voice_enabled ? 'bg-purple-500' : 'bg-blue-500'} animate-pulse`}></div>
+            <div
+              className={`w-3 h-3 rounded-full ${features.voice_enabled ? 'bg-purple-500' : 'bg-blue-500'} animate-pulse`}
+            ></div>
             <div>
               <p className="font-semibold text-gray-900">
                 Current Mode: {features.voice_enabled ? 'Realtime Voice Therapy' : 'Chat-Only Therapy'}
@@ -1091,7 +1113,8 @@ export default function SystemConfig() {
                   <div>
                     <p className="font-semibold text-gray-900">Realtime Voice Therapy</p>
                     <p className="text-xs text-gray-600 mt-1">
-                      Users can speak with AI using voice input and receive audio responses. WebRTC connection with low latency.
+                      Users can speak with AI using voice input and receive audio responses. WebRTC connection with low
+                      latency.
                     </p>
                     <div className="mt-2 p-2 bg-white rounded border border-purple-200">
                       <p className="text-xs font-semibold text-purple-800">Features:</p>
@@ -1111,9 +1134,7 @@ export default function SystemConfig() {
           <div
             onClick={() => updateFeatures('voice_enabled', false)}
             className={`p-4 rounded-lg border-2 cursor-pointer transition ${
-              !features.voice_enabled
-                ? 'border-blue-500 bg-blue-50'
-                : 'border-gray-200 hover:border-gray-300 bg-white'
+              !features.voice_enabled ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300 bg-white'
             }`}
           >
             <div className="flex items-start justify-between">
@@ -1137,7 +1158,6 @@ export default function SystemConfig() {
                         <li>• Text-based messaging only</li>
                         <li>• AI responds with text (GPT-5.2 Responses API)</li>
                         <li>• No voice input or audio output</li>
-
                       </ul>
                     </div>
                   </div>
@@ -1154,11 +1174,11 @@ export default function SystemConfig() {
         <div className="mb-6 bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-1">AI Tools</h3>
           <p className="text-sm text-gray-600 mb-4">
-            Functions the AI can call during sessions. Disabling a tool removes it from new
-            sessions (and blocks it in running ones) — usable as a study condition.
+            Functions the AI can call during sessions. Disabling a tool removes it from new sessions (and blocks it in
+            running ones) — usable as a study condition.
           </p>
           <div className="space-y-2">
-            {aiTools.map(tool => {
+            {aiTools.map((tool) => {
               const enabled = !(features.disabled_tools ?? []).includes(tool.name);
               return (
                 <div key={tool.name} className="flex items-start justify-between gap-4 p-3 bg-gray-50 rounded-lg">
@@ -1166,7 +1186,8 @@ export default function SystemConfig() {
                     <p className="font-medium text-gray-900 font-mono text-sm">{tool.name}</p>
                     <p className="text-xs text-gray-600 mt-0.5">{tool.description}</p>
                     <p className="text-xs text-gray-400 mt-1">
-                      {tool.invocations} call{tool.invocations === 1 ? '' : 's'} across {tool.sessions} session{tool.sessions === 1 ? '' : 's'}
+                      {tool.invocations} call{tool.invocations === 1 ? '' : 's'} across {tool.sessions} session
+                      {tool.sessions === 1 ? '' : 's'}
                       {tool.last_used ? ` · last used ${new Date(tool.last_used).toLocaleDateString()}` : ''}
                     </p>
                   </div>
@@ -1187,15 +1208,15 @@ export default function SystemConfig() {
       {features.voice_enabled && (
         <div className="mb-6 bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Realtime Voice Session Options</h3>
-          <p className="text-sm text-gray-600 mb-4">
-            Additional features for realtime voice therapy sessions.
-          </p>
+          <p className="text-sm text-gray-600 mb-4">Additional features for realtime voice therapy sessions.</p>
 
           <div className="space-y-3">
             <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
               <div>
                 <p className="font-medium text-gray-900">Text Input in Voice Sessions</p>
-                <p className="text-xs text-gray-600">Allow users to type messages during voice sessions (in addition to speaking)</p>
+                <p className="text-xs text-gray-600">
+                  Allow users to type messages during voice sessions (in addition to speaking)
+                </p>
               </div>
               <input
                 type="checkbox"
@@ -1216,8 +1237,8 @@ export default function SystemConfig() {
                   <input
                     type="radio"
                     name="output_modalities"
-                    checked={JSON.stringify(features.output_modalities) === JSON.stringify(["audio"])}
-                    onChange={() => updateFeatures('output_modalities', ["audio"])}
+                    checked={JSON.stringify(features.output_modalities) === JSON.stringify(['audio'])}
+                    onChange={() => updateFeatures('output_modalities', ['audio'])}
                     className="w-4 h-4 text-purple-600 border-gray-300 focus:ring-purple-500"
                   />
                   <div>
@@ -1229,8 +1250,8 @@ export default function SystemConfig() {
                   <input
                     type="radio"
                     name="output_modalities"
-                    checked={JSON.stringify(features.output_modalities) === JSON.stringify(["text"])}
-                    onChange={() => updateFeatures('output_modalities', ["text"])}
+                    checked={JSON.stringify(features.output_modalities) === JSON.stringify(['text'])}
+                    onChange={() => updateFeatures('output_modalities', ['text'])}
                     className="w-4 h-4 text-purple-600 border-gray-300 focus:ring-purple-500"
                   />
                   <div>
@@ -1242,8 +1263,11 @@ export default function SystemConfig() {
                   <input
                     type="radio"
                     name="output_modalities"
-                    checked={JSON.stringify(features.output_modalities) === JSON.stringify(["audio", "text"]) || JSON.stringify(features.output_modalities) === JSON.stringify(["text", "audio"])}
-                    onChange={() => updateFeatures('output_modalities', ["audio", "text"])}
+                    checked={
+                      JSON.stringify(features.output_modalities) === JSON.stringify(['audio', 'text']) ||
+                      JSON.stringify(features.output_modalities) === JSON.stringify(['text', 'audio'])
+                    }
+                    onChange={() => updateFeatures('output_modalities', ['audio', 'text'])}
                     className="w-4 h-4 text-purple-600 border-gray-300 focus:ring-purple-500"
                   />
                   <div>
@@ -1253,8 +1277,6 @@ export default function SystemConfig() {
                 </label>
               </div>
             </div>
-
-
           </div>
         </div>
       )}
@@ -1262,9 +1284,7 @@ export default function SystemConfig() {
       {/* Other Features */}
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Additional Features</h3>
-        <p className="text-sm text-gray-600 mb-4">
-          Other experimental features (available in both modes).
-        </p>
+        <p className="text-sm text-gray-600 mb-4">Other experimental features (available in both modes).</p>
 
         <div className="space-y-3">
           {/* Session recording. This flag was typed in the Features interface
@@ -1276,10 +1296,9 @@ export default function SystemConfig() {
             <div>
               <p className="font-medium text-gray-900">Session audio recording</p>
               <p className="text-xs text-gray-600">
-                Records voice sessions (mixed track plus a participant-only track for prosody
-                research). Participants see an explicit recording disclosure in consent when this
-                is on, and per-session consent is still required. Also unblocks the voice
-                red-team suite.
+                Records voice sessions (mixed track plus a participant-only track for prosody research). Participants
+                see an explicit recording disclosure in consent when this is on, and per-session consent is still
+                required. Also unblocks the voice red-team suite.
               </p>
             </div>
             <input
@@ -1296,8 +1315,8 @@ export default function SystemConfig() {
             <div>
               <p className="font-medium text-gray-900">Periodic re-grounding</p>
               <p className="text-xs text-gray-600">
-                Sends the model a quiet reminder of its role at a fixed interval during long
-                voice sessions. Requires a live sideband connection.
+                Sends the model a quiet reminder of its role at a fixed interval during long voice sessions. Requires a
+                live sideband connection.
               </p>
             </div>
             <input
@@ -1314,16 +1333,17 @@ export default function SystemConfig() {
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Phase 2 Research Telemetry</h3>
         <p className="text-sm text-gray-600 mb-4">
-          Streams declared in the Phase 2 IRB application. All default off and are enforced
-          server-side. Enable a stream only once the approved protocol and consent authorize it;
-          Phase 1 (2025-519) does not.
+          Streams declared in the Phase 2 IRB application. All default off and are enforced server-side. Enable a stream
+          only once the approved protocol and consent authorize it; Phase 1 (2025-519) does not.
         </p>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
             <div>
               <p className="font-medium text-gray-900">Interaction timing</p>
-              <p className="text-xs text-gray-600">Participant reply latency and message length per typed turn (no content)</p>
+              <p className="text-xs text-gray-600">
+                Participant reply latency and message length per typed turn (no content)
+              </p>
             </div>
             <input
               type="checkbox"
@@ -1336,7 +1356,9 @@ export default function SystemConfig() {
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
             <div>
               <p className="font-medium text-gray-900">Engagement events</p>
-              <p className="text-xs text-gray-600">Window focus changes, scroll-back, tool overlay opens, check-in completion/skips</p>
+              <p className="text-xs text-gray-600">
+                Window focus changes, scroll-back, tool overlay opens, check-in completion/skips
+              </p>
             </div>
             <input
               type="checkbox"
@@ -1349,7 +1371,10 @@ export default function SystemConfig() {
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
             <div>
               <p className="font-medium text-gray-900">Acoustic features</p>
-              <p className="text-xs text-gray-600">Derived vocal measures (pitch, energy, pauses) from the participant recording track after each session; requires recording to be enabled</p>
+              <p className="text-xs text-gray-600">
+                Derived vocal measures (pitch, energy, pauses) from the participant recording track after each session;
+                requires recording to be enabled
+              </p>
             </div>
             <input
               type="checkbox"
@@ -1365,10 +1390,10 @@ export default function SystemConfig() {
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Admin Usage Telemetry</h3>
         <p className="text-sm text-gray-600 mb-4">
-          De-identified product telemetry for this admin app (view opens, time on screen, errors).
-          Stores no user identity — a random per-tab session id and role cohort only, with resource
-          ids stripped — so it cannot reconstruct what any specific person did. Separate from the
-          identified access-audit log, which exists for accountability and is unaffected.
+          De-identified product telemetry for this admin app (view opens, time on screen, errors). Stores no user
+          identity — a random per-tab session id and role cohort only, with resource ids stripped — so it cannot
+          reconstruct what any specific person did. Separate from the identified access-audit log, which exists for
+          accountability and is unaffected.
         </p>
 
         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -1390,56 +1415,123 @@ export default function SystemConfig() {
         <div className="mb-6 bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-1">Grok Voice Turn-Taking</h3>
           <p className="text-sm text-gray-600 mb-4">
-            Grok Voice is turn-based: it listens, detects the end of your speech, then replies. These
-            knobs set how quickly that boundary is detected and how fast the reply starts. Applied to
-            the next session start (no cache). Ranges are xAI&apos;s.
+            Grok Voice is turn-based: it listens, detects the end of your speech, then replies. These knobs set how
+            quickly that boundary is detected and how fast the reply starts. Applied to the next session start (no
+            cache). Ranges are xAI&apos;s.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <label className="text-sm">
               <span className="block font-medium text-gray-700">End-of-speech silence (ms)</span>
-              <input type="number" min={0} max={10000} step={50} value={grokTuning.vad.silence_duration_ms}
-                onChange={e => setGrokTuning({ ...grokTuning, vad: { ...grokTuning.vad, silence_duration_ms: Number(e.target.value) } })}
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
-              <span className="block text-xs text-gray-500 mt-1">Lower feels snappier; too low splits mid-sentence pauses into separate turns.</span>
+              <input
+                type="number"
+                min={0}
+                max={10000}
+                step={50}
+                value={grokTuning.vad.silence_duration_ms}
+                onChange={(e) =>
+                  setGrokTuning({
+                    ...grokTuning,
+                    vad: { ...grokTuning.vad, silence_duration_ms: Number(e.target.value) },
+                  })
+                }
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+              <span className="block text-xs text-gray-500 mt-1">
+                Lower feels snappier; too low splits mid-sentence pauses into separate turns.
+              </span>
             </label>
             <label className="text-sm">
               <span className="block font-medium text-gray-700">VAD threshold (0.1–0.9)</span>
-              <input type="number" min={0.1} max={0.9} step={0.05} value={grokTuning.vad.threshold}
-                onChange={e => setGrokTuning({ ...grokTuning, vad: { ...grokTuning.vad, threshold: Number(e.target.value) } })}
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
-              <span className="block text-xs text-gray-500 mt-1">Lower is more sensitive to quiet speech (and to room noise).</span>
+              <input
+                type="number"
+                min={0.1}
+                max={0.9}
+                step={0.05}
+                value={grokTuning.vad.threshold}
+                onChange={(e) =>
+                  setGrokTuning({ ...grokTuning, vad: { ...grokTuning.vad, threshold: Number(e.target.value) } })
+                }
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+              <span className="block text-xs text-gray-500 mt-1">
+                Lower is more sensitive to quiet speech (and to room noise).
+              </span>
             </label>
             <label className="text-sm">
               <span className="block font-medium text-gray-700">Prefix padding (ms)</span>
-              <input type="number" min={0} max={10000} step={50} value={grokTuning.vad.prefix_padding_ms}
-                onChange={e => setGrokTuning({ ...grokTuning, vad: { ...grokTuning.vad, prefix_padding_ms: Number(e.target.value) } })}
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
-              <span className="block text-xs text-gray-500 mt-1">Audio kept from before speech was detected, so first syllables are not clipped.</span>
+              <input
+                type="number"
+                min={0}
+                max={10000}
+                step={50}
+                value={grokTuning.vad.prefix_padding_ms}
+                onChange={(e) =>
+                  setGrokTuning({
+                    ...grokTuning,
+                    vad: { ...grokTuning.vad, prefix_padding_ms: Number(e.target.value) },
+                  })
+                }
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+              <span className="block text-xs text-gray-500 mt-1">
+                Audio kept from before speech was detected, so first syllables are not clipped.
+              </span>
             </label>
             <label className="text-sm">
               <span className="block font-medium text-gray-700">Voice speed (0.7–1.5)</span>
-              <input type="number" min={0.7} max={1.5} step={0.05} value={grokTuning.speed}
-                onChange={e => setGrokTuning({ ...grokTuning, speed: Number(e.target.value) })}
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              <input
+                type="number"
+                min={0.7}
+                max={1.5}
+                step={0.05}
+                value={grokTuning.speed}
+                onChange={(e) => setGrokTuning({ ...grokTuning, speed: Number(e.target.value) })}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
             </label>
             <label className="text-sm">
               <span className="block font-medium text-gray-700">Reconnect window (s, 0–600)</span>
-              <input type="number" min={0} max={600} step={5} value={grokTuning.reconnect_window_s}
-                onChange={e => setGrokTuning({ ...grokTuning, reconnect_window_s: Number(e.target.value) })}
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
-              <span className="block text-xs text-gray-500 mt-1">How long a dropped connection (participant or xAI side) may be recovered before the session ends. 0 ends it immediately. The xAI session keeps billing while it waits.</span>
+              <input
+                type="number"
+                min={0}
+                max={600}
+                step={5}
+                value={grokTuning.reconnect_window_s}
+                onChange={(e) => setGrokTuning({ ...grokTuning, reconnect_window_s: Number(e.target.value) })}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+              <span className="block text-xs text-gray-500 mt-1">
+                How long a dropped connection (participant or xAI side) may be recovered before the session ends. 0 ends
+                it immediately. The xAI session keeps billing while it waits.
+              </span>
             </label>
             <div className="text-sm sm:col-span-2">
               <span className="block font-medium text-gray-700 mb-1">Reasoning effort</span>
-              <label className="mr-4"><input type="radio" name="grok_reasoning" checked={grokTuning.reasoning_effort === 'none'}
-                onChange={() => setGrokTuning({ ...grokTuning, reasoning_effort: 'none' })} className="mr-1" />none (fastest first word)</label>
-              <label><input type="radio" name="grok_reasoning" checked={grokTuning.reasoning_effort === 'high'}
-                onChange={() => setGrokTuning({ ...grokTuning, reasoning_effort: 'high' })} className="mr-1" />high (xAI default; slower, more considered)</label>
+              <label className="mr-4">
+                <input
+                  type="radio"
+                  name="grok_reasoning"
+                  checked={grokTuning.reasoning_effort === 'none'}
+                  onChange={() => setGrokTuning({ ...grokTuning, reasoning_effort: 'none' })}
+                  className="mr-1"
+                />
+                none (fastest first word)
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="grok_reasoning"
+                  checked={grokTuning.reasoning_effort === 'high'}
+                  onChange={() => setGrokTuning({ ...grokTuning, reasoning_effort: 'high' })}
+                  className="mr-1"
+                />
+                high (xAI default; slower, more considered)
+              </label>
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-3">
-            Measured per-turn latency (end of speech to first audio, and to response done) is recorded in
-            turn_latency for every Grok turn; see Analytics.
+            Measured per-turn latency (end of speech to first audio, and to response done) is recorded in turn_latency
+            for every Grok turn; see Analytics.
           </p>
         </div>
       )}
@@ -1465,21 +1557,25 @@ export default function SystemConfig() {
             </label>
           </div>
           <p className="text-xs text-gray-500 ml-6">
-            When enabled, the participant interface will output debug messages to the browser console. Keep disabled in production for cleaner logs.
+            When enabled, the participant interface will output debug messages to the browser console. Keep disabled in
+            production for cleaner logs.
           </p>
         </div>
       </div>
 
       {config && (
         <div className="text-xs text-gray-500 mt-6">
-          Last updated: {config.crisis_contact?.updated_at ? new Date(config.crisis_contact.updated_at).toLocaleString('en-US', {
-            month: 'numeric',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-          }) : 'Never'}
+          Last updated:{' '}
+          {config.crisis_contact?.updated_at
+            ? new Date(config.crisis_contact.updated_at).toLocaleString('en-US', {
+                month: 'numeric',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true,
+              })
+            : 'Never'}
           {config.crisis_contact?.updated_by && ` by ${config.crisis_contact.updated_by}`}
         </div>
       )}

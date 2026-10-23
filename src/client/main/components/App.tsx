@@ -1,17 +1,21 @@
-import { useEffect, useRef, useState } from "react";
-import type { Socket } from "socket.io-client";
+import { useEffect, useRef, useState } from 'react';
+import type { Socket } from 'socket.io-client';
 import { Loader } from 'react-feather';
-import ChatLog from "./ChatLog";
-import SessionControls from "./SessionControls";
-import SessionSettings from "./SessionSettings";
-import PreSessionCheckIn, { type CheckinData } from "./PreSessionCheckIn";
-import ConsentScreen from "./ConsentScreen";
-import QuietHoursScreen from "./QuietHoursScreen";
-import StudyStatusScreen from "./StudyStatusScreen";
-import ExerciseOverlay, { type ActiveExercise } from "./ExerciseOverlay";
-import ToolOverlays, { type ToolUI, type SafetyPlanData } from "./ToolOverlays";
-import PostSessionScreen, { type PostSessionData, type SessionRecapData, type SharedWriteup } from "./PostSessionScreen";
-import ModerationRecoveryScreen, { type ModerationRecoveryStage } from "./ModerationRecoveryScreen";
+import ChatLog from './ChatLog';
+import SessionControls from './SessionControls';
+import SessionSettings from './SessionSettings';
+import PreSessionCheckIn, { type CheckinData } from './PreSessionCheckIn';
+import ConsentScreen from './ConsentScreen';
+import QuietHoursScreen from './QuietHoursScreen';
+import StudyStatusScreen from './StudyStatusScreen';
+import ExerciseOverlay, { type ActiveExercise } from './ExerciseOverlay';
+import ToolOverlays, { type ToolUI, type SafetyPlanData } from './ToolOverlays';
+import PostSessionScreen, {
+  type PostSessionData,
+  type SessionRecapData,
+  type SharedWriteup,
+} from './PostSessionScreen';
+import ModerationRecoveryScreen, { type ModerationRecoveryStage } from './ModerationRecoveryScreen';
 import Header from './Header';
 import Home from './Home';
 import Messages from './Messages';
@@ -175,7 +179,7 @@ export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState<unknown[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [assistantStream, setAssistantStream] = useState("");
+  const [assistantStream, setAssistantStream] = useState('');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -232,7 +236,7 @@ export default function App() {
   const captionRowsRef = useRef<{ user: CaptionRow[]; assistant: CaptionRow[] }>({ user: [], assistant: [] });
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
-    language: 'en'
+    language: 'en',
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
@@ -251,12 +255,12 @@ export default function App() {
     hotline: '988 Suicide & Crisis Lifeline',
     phone: '988',
     text: 'HOME to 741741',
-    enabled: true
+    enabled: true,
   });
   const [features, setFeatures] = useState<Features>({
-    output_modalities: ["audio"],
+    output_modalities: ['audio'],
     voice_enabled: true,
-    chat_enabled: true
+    chat_enabled: true,
   });
   const [sessionEndTime, setSessionEndTime] = useState<number | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
@@ -367,9 +371,11 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/auth/status', { credentials: 'include' })
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => setIsAuthenticated(Boolean(data?.authenticated)))
-      .catch(() => { /* stay anonymous */ });
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setIsAuthenticated(Boolean(data?.authenticated)))
+      .catch(() => {
+        /* stay anonymous */
+      });
   }, []);
 
   useEffect(() => {
@@ -417,35 +423,37 @@ export default function App() {
 
     // Fetch crisis contact info
     fetch('/api/config/crisis')
-      .then(res => res.json())
-      .then(data => setCrisisContact(data))
-      .catch(err => console.error('Failed to fetch crisis contact:', err));
+      .then((res) => res.json())
+      .then((data) => setCrisisContact(data))
+      .catch((err) => console.error('Failed to fetch crisis contact:', err));
 
     // Quiet hours: pre-check on load, then every 5 minutes so the overnight
     // screen appears/lifts on its own at the window boundaries.
     const fetchQuietHours = () =>
       fetch('/api/config/quiet-hours', { credentials: 'include' })
-        .then(res => (res.ok ? res.json() : null))
-        .then(data => { if (data) setQuietHours(data); })
-        .catch(err => console.error('Failed to fetch quiet hours status:', err));
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data) setQuietHours(data);
+        })
+        .catch((err) => console.error('Failed to fetch quiet hours status:', err));
     fetchQuietHours();
     const quietHoursTimer = setInterval(fetchQuietHours, 5 * 60_000);
 
     // Fetch daily-session rate-limit status so a capped participant sees the
     // limit up front instead of after consent + check-in (429 on session start).
     fetch('/api/rate-limits/status', { credentials: 'include' })
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => {
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
         if (data && data.is_rate_limited) {
           setRateLimitInfo({ limited: true, resetsAt: data.limit_resets_at ?? null });
         }
       })
-      .catch(err => console.error('Failed to fetch rate limit status:', err));
+      .catch((err) => console.error('Failed to fetch rate limit status:', err));
 
     // Fetch features config
     fetch('/api/config/features')
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         setFeatures(data);
         // Phase 2 telemetry gates (default off; server enforces regardless).
         configureEngagementTelemetry({
@@ -453,36 +461,36 @@ export default function App() {
           engagementEvents: data.telemetry_engagement_events === true,
         });
       })
-      .catch(err => console.error('Failed to fetch features config:', err));
+      .catch((err) => console.error('Failed to fetch features config:', err));
 
     // Fetch consent status: has this browser session already accepted the
     // current consent copy? (e.g. earlier in the same session, or a returning
     // logged-in user within the same cookie's lifetime).
     fetch('/api/consent/status', { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         setConsentVersion(data.currentVersion);
         setConsentAccepted(!!data.accepted);
         setConsentBody(data.body ?? '');
         setReconsentRequired(!!data.reconsentRequired);
       })
-      .catch(err => console.error('Failed to fetch consent status:', err));
+      .catch((err) => console.error('Failed to fetch consent status:', err));
 
     // Fetch user preferences (voice and language)
     fetch('/api/users/preferences', {
-      credentials: 'include'
+      credentials: 'include',
     })
-      .then(res => {
+      .then((res) => {
         if (res.ok) {
           return res.json();
         }
         // If not authenticated or error, use defaults
         return { voice: 'cedar', language: 'en' };
       })
-      .then(prefs => {
+      .then((prefs) => {
         setSessionSettings({
           voice: prefs.voice || 'cedar',
-          language: prefs.language || 'en'
+          language: prefs.language || 'en',
         });
         // Server-stored theme wins over this device's localStorage so a
         // logged-in user's choice follows them across devices.
@@ -491,7 +499,7 @@ export default function App() {
         }
         console.log('Loaded user preferences:', prefs);
       })
-      .catch(err => {
+      .catch((err) => {
         console.error('Failed to fetch user preferences:', err);
         // Keep defaults on error
       });
@@ -522,7 +530,7 @@ export default function App() {
 
         if (sessionType === 'chat') {
           // Chat has no server-driven wrap-up; end it here as before.
-          toast.warning("Your session time has ended. The session will now close.");
+          toast.warning('Your session time has ended. The session will now close.');
           stopSession();
           return;
         }
@@ -534,7 +542,7 @@ export default function App() {
         // so no new participant turns start, and let the wrap-up land.
         toast.warning("Time's up — the session is wrapping up and will close in a moment.");
         setMicLocked(true);
-        peerConnection.current?.getSenders().forEach(sender => {
+        peerConnection.current?.getSenders().forEach((sender) => {
           if (sender.track) sender.track.enabled = false;
         });
         grokClientRef.current?.muteMic();
@@ -566,7 +574,7 @@ export default function App() {
     logBufferRef.current.push({
       timestamp: new Date().toISOString(),
       sessionId,
-      role: role || "system",
+      role: role || 'system',
       type,
       message: message ?? null,
       extras: extras ?? null,
@@ -581,14 +589,14 @@ export default function App() {
     flushInFlightRef.current = true;
     logBufferRef.current = [];
     try {
-      await fetch("/logs/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      await fetch('/logs/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ records: batch }),
         keepalive: true,
       });
     } catch (err) {
-      console.error("Failed to batch log, re-queueing:", err);
+      console.error('Failed to batch log, re-queueing:', err);
       logBufferRef.current = [...batch, ...logBufferRef.current];
     } finally {
       flushInFlightRef.current = false;
@@ -636,13 +644,13 @@ export default function App() {
       row.startMs = Math.min(row.startMs, startMs);
       row.endMs = Math.max(row.endMs, endMs);
       const rowId = row.id;
-      setMessages(prev => prev.map(m => (m.id === rowId ? { ...m, text: m.text + delta } : m)));
+      setMessages((prev) => prev.map((m) => (m.id === rowId ? { ...m, text: m.text + delta } : m)));
       return;
     }
 
     const created: CaptionRow = { id: crypto.randomUUID(), startMs, endMs };
     rows.push(created);
-    setMessages(prev => [...prev, { id: created.id, role, text: delta }]);
+    setMessages((prev) => [...prev, { id: created.id, role, text: delta }]);
   }
 
   /** Show the delegated-work hint, with a failsafe so it always clears. */
@@ -673,7 +681,7 @@ export default function App() {
       } else {
         // The voice backend follows the admin's ai_model choice, read fresh at
         // every start so a switch made after page load still takes effect.
-        if (await detectVoiceBackend() === 'grok') {
+        if ((await detectVoiceBackend()) === 'grok') {
           await startGrokSession(checkin);
         } else {
           await startRealtimeSession(checkin);
@@ -686,11 +694,19 @@ export default function App() {
       const name = error instanceof DOMException || error instanceof Error ? error.name : '';
       const errMessage = (error instanceof Error ? error.message : String(error)).slice(0, 300);
       if (name === 'NotAllowedError' || name === 'NotFoundError') {
-        toast.error('We could not access your microphone. Please allow microphone access in your browser settings (or plug one in) and try again.');
+        toast.error(
+          'We could not access your microphone. Please allow microphone access in your browser settings (or plug one in) and try again.',
+        );
         reportClientEvent('mic_permission_denied', { name });
       } else {
-        toast.error('Could not start your session — there was a problem reaching the server. Please check your connection and try again.');
-        reportClientEvent(name === 'SdpFetchError' ? 'sdp_fetch_failed' : 'webrtc_failed', { stage: 'start', name, message: errMessage });
+        toast.error(
+          'Could not start your session — there was a problem reaching the server. Please check your connection and try again.',
+        );
+        reportClientEvent(name === 'SdpFetchError' ? 'sdp_fetch_failed' : 'webrtc_failed', {
+          stage: 'start',
+          name,
+          message: errMessage,
+        });
       }
       cleanupFailedStart();
     }
@@ -744,8 +760,9 @@ export default function App() {
     if (orphan) {
       pendingStartSessionRef.current = null;
       const endUrl = orphan.kind === 'chat' ? '/api/chat/end' : `/api/sessions/${orphan.id}/end`;
-      void fetch(endUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
-        .catch((endErr) => console.error('Failed to release orphaned session:', endErr));
+      void fetch(endUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch((endErr) =>
+        console.error('Failed to release orphaned session:', endErr),
+      );
     }
   }
 
@@ -757,14 +774,14 @@ export default function App() {
       const response = await fetch('/api/chat/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: sessionSettings.language, checkin })
+        body: JSON.stringify({ language: sessionSettings.language, checkin }),
       });
 
       // Check for rate limiting errors
       if (response.status === 429) {
         const errorData = await response.json();
-        toast.error(errorData.message || "You have reached your session limit. Please try again later.");
-        console.warn("Rate limit exceeded:", errorData);
+        toast.error(errorData.message || 'You have reached your session limit. Please try again later.');
+        console.warn('Rate limit exceeded:', errorData);
         setRateLimitInfo({ limited: true, resetsAt: errorData.limit_resets_at ?? null });
         return;
       }
@@ -793,12 +810,12 @@ export default function App() {
       }
 
       const data = await response.json();
-      console.log("Chat session started:", data);
+      console.log('Chat session started:', data);
 
       // Check if session already exists (idempotency check)
       if (data.alreadyActive) {
-        toast.warning("You already have an active session. Please end it before starting a new one.");
-        console.warn("Active session already exists:", data.sessionId);
+        toast.warning('You already have an active session. Please end it before starting a new one.');
+        console.warn('Active session already exists:', data.sessionId);
         return;
       }
 
@@ -815,25 +832,31 @@ export default function App() {
       // session's first assistant turn, so the model and the transcript both
       // carry the disclaimer); the local copy is only a fallback for an older
       // server that did not return one.
-      setMessages([{
-        id: crypto.randomUUID(),
-        role: "assistant",
-        text: typeof data.opening === 'string' && data.opening
-          ? data.opening
-          : getPreambleForLanguage(sessionSettings.language, false),
-      }]);
+      setMessages([
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text:
+            typeof data.opening === 'string' && data.opening
+              ? data.opening
+              : getPreambleForLanguage(sessionSettings.language, false),
+        },
+      ]);
 
       console.log(`Chat-only session started: ${newSessionId}`);
       pendingStartSessionRef.current = null; // start succeeded — nothing to release
-
     } catch (error) {
       console.error('Failed to start chat session:', error);
       toast.error('Failed to start chat session. Please try again.');
-      reportClientEvent('chat_send_failed', { where: 'start', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) });
+      reportClientEvent('chat_send_failed', {
+        where: 'start',
+        message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      });
       if (pendingStartSessionRef.current?.kind === 'chat') {
         pendingStartSessionRef.current = null;
-        void fetch('/api/chat/end', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
-          .catch((endErr) => console.error('Failed to release orphaned chat session:', endErr));
+        void fetch('/api/chat/end', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch(
+          (endErr) => console.error('Failed to release orphaned chat session:', endErr),
+        );
       }
     }
   }
@@ -895,7 +918,11 @@ export default function App() {
       // one) open, so this is not a session we can safely talk in — treat it as
       // a failure and let the retry run once the /end has landed.
       if (data.alreadyActive || !data.sessionId) {
-        throw new Error(data.alreadyActive ? 'Chat continuation blocked by an active session' : 'Chat continuation returned no session id');
+        throw new Error(
+          data.alreadyActive
+            ? 'Chat continuation blocked by an active session'
+            : 'Chat continuation returned no session id',
+        );
       }
 
       const newSessionId = data.sessionId as string;
@@ -924,10 +951,14 @@ export default function App() {
       console.log(`[Live] Voice session continued as chat session ${newSessionId}`);
     } catch (error) {
       console.error('[Live] Failed to continue a filter-terminated session in chat:', error);
-      reportClientEvent('chat_send_failed', {
-        where: 'moderation_continuation',
-        message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
-      }, voiceSessionId);
+      reportClientEvent(
+        'chat_send_failed',
+        {
+          where: 'moderation_continuation',
+          message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+        },
+        voiceSessionId,
+      );
       setModerationRecovery('failed');
     }
   }
@@ -979,11 +1010,15 @@ export default function App() {
       return true;
     } catch (error) {
       console.error(`[Live] Voice recovery attempt ${attempt} failed:`, error);
-      reportClientEvent('webrtc_failed', {
-        stage: 'moderation_voice_recovery',
-        attempt,
-        message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
-      }, moderationVoiceSessionIdRef.current);
+      reportClientEvent(
+        'webrtc_failed',
+        {
+          stage: 'moderation_voice_recovery',
+          attempt,
+          message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+        },
+        moderationVoiceSessionIdRef.current,
+      );
       // Whatever the failed start left behind (peer connection, mic track,
       // socket, server-side session) is released here, so the next attempt — or
       // the text fallback — starts from a clean slate.
@@ -1049,10 +1084,14 @@ export default function App() {
     // history to continue.
     moderationVoiceSessionIdRef.current ??= voiceSessionId;
     console.error('[Live] Session terminated by the content filter; taking over with the recovery screen.');
-    reportClientEvent('data_channel_error', {
-      stage: 'moderation_terminated',
-      voiceRecoveryAttemptsSpent: moderationVoiceAttemptsRef.current,
-    }, voiceSessionId);
+    reportClientEvent(
+      'data_channel_error',
+      {
+        stage: 'moderation_terminated',
+        voiceRecoveryAttemptsSpent: moderationVoiceAttemptsRef.current,
+      },
+      voiceSessionId,
+    );
 
     // Screen first: the participant must not see the post-session screen for a
     // single frame, so this happens before any awaited teardown work.
@@ -1125,7 +1164,10 @@ export default function App() {
    *   before. Callers must not treat a refusal as a slow connect
    *   (ai-therapist-227).
    */
-  async function startRealtimeSession(checkin: CheckinData | null = null, recovery = false): Promise<SessionStartResult> {
+  async function startRealtimeSession(
+    checkin: CheckinData | null = null,
+    recovery = false,
+  ): Promise<SessionStartResult> {
     voiceBackendRef.current = 'live';
     // Drives SessionControls.startMicOn. A recovery session resumes a
     // conversation the participant was already speaking in, so it must come
@@ -1181,7 +1223,9 @@ export default function App() {
           clearTimeout(disconnectTimerRef.current);
           disconnectTimerRef.current = null;
         }
-        toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
+        toast.error(
+          'The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.',
+        );
         reportClientEvent('webrtc_failed', { stage: 'connectionstatechange' }, liveSessionIdRef.current);
         void stopSessionRef.current();
       } else if (state === 'disconnected') {
@@ -1190,8 +1234,14 @@ export default function App() {
             disconnectTimerRef.current = null;
             const s = pc.connectionState;
             if (s === 'disconnected' || s === 'failed') {
-              toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
-              reportClientEvent('webrtc_disconnected', { stage: 'grace-period-expired', state: s }, liveSessionIdRef.current);
+              toast.error(
+                'The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.',
+              );
+              reportClientEvent(
+                'webrtc_disconnected',
+                { stage: 'grace-period-expired', state: s },
+                liveSessionIdRef.current,
+              );
               void stopSessionRef.current();
             }
           }, 7000);
@@ -1200,7 +1250,7 @@ export default function App() {
     };
 
     // Set up to play remote audio from the model
-    const audioEl = document.createElement("audio");
+    const audioEl = document.createElement('audio');
     audioEl.autoplay = true;
     audioElement.current = audioEl;
 
@@ -1220,15 +1270,15 @@ export default function App() {
     // The data channel and every one of its listeners must exist BEFORE
     // createOffer(): the channel is negotiated in the SDP, and `session.started`
     // can arrive the moment the answer is applied.
-    const dc = pc.createDataChannel("oai-events");
+    const dc = pc.createDataChannel('oai-events');
     dataChannelRef.current = dc;
 
-    dc.addEventListener("error", (e) => {
+    dc.addEventListener('error', (e) => {
       console.error('[DataChannel] error:', e);
       reportClientEvent('data_channel_error', { stage: 'oai-events' }, liveSessionIdRef.current);
     });
 
-    dc.addEventListener("close", () => {
+    dc.addEventListener('close', () => {
       // A transport close is not finalization. If it happens before
       // `session.closed`, the final usage for this session is unconfirmed —
       // worth reporting, because our own teardown closes the channel only after
@@ -1239,7 +1289,7 @@ export default function App() {
       }
     });
 
-    dc.addEventListener("message", async (e) => {
+    dc.addEventListener('message', async (e) => {
       const event = JSON.parse(e.data as string) as LiveServerEvent;
       if (!event.type) return;
 
@@ -1263,7 +1313,7 @@ export default function App() {
           // happened, at the worst possible moment. Only the in-progress
           // fragment goes.
           if (!recovery) setMessages([]);
-          setAssistantStream("");
+          setAssistantStream('');
           startPeriodicFlush();
 
           if (recovery) {
@@ -1374,11 +1424,15 @@ export default function App() {
         case 'error': {
           const err = event.error as { code?: string; message?: string; client_event_id?: string } | undefined;
           console.error('[Live] API error:', err);
-          reportClientEvent('data_channel_error', {
-            stage: 'live_error',
-            code: err?.code ?? null,
-            message: (err?.message ?? '').slice(0, 200),
-          }, liveSessionIdRef.current);
+          reportClientEvent(
+            'data_channel_error',
+            {
+              stage: 'live_error',
+              code: err?.code ?? null,
+              message: (err?.message ?? '').slice(0, 200),
+            },
+            liveSessionIdRef.current,
+          );
           logConversation({
             sessionId: liveSessionIdRef.current,
             role: 'system',
@@ -1432,9 +1486,9 @@ export default function App() {
     // explicitly (request body wins server-side) so the choice also applies for
     // anonymous participants, who have no saved preferences row; logged-in
     // users' preferences remain the fallback when nothing is sent.
-    const response = await fetch("/api/live/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const response = await fetch('/api/live/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sdp: localSdp,
         voice: sessionSettings.voice,
@@ -1455,7 +1509,7 @@ export default function App() {
     // content-filter voice recovery can fail over at once instead of waiting out
     // a `session.started` that is never coming.
     if (!response.ok) {
-      const errorData = await response.json().catch(() => null) as SessionStartErrorBody | null;
+      const errorData = (await response.json().catch(() => null)) as SessionStartErrorBody | null;
       const refusal = classifySessionStartRefusal(response.status, errorData);
       if (refusal) {
         switch (refusal) {
@@ -1468,7 +1522,10 @@ export default function App() {
             // anyway (recovery is server-side exempt) — so neither the toast
             // nor the home-screen rate-limit banner state is touched here.
             if (!moderationTakeoverRef.current) {
-              toast.error((errorData?.message as string | undefined) || 'You have reached your session limit. Please try again later.');
+              toast.error(
+                (errorData?.message as string | undefined) ||
+                  'You have reached your session limit. Please try again later.',
+              );
               setRateLimitInfo({ limited: true, resetsAt: (errorData?.limit_resets_at as string | undefined) ?? null });
             }
             break;
@@ -1493,7 +1550,9 @@ export default function App() {
           case 'live_not_active':
             console.warn('Live backend is not active:', errorData);
             if (!moderationTakeoverRef.current) {
-              toast.error('Voice sessions are temporarily unavailable. Please refresh the page and try again, or contact the research team if this keeps happening.');
+              toast.error(
+                'Voice sessions are temporarily unavailable. Please refresh the page and try again, or contact the research team if this keeps happening.',
+              );
             }
             break;
           default:
@@ -1516,9 +1575,9 @@ export default function App() {
 
     // Check if session already exists (idempotency check)
     if (data.session?.exists) {
-      console.warn("Active session already exists:", data.session.id);
+      console.warn('Active session already exists:', data.session.id);
       if (!moderationTakeoverRef.current) {
-        toast.warning(data.message || "You already have an active session. Please end it before starting a new one.");
+        toast.warning(data.message || 'You already have an active session. Please end it before starting a new one.');
       }
       abortStart();
       return sessionStartRefused('session_exists');
@@ -1550,15 +1609,15 @@ export default function App() {
 
     logConversation({
       sessionId: newSessionId,
-      role: "system",
-      type: "session_start",
-      message: "Session started",
+      role: 'system',
+      type: 'session_start',
+      message: 'Session started',
     });
     logConversation({
       sessionId: newSessionId,
-      role: "system",
-      type: "system",
-      message: "Session settings",
+      role: 'system',
+      type: 'system',
+      message: 'Session settings',
       // The clinical prompt and tool schemas live server-side now — the browser
       // never sees them, so there is nothing to omit from this record.
       extras: {
@@ -1609,7 +1668,7 @@ export default function App() {
 
     // Apply the answer. The HTTP request already started the session — there is
     // deliberately no `session.start` on the data channel.
-    await pc.setRemoteDescription({ type: "answer", sdp: sdpAnswer });
+    await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
 
     // If the answer applies but `session.started` never lands, the participant
     // would sit on "Connecting..." forever with a session that is already
@@ -1618,17 +1677,23 @@ export default function App() {
       liveStartTimeoutRef.current = null;
       if (liveStartedRef.current) return;
       console.error('[Live] No session.started within the timeout; abandoning this connection.');
-      reportClientEvent('webrtc_failed', {
-        stage: 'no_session_started',
-        recovery,
-        connectionState: pc.connectionState,
-        iceState: pc.iceConnectionState,
-      }, newSessionId);
+      reportClientEvent(
+        'webrtc_failed',
+        {
+          stage: 'no_session_started',
+          recovery,
+          connectionState: pc.connectionState,
+          iceState: pc.iceConnectionState,
+        },
+        newSessionId,
+      );
       // No toast on the recovery path: the crisis screen is already up and owns
       // the explanation, and it is about to move the participant on to the next
       // fallback — a "check your connection" toast over it would only alarm.
       if (!recovery) {
-        toast.error('Could not start your session — there was a problem reaching the server. Please check your connection and try again.');
+        toast.error(
+          'Could not start your session — there was a problem reaching the server. Please check your connection and try again.',
+        );
       }
       void stopSessionRef.current();
     }, LIVE_START_TIMEOUT_MS);
@@ -1653,7 +1718,7 @@ export default function App() {
     try {
       const res = await fetch('/api/config/ai-model', { credentials: 'include' });
       if (res.ok) {
-        const data = await res.json() as { voice_backend?: string };
+        const data = (await res.json()) as { voice_backend?: string };
         if (data.voice_backend === 'grok') return 'grok';
       }
     } catch (err) {
@@ -1672,12 +1737,14 @@ export default function App() {
       // Participant text arrives cumulative (replace); assistant text streams
       // as deltas (append) until the final transcript replaces the row.
       const replace = msg.final || msg.role === 'user';
-      setMessages(prev => prev.map(m => (m.id === existing ? { ...m, text: replace ? msg.text : m.text + msg.text } : m)));
+      setMessages((prev) =>
+        prev.map((m) => (m.id === existing ? { ...m, text: replace ? msg.text : m.text + msg.text } : m)),
+      );
       return;
     }
     const id = crypto.randomUUID();
     rows.set(key, id);
-    setMessages(prev => [...prev, { id, role: msg.role, text: msg.text }]);
+    setMessages((prev) => [...prev, { id, role: msg.role, text: msg.text }]);
   }
 
   /** UI-only: open the overlay for a tool the SERVER is executing. */
@@ -1705,12 +1772,21 @@ export default function App() {
         void handleGrokToolCall(msg);
         break;
       case 'error':
-        reportClientEvent('data_channel_error', {
-          stage: 'grok_error', code: msg.code ?? null, message: msg.message.slice(0, 200),
-        }, liveSessionIdRef.current);
+        reportClientEvent(
+          'data_channel_error',
+          {
+            stage: 'grok_error',
+            code: msg.code ?? null,
+            message: msg.message.slice(0, 200),
+          },
+          liveSessionIdRef.current,
+        );
         logConversation({
-          sessionId: liveSessionIdRef.current, role: 'system', type: 'system',
-          message: `Grok API error: ${msg.message}`, extras: { code: msg.code ?? null },
+          sessionId: liveSessionIdRef.current,
+          role: 'system',
+          type: 'system',
+          message: `Grok API error: ${msg.message}`,
+          extras: { code: msg.code ?? null },
         });
         break;
       case 'closed':
@@ -1721,8 +1797,14 @@ export default function App() {
         setVoiceReconnecting(false);
         if (!isTearingDownRef.current) {
           if (msg.reason !== 'ended') {
-            toast.error('The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.');
-            reportClientEvent('webrtc_disconnected', { stage: 'grok_closed', reason: msg.reason }, liveSessionIdRef.current);
+            toast.error(
+              'The connection to your session was lost. The session has ended — you can start a new one whenever you are ready.',
+            );
+            reportClientEvent(
+              'webrtc_disconnected',
+              { stage: 'grok_closed', reason: msg.reason },
+              liveSessionIdRef.current,
+            );
           }
           void stopSessionRef.current();
         }
@@ -1793,7 +1875,9 @@ export default function App() {
     }
     if (response.status === 409) {
       const errorData = await response.json().catch(() => null);
-      toast.error(errorData?.message || 'Voice sessions are temporarily unavailable. Please refresh the page and try again.');
+      toast.error(
+        errorData?.message || 'Voice sessions are temporarily unavailable. Please refresh the page and try again.',
+      );
       console.warn('Grok backend not active/configured:', errorData);
       abortStart();
       return;
@@ -1833,7 +1917,10 @@ export default function App() {
 
     logConversation({ sessionId: newSessionId, role: 'system', type: 'session_start', message: 'Session started' });
     logConversation({
-      sessionId: newSessionId, role: 'system', type: 'system', message: 'Session settings',
+      sessionId: newSessionId,
+      role: 'system',
+      type: 'system',
+      message: 'Session settings',
       extras: {
         id: newSessionId,
         backend: 'grok',
@@ -1858,7 +1945,9 @@ export default function App() {
         // the re-attach (4410: the session was already ended server-side).
         console.error(`[Grok] Voice socket dropped: ${code} ${reason}`);
         reportClientEvent('webrtc_disconnected', { stage: 'grok_socket_dropped', code }, liveSessionIdRef.current);
-        toast.error('The connection to your session was lost. The session has ended. You can start a new one whenever you are ready.');
+        toast.error(
+          'The connection to your session was lost. The session has ended. You can start a new one whenever you are ready.',
+        );
         void stopSessionRef.current();
       },
       onError: (message) => {
@@ -1890,8 +1979,15 @@ export default function App() {
       participantUploaderRef.current = participantUploader;
       audioTeeRef.current = startMixedTee(
         [ms, client.remoteStream],
-        (pcm, sampleRate) => { uploader.push(pcm, sampleRate); },
-        { stream: ms, onChunk: (pcm, sampleRate) => { participantUploader.push(pcm, sampleRate); } },
+        (pcm, sampleRate) => {
+          uploader.push(pcm, sampleRate);
+        },
+        {
+          stream: ms,
+          onChunk: (pcm, sampleRate) => {
+            participantUploader.push(pcm, sampleRate);
+          },
+        },
       );
     }
   }
@@ -2027,14 +2123,18 @@ export default function App() {
       // Handle both array and single object formats
       const messages = Array.isArray(data) ? data : [data];
 
-      messages.forEach(msg => {
+      messages.forEach((msg) => {
         // Handle AI guidance messages (hidden from user, sent to AI)
         if (msg.message_type === 'ai_guidance' && msg.metadata?.hidden_from_user) {
           console.log('[Crisis] Steering the live model with AI guidance');
           sendInvisiblePrompt(msg.content);
         }
         // Crisis intervention and admin messages: send to AI to speak them
-        else if (msg.message_type === 'crisis_intervention' || msg.message_type === 'crisis_emergency' || msg.message_type === 'admin_visible') {
+        else if (
+          msg.message_type === 'crisis_intervention' ||
+          msg.message_type === 'crisis_emergency' ||
+          msg.message_type === 'admin_visible'
+        ) {
           console.log('[Crisis] Sending intervention message to AI to speak:', msg.content.substring(0, 100));
           // Escape single quotes in the message content
           const escapedContent = msg.content.replace(/'/g, "\\'");
@@ -2056,7 +2156,9 @@ export default function App() {
               sendInvisiblePrompt(promptToSpeak);
             } else if (attempt < maxAttempts) {
               const state = dataChannelRef.current ? dataChannelRef.current.readyState : 'null';
-              console.log(`[Crisis] Session not ready (channel=${state}, started=${liveStartedRef.current}), retry ${attempt + 1}/${maxAttempts} in 500ms`);
+              console.log(
+                `[Crisis] Session not ready (channel=${state}, started=${liveStartedRef.current}), retry ${attempt + 1}/${maxAttempts} in 500ms`,
+              );
               setTimeout(() => trySendMessage(attempt + 1), 500);
             } else {
               console.error('[Crisis] Failed to send message after max retries - session never became ready');
@@ -2070,9 +2172,9 @@ export default function App() {
             ...prev,
             {
               id: crypto.randomUUID(),
-              role: "system",
-              text: msg.content
-            }
+              role: 'system',
+              text: msg.content,
+            },
           ]);
         }
       });
@@ -2092,10 +2194,10 @@ export default function App() {
           ...prev,
           {
             id: crypto.randomUUID(),
-            role: "system",
+            role: 'system',
             text: fullMessage,
-            isAdminMessage: true
-          }
+            isAdminMessage: true,
+          },
         ]);
       } else if (messageType === 'invisible') {
         // Steer the AI without the participant seeing it. Note the behaviour
@@ -2126,9 +2228,7 @@ export default function App() {
    */
   async function handleNestedResponseEvent(inner: LiveServerEvent | undefined) {
     if (inner?.type !== 'response.output_item.done') return;
-    const item = inner.item as
-      | { type?: string; name?: string; call_id?: string; arguments?: string }
-      | undefined;
+    const item = inner.item as { type?: string; name?: string; call_id?: string; arguments?: string } | undefined;
     if (item?.type !== 'function_call' || !item.name || !item.call_id) return;
     if (handledToolCallsRef.current.has(item.call_id)) return;
     handledToolCallsRef.current.add(item.call_id);
@@ -2147,8 +2247,8 @@ export default function App() {
     const result = await fn(args);
     logConversation({
       sessionId: liveSessionIdRef.current,
-      role: "system",
-      type: "function_call",
+      role: 'system',
+      type: 'function_call',
       message: `Function ${item.name} called`,
       extras: { args, result },
     });
@@ -2203,7 +2303,7 @@ export default function App() {
           await fetch('/api/chat/end', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId })
+            body: JSON.stringify({ sessionId }),
           });
         } catch (error) {
           console.error('Failed to end chat session:', error);
@@ -2277,7 +2377,7 @@ export default function App() {
       });
     }
 
-    logConversation({ sessionId:sessionId, role: "system", type: "session_end", message: "Session ended" });
+    logConversation({ sessionId: sessionId, role: 'system', type: 'session_end', message: 'Session ended' });
     stopPeriodicFlush();
     await flushLogs();
 
@@ -2286,7 +2386,7 @@ export default function App() {
       try {
         await fetch(`/api/sessions/${sessionId}/end`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
         });
       } catch (error) {
         console.error('Failed to end session:', error);
@@ -2365,28 +2465,27 @@ export default function App() {
     const handlePageHide = () => {
       // Flush logs regardless of session state
       const logBlob = new Blob([JSON.stringify({ records: logBufferRef.current })], { type: 'application/json' });
-      navigator.sendBeacon?.("/logs/batch", logBlob);
+      navigator.sendBeacon?.('/logs/batch', logBlob);
 
       // If session is active, end it
       if (isSessionActive && sessionId) {
         const endBlob = new Blob([JSON.stringify({ sessionId })], { type: 'application/json' });
         if (sessionType === 'chat') {
-          navigator.sendBeacon?.("/api/chat/end", endBlob);
+          navigator.sendBeacon?.('/api/chat/end', endBlob);
         } else {
           navigator.sendBeacon?.(`/api/sessions/${sessionId}/end`, endBlob);
         }
       }
     };
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
 
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
     };
   }, [isSessionActive, sessionId, sessionType]);
-
 
   // Send one client event on the GPT-Live data channel. Guarded on
   // `session.started` as well as the channel state: the HTTP request starts the
@@ -2398,7 +2497,10 @@ export default function App() {
       setEvents((prev) => [{ ...message, timestamp: new Date().toLocaleTimeString() }, ...prev].slice(0, 200));
     } else {
       const state = dataChannelRef.current ? dataChannelRef.current.readyState : 'null';
-      console.error(`Failed to send message - session not ready (channel: ${state}, started: ${liveStartedRef.current})`, message);
+      console.error(
+        `Failed to send message - session not ready (channel: ${state}, started: ${liveStartedRef.current})`,
+        message,
+      );
     }
   }
 
@@ -2413,16 +2515,13 @@ export default function App() {
     // Handle chat-only session
     if (sessionType === 'chat') {
       // Add user message to UI immediately
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "user", text: message },
-      ]);
+      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text: message }]);
 
       try {
         const response = await fetch('/api/chat/message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, message })
+          body: JSON.stringify({ sessionId, message }),
         });
 
         if (response.status === 403) {
@@ -2442,7 +2541,7 @@ export default function App() {
               ...prev,
               {
                 id: crypto.randomUUID(),
-                role: "system",
+                role: 'system',
                 text: errorData.message || 'This conversation is no longer available. Please start a new session.',
               },
             ]);
@@ -2456,10 +2555,7 @@ export default function App() {
         const data = await response.json();
 
         // Add AI response to UI
-        setMessages((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), role: "assistant", text: data.response },
-        ]);
+        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', text: data.response }]);
 
         // Tool parity (ai-therapist-118): the server executes chat tool calls
         // and returns the visual ones as toolEvents; dispatch them through the
@@ -2484,13 +2580,16 @@ export default function App() {
         if (data.sessionEnded) {
           await stopSession();
         }
-
       } catch (error) {
         console.error('Failed to send chat message:', error);
-        reportClientEvent('chat_send_failed', { where: 'message', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) }, sessionId);
+        reportClientEvent(
+          'chat_send_failed',
+          { where: 'message', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) },
+          sessionId,
+        );
         setMessages((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), role: "system", text: "Error: Failed to send message. Please try again." },
+          { id: crypto.randomUUID(), role: 'system', text: 'Error: Failed to send message. Please try again.' },
         ]);
       }
       return;
@@ -2501,8 +2600,8 @@ export default function App() {
     // reply. Persistence + crisis scoring still ride the log batch below.
     if (voiceBackendRef.current === 'grok') {
       const grokSessionId = liveSessionIdRef.current ?? sessionId;
-      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", text: message }]);
-      logConversation({ sessionId: grokSessionId, role: "user", type: "chat", message });
+      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text: message }]);
+      logConversation({ sessionId: grokSessionId, role: 'user', type: 'chat', message });
       try {
         const res = await fetch(`/api/grok/session/${grokSessionId}/text`, {
           method: 'POST',
@@ -2512,8 +2611,15 @@ export default function App() {
         if (!res.ok) throw new Error(`status ${res.status}`);
       } catch (error) {
         console.error('[Grok] Failed to send typed text:', error);
-        reportClientEvent('chat_send_failed', { where: 'grok_text', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) }, grokSessionId);
-        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "system", text: "Error: Failed to send message. Please try again." }]);
+        reportClientEvent(
+          'chat_send_failed',
+          { where: 'grok_text', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) },
+          grokSessionId,
+        );
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: 'system', text: 'Error: Failed to send message. Please try again.' },
+        ]);
       }
       return;
     }
@@ -2525,26 +2631,23 @@ export default function App() {
     // backend. (Both replace the Realtime conversation.item.create pair; Live
     // has no conversation item list to write into.)
     sendClientEvent({
-      type: "response.item.create",
+      type: 'response.item.create',
       item: {
-        type: "message",
-        role: "user",
+        type: 'message',
+        role: 'user',
         content: [
           {
-            type: "input_text",
+            type: 'input_text',
             text: message,
           },
         ],
       },
     });
-    setMessages((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), role: "user", text: message },
-    ]);
-    sendClientEvent({ type: "response.create" });
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text: message }]);
+    sendClientEvent({ type: 'response.create' });
     // Typed turns produce no transcript deltas, so unlike spoken turns the
     // server's sideband never sees them — this log is the only record.
-    logConversation({ sessionId: liveSessionIdRef.current ?? sessionId, role: "user", type: "chat", message: message });
+    logConversation({ sessionId: liveSessionIdRef.current ?? sessionId, role: 'user', type: 'chat', message: message });
   }
 
   /**
@@ -2571,7 +2674,7 @@ export default function App() {
     }
     console.log('[sendInvisiblePrompt] Appending instructions, length:', text.length);
     sendClientEvent({
-      type: "session.instructions.append",
+      type: 'session.instructions.append',
       delegation_id: null,
       content: truncateForAppend(text),
     });
@@ -2581,7 +2684,12 @@ export default function App() {
       // Latest-ref, not state: this runs from data-channel and socket handlers
       // that closed over the render where sessionId was still null, which used
       // to drop the record entirely (ai-therapist-113 family).
-      logConversation({ sessionId: liveSessionIdRef.current ?? sessionId, role: "system", type: "system", message: logMessage });
+      logConversation({
+        sessionId: liveSessionIdRef.current ?? sessionId,
+        role: 'system',
+        type: 'system',
+        message: logMessage,
+      });
     }
   }
 
@@ -2602,7 +2710,7 @@ export default function App() {
           body: JSON.stringify({ kind, summary }),
         });
         if (res.ok) {
-          const data = await res.json() as { injected?: boolean };
+          const data = (await res.json()) as { injected?: boolean };
           if (data.injected) return;
         }
       }
@@ -2630,21 +2738,21 @@ export default function App() {
     const basePrompt = getPreambleForLanguage(language, true);
 
     const languageNames: Record<string, string> = {
-      'en': 'English',
+      en: 'English',
       'es-ES': 'Spanish from Spain (Español de España)',
       'es-419': 'Latin American Spanish (Español Latinoamericano)',
       'fr-FR': 'French from France (Français de France)',
       'fr-CA': 'Québécois French (Français Québécois)',
       'pt-BR': 'Brazilian Portuguese (Português Brasileiro)',
       'pt-PT': 'European Portuguese (Português Europeu)',
-      'de': 'German',
-      'it': 'Italian',
-      'zh': 'Chinese',
-      'ja': 'Japanese',
-      'ko': 'Korean',
-      'ar': 'Arabic',
-      'hi': 'Hindi',
-      'ru': 'Russian'
+      de: 'German',
+      it: 'Italian',
+      zh: 'Chinese',
+      ja: 'Japanese',
+      ko: 'Korean',
+      ar: 'Arabic',
+      hi: 'Hindi',
+      ru: 'Russian',
     };
 
     if (language === 'en') {
@@ -2710,7 +2818,8 @@ export default function App() {
       // validates the same args against the vetted template's structure and
       // persists the instance for researcher review — see toolRegistry.service.ts.
       const a = (args ?? {}) as {
-        title?: string; intro?: string;
+        title?: string;
+        intro?: string;
         sections?: Array<{ type: 'text' | 'textarea' | 'scale'; label: string; placeholder?: string }>;
       };
       if (!a.title || !Array.isArray(a.sections) || a.sections.length === 0) {
@@ -2782,9 +2891,11 @@ export default function App() {
         sessionId={sessionId}
         timeRemaining={timeRemaining}
         messagesUnread={messagesUnread}
-        onOpenMessages={isAuthenticated && !isSessionActive
-          ? () => setActiveView(v => (v === 'messages' ? 'home' : 'messages'))
-          : undefined}
+        onOpenMessages={
+          isAuthenticated && !isSessionActive
+            ? () => setActiveView((v) => (v === 'messages' ? 'home' : 'messages'))
+            : undefined
+        }
         messagesOpen={activeView === 'messages'}
       />
       <main className="flex-1 flex flex-col items-center overflow-hidden">
@@ -2804,10 +2915,7 @@ export default function App() {
                the component carries its own crisis-resources banner. */
             <Messages />
           ) : postSessionData ? (
-            <PostSessionScreen
-              data={postSessionData}
-              onDismiss={() => setPostSessionData(null)}
-            />
+            <PostSessionScreen data={postSessionData} onDismiss={() => setPostSessionData(null)} />
           ) : (
             /* Between-sessions Home (ai-therapist-121): progress, worksheets,
                safety plan for logged-in participants; anonymous users still get
@@ -2881,14 +2989,17 @@ export default function App() {
           const ex = activeExercise;
           setActiveExercise(null);
           if (!ex) return;
-          const label = ex.type === 'breathing' ? 'breathing exercise'
-            : ex.type === 'body_scan' ? 'body scan'
-            : 'grounding exercise';
+          const label =
+            ex.type === 'breathing'
+              ? 'breathing exercise'
+              : ex.type === 'body_scan'
+                ? 'body scan'
+                : 'grounding exercise';
           void reportToolEvent(
             status === 'completed' ? 'exercise_completed' : 'exercise_dismissed',
             status === 'completed'
               ? `[The participant's ${label} just finished. Check in gently in one short question — ask how they feel now.]`
-              : `[The participant closed the ${label} early. Don't push — acknowledge gently and ask what they'd prefer to do instead.]`
+              : `[The participant closed the ${label} early. Don't push — acknowledge gently and ask what they'd prefer to do instead.]`,
           );
         }}
       />
@@ -2901,7 +3012,7 @@ export default function App() {
           sendTextMessage(text);
           // Only journal uses onShareText; keep it for "Download my work" (ai-therapist-76).
           if (toolUI?.kind === 'journal') {
-            setSessionWriteups(prev => [...prev, { type: 'journal', label: 'Something I wrote', summary: text }]);
+            setSessionWriteups((prev) => [...prev, { type: 'journal', label: 'Something I wrote', summary: text }]);
           }
         }}
         onInvisibleMessage={(text) => {
@@ -2920,26 +3031,37 @@ export default function App() {
           // content only, formatted from the same extras the model receives.
           if (type === 'thought_record') {
             const r = extras as { situation?: string; thought?: string; feeling?: string; balanced_thought?: string };
-            setSessionWriteups(prev => [...prev, {
-              type: 'thought_record',
-              label: 'Thought record',
-              summary: [
-                r.situation && `Situation: ${r.situation}`,
-                r.thought && `Automatic thought: ${r.thought}`,
-                r.feeling && `Feeling: ${r.feeling}`,
-                r.balanced_thought && `Balanced thought: ${r.balanced_thought}`,
-              ].filter(Boolean).join('\n'),
-            }]);
+            setSessionWriteups((prev) => [
+              ...prev,
+              {
+                type: 'thought_record',
+                label: 'Thought record',
+                summary: [
+                  r.situation && `Situation: ${r.situation}`,
+                  r.thought && `Automatic thought: ${r.thought}`,
+                  r.feeling && `Feeling: ${r.feeling}`,
+                  r.balanced_thought && `Balanced thought: ${r.balanced_thought}`,
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
+              },
+            ]);
           } else if (type === 'values_sort') {
             const v = extras as { values?: string[] };
-            setSessionWriteups(prev => [...prev, { type: 'values_sort', label: 'Values that matter to me', summary: (v.values ?? []).join(', ') }]);
+            setSessionWriteups((prev) => [
+              ...prev,
+              { type: 'values_sort', label: 'Values that matter to me', summary: (v.values ?? []).join(', ') },
+            ]);
           } else if (type === 'fear_ladder') {
             const f = extras as { items?: { situation: string; rating: number }[] };
-            setSessionWriteups(prev => [...prev, {
-              type: 'fear_ladder',
-              label: 'My fear ladder (easiest to hardest)',
-              summary: (f.items ?? []).map((it, i) => `${i + 1}. ${it.situation} (${it.rating}/10)`).join('\n'),
-            }]);
+            setSessionWriteups((prev) => [
+              ...prev,
+              {
+                type: 'fear_ladder',
+                label: 'My fear ladder (easiest to hardest)',
+                summary: (f.items ?? []).map((it, i) => `${i + 1}. ${it.situation} (${it.rating}/10)`).join('\n'),
+              },
+            ]);
           }
         }}
         sessionId={sessionId}
@@ -2958,7 +3080,9 @@ export default function App() {
         <ModerationRecoveryScreen
           stage={moderationRecovery}
           crisisContact={crisisContact}
-          onRetry={() => { void continueInChat(moderationVoiceSessionIdRef.current); }}
+          onRetry={() => {
+            void continueInChat(moderationVoiceSessionIdRef.current);
+          }}
         />
       )}
 
@@ -3021,6 +3145,5 @@ export default function App() {
       <ToastContainer />
       <BugReport />
     </div>
-
   );
 }

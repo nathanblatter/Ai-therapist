@@ -86,7 +86,7 @@ function daysSince(iso: string | null): number | null {
 export function computeAttention(
   row: RosterRow,
   unreadCount: number,
-  config: AttentionRankingConfig = DEFAULT_ATTENTION_RANKING
+  config: AttentionRankingConfig = DEFAULT_ATTENTION_RANKING,
 ): { score: number; reasons: AttentionReason[] } {
   const reasons: AttentionReason[] = [];
   if (row.open_crisis_count > 0) {
@@ -149,10 +149,7 @@ export function _clearCatchupCache(): void {
 }
 
 /** Compact, deterministic prompt context from summaries-tier data only. */
-export function composeCatchupContext(
-  detail: RosterClientDetail,
-  engagement: ClientEngagementSignals
-): string {
+export function composeCatchupContext(detail: RosterClientDetail, engagement: ClientEngagementSignals): string {
   const lines: string[] = [];
   lines.push(`Completed sessions: ${engagement.ended_session_count}`);
   if (engagement.last_session_at) lines.push(`Last session: ${engagement.last_session_at}`);
@@ -161,9 +158,9 @@ export function composeCatchupContext(
     const s = (row.summary ?? {}) as Record<string, unknown>;
     lines.push(
       `Session (${row.ended_at ?? 'date unknown'}): ${String(s.headline ?? '')}. ` +
-      `Topics: ${Array.isArray(s.topics) ? s.topics.join(', ') : 'n/a'}. ` +
-      `Mood trajectory: ${String(s.mood_trajectory ?? 'n/a')}.` +
-      (s.follow_up ? ` Open follow-up: ${String(s.follow_up)}` : '')
+        `Topics: ${Array.isArray(s.topics) ? s.topics.join(', ') : 'n/a'}. ` +
+        `Mood trajectory: ${String(s.mood_trajectory ?? 'n/a')}.` +
+        (s.follow_up ? ` Open follow-up: ${String(s.follow_up)}` : ''),
     );
   }
 
@@ -178,7 +175,7 @@ export function composeCatchupContext(
     const [latest, prev] = points;
     lines.push(
       `${scale.toUpperCase()} latest: ${latest.score}` +
-      (prev ? ` (previous ${prev.score}, delta ${latest.score - prev.score})` : '')
+        (prev ? ` (previous ${prev.score}, delta ${latest.score - prev.score})` : ''),
     );
   }
 
@@ -186,7 +183,7 @@ export function composeCatchupContext(
   if (latestRisk) {
     lines.push(
       `Risk severity latest: ${latestRisk.severity ?? 'unknown'} (${latestRisk.calculated_at})` +
-      (prevRisk ? `, previous: ${prevRisk.severity ?? 'unknown'}` : '')
+        (prevRisk ? `, previous: ${prevRisk.severity ?? 'unknown'}` : ''),
     );
   }
 
@@ -205,10 +202,7 @@ export function composeCatchupContext(
 }
 
 async function buildRoster(memberId: number, config: AttentionRankingConfig) {
-  const [rows, unread] = await Promise.all([
-    listCaseworkerRoster(memberId),
-    countUnreadByClientForMember(memberId),
-  ]);
+  const [rows, unread] = await Promise.all([listCaseworkerRoster(memberId), countUnreadByClientForMember(memberId)]);
   const unreadByClient = new Map(unread.map((u) => [u.client_id, u.unread_count]));
   return rows
     .map((row) => {
@@ -216,10 +210,7 @@ async function buildRoster(memberId: number, config: AttentionRankingConfig) {
       const attention = computeAttention(row, unreadCount, config);
       return { ...row, unread_count: unreadCount, attention };
     })
-    .sort(
-      (a, b) =>
-        b.attention.score - a.attention.score || a.username.localeCompare(b.username)
-    );
+    .sort((a, b) => b.attention.score - a.attention.score || a.username.localeCompare(b.username));
 }
 
 export default function caseworkerDashboardRoutes(): Router {
@@ -228,37 +219,33 @@ export default function caseworkerDashboardRoutes(): Router {
   // GET /admin/api/caseworker/roster
   // Care-team member: own roster, attention-ranked. Researcher: org overview,
   // one roster block per care-team member in the org.
-  router.get(
-    '/admin/api/caseworker/roster',
-    requireRole('caseworker', 'therapist', 'researcher'),
-    async (req, res) => {
-      try {
-        const config = await loadRankingConfig();
-        if (isCareTeamRole(req.session.userRole)) {
-          const clients = await buildRoster(req.session.userId!, config);
-          return res.json({ clients, generated_at: new Date().toISOString() });
-        }
-        const orgId = await orgIdFor(req);
-        const users = await getAllUsers(null, orgId ?? undefined);
-        const members = users.filter((u) => isCareTeamRole(u.role));
-        const rosters = await Promise.all(
-          members.map(async (member) => ({
-            member_id: member.userid,
-            username: member.username,
-            member_role: member.role,
-            clients: await buildRoster(member.userid, config),
-          }))
-        );
-        res.json({
-          members: rosters.filter((r) => r.clients.length > 0),
-          generated_at: new Date().toISOString(),
-        });
-      } catch (err) {
-        log.error({ err }, 'Failed to build roster');
-        res.status(500).json({ error: 'Failed to build roster' });
+  router.get('/admin/api/caseworker/roster', requireRole('caseworker', 'therapist', 'researcher'), async (req, res) => {
+    try {
+      const config = await loadRankingConfig();
+      if (isCareTeamRole(req.session.userRole)) {
+        const clients = await buildRoster(req.session.userId!, config);
+        return res.json({ clients, generated_at: new Date().toISOString() });
       }
+      const orgId = await orgIdFor(req);
+      const users = await getAllUsers(null, orgId ?? undefined);
+      const members = users.filter((u) => isCareTeamRole(u.role));
+      const rosters = await Promise.all(
+        members.map(async (member) => ({
+          member_id: member.userid,
+          username: member.username,
+          member_role: member.role,
+          clients: await buildRoster(member.userid, config),
+        })),
+      );
+      res.json({
+        members: rosters.filter((r) => r.clients.length > 0),
+        generated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      log.error({ err }, 'Failed to build roster');
+      res.status(500).json({ error: 'Failed to build roster' });
     }
-  );
+  });
 
   // GET /admin/api/caseworker/roster/:userId/detail — summary-tier drill-down
   // (requireClientAccess keeps 404-over-403 for care-team members).
@@ -289,7 +276,7 @@ export default function caseworkerDashboardRoutes(): Router {
         log.error({ err, clientId }, 'Failed to load roster client detail');
         res.status(500).json({ error: 'Failed to load client detail' });
       }
-    }
+    },
   );
 
   // GET /admin/api/caseworker/roster/:userId/catchup — the "catch up on this
@@ -347,9 +334,14 @@ export default function caseworkerDashboardRoutes(): Router {
           // Cost tracking: same best-effort pattern as the profile brief;
           // attributed to the latest summarized session (purpose 'insights').
           recordLlmUsage(
-            latestSummarySessionId, 'insights', CATCHUP_MODEL,
-            response.usage?.prompt_tokens ?? null, response.usage?.completion_tokens ?? null,
-          ).catch(() => { /* recordLlmUsage already swallows; belt and braces */ });
+            latestSummarySessionId,
+            'insights',
+            CATCHUP_MODEL,
+            response.usage?.prompt_tokens ?? null,
+            response.usage?.completion_tokens ?? null,
+          ).catch(() => {
+            /* recordLlmUsage already swallows; belt and braces */
+          });
           summary = response.choices[0]?.message?.content?.trim() || null;
           if (summary) catchupCache.set(clientId, { key: cacheKey, summary });
         } catch (err) {
@@ -361,7 +353,7 @@ export default function caseworkerDashboardRoutes(): Router {
         log.error({ err, clientId }, 'Failed to build catch-up');
         res.status(500).json({ error: 'Failed to build catch-up' });
       }
-    }
+    },
   );
 
   return router;

@@ -25,9 +25,10 @@ export function denverDateStamp(now: Date = new Date()): string {
 
 /** Denver's UTC offset (ms, negative) in effect at the given instant. */
 function denverOffsetMs(at: Date): number {
-  const name = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', timeZoneName: 'longOffset' })
-    .formatToParts(at)
-    .find((p) => p.type === 'timeZoneName')?.value ?? '';
+  const name =
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', timeZoneName: 'longOffset' })
+      .formatToParts(at)
+      .find((p) => p.type === 'timeZoneName')?.value ?? '';
   const match = /GMT([+-])(\d{2}):(\d{2})/.exec(name);
   if (!match) return -7 * 3_600_000; // MST fallback; Denver is always GMT-6/-7
   const sign = match[1] === '-' ? -1 : 1;

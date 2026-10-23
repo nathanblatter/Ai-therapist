@@ -5,28 +5,36 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-import {
-  insertPracticeAssignment,
-  listUserAssignments,
-  completeAssignment,
-} from './practiceAssignments.queries.js';
+import { insertPracticeAssignment, listUserAssignments, completeAssignment } from './practiceAssignments.queries.js';
 
 beforeEach(() => {
   queryMock.mockReset();
 });
 
 const ROW = {
-  id: 5, user_id: 42, session_id: 's1', title: 'Two-minute breathing',
-  description: 'Before bed.', kind: 'exercise', suggested_frequency: 'daily',
-  status: 'assigned', assigned_at: new Date(), completed_at: null, completion_note: null,
+  id: 5,
+  user_id: 42,
+  session_id: 's1',
+  title: 'Two-minute breathing',
+  description: 'Before bed.',
+  kind: 'exercise',
+  suggested_frequency: 'daily',
+  status: 'assigned',
+  assigned_at: new Date(),
+  completed_at: null,
+  completion_note: null,
 };
 
 describe('insertPracticeAssignment', () => {
   it('inserts with explicit values and returns the row', async () => {
     queryMock.mockResolvedValueOnce({ rows: [ROW] });
     const row = await insertPracticeAssignment({
-      userId: 42, sessionId: 's1', title: 'Two-minute breathing',
-      description: 'Before bed.', kind: 'exercise', suggestedFrequency: 'daily',
+      userId: 42,
+      sessionId: 's1',
+      title: 'Two-minute breathing',
+      description: 'Before bed.',
+      kind: 'exercise',
+      suggestedFrequency: 'daily',
     });
     expect(row).toEqual(ROW);
     const [sql, params] = queryMock.mock.calls[0];
@@ -104,7 +112,12 @@ describe('createAssignment', () => {
   it("inserts with source 'therapist' and the author id", async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ ...ROW, source: 'therapist', authored_by: 9 }] });
     const row = await createAssignment({
-      userId: 42, authoredBy: 9, title: 'Worry log', description: 'd', kind: 'worksheet', suggestedFrequency: 'daily',
+      userId: 42,
+      authoredBy: 9,
+      title: 'Worry log',
+      description: 'd',
+      kind: 'worksheet',
+      suggestedFrequency: 'daily',
     });
     expect(row.source).toBe('therapist');
     const [sql, params] = queryMock.mock.calls[0];

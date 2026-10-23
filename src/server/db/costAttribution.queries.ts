@@ -36,9 +36,9 @@ export async function getUsageByPurpose(days: number): Promise<PurposeUsageRow[]
      WHERE created_at >= NOW() - make_interval(days => $1)
      GROUP BY purpose, model
      ORDER BY calls DESC`,
-    [days]
+    [days],
   );
-  return result.rows.map(r => ({
+  return result.rows.map((r) => ({
     purpose: r.purpose,
     model: r.model,
     calls: r.calls,
@@ -68,7 +68,7 @@ export async function getRealtimeUsageTotals(days: number): Promise<RealtimeUsag
             COALESCE(SUM(cached_tokens), 0)::int       AS cached_tokens
      FROM realtime_usage
      WHERE created_at >= NOW() - make_interval(days => $1)`,
-    [days]
+    [days],
   );
   const r = result.rows[0] ?? {};
   return {
@@ -102,7 +102,7 @@ export async function getSessionVolume(days: number): Promise<SessionVolume> {
             COUNT(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL)::int     AS participants
      FROM therapy_sessions
      WHERE created_at >= NOW() - make_interval(days => $1)`,
-    [days]
+    [days],
   );
   const r = result.rows[0] ?? {};
   return {

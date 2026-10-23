@@ -60,11 +60,19 @@ export interface ScoredMessageRow {
  */
 export async function getScoredMessages(w: IrbWindow): Promise<ScoredMessageRow[]> {
   const r = await pool.query<{
-    history_id: string; message_id: string | null; risk_score: number; method: string | null;
-    keyword_score: string | null; llm_score: string | null;
-    moderation_self_harm: string | null; moderation_self_harm_intent: string | null;
-    moderation_self_harm_instructions: string | null; moderation_score: string | null;
-    trajectory_score: string | null; crisis_event_id: string | null; verdicts: string[] | null;
+    history_id: string;
+    message_id: string | null;
+    risk_score: number;
+    method: string | null;
+    keyword_score: string | null;
+    llm_score: string | null;
+    moderation_self_harm: string | null;
+    moderation_self_harm_intent: string | null;
+    moderation_self_harm_instructions: string | null;
+    moderation_score: string | null;
+    trajectory_score: string | null;
+    crisis_event_id: string | null;
+    verdicts: string[] | null;
   }>(
     `SELECT r.history_id, r.message_id, r.risk_score,
             r.score_factors->>'method' AS method,
@@ -91,7 +99,7 @@ export async function getScoredMessages(w: IrbWindow): Promise<ScoredMessageRow[
       ORDER BY r.history_id`,
     irbWindowParams(w),
   );
-  return r.rows.map(x => ({
+  return r.rows.map((x) => ({
     history_id: int(x.history_id),
     message_id: x.message_id === null ? null : int(x.message_id),
     risk_score: int(x.risk_score),
@@ -104,8 +112,9 @@ export async function getScoredMessages(w: IrbWindow): Promise<ScoredMessageRow[
     moderation_score: num(x.moderation_score),
     trajectory_score: int(x.trajectory_score),
     crisis_event_id: x.crisis_event_id === null ? null : int(x.crisis_event_id),
-    verdicts: (x.verdicts ?? []).filter((v): v is AdjudicationVerdict =>
-      v === 'confirmed' || v === 'false_positive' || v === 'unclear'),
+    verdicts: (x.verdicts ?? []).filter(
+      (v): v is AdjudicationVerdict => v === 'confirmed' || v === 'false_positive' || v === 'unclear',
+    ),
   }));
 }
 
@@ -191,7 +200,7 @@ export async function getUnflaggedCandidates(w: IrbWindow): Promise<UnflaggedCan
       ORDER BY m.message_id`,
     [...irbWindowParams(w), UNFLAGGED_MAX_SCORE],
   );
-  return r.rows.map(x => ({ message_id: int(x.message_id), session_id: x.session_id, stratum: x.stratum }));
+  return r.rows.map((x) => ({ message_id: int(x.message_id), session_id: x.session_id, stratum: x.stratum }));
 }
 
 export interface RedactedTurn {
@@ -221,11 +230,11 @@ export async function getRedactedMessageContext(
     [messageId, Math.max(1, contextTurns) + 1],
   );
   const rows = r.rows.reverse();
-  const target = rows.find(x => int(x.message_id) === messageId);
+  const target = rows.find((x) => int(x.message_id) === messageId);
   if (!target?.content_redacted?.trim()) return null;
   const history = rows
-    .filter(x => int(x.message_id) !== messageId && x.content_redacted?.trim())
-    .map(x => ({ role: x.role as 'user' | 'assistant', content_redacted: x.content_redacted as string }));
+    .filter((x) => int(x.message_id) !== messageId && x.content_redacted?.trim())
+    .map((x) => ({ role: x.role as 'user' | 'assistant', content_redacted: x.content_redacted as string }));
   return { latest: target.content_redacted, history };
 }
 
@@ -266,8 +275,15 @@ export async function insertRiskCalibrationRun(input: {
        (org_id, started_at, finished_at, params, report, recommended_thresholds, created_by)
      VALUES ($1, $2::timestamptz, $3::timestamptz, $4, $5, $6, $7)
      RETURNING run_id, org_id, started_at, finished_at, params, report, recommended_thresholds, created_by`,
-    [input.orgId, input.startedAt, input.finishedAt, JSON.stringify(input.params), JSON.stringify(input.report),
-      JSON.stringify(input.recommendedThresholds), input.createdBy],
+    [
+      input.orgId,
+      input.startedAt,
+      input.finishedAt,
+      JSON.stringify(input.params),
+      JSON.stringify(input.report),
+      JSON.stringify(input.recommendedThresholds),
+      input.createdBy,
+    ],
   );
   return r.rows[0];
 }
@@ -285,7 +301,7 @@ export async function listRiskCalibrationRuns(orgId: number, limit = 20): Promis
       LIMIT $2`,
     [orgId, Math.min(Math.max(1, limit), 200)],
   );
-  return r.rows.map(x => ({ ...x, insufficient_labels: x.insufficient_labels !== false }));
+  return r.rows.map((x) => ({ ...x, insufficient_labels: x.insufficient_labels !== false }));
 }
 
 /** One run, only when it belongs to the org (cross-org ids read as absent). */

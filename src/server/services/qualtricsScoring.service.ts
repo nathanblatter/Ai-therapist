@@ -72,10 +72,7 @@ export interface SurveyParadata {
   speeder: boolean | null;
 }
 
-export function surveyParadata(
-  role: QualtricsSurveyRole,
-  answers: Record<string, unknown>
-): SurveyParadata {
+export function surveyParadata(role: QualtricsSurveyRole, answers: Record<string, unknown>): SurveyParadata {
   const raw = answers.duration;
   const seconds =
     typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
@@ -103,10 +100,7 @@ function sumItems(answers: Record<string, unknown>, keys: [string, string]): num
 
 /** PHQ-2/GAD-2 scores (0-6, cutoff >=3) for one response; nulls when the
  *  role has no instrument (weekly) or items are missing/out of range. */
-export function scoreInstruments(
-  role: QualtricsSurveyRole,
-  answers: Record<string, unknown>
-): InstrumentScores {
+export function scoreInstruments(role: QualtricsSurveyRole, answers: Record<string, unknown>): InstrumentScores {
   const map = SCORE_MAP[role];
   if (!map) return { phq2: null, gad2: null, phq2Positive: null, gad2Positive: null };
   const phq2 = sumItems(answers, map.phq2);

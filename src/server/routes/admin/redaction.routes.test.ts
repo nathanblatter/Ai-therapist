@@ -89,32 +89,38 @@ describe('PUT /redact/api/messages/:id', () => {
 
   it('anonymous-session message: only the irb-study org may correct it', async () => {
     dbMocks.getMessageOwner.mockResolvedValue({ session_id: 's1', user_id: null, owner_organization_id: null });
-    expect((await request(appAs('researcher', 7, PRACTICE_ORG)).put('/redact/api/messages/42').send({ content_redacted: 'x' })).status).toBe(404);
+    expect(
+      (
+        await request(appAs('researcher', 7, PRACTICE_ORG))
+          .put('/redact/api/messages/42')
+          .send({ content_redacted: 'x' })
+      ).status,
+    ).toBe(404);
     expect(dbMocks.updateRedactedContent).not.toHaveBeenCalled();
-    expect((await request(appAs('researcher', 7, IRB_ORG)).put('/redact/api/messages/42').send({ content_redacted: 'x' })).status).toBe(200);
+    expect(
+      (
+        await request(appAs('researcher', 7, IRB_ORG))
+          .put('/redact/api/messages/42')
+          .send({ content_redacted: 'x' })
+      ).status,
+    ).toBe(200);
   });
 
   it('404s when the message does not exist', async () => {
     dbMocks.getMessageOwner.mockResolvedValue(null);
-    const res = await request(appAs('researcher'))
-      .put('/redact/api/messages/999')
-      .send({ content_redacted: 'x' });
+    const res = await request(appAs('researcher')).put('/redact/api/messages/999').send({ content_redacted: 'x' });
     expect(res.status).toBe(404);
     expect(dbMocks.updateRedactedContent).not.toHaveBeenCalled();
   });
 
   it('404s when the message vanishes between the owner check and the write', async () => {
     dbMocks.updateRedactedContent.mockResolvedValue(false);
-    const res = await request(appAs('researcher'))
-      .put('/redact/api/messages/999')
-      .send({ content_redacted: 'x' });
+    const res = await request(appAs('researcher')).put('/redact/api/messages/999').send({ content_redacted: 'x' });
     expect(res.status).toBe(404);
   });
 
   it('is researcher-only', async () => {
-    const res = await request(appAs('therapist'))
-      .put('/redact/api/messages/42')
-      .send({ content_redacted: 'x' });
+    const res = await request(appAs('therapist')).put('/redact/api/messages/42').send({ content_redacted: 'x' });
     expect(res.status).toBe(403);
     expect(dbMocks.updateRedactedContent).not.toHaveBeenCalled();
   });
@@ -137,9 +143,13 @@ describe('POST /redact/api/messages/:id/approve', () => {
   it('404s a researcher approving a message owned outside their org; anonymous is irb-study only', async () => {
     dbMocks.getMessageOwner.mockResolvedValue({ session_id: 's1', user_id: 9, owner_organization_id: PRACTICE_ORG });
     expect((await request(appAs('researcher', 7, IRB_ORG)).post('/redact/api/messages/42/approve')).status).toBe(404);
-    expect((await request(appAs('researcher', 7, PRACTICE_ORG)).post('/redact/api/messages/42/approve')).status).toBe(200);
+    expect((await request(appAs('researcher', 7, PRACTICE_ORG)).post('/redact/api/messages/42/approve')).status).toBe(
+      200,
+    );
     dbMocks.getMessageOwner.mockResolvedValue({ session_id: 's1', user_id: null, owner_organization_id: null });
-    expect((await request(appAs('researcher', 7, PRACTICE_ORG)).post('/redact/api/messages/42/approve')).status).toBe(404);
+    expect((await request(appAs('researcher', 7, PRACTICE_ORG)).post('/redact/api/messages/42/approve')).status).toBe(
+      404,
+    );
     expect((await request(appAs('researcher', 7, IRB_ORG)).post('/redact/api/messages/42/approve')).status).toBe(200);
     expect(dbMocks.recordRedactionApproval).toHaveBeenCalledTimes(2);
   });

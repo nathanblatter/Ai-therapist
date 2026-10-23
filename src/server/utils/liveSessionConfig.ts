@@ -62,18 +62,126 @@ export interface LiveVoice {
  * voice table. Ordered by language then accent so the picker groups sensibly.
  */
 export const LIVE_NATIVE_VOICES: LiveVoice[] = [
-  { value: 'gleam',    label: 'Gleam',    description: 'Bright and clear',        language: 'English',    accent: 'North American', presentation: 'Feminine',  source: 'natural',   liveNative: true },
-  { value: 'meridian', label: 'Meridian', description: 'Even and grounded',       language: 'English',    accent: 'North American', presentation: 'Masculine', source: 'natural',   liveNative: true },
-  { value: 'delta',    label: 'Delta',    description: 'Warm Southern lilt',      language: 'English',    accent: 'Southern U.S.',  presentation: 'Feminine',  source: 'generated', liveNative: true },
-  { value: 'cinder',   label: 'Cinder',   description: 'Low and unhurried',       language: 'English',    accent: 'Southern U.S.',  presentation: 'Masculine', source: 'generated', liveNative: true },
-  { value: 'vesper',   label: 'Vesper',   description: 'Measured and British',    language: 'English',    accent: 'British',        presentation: 'Masculine', source: 'natural',   liveNative: true },
-  { value: 'willow',   label: 'Willow',   description: 'Soft and Irish',          language: 'English',    accent: 'Irish',          presentation: 'Feminine',  source: 'natural',   liveNative: true },
-  { value: 'stone',    label: 'Stone',    description: 'Steady and Irish',        language: 'English',    accent: 'Irish',          presentation: 'Masculine', source: 'natural',   liveNative: true },
-  { value: 'quartz',   label: 'Quartz',   description: 'Crisp and Australian',    language: 'English',    accent: 'Australian',     presentation: 'Feminine',  source: 'generated', liveNative: true },
-  { value: 'ripple',   label: 'Ripple',   description: 'Relaxed and Australian',  language: 'English',    accent: 'Australian',     presentation: 'Masculine', source: 'natural',   liveNative: true },
-  { value: 'beacon',   label: 'Beacon',   description: 'Open and Filipino',       language: 'English',    accent: 'Filipino',       presentation: 'Masculine', source: 'generated', liveNative: true },
-  { value: 'bossa',    label: 'Bossa',    description: 'Brazilian Portuguese',    language: 'Portuguese', accent: 'Brazilian',      presentation: 'Feminine',  source: 'natural',   liveNative: true },
-  { value: 'tempo',    label: 'Tempo',    description: 'Brazilian Portuguese',    language: 'Portuguese', accent: 'Brazilian',      presentation: 'Masculine', source: 'natural',   liveNative: true },
+  {
+    value: 'gleam',
+    label: 'Gleam',
+    description: 'Bright and clear',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Feminine',
+    source: 'natural',
+    liveNative: true,
+  },
+  {
+    value: 'meridian',
+    label: 'Meridian',
+    description: 'Even and grounded',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Masculine',
+    source: 'natural',
+    liveNative: true,
+  },
+  {
+    value: 'delta',
+    label: 'Delta',
+    description: 'Warm Southern lilt',
+    language: 'English',
+    accent: 'Southern U.S.',
+    presentation: 'Feminine',
+    source: 'generated',
+    liveNative: true,
+  },
+  {
+    value: 'cinder',
+    label: 'Cinder',
+    description: 'Low and unhurried',
+    language: 'English',
+    accent: 'Southern U.S.',
+    presentation: 'Masculine',
+    source: 'generated',
+    liveNative: true,
+  },
+  {
+    value: 'vesper',
+    label: 'Vesper',
+    description: 'Measured and British',
+    language: 'English',
+    accent: 'British',
+    presentation: 'Masculine',
+    source: 'natural',
+    liveNative: true,
+  },
+  {
+    value: 'willow',
+    label: 'Willow',
+    description: 'Soft and Irish',
+    language: 'English',
+    accent: 'Irish',
+    presentation: 'Feminine',
+    source: 'natural',
+    liveNative: true,
+  },
+  {
+    value: 'stone',
+    label: 'Stone',
+    description: 'Steady and Irish',
+    language: 'English',
+    accent: 'Irish',
+    presentation: 'Masculine',
+    source: 'natural',
+    liveNative: true,
+  },
+  {
+    value: 'quartz',
+    label: 'Quartz',
+    description: 'Crisp and Australian',
+    language: 'English',
+    accent: 'Australian',
+    presentation: 'Feminine',
+    source: 'generated',
+    liveNative: true,
+  },
+  {
+    value: 'ripple',
+    label: 'Ripple',
+    description: 'Relaxed and Australian',
+    language: 'English',
+    accent: 'Australian',
+    presentation: 'Masculine',
+    source: 'natural',
+    liveNative: true,
+  },
+  {
+    value: 'beacon',
+    label: 'Beacon',
+    description: 'Open and Filipino',
+    language: 'English',
+    accent: 'Filipino',
+    presentation: 'Masculine',
+    source: 'generated',
+    liveNative: true,
+  },
+  {
+    value: 'bossa',
+    label: 'Bossa',
+    description: 'Brazilian Portuguese',
+    language: 'Portuguese',
+    accent: 'Brazilian',
+    presentation: 'Feminine',
+    source: 'natural',
+    liveNative: true,
+  },
+  {
+    value: 'tempo',
+    label: 'Tempo',
+    description: 'Brazilian Portuguese',
+    language: 'Portuguese',
+    accent: 'Brazilian',
+    presentation: 'Masculine',
+    source: 'natural',
+    liveNative: true,
+  },
 ];
 
 /**
@@ -88,22 +196,112 @@ export const LIVE_NATIVE_VOICES: LiveVoice[] = [
  * silently reassigned mid-enrollment.
  */
 export const LIVE_LEGACY_VOICES: LiveVoice[] = [
-  { value: 'marin',   label: 'Marin',   description: 'Clear and professional', language: 'English', accent: 'North American', presentation: 'Feminine',  source: 'natural',   liveNative: false },
-  { value: 'cedar',   label: 'Cedar',   description: 'Warm and natural',       language: 'English', accent: 'North American', presentation: 'Masculine', source: 'natural',   liveNative: false },
-  { value: 'alloy',   label: 'Alloy',   description: 'Neutral and balanced',   language: 'English', accent: 'North American', presentation: 'Feminine',  source: 'generated', liveNative: false },
-  { value: 'ash',     label: 'Ash',     description: 'Clear and articulate',   language: 'English', accent: 'North American', presentation: 'Masculine', source: 'generated', liveNative: false },
-  { value: 'ballad',  label: 'Ballad',  description: 'Smooth and melodic',     language: 'English', accent: 'British',        presentation: 'Masculine', source: 'generated', liveNative: false },
-  { value: 'coral',   label: 'Coral',   description: 'Gentle and friendly',    language: 'English', accent: 'North American', presentation: 'Feminine',  source: 'generated', liveNative: false },
-  { value: 'echo',    label: 'Echo',    description: 'Warm and approachable',  language: 'English', accent: 'North American', presentation: 'Masculine', source: 'generated', liveNative: false },
-  { value: 'sage',    label: 'Sage',    description: 'Calm and soothing',      language: 'English', accent: 'North American', presentation: 'Feminine',  source: 'generated', liveNative: false },
-  { value: 'shimmer', label: 'Shimmer', description: 'Bright and energetic',   language: 'English', accent: 'North American', presentation: 'Feminine',  source: 'generated', liveNative: false },
-  { value: 'verse',   label: 'Verse',   description: 'Dynamic and expressive', language: 'English', accent: 'North American', presentation: 'Masculine', source: 'generated', liveNative: false },
+  {
+    value: 'marin',
+    label: 'Marin',
+    description: 'Clear and professional',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Feminine',
+    source: 'natural',
+    liveNative: false,
+  },
+  {
+    value: 'cedar',
+    label: 'Cedar',
+    description: 'Warm and natural',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Masculine',
+    source: 'natural',
+    liveNative: false,
+  },
+  {
+    value: 'alloy',
+    label: 'Alloy',
+    description: 'Neutral and balanced',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Feminine',
+    source: 'generated',
+    liveNative: false,
+  },
+  {
+    value: 'ash',
+    label: 'Ash',
+    description: 'Clear and articulate',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Masculine',
+    source: 'generated',
+    liveNative: false,
+  },
+  {
+    value: 'ballad',
+    label: 'Ballad',
+    description: 'Smooth and melodic',
+    language: 'English',
+    accent: 'British',
+    presentation: 'Masculine',
+    source: 'generated',
+    liveNative: false,
+  },
+  {
+    value: 'coral',
+    label: 'Coral',
+    description: 'Gentle and friendly',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Feminine',
+    source: 'generated',
+    liveNative: false,
+  },
+  {
+    value: 'echo',
+    label: 'Echo',
+    description: 'Warm and approachable',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Masculine',
+    source: 'generated',
+    liveNative: false,
+  },
+  {
+    value: 'sage',
+    label: 'Sage',
+    description: 'Calm and soothing',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Feminine',
+    source: 'generated',
+    liveNative: false,
+  },
+  {
+    value: 'shimmer',
+    label: 'Shimmer',
+    description: 'Bright and energetic',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Feminine',
+    source: 'generated',
+    liveNative: false,
+  },
+  {
+    value: 'verse',
+    label: 'Verse',
+    description: 'Dynamic and expressive',
+    language: 'English',
+    accent: 'North American',
+    presentation: 'Masculine',
+    source: 'generated',
+    liveNative: false,
+  },
 ];
 
 /** Every voice GPT-Live accepts, native first. */
 export const LIVE_VOICES: LiveVoice[] = [...LIVE_NATIVE_VOICES, ...LIVE_LEGACY_VOICES];
 
-const LIVE_VOICE_INDEX = new Map(LIVE_VOICES.map(v => [v.value, v]));
+const LIVE_VOICE_INDEX = new Map(LIVE_VOICES.map((v) => [v.value, v]));
 
 /** The documented GPT-Live default. */
 export const LIVE_DEFAULT_VOICE = 'marin';
@@ -140,7 +338,7 @@ export function resolveLiveVoice(requested: string | null | undefined): string {
 export function liveVoicesForLanguage(languageCode: string | null | undefined): LiveVoice[] {
   const isPortuguese = typeof languageCode === 'string' && languageCode.startsWith('pt');
   const wanted = isPortuguese ? 'Portuguese' : 'English';
-  const matches = LIVE_VOICES.filter(v => v.language === wanted);
+  const matches = LIVE_VOICES.filter((v) => v.language === wanted);
   return matches.length > 0 ? matches : LIVE_VOICES;
 }
 
@@ -161,27 +359,26 @@ export const LIVE_DEFAULT_BACKEND_MODEL = 'gpt-5.6-terra';
  * rather than going quiet. The actual crisis handling still runs server-side
  * through runCrisisPipeline and arrives as session.instructions.append.
  */
-export function buildLiveInstructions(opts: {
-  languageName?: string | null;
-  toolNames: string[];
-}): string {
+export function buildLiveInstructions(opts: { languageName?: string | null; toolNames: string[] }): string {
   const { languageName, toolNames } = opts;
 
-  const languageLine = languageName
-    ? `Speak ${languageName} unless the participant asks you to switch.\n`
-    : '';
+  const languageLine = languageName ? `Speak ${languageName} unless the participant asks you to switch.\n` : '';
 
   // Describe backend CAPABILITIES, not tool call syntax — the guide is explicit
   // that these lines tell the live model what help is available, and are not
   // instructions for it to invoke anything itself.
   const capabilities: string[] = [
-    '- Therapeutic response: reflective listening, and guidance grounded in the session\'s active approach.',
+    "- Therapeutic response: reflective listening, and guidance grounded in the session's active approach.",
   ];
   if (toolNames.includes('find_worksheet')) {
-    capabilities.push('- Worksheets and exercises: find and present a structured exercise that fits what the participant is working on.');
+    capabilities.push(
+      '- Worksheets and exercises: find and present a structured exercise that fits what the participant is working on.',
+    );
   }
-  if (toolNames.some(n => n.startsWith('administer_scale') || n.includes('scale'))) {
-    capabilities.push('- Brief measures: administer a short standardized questionnaire when it is clinically indicated.');
+  if (toolNames.some((n) => n.startsWith('administer_scale') || n.includes('scale'))) {
+    capabilities.push(
+      '- Brief measures: administer a short standardized questionnaire when it is clinically indicated.',
+    );
   }
   if (toolNames.includes('display_session_recap')) {
     capabilities.push('- Session recap: assemble a summary of what was covered.');
@@ -346,7 +543,7 @@ export interface LiveSessionConfigInput {
  * which is the ai-therapist-124 failure mode repeating in a new place.
  */
 export function toLiveDelegationTools(defs: ToolDefinition[]): Array<Record<string, unknown>> {
-  return defs.map(d => ({
+  return defs.map((d) => ({
     type: 'function',
     name: d.name,
     description: d.description,
@@ -376,7 +573,7 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
       ? buildLiveRecoveryInstructions({ languageName, crisisLine: recovery.crisisLine })
       : buildLiveInstructions({
           languageName,
-          toolNames: toolDefs.map(t => t.name),
+          toolNames: toolDefs.map((t) => t.name),
         }),
     audio: {
       output: { voice: resolveLiveVoice(voice) },
@@ -386,21 +583,23 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
     // the point: a Responses round trip introduces a pause, and going quiet on
     // someone who just disclosed suicidal intent is the exact failure we are
     // recovering from. It also removes the tools, which have no place here.
-    delegation: recovery ? { type: 'client' } : {
-      type: 'responses',
-      responses: {
-        model: backendModel,
-        instructions: buildLiveBackendInstructions(systemPrompt),
-        tools: toLiveDelegationTools(toolDefs),
-        tool_choice: 'auto',
-        // Sequential tool calls. Several of our tools mutate session state
-        // (end_session, scale administration) and the delegation guide
-        // recommends starting here; parallel calls would let the backend
-        // request an end_session alongside work that assumes the session is
-        // still open.
-        parallel_tool_calls: false,
-      },
-    },
+    delegation: recovery
+      ? { type: 'client' }
+      : {
+          type: 'responses',
+          responses: {
+            model: backendModel,
+            instructions: buildLiveBackendInstructions(systemPrompt),
+            tools: toLiveDelegationTools(toolDefs),
+            tool_choice: 'auto',
+            // Sequential tool calls. Several of our tools mutate session state
+            // (end_session, scale administration) and the delegation guide
+            // recommends starting here; parallel calls would let the backend
+            // request an end_session alongside work that assumes the session is
+            // still open.
+            parallel_tool_calls: false,
+          },
+        },
     // Storage means OpenAI retains this session's audio for 30 days, and is
     // what makes a session forkable. Participant consent does not cover
     // vendor-side retention, so this is false for every real session and true
@@ -445,7 +644,6 @@ function finalizeSession(
   session: Record<string, unknown>,
   history: LiveSessionConfigInput['history'],
 ): Record<string, unknown> {
-
   if (history && history.length > 0) {
     const trimmed: Array<Record<string, unknown>> = [];
     let chars = 0;

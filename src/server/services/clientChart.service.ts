@@ -84,12 +84,12 @@ function iso(value: unknown): string | null {
 
 function joinList(value: unknown): string | null {
   if (!Array.isArray(value)) return null;
-  return value.map(v => String(v)).join('; ');
+  return value.map((v) => String(v)).join('; ');
 }
 
 /** CSV with the given header order, reusing the dataset serializer rules. */
 export function rowsToCsv(headers: string[], rows: Row[]): string {
-  const columns: DatasetColumn[] = headers.map(name => ({ name, type: 'string', source: 'client_chart' }));
+  const columns: DatasetColumn[] = headers.map((name) => ({ name, type: 'string', source: 'client_chart' }));
   return toCsv(columns, rows);
 }
 
@@ -98,14 +98,26 @@ export function rowsToCsv(headers: string[], rows: Row[]): string {
 // ---------------------------------------------------------------------------
 
 export const NOTES_HEADERS = [
-  'note_id', 'note_type', 'case_note_kind', 'status', 'session_id', 'author_name', 'author_role',
-  'signed_at', 'sign_hash', 'amends_note_id', 'shared_with_care_team', 'seed_source',
-  'created_at', 'updated_at', 'content',
+  'note_id',
+  'note_type',
+  'case_note_kind',
+  'status',
+  'session_id',
+  'author_name',
+  'author_role',
+  'signed_at',
+  'sign_hash',
+  'amends_note_id',
+  'shared_with_care_team',
+  'seed_source',
+  'created_at',
+  'updated_at',
+  'content',
 ];
 
 /** Signed/amended notes ledger. Content is included only for a full-scope viewer. */
 export function notesRows(notes: CareNoteRow[], scope: 'full' | 'summary'): Row[] {
-  return notes.map(n => ({
+  return notes.map((n) => ({
     note_id: n.note_id,
     note_type: n.note_type,
     case_note_kind: n.case_note_kind,
@@ -127,7 +139,7 @@ export function notesRows(notes: CareNoteRow[], scope: 'full' | 'summary'): Row[
 export const SCREENERS_HEADERS = ['session_id', 'scale', 'score', 'answers', 'created_at'];
 
 export function screenerRows(screeners: ClientScreenerRow[]): Row[] {
-  return screeners.map(s => ({
+  return screeners.map((s) => ({
     session_id: s.session_id,
     scale: s.scale,
     score: s.score,
@@ -137,14 +149,27 @@ export function screenerRows(screeners: ClientScreenerRow[]): Row[] {
 }
 
 export const SESSION_SUMMARY_HEADERS = [
-  'session_id', 'session_name', 'started_at', 'ended_at', 'duration_minutes', 'session_type', 'modality',
-  'risk_band', 'crisis_flagged', 'headline', 'topics', 'mood_trajectory', 'techniques_discussed',
-  'techniques_helped', 'follow_up', 'safety',
+  'session_id',
+  'session_name',
+  'started_at',
+  'ended_at',
+  'duration_minutes',
+  'session_type',
+  'modality',
+  'risk_band',
+  'crisis_flagged',
+  'headline',
+  'topics',
+  'mood_trajectory',
+  'techniques_discussed',
+  'techniques_helped',
+  'follow_up',
+  'safety',
 ];
 
 /** One row per ended session; summary fields only (no SOAP note). */
 export function sessionSummaryRows(sessions: ClientSessionSummaryRow[]): Row[] {
-  return sessions.map(s => {
+  return sessions.map((s) => {
     const summary = s.summary ?? {};
     return {
       session_id: s.session_id,
@@ -168,8 +193,21 @@ export function sessionSummaryRows(sessions: ClientSessionSummaryRow[]): Row[] {
 }
 
 export const CRISIS_HISTORY_HEADERS = [
-  'kind', 'id', 'occurred_at', 'session_id', 'origin', 'type', 'severity', 'previous_severity',
-  'risk_score', 'previous_risk_score', 'actor', 'trigger_method', 'risk_factors', 'outcome', 'notes',
+  'kind',
+  'id',
+  'occurred_at',
+  'session_id',
+  'origin',
+  'type',
+  'severity',
+  'previous_severity',
+  'risk_score',
+  'previous_risk_score',
+  'actor',
+  'trigger_method',
+  'risk_factors',
+  'outcome',
+  'notes',
 ];
 
 /**
@@ -180,7 +218,7 @@ export const CRISIS_HISTORY_HEADERS = [
 export function crisisHistoryRows(
   events: ClientCrisisEventRow[],
   interventions: ClientInterventionRow[],
-  scope: 'full' | 'summary'
+  scope: 'full' | 'summary',
 ): Row[] {
   const verbatim = scope === 'full';
   const rows: (Row & { _t: number })[] = [];
@@ -229,13 +267,26 @@ export function crisisHistoryRows(
 }
 
 export const ASSIGNMENTS_HEADERS = [
-  'id', 'session_id', 'title', 'description', 'kind', 'suggested_frequency', 'status', 'source',
-  'authored_by', 'assigned_at', 'completed_at', 'completion_note', 'cancelled_at', 'cancelled_by',
-  'cancel_reason', 'reissued_from',
+  'id',
+  'session_id',
+  'title',
+  'description',
+  'kind',
+  'suggested_frequency',
+  'status',
+  'source',
+  'authored_by',
+  'assigned_at',
+  'completed_at',
+  'completion_note',
+  'cancelled_at',
+  'cancelled_by',
+  'cancel_reason',
+  'reissued_from',
 ];
 
 export function assignmentRows(assignments: PracticeAssignmentListRow[]): Row[] {
-  return assignments.map(a => ({
+  return assignments.map((a) => ({
     id: a.id,
     session_id: a.session_id,
     title: a.title,
@@ -256,12 +307,23 @@ export function assignmentRows(assignments: PracticeAssignmentListRow[]): Row[] 
 }
 
 export const ESCALATIONS_HEADERS = [
-  'escalation_id', 'status', 'urgency', 'reason', 'raised_by_role', 'assigned_to', 'crisis_event_id',
-  'session_id', 'note_id', 'created_at', 'acknowledged_at', 'resolved_at', 'resolution_note',
+  'escalation_id',
+  'status',
+  'urgency',
+  'reason',
+  'raised_by_role',
+  'assigned_to',
+  'crisis_event_id',
+  'session_id',
+  'note_id',
+  'created_at',
+  'acknowledged_at',
+  'resolved_at',
+  'resolution_note',
 ];
 
 export function escalationRows(escalations: EscalationListRow[]): Row[] {
-  return escalations.map(e => ({
+  return escalations.map((e) => ({
     escalation_id: e.escalation_id,
     status: e.status,
     urgency: e.urgency,
@@ -294,21 +356,23 @@ export function buildChartReadme(input: ReadmeInput): string {
     `Client reference: ${input.client.username} (id ${input.client.userid})`,
     `Exported by: ${input.exporter.username} (id ${input.exporter.userId}, role ${input.exporter.role})`,
     `Generated at: ${input.generatedAt}`,
-    `Scope: ${input.scope === 'full'
-      ? 'full - treating-clinician view; includes signed note content, the safety plan and crisis free text'
-      : 'summary - organization-scoped research view; note ledger without content, no safety plan, crisis free text blanked'}`,
+    `Scope: ${
+      input.scope === 'full'
+        ? 'full - treating-clinician view; includes signed note content, the safety plan and crisis free text'
+        : 'summary - organization-scoped research view; note ledger without content, no safety plan, crisis free text blanked'
+    }`,
     '',
     'Files:',
-    ...input.files.map(f => `  ${f.name}${f.rows === null ? '' : ` (${f.rows} rows)`}`),
+    ...input.files.map((f) => `  ${f.name}${f.rows === null ? '' : ` (${f.rows} rows)`}`),
   ];
   if (input.omitted.length > 0) {
-    lines.push('', 'Not included at this scope:', ...input.omitted.map(name => `  ${name}`));
+    lines.push('', 'Not included at this scope:', ...input.omitted.map((name) => `  ${name}`));
   }
   lines.push(
     '',
     'This export is recorded in the data access log (action: export, kind: client_chart).',
-    'It contains only this client\'s record. Handle as protected health information.',
-    ''
+    "It contains only this client's record. Handle as protected health information.",
+    '',
   );
   return lines.join('\n');
 }
@@ -320,7 +384,7 @@ export function buildChartReadme(input: ReadmeInput): string {
 export async function buildClientChart(
   client: ChartClient,
   exporter: ChartExporter,
-  opts: BuildChartOptions = {}
+  opts: BuildChartOptions = {},
 ): Promise<ClientChart> {
   const scope = chartScopeFor(exporter.role);
   const generatedAt = opts.generatedAt ?? new Date().toISOString();
@@ -336,7 +400,7 @@ export async function buildClientChart(
     listAssignmentsForClient(clientId, 1000),
     listEscalations({
       clientId,
-      orgId: exporter.role === 'researcher' ? opts.orgId ?? null : null,
+      orgId: exporter.role === 'researcher' ? (opts.orgId ?? null) : null,
       limit: 1000,
     }),
   ]);
@@ -345,7 +409,11 @@ export async function buildClientChart(
     { name: 'notes.csv', headers: NOTES_HEADERS, rows: notesRows(notes, scope) },
     { name: 'screeners.csv', headers: SCREENERS_HEADERS, rows: screenerRows(screeners) },
     { name: 'session_summaries.csv', headers: SESSION_SUMMARY_HEADERS, rows: sessionSummaryRows(sessions) },
-    { name: 'crisis_history.csv', headers: CRISIS_HISTORY_HEADERS, rows: crisisHistoryRows(events, interventions, scope) },
+    {
+      name: 'crisis_history.csv',
+      headers: CRISIS_HISTORY_HEADERS,
+      rows: crisisHistoryRows(events, interventions, scope),
+    },
     { name: 'assignments.csv', headers: ASSIGNMENTS_HEADERS, rows: assignmentRows(assignments) },
     { name: 'escalations.csv', headers: ESCALATIONS_HEADERS, rows: escalationRows(escalations as EscalationListRow[]) },
   ];
@@ -365,7 +433,10 @@ export async function buildClientChart(
     const plan: { plan: SafetyPlan; created_at: string | null; session_id: string | null } | null = safetyPlan
       ? { plan: safetyPlan.plan, created_at: iso(safetyPlan.created_at), session_id: safetyPlan.session_id }
       : null;
-    files.push({ name: 'safety_plan.json', content: JSON.stringify({ exported_at: generatedAt, safety_plan: plan }, null, 2) + '\n' });
+    files.push({
+      name: 'safety_plan.json',
+      content: JSON.stringify({ exported_at: generatedAt, safety_plan: plan }, null, 2) + '\n',
+    });
     rowCounts['safety_plan.json'] = plan ? 1 : 0;
     readmeFiles.push({ name: 'safety_plan.json', rows: null });
   } else {
@@ -385,7 +456,7 @@ export async function buildClientChart(
     generatedAt,
     scope,
     files,
-    manifest: files.map(f => f.name),
+    manifest: files.map((f) => f.name),
     rowCounts,
   };
 }

@@ -12,10 +12,7 @@ async function runMigration() {
   try {
     console.log('Running migration 022: Add session recording metadata...');
 
-    const sql = fs.readFileSync(
-      path.join(__dirname, '../migrations/022_add_session_recording.sql'),
-      'utf8'
-    );
+    const sql = fs.readFileSync(path.join(__dirname, '../migrations/022_add_session_recording.sql'), 'utf8');
 
     await client.query(sql);
 

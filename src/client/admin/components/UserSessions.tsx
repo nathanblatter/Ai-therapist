@@ -36,7 +36,9 @@ export default function UserSessions() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getJson<UserSession[]>('/admin/api/user-sessions', { fallback: 'Failed to fetch user sessions' });
+      const data = await getJson<UserSession[]>('/admin/api/user-sessions', {
+        fallback: 'Failed to fetch user sessions',
+      });
       setSessions(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -76,10 +78,18 @@ export default function UserSessions() {
 
     if (hours > 24) {
       const days = Math.floor(hours / 24);
-      return <span className="text-green-600">{days}d {hours % 24}h</span>;
+      return (
+        <span className="text-green-600">
+          {days}d {hours % 24}h
+        </span>
+      );
     }
 
-    return <span className="text-yellow-600">{hours}h {minutes}m</span>;
+    return (
+      <span className="text-yellow-600">
+        {hours}h {minutes}m
+      </span>
+    );
   };
 
   const sortedSessions = [...sessions].sort((a: UserSession, b: UserSession) => {
@@ -132,9 +142,7 @@ export default function UserSessions() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-navy">Active User Sessions</h1>
-          <p className="text-gray-600 mt-1">
-            Monitor and manage active login sessions
-          </p>
+          <p className="text-gray-600 mt-1">Monitor and manage active login sessions</p>
         </div>
         <button
           onClick={fetchSessions}
@@ -162,7 +170,7 @@ export default function UserSessions() {
             <div>
               <p className="text-sm text-gray-600">Active Sessions</p>
               <p className="text-2xl font-bold text-green-600">
-                {sessions.filter(s => new Date(s.expire) > new Date()).length}
+                {sessions.filter((s) => new Date(s.expire) > new Date()).length}
               </p>
             </div>
             <Clock className="text-green-500" size={32} />
@@ -174,7 +182,7 @@ export default function UserSessions() {
             <div>
               <p className="text-sm text-gray-600">Expired Sessions</p>
               <p className="text-2xl font-bold text-red-600">
-                {sessions.filter(s => new Date(s.expire) <= new Date()).length}
+                {sessions.filter((s) => new Date(s.expire) <= new Date()).length}
               </p>
             </div>
             <Calendar className="text-red-500" size={32} />
@@ -194,14 +202,10 @@ export default function UserSessions() {
                 >
                   <div className="flex items-center gap-2">
                     User
-                    {sortBy === 'username' && (
-                      <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                    )}
+                    {sortBy === 'username' && <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Role
-                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   User ID
                 </th>
@@ -211,9 +215,7 @@ export default function UserSessions() {
                 >
                   <div className="flex items-center gap-2">
                     Expires
-                    {sortBy === 'expire' && (
-                      <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                    )}
+                    {sortBy === 'expire' && <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </div>
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -236,31 +238,25 @@ export default function UserSessions() {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center gap-2">
                       <User size={16} className="text-gray-400" />
-                      <span className="font-medium text-gray-900">
-                        {session.username || 'N/A'}
-                      </span>
+                      <span className="font-medium text-gray-900">{session.username || 'N/A'}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      session.userRole === 'researcher'
-                        ? 'bg-purple-100 text-purple-800'
-                        : session.userRole === 'admin'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-gray-100 text-gray-800'
-                    }`}>
+                    <span
+                      className={`px-2 py-1 text-xs rounded-full ${
+                        session.userRole === 'researcher'
+                          ? 'bg-purple-100 text-purple-800'
+                          : session.userRole === 'admin'
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-gray-100 text-gray-800'
+                      }`}
+                    >
                       {session.userRole || 'N/A'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                    #{session.userId || 'N/A'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                    {formatDate(session.expire)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {formatTimeRemaining(session.expire)}
-                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">#{session.userId || 'N/A'}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatDate(session.expire)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatTimeRemaining(session.expire)}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <code className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-700">
                       {session.sid.substring(0, 12)}...

@@ -33,7 +33,7 @@ const INVITE_COLUMNS =
 export async function createInvite(
   therapistId: number,
   label: string | null,
-  ttlHours: number = 168
+  ttlHours: number = 168,
 ): Promise<{ rawToken: string; invite: ClientInviteRow }> {
   const rawToken = randomBytes(32).toString('base64url');
   const result = await pool.query<ClientInviteRow>(
@@ -42,7 +42,7 @@ export async function createInvite(
              (SELECT organization_id FROM users WHERE userid = $2),
              $3, now() + ($4 * INTERVAL '1 hour'))
      RETURNING ${INVITE_COLUMNS}`,
-    [hashToken(rawToken), therapistId, label, ttlHours]
+    [hashToken(rawToken), therapistId, label, ttlHours],
   );
   return { rawToken, invite: result.rows[0] };
 }
@@ -55,7 +55,7 @@ export async function createInvite(
 export async function findInviteByToken(rawToken: string): Promise<ClientInviteRow | null> {
   const result = await pool.query<ClientInviteRow>(
     `SELECT ${INVITE_COLUMNS} FROM client_invites WHERE token_hash = $1`,
-    [hashToken(rawToken)]
+    [hashToken(rawToken)],
   );
   return result.rows[0] ?? null;
 }
@@ -71,17 +71,14 @@ export async function consumeInvite(rawToken: string): Promise<ClientInviteRow |
     `UPDATE client_invites SET used_at = now()
      WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
      RETURNING ${INVITE_COLUMNS}`,
-    [hashToken(rawToken)]
+    [hashToken(rawToken)],
   );
   return result.rows[0] ?? null;
 }
 
 /** Record which user account a consumed invite produced. */
 export async function markInviteUsedBy(inviteId: number, userId: number): Promise<void> {
-  await pool.query('UPDATE client_invites SET used_by = $1 WHERE invite_id = $2', [
-    userId,
-    inviteId,
-  ]);
+  await pool.query('UPDATE client_invites SET used_by = $1 WHERE invite_id = $2', [userId, inviteId]);
 }
 
 /**
@@ -89,10 +86,7 @@ export async function markInviteUsedBy(inviteId: number, userId: number): Promis
  * registration that consumed it could not complete, so the link stays valid.
  */
 export async function releaseInvite(inviteId: number): Promise<void> {
-  await pool.query(
-    'UPDATE client_invites SET used_at = NULL, used_by = NULL WHERE invite_id = $1',
-    [inviteId]
-  );
+  await pool.query('UPDATE client_invites SET used_at = NULL, used_by = NULL WHERE invite_id = $1', [inviteId]);
 }
 
 /** A therapist's invites, newest first (admin invite panel). */
@@ -100,7 +94,7 @@ export async function listInvites(therapistId: number): Promise<ClientInviteRow[
   const result = await pool.query<ClientInviteRow>(
     `SELECT ${INVITE_COLUMNS} FROM client_invites
      WHERE therapist_id = $1 ORDER BY created_at DESC`,
-    [therapistId]
+    [therapistId],
   );
   return result.rows;
 }
@@ -139,10 +133,7 @@ export async function completeInviteGrant(input: InviteGrantInput): Promise<void
       actorUsername: input.clientUsername,
       detail: { invite_id: input.inviteId, member_role: input.memberRole },
     });
-    await client.query('UPDATE client_invites SET used_by = $1 WHERE invite_id = $2', [
-      input.clientId,
-      input.inviteId,
-    ]);
+    await client.query('UPDATE client_invites SET used_by = $1 WHERE invite_id = $2', [input.clientId, input.inviteId]);
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);

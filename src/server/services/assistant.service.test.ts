@@ -33,7 +33,11 @@ function fakeClient(script: Array<{ output_text?: string; output?: unknown[] }>)
   const create = vi.fn().mockImplementation(() => {
     const step = script[Math.min(i, script.length - 1)];
     i++;
-    return Promise.resolve({ output_text: step.output_text ?? '', output: step.output ?? [], usage: { input_tokens: 10, output_tokens: 5 } });
+    return Promise.resolve({
+      output_text: step.output_text ?? '',
+      output: step.output ?? [],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
   });
   return { client: { responses: { create } }, create };
 }
@@ -111,10 +115,15 @@ describe('runAssistantTurn', () => {
     // getAllUsers is the org-scoped read: a cross-org participant never comes
     // back from it, so the only rows the model can see are the caller org's.
     dbMocks.getAllUsers.mockImplementation((_scope: number | null, orgId: number | null) =>
-      Promise.resolve(orgId === 5
-        ? [{ userid: 42, username: 'p42', role: 'participant', study_status: 'active', created_at: 't' }]
-        : [{ userid: 42, username: 'p42', role: 'participant', study_status: 'active', created_at: 't' },
-           { userid: 77, username: 'p42_other_org', role: 'participant', study_status: 'active', created_at: 't' }]));
+      Promise.resolve(
+        orgId === 5
+          ? [{ userid: 42, username: 'p42', role: 'participant', study_status: 'active', created_at: 't' }]
+          : [
+              { userid: 42, username: 'p42', role: 'participant', study_status: 'active', created_at: 't' },
+              { userid: 77, username: 'p42_other_org', role: 'participant', study_status: 'active', created_at: 't' },
+            ],
+      ),
+    );
     const { client, create } = fakeClient([
       { output: [{ type: 'function_call', name: 'user_lookup', call_id: 'c1', arguments: '{"username":"p42"}' }] },
       { output_text: 'Found p42.' },
@@ -136,7 +145,9 @@ describe('runAssistantTurn', () => {
       { output_text: 'Nothing.' },
     ]);
     setAssistantClientForTest(client as never);
-    const result = await runAssistantTurn({ ...CTX_RESEARCHER, orgId: null }, [{ role: 'user', content: 'who is p4?' }]);
+    const result = await runAssistantTurn({ ...CTX_RESEARCHER, orgId: null }, [
+      { role: 'user', content: 'who is p4?' },
+    ]);
     expect(dbMocks.getAllUsers).not.toHaveBeenCalled();
     expect(result.toolCalls).toEqual([{ name: 'user_lookup', rowCount: 0 }]);
     const secondCall = create.mock.calls[1][0] as { input: Array<Record<string, unknown>> };

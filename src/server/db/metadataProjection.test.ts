@@ -4,11 +4,7 @@
 // query-level wiring is covered in export.queries.test.ts and
 // adminSessions.metadata.test.ts.
 import { describe, it, expect } from 'vitest';
-import {
-  SAFE_MESSAGE_METADATA_KEYS,
-  projectSafeMetadata,
-  projectRowsMetadata,
-} from './metadataProjection.js';
+import { SAFE_MESSAGE_METADATA_KEYS, projectSafeMetadata, projectRowsMetadata } from './metadataProjection.js';
 
 // A realistic worst case: one blob holding every PHI-bearing key any writer
 // produces, next to the telemetry keys researchers legitimately need.
@@ -86,8 +82,7 @@ describe('projectSafeMetadata', () => {
   });
 
   it('is an allowlist: an unknown key from a future writer is denied', () => {
-    expect(projectSafeMetadata({ status: 'failed', some_new_field: 'verbatim text' }))
-      .toEqual({ status: 'failed' });
+    expect(projectSafeMetadata({ status: 'failed', some_new_field: 'verbatim text' })).toEqual({ status: 'failed' });
   });
 
   it('returns null for absent, non-object, or fully-stripped metadata', () => {

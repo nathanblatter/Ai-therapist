@@ -12,10 +12,7 @@ async function runMigration() {
   try {
     console.log('Starting migration 015: Add user preferences...');
 
-    const migrationSQL = fs.readFileSync(
-      path.join(__dirname, '../migrations/015_add_user_preferences.sql'),
-      'utf8'
-    );
+    const migrationSQL = fs.readFileSync(path.join(__dirname, '../migrations/015_add_user_preferences.sql'), 'utf8');
 
     await client.query(migrationSQL);
 
@@ -23,7 +20,6 @@ async function runMigration() {
     console.log('  - Added preferred_voice column to users table');
     console.log('  - Added preferred_language column to users table');
     console.log('  - Created index on user preferences');
-
   } catch (error) {
     console.error('Migration 015 failed:', error);
     throw error;

@@ -38,7 +38,9 @@ function usd(n: number | null | undefined): string {
 async function main(): Promise<void> {
   const sessionId = arg('session');
   if (!sessionId) {
-    console.error('Usage: npm run counterfactual -- --session <id> [--mode replay|fork] [--models default|all|a,b] [--point n] [--risk-spike] [--judge]');
+    console.error(
+      'Usage: npm run counterfactual -- --session <id> [--mode replay|fork] [--models default|all|a,b] [--point n] [--risk-spike] [--judge]',
+    );
     process.exit(1);
   }
 
@@ -49,9 +51,13 @@ async function main(): Promise<void> {
   }
 
   const modelsArg = arg('models') ?? 'default';
-  const models = modelsArg === 'default' || modelsArg === 'all'
-    ? modelsArg
-    : modelsArg.split(',').map(s => s.trim()).filter(Boolean);
+  const models =
+    modelsArg === 'default' || modelsArg === 'all'
+      ? modelsArg
+      : modelsArg
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
 
   let decisionPoint: number | undefined;
   let probeReason = 'manual';
@@ -103,11 +109,13 @@ async function main(): Promise<void> {
       continue;
     }
     const scores = r.judge_scores
-      ? Object.entries(r.judge_scores).map(([k, v]) => `${k}=${v}`).join(' ')
+      ? Object.entries(r.judge_scores)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(' ')
       : null;
     console.log(
       `${r.model}   ${usd(r.estimated_cost_usd)}  ${r.latency_ms ?? '—'}ms` +
-      `  in=${r.tokens_in ?? '—'} out=${r.tokens_out ?? '—'}`,
+        `  in=${r.tokens_in ?? '—'} out=${r.tokens_out ?? '—'}`,
     );
     if (scores) console.log(`  judge: ${scores}`);
     if (r.judge_rationale) console.log(`  "${r.judge_rationale}"`);
@@ -118,10 +126,10 @@ async function main(): Promise<void> {
   console.log('-'.repeat(78));
   console.log(`\n${summary.succeeded} succeeded, ${summary.failed} failed, of ${summary.candidates} candidates.`);
 
-  if (stored.responses.some(r => r.judge_scores)) {
+  if (stored.responses.some((r) => r.judge_scores)) {
     const ranked = stored.responses
-      .filter(r => r.judge_scores)
-      .map(r => ({
+      .filter((r) => r.judge_scores)
+      .map((r) => ({
         model: r.model,
         total: Object.values(r.judge_scores!).reduce((a, b) => a + b, 0),
         cost: r.estimated_cost_usd,
@@ -134,7 +142,7 @@ async function main(): Promise<void> {
 
 main()
   .then(() => pool.end())
-  .catch(async err => {
+  .catch(async (err) => {
     console.error('\nCounterfactual run failed:', err instanceof Error ? err.message : err);
     await pool.end().catch(() => {});
     process.exit(1);

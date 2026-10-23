@@ -13,10 +13,7 @@ async function rollbackMigration() {
     console.log('Starting rollback of migration 016: Remove MFA Support...');
 
     // Read the rollback SQL file
-    const rollbackSQL = fs.readFileSync(
-      path.join(__dirname, '../migrations/016_add_mfa_support_rollback.sql'),
-      'utf8'
-    );
+    const rollbackSQL = fs.readFileSync(path.join(__dirname, '../migrations/016_add_mfa_support_rollback.sql'), 'utf8');
 
     // Execute the rollback
     await client.query('BEGIN');
@@ -25,7 +22,6 @@ async function rollbackMigration() {
 
     console.log('OK: Migration 016 rolled back successfully!');
     console.log('MFA columns removed from users table');
-
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('FAIL: Rollback of migration 016 failed:', error);

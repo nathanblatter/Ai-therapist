@@ -101,15 +101,15 @@ describe('getLiveVoice', () => {
 describe('liveVoicesForLanguage', () => {
   it("returns only the Portuguese voices for 'pt-BR'", () => {
     const voices = liveVoicesForLanguage('pt-BR');
-    expect(voices.map(v => v.value).sort()).toEqual(['bossa', 'tempo']);
-    expect(voices.every(v => v.language === 'Portuguese')).toBe(true);
+    expect(voices.map((v) => v.value).sort()).toEqual(['bossa', 'tempo']);
+    expect(voices.every((v) => v.language === 'Portuguese')).toBe(true);
   });
 
   it('returns only English voices for English and for an unknown language code', () => {
     for (const code of ['en-US', 'de-DE', null, undefined]) {
       const voices = liveVoicesForLanguage(code);
-      expect(voices.every(v => v.language === 'English')).toBe(true);
-      expect(voices.map(v => v.value)).not.toContain('bossa');
+      expect(voices.every((v) => v.language === 'English')).toBe(true);
+      expect(voices.map((v) => v.value)).not.toContain('bossa');
     }
   });
 
@@ -159,13 +159,15 @@ describe('buildLiveSessionConfig', () => {
     expect(delegation.type).toBe('responses');
     expect(delegation.responses.tool_choice).toBe('auto');
     expect(delegation.responses.parallel_tool_calls).toBe(false);
-    expect(delegation.responses.tools).toEqual([{
-      type: 'function',
-      name: 'find_worksheet',
-      description: 'Find a worksheet',
-      parameters: TOOL_DEFS[0].parameters,
-      strict: false,
-    }]);
+    expect(delegation.responses.tools).toEqual([
+      {
+        type: 'function',
+        name: 'find_worksheet',
+        description: 'Find a worksheet',
+        parameters: TOOL_DEFS[0].parameters,
+        strict: false,
+      },
+    ]);
   });
 
   it('omits session.input when there is no history', () => {
@@ -200,21 +202,26 @@ describe('buildLiveSessionConfig', () => {
   });
 
   it('adds a language line to the live instructions when a language is set', () => {
-    expect(build({ languageName: 'Brazilian Portuguese' }).instructions as string)
-      .toMatch(/Speak Brazilian Portuguese unless/);
-    expect(build({ languageName: null }).instructions as string).not.toMatch(/unless the participant asks you to switch/);
+    expect(build({ languageName: 'Brazilian Portuguese' }).instructions as string).toMatch(
+      /Speak Brazilian Portuguese unless/,
+    );
+    expect(build({ languageName: null }).instructions as string).not.toMatch(
+      /unless the participant asks you to switch/,
+    );
   });
 });
 
 describe('toLiveDelegationTools', () => {
   it('never forwards registry-only metadata that would 400 session creation', () => {
-    const defs = [{
-      name: 'end_session',
-      description: 'End it',
-      parameters: { type: 'object', properties: {} },
-      channel: 'realtime',
-      handler: () => undefined,
-    } as unknown as ToolDefinition];
+    const defs = [
+      {
+        name: 'end_session',
+        description: 'End it',
+        parameters: { type: 'object', properties: {} },
+        channel: 'realtime',
+        handler: () => undefined,
+      } as unknown as ToolDefinition,
+    ];
 
     const [tool] = toLiveDelegationTools(defs);
     expect(Object.keys(tool).sort()).toEqual(['description', 'name', 'parameters', 'strict', 'type']);

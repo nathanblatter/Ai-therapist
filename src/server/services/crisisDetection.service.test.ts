@@ -32,8 +32,12 @@ vi.mock('openai', () => ({
 }));
 
 const {
-  detectCrisisKeywords, analyzeMessageRisk, analyzeStandaloneRisk, flagSessionCrisis,
-  getActiveCrisisSessions, _sweepCounterSizeForTests,
+  detectCrisisKeywords,
+  analyzeMessageRisk,
+  analyzeStandaloneRisk,
+  flagSessionCrisis,
+  getActiveCrisisSessions,
+  _sweepCounterSizeForTests,
 } = await import('./crisisDetection.service.js');
 
 // /admin/api/crisis/active list (ai-therapist-276): the researcher org rule
@@ -49,7 +53,7 @@ describe('getActiveCrisisSessions org scoping', () => {
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('WHERE ts.crisis_flagged = TRUE');
     expect(sql.replace(/\s+/g, ' ')).toContain(
-      "AND ($1::int IS NULL OR u.organization_id = $1 OR (ts.user_id IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))"
+      "AND ($1::int IS NULL OR u.organization_id = $1 OR (ts.user_id IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')))",
     );
     expect(params).toEqual([3]);
   });
@@ -92,7 +96,7 @@ describe('detectCrisisKeywords (stage 1 screen)', () => {
 
   // ai-therapist-126: the spoken contraction slipped past the screen entirely
   // (score 0 → no LLM assessment) in the voice crisis ladder.
-  it("normalizes colloquial contractions — the exact voice-transcript phrase that scored 0", () => {
+  it('normalizes colloquial contractions — the exact voice-transcript phrase that scored 0', () => {
     const r = detectCrisisKeywords("Honestly, some days I don't wanna be here anymore.");
     expect(r.keywordScore).toBe(50);
   });
@@ -133,9 +137,9 @@ describe('detectCrisisKeywords (stage 1 screen)', () => {
       "I wouldn't mind not waking up tomorrow",
       "I wouldn't care if I didn't wake up",
       "I hope I just don't wake up tomorrow",
-      "I want to go to sleep and not wake up",
-      "everyone would be fine without me",
-      "I just want it all to be over",
+      'I want to go to sleep and not wake up',
+      'everyone would be fine without me',
+      'I just want it all to be over',
     ];
     for (const phrase of phrasings) {
       expect(detectCrisisKeywords(phrase).keywordScore, phrase).toBe(50);
@@ -156,7 +160,7 @@ describe('detectCrisisKeywords (stage 1 screen)', () => {
   });
 
   it('takes the max tier when multiple match', () => {
-    const r = detectCrisisKeywords("I feel hopeless and want to die");
+    const r = detectCrisisKeywords('I feel hopeless and want to die');
     expect(r.keywordScore).toBe(75);
   });
 
@@ -186,24 +190,33 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
   });
 
   it('lets the LLM downgrade a keyword hit that is just a reference (988 problem)', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 5, severity: 'none', context: 'reference',
-      factors: [], reasoning: 'Participant is asking about the suicide prevention hotline, not expressing ideation.',
-    }));
-    const r = await analyzeMessageRisk(
-      msg('what is the number for the suicide prevention hotline?'),
-      [{ role: 'user', content: 'what is the number for the suicide prevention hotline?' }],
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 5,
+        severity: 'none',
+        context: 'reference',
+        factors: [],
+        reasoning: 'Participant is asking about the suicide prevention hotline, not expressing ideation.',
+      }),
     );
+    const r = await analyzeMessageRisk(msg('what is the number for the suicide prevention hotline?'), [
+      { role: 'user', content: 'what is the number for the suicide prevention hotline?' },
+    ]);
     expect(r.riskScore).toBe(5);
     expect(r.severity).toBe('none');
     expect(createMock).toHaveBeenCalledOnce();
   });
 
   it('lets the LLM upgrade genuine ideation with context', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 82, severity: 'high', context: 'genuine',
-      factors: ['active ideation', 'expressed plan'], reasoning: 'Active ideation with plan.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 82,
+        severity: 'high',
+        context: 'genuine',
+        factors: ['active ideation', 'expressed plan'],
+        reasoning: 'Active ideation with plan.',
+      }),
+    );
     const r = await analyzeMessageRisk(msg('I want to die and I know how I would do it'), []);
     expect(r.riskScore).toBe(82);
     expect(r.severity).toBe('high');
@@ -218,19 +231,29 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
   });
 
   it('maps graduated severity bands from the LLM score', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 55, severity: 'medium', context: 'genuine',
-      factors: ['passive ideation'], reasoning: 'Passive ideation, no plan.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 55,
+        severity: 'medium',
+        context: 'genuine',
+        factors: ['passive ideation'],
+        reasoning: 'Passive ideation, no plan.',
+      }),
+    );
     const r = await analyzeMessageRisk(msg("I don't want to be here anymore"), []);
     expect(r.severity).toBe('medium');
   });
 
   it('runs a periodic LLM sweep after 8 quiet user messages (no keyword trip)', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 30, severity: 'low', context: 'genuine',
-      factors: ['withdrawal'], reasoning: 'Increasing withdrawal without explicit language.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 30,
+        severity: 'low',
+        context: 'genuine',
+        factors: ['withdrawal'],
+        reasoning: 'Increasing withdrawal without explicit language.',
+      }),
+    );
     const sweepMsg = (i: number) => ({ content: `ordinary message ${i}`, session_id: 'sess-sweep', message_id: i });
     for (let i = 1; i <= 7; i++) {
       const r = await analyzeMessageRisk(sweepMsg(i), []);
@@ -260,11 +283,19 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 55, severity: 'medium', context: 'genuine',
-      factors: ['passive ideation'], reasoning: 'Escalating passive ideation.',
-    }));
-    const r = await analyzeMessageRisk({ content: "I can't go on like this", session_id: 'sess-traj', message_id: 1 }, []);
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 55,
+        severity: 'medium',
+        context: 'genuine',
+        factors: ['passive ideation'],
+        reasoning: 'Escalating passive ideation.',
+      }),
+    );
+    const r = await analyzeMessageRisk(
+      { content: "I can't go on like this", session_id: 'sess-traj', message_id: 1 },
+      [],
+    );
     expect(r.riskScore).toBe(70); // 55 + 15 deteriorating-trend bonus
     expect(r.factors).toContain('trajectory: deteriorating');
     expect(r.breakdown.trajectory).toBe(15);
@@ -283,7 +314,10 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
       }
       return Promise.resolve({ rows: [] });
     });
-    const r = await analyzeMessageRisk({ content: 'the weather is nice today', session_id: 'sess-traj-zero', message_id: 2 }, []);
+    const r = await analyzeMessageRisk(
+      { content: 'the weather is nice today', session_id: 'sess-traj-zero', message_id: 2 },
+      [],
+    );
     expect(r.riskScore).toBe(0);
   });
 
@@ -291,10 +325,15 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
   // catch and return riskScore 0 / severity 'none' — an LLM-assessed HIGH
   // crisis was silently dropped (no flag, no page) on a transient DB error.
   it('keeps the LLM-assessed verdict when the risk_score_history insert fails', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 82, severity: 'high', context: 'genuine',
-      factors: ['active ideation', 'expressed plan'], reasoning: 'Active ideation with plan.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 82,
+        severity: 'high',
+        context: 'genuine',
+        factors: ['active ideation', 'expressed plan'],
+        reasoning: 'Active ideation with plan.',
+      }),
+    );
     queryMock.mockImplementation((sql: string) => {
       if (String(sql).includes('INSERT INTO risk_score_history')) {
         return Promise.reject(new Error('db down'));
@@ -331,12 +370,17 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
   });
 
   it('logs the assessment to risk_score_history with both stage breakdowns', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 5, severity: 'none', context: 'bystander',
-      factors: [], reasoning: 'Talking about a friend.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 5,
+        severity: 'none',
+        context: 'bystander',
+        factors: [],
+        reasoning: 'Talking about a friend.',
+      }),
+    );
     await analyzeMessageRisk(msg('my friend attempted suicide last year'), []);
-    const historyInsert = queryMock.mock.calls.find(c => String(c[0]).includes('INSERT INTO risk_score_history'));
+    const historyInsert = queryMock.mock.calls.find((c) => String(c[0]).includes('INSERT INTO risk_score_history'));
     expect(historyInsert).toBeDefined();
     const factorsJson = JSON.parse(historyInsert![1][4] as string);
     expect(factorsJson.method).toBe('llm_assessed');
@@ -356,10 +400,15 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
   // the LLM on EVERY message — means/farewell language ("bought a gun", "wrote
   // goodbye letters") carries no lexicon words and would otherwise score 0.
   it('runs the LLM even when no keywords match, and still writes nothing to the DB', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 80, severity: 'high', context: 'genuine',
-      factors: ['stated method', 'farewell'], reasoning: 'Describes access to a means and goodbye letters.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 80,
+        severity: 'high',
+        context: 'genuine',
+        factors: ['stated method', 'farewell'],
+        reasoning: 'Describes access to a means and goodbye letters.',
+      }),
+    );
     const r = await analyzeStandaloneRisk('I bought a gun yesterday and wrote letters to everyone');
     expect(createMock).toHaveBeenCalledOnce();
     expect(r.severity).toBe('high');
@@ -377,14 +426,18 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
   });
 
   it('runs the stage-2 LLM on a keyword hit and returns its contextual verdict', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 55, severity: 'medium', context: 'genuine',
-      factors: ['passive ideation'], reasoning: 'Expressed wish to not be here.',
-    }));
-    const r = await analyzeStandaloneRisk(
-      "lately I don't want to be here anymore",
-      [{ role: 'assistant', content: 'How have things been since we spoke?' }],
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 55,
+        severity: 'medium',
+        context: 'genuine',
+        factors: ['passive ideation'],
+        reasoning: 'Expressed wish to not be here.',
+      }),
     );
+    const r = await analyzeStandaloneRisk("lately I don't want to be here anymore", [
+      { role: 'assistant', content: 'How have things been since we spoke?' },
+    ]);
     expect(r.riskScore).toBe(55);
     expect(r.severity).toBe('medium');
     expect(r.factors).toEqual(['passive ideation']);
@@ -403,9 +456,15 @@ describe('analyzeStandaloneRisk (messaging slice: no session machinery)', () => 
   });
 
   it('assesses keyword-free messages with the LLM every time (no sampling) — ai-therapist-142', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 0, severity: 'none', context: 'neutral', factors: [], reasoning: 'neutral check-in',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 0,
+        severity: 'none',
+        context: 'neutral',
+        factors: [],
+        reasoning: 'neutral check-in',
+      }),
+    );
     for (let i = 0; i < 3; i++) {
       await analyzeStandaloneRisk('another completely neutral check-in message');
     }
@@ -425,14 +484,14 @@ describe('flagSessionCrisis → adverse-event auto-draft hook', () => {
   it('schedules an AE draft on a high-severity flag', async () => {
     await flagSessionCrisis('sess-hi', 'high', 90, 'system', 'auto', 1, ['plan'], null);
     // The draft is fire-and-forget after COMMIT; let the microtask run.
-    await new Promise(r => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
     expect(draftAeMock).toHaveBeenCalledWith('sess-hi');
   });
 
   it('does NOT schedule an AE draft on medium or low flags', async () => {
     await flagSessionCrisis('sess-med', 'medium', 60, 'system', 'auto', 1, [], null);
     await flagSessionCrisis('sess-low', 'low', 30, 'system', 'auto', 1, [], null);
-    await new Promise(r => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
     expect(draftAeMock).not.toHaveBeenCalled();
   });
 });
@@ -450,12 +509,18 @@ describe('moderation tier (ai-therapist-167, supplementary signal)', () => {
 
   it('wakes the LLM when keywords miss but moderation reads self-harm intent', async () => {
     moderationCreateMock.mockResolvedValue(modResponse({ 'self-harm/intent': 0.7 }));
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 55, severity: 'medium', context: 'genuine',
-      factors: ['passive ideation'], reasoning: 'Indirect phrasing the keyword screen missed.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 55,
+        severity: 'medium',
+        context: 'genuine',
+        factors: ['passive ideation'],
+        reasoning: 'Indirect phrasing the keyword screen missed.',
+      }),
+    );
     const r = await analyzeMessageRisk(
-      { content: 'unusual phrasing with no screen keywords at all', session_id: 'sess-modwake', message_id: 1 }, []
+      { content: 'unusual phrasing with no screen keywords at all', session_id: 'sess-modwake', message_id: 1 },
+      [],
     );
     expect(createMock).toHaveBeenCalledOnce();
     expect(r.riskScore).toBe(55);
@@ -466,7 +531,8 @@ describe('moderation tier (ai-therapist-167, supplementary signal)', () => {
   it('does not wake the LLM below the moderation threshold, but still records the score', async () => {
     moderationCreateMock.mockResolvedValue(modResponse({ 'self-harm': 0.2 }, false));
     const r = await analyzeMessageRisk(
-      { content: 'another ordinary message', session_id: 'sess-modlow', message_id: 1 }, []
+      { content: 'another ordinary message', session_id: 'sess-modlow', message_id: 1 },
+      [],
     );
     expect(createMock).not.toHaveBeenCalled();
     expect(r.riskScore).toBe(0);
@@ -477,22 +543,33 @@ describe('moderation tier (ai-therapist-167, supplementary signal)', () => {
     moderationCreateMock.mockResolvedValue(modResponse({ 'self-harm/intent': 0.95 }));
     createMock.mockRejectedValue(new Error('openai down'));
     const r = await analyzeMessageRisk(
-      { content: 'I want to end my life', session_id: 'sess-modfallback', message_id: 1 }, []
+      { content: 'I want to end my life', session_id: 'sess-modfallback', message_id: 1 },
+      [],
     );
     // keyword tier 75, moderation 95 capped at 85 -> 85 (fail toward detection)
     expect(r.riskScore).toBe(85);
     expect(r.severity).toBe('high');
-    expect(r.factors.some(f => f.includes('moderation self-harm signal'))).toBe(true);
+    expect(r.factors.some((f) => f.includes('moderation self-harm signal'))).toBe(true);
   });
 
   it('LLM context judgment still wins over a hot moderation score (negation)', async () => {
     moderationCreateMock.mockResolvedValue(modResponse({ 'self-harm/intent': 0.8 }));
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 10, severity: 'none', context: 'negated',
-      factors: [], reasoning: 'Participant explicitly denies ideation.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 10,
+        severity: 'none',
+        context: 'negated',
+        factors: [],
+        reasoning: 'Participant explicitly denies ideation.',
+      }),
+    );
     const r = await analyzeMessageRisk(
-      { content: "I promise I'm not suicidal, my roommate asked me to say that clearly", session_id: 'sess-modneg', message_id: 1 }, []
+      {
+        content: "I promise I'm not suicidal, my roommate asked me to say that clearly",
+        session_id: 'sess-modneg',
+        message_id: 1,
+      },
+      [],
     );
     expect(r.riskScore).toBe(10);
     expect(r.severity).toBe('none');
@@ -509,17 +586,19 @@ describe('passive-ideation floor (ai-therapist-254)', () => {
     moderationCreateMock.mockReset().mockRejectedValue(new Error('moderation unavailable'));
   });
 
-  const STAGE_UTTERANCE =
-    "I think it would just be easier sometimes if I just didn't have to do this anymore.";
+  const STAGE_UTTERANCE = "I think it would just be easier sometimes if I just didn't have to do this anymore.";
 
   it('raises an under-scored genuine passive-ideation turn to medium', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 30, severity: 'low', context: 'genuine',
-      factors: ['hopelessness'], reasoning: 'Reads as exhaustion rather than ideation.',
-    }));
-    const r = await analyzeMessageRisk(
-      { content: STAGE_UTTERANCE, session_id: 'sess-passive', message_id: 1 }, [],
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 30,
+        severity: 'low',
+        context: 'genuine',
+        factors: ['hopelessness'],
+        reasoning: 'Reads as exhaustion rather than ideation.',
+      }),
     );
+    const r = await analyzeMessageRisk({ content: STAGE_UTTERANCE, session_id: 'sess-passive', message_id: 1 }, []);
     expect(createMock).toHaveBeenCalledOnce();
     expect(r.riskScore).toBeGreaterThanOrEqual(50);
     expect(r.severity).toBe('medium');
@@ -527,14 +606,17 @@ describe('passive-ideation floor (ai-therapist-254)', () => {
   });
 
   it('records the floor in risk_score_history', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 30, severity: 'low', context: 'genuine',
-      factors: ['hopelessness'], reasoning: 'Under-scored.',
-    }));
-    await analyzeMessageRisk(
-      { content: STAGE_UTTERANCE, session_id: 'sess-passive-log', message_id: 2 }, [],
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 30,
+        severity: 'low',
+        context: 'genuine',
+        factors: ['hopelessness'],
+        reasoning: 'Under-scored.',
+      }),
     );
-    const insert = queryMock.mock.calls.find(c => String(c[0]).includes('INSERT INTO risk_score_history'));
+    await analyzeMessageRisk({ content: STAGE_UTTERANCE, session_id: 'sess-passive-log', message_id: 2 }, []);
+    const insert = queryMock.mock.calls.find((c) => String(c[0]).includes('INSERT INTO risk_score_history'));
     const factorsJson = JSON.parse(insert![1][4] as string);
     expect(factorsJson.keyword_score).toBe(50);
     expect(factorsJson.llm_score).toBe(30);
@@ -545,7 +627,8 @@ describe('passive-ideation floor (ai-therapist-254)', () => {
   it('flags medium on the keyword tier alone when the assessor is unreachable', async () => {
     createMock.mockRejectedValue(new Error('openai down'));
     const r = await analyzeMessageRisk(
-      { content: STAGE_UTTERANCE, session_id: 'sess-passive-down', message_id: 3 }, [],
+      { content: STAGE_UTTERANCE, session_id: 'sess-passive-down', message_id: 3 },
+      [],
     );
     expect(r.riskScore).toBe(50);
     expect(r.severity).toBe('medium');
@@ -553,12 +636,18 @@ describe('passive-ideation floor (ai-therapist-254)', () => {
 
   it('still lets the assessor discount a negated / bystander / reference reading', async () => {
     for (const context of ['negated', 'bystander', 'reference']) {
-      createMock.mockReset().mockResolvedValue(llmResponse({
-        risk_score: 8, severity: 'none', context,
-        factors: [], reasoning: 'Not about the participant now.',
-      }));
+      createMock.mockReset().mockResolvedValue(
+        llmResponse({
+          risk_score: 8,
+          severity: 'none',
+          context,
+          factors: [],
+          reasoning: 'Not about the participant now.',
+        }),
+      );
       const r = await analyzeMessageRisk(
-        { content: STAGE_UTTERANCE, session_id: `sess-passive-${context}`, message_id: 4 }, [],
+        { content: STAGE_UTTERANCE, session_id: `sess-passive-${context}`, message_id: 4 },
+        [],
       );
       expect(r.riskScore, context).toBe(8);
       expect(r.severity, context).toBe('none');
@@ -566,34 +655,51 @@ describe('passive-ideation floor (ai-therapist-254)', () => {
   });
 
   it('never lowers a verdict the assessor scored above the floor', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 85, severity: 'high', context: 'genuine',
-      factors: ['active ideation'], reasoning: 'Escalated within the turn.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 85,
+        severity: 'high',
+        context: 'genuine',
+        factors: ['active ideation'],
+        reasoning: 'Escalated within the turn.',
+      }),
+    );
     const r = await analyzeMessageRisk(
-      { content: STAGE_UTTERANCE, session_id: 'sess-passive-high', message_id: 5 }, [],
+      { content: STAGE_UTTERANCE, session_id: 'sess-passive-high', message_id: 5 },
+      [],
     );
     expect(r.riskScore).toBe(85);
     expect(r.severity).toBe('high');
   });
 
   it('does not floor distress-without-ideation (low tier stays low)', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 28, severity: 'low', context: 'genuine',
-      factors: ['hopelessness'], reasoning: 'Distress without ideation.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 28,
+        severity: 'low',
+        context: 'genuine',
+        factors: ['hopelessness'],
+        reasoning: 'Distress without ideation.',
+      }),
+    );
     const r = await analyzeMessageRisk(
-      { content: 'I just feel hopeless and worthless lately', session_id: 'sess-distress', message_id: 6 }, [],
+      { content: 'I just feel hopeless and worthless lately', session_id: 'sess-distress', message_id: 6 },
+      [],
     );
     expect(r.riskScore).toBe(28);
     expect(r.severity).toBe('low');
   });
 
   it('applies the same floor on the standalone (caseworker) path', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 30, severity: 'low', context: 'genuine',
-      factors: ['hopelessness'], reasoning: 'Under-scored.',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 30,
+        severity: 'low',
+        context: 'genuine',
+        factors: ['hopelessness'],
+        reasoning: 'Under-scored.',
+      }),
+    );
     const r = await analyzeStandaloneRisk("lately I wouldn't mind not waking up");
     expect(r.riskScore).toBe(50);
     expect(r.severity).toBe('medium');
@@ -610,20 +716,30 @@ describe('strict-schema severity reconciliation (ai-therapist-179)', () => {
 
   it('never lets a calm label mask a high score (the dangerous mismatch)', async () => {
     // Strict schema guarantees a valid enum, not a consistent one.
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 90, severity: 'none', context: 'genuine',
-      factors: ['expressed plan'], reasoning: 'mismatched pair',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 90,
+        severity: 'none',
+        context: 'genuine',
+        factors: ['expressed plan'],
+        reasoning: 'mismatched pair',
+      }),
+    );
     const r = await analyzeStandaloneRisk('I have a plan and the means');
     expect(r.riskScore).toBe(90);
     expect(r.severity).toBe('high'); // derived band wins over the calm label
   });
 
   it('keeps the more severe label when the model is more worried than the score', async () => {
-    createMock.mockResolvedValue(llmResponse({
-      risk_score: 8, severity: 'high', context: 'genuine',
-      factors: ['expressed plan'], reasoning: 'observed live from gpt-4o-mini',
-    }));
+    createMock.mockResolvedValue(
+      llmResponse({
+        risk_score: 8,
+        severity: 'high',
+        context: 'genuine',
+        factors: ['expressed plan'],
+        reasoning: 'observed live from gpt-4o-mini',
+      }),
+    );
     const r = await analyzeStandaloneRisk('...');
     expect(r.severity).toBe('high');
   });
@@ -632,7 +748,8 @@ describe('strict-schema severity reconciliation (ai-therapist-179)', () => {
     createMock.mockResolvedValue({ choices: [{ message: { refusal: 'I cannot help with that' } }] });
     // Keyword floor stands rather than a false all-clear.
     const r = await analyzeMessageRisk(
-      { content: 'I want to end my life', session_id: 'sess-refusal', message_id: 1 }, []
+      { content: 'I want to end my life', session_id: 'sess-refusal', message_id: 1 },
+      [],
     );
     expect(r.riskScore).toBe(75);
     expect(r.severity).toBe('high');
@@ -643,7 +760,8 @@ describe('strict-schema severity reconciliation (ai-therapist-179)', () => {
       choices: [{ finish_reason: 'length', message: { content: '{"risk_score":' } }],
     });
     const r = await analyzeMessageRisk(
-      { content: 'I want to end my life', session_id: 'sess-trunc', message_id: 1 }, []
+      { content: 'I want to end my life', session_id: 'sess-trunc', message_id: 1 },
+      [],
     );
     expect(r.riskScore).toBe(75);
   });
@@ -651,12 +769,18 @@ describe('strict-schema severity reconciliation (ai-therapist-179)', () => {
   it('falls back to json_object if the configured model rejects strict schema', async () => {
     createMock
       .mockRejectedValueOnce(new Error("400 Invalid parameter: 'response_format.json_schema' is not supported"))
-      .mockResolvedValue(llmResponse({
-        risk_score: 55, severity: 'medium', context: 'genuine',
-        factors: ['passive ideation'], reasoning: 'ok on the fallback format',
-      }));
+      .mockResolvedValue(
+        llmResponse({
+          risk_score: 55,
+          severity: 'medium',
+          context: 'genuine',
+          factors: ['passive ideation'],
+          reasoning: 'ok on the fallback format',
+        }),
+      );
     const r = await analyzeMessageRisk(
-      { content: "I don't want to be here anymore", session_id: 'sess-fallback', message_id: 1 }, []
+      { content: "I don't want to be here anymore", session_id: 'sess-fallback', message_id: 1 },
+      [],
     );
     expect(r.riskScore).toBe(55);
     // First attempt strict, retry plain.

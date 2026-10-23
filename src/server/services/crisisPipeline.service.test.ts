@@ -4,12 +4,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // The pipeline's job is orchestration: demo skip, steering delivery per
 // channel, and the graduated-flag decision matrix.
 const {
-  analyzeMessageRiskMock, flagSessionCrisisMock, logInterventionActionMock,
-  maybeSteerSessionMock, shouldSteerMock, buildChatSteeringGuidanceMock,
+  analyzeMessageRiskMock,
+  flagSessionCrisisMock,
+  logInterventionActionMock,
+  maybeSteerSessionMock,
+  shouldSteerMock,
+  buildChatSteeringGuidanceMock,
   maybeRequireRiskCheckMock,
   executeGraduatedResponseMock,
-  getRecentSessionMessagesMock, getSessionCrisisStateMock, isDemoAccountSessionMock,
-  getSessionAccessInfoMock, enqueueWorkItemMock,
+  getRecentSessionMessagesMock,
+  getSessionCrisisStateMock,
+  isDemoAccountSessionMock,
+  getSessionAccessInfoMock,
+  enqueueWorkItemMock,
 } = vi.hoisted(() => ({
   analyzeMessageRiskMock: vi.fn(),
   flagSessionCrisisMock: vi.fn(),
@@ -60,7 +67,11 @@ beforeEach(() => {
   (global as unknown as { io: unknown }).io = { to: toMock };
   isDemoAccountSessionMock.mockResolvedValue(false);
   getRecentSessionMessagesMock.mockResolvedValue([]);
-  getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: false, crisis_severity: null, crisis_risk_score: null });
+  getSessionCrisisStateMock.mockResolvedValue({
+    crisis_flagged: false,
+    crisis_severity: null,
+    crisis_risk_score: null,
+  });
   getSessionAccessInfoMock.mockResolvedValue({ status: 'active', user_id: 42, session_type: 'voice' });
   enqueueWorkItemMock.mockResolvedValue(null);
   buildChatSteeringGuidanceMock.mockImplementation((s: number) => `CHAT_STEER_${s}`);
@@ -119,7 +130,11 @@ describe('runCrisisPipeline — flag matrix', () => {
   });
 
   it('does NOT re-flag when already flagged at same severity without +10 escalation', async () => {
-    getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: true, crisis_severity: 'medium', crisis_risk_score: 55 });
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: 'medium',
+      crisis_risk_score: 55,
+    });
     risk(58, 'medium'); // +3, below the +10 rule
     const r = await runCrisisPipeline(TURN, 'realtime');
     expect(r.flagged).toBe(false);
@@ -127,14 +142,22 @@ describe('runCrisisPipeline — flag matrix', () => {
   });
 
   it('re-flags on severity escalation medium→high', async () => {
-    getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: true, crisis_severity: 'medium', crisis_risk_score: 55 });
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: 'medium',
+      crisis_risk_score: 55,
+    });
     risk(80, 'high');
     const r = await runCrisisPipeline(TURN, 'realtime');
     expect(r.flagged).toBe(true);
   });
 
   it('re-flags on same severity but +10 score jump', async () => {
-    getSessionCrisisStateMock.mockResolvedValue({ crisis_flagged: true, crisis_severity: 'medium', crisis_risk_score: 55 });
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: 'medium',
+      crisis_risk_score: 55,
+    });
     risk(70, 'medium'); // +15 > +10
     const r = await runCrisisPipeline(TURN, 'realtime');
     expect(r.flagged).toBe(true);
@@ -153,7 +176,11 @@ describe('runCrisisPipeline — steering delivery per channel', () => {
     risk(40, 'medium');
     const r = await runCrisisPipeline(TURN, 'chat');
     expect(r.steeringGuidance).toBe('CHAT_STEER_40');
-    expect(logInterventionActionMock).toHaveBeenCalledWith('chat_1', 'risk_steering', expect.objectContaining({ channel: 'chat' }));
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'chat_1',
+      'risk_steering',
+      expect.objectContaining({ channel: 'chat' }),
+    );
     expect(maybeSteerSessionMock).not.toHaveBeenCalled();
   });
 
@@ -161,7 +188,11 @@ describe('runCrisisPipeline — steering delivery per channel', () => {
     risk(90, 'high');
     const r = await runCrisisPipeline(TURN, 'chat');
     expect(r.steeringGuidance).toBe('CHAT_HIGH_GUIDANCE');
-    expect(logInterventionActionMock).toHaveBeenCalledWith('chat_1', 'safety_protocol', expect.objectContaining({ channel: 'chat' }));
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'chat_1',
+      'safety_protocol',
+      expect.objectContaining({ channel: 'chat' }),
+    );
   });
 
   it('chat honors the steering cooldown (shouldSteer false → no guidance)', async () => {
@@ -177,15 +208,17 @@ describe('runCrisisPipeline — crisis_flag work item', () => {
     risk(90, 'high', ['suicidal_ideation']);
     const turn = { ...TURN, content: 'a distinctive participant utterance' };
     await runCrisisPipeline(turn, 'realtime');
-    expect(enqueueWorkItemMock).toHaveBeenCalledWith(expect.objectContaining({
-      itemType: 'crisis_flag',
-      severity: 'urgent',
-      sourceId: 'chat_1:high',
-      sessionId: 'chat_1',
-      // Reopen: a re-flag after the item was resolved must re-notify the care
-      // team instead of dying on the (item_type, source, id) idempotency key.
-      reopen: true,
-    }));
+    expect(enqueueWorkItemMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemType: 'crisis_flag',
+        severity: 'urgent',
+        sourceId: 'chat_1:high',
+        sessionId: 'chat_1',
+        // Reopen: a re-flag after the item was resolved must re-notify the care
+        // team instead of dying on the (item_type, source, id) idempotency key.
+        reopen: true,
+      }),
+    );
     // Detail carries category tags only, never transcript text.
     const detail = enqueueWorkItemMock.mock.calls[0][0].detail as Record<string, unknown>;
     expect(JSON.stringify(detail)).not.toContain(turn.content);

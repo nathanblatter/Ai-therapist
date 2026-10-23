@@ -15,7 +15,14 @@ import { Router, type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { createHash, randomBytes } from 'node:crypto';
 import { requireAuth } from '../../middleware/auth.js';
-import { getUserById, getUserBySquawkId, getUserByUsernameForLogin, setSquawkUserId, syncRoleFromSquawk, type UserRow } from '../../db/index.js';
+import {
+  getUserById,
+  getUserBySquawkId,
+  getUserByUsernameForLogin,
+  setSquawkUserId,
+  syncRoleFromSquawk,
+  type UserRow,
+} from '../../db/index.js';
 import { USER_ROLES } from '../../../shared/roles.js';
 import * as squawk from '../../services/squawk.service.js';
 import { createLogger } from '../../utils/logger.js';
@@ -55,7 +62,10 @@ function sendSquawkError(res: Response, err: unknown): void {
   if (err instanceof squawk.SquawkError) {
     const status = [400, 401, 403, 404, 409, 429].includes(err.status) ? err.status : 502;
     if (err.status === 429 && err.retryAfter) res.set('Retry-After', String(err.retryAfter));
-    const message = status === 502 ? 'Sign-in service unavailable. Try again.' : (ERROR_MESSAGES[err.code] ?? err.detail ?? 'Sign-in failed.');
+    const message =
+      status === 502
+        ? 'Sign-in service unavailable. Try again.'
+        : (ERROR_MESSAGES[err.code] ?? err.detail ?? 'Sign-in failed.');
     if (status === 502) log.warn({ err: err.message }, 'Squawk upstream error');
     res.status(status).json({ error: message, code: err.code });
     return;
@@ -216,7 +226,14 @@ export default function squawkAuthRoutes(): Router {
   // Ceremony proxies for the login page.
   router.post('/api/auth/squawk/password', requireSquawk, ceremonyLimiter, async (req, res) => {
     const { login_challenge, username, password } = req.body ?? {};
-    if (typeof login_challenge !== 'string' || typeof username !== 'string' || typeof password !== 'string' || !login_challenge || !username || !password) {
+    if (
+      typeof login_challenge !== 'string' ||
+      typeof username !== 'string' ||
+      typeof password !== 'string' ||
+      !login_challenge ||
+      !username ||
+      !password
+    ) {
       return res.status(400).json({ error: 'Username and password are required' });
     }
     try {
@@ -229,7 +246,8 @@ export default function squawkAuthRoutes(): Router {
 
   router.post('/api/auth/squawk/passkey/begin', requireSquawk, ceremonyLimiter, async (req, res) => {
     const { login_challenge } = req.body ?? {};
-    if (typeof login_challenge !== 'string' || !login_challenge) return res.status(400).json({ error: 'login_challenge is required' });
+    if (typeof login_challenge !== 'string' || !login_challenge)
+      return res.status(400).json({ error: 'login_challenge is required' });
     try {
       res.json(await squawk.loginPasskeyBegin(login_challenge));
     } catch (err) {
@@ -239,7 +257,8 @@ export default function squawkAuthRoutes(): Router {
 
   router.post('/api/auth/squawk/passkey/finish', requireSquawk, ceremonyLimiter, async (req, res) => {
     const { challenge_id, credential } = req.body ?? {};
-    if (typeof challenge_id !== 'string' || !challenge_id || !credential) return res.status(400).json({ error: 'challenge_id and credential are required' });
+    if (typeof challenge_id !== 'string' || !challenge_id || !credential)
+      return res.status(400).json({ error: 'challenge_id and credential are required' });
     try {
       const out = await squawk.loginPasskeyFinish(challenge_id, credential);
       res.json({ redirect_to: out.redirect_to });
@@ -250,7 +269,8 @@ export default function squawkAuthRoutes(): Router {
 
   router.post('/api/auth/squawk/owner/begin', requireSquawk, ceremonyLimiter, async (req, res) => {
     const { login_challenge } = req.body ?? {};
-    if (typeof login_challenge !== 'string' || !login_challenge) return res.status(400).json({ error: 'login_challenge is required' });
+    if (typeof login_challenge !== 'string' || !login_challenge)
+      return res.status(400).json({ error: 'login_challenge is required' });
     try {
       res.json(await squawk.loginOwnerBegin(login_challenge));
     } catch (err) {
@@ -260,7 +280,8 @@ export default function squawkAuthRoutes(): Router {
 
   router.post('/api/auth/squawk/owner/finish', requireSquawk, ceremonyLimiter, async (req, res) => {
     const { challenge_id, credential } = req.body ?? {};
-    if (typeof challenge_id !== 'string' || !challenge_id || !credential) return res.status(400).json({ error: 'challenge_id and credential are required' });
+    if (typeof challenge_id !== 'string' || !challenge_id || !credential)
+      return res.status(400).json({ error: 'challenge_id and credential are required' });
     try {
       const out = await squawk.loginOwnerFinish(challenge_id, credential);
       res.json({ redirect_to: out.redirect_to });
@@ -290,7 +311,10 @@ export default function squawkAuthRoutes(): Router {
   router.post('/api/auth/squawk/passkeys/begin', requireSquawk, requireAuth, async (req, res) => {
     try {
       const id = await linkedId(req);
-      if (!id) return res.status(409).json({ error: 'This account is not linked to Squawk yet; sign out and back in first.', code: 'not_linked' });
+      if (!id)
+        return res
+          .status(409)
+          .json({ error: 'This account is not linked to Squawk yet; sign out and back in first.', code: 'not_linked' });
       res.json(await squawk.passkeyRegisterBegin(id));
     } catch (err) {
       sendSquawkError(res, err);
@@ -299,11 +323,21 @@ export default function squawkAuthRoutes(): Router {
 
   router.post('/api/auth/squawk/passkeys/finish', requireSquawk, requireAuth, async (req, res) => {
     const { challenge_id, name, credential } = req.body ?? {};
-    if (typeof challenge_id !== 'string' || !challenge_id || !credential) return res.status(400).json({ error: 'challenge_id and credential are required' });
+    if (typeof challenge_id !== 'string' || !challenge_id || !credential)
+      return res.status(400).json({ error: 'challenge_id and credential are required' });
     try {
       const id = await linkedId(req);
       if (!id) return res.status(409).json({ error: 'This account is not linked to Squawk yet.', code: 'not_linked' });
-      res.status(201).json(await squawk.passkeyRegisterFinish(id, challenge_id, typeof name === 'string' ? name.slice(0, 60) : 'Passkey', credential));
+      res
+        .status(201)
+        .json(
+          await squawk.passkeyRegisterFinish(
+            id,
+            challenge_id,
+            typeof name === 'string' ? name.slice(0, 60) : 'Passkey',
+            credential,
+          ),
+        );
     } catch (err) {
       sendSquawkError(res, err);
     }

@@ -120,7 +120,7 @@ export default function configRoutes(): Router {
 
       if (grok.isGrokVoiceModel(await getAiModel())) {
         return res.json({
-          voices: grok.GROK_VOICES.map(v => ({
+          voices: grok.GROK_VOICES.map((v) => ({
             value: v.value,
             label: v.label,
             description: v.description,
@@ -137,17 +137,20 @@ export default function configRoutes(): Router {
       const voicesConfig = config.voices as VoicesConfig | undefined;
 
       const language = typeof req.query.language === 'string' ? req.query.language : null;
-      const allowed = new Set(liveVoicesForLanguage(language).map(v => v.value));
+      const allowed = new Set(liveVoicesForLanguage(language).map((v) => v.value));
 
-      const configured = voicesConfig?.voices?.filter(v => v.enabled) ?? [];
+      const configured = voicesConfig?.voices?.filter((v) => v.enabled) ?? [];
       const unknown: string[] = [];
 
       const voices = configured
-        .filter(v => {
-          if (!getLiveVoice(v.value)) { unknown.push(v.value); return false; }
+        .filter((v) => {
+          if (!getLiveVoice(v.value)) {
+            unknown.push(v.value);
+            return false;
+          }
           return allowed.has(v.value);
         })
-        .map(v => {
+        .map((v) => {
           const meta = getLiveVoice(v.value)!;
           return {
             value: v.value,
@@ -164,7 +167,7 @@ export default function configRoutes(): Router {
       if (unknown.length > 0) {
         log.warn(
           `Dropping voice(s) not supported by GPT-Live: ${unknown.join(', ')}. ` +
-          'Fix system_config.voices — these would fail at session creation.',
+            'Fix system_config.voices — these would fail at session creation.',
         );
       }
 
@@ -173,7 +176,7 @@ export default function configRoutes(): Router {
       // list we just returned, or the picker opens with nothing selected.
       const configuredDefault = voicesConfig?.default_voice;
       const defaultVoice =
-        (configuredDefault && voices.some(v => v.value === configuredDefault) && configuredDefault) ||
+        (configuredDefault && voices.some((v) => v.value === configuredDefault) && configuredDefault) ||
         voices[0]?.value ||
         LIVE_DEFAULT_VOICE;
 

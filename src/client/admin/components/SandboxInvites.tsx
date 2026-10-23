@@ -56,13 +56,17 @@ export default function SandboxInvites() {
       const data = await getJson<{ batches?: BatchRow[] }>('/admin/api/sandbox/invites');
       setBatches(data.batches ?? []);
     } catch (e) {
-      setError(e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load');
+      setError(
+        e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load',
+      );
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const mint = async () => {
     const n = Number(count);
@@ -73,12 +77,22 @@ export default function SandboxInvites() {
     setMinting(true);
     setError(null);
     try {
-      const data = await postJson<MintResult>('/admin/api/sandbox/invites', { count: n, role, ...(label.trim() ? { label: label.trim() } : {}) });
+      const data = await postJson<MintResult>('/admin/api/sandbox/invites', {
+        count: n,
+        role,
+        ...(label.trim() ? { label: label.trim() } : {}),
+      });
       setMinted(data);
       toast.success(`Minted ${data.links.length} sandbox link${data.links.length === 1 ? '' : 's'}.`);
       await load();
     } catch (e) {
-      setError(e instanceof HttpError && !e.body?.error ? `Mint failed (${e.status})` : e instanceof Error ? e.message : 'Mint failed');
+      setError(
+        e instanceof HttpError && !e.body?.error
+          ? `Mint failed (${e.status})`
+          : e instanceof Error
+            ? e.message
+            : 'Mint failed',
+      );
     } finally {
       setMinting(false);
     }
@@ -91,7 +105,7 @@ export default function SandboxInvites() {
     const rows = [
       'invite_id,role,label,link',
       ...minted.links.map((l) =>
-        [String(l.inviteId), minted.role, csvEscape(minted.label ?? ''), fullUrl(l.link)].join(',')
+        [String(l.inviteId), minted.role, csvEscape(minted.label ?? ''), fullUrl(l.link)].join(','),
       ),
     ];
     const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
@@ -118,20 +132,20 @@ export default function SandboxInvites() {
       <div>
         <h2 className="text-2xl font-bold text-gray-900">Sandbox Invites</h2>
         <p className="text-sm text-gray-600 mt-1">
-          One-time links that create an isolated, pre-seeded demo environment (a fresh sandbox
-          organization with 6-9 synthetic clients) for a therapist or caseworker. Sandbox data never
-          reaches research exports, crisis paging, or email.
+          One-time links that create an isolated, pre-seeded demo environment (a fresh sandbox organization with 6-9
+          synthetic clients) for a therapist or caseworker. Sandbox data never reaches research exports, crisis paging,
+          or email.
         </p>
       </div>
 
-      {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
-      )}
+      {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
 
       <Panel title="Mint a batch" icon={Box}>
         <div className="flex flex-wrap items-end gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sbx-count">Count</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sbx-count">
+              Count
+            </label>
             <input
               id="sbx-count"
               type="number"
@@ -143,7 +157,9 @@ export default function SandboxInvites() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sbx-role">Dashboard role</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sbx-role">
+              Dashboard role
+            </label>
             <select
               id="sbx-role"
               value={role}
@@ -155,7 +171,9 @@ export default function SandboxInvites() {
             </select>
           </div>
           <div className="flex-1 min-w-[12rem]">
-            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sbx-label">Batch label (optional)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sbx-label">
+              Batch label (optional)
+            </label>
             <input
               id="sbx-label"
               value={label}
@@ -213,10 +231,7 @@ export default function SandboxInvites() {
 
       <Panel title="Batch history">
         <div className="flex justify-end mb-2">
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
-          >
+          <button onClick={load} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700">
             <RefreshCw size={14} /> Refresh
           </button>
         </div>
@@ -239,7 +254,9 @@ export default function SandboxInvites() {
               <tbody>
                 {batches.map((b) => (
                   <tr key={b.batch_id} className="border-b border-gray-100 last:border-0">
-                    <td className="py-2 pr-4 text-gray-900">{b.label ?? <span className="text-gray-400">(no label)</span>}</td>
+                    <td className="py-2 pr-4 text-gray-900">
+                      {b.label ?? <span className="text-gray-400">(no label)</span>}
+                    </td>
                     <td className="py-2 pr-4 capitalize">{b.invite_role}</td>
                     <td className="py-2 pr-4 text-gray-500">{new Date(b.created_at).toLocaleDateString()}</td>
                     <td className="py-2 pr-4 text-gray-500">{new Date(b.expires_at).toLocaleDateString()}</td>

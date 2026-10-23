@@ -3,9 +3,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // Mock secrets + OpenAI for stage 2, and the DB/collaborators for the shared
 // post-confirmation handler.
 const {
-  createMock, recordLlmUsageMock, hasInterventionActionMock, updateSessionStatusMock,
-  logInterventionActionMock, draftEligibilityAeMock, endChatSessionMock, clearSteeringMock,
-  redactSessionMock, nameSessionMock, insightsMock, serverEndSessionMock,
+  createMock,
+  recordLlmUsageMock,
+  hasInterventionActionMock,
+  updateSessionStatusMock,
+  logInterventionActionMock,
+  draftEligibilityAeMock,
+  endChatSessionMock,
+  clearSteeringMock,
+  redactSessionMock,
+  nameSessionMock,
+  insightsMock,
+  serverEndSessionMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
   recordLlmUsageMock: vi.fn().mockResolvedValue(undefined),
@@ -42,12 +51,18 @@ vi.mock('./sessionInsights.service.js', () => ({ generateSessionInsightsAsync: i
 vi.mock('./sessionLifecycle.service.js', () => ({ serverEndSession: serverEndSessionMock }));
 
 const {
-  detectMinorDisclosurePatterns, confirmMinorDisclosure, handleConfirmedMinor,
-  MINOR_ELIGIBILITY_MESSAGE, REALTIME_MINOR_GUIDANCE,
+  detectMinorDisclosurePatterns,
+  confirmMinorDisclosure,
+  handleConfirmedMinor,
+  MINOR_ELIGIBILITY_MESSAGE,
+  REALTIME_MINOR_GUIDANCE,
 } = await import('./minorSafeguard.service.js');
 
 function llmResponse(payload: Record<string, unknown>) {
-  return { choices: [{ message: { content: JSON.stringify(payload) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } };
+  return {
+    choices: [{ message: { content: JSON.stringify(payload) } }],
+    usage: { prompt_tokens: 10, completion_tokens: 5 },
+  };
 }
 
 const emitMock = vi.fn();
@@ -100,14 +115,18 @@ describe('detectMinorDisclosurePatterns — stage 1 negatives (must NOT reach st
 
 describe('confirmMinorDisclosure — stage 2', () => {
   it('parses a confirmed minor verdict and records usage', async () => {
-    createMock.mockResolvedValue(llmResponse({ is_minor: true, stated_age: 15, confidence: 'high', reasoning: 'clear' }));
+    createMock.mockResolvedValue(
+      llmResponse({ is_minor: true, stated_age: 15, confidence: 'high', reasoning: 'clear' }),
+    );
     const v = await confirmMinorDisclosure("I'm 15", [], 'sess-1');
     expect(v).toEqual({ isMinor: true, statedAge: 15, confidence: 'high', reasoning: 'clear' });
     expect(recordLlmUsageMock).toHaveBeenCalledWith('sess-1', 'eligibility', 'gpt-4o-mini', 10, 5);
   });
 
   it('returns is_minor=false for a false-positive family (adult / bystander)', async () => {
-    createMock.mockResolvedValue(llmResponse({ is_minor: false, stated_age: null, confidence: 'high', reasoning: 'daughter' }));
+    createMock.mockResolvedValue(
+      llmResponse({ is_minor: false, stated_age: null, confidence: 'high', reasoning: 'daughter' }),
+    );
     const v = await confirmMinorDisclosure('my 15-year-old daughter', [], 'sess-1');
     expect(v.isMinor).toBe(false);
   });
@@ -127,7 +146,11 @@ describe('confirmMinorDisclosure — stage 2', () => {
 describe('handleConfirmedMinor — shared actions', () => {
   it('chat: logs, drafts AE, emits, ends immediately', async () => {
     await handleConfirmedMinor({ sessionId: 'chat_1', messageId: 5, channel: 'chat', statedAge: 15 });
-    expect(logInterventionActionMock).toHaveBeenCalledWith('chat_1', 'eligibility_minor_end', expect.objectContaining({ statedAge: 15, channel: 'chat' }));
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'chat_1',
+      'eligibility_minor_end',
+      expect.objectContaining({ statedAge: 15, channel: 'chat' }),
+    );
     expect(draftEligibilityAeMock).toHaveBeenCalledWith('chat_1', expect.objectContaining({ statedAge: 15 }));
     expect(updateSessionStatusMock).toHaveBeenCalledWith('chat_1', 'ended', 'system');
     expect(endChatSessionMock).toHaveBeenCalledWith('chat_1');
@@ -152,9 +175,13 @@ describe('handleConfirmedMinor — shared actions', () => {
       // Must go through serverEndSession — the bare status flip used before
       // left the sideband WS attached and the recording unfinalized forever
       // (an ended session is invisible to the abandoned-session sweep).
-      expect(serverEndSessionMock).toHaveBeenCalledWith('sess-1', expect.objectContaining({
-        endedBy: 'system', reason: 'eligibility_minor_end',
-      }));
+      expect(serverEndSessionMock).toHaveBeenCalledWith(
+        'sess-1',
+        expect.objectContaining({
+          endedBy: 'system',
+          reason: 'eligibility_minor_end',
+        }),
+      );
       expect(updateSessionStatusMock).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

@@ -15,11 +15,7 @@
 // Everything else — risk_score_history writes, crisis flagging, paging via
 // sendCrisisAlert, session:crisis-emergency, and the AE auto-draft — is
 // channel-agnostic and reuses the existing functions untouched.
-import {
-  analyzeMessageRisk,
-  flagSessionCrisis,
-  logInterventionAction,
-} from './crisisDetection.service.js';
+import { analyzeMessageRisk, flagSessionCrisis, logInterventionAction } from './crisisDetection.service.js';
 import {
   maybeSteerSession,
   maybeRequireRiskCheck,
@@ -28,11 +24,7 @@ import {
   executeGraduatedResponse,
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
 } from './crisisIntervention.service.js';
-import {
-  getRecentSessionMessages,
-  getSessionAccessInfo,
-  getSessionCrisisState,
-} from '../db/index.js';
+import { getRecentSessionMessages, getSessionAccessInfo, getSessionCrisisState } from '../db/index.js';
 import { sessionSuppressesSafetyPipeline } from './suppression.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { enqueueWorkItem } from './workQueue.service.js';
@@ -100,12 +92,18 @@ export async function runCrisisPipeline(
       // severity only — caseworker sockets get risk trends without any
       // transcript content. Fire-and-forget; never blocks the pipeline.
       if (global.io) {
-        void broadcastAdminEventForSession(global.io, 'session:risk-score-updated', {
-          sessionId: turn.sessionId,
-          riskScore: risk.riskScore,
-          severity,
-          at: new Date(),
-        }, turn.sessionId, 'summary');
+        void broadcastAdminEventForSession(
+          global.io,
+          'session:risk-score-updated',
+          {
+            sessionId: turn.sessionId,
+            riskScore: risk.riskScore,
+            severity,
+            at: new Date(),
+          },
+          turn.sessionId,
+          'summary',
+        );
       }
 
       // ---- Steering ----
@@ -119,24 +117,31 @@ export async function runCrisisPipeline(
         // realtime `safety_protocol` intervention so the AE timeline matches.
         // High severity forces past the cooldown — a crisis escalating within
         // three minutes of a routine steer must still get the safety protocol.
-        steeringGuidance = severity === 'high'
-          ? CHAT_SAFETY_PROTOCOL_GUIDANCE
-          : buildChatSteeringGuidance(risk.riskScore, severity);
+        steeringGuidance =
+          severity === 'high' ? CHAT_SAFETY_PROTOCOL_GUIDANCE : buildChatSteeringGuidance(risk.riskScore, severity);
         await logInterventionAction(turn.sessionId, 'risk_steering', {
-          riskScore: risk.riskScore, severity, channel: 'chat',
+          riskScore: risk.riskScore,
+          severity,
+          channel: 'chat',
         });
         if (severity === 'high') {
           await logInterventionAction(turn.sessionId, 'safety_protocol', {
-            riskScore: risk.riskScore, channel: 'chat',
+            riskScore: risk.riskScore,
+            channel: 'chat',
           });
         }
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'session:risk-steering', {
-            sessionId: turn.sessionId,
-            riskScore: risk.riskScore,
-            severity,
-            steeredAt: new Date(),
-          }, turn.sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:risk-steering',
+            {
+              sessionId: turn.sessionId,
+              riskScore: risk.riskScore,
+              severity,
+              steeredAt: new Date(),
+            },
+            turn.sessionId,
+          );
         }
       }
 
@@ -146,19 +151,16 @@ export async function runCrisisPipeline(
       // this session has logged no ladder step", not on steering cadence. It
       // runs on both channels; realtime delivers over the sideband inside,
       // chat gets a guidance string appended to this turn's model call.
-      const ladderGuidance = await maybeRequireRiskCheck(
-        turn.sessionId, risk.riskScore, severity, channel,
-      );
+      const ladderGuidance = await maybeRequireRiskCheck(turn.sessionId, risk.riskScore, severity, channel);
       if (ladderGuidance) {
-        steeringGuidance = steeringGuidance
-          ? `${steeringGuidance}\n\n${ladderGuidance}`
-          : ladderGuidance;
+        steeringGuidance = steeringGuidance ? `${steeringGuidance}\n\n${ladderGuidance}` : ladderGuidance;
       }
 
       // ---- Flagging ---- (identical to the original realtime logic)
       const state = await getSessionCrisisState(turn.sessionId);
       const currentScore = state?.crisis_risk_score || 0;
-      const shouldFlag = (severity === 'high' || severity === 'medium') &&
+      const shouldFlag =
+        (severity === 'high' || severity === 'medium') &&
         (!state?.crisis_flagged ||
           SEVERITY_RANK[severity] > (SEVERITY_RANK[state?.crisis_severity ?? 'none'] ?? 0) ||
           risk.riskScore > currentScore + 10);
@@ -183,27 +185,38 @@ export async function runCrisisPipeline(
         });
 
         if (global.io) {
-          void broadcastAdminEventForSession(global.io, 'session:crisis-detected', {
-            sessionId: turn.sessionId,
-            severity,
-            riskScore: risk.riskScore,
-            factors: risk.factors,
-            messageId: turn.messageId,
-            detectedAt: new Date(),
-            message: `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})`,
-            ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
-          }, turn.sessionId);
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:crisis-detected',
+            {
+              sessionId: turn.sessionId,
+              severity,
+              riskScore: risk.riskScore,
+              factors: risk.factors,
+              messageId: turn.messageId,
+              detectedAt: new Date(),
+              message: `${severity.toUpperCase()} risk detected (score: ${risk.riskScore})`,
+              ...(channel === 'chat' ? { sessionType: 'chat' } : {}),
+            },
+            turn.sessionId,
+          );
 
           // Summary-tier mirror for caseworker sockets (spec section 5:
           // crisis-event-created is summary-safe). Severity/score/category
           // factors only — no message ids, no transcript-adjacent text.
-          void broadcastAdminEventForSession(global.io, 'session:crisis-event-created', {
-            sessionId: turn.sessionId,
-            severity,
-            riskScore: risk.riskScore,
-            factors: risk.factors,
-            detectedAt: new Date(),
-          }, turn.sessionId, 'summary');
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:crisis-event-created',
+            {
+              sessionId: turn.sessionId,
+              severity,
+              riskScore: risk.riskScore,
+              factors: risk.factors,
+              detectedAt: new Date(),
+            },
+            turn.sessionId,
+            'summary',
+          );
         }
 
         await executeGraduatedResponse(turn.sessionId, severity, risk.riskScore);
@@ -266,9 +279,8 @@ export async function runCrisisPipeline(
  */
 async function runRealtimeMinorSafeguard(turn: ParticipantTurn): Promise<void> {
   try {
-    const {
-      detectMinorDisclosurePatterns, confirmMinorDisclosure, handleConfirmedMinor, REALTIME_MINOR_GUIDANCE,
-    } = await import('./minorSafeguard.service.js');
+    const { detectMinorDisclosurePatterns, confirmMinorDisclosure, handleConfirmedMinor, REALTIME_MINOR_GUIDANCE } =
+      await import('./minorSafeguard.service.js');
 
     if (!detectMinorDisclosurePatterns(turn.content).matched) return;
 
@@ -281,12 +293,24 @@ async function runRealtimeMinorSafeguard(turn: ParticipantTurn): Promise<void> {
         await sidebandManager.injectMessage(turn.sessionId, 'system', REALTIME_MINOR_GUIDANCE, false);
       }
       await handleConfirmedMinor({
-        sessionId: turn.sessionId, messageId: turn.messageId ?? null, channel: 'realtime', statedAge: verdict.statedAge,
+        sessionId: turn.sessionId,
+        messageId: turn.messageId ?? null,
+        channel: 'realtime',
+        statedAge: verdict.statedAge,
       });
     } else if (verdict.isMinor && verdict.confidence === 'low' && global.io) {
-      void broadcastAdminEventForSession(global.io, 'session:eligibility-review', {
-        sessionId: turn.sessionId, statedAge: verdict.statedAge, reasoning: verdict.reasoning, channel: 'realtime', at: new Date(),
-      }, turn.sessionId);
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:eligibility-review',
+        {
+          sessionId: turn.sessionId,
+          statedAge: verdict.statedAge,
+          reasoning: verdict.reasoning,
+          channel: 'realtime',
+          at: new Date(),
+        },
+        turn.sessionId,
+      );
     }
   } catch (err) {
     // Fail-open: an eligibility confirmation error must never end a session.

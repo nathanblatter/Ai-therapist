@@ -30,7 +30,7 @@ const SOLID_SEVERITY_CLASSES: Record<SeverityLevel, string> = {
  */
 export function severityBadgeClass(
   level: string | null | undefined,
-  opts?: { solid?: boolean; pulseHigh?: boolean }
+  opts?: { solid?: boolean; pulseHigh?: boolean },
 ): string {
   const map = opts?.solid ? SOLID_SEVERITY_CLASSES : SOFT_SEVERITY_CLASSES;
   const cls = map[(level ?? '') as SeverityLevel];
@@ -73,9 +73,13 @@ export function riskScoreTextClass(score: number): string {
 /** Generic workflow-status tone (crisis follow-up reviews and the like). */
 export function statusBadgeClass(status: string | undefined): string {
   switch (status?.toLowerCase()) {
-    case 'completed': return 'bg-green-100 text-green-800';
-    case 'in_progress': return 'bg-blue-100 text-blue-800';
-    case 'pending': return 'bg-yellow-100 text-yellow-800';
-    default: return 'bg-gray-100 text-gray-800';
+    case 'completed':
+      return 'bg-green-100 text-green-800';
+    case 'in_progress':
+      return 'bg-blue-100 text-blue-800';
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-800';
+    default:
+      return 'bg-gray-100 text-gray-800';
   }
 }

@@ -35,7 +35,9 @@ export default function authRoutes(): Router {
     // With Squawk configured the local hash is a stale copy: sign-in goes
     // through /api/auth/squawk/* (the login page does this on its own).
     if (squawkEnabled()) {
-      return res.status(410).json({ error: 'Sign in through the login page; password login moved to Squawk', code: 'use_squawk' });
+      return res
+        .status(410)
+        .json({ error: 'Sign in through the login page; password login moved to Squawk', code: 'use_squawk' });
     }
 
     try {
@@ -51,8 +53,9 @@ export default function authRoutes(): Router {
           return res.json({ success: false, mfaRequired: true, userId: user.userid });
         }
 
-        const { verifyTOTP, verifyBackupCode, updateBackupCodes, updateMFAVerificationTime } =
-          await import('../../services/mfa.service.js');
+        const { verifyTOTP, verifyBackupCode, updateBackupCodes, updateMFAVerificationTime } = await import(
+          '../../services/mfa.service.js'
+        );
 
         let mfaValid = false;
 

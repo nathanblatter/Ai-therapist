@@ -57,9 +57,7 @@ export const MAX_DETAIL_BYTES = 2048;
 const SESSION_ID_RE = /^(live|sess|chat|redteam)_\w{1,56}$/;
 
 export function cleanSessionId(sessionId: unknown): string | null {
-  return typeof sessionId === 'string' && sessionId.length <= 64 && SESSION_ID_RE.test(sessionId)
-    ? sessionId
-    : null;
+  return typeof sessionId === 'string' && sessionId.length <= 64 && SESSION_ID_RE.test(sessionId) ? sessionId : null;
 }
 
 /** Cap the detail payload: valid small objects pass through, oversized ones

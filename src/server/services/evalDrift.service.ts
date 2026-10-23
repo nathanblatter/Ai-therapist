@@ -4,12 +4,7 @@
 // admin-visible alert (eval_drift_alerts) and, only when explicitly opted in
 // (evals.drift_page_enabled) AND the crisis channel is enabled, pages on-call
 // via the existing crisis iMessage channel. Never throws.
-import {
-  getEvalBuckets,
-  getRecentDimensionScores,
-  insertDriftAlert,
-  markDriftAlertPaged,
-} from '../db/index.js';
+import { getEvalBuckets, getRecentDimensionScores, insertDriftAlert, markDriftAlertPaged } from '../db/index.js';
 import { EVAL_DIMENSIONS } from './sessionEval.service.js';
 import { getSystemConfig } from '../utils/sessionHelpers.js';
 import { createLogger } from '../utils/logger.js';
@@ -50,7 +45,7 @@ export function computeDrift(
   scores: number[],
   window: number,
   baseline: number,
-  minWindow: number
+  minWindow: number,
 ): DriftComputation | null {
   const windowScores = scores.slice(0, window);
   const baselineScores = scores.slice(window, window + baseline);
@@ -93,7 +88,7 @@ export async function checkEvalDrift(): Promise<{ checked: number; alerted: numb
             dimension,
             bucket.ai_model,
             bucket.prompt_version,
-            window + baseline
+            window + baseline,
           );
           const drift = computeDrift(scores, window, baseline, minWindow);
           if (!drift || drift.drop < threshold) continue;
@@ -118,7 +113,7 @@ export async function checkEvalDrift(): Promise<{ checked: number; alerted: numb
               await sendCrisisAlert(
                 `[EVAL DRIFT] ${dimension} rolling mean ${round2(drift.rollingMean).toFixed(2)} vs baseline ` +
                   `${round2(drift.baselineMean).toFixed(2)} (drop ${round2(drift.drop).toFixed(2)}, n=${drift.windowN}) — model ` +
-                  `${bucket.ai_model ?? 'unknown'}, prompt ${bucket.prompt_version}. Check Admin > Analytics.`
+                  `${bucket.ai_model ?? 'unknown'}, prompt ${bucket.prompt_version}. Check Admin > Analytics.`,
               );
               await markDriftAlertPaged(inserted.alert_id);
             } catch (pageErr) {
@@ -138,5 +133,5 @@ export async function checkEvalDrift(): Promise<{ checked: number; alerted: numb
 
 /** Fire-and-forget wrapper (mirrors maybeAutoEvalSession's shape). */
 export function maybeCheckEvalDrift(): void {
-  checkEvalDrift().catch(err => log.error({ err }, 'maybeCheckEvalDrift failed'));
+  checkEvalDrift().catch((err) => log.error({ err }, 'maybeCheckEvalDrift failed'));
 }

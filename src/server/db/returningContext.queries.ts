@@ -26,7 +26,7 @@ export async function getUserScaleHistory(userId: number, perScale = 2): Promise
      ) ranked
      WHERE rn <= $2
      ORDER BY scale, created_at DESC`,
-    [userId, perScale]
+    [userId, perScale],
   );
   return result.rows.map(({ rn: _rn, ...row }) => row);
 }
@@ -35,7 +35,7 @@ export async function getUserScaleHistory(userId: number, perScale = 2): Promise
 export async function getUserLatestScaleScore(
   userId: number,
   scale: string,
-  excludeSessionId?: string
+  excludeSessionId?: string,
 ): Promise<{ score: number; created_at: Date; session_id: string } | null> {
   const result = await pool.query<{ score: number; created_at: Date; session_id: string }>(
     `SELECT sr.score, sr.created_at, sr.session_id
@@ -44,7 +44,7 @@ export async function getUserLatestScaleScore(
      WHERE ts.user_id = $1 AND sr.scale = $2 AND ($3::text IS NULL OR sr.session_id != $3)
      ORDER BY sr.created_at DESC
      LIMIT 1`,
-    [userId, scale, excludeSessionId ?? null]
+    [userId, scale, excludeSessionId ?? null],
   );
   return result.rows[0] ?? null;
 }
@@ -72,18 +72,18 @@ export async function getUserMoodTrajectory(userId: number, limit = 6): Promise<
      )
      ORDER BY date DESC
      LIMIT $2`,
-    [userId, limit]
+    [userId, limit],
   );
   return result.rows;
 }
 
 /** The participant's most recent safety plan across all sessions (any consented user). */
 export async function getUserLatestSafetyPlan(
-  userId: number
+  userId: number,
 ): Promise<{ plan: SafetyPlan; created_at: Date; session_id: string | null } | null> {
   const result = await pool.query<{ plan: SafetyPlan; created_at: Date; session_id: string | null }>(
     'SELECT plan, created_at, session_id FROM safety_plans WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
-    [userId]
+    [userId],
   );
   return result.rows[0] ?? null;
 }
@@ -99,7 +99,7 @@ export interface ThoughtRecordEntry {
 
 /** The participant's most recently completed thought record (any of their sessions). */
 export async function getUserLatestThoughtRecord(
-  userId: number
+  userId: number,
 ): Promise<{ record: ThoughtRecordEntry; created_at: Date } | null> {
   const result = await pool.query<{ metadata: ThoughtRecordEntry; created_at: Date }>(
     `SELECT m.metadata, m.created_at
@@ -108,7 +108,7 @@ export async function getUserLatestThoughtRecord(
      WHERE ts.user_id = $1 AND m.message_type = 'thought_record'
      ORDER BY m.created_at DESC
      LIMIT 1`,
-    [userId]
+    [userId],
   );
   const row = result.rows[0];
   return row ? { record: row.metadata ?? {}, created_at: row.created_at } : null;

@@ -90,7 +90,7 @@ function studyWeekOf(enrolledAt: Date, at: Date): number | null {
 export function buildSurveyDataOverview(
   enrolled: Array<{ userId: number; username: string; enrolledAt: Date }>,
   rows: LinkedSurveyRow[],
-  now: Date = new Date()
+  now: Date = new Date(),
 ): Omit<SurveyDataOverview, 'funnel'> {
   const byUser = new Map<number, ParticipantSurveyData>();
   for (const p of enrolled) {
@@ -148,9 +148,7 @@ export function buildSurveyDataOverview(
 
   const weeklyAggregates: WeeklyAggregate[] = [];
   for (let week = 1; week <= WEEKLY_WEEKS; week++) {
-    const cells = participants
-      .map((p) => p.weekly[week])
-      .filter((c): c is WeeklyCell => Boolean(c));
+    const cells = participants.map((p) => p.weekly[week]).filter((c): c is WeeklyCell => Boolean(c));
     if (cells.length === 0) continue;
     weeklyAggregates.push({
       week,
@@ -163,9 +161,7 @@ export function buildSurveyDataOverview(
 
   const instrumentAggregates: InstrumentAggregate[] = [];
   for (const role of ['baseline', 'exit', 'week12'] as const) {
-    const scored = participants
-      .map((p) => p[role])
-      .filter((s): s is ScoredResponse => Boolean(s));
+    const scored = participants.map((p) => p[role]).filter((s): s is ScoredResponse => Boolean(s));
     if (scored.length === 0) continue;
     instrumentAggregates.push({
       role,

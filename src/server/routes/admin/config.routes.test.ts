@@ -67,7 +67,7 @@ beforeEach(() => {
   // Default: the row does not exist (fresh database).
   updateSystemConfigMock.mockResolvedValue(null);
   upsertSystemConfigMock.mockImplementation(async (key: string, value: unknown, updatedBy: string) =>
-    row(key, value, updatedBy)
+    row(key, value, updatedBy),
   );
 });
 
@@ -87,16 +87,14 @@ describe('PUT /admin/api/config/:key (upsert path)', () => {
       reasoning_effort: 'none',
       speed: 1.1,
     };
-    const res = await request(appAs('researcher'))
-      .put('/admin/api/config/grok_voice')
-      .send({ value: tuning });
+    const res = await request(appAs('researcher')).put('/admin/api/config/grok_voice').send({ value: tuning });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ success: true, key: 'grok_voice', value: tuning, updated_by: 'researcher1' });
     expect(upsertSystemConfigMock).toHaveBeenCalledWith(
       'grok_voice',
       tuning,
       'researcher1',
-      UPSERTABLE_CONFIG_KEYS.grok_voice
+      UPSERTABLE_CONFIG_KEYS.grok_voice,
     );
     expect(updateSystemConfigMock).not.toHaveBeenCalled();
     expect(invalidateConfigCacheMock).toHaveBeenCalledTimes(1);
@@ -111,7 +109,7 @@ describe('PUT /admin/api/config/:key (upsert path)', () => {
       'email_notifications',
       { enabled: false },
       'researcher1',
-      expect.any(String)
+      expect.any(String),
     );
   });
 
@@ -145,9 +143,7 @@ describe('PUT /admin/api/config/:key (upsert path)', () => {
   });
 
   it('rejects an empty value before any write', async () => {
-    const res = await request(appAs('researcher'))
-      .put('/admin/api/config/grok_voice')
-      .send({});
+    const res = await request(appAs('researcher')).put('/admin/api/config/grok_voice').send({});
     expect(res.status).toBe(400);
     expect(upsertSystemConfigMock).not.toHaveBeenCalled();
     expect(updateSystemConfigMock).not.toHaveBeenCalled();
@@ -195,16 +191,14 @@ describe('PUT /admin/api/config/crisis_alert (behaviour unchanged)', () => {
     expect(updateSystemConfigMock).toHaveBeenCalledWith(
       'crisis_alert',
       { enabled: true, phone: '+15555550100' },
-      'researcher1'
+      'researcher1',
     );
   });
 
   it('updates the existing row through the plain UPDATE path', async () => {
     const value = { enabled: false, phone: null };
     updateSystemConfigMock.mockResolvedValue(row('crisis_alert', value));
-    const res = await request(appAs('researcher'))
-      .put('/admin/api/config/crisis_alert')
-      .send({ value });
+    const res = await request(appAs('researcher')).put('/admin/api/config/crisis_alert').send({ value });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ success: true, key: 'crisis_alert', value });
     expect(upsertSystemConfigMock).not.toHaveBeenCalled();
@@ -215,8 +209,17 @@ describe('PUT /admin/api/config/crisis_alert (behaviour unchanged)', () => {
 describe('UPSERTABLE_CONFIG_KEYS', () => {
   it('covers every key the admin UI saves through this route', () => {
     for (const key of [
-      'crisis_contact', 'session_limits', 'features', 'ai_model', 'transcription_model',
-      'grok_voice', 'client_logging', 'voices', 'languages', 'system_prompts', 'deployment_mode',
+      'crisis_contact',
+      'session_limits',
+      'features',
+      'ai_model',
+      'transcription_model',
+      'grok_voice',
+      'client_logging',
+      'voices',
+      'languages',
+      'system_prompts',
+      'deployment_mode',
     ]) {
       expect(UPSERTABLE_CONFIG_KEYS, key).toHaveProperty(key);
     }

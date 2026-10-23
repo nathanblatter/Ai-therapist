@@ -13,10 +13,7 @@ async function runMigration() {
     console.log('Starting migration 016: Add MFA Support...');
 
     // Read the migration SQL file
-    const migrationSQL = fs.readFileSync(
-      path.join(__dirname, '../migrations/016_add_mfa_support.sql'),
-      'utf8'
-    );
+    const migrationSQL = fs.readFileSync(path.join(__dirname, '../migrations/016_add_mfa_support.sql'), 'utf8');
 
     // Execute the migration
     await client.query('BEGIN');
@@ -25,7 +22,6 @@ async function runMigration() {
 
     console.log('OK: Migration 016 completed successfully!');
     console.log('MFA columns added to users table');
-
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('FAIL: Migration 016 failed:', error);

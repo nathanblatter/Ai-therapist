@@ -56,8 +56,8 @@ const VALID_BODY = {
 };
 
 beforeEach(() => {
-  Object.values(dbMocks).forEach(m => m.mockClear());
-  Object.values(serviceMocks).forEach(m => m.mockClear());
+  Object.values(dbMocks).forEach((m) => m.mockClear());
+  Object.values(serviceMocks).forEach((m) => m.mockClear());
   dbMocks.getKnowledgeChunkById.mockResolvedValue({ chunk_id: 7, content: 'old content' });
 });
 
@@ -70,9 +70,18 @@ describe('POST /admin/api/knowledge (create)', () => {
 
   it('rejects an invalid kind and missing content/source', async () => {
     const app = appAs('researcher');
-    await request(app).post('/admin/api/knowledge').send({ ...VALID_BODY, kind: 'blog-post' }).expect(400);
-    await request(app).post('/admin/api/knowledge').send({ ...VALID_BODY, content: '  ' }).expect(400);
-    await request(app).post('/admin/api/knowledge').send({ ...VALID_BODY, source: '' }).expect(400);
+    await request(app)
+      .post('/admin/api/knowledge')
+      .send({ ...VALID_BODY, kind: 'blog-post' })
+      .expect(400);
+    await request(app)
+      .post('/admin/api/knowledge')
+      .send({ ...VALID_BODY, content: '  ' })
+      .expect(400);
+    await request(app)
+      .post('/admin/api/knowledge')
+      .send({ ...VALID_BODY, source: '' })
+      .expect(400);
     expect(serviceMocks.embedText).not.toHaveBeenCalled();
   });
 
@@ -129,10 +138,21 @@ describe('POST /admin/api/knowledge/test-retrieval (playground)', () => {
 
   it('runs embed -> search -> rerank with decision logging DISABLED', async () => {
     dbMocks.searchKnowledgeChunks.mockResolvedValueOnce([
-      { chunk_id: 1, title: 't', topic: null, kind: 'psychoeducation', modality: null, active: true, similarity: 0.9, content: 'abc' },
+      {
+        chunk_id: 1,
+        title: 't',
+        topic: null,
+        kind: 'psychoeducation',
+        modality: null,
+        active: true,
+        similarity: 0.9,
+        content: 'abc',
+      },
     ]);
     serviceMocks.rerankChunks.mockResolvedValueOnce({
-      chunks: [{ chunk_id: 1 }], usedFallback: false, latencyMs: 200,
+      chunks: [{ chunk_id: 1 }],
+      usedFallback: false,
+      latencyMs: 200,
     });
     const res = await request(appAs('researcher'))
       .post('/admin/api/knowledge/test-retrieval')
@@ -163,7 +183,11 @@ describe('GET /admin/api/knowledge (list w/ search + paging)', () => {
       .expect(200);
     expect(res.body.total).toBe(12);
     expect(dbMocks.listKnowledgeChunks).toHaveBeenCalledWith({
-      kind: 'worksheet', active: true, q: 'breathing', limit: 10, offset: 20,
+      kind: 'worksheet',
+      active: true,
+      q: 'breathing',
+      limit: 10,
+      offset: 20,
     });
   });
 });
@@ -184,7 +208,9 @@ describe('GET /admin/api/knowledge/rerank-decisions', () => {
       .get('/admin/api/knowledge/rerank-decisions?sessionId=sess-1&tool=retrieve_psychoeducation')
       .expect(200);
     expect(dbMocks.listRerankDecisions).toHaveBeenCalledWith({
-      toolName: 'retrieve_psychoeducation', sessionId: 'sess-1', limit: 100,
+      toolName: 'retrieve_psychoeducation',
+      sessionId: 'sess-1',
+      limit: 100,
     });
   });
 });

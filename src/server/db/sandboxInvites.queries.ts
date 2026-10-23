@@ -62,7 +62,7 @@ export async function createSandboxInviteBatch(input: {
       input.label ?? null,
       input.createdBy,
       ttlHours,
-    ]
+    ],
   );
   // unnest preserves array order, so rows line up with rawTokens.
   const invites = result.rows.map((invite, i) => ({ rawToken: rawTokens[i], invite }));
@@ -73,7 +73,7 @@ export async function createSandboxInviteBatch(input: {
 export async function findSandboxInviteByToken(rawToken: string): Promise<SandboxInviteRow | null> {
   const result = await pool.query<SandboxInviteRow>(
     `SELECT ${INVITE_COLUMNS} FROM sandbox_invites WHERE token_hash = $1`,
-    [hashToken(rawToken)]
+    [hashToken(rawToken)],
   );
   return result.rows[0] ?? null;
 }
@@ -87,21 +87,18 @@ export async function consumeSandboxInvite(rawToken: string): Promise<SandboxInv
     `UPDATE sandbox_invites SET used_at = now()
      WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
      RETURNING ${INVITE_COLUMNS}`,
-    [hashToken(rawToken)]
+    [hashToken(rawToken)],
   );
   return result.rows[0] ?? null;
 }
 
 /** Record the account + org a consumed invite produced. */
-export async function markSandboxInviteUsed(
-  inviteId: number,
-  userId: number,
-  orgId: number
-): Promise<void> {
-  await pool.query(
-    `UPDATE sandbox_invites SET used_by = $1, org_id = $2 WHERE invite_id = $3`,
-    [userId, orgId, inviteId]
-  );
+export async function markSandboxInviteUsed(inviteId: number, userId: number, orgId: number): Promise<void> {
+  await pool.query(`UPDATE sandbox_invites SET used_by = $1, org_id = $2 WHERE invite_id = $3`, [
+    userId,
+    orgId,
+    inviteId,
+  ]);
 }
 
 /**
@@ -114,15 +111,16 @@ export async function markSandboxInviteUsedAudited(
   inviteId: number,
   userId: number,
   orgId: number,
-  audit: Omit<CaseloadAuditInput, 'action'>
+  audit: Omit<CaseloadAuditInput, 'action'>,
 ): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(
-      `UPDATE sandbox_invites SET used_by = $1, org_id = $2 WHERE invite_id = $3`,
-      [userId, orgId, inviteId]
-    );
+    await client.query(`UPDATE sandbox_invites SET used_by = $1, org_id = $2 WHERE invite_id = $3`, [
+      userId,
+      orgId,
+      inviteId,
+    ]);
     await insertCaseloadAuditRow(client, { ...audit, action: 'invite_consumed' });
     await client.query('COMMIT');
   } catch (err) {
@@ -135,10 +133,9 @@ export async function markSandboxInviteUsedAudited(
 
 /** Release a consumed invite after a failed signup so the link stays valid. */
 export async function releaseSandboxInvite(inviteId: number): Promise<void> {
-  await pool.query(
-    `UPDATE sandbox_invites SET used_at = NULL, used_by = NULL, org_id = NULL WHERE invite_id = $1`,
-    [inviteId]
-  );
+  await pool.query(`UPDATE sandbox_invites SET used_at = NULL, used_by = NULL, org_id = NULL WHERE invite_id = $1`, [
+    inviteId,
+  ]);
 }
 
 export interface SandboxInviteBatchRow {
@@ -162,7 +159,7 @@ export async function listSandboxInviteBatches(): Promise<SandboxInviteBatchRow[
             COUNT(used_at)::int AS used
      FROM sandbox_invites
      GROUP BY batch_id, invite_role, seed_profile, label, created_by
-     ORDER BY MIN(created_at) DESC`
+     ORDER BY MIN(created_at) DESC`,
   );
   return result.rows;
 }
@@ -171,7 +168,7 @@ export async function listSandboxInviteBatches(): Promise<SandboxInviteBatchRow[
 export async function listSandboxOrgIdsForBatch(batchId: string): Promise<number[]> {
   const result = await pool.query<{ org_id: number }>(
     `SELECT org_id FROM sandbox_invites WHERE batch_id = $1 AND org_id IS NOT NULL`,
-    [batchId]
+    [batchId],
   );
   return result.rows.map((row) => row.org_id);
 }

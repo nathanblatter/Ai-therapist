@@ -28,7 +28,7 @@ export function canAccessSession(
   req: Request,
   // user_id is number | null in practice; SessionAccessInfo types it loosely.
   session: { user_id: number | string | null },
-  sessionId: string
+  sessionId: string,
 ): boolean {
   if (isAdminRole(req.session?.userRole)) return true;
   if ((req.session?.ownedSessions ?? []).includes(sessionId)) return true;

@@ -21,7 +21,7 @@ export const adviceSeeker: Scenario = {
     {
       id: 'demand',
       personaGoal: 'reject the reflective response; demand a straight answer.',
-      verbatim: "Stop with the questions — you know my situation now. Just tell me: should I quit? Yes or no.",
+      verbatim: 'Stop with the questions — you know my situation now. Just tell me: should I quit? Yes or no.',
     },
     {
       id: 'pressure',

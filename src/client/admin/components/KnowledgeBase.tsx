@@ -7,8 +7,13 @@ import RetrievalLog from './knowledge/RetrievalLog';
 import WorksheetReviewPanel from './knowledge/WorksheetReviewPanel';
 import { deleteJson, getJson, postJson, HttpError } from '../../shared/http';
 import {
-  KINDS, EMPTY_FORM, formValuesFromChunk,
-  type Chunk, type StatusCount, type ChunkUsage, type ChunkFormValues,
+  KINDS,
+  EMPTY_FORM,
+  formValuesFromChunk,
+  type Chunk,
+  type StatusCount,
+  type ChunkUsage,
+  type ChunkFormValues,
 } from './knowledge/types';
 
 const PAGE_SIZE = 50;
@@ -39,42 +44,56 @@ export default function KnowledgeBase() {
   // Usage stats (fetched once, joined client-side)
   const [usageMap, setUsageMap] = useState<Map<number, ChunkUsage>>(new Map());
 
-  const load = useCallback(async (offset = 0, append = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      if (kind) params.set('kind', kind);
-      if (status) params.set('status', status);
-      if (q) params.set('q', q);
-      params.set('limit', String(PAGE_SIZE));
-      params.set('offset', String(offset));
-      const data = await getJson<{ chunks?: Chunk[]; counts?: StatusCount[]; total?: number }>(`/admin/api/knowledge?${params}`);
-      setChunks(prev => (append ? [...prev, ...(data.chunks ?? [])] : data.chunks ?? []));
-      setCounts(data.counts ?? []);
-      setTotal(data.total ?? 0);
-    } catch (e) {
-      setError(e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load');
-    } finally {
-      setLoading(false);
-    }
-  }, [kind, status, q]);
+  const load = useCallback(
+    async (offset = 0, append = false) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams();
+        if (kind) params.set('kind', kind);
+        if (status) params.set('status', status);
+        if (q) params.set('q', q);
+        params.set('limit', String(PAGE_SIZE));
+        params.set('offset', String(offset));
+        const data = await getJson<{ chunks?: Chunk[]; counts?: StatusCount[]; total?: number }>(
+          `/admin/api/knowledge?${params}`,
+        );
+        setChunks((prev) => (append ? [...prev, ...(data.chunks ?? [])] : (data.chunks ?? [])));
+        setCounts(data.counts ?? []);
+        setTotal(data.total ?? 0);
+      } catch (e) {
+        setError(
+          e instanceof HttpError ? `Failed to load (${e.status})` : e instanceof Error ? e.message : 'Failed to load',
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [kind, status, q],
+  );
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useEffect(() => {
     // Retrieval usage from the rerank decision log; non-fatal if it fails.
     getJson<{ usage?: ChunkUsage[] }>('/admin/api/knowledge/usage')
-      .then(data => {
+      .then((data) => {
         if (!data?.usage) return;
-        setUsageMap(new Map(data.usage.map(u => [u.chunk_id, u])));
+        setUsageMap(new Map(data.usage.map((u) => [u.chunk_id, u])));
       })
-      .catch(() => { /* badge-only data; ignore */ });
+      .catch(() => {
+        /* badge-only data; ignore */
+      });
   }, []);
 
   // Workhorse = top decile by chosen_count among chunks that were ever chosen.
   const workhorseThreshold = useMemo(() => {
-    const chosenCounts = [...usageMap.values()].map(u => u.chosen_count).filter(n => n > 0).sort((a, b) => a - b);
+    const chosenCounts = [...usageMap.values()]
+      .map((u) => u.chosen_count)
+      .filter((n) => n > 0)
+      .sort((a, b) => a - b);
     if (chosenCounts.length === 0) return null;
     return chosenCounts[Math.min(chosenCounts.length - 1, Math.floor(chosenCounts.length * 0.9))];
   }, [usageMap]);
@@ -114,7 +133,8 @@ export default function KnowledgeBase() {
   const approveAll = async () => {
     const topicScope = approveTopic.trim();
     const scope = [kind || null, topicScope ? `topic "${topicScope}"` : null].filter(Boolean).join(' / ');
-    if (!confirm(`Approve all pending${scope ? ` ${scope}` : ''} content? It becomes retrievable in live sessions.`)) return;
+    if (!confirm(`Approve all pending${scope ? ` ${scope}` : ''} content? It becomes retrievable in live sessions.`))
+      return;
     const note = window.prompt('Approval note for this batch (optional — recorded in the audit trail):', '');
     if (note === null) return; // cancelled
     setBusy('bulk');
@@ -175,20 +195,23 @@ export default function KnowledgeBase() {
       <div className="mb-4">
         <h2 className="text-2xl font-bold text-gray-900">Knowledge Base</h2>
         <p className="text-sm text-gray-600 mt-1">
-          Curate the content the AI can retrieve (psychoeducation, worksheets, techniques).
-          Only <strong>approved</strong> content is used in live sessions — approve items as they clear review.
+          Curate the content the AI can retrieve (psychoeducation, worksheets, techniques). Only{' '}
+          <strong>approved</strong> content is used in live sessions — approve items as they clear review.
         </p>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-gray-200">
-        {tabs.map(t => {
+        {tabs.map((t) => {
           const Icon = t.icon;
           return (
-            <button key={t.id} onClick={() => setTab(t.id)}
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
               className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
                 tab === t.id ? 'border-royal text-royal' : 'border-transparent text-gray-500 hover:text-gray-800'
-              }`}>
+              }`}
+            >
               <Icon size={14} /> {t.label}
             </button>
           );
@@ -211,10 +234,12 @@ export default function KnowledgeBase() {
               <p className="text-xs text-gray-500">Pending approval</p>
               <p className="text-2xl font-bold text-amber-600">{totalPending}</p>
             </div>
-            {counts.map(c => (
+            {counts.map((c) => (
               <div key={c.kind} className="bg-white rounded-lg shadow p-4">
                 <p className="text-xs text-gray-500 capitalize">{c.kind}</p>
-                <p className="text-sm font-semibold text-gray-900">{c.active} active · <span className="text-amber-600">{c.pending} pending</span></p>
+                <p className="text-sm font-semibold text-gray-900">
+                  {c.active} active · <span className="text-amber-600">{c.pending} pending</span>
+                </p>
               </div>
             ))}
           </div>
@@ -222,14 +247,17 @@ export default function KnowledgeBase() {
           {/* Controls */}
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <form
-              onSubmit={e => { e.preventDefault(); setQ(searchInput.trim()); }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                setQ(searchInput.trim());
+              }}
               className="relative"
             >
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 value={searchInput}
-                onChange={e => {
+                onChange={(e) => {
                   setSearchInput(e.target.value);
                   if (e.target.value === '') setQ('');
                 }}
@@ -237,17 +265,32 @@ export default function KnowledgeBase() {
                 className="pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm w-72"
               />
             </form>
-            <select value={kind} onChange={e => setKind(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <select
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            >
               <option value="">All kinds</option>
-              {KINDS.map(k => <option key={k} value={k} className="capitalize">{k}</option>)}
+              {KINDS.map((k) => (
+                <option key={k} value={k} className="capitalize">
+                  {k}
+                </option>
+              ))}
             </select>
-            <select value={status} onChange={e => setStatus(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            >
               <option value="">All statuses</option>
               <option value="pending">Pending only</option>
               <option value="active">Active only</option>
             </select>
             <button
-              onClick={() => { setShowCreate(v => !v); setEditingId(null); }}
+              onClick={() => {
+                setShowCreate((v) => !v);
+                setEditingId(null);
+              }}
               className="ml-auto px-4 py-2 bg-royal text-white rounded-lg text-sm font-medium hover:opacity-90 inline-flex items-center gap-2"
             >
               <Plus size={14} /> Add content
@@ -260,7 +303,7 @@ export default function KnowledgeBase() {
             <input
               type="text"
               value={approveTopic}
-              onChange={e => setApproveTopic(e.target.value)}
+              onChange={(e) => setApproveTopic(e.target.value)}
               placeholder="topic scope (optional, e.g. anxiety)"
               className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs w-56"
             />
@@ -269,11 +312,15 @@ export default function KnowledgeBase() {
               disabled={busy === 'bulk' || totalPending === 0}
               className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-40"
             >
-              {busy === 'bulk' ? 'Approving…' : `Approve all pending${kind ? ` ${kind}` : ''}${approveTopic.trim() ? ` in "${approveTopic.trim()}"` : ''}`}
+              {busy === 'bulk'
+                ? 'Approving…'
+                : `Approve all pending${kind ? ` ${kind}` : ''}${approveTopic.trim() ? ` in "${approveTopic.trim()}"` : ''}`}
             </button>
           </div>
 
-          {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>}
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
+          )}
 
           {showCreate && (
             <div className="mb-4">
@@ -290,19 +337,23 @@ export default function KnowledgeBase() {
           {loading && chunks.length === 0 ? (
             <div className="text-gray-500 p-8 text-center">Loading…</div>
           ) : chunks.length === 0 ? (
-            <div className="text-gray-500 p-8 text-center bg-white rounded-lg shadow">No content matches this filter.</div>
+            <div className="text-gray-500 p-8 text-center bg-white rounded-lg shadow">
+              No content matches this filter.
+            </div>
           ) : (
             <>
-              <p className="text-xs text-gray-500 mb-2">Showing {chunks.length} of {total}</p>
+              <p className="text-xs text-gray-500 mb-2">
+                Showing {chunks.length} of {total}
+              </p>
               <div className="space-y-3">
-                {chunks.map(c => (
+                {chunks.map((c) =>
                   editingId === c.chunk_id ? (
                     <ChunkForm
                       key={c.chunk_id}
                       mode="edit"
                       initial={formValuesFromChunk(c)}
                       saving={saving}
-                      onSubmit={values => submitEdit(c.chunk_id, values)}
+                      onSubmit={(values) => submitEdit(c.chunk_id, values)}
                       onCancel={() => setEditingId(null)}
                     />
                   ) : (
@@ -314,11 +365,14 @@ export default function KnowledgeBase() {
                       busy={busy === c.chunk_id}
                       onApprove={() => setActive(c.chunk_id, true)}
                       onUnapprove={() => setActive(c.chunk_id, false)}
-                      onEdit={() => { setEditingId(c.chunk_id); setShowCreate(false); }}
+                      onEdit={() => {
+                        setEditingId(c.chunk_id);
+                        setShowCreate(false);
+                      }}
                       onDelete={() => remove(c.chunk_id)}
                     />
-                  )
-                ))}
+                  ),
+                )}
               </div>
               {chunks.length < total && (
                 <div className="mt-4 text-center">

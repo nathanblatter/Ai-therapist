@@ -146,14 +146,18 @@ export class GrokVoiceClient {
         if (settled) return;
         settled = true;
         abandoned = true;
-        try { ws.close(1000, 'ready timeout'); } catch { /* ignore */ }
+        try {
+          ws.close(1000, 'ready timeout');
+        } catch {
+          /* ignore */
+        }
         reject(new Error('Voice service did not become ready in time'));
       }, timeoutMs);
 
       ws.onopen = () => {
         if (this.audioStarted) return;
         this.audioStarted = true;
-        this.startAudio().catch(err => {
+        this.startAudio().catch((err) => {
           this.audioStarted = false;
           if (settled) return;
           settled = true;
@@ -238,7 +242,9 @@ export class GrokVoiceClient {
     const deadline = Date.now() + RECONNECT_WINDOW_MS;
     for (let attempt = 0; ; attempt++) {
       const backoff = RECONNECT_BACKOFF_MS[Math.min(attempt, RECONNECT_BACKOFF_MS.length - 1)];
-      await new Promise<void>(res => { this.reconnectTimer = setTimeout(res, backoff); });
+      await new Promise<void>((res) => {
+        this.reconnectTimer = setTimeout(res, backoff);
+      });
       this.reconnectTimer = null;
       if (this.stopped) return;
       if (Date.now() > deadline) break;
@@ -291,7 +297,11 @@ export class GrokVoiceClient {
       } finally {
         URL.revokeObjectURL(url);
       }
-      const node = new AudioWorkletNode(ctx, 'grok-capture', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+      const node = new AudioWorkletNode(ctx, 'grok-capture', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        channelCount: 1,
+      });
       node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => this.sendPcm(e.data);
       this.micSource.connect(node);
       node.connect(this.captureSink);
@@ -355,7 +365,11 @@ export class GrokVoiceClient {
   /** Drop everything queued for playback (barge-in, interrupt). */
   flushPlayback(): void {
     for (const s of this.scheduled) {
-      try { s.stop(); } catch { /* already ended */ }
+      try {
+        s.stop();
+      } catch {
+        /* already ended */
+      }
     }
     this.scheduled = [];
     this.nextPlayAt = 0;
@@ -369,7 +383,11 @@ export class GrokVoiceClient {
 
   private sendControl(msg: GrokClientMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      try { this.ws.send(JSON.stringify(msg)); } catch { /* closing */ }
+      try {
+        this.ws.send(JSON.stringify(msg));
+      } catch {
+        /* closing */
+      }
     }
   }
 
@@ -384,17 +402,36 @@ export class GrokVoiceClient {
     this.stopped = true;
     this.ready = false;
     this.reconnecting = false;
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.flushPlayback();
-    try { this.captureNode?.disconnect(); } catch { /* ignore */ }
+    try {
+      this.captureNode?.disconnect();
+    } catch {
+      /* ignore */
+    }
     if (this.captureNode && 'port' in this.captureNode) {
       (this.captureNode as AudioWorkletNode).port.onmessage = null;
     } else if (this.captureNode) {
       (this.captureNode as ScriptProcessorNode).onaudioprocess = null;
     }
-    try { this.micSource?.disconnect(); } catch { /* ignore */ }
-    try { this.captureSink?.disconnect(); } catch { /* ignore */ }
-    try { this.playbackGain?.disconnect(); } catch { /* ignore */ }
+    try {
+      this.micSource?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    try {
+      this.captureSink?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    try {
+      this.playbackGain?.disconnect();
+    } catch {
+      /* ignore */
+    }
     this.captureNode = null;
     this.micSource = null;
     this.captureSink = null;
@@ -409,7 +446,9 @@ export class GrokVoiceClient {
       this.ws = null;
       try {
         if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, 'client stop');
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 }

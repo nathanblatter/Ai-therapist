@@ -72,8 +72,19 @@ function forkRow(overrides: Partial<{ is_demo: boolean | null; live_id: string |
 }
 
 beforeEach(() => {
-  for (const m of [queryMock, responsesCreate, chatCreate, getSessionMessagesMock, getSessionConfigMock,
-    createRunMock, recordResponseMock, recordJudgementMock, finishRunMock, getRunMock, forkAndProbeMock]) {
+  for (const m of [
+    queryMock,
+    responsesCreate,
+    chatCreate,
+    getSessionMessagesMock,
+    getSessionConfigMock,
+    createRunMock,
+    recordResponseMock,
+    recordJudgementMock,
+    finishRunMock,
+    getRunMock,
+    forkAndProbeMock,
+  ]) {
     m.mockReset();
   }
   getSessionMessagesMock.mockResolvedValue(MESSAGES);
@@ -156,7 +167,12 @@ describe('runCounterfactual replay mode (default)', () => {
   });
 
   it('passes createdBy and probeReason through to the run row', async () => {
-    await runCounterfactual({ sessionId: SESSION, models: ['gpt-5-nano'], createdBy: 'admin', probeReason: 'risk_spike' });
+    await runCounterfactual({
+      sessionId: SESSION,
+      models: ['gpt-5-nano'],
+      createdBy: 'admin',
+      probeReason: 'risk_spike',
+    });
     expect(createRunMock.mock.calls[0][0]).toMatchObject({ createdBy: 'admin', probeReason: 'risk_spike' });
   });
 
@@ -170,28 +186,32 @@ describe('runCounterfactual replay mode (default)', () => {
   });
 
   it('rejects an assistant turn as the decision point', async () => {
-    await expect(runCounterfactual({ sessionId: SESSION, decisionPoint: 1 }))
-      .rejects.toThrow(/Decision point 1 is an assistant turn/);
+    await expect(runCounterfactual({ sessionId: SESSION, decisionPoint: 1 })).rejects.toThrow(
+      /Decision point 1 is an assistant turn/,
+    );
     expect(createRunMock).not.toHaveBeenCalled();
   });
 
   it('rejects an out-of-range decision point', async () => {
-    await expect(runCounterfactual({ sessionId: SESSION, decisionPoint: 99 }))
-      .rejects.toThrow('Decision point 99 is out of range.');
+    await expect(runCounterfactual({ sessionId: SESSION, decisionPoint: 99 })).rejects.toThrow(
+      'Decision point 99 is out of range.',
+    );
     expect(createRunMock).not.toHaveBeenCalled();
   });
 
   it('refuses a session with no conversation content', async () => {
     getSessionMessagesMock.mockResolvedValue([{ role: 'system', content: 'x', content_redacted: null }]);
-    await expect(runCounterfactual({ sessionId: SESSION }))
-      .rejects.toThrow(`Session ${SESSION} has no conversation content to branch from.`);
+    await expect(runCounterfactual({ sessionId: SESSION })).rejects.toThrow(
+      `Session ${SESSION} has no conversation content to branch from.`,
+    );
     expect(createRunMock).not.toHaveBeenCalled();
   });
 
   it('refuses a session with assistant-only turns', async () => {
     getSessionMessagesMock.mockResolvedValue([{ role: 'assistant', content: 'hi', content_redacted: null }]);
-    await expect(runCounterfactual({ sessionId: SESSION }))
-      .rejects.toThrow(`Session ${SESSION} contains no participant turns.`);
+    await expect(runCounterfactual({ sessionId: SESSION })).rejects.toThrow(
+      `Session ${SESSION} contains no participant turns.`,
+    );
   });
 
   it('caps the replayed transcript at the most recent 12k characters', async () => {
@@ -213,12 +233,14 @@ describe('runCounterfactual replay mode (default)', () => {
     responsesCreate.mockResolvedValue({ output_text: '  \n', usage: { input_tokens: 10, output_tokens: 0 } });
     const summary = await runCounterfactual({ sessionId: SESSION, models: ['gpt-5-nano'] });
     expect(summary).toMatchObject({ succeeded: 0, failed: 1 });
-    expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-5-nano',
-      responseText: null,
-      estimatedCostUsd: null,
-      error: 'candidate produced no backend text',
-    }));
+    expect(recordResponseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gpt-5-nano',
+        responseText: null,
+        estimatedCostUsd: null,
+        error: 'candidate produced no backend text',
+      }),
+    );
     expect(finishRunMock).toHaveBeenCalledWith(7, 'failed', 'every candidate failed');
   });
 
@@ -229,7 +251,11 @@ describe('runCounterfactual replay mode (default)', () => {
     });
     const summary = await runCounterfactual({ sessionId: SESSION, models: ['gpt-5-nano', 'gpt-bogus'] });
     expect(summary).toMatchObject({ candidates: 2, succeeded: 1, failed: 1 });
-    expect(recordResponseMock).toHaveBeenCalledWith({ runId: 7, model: 'gpt-bogus', error: 'HTTP 404 model not found' });
+    expect(recordResponseMock).toHaveBeenCalledWith({
+      runId: 7,
+      model: 'gpt-bogus',
+      error: 'HTTP 404 model not found',
+    });
     expect(finishRunMock).toHaveBeenCalledWith(7, 'completed', null);
   });
 
@@ -244,12 +270,14 @@ describe('runCounterfactual replay mode (default)', () => {
   it('records a successful unknown model with a null cost rather than dropping it', async () => {
     const summary = await runCounterfactual({ sessionId: SESSION, models: ['gpt-99-new'] });
     expect(summary).toMatchObject({ succeeded: 1, failed: 0 });
-    expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gpt-99-new',
-      responseText: 'A caring reply.',
-      estimatedCostUsd: null,
-      error: null,
-    }));
+    expect(recordResponseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'gpt-99-new',
+        responseText: 'A caring reply.',
+        estimatedCostUsd: null,
+        error: null,
+      }),
+    );
   });
 
   it('runs the default sweep when no models are given', async () => {
@@ -262,10 +290,13 @@ describe('runCounterfactual replay mode (default)', () => {
 describe('runCounterfactual fork mode guard', () => {
   it('refuses a participant (non-demo) session before creating a run', async () => {
     queryMock.mockResolvedValue(forkRow({ is_demo: false }));
-    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork', models: ['gpt-5-nano'] }))
-      .rejects.toThrow(/Fork mode is restricted to non-study sessions/);
+    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork', models: ['gpt-5-nano'] })).rejects.toThrow(
+      /Fork mode is restricted to non-study sessions/,
+    );
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
-    expect(sql).toMatch(/SELECT is_demo, openai_live_session_id AS live_id, created_at\s+FROM therapy_sessions WHERE session_id = \$1/);
+    expect(sql).toMatch(
+      /SELECT is_demo, openai_live_session_id AS live_id, created_at\s+FROM therapy_sessions WHERE session_id = \$1/,
+    );
     expect(params).toEqual([SESSION]);
     expect(createRunMock).not.toHaveBeenCalled();
     expect(forkAndProbeMock).not.toHaveBeenCalled();
@@ -273,35 +304,45 @@ describe('runCounterfactual fork mode guard', () => {
 
   it('treats a null is_demo as a study session', async () => {
     queryMock.mockResolvedValue(forkRow({ is_demo: null }));
-    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork' }))
-      .rejects.toThrow(/restricted to non-study sessions/);
+    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork' })).rejects.toThrow(
+      /restricted to non-study sessions/,
+    );
   });
 
   it('refuses an unknown session', async () => {
     queryMock.mockResolvedValue({ rows: [] });
-    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork' }))
-      .rejects.toThrow(`Session ${SESSION} not found`);
+    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork' })).rejects.toThrow(
+      `Session ${SESSION} not found`,
+    );
   });
 
   it('refuses a demo session that never ran on GPT-Live', async () => {
     queryMock.mockResolvedValue(forkRow({ live_id: null }));
-    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork' }))
-      .rejects.toThrow(/has no GPT-Live session id/);
+    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork' })).rejects.toThrow(/has no GPT-Live session id/);
   });
 
   it('refuses a session older than the 30-day recording window', async () => {
     queryMock.mockResolvedValue(forkRow({ created_at: new Date(Date.now() - 31 * 86_400_000) }));
-    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork' }))
-      .rejects.toThrow(/is 31 days old; GPT-Live recordings expire after 30 days/);
+    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork' })).rejects.toThrow(
+      /is 31 days old; GPT-Live recordings expire after 30 days/,
+    );
   });
 
   it('allows a 29-day-old demo Live session', async () => {
     queryMock.mockResolvedValue(forkRow({ created_at: new Date(Date.now() - 29 * 86_400_000) }));
     forkAndProbeMock.mockResolvedValue({
-      forkSessionId: 'f1', responseText: 'ok', spokenText: 'ok', tokensIn: 1, tokensOut: 1,
-      latencyMs: 5, voiceSeconds: 1, error: null,
+      forkSessionId: 'f1',
+      responseText: 'ok',
+      spokenText: 'ok',
+      tokensIn: 1,
+      tokensOut: 1,
+      latencyMs: 5,
+      voiceSeconds: 1,
+      error: null,
     });
-    await expect(runCounterfactual({ sessionId: SESSION, mode: 'fork', models: ['gpt-5-nano'] })).resolves.toMatchObject({ mode: 'fork' });
+    await expect(
+      runCounterfactual({ sessionId: SESSION, mode: 'fork', models: ['gpt-5-nano'] }),
+    ).resolves.toMatchObject({ mode: 'fork' });
   });
 });
 
@@ -350,35 +391,54 @@ describe('runCounterfactual fork mode', () => {
 
   it('records a fork error envelope as a failed candidate with no cost', async () => {
     forkAndProbeMock.mockResolvedValue({
-      forkSessionId: null, responseText: '', spokenText: '', tokensIn: null, tokensOut: null,
-      latencyMs: 0, voiceSeconds: null, error: 'fork rejected: HTTP 404',
+      forkSessionId: null,
+      responseText: '',
+      spokenText: '',
+      tokensIn: null,
+      tokensOut: null,
+      latencyMs: 0,
+      voiceSeconds: null,
+      error: 'fork rejected: HTTP 404',
     });
     const summary = await runCounterfactual({ sessionId: SESSION, mode: 'fork', models: ['gpt-5-nano'] });
     expect(summary).toMatchObject({ succeeded: 0, failed: 1 });
-    expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({
-      responseText: null,
-      spokenText: null,
-      estimatedCostUsd: null,
-      error: 'fork rejected: HTTP 404',
-    }));
+    expect(recordResponseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responseText: null,
+        spokenText: null,
+        estimatedCostUsd: null,
+        error: 'fork rejected: HTTP 404',
+      }),
+    );
     expect(finishRunMock).toHaveBeenCalledWith(7, 'failed', 'every candidate failed');
   });
 
   it('treats a fork that resolved with no backend text as a failure', async () => {
     forkAndProbeMock.mockResolvedValue({
-      forkSessionId: 'f', responseText: '', spokenText: 'hmm', tokensIn: 5, tokensOut: 0,
-      latencyMs: 10, voiceSeconds: 2, error: null,
+      forkSessionId: 'f',
+      responseText: '',
+      spokenText: 'hmm',
+      tokensIn: 5,
+      tokensOut: 0,
+      latencyMs: 10,
+      voiceSeconds: 2,
+      error: null,
     });
     await runCounterfactual({ sessionId: SESSION, mode: 'fork', models: ['gpt-5-nano'] });
-    expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({
-      estimatedCostUsd: null,
-      error: 'candidate produced no backend text',
-    }));
+    expect(recordResponseMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        estimatedCostUsd: null,
+        error: 'candidate produced no backend text',
+      }),
+    );
   });
 });
 
 describe('runCounterfactual judge gating', () => {
-  const verdict = { scores: { empathy: 4, clinical_appropriateness: 5, specificity: 3, spoken_quality: 4 }, rationale: 'solid' };
+  const verdict = {
+    scores: { empathy: 4, clinical_appropriateness: 5, specificity: 3, spoken_quality: 4 },
+    rationale: 'solid',
+  };
 
   beforeEach(() => {
     getRunMock.mockResolvedValue({
@@ -443,13 +503,16 @@ describe('runCounterfactual judge gating', () => {
   });
 
   it('skips a verdict with no scores block and defaults a missing rationale to empty', async () => {
-    chatCreate
-      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ rationale: 'no scores here' }) } }] });
+    chatCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ rationale: 'no scores here' }) } }],
+    });
     await runCounterfactual({ sessionId: SESSION, models: ['gpt-5-nano'], judge: true });
     expect(recordJudgementMock).not.toHaveBeenCalled();
 
     recordJudgementMock.mockClear();
-    chatCreate.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ scores: { empathy: 2 } }) } }] });
+    chatCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ scores: { empathy: 2 } }) } }],
+    });
     await runCounterfactual({ sessionId: SESSION, models: ['gpt-5-nano'], judge: true });
     expect(recordJudgementMock).toHaveBeenCalledWith(7, 'good', { empathy: 2 }, '');
   });
@@ -462,8 +525,9 @@ describe('runCounterfactual judge gating', () => {
 
   it('does not let a judgement write failure fail the run', async () => {
     recordJudgementMock.mockRejectedValue(new Error('db down'));
-    await expect(runCounterfactual({ sessionId: SESSION, models: ['gpt-5-nano'], judge: true }))
-      .resolves.toMatchObject({ succeeded: 1 });
+    await expect(runCounterfactual({ sessionId: SESSION, models: ['gpt-5-nano'], judge: true })).resolves.toMatchObject(
+      { succeeded: 1 },
+    );
     expect(finishRunMock).toHaveBeenCalledWith(7, 'completed', null);
   });
 });

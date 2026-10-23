@@ -76,9 +76,18 @@ interface AssistantTool {
 }
 
 const EMPTY_SESSION_FILTERS = {
-  search: null, startDate: null, endDate: null, minMessages: null, maxMessages: null,
-  voices: null, languages: null, durations: null, sessionTypes: null, statuses: null,
-  endedBy: null, crisisSeverity: null,
+  search: null,
+  startDate: null,
+  endDate: null,
+  minMessages: null,
+  maxMessages: null,
+  voices: null,
+  languages: null,
+  durations: null,
+  sessionTypes: null,
+  statuses: null,
+  endedBy: null,
+  crisisSeverity: null,
 };
 
 function daysAgoIso(days: number): string {
@@ -120,7 +129,9 @@ const TOOLS: AssistantTool[] = [
         userId: p.userId,
         username: p.username,
         studyWeek: p.studyWeek,
-        weeklyCompleted: Object.keys(p.weekly).map(Number).sort((a, b) => a - b),
+        weeklyCompleted: Object.keys(p.weekly)
+          .map(Number)
+          .sort((a, b) => a - b),
         baselineDone: p.baseline !== null,
         exitDone: p.exit !== null,
         week12Done: p.week12 !== null,
@@ -154,11 +165,20 @@ const TOOLS: AssistantTool[] = [
           offset: 0,
         },
         scope,
-        ctx.orgId
+        ctx.orgId,
       );
       return project(rows as Array<Record<string, unknown>>, [
-        'session_id', 'username', 'user_id', 'status', 'session_type', 'start_time',
-        'end_time', 'message_count', 'crisis_flagged', 'crisis_severity', 'duration_minutes',
+        'session_id',
+        'username',
+        'user_id',
+        'status',
+        'session_type',
+        'start_time',
+        'end_time',
+        'message_count',
+        'crisis_flagged',
+        'crisis_severity',
+        'duration_minutes',
       ]);
     },
   },
@@ -172,8 +192,16 @@ const TOOLS: AssistantTool[] = [
       const scope = isCareTeamRole(ctx.role) ? ctx.userId : null;
       const data = await getAllCrisisData(scope, ctx.orgId);
       return project((data.crisisEvents ?? []) as Array<Record<string, unknown>>, [
-        'event_id', 'session_id', 'client_user_id', 'username', 'severity', 'risk_score',
-        'status', 'origin', 'created_at', 'resolved_at',
+        'event_id',
+        'session_id',
+        'client_user_id',
+        'username',
+        'severity',
+        'risk_score',
+        'status',
+        'origin',
+        'created_at',
+        'resolved_at',
       ]);
     },
   },
@@ -192,11 +220,19 @@ const TOOLS: AssistantTool[] = [
       const rows = await listEscalations(
         ctx.role === 'researcher'
           ? { orgId: ctx.orgId, openOnly }
-          : { memberId: ctx.userId, memberRole: ctx.role, openOnly }
+          : { memberId: ctx.userId, memberRole: ctx.role, openOnly },
       );
       return project(rows as unknown as Array<Record<string, unknown>>, [
-        'escalation_id', 'client_id', 'raised_by', 'raised_by_role', 'assigned_to',
-        'urgency', 'status', 'created_at', 'acknowledged_at', 'resolved_at',
+        'escalation_id',
+        'client_id',
+        'raised_by',
+        'raised_by_role',
+        'assigned_to',
+        'urgency',
+        'status',
+        'created_at',
+        'acknowledged_at',
+        'resolved_at',
       ]);
     },
   },
@@ -208,7 +244,8 @@ const TOOLS: AssistantTool[] = [
       type: 'object',
       properties: {
         statuses: {
-          type: 'array', items: { type: 'string', enum: ['open', 'acked', 'resolved', 'expired'] },
+          type: 'array',
+          items: { type: 'string', enum: ['open', 'acked', 'resolved', 'expired'] },
           description: 'Statuses to include (default open + acked)',
         },
       },
@@ -216,17 +253,26 @@ const TOOLS: AssistantTool[] = [
     },
     roles: ['researcher', 'therapist', 'caseworker'],
     run: async (ctx, args) => {
-      const statuses = Array.isArray(args.statuses) && args.statuses.length > 0
-        ? (args.statuses as Array<'open' | 'acked' | 'resolved' | 'expired'>)
-        : undefined;
+      const statuses =
+        Array.isArray(args.statuses) && args.statuses.length > 0
+          ? (args.statuses as Array<'open' | 'acked' | 'resolved' | 'expired'>)
+          : undefined;
       const rows = isCareTeamRole(ctx.role)
         ? await listWorkItemsForMember(ctx.userId, { statuses, limit: MAX_ROWS })
         : ctx.orgId === null
           ? []
           : await listWorkItemsForOrg(ctx.orgId, { statuses, limit: MAX_ROWS });
       return project(rows as unknown as Array<Record<string, unknown>>, [
-        'item_id', 'client_id', 'assignee_id', 'item_type', 'severity', 'title',
-        'status', 'created_at', 'acked_at', 'resolved_at',
+        'item_id',
+        'client_id',
+        'assignee_id',
+        'item_type',
+        'severity',
+        'title',
+        'status',
+        'created_at',
+        'acked_at',
+        'resolved_at',
       ]);
     },
   },
@@ -239,10 +285,20 @@ const TOOLS: AssistantTool[] = [
     run: async (ctx) => {
       const rows = await listCaseworkerRoster(ctx.userId);
       return project(rows as unknown as Array<Record<string, unknown>>, [
-        'client_id', 'username', 'assigned_at', 'last_session_at', 'ended_session_count',
-        'last_checkin_mood', 'latest_risk_score', 'latest_risk_severity', 'latest_risk_at',
-        'open_crisis_count', 'latest_scales', 'open_escalation_count',
-        'overdue_practice_count', 'has_safety_plan',
+        'client_id',
+        'username',
+        'assigned_at',
+        'last_session_at',
+        'ended_session_count',
+        'last_checkin_mood',
+        'latest_risk_score',
+        'latest_risk_severity',
+        'latest_risk_at',
+        'open_crisis_count',
+        'latest_scales',
+        'open_escalation_count',
+        'overdue_practice_count',
+        'has_safety_plan',
       ]);
     },
   },
@@ -258,7 +314,9 @@ const TOOLS: AssistantTool[] = [
     },
     roles: ['researcher', 'therapist', 'caseworker'],
     run: async (ctx, args) => {
-      const q = String(args.username ?? '').trim().toLowerCase();
+      const q = String(args.username ?? '')
+        .trim()
+        .toLowerCase();
       if (!q) return [];
       // Organization scope (ai-therapist-277): the same org-scoped read the
       // Users view makes, so a researcher never resolves another org's
@@ -272,7 +330,11 @@ const TOOLS: AssistantTool[] = [
         matches = matches.filter((_, i) => assigned[i]);
       }
       return project(matches as unknown as Array<Record<string, unknown>>, [
-        'userid', 'username', 'role', 'study_status', 'created_at',
+        'userid',
+        'username',
+        'role',
+        'study_status',
+        'created_at',
       ]);
     },
   },
@@ -295,7 +357,9 @@ function toResponsesTools(role: AssistantRole): Array<Record<string, unknown>> {
 /** Exported so the red-team harness can draw leak canaries from the REAL
  *  prompt (src/redteam/assistantAssertions.ts) rather than a stale copy. */
 export function assistantSystemPrompt(ctx: AssistantContext): string {
-  const toolNames = toolsFor(ctx.role).map((t) => t.name).join(', ');
+  const toolNames = toolsFor(ctx.role)
+    .map((t) => t.name)
+    .join(', ');
   return [
     'You are the admin data assistant for a mental-health research platform. You answer staff questions strictly from the results of your tools, which run under the asker’s own access scope.',
     `The asker is ${ctx.username ?? 'a staff member'} with role "${ctx.role}". Available tools: ${toolNames}.`,
@@ -308,7 +372,12 @@ export function assistantSystemPrompt(ctx: AssistantContext): string {
   ].join('\n');
 }
 
-interface ResponsesOutputItem { type: string; call_id?: string; name?: string; arguments?: string }
+interface ResponsesOutputItem {
+  type: string;
+  call_id?: string;
+  name?: string;
+  arguments?: string;
+}
 interface ResponsesResult {
   output_text: string;
   output?: ResponsesOutputItem[];
@@ -333,26 +402,36 @@ async function insertAudit(
   ctx: AssistantContext,
   question: string,
   tools: Array<{ name: string; args: Record<string, unknown>; row_count: number }>,
-  usage: { input_tokens: number; output_tokens: number }
+  usage: { input_tokens: number; output_tokens: number },
 ): Promise<void> {
   try {
     await pool.query(
       `INSERT INTO assistant_audit (user_id, role, question, tools, model, input_tokens, output_tokens)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [ctx.userId, ctx.role, question.slice(0, 4000), JSON.stringify(tools), ASSISTANT_MODEL,
-       usage.input_tokens, usage.output_tokens]
+      [
+        ctx.userId,
+        ctx.role,
+        question.slice(0, 4000),
+        JSON.stringify(tools),
+        ASSISTANT_MODEL,
+        usage.input_tokens,
+        usage.output_tokens,
+      ],
     );
   } catch (err) {
     log.error({ err }, 'assistant audit insert failed');
   }
 }
 
-export interface AssistantMessage { role: 'user' | 'assistant'; content: string }
+export interface AssistantMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 /** One assistant turn: history + new question in, final text + tool trail out. */
 export async function runAssistantTurn(
   ctx: AssistantContext,
-  history: AssistantMessage[]
+  history: AssistantMessage[],
 ): Promise<AssistantTurnResult> {
   const client = await getClient();
   const roleTools = toolsFor(ctx.role);
@@ -423,7 +502,9 @@ export async function runAssistantTurn(
 
   await insertAudit(ctx, question, auditTools, usage);
   return {
-    answer: response.output_text || 'I could not produce an answer for that. Try rephrasing, or use the relevant admin panel.',
+    answer:
+      response.output_text ||
+      'I could not produce an answer for that. Try rephrasing, or use the relevant admin panel.',
     toolCalls: auditTools.map((t) => ({ name: t.name, rowCount: t.row_count })),
   };
 }

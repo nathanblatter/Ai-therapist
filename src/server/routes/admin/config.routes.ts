@@ -75,13 +75,10 @@ export default function adminConfigRoutes(): Router {
     try {
       const { toolRegistry } = await import('../../services/toolRegistry.service.js');
       const { getToolInvocationStats } = await import('../../db/index.js');
-      const [enabled, stats] = await Promise.all([
-        toolRegistry.getEnabledToolDefinitions(),
-        getToolInvocationStats(),
-      ]);
-      const enabledNames = new Set(enabled.map(d => d.name));
-      const statsByName = new Map(stats.map(s => [s.tool_name, s]));
-      const tools = toolRegistry.getAllToolDefinitions().map(def => ({
+      const [enabled, stats] = await Promise.all([toolRegistry.getEnabledToolDefinitions(), getToolInvocationStats()]);
+      const enabledNames = new Set(enabled.map((d) => d.name));
+      const statsByName = new Map(stats.map((s) => [s.tool_name, s]));
+      const tools = toolRegistry.getAllToolDefinitions().map((def) => ({
         name: def.name,
         description: def.description,
         enabled: enabledNames.has(def.name),
@@ -101,7 +98,7 @@ export default function adminConfigRoutes(): Router {
     try {
       const rows = await getAllSystemConfig();
       const config: Record<string, unknown> = {};
-      rows.forEach(row => {
+      rows.forEach((row) => {
         config[row.config_key] = {
           value: row.config_value,
           description: row.description,
@@ -114,7 +111,8 @@ export default function adminConfigRoutes(): Router {
       if (!config.deployment_mode) {
         config.deployment_mode = {
           value: { mode: 'research' },
-          description: 'Deployment posture: research or clinical (default; migration 060 seeds the row, this database predates it)',
+          description:
+            'Deployment posture: research or clinical (default; migration 060 seeds the row, this database predates it)',
           updated_at: null,
           updated_by: null,
         };
@@ -163,7 +161,8 @@ export default function adminConfigRoutes(): Router {
           return res.json({
             key,
             value: { mode: 'research' },
-            description: 'Deployment posture: research or clinical (default; migration 060 seeds the row, this database predates it)',
+            description:
+              'Deployment posture: research or clinical (default; migration 060 seeds the row, this database predates it)',
             updated_at: null,
             updated_by: null,
           });
@@ -198,11 +197,11 @@ export default function adminConfigRoutes(): Router {
         if (!value.voices || !Array.isArray(value.voices)) {
           return res.status(400).json({ error: 'voices must be an array' });
         }
-        const enabledVoices = (value.voices as VoiceOption[]).filter(v => v.enabled);
+        const enabledVoices = (value.voices as VoiceOption[]).filter((v) => v.enabled);
         if (enabledVoices.length === 0) {
           return res.status(400).json({ error: 'At least one voice must be enabled' });
         }
-        const defaultVoice = (value.voices as VoiceOption[]).find(v => v.value === value.default_voice && v.enabled);
+        const defaultVoice = (value.voices as VoiceOption[]).find((v) => v.value === value.default_voice && v.enabled);
         if (!defaultVoice) {
           return res.status(400).json({ error: 'default_voice must be one of the enabled voices' });
         }
@@ -218,11 +217,13 @@ export default function adminConfigRoutes(): Router {
         if (!value.languages || !Array.isArray(value.languages)) {
           return res.status(400).json({ error: 'languages must be an array' });
         }
-        const enabledLanguages = (value.languages as LanguageOption[]).filter(l => l.enabled);
+        const enabledLanguages = (value.languages as LanguageOption[]).filter((l) => l.enabled);
         if (enabledLanguages.length === 0) {
           return res.status(400).json({ error: 'At least one language must be enabled' });
         }
-        const defaultLanguage = (value.languages as LanguageOption[]).find(l => l.value === value.default_language && l.enabled);
+        const defaultLanguage = (value.languages as LanguageOption[]).find(
+          (l) => l.value === value.default_language && l.enabled,
+        );
         if (!defaultLanguage) {
           return res.status(400).json({ error: 'default_language must be one of the enabled languages' });
         }
@@ -258,9 +259,10 @@ export default function adminConfigRoutes(): Router {
       const description = Object.prototype.hasOwnProperty.call(UPSERTABLE_CONFIG_KEYS, key)
         ? UPSERTABLE_CONFIG_KEYS[key]
         : undefined;
-      const updated = description !== undefined
-        ? await upsertSystemConfig(key, value, req.session.username, description)
-        : await updateSystemConfig(key, value, req.session.username);
+      const updated =
+        description !== undefined
+          ? await upsertSystemConfig(key, value, req.session.username, description)
+          : await updateSystemConfig(key, value, req.session.username);
       if (!updated) {
         return res.status(404).json({ error: 'Configuration key not found' });
       }

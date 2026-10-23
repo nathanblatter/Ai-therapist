@@ -59,8 +59,8 @@ export default function Profile() {
     fetchSessions();
     fetchRateLimitStatus();
     fetch('/api/me/withdrawal-link')
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => {
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
         if (data?.available && data.url) setWithdrawal({ url: data.url, studyStatus: data.studyStatus });
       })
       .catch(() => {});
@@ -103,7 +103,7 @@ export default function Profile() {
     try {
       const response = await fetch('/api/rate-limits/status');
       if (response.ok) {
-        const data = await response.json() as RateLimitStatus;
+        const data = (await response.json()) as RateLimitStatus;
         setRateLimitStatus(data);
         setShowRateLimitBanner(data.is_rate_limited && !data.is_exempt);
       }
@@ -117,22 +117,19 @@ export default function Profile() {
 
     // Search filter
     if (searchTerm) {
-      filtered = filtered.filter(session =>
-        session.session_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        session.session_id.toLowerCase().includes(searchTerm.toLowerCase())
+      filtered = filtered.filter(
+        (session) =>
+          session.session_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          session.session_id.toLowerCase().includes(searchTerm.toLowerCase()),
       );
     }
 
     // Date filters
     if (startDate) {
-      filtered = filtered.filter(session =>
-        new Date(session.created_at) >= new Date(startDate)
-      );
+      filtered = filtered.filter((session) => new Date(session.created_at) >= new Date(startDate));
     }
     if (endDate) {
-      filtered = filtered.filter(session =>
-        new Date(session.created_at) <= new Date(endDate + 'T23:59:59')
-      );
+      filtered = filtered.filter((session) => new Date(session.created_at) <= new Date(endDate + 'T23:59:59'));
     }
 
     setFilteredSessions(filtered);
@@ -160,7 +157,7 @@ export default function Profile() {
       const response = await fetch(`/api/users/${user.userid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: newPassword })
+        body: JSON.stringify({ password: newPassword }),
       });
 
       if (!response.ok) {
@@ -184,10 +181,10 @@ export default function Profile() {
     }
 
     const totalSessions = sessions.length;
-    const completedSessions = sessions.filter(s => s.status === 'ended').length;
+    const completedSessions = sessions.filter((s) => s.status === 'ended').length;
 
     let totalSeconds = 0;
-    sessions.forEach(session => {
+    sessions.forEach((session) => {
       if (session.created_at && session.ended_at) {
         const duration = (new Date(session.ended_at).getTime() - new Date(session.created_at).getTime()) / 1000;
         totalSeconds += duration;
@@ -201,7 +198,7 @@ export default function Profile() {
       completedSessions,
       totalTime: totalSeconds,
       avgDuration,
-      totalMessages: 0 // We don't have message counts in sessions list
+      totalMessages: 0, // We don't have message counts in sessions list
     };
   };
 
@@ -260,9 +257,7 @@ export default function Profile() {
             <div className="flex items-start">
               <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={24} aria-hidden="true" />
               <div className="ml-3 flex-1">
-                <h3 className="text-lg font-semibold text-yellow-800">
-                  Daily Session Limit Reached
-                </h3>
+                <h3 className="text-lg font-semibold text-yellow-800">Daily Session Limit Reached</h3>
                 <p className="text-yellow-700 mt-1">
                   You have used {rateLimitStatus.sessions_used_today} of {rateLimitStatus.session_limit} sessions today.
                   Your limit will reset at midnight Salt Lake City time.
@@ -295,9 +290,7 @@ export default function Profile() {
             {/* Role */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Role</label>
-              <span className="px-3 py-1 bg-royal text-white rounded-full text-sm">
-                {user.role}
-              </span>
+              <span className="px-3 py-1 bg-royal text-white rounded-full text-sm">{user.role}</span>
             </div>
 
             {/* Password Change */}
@@ -312,7 +305,9 @@ export default function Profile() {
                 </button>
               ) : (
                 <div className="space-y-3" role="form" aria-labelledby="password-change-title">
-                  <h3 id="password-change-title" className="font-semibold text-lg">Change Password</h3>
+                  <h3 id="password-change-title" className="font-semibold text-lg">
+                    Change Password
+                  </h3>
                   <input
                     type="password"
                     placeholder="Current Password"
@@ -373,8 +368,8 @@ export default function Profile() {
                   className="text-royal underline hover:text-navy"
                 >
                   Watch the tour or read the guide
-                </a>
-                {' '}— every screen, explained in a few minutes.
+                </a>{' '}
+                — every screen, explained in a few minutes.
               </p>
             </div>
 
@@ -382,14 +377,10 @@ export default function Profile() {
             <div className="pt-4 border-t">
               <p className="text-sm text-gray-600">
                 Want a copy of your data?{' '}
-                <a
-                  href="/api/me/export"
-                  download
-                  className="text-royal underline hover:text-navy"
-                >
+                <a href="/api/me/export" download className="text-royal underline hover:text-navy">
                   Download everything we have about you
-                </a>
-                {' '}as a file — your sessions, progress, and preferences.
+                </a>{' '}
+                as a file — your sessions, progress, and preferences.
               </p>
             </div>
 
@@ -399,20 +390,14 @@ export default function Profile() {
                 {withdrawal.studyStatus !== 'active' ? (
                   <p className="text-sm text-gray-600">
                     Your study participation is currently{' '}
-                    <strong>{withdrawal.studyStatus === 'paused' ? 'paused' : 'withdrawn'}</strong>.
-                    If this is not what you intended, or you would like to resume, contact the
-                    research team: James Gaskin, Principal Investigator (
-                    <a
-                      href="mailto:james.gaskin@byu.edu"
-                      className="text-royal underline hover:text-navy"
-                    >
+                    <strong>{withdrawal.studyStatus === 'paused' ? 'paused' : 'withdrawn'}</strong>. If this is not what
+                    you intended, or you would like to resume, contact the research team: James Gaskin, Principal
+                    Investigator (
+                    <a href="mailto:james.gaskin@byu.edu" className="text-royal underline hover:text-navy">
                       james.gaskin@byu.edu
                     </a>
                     ) or Nathan Blatter (
-                    <a
-                      href="mailto:nzb22@byu.edu"
-                      className="text-royal underline hover:text-navy"
-                    >
+                    <a href="mailto:nzb22@byu.edu" className="text-royal underline hover:text-navy">
                       nzb22@byu.edu
                     </a>
                     ).
@@ -427,8 +412,8 @@ export default function Profile() {
                       className="text-royal underline hover:text-navy"
                     >
                       Let us know here
-                    </a>
-                    {' '}— it only takes a minute, and you can pause instead of fully withdrawing.
+                    </a>{' '}
+                    — it only takes a minute, and you can pause instead of fully withdrawing.
                   </p>
                 )}
               </div>
@@ -498,9 +483,7 @@ export default function Profile() {
           )}
 
           {error && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-              Error: {error}
-            </div>
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">Error: {error}</div>
           )}
 
           {!loading && !error && filteredSessions.length === 0 && (
@@ -514,10 +497,18 @@ export default function Profile() {
               <table className="w-full" role="table">
                 <thead>
                   <tr className="bg-gray-100 border-b">
-                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">Session Name</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">Date</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">Status</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">Actions</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">
+                      Session Name
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">
+                      Date
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold" scope="col">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -530,15 +521,13 @@ export default function Profile() {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">
-                        {formatDate(session.created_at)}
-                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{formatDate(session.created_at)}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-1 text-xs rounded-full ${
-                          session.status === 'active'
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}>
+                        <span
+                          className={`px-2 py-1 text-xs rounded-full ${
+                            session.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          }`}
+                        >
                           {session.status}
                         </span>
                       </td>
@@ -562,10 +551,7 @@ export default function Profile() {
 
       {/* Session Detail Modal */}
       {selectedSessionId && (
-        <UserSessionDetail
-          sessionId={selectedSessionId}
-          onClose={() => setSelectedSessionId(null)}
-        />
+        <UserSessionDetail sessionId={selectedSessionId} onClose={() => setSelectedSessionId(null)} />
       )}
     </div>
   );

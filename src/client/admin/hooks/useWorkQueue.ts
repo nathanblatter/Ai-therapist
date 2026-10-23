@@ -34,7 +34,7 @@ export default function useWorkQueue(statuses: string[] = ['open', 'acked']) {
 
   const statusKey = statuses.join(',');
   const { data, loading, error, refetch } = useAdminFetch<{ items: AttentionWorkItem[] }>(
-    `/admin/api/work-items?status=${encodeURIComponent(statusKey)}`
+    `/admin/api/work-items?status=${encodeURIComponent(statusKey)}`,
   );
   const items = data?.items ?? [];
 
@@ -61,14 +61,14 @@ export default function useWorkQueue(statuses: string[] = ['open', 'acked']) {
         return false;
       }
     },
-    [refetch]
+    [refetch],
   );
 
   const ack = useCallback((itemId: number) => post(itemId, 'ack'), [post]);
   const resolve = useCallback(
     (itemId: number, resolutionNote?: string) =>
       post(itemId, 'resolve', resolutionNote ? { resolution_note: resolutionNote } : {}),
-    [post]
+    [post],
   );
 
   // Only surface loading before the first payload lands: socket-triggered

@@ -42,27 +42,44 @@ vi.mock('./notification.service.js', () => ({
   runDigestSweep: runDigestSweepMock,
 }));
 
-const {
-  enqueueWorkItem,
-  runWorkItemSweep,
-  startWorkQueueScheduler,
-  stopWorkQueueScheduler,
-} = await import('./workQueue.service.js');
+const { enqueueWorkItem, runWorkItemSweep, startWorkQueueScheduler, stopWorkQueueScheduler } = await import(
+  './workQueue.service.js'
+);
 
 function insertedRow(overrides: Record<string, unknown> = {}) {
   return {
-    item_id: 1, org_id: 5, client_id: 42, assignee_id: null, assignee_role: null,
-    item_type: 'crisis_flag', severity: 'urgent', title: 'Crisis flag', detail: null,
-    source_table: 'crisis_events', source_id: '7', status: 'open',
-    acked_by: null, acked_at: null, resolved_by: null, resolved_at: null,
-    resolution_note: null, is_sandbox: false, created_at: 'now',
+    item_id: 1,
+    org_id: 5,
+    client_id: 42,
+    assignee_id: null,
+    assignee_role: null,
+    item_type: 'crisis_flag',
+    severity: 'urgent',
+    title: 'Crisis flag',
+    detail: null,
+    source_table: 'crisis_events',
+    source_id: '7',
+    status: 'open',
+    acked_by: null,
+    acked_at: null,
+    resolved_by: null,
+    resolved_at: null,
+    resolution_note: null,
+    is_sandbox: false,
+    created_at: 'now',
     ...overrides,
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getUserByIdMock.mockResolvedValue({ userid: 42, username: 'p42', role: 'participant', organization_id: 5, is_sandbox: false });
+  getUserByIdMock.mockResolvedValue({
+    userid: 42,
+    username: 'p42',
+    role: 'participant',
+    organization_id: 5,
+    is_sandbox: false,
+  });
   getCareTeamMock.mockResolvedValue([
     { member_id: 7, username: 't1', member_role: 'therapist', assigned_at: 'x' },
     { member_id: 8, username: 'cw1', member_role: 'caseworker', assigned_at: 'x' },
@@ -86,9 +103,14 @@ describe('enqueueWorkItem', () => {
   it('resolves org and sandbox from the client row and notifies the care team pool', async () => {
     const item = await enqueueWorkItem({ ...BASE, clientId: 42 });
     expect(item).not.toBeNull();
-    expect(insertWorkItemMock).toHaveBeenCalledWith(expect.objectContaining({
-      orgId: 5, clientId: 42, isSandbox: false, itemType: 'crisis_flag',
-    }));
+    expect(insertWorkItemMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgId: 5,
+        clientId: 42,
+        isSandbox: false,
+        itemType: 'crisis_flag',
+      }),
+    );
     expect(notifyWorkItemMock).toHaveBeenCalledWith(insertedRow(), [
       { userId: 7, role: 'therapist' },
       { userId: 8, role: 'caseworker' },
@@ -103,7 +125,13 @@ describe('enqueueWorkItem', () => {
   });
 
   it('stamps is_sandbox from the client account', async () => {
-    getUserByIdMock.mockResolvedValue({ userid: 42, username: 'fake', role: 'participant', organization_id: 9, is_sandbox: true });
+    getUserByIdMock.mockResolvedValue({
+      userid: 42,
+      username: 'fake',
+      role: 'participant',
+      organization_id: 9,
+      is_sandbox: true,
+    });
     await enqueueWorkItem({ ...BASE, clientId: 42 });
     expect(insertWorkItemMock).toHaveBeenCalledWith(expect.objectContaining({ orgId: 9, isSandbox: true }));
   });
@@ -129,8 +157,12 @@ describe('enqueueWorkItem', () => {
     getResearcherIdsMock.mockResolvedValue([11, 12]);
     insertWorkItemMock.mockResolvedValue(insertedRow({ item_type: 'participant_withdrawal', severity: 'info' }));
     await enqueueWorkItem({
-      itemType: 'participant_withdrawal', severity: 'info', title: 'Participant withdrew from the study',
-      sourceTable: 'qualtrics_responses', sourceId: 'R_1', clientId: 42,
+      itemType: 'participant_withdrawal',
+      severity: 'info',
+      title: 'Participant withdrew from the study',
+      sourceTable: 'qualtrics_responses',
+      sourceId: 'R_1',
+      clientId: 42,
     });
     expect(notifyWorkItemMock).toHaveBeenCalledWith(expect.anything(), [
       { userId: 11, role: 'researcher' },
@@ -142,8 +174,12 @@ describe('enqueueWorkItem', () => {
     getResearcherIdsMock.mockResolvedValue([7, 11]); // 7 already on the care team
     insertWorkItemMock.mockResolvedValue(insertedRow({ item_type: 'participant_withdrawal', severity: 'info' }));
     await enqueueWorkItem({
-      itemType: 'participant_withdrawal', severity: 'info', title: 'Participant withdrew from the study',
-      sourceTable: 'qualtrics_responses', sourceId: 'R_2', clientId: 42,
+      itemType: 'participant_withdrawal',
+      severity: 'info',
+      title: 'Participant withdrew from the study',
+      sourceTable: 'qualtrics_responses',
+      sourceId: 'R_2',
+      clientId: 42,
     });
     expect(notifyWorkItemMock).toHaveBeenCalledWith(expect.anything(), [
       { userId: 7, role: 'therapist' },
@@ -188,44 +224,63 @@ describe('runWorkItemSweep', () => {
       return { rows: [] };
     });
     await runWorkItemSweep(undefined, new Date('2026-08-27T18:00:00Z'));
-    expect(insertWorkItemMock).toHaveBeenCalledWith(expect.objectContaining({
-      itemType: 'inactivity',
-      sourceId: 'inactivity:42', // no date: an open item is refreshed, never stacked daily
-      clientId: 42,
-      reopen: true, // expired-on-re-engagement items reactivate when inactivity recurs
-    }));
+    expect(insertWorkItemMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemType: 'inactivity',
+        sourceId: 'inactivity:42', // no date: an open item is refreshed, never stacked daily
+        clientId: 42,
+        reopen: true, // expired-on-re-engagement items reactivate when inactivity recurs
+      }),
+    );
   });
 
   it('enqueues screener_worsening pool items with the score delta in detail', async () => {
     poolQueryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('WITH ranked AS')) {
-        return { rows: [{ client_id: 42, scale: 'PHQ-9', latest_score: 18, previous_score: 10, latest_at: '2026-08-25' }] };
+        return {
+          rows: [{ client_id: 42, scale: 'PHQ-9', latest_score: 18, previous_score: 10, latest_at: '2026-08-25' }],
+        };
       }
       return { rows: [] };
     });
     await runWorkItemSweep();
-    expect(insertWorkItemMock).toHaveBeenCalledWith(expect.objectContaining({
-      itemType: 'screener_worsening',
-      severity: 'warning',
-      sourceId: 'screener:42:PHQ-9:2026-08-25',
-      detail: { scale: 'PHQ-9', latest_score: 18, previous_score: 10 },
-    }));
+    expect(insertWorkItemMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemType: 'screener_worsening',
+        severity: 'warning',
+        sourceId: 'screener:42:PHQ-9:2026-08-25',
+        detail: { scale: 'PHQ-9', latest_score: 18, previous_score: 10 },
+      }),
+    );
   });
 
   it('assigns message_unread_stale items to the thread clinician', async () => {
     poolQueryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM message_threads t')) {
-        return { rows: [{ thread_id: 3, client_id: 42, clinician_id: 8, clinician_role: 'caseworker', last_message_id: 99, unread_count: 2 }] };
+        return {
+          rows: [
+            {
+              thread_id: 3,
+              client_id: 42,
+              clinician_id: 8,
+              clinician_role: 'caseworker',
+              last_message_id: 99,
+              unread_count: 2,
+            },
+          ],
+        };
       }
       return { rows: [] };
     });
     await runWorkItemSweep();
-    expect(insertWorkItemMock).toHaveBeenCalledWith(expect.objectContaining({
-      itemType: 'message_unread_stale',
-      sourceId: 'thread:3:99',
-      assigneeId: 8,
-      assigneeRole: 'caseworker',
-    }));
+    expect(insertWorkItemMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemType: 'message_unread_stale',
+        sourceId: 'thread:3:99',
+        assigneeId: 8,
+        assigneeRole: 'caseworker',
+      }),
+    );
   });
 
   it('survives a failing producer query and still runs the others', async () => {
@@ -287,8 +342,7 @@ describe('startWorkQueueScheduler', () => {
     poolFor(true);
     startWorkQueueScheduler();
     await vi.advanceTimersByTimeAsync(MAX_JITTER_MS);
-    const claimCalls = () =>
-      poolQueryMock.mock.calls.filter(([sql]) => String(sql).includes('system_config')).length;
+    const claimCalls = () => poolQueryMock.mock.calls.filter(([sql]) => String(sql).includes('system_config')).length;
     expect(claimCalls()).toBe(1);
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000); // next hourly tick, same day
     expect(runDigestSweepMock).toHaveBeenCalledTimes(2);

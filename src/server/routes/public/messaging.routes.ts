@@ -42,7 +42,13 @@ function participantMessageView(m: ThreadMessageRow) {
 }
 
 /** Participant view of a thread: no org/sandbox internals. */
-function participantThreadView(t: MessageThreadRow & { counterpart_username?: string | null; unread_count?: number; last_message_preview?: string | null }) {
+function participantThreadView(
+  t: MessageThreadRow & {
+    counterpart_username?: string | null;
+    unread_count?: number;
+    last_message_preview?: string | null;
+  },
+) {
   return {
     thread_id: t.thread_id,
     clinician_id: t.clinician_id,
@@ -64,10 +70,7 @@ export default function publicMessagingRoutes(): Router {
   router.get('/api/messaging/threads', requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
-      const [threads, unreadTotal] = await Promise.all([
-        listThreadsForClient(userId),
-        countUnreadForUser(userId),
-      ]);
+      const [threads, unreadTotal] = await Promise.all([listThreadsForClient(userId), countUnreadForUser(userId)]);
       res.json({ threads: threads.map(participantThreadView), unread_total: unreadTotal });
     } catch (err) {
       log.error({ err }, 'Failed to list participant threads');
@@ -77,29 +80,24 @@ export default function publicMessagingRoutes(): Router {
 
   // GET /api/messaging/threads/:threadId/messages - a thread's messages
   // (oldest first; ?before=<messageId>&limit=<n> keyset pagination)
-  router.get(
-    '/api/messaging/threads/:threadId/messages',
-    requireAuth,
-    requireThreadParticipant(),
-    async (req, res) => {
-      try {
-        const thread = res.locals.thread as MessageThreadRow;
-        const before = Number(req.query.before);
-        const { limit } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
-        const messages = await listThreadMessages(thread.thread_id, {
-          beforeMessageId: Number.isInteger(before) ? before : null,
-          limit,
-        });
-        res.json({
-          thread: participantThreadView(thread),
-          messages: messages.map(participantMessageView),
-        });
-      } catch (err) {
-        log.error({ err }, 'Failed to list thread messages');
-        res.status(500).json({ error: 'Failed to load messages' });
-      }
+  router.get('/api/messaging/threads/:threadId/messages', requireAuth, requireThreadParticipant(), async (req, res) => {
+    try {
+      const thread = res.locals.thread as MessageThreadRow;
+      const before = Number(req.query.before);
+      const { limit } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
+      const messages = await listThreadMessages(thread.thread_id, {
+        beforeMessageId: Number.isInteger(before) ? before : null,
+        limit,
+      });
+      res.json({
+        thread: participantThreadView(thread),
+        messages: messages.map(participantMessageView),
+      });
+    } catch (err) {
+      log.error({ err }, 'Failed to list thread messages');
+      res.status(500).json({ error: 'Failed to load messages' });
     }
-  );
+  });
 
   // POST /api/messaging/threads/:threadId/messages - send (active threads only;
   // frozen -> 409 thread_frozen from the gate). Fires the safety scan
@@ -141,36 +139,31 @@ export default function publicMessagingRoutes(): Router {
         log.error({ err }, 'Failed to send message');
         res.status(500).json({ error: 'Failed to send message' });
       }
-    }
+    },
   );
 
   // POST /api/messaging/threads/:threadId/read - advance the read pointer
-  router.post(
-    '/api/messaging/threads/:threadId/read',
-    requireAuth,
-    requireThreadParticipant(),
-    async (req, res) => {
-      const lastReadMessageId = Number(req.body?.last_read_message_id);
-      if (!Number.isInteger(lastReadMessageId) || lastReadMessageId < 0) {
-        return res.status(400).json({ error: 'Invalid last_read_message_id' });
-      }
-      try {
-        const thread = res.locals.thread as MessageThreadRow;
-        await markThreadRead(thread.thread_id, req.session.userId!, lastReadMessageId);
-        if (global.io) {
-          global.io.to(userRoom(thread.clinician_id)).emit('messaging:read', {
-            threadId: thread.thread_id,
-            lastReadMessageId,
-            readerId: req.session.userId,
-          });
-        }
-        res.json({ success: true });
-      } catch (err) {
-        log.error({ err }, 'Failed to mark thread read');
-        res.status(500).json({ error: 'Failed to mark thread read' });
-      }
+  router.post('/api/messaging/threads/:threadId/read', requireAuth, requireThreadParticipant(), async (req, res) => {
+    const lastReadMessageId = Number(req.body?.last_read_message_id);
+    if (!Number.isInteger(lastReadMessageId) || lastReadMessageId < 0) {
+      return res.status(400).json({ error: 'Invalid last_read_message_id' });
     }
-  );
+    try {
+      const thread = res.locals.thread as MessageThreadRow;
+      await markThreadRead(thread.thread_id, req.session.userId!, lastReadMessageId);
+      if (global.io) {
+        global.io.to(userRoom(thread.clinician_id)).emit('messaging:read', {
+          threadId: thread.thread_id,
+          lastReadMessageId,
+          readerId: req.session.userId,
+        });
+      }
+      res.json({ success: true });
+    } catch (err) {
+      log.error({ err }, 'Failed to mark thread read');
+      res.status(500).json({ error: 'Failed to mark thread read' });
+    }
+  });
 
   return router;
 }

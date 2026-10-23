@@ -22,7 +22,9 @@
     "redteam:quality": "tsx src/redteam/cli.ts --suite quality",
     "redteam:voice": "tsx src/redteam/cli.ts --suite voice",
     "redteam:replay": "tsx src/redteam/replay.ts",
-    "counterfactual": "tsx src/database/scripts/runCounterfactual.ts"
+    "counterfactual": "tsx src/database/scripts/runCounterfactual.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
@@ -80,12 +82,14 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.21",
     "eslint": "^8.57.0",
+    "eslint-config-prettier": "9.1.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "opusscript": "^0.1.1",
     "postcss": "^8.5.6",
     "postcss-nesting": "^12.0.2",
     "postcss-preset-env": "^7.7.1",
+    "prettier": "3.6.2",
     "supertest": "^7.2.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",

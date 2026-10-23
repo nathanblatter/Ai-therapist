@@ -36,7 +36,7 @@ function auditWorkItemChange(
   item: WorkItemRow,
   memberId: number,
   username: string | null | undefined,
-  detail: Record<string, unknown>
+  detail: Record<string, unknown>,
 ): void {
   void insertCaseloadAudit({
     action,
@@ -60,16 +60,18 @@ function parseStatuses(raw: unknown): WorkItemStatus[] | null {
  * Distinguish 404 (missing or not visible to me — same answer) from 409
  * (visible but the guarded UPDATE lost the state race) after a null result.
  */
-async function missOrConflict(itemId: number, memberId: number, orgId: number | null = null):
-  Promise<{ status: 404 } | { status: 409; itemStatus: string }> {
+async function missOrConflict(
+  itemId: number,
+  memberId: number,
+  orgId: number | null = null,
+): Promise<{ status: 404 } | { status: 409; itemStatus: string }> {
   const item = await getWorkItemById(itemId);
   if (!item) return { status: 404 };
-  const visible = orgId !== null
-    ? item.org_id === orgId
-    : item.assignee_id === memberId ||
-      (item.assignee_id === null &&
-        item.client_id !== null &&
-        (await isAssigned(memberId, item.client_id)));
+  const visible =
+    orgId !== null
+      ? item.org_id === orgId
+      : item.assignee_id === memberId ||
+        (item.assignee_id === null && item.client_id !== null && (await isAssigned(memberId, item.client_id)));
   if (!visible) return { status: 404 };
   return { status: 409, itemStatus: item.status };
 }
@@ -78,29 +80,25 @@ export default function workQueueRoutes(): Router {
   const router = Router();
 
   // GET /admin/api/work-items?status=open,acked&limit=100
-  router.get(
-    '/admin/api/work-items',
-    requireRole('caseworker', 'therapist', 'researcher'),
-    async (req, res) => {
-      const statuses = parseStatuses(req.query.status);
-      if (!statuses) return res.status(400).json({ error: 'Invalid status filter' });
-      const { limit } = parsePagination(req.query, { defaultLimit: 200, maxLimit: 500 });
+  router.get('/admin/api/work-items', requireRole('caseworker', 'therapist', 'researcher'), async (req, res) => {
+    const statuses = parseStatuses(req.query.status);
+    if (!statuses) return res.status(400).json({ error: 'Invalid status filter' });
+    const { limit } = parsePagination(req.query, { defaultLimit: 200, maxLimit: 500 });
 
-      try {
-        if (isCareTeamRole(req.session.userRole)) {
-          const items = await listWorkItemsForMember(req.session.userId!, { statuses, limit });
-          return res.json({ items });
-        }
-        // Researcher: org-scoped read. Unresolvable org -> empty, never a leak.
-        const orgId = await orgIdFor(req);
-        const items = orgId === null ? [] : await listWorkItemsForOrg(orgId, { statuses, limit });
-        res.json({ items });
-      } catch (err) {
-        log.error({ err }, 'Failed to list work items');
-        res.status(500).json({ error: 'Failed to list work items' });
+    try {
+      if (isCareTeamRole(req.session.userRole)) {
+        const items = await listWorkItemsForMember(req.session.userId!, { statuses, limit });
+        return res.json({ items });
       }
+      // Researcher: org-scoped read. Unresolvable org -> empty, never a leak.
+      const orgId = await orgIdFor(req);
+      const items = orgId === null ? [] : await listWorkItemsForOrg(orgId, { statuses, limit });
+      res.json({ items });
+    } catch (err) {
+      log.error({ err }, 'Failed to list work items');
+      res.status(500).json({ error: 'Failed to list work items' });
     }
-  );
+  });
 
   // POST /admin/api/work-items/:itemId/ack — care-team members (caseload
   // visibility) or researchers (org-scoped, unscoped study role)
@@ -123,10 +121,7 @@ export default function workQueueRoutes(): Router {
           if (miss.status === 404) return res.status(404).json({ error: 'Not found' });
           return res.status(409).json({ error: 'Item is not open', status: miss.itemStatus });
         }
-        log.info(
-          { itemId, memberId, actor: req.session.username, itemType: item.item_type },
-          'work item acknowledged'
-        );
+        log.info({ itemId, memberId, actor: req.session.username, itemType: item.item_type }, 'work item acknowledged');
         auditWorkItemChange('work_item_ack', item, memberId, req.session.username, {});
         void emitWorkItemUpdated(item);
         res.json({ item });
@@ -134,7 +129,7 @@ export default function workQueueRoutes(): Router {
         log.error({ err, itemId }, 'Failed to ack work item');
         res.status(500).json({ error: 'Failed to acknowledge work item' });
       }
-    }
+    },
   );
 
   // POST /admin/api/work-items/:itemId/resolve — body { resolution_note? }
@@ -162,10 +157,7 @@ export default function workQueueRoutes(): Router {
           if (miss.status === 404) return res.status(404).json({ error: 'Not found' });
           return res.status(409).json({ error: 'Item is not open or acknowledged', status: miss.itemStatus });
         }
-        log.info(
-          { itemId, memberId, actor: req.session.username, itemType: item.item_type },
-          'work item resolved'
-        );
+        log.info({ itemId, memberId, actor: req.session.username, itemType: item.item_type }, 'work item resolved');
         auditWorkItemChange('work_item_resolve', item, memberId, req.session.username, {
           has_resolution_note: note !== null,
         });
@@ -175,7 +167,7 @@ export default function workQueueRoutes(): Router {
         log.error({ err, itemId }, 'Failed to resolve work item');
         res.status(500).json({ error: 'Failed to resolve work item' });
       }
-    }
+    },
   );
 
   return router;

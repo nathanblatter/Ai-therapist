@@ -43,7 +43,7 @@ export function useFlaggedMessageEvents(): {
   const refetch = useCallback(() => {
     setLoading(true);
     getJson<{ events: FlaggedMessageEvent[] }>('/api/admin/messaging/flagged')
-      .then(data => {
+      .then((data) => {
         setEvents(data.events);
         setError(null);
       })
@@ -100,13 +100,14 @@ export default function FlaggedMessageRow({ event, onOpenThread }: FlaggedMessag
             <MessageSquare size={12} aria-hidden="true" /> Flagged message
           </span>
         </div>
-        {factors.length > 0 && (
-          <p className="text-xs text-gray-500 truncate mt-0.5">{factors.join(', ')}</p>
-        )}
+        {factors.length > 0 && <p className="text-xs text-gray-500 truncate mt-0.5">{factors.join(', ')}</p>}
       </div>
       <span className="text-xs text-gray-400 flex-shrink-0">
         {new Date(event.created_at).toLocaleString(undefined, {
-          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
         })}
       </span>
       {event.thread_id !== null && onOpenThread && (

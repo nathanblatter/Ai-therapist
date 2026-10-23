@@ -56,7 +56,10 @@ describe('sweepMessageEmbeddings', () => {
         { message_id: 'm2', content_redacted: 'redacted two' },
       ],
     });
-    embedTextBatchMock.mockResolvedValueOnce([[0.1, 0.2], [0.3, 0.4]]);
+    embedTextBatchMock.mockResolvedValueOnce([
+      [0.1, 0.2],
+      [0.3, 0.4],
+    ]);
     queryMock.mockResolvedValue({ rowCount: 1 });
 
     const result = await sweepMessageEmbeddings();

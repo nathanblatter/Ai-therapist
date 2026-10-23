@@ -6,8 +6,15 @@
 // the therapist-only clinical bundle (caseworkers, researchers).
 import { useMemo } from 'react';
 import {
-  AlertTriangle, ArrowUpRight, Clock, Heart, MessageCircle, Minus, Shield,
-  TrendingDown, TrendingUp,
+  AlertTriangle,
+  ArrowUpRight,
+  Clock,
+  Heart,
+  MessageCircle,
+  Minus,
+  Shield,
+  TrendingDown,
+  TrendingUp,
 } from 'react-feather';
 import Panel from './ui/Panel';
 import StatCard from './ui/StatCard';
@@ -93,7 +100,7 @@ export default function CatchUp({ userId, onViewSession }: CatchUpProps) {
   const detail = detailFetch.data;
   const engagement = catchupFetch.data?.engagement ?? null;
   // Fail-soft AI paragraph: any error simply hides it (signals still render).
-  const aiSummary = catchupFetch.error ? null : catchupFetch.data?.summary ?? null;
+  const aiSummary = catchupFetch.error ? null : (catchupFetch.data?.summary ?? null);
 
   const screeners = useMemo(() => screenerSignals(detail?.scale_history ?? []), [detail]);
   const latestRisk = detail?.risk_history[0] ?? null;
@@ -107,10 +114,18 @@ export default function CatchUp({ userId, onViewSession }: CatchUpProps) {
     Date.now() - new Date(lastSessionAt).getTime() >= INACTIVITY_DAYS * 24 * 3600 * 1000;
 
   if (detailFetch.loading || catchupFetch.loading) {
-    return <Panel><p className="text-sm text-gray-500 py-4 text-center">Loading catch-up…</p></Panel>;
+    return (
+      <Panel>
+        <p className="text-sm text-gray-500 py-4 text-center">Loading catch-up…</p>
+      </Panel>
+    );
   }
   if (detailFetch.error && catchupFetch.error) {
-    return <Panel><p className="text-sm text-gray-500 py-4 text-center">Catch-up is not available for this client.</p></Panel>;
+    return (
+      <Panel>
+        <p className="text-sm text-gray-500 py-4 text-center">Catch-up is not available for this client.</p>
+      </Panel>
+    );
   }
 
   const TrendMeta = trend ? TREND_META[trend] : null;
@@ -155,8 +170,11 @@ export default function CatchUp({ userId, onViewSession }: CatchUpProps) {
                 <p key={s.scale} className="text-sm text-navy">
                   <span className="font-semibold uppercase">{s.scale}</span> {s.score}
                   {s.delta !== null && (
-                    <span className={`text-xs ml-1 ${s.delta > 0 ? 'text-red-600' : s.delta < 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
-                      ({s.delta > 0 ? '+' : ''}{s.delta})
+                    <span
+                      className={`text-xs ml-1 ${s.delta > 0 ? 'text-red-600' : s.delta < 0 ? 'text-emerald-600' : 'text-gray-400'}`}
+                    >
+                      ({s.delta > 0 ? '+' : ''}
+                      {s.delta})
                     </span>
                   )}
                 </p>
@@ -175,30 +193,46 @@ export default function CatchUp({ userId, onViewSession }: CatchUpProps) {
       </div>
 
       {/* Notable flags */}
-      {engagement && (engagement.open_crisis_count > 0 || engagement.open_escalation_count > 0 || inactive || engagement.has_safety_plan) && (
-        <div className="flex flex-wrap gap-2" aria-label="Notable flags">
-          {engagement.open_crisis_count > 0 && (
-            <FlagChip icon={AlertTriangle} tone="bg-red-100 text-red-700"
-              label={`${engagement.open_crisis_count} open crisis flag${engagement.open_crisis_count === 1 ? '' : 's'}`} />
-          )}
-          {engagement.open_escalation_count > 0 && (
-            <FlagChip icon={ArrowUpRight} tone="bg-yellow-100 text-yellow-800"
-              label={`${engagement.open_escalation_count} open escalation${engagement.open_escalation_count === 1 ? '' : 's'}`} />
-          )}
-          {inactive && (
-            <FlagChip icon={Clock} tone="bg-gray-100 text-gray-600" label={`No session in ${INACTIVITY_DAYS}+ days`} />
-          )}
-          {engagement.has_safety_plan && (
-            <FlagChip icon={Shield} tone="bg-emerald-100 text-emerald-800" label="Safety plan on file" />
-          )}
-        </div>
-      )}
+      {engagement &&
+        (engagement.open_crisis_count > 0 ||
+          engagement.open_escalation_count > 0 ||
+          inactive ||
+          engagement.has_safety_plan) && (
+          <div className="flex flex-wrap gap-2" aria-label="Notable flags">
+            {engagement.open_crisis_count > 0 && (
+              <FlagChip
+                icon={AlertTriangle}
+                tone="bg-red-100 text-red-700"
+                label={`${engagement.open_crisis_count} open crisis flag${engagement.open_crisis_count === 1 ? '' : 's'}`}
+              />
+            )}
+            {engagement.open_escalation_count > 0 && (
+              <FlagChip
+                icon={ArrowUpRight}
+                tone="bg-yellow-100 text-yellow-800"
+                label={`${engagement.open_escalation_count} open escalation${engagement.open_escalation_count === 1 ? '' : 's'}`}
+              />
+            )}
+            {inactive && (
+              <FlagChip
+                icon={Clock}
+                tone="bg-gray-100 text-gray-600"
+                label={`No session in ${INACTIVITY_DAYS}+ days`}
+              />
+            )}
+            {engagement.has_safety_plan && (
+              <FlagChip icon={Shield} tone="bg-emerald-100 text-emerald-800" label="Safety plan on file" />
+            )}
+          </div>
+        )}
 
       {/* AI catch-up paragraph */}
       {aiSummary && (
         <div className="px-1">
           <p className="text-sm text-gray-600 italic leading-relaxed">{aiSummary}</p>
-          <p className="text-xs text-gray-400 mt-1">AI-generated from session summaries and signals — verify against the record.</p>
+          <p className="text-xs text-gray-400 mt-1">
+            AI-generated from session summaries and signals — verify against the record.
+          </p>
         </div>
       )}
 
@@ -230,7 +264,9 @@ export default function CatchUp({ userId, onViewSession }: CatchUpProps) {
                       {s.topics?.length ? (
                         <div className="flex flex-wrap gap-1.5">
                           {s.topics.map((t) => (
-                            <span key={t} className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-800">{t}</span>
+                            <span key={t} className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-800">
+                              {t}
+                            </span>
                           ))}
                         </div>
                       ) : null}

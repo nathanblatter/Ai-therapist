@@ -29,10 +29,9 @@ async function postEmbeddings(body: string): Promise<Response> {
     lastRes = res;
     if (i < MAX_ATTEMPTS - 1) {
       const retryAfter = Number(res.headers.get('retry-after'));
-      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(retryAfter * 1000, 30_000)
-        : 1000 * (i + 1);
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      const delayMs =
+        Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 30_000) : 1000 * (i + 1);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
   return lastRes!;

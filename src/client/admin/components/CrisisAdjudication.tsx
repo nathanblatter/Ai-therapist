@@ -28,19 +28,24 @@ interface CrisisAdjudicationProps {
 
 const VERDICTS: Array<{ id: AdjudicationVerdict; label: string; Icon: typeof CheckCircle; active: string }> = [
   { id: 'confirmed', label: 'Confirmed', Icon: CheckCircle, active: 'bg-red-100 text-red-800 border-red-300' },
-  { id: 'false_positive', label: 'False positive', Icon: XCircle, active: 'bg-green-100 text-green-800 border-green-300' },
+  {
+    id: 'false_positive',
+    label: 'False positive',
+    Icon: XCircle,
+    active: 'bg-green-100 text-green-800 border-green-300',
+  },
   { id: 'unclear', label: 'Unclear', Icon: HelpCircle, active: 'bg-gray-200 text-gray-800 border-gray-400' },
 ];
 
 export function verdictLabel(v: AdjudicationVerdict): string {
-  return VERDICTS.find(x => x.id === v)?.label ?? v;
+  return VERDICTS.find((x) => x.id === v)?.label ?? v;
 }
 
 export default function CrisisAdjudication({ eventId, adjudications, onSaved, compact }: CrisisAdjudicationProps) {
   const { role, userId } = useAuth();
   const canAdjudicate = role === 'therapist' || role === 'researcher';
   const list = adjudications ?? [];
-  const mine = userId !== null ? list.find(a => a.adjudicator_id === userId) : undefined;
+  const mine = userId !== null ? list.find((a) => a.adjudicator_id === userId) : undefined;
   const [note, setNote] = useState('');
   const [showNote, setShowNote] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -51,11 +56,15 @@ export default function CrisisAdjudication({ eventId, adjudications, onSaved, co
       const data = await postJson<{ adjudication: AdjudicationSummary }>(
         `/admin/api/crisis/events/${eventId}/adjudication`,
         { verdict, note: note || undefined },
-        { method: 'PUT', fallback: 'Failed to save adjudication' }
+        { method: 'PUT', fallback: 'Failed to save adjudication' },
       );
       const next = [
-        { adjudicator_id: data.adjudication.adjudicator_id, verdict: data.adjudication.verdict, adjudicated_at: data.adjudication.adjudicated_at },
-        ...list.filter(a => a.adjudicator_id !== data.adjudication.adjudicator_id),
+        {
+          adjudicator_id: data.adjudication.adjudicator_id,
+          verdict: data.adjudication.verdict,
+          adjudicated_at: data.adjudication.adjudicated_at,
+        },
+        ...list.filter((a) => a.adjudicator_id !== data.adjudication.adjudicator_id),
       ];
       onSaved?.(next);
       toast.success(`Marked ${verdictLabel(verdict).toLowerCase()}`);
@@ -66,7 +75,7 @@ export default function CrisisAdjudication({ eventId, adjudications, onSaved, co
     }
   };
 
-  const others = list.filter(a => a.adjudicator_id !== userId);
+  const others = list.filter((a) => a.adjudicator_id !== userId);
 
   return (
     <div className={`${compact ? 'mt-2' : 'mt-3 pt-3 border-t border-gray-200'} text-xs`}>
@@ -88,18 +97,19 @@ export default function CrisisAdjudication({ eventId, adjudications, onSaved, co
             </button>
           ))
         ) : (
-          <span className="text-gray-600">{mine ? verdictLabel(mine.verdict) : list.length ? '' : 'not adjudicated'}</span>
+          <span className="text-gray-600">
+            {mine ? verdictLabel(mine.verdict) : list.length ? '' : 'not adjudicated'}
+          </span>
         )}
-        {!mine && canAdjudicate && list.length === 0 && (
-          <span className="text-gray-500">not yet adjudicated</span>
-        )}
+        {!mine && canAdjudicate && list.length === 0 && <span className="text-gray-500">not yet adjudicated</span>}
         {others.length > 0 && (
           <span className="text-gray-500">
-            {others.length} other verdict{others.length === 1 ? '' : 's'}: {others.map(a => verdictLabel(a.verdict)).join(', ')}
+            {others.length} other verdict{others.length === 1 ? '' : 's'}:{' '}
+            {others.map((a) => verdictLabel(a.verdict)).join(', ')}
           </span>
         )}
         {canAdjudicate && (
-          <button type="button" onClick={() => setShowNote(v => !v)} className="text-royal hover:text-navy">
+          <button type="button" onClick={() => setShowNote((v) => !v)} className="text-royal hover:text-navy">
             {showNote ? 'hide note' : 'add note'}
           </button>
         )}
@@ -109,7 +119,7 @@ export default function CrisisAdjudication({ eventId, adjudications, onSaved, co
           type="text"
           value={note}
           maxLength={2000}
-          onChange={e => setNote(e.target.value)}
+          onChange={(e) => setNote(e.target.value)}
           placeholder="Optional note (saved with your next verdict; never exported)"
           className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1"
         />

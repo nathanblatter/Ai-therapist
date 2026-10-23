@@ -7,7 +7,8 @@ export function gitSha(): string {
   if (process.env.GIT_SHA) return process.env.GIT_SHA;
   try {
     return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString().trim();
+      .toString()
+      .trim();
   } catch {
     return 'unknown';
   }

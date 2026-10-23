@@ -21,11 +21,7 @@ vi.mock('../db/index.js', () => ({
   updateSessionName: updateSessionNameMock,
 }));
 
-import {
-  buildConversationText,
-  isJunkSessionName,
-  generateSessionName,
-} from './sessionName.service.js';
+import { buildConversationText, isJunkSessionName, generateSessionName } from './sessionName.service.js';
 
 beforeEach(() => {
   createMock.mockReset();

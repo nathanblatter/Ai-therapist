@@ -6,11 +6,7 @@
 //   - GET  /admin/api/sandbox/invites — batch history with used/total counts.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import {
-  createSandboxInviteBatch,
-  listSandboxInviteBatches,
-  insertCaseloadAudit,
-} from '../../db/index.js';
+import { createSandboxInviteBatch, listSandboxInviteBatches, insertCaseloadAudit } from '../../db/index.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('sandboxInvites');
@@ -36,8 +32,7 @@ export default function sandboxInvitesRoutes(): Router {
       }
 
       const rawLabel = req.body?.label;
-      const label =
-        typeof rawLabel === 'string' && rawLabel.trim().length > 0 ? rawLabel.trim().slice(0, 120) : null;
+      const label = typeof rawLabel === 'string' && rawLabel.trim().length > 0 ? rawLabel.trim().slice(0, 120) : null;
 
       let ttlHours = DEFAULT_TTL_HOURS;
       const rawTtl = req.body?.ttlHours;

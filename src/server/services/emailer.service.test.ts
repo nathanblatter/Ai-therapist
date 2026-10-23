@@ -11,13 +11,17 @@ vi.mock('../db/index.js', () => ({
   getSystemConfigByKey: getSystemConfigByKeyMock,
 }));
 
-import {
-  sendEmail,
-  _setTransportFactoryForTests,
-  type MailTransport,
-} from './emailer.service.js';
+import { sendEmail, _setTransportFactoryForTests, type MailTransport } from './emailer.service.js';
 
-const SMTP_KEYS = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_FROM', 'EMAIL_API_URL', 'EMAIL_API_KEY'] as const;
+const SMTP_KEYS = [
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_USER',
+  'SMTP_PASS',
+  'EMAIL_FROM',
+  'EMAIL_API_URL',
+  'EMAIL_API_KEY',
+] as const;
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -142,7 +146,12 @@ describe('sendEmail', () => {
     });
 
     function reply(status: number, body: unknown = {}) {
-      return { ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) };
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      };
     }
 
     it('POSTs /send with the key and the configured from address', async () => {
@@ -195,4 +204,3 @@ describe('sendEmail', () => {
     });
   });
 });
-

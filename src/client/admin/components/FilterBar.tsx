@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 
 // Filter option constants
 const VOICE_OPTIONS = [
@@ -11,7 +11,7 @@ const VOICE_OPTIONS = [
   { value: 'marin', label: 'Marin' },
   { value: 'sage', label: 'Sage' },
   { value: 'shimmer', label: 'Shimmer' },
-  { value: 'verse', label: 'Verse' }
+  { value: 'verse', label: 'Verse' },
 ];
 
 const LANGUAGE_OPTIONS = [
@@ -29,37 +29,37 @@ const LANGUAGE_OPTIONS = [
   { value: 'ko', label: 'Korean' },
   { value: 'ar', label: 'Arabic' },
   { value: 'hi', label: 'Hindi' },
-  { value: 'ru', label: 'Russian' }
+  { value: 'ru', label: 'Russian' },
 ];
 
 const DURATION_OPTIONS = [
   { value: 'short', label: 'Short (0-5 min)' },
   { value: 'medium', label: 'Medium (5-30 min)' },
-  { value: 'long', label: 'Long (30+ min)' }
+  { value: 'long', label: 'Long (30+ min)' },
 ];
 
 const SESSION_TYPE_OPTIONS = [
   { value: 'realtime', label: 'Realtime' },
-  { value: 'chat', label: 'Chat' }
+  { value: 'chat', label: 'Chat' },
 ];
 
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
   { value: 'ended', label: 'Ended' },
-  { value: 'archived', label: 'Archived' }
+  { value: 'archived', label: 'Archived' },
 ];
 
 const ENDED_BY_OPTIONS = [
   { value: 'user', label: 'User' },
   { value: 'admin', label: 'Admin' },
-  { value: 'system', label: 'System' }
+  { value: 'system', label: 'System' },
 ];
 
 const CRISIS_SEVERITY_OPTIONS = [
   { value: '', label: 'All' },
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' }
+  { value: 'high', label: 'High' },
 ];
 
 interface SelectOption {
@@ -78,14 +78,14 @@ interface MultiSelectFilterProps {
 function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFilterProps) {
   const handleToggle = (value: string) => {
     if (selected.includes(value)) {
-      onChange(selected.filter(v => v !== value));
+      onChange(selected.filter((v) => v !== value));
     } else {
       onChange([...selected, value]);
     }
   };
 
   const handleSelectAll = () => {
-    onChange(options.map(opt => opt.value));
+    onChange(options.map((opt) => opt.value));
   };
 
   const handleClearAll = () => {
@@ -97,24 +97,16 @@ function MultiSelectFilter({ label, options, selected, onChange }: MultiSelectFi
       <div className="flex items-center justify-between">
         <label className="text-sm font-semibold text-gray-700">{label}</label>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={handleSelectAll}
-            className="text-xs text-royal hover:underline"
-          >
+          <button type="button" onClick={handleSelectAll} className="text-xs text-royal hover:underline">
             All
           </button>
-          <button
-            type="button"
-            onClick={handleClearAll}
-            className="text-xs text-gray-500 hover:underline"
-          >
+          <button type="button" onClick={handleClearAll} className="text-xs text-gray-500 hover:underline">
             Clear
           </button>
         </div>
       </div>
       <div className="flex flex-col gap-1 max-h-40 overflow-y-auto border rounded p-2 bg-gray-50">
-        {options.map(option => (
+        {options.map((option) => (
           <label key={option.value} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 px-1 rounded">
             <input
               type="checkbox"
@@ -182,7 +174,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
     statuses: [],
     endedBy: [],
     crisisFlagged: '',
-    crisisSeverity: ''
+    crisisSeverity: '',
   });
 
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -198,7 +190,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
         durations: filters.durations.length > 0 ? filters.durations.join(',') : '',
         sessionTypes: filters.sessionTypes.length > 0 ? filters.sessionTypes.join(',') : '',
         statuses: filters.statuses.length > 0 ? filters.statuses.join(',') : '',
-        endedBy: filters.endedBy.length > 0 ? filters.endedBy.join(',') : ''
+        endedBy: filters.endedBy.length > 0 ? filters.endedBy.join(',') : '',
       };
       onFilterChange(serializedFilters);
     }, 500);
@@ -207,7 +199,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
   }, [filters, onFilterChange]);
 
   const handleChange = (field: keyof Filters, value: string | string[]) => {
-    setFilters(prev => ({ ...prev, [field]: value }));
+    setFilters((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleClear = () => {
@@ -224,13 +216,13 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
       statuses: [],
       endedBy: [],
       crisisFlagged: '',
-      crisisSeverity: ''
+      crisisSeverity: '',
     };
     setFilters(clearedFilters);
   };
 
   const handleClearAdvanced = () => {
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       voices: [],
       languages: [],
@@ -239,7 +231,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
       statuses: [],
       endedBy: [],
       crisisFlagged: '',
-      crisisSeverity: ''
+      crisisSeverity: '',
     }));
   };
 
@@ -252,7 +244,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
     filters.statuses.length > 0,
     filters.endedBy.length > 0,
     filters.crisisFlagged !== '',
-    filters.crisisSeverity !== ''
+    filters.crisisSeverity !== '',
   ].filter(Boolean).length;
 
   return (
@@ -302,9 +294,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}
           className={`px-4 py-2 rounded font-medium transition-colors ${
-            showAdvanced
-              ? 'bg-royal text-white'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            showAdvanced ? 'bg-royal text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
           }`}
         >
           Advanced Filters {showAdvanced ? '▲' : '▼'}
@@ -315,10 +305,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
           )}
         </button>
 
-        <button
-          onClick={handleClear}
-          className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
-        >
+        <button onClick={handleClear} className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300">
           Clear All
         </button>
       </div>
@@ -423,7 +410,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
                 onChange={(e) => handleChange('crisisSeverity', e.target.value)}
                 className="border rounded px-3 py-2 bg-white"
               >
-                {CRISIS_SEVERITY_OPTIONS.map(option => (
+                {CRISIS_SEVERITY_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -432,10 +419,7 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
             </div>
           </div>
 
-          <button
-            onClick={handleClearAdvanced}
-            className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300 text-sm"
-          >
+          <button onClick={handleClearAdvanced} className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300 text-sm">
             Clear Advanced Filters
           </button>
         </div>

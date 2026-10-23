@@ -24,8 +24,22 @@ export default function EvalsView({ onViewSession }: { onViewSession?: (sessionI
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="text-2xl font-bold">Evals</h2>
         <div className="flex gap-1" role="tablist">
-          <button role="tab" aria-selected={tab === 'overview'} className={tabClass('overview')} onClick={() => setTab('overview')}>Overview</button>
-          <button role="tab" aria-selected={tab === 'rating-queue'} className={tabClass('rating-queue')} onClick={() => setTab('rating-queue')}>Rating queue</button>
+          <button
+            role="tab"
+            aria-selected={tab === 'overview'}
+            className={tabClass('overview')}
+            onClick={() => setTab('overview')}
+          >
+            Overview
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === 'rating-queue'}
+            className={tabClass('rating-queue')}
+            onClick={() => setTab('rating-queue')}
+          >
+            Rating queue
+          </button>
         </div>
       </div>
       {tab === 'overview' && (

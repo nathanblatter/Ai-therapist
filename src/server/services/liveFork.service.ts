@@ -80,7 +80,7 @@ export async function forkAndProbe(opts: ForkOptions): Promise<ForkResult> {
     error: null,
   };
 
-  return new Promise<ForkResult>(resolve => {
+  return new Promise<ForkResult>((resolve) => {
     const ws = new WebSocket(url, {
       headers: { Authorization: `Bearer ${opts.apiKey}` },
     });
@@ -96,7 +96,11 @@ export async function forkAndProbe(opts: ForkOptions): Promise<ForkResult> {
       settled = true;
       if (error && !result.error) result.error = error;
       clearTimeout(timer);
-      try { ws.close(); } catch { /* already closing */ }
+      try {
+        ws.close();
+      } catch {
+        /* already closing */
+      }
       resolve(result);
     };
 
@@ -111,21 +115,23 @@ export async function forkAndProbe(opts: ForkOptions): Promise<ForkResult> {
       const responses: Record<string, unknown> = { model: opts.backendModel };
       if (opts.backendInstructions) responses.instructions = opts.backendInstructions;
 
-      ws.send(JSON.stringify({
-        type: 'session.start',
-        session: {
-          delegation: { type: 'responses', responses },
-          // A WebSocket fork does not inherit the source audio format; set it
-          // explicitly rather than relying on the default staying PCM16/24k.
-          audio: { format: { type: 'audio/pcm', rate: 24000 } },
-          // Never store the branch itself. These are throwaway eval sessions
-          // and storing them would pile up recordings for no purpose.
-          store: false,
-        },
-      }));
+      ws.send(
+        JSON.stringify({
+          type: 'session.start',
+          session: {
+            delegation: { type: 'responses', responses },
+            // A WebSocket fork does not inherit the source audio format; set it
+            // explicitly rather than relying on the default staying PCM16/24k.
+            audio: { format: { type: 'audio/pcm', rate: 24000 } },
+            // Never store the branch itself. These are throwaway eval sessions
+            // and storing them would pile up recordings for no purpose.
+            store: false,
+          },
+        }),
+      );
     });
 
-    ws.on('message', raw => {
+    ws.on('message', (raw) => {
       let event: { type?: string; [k: string]: unknown };
       try {
         event = JSON.parse(raw.toString());
@@ -141,15 +147,17 @@ export async function forkAndProbe(opts: ForkOptions): Promise<ForkResult> {
           // Queue the participant utterance for the backend, then run it.
           // response.create uses the session's configured backend — it must not
           // carry a request body or a model override.
-          ws.send(JSON.stringify({
-            type: 'response.item.create',
-            event_id: 'probe_item',
-            item: {
-              type: 'message',
-              role: 'user',
-              content: [{ type: 'input_text', text: opts.probeText }],
-            },
-          }));
+          ws.send(
+            JSON.stringify({
+              type: 'response.item.create',
+              event_id: 'probe_item',
+              item: {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: opts.probeText }],
+              },
+            }),
+          );
           ws.send(JSON.stringify({ type: 'response.create', event_id: 'probe_run' }));
           break;
         }
@@ -168,9 +176,11 @@ export async function forkAndProbe(opts: ForkOptions): Promise<ForkResult> {
           if (inner.type === 'response.output_text.delta') {
             result.responseText += String(inner.delta ?? '');
           } else if (inner.type === 'response.completed') {
-            const response = inner.response as {
-              usage?: { input_tokens?: number; output_tokens?: number };
-            } | undefined;
+            const response = inner.response as
+              | {
+                  usage?: { input_tokens?: number; output_tokens?: number };
+                }
+              | undefined;
             result.tokensIn = response?.usage?.input_tokens ?? null;
             result.tokensOut = response?.usage?.output_tokens ?? null;
             result.latencyMs = probeSentAt ? Date.now() - probeSentAt : 0;
@@ -219,7 +229,9 @@ export async function forkAndProbe(opts: ForkOptions): Promise<ForkResult> {
 
     ws.on('unexpected-response', (_req, res) => {
       let body = '';
-      res.on('data', (c: Buffer) => { body += c.toString(); });
+      res.on('data', (c: Buffer) => {
+        body += c.toString();
+      });
       res.on('end', () => {
         // 404 here usually means the source session was never stored, its
         // 30-day recording window has expired, or the project is ZDR.
@@ -227,7 +239,7 @@ export async function forkAndProbe(opts: ForkOptions): Promise<ForkResult> {
       });
     });
 
-    ws.on('error', err => finish(`socket error: ${err.message}`));
+    ws.on('error', (err) => finish(`socket error: ${err.message}`));
     ws.on('close', () => finish(gotResponse ? null : 'socket closed before the backend responded'));
   });
 }

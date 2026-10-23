@@ -101,9 +101,8 @@ export default function usersRoutes(): Router {
 
       // null = never chosen (distinct from an explicit 'default' choice, which
       // should sync across devices).
-      const theme = prefs?.preferred_theme && VALID_THEMES.includes(prefs.preferred_theme)
-        ? prefs.preferred_theme
-        : null;
+      const theme =
+        prefs?.preferred_theme && VALID_THEMES.includes(prefs.preferred_theme) ? prefs.preferred_theme : null;
 
       res.json({ voice, language, theme, memory_enabled });
     } catch (error) {

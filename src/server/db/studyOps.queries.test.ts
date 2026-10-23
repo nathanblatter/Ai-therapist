@@ -57,9 +57,7 @@ describe('getStudyOpsSummary', () => {
   });
 
   it('handles the all-NULL arm case without dividing by zero', async () => {
-    routeBy([
-      { match: /proactive_offering IS TRUE/, rows: [{ arm_true: '0', arm_false: '0', arm_null: '5' }] },
-    ]);
+    routeBy([{ match: /proactive_offering IS TRUE/, rows: [{ arm_true: '0', arm_false: '0', arm_null: '5' }] }]);
     const s = await getStudyOpsSummary();
     expect(s.arm_balance.imbalance).toBeNull();
     expect(s.arm_balance.over_threshold).toBe(false);
@@ -67,11 +65,14 @@ describe('getStudyOpsSummary', () => {
 
   it('buckets sessions-per-participant against expectation', async () => {
     routeBy([
-      { match: /GROUP BY n_sessions/, rows: [
-        { n_sessions: '2', n_participants: '3' }, // below (expected 4)
-        { n_sessions: '4', n_participants: '5' }, // at
-        { n_sessions: '7', n_participants: '1' }, // above
-      ] },
+      {
+        match: /GROUP BY n_sessions/,
+        rows: [
+          { n_sessions: '2', n_participants: '3' }, // below (expected 4)
+          { n_sessions: '4', n_participants: '5' }, // at
+          { n_sessions: '7', n_participants: '1' }, // above
+        ],
+      },
     ]);
     const s = await getStudyOpsSummary();
     expect(s.sessions_per_participant.below_expected).toBe(3);
@@ -153,7 +154,10 @@ describe('scanForDeviations', () => {
       if (sql.includes('FROM system_config WHERE config_key')) {
         return Promise.resolve({ rows: [{ config_value: withWindow }] });
       }
-      if (sql.includes('INSERT INTO protocol_deviations')) { inserts++; return Promise.resolve({ rowCount: 0 }); }
+      if (sql.includes('INSERT INTO protocol_deviations')) {
+        inserts++;
+        return Promise.resolve({ rowCount: 0 });
+      }
       return Promise.resolve({ rows: [] });
     });
     await scanForDeviations();

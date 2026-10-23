@@ -32,9 +32,7 @@ function makeConsoleLogger(bindings: LogMeta): Logger {
   }
 
   function format(meta: LogMeta | string, msg?: string): string {
-    const bindingStr = Object.keys(bindings).length
-      ? JSON.stringify(bindings) + ' '
-      : '';
+    const bindingStr = Object.keys(bindings).length ? JSON.stringify(bindings) + ' ' : '';
     if (typeof meta === 'string') {
       return bindingStr + meta;
     }
@@ -43,11 +41,21 @@ function makeConsoleLogger(bindings: LogMeta): Logger {
   }
 
   return {
-    debug(meta, msg?) { if (shouldLog('debug')) console.debug('[DEBUG]', format(meta, msg)); },
-    info(meta, msg?)  { if (shouldLog('info'))  console.info('[INFO]',  format(meta, msg)); },
-    warn(meta, msg?)  { if (shouldLog('warn'))  console.warn('[WARN]',  format(meta, msg)); },
-    error(meta, msg?) { if (shouldLog('error')) console.error('[ERROR]', format(meta, msg)); },
-    child(childBindings) { return makeConsoleLogger({ ...bindings, ...childBindings }); },
+    debug(meta, msg?) {
+      if (shouldLog('debug')) console.debug('[DEBUG]', format(meta, msg));
+    },
+    info(meta, msg?) {
+      if (shouldLog('info')) console.info('[INFO]', format(meta, msg));
+    },
+    warn(meta, msg?) {
+      if (shouldLog('warn')) console.warn('[WARN]', format(meta, msg));
+    },
+    error(meta, msg?) {
+      if (shouldLog('error')) console.error('[ERROR]', format(meta, msg));
+    },
+    child(childBindings) {
+      return makeConsoleLogger({ ...bindings, ...childBindings });
+    },
   };
 }
 
@@ -68,13 +76,7 @@ function makePinoLogger(): Logger {
     // Session transcripts never pass through the logger, but headers can:
     // scrub credentials defensively at the logger level too.
     redact: {
-      paths: [
-        'req.headers.cookie',
-        'req.headers.authorization',
-        'res.headers["set-cookie"]',
-        'password',
-        'token',
-      ],
+      paths: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]', 'password', 'token'],
       censor: '[redacted]',
     },
   });
@@ -91,11 +93,25 @@ function makePinoLogger(): Logger {
 
   function wrap(p: PinoLike): Logger {
     return {
-      debug(meta, msg?) { if (typeof meta === 'string') p.debug(meta); else p.debug(meta, msg); },
-      info(meta, msg?)  { if (typeof meta === 'string') p.info(meta);  else p.info(meta, msg); },
-      warn(meta, msg?)  { if (typeof meta === 'string') p.warn(meta);  else p.warn(meta, msg); },
-      error(meta, msg?) { if (typeof meta === 'string') p.error(meta); else p.error(meta, msg); },
-      child(bindings) { return wrap(p.child(bindings)); },
+      debug(meta, msg?) {
+        if (typeof meta === 'string') p.debug(meta);
+        else p.debug(meta, msg);
+      },
+      info(meta, msg?) {
+        if (typeof meta === 'string') p.info(meta);
+        else p.info(meta, msg);
+      },
+      warn(meta, msg?) {
+        if (typeof meta === 'string') p.warn(meta);
+        else p.warn(meta, msg);
+      },
+      error(meta, msg?) {
+        if (typeof meta === 'string') p.error(meta);
+        else p.error(meta, msg);
+      },
+      child(bindings) {
+        return wrap(p.child(bindings));
+      },
     };
   }
 

@@ -26,8 +26,13 @@ describe('insertWorkItem', () => {
   it('is idempotent: ON CONFLICT DO NOTHING, null on duplicate', async () => {
     queryMock.mockResolvedValueOnce({ rows: [] });
     const dup = await insertWorkItem({
-      orgId: 1, clientId: 42, itemType: 'crisis_flag', severity: 'urgent',
-      title: 'Crisis flag', sourceTable: 'crisis_events', sourceId: '9',
+      orgId: 1,
+      clientId: 42,
+      itemType: 'crisis_flag',
+      severity: 'urgent',
+      title: 'Crisis flag',
+      sourceTable: 'crisis_events',
+      sourceId: '9',
     });
     expect(dup).toBeNull();
     const sql = String(queryMock.mock.calls[0][0]);
@@ -37,8 +42,12 @@ describe('insertWorkItem', () => {
   it('returns the created row and stamps is_sandbox', async () => {
     queryMock.mockResolvedValueOnce({ rows: [ITEM] });
     const row = await insertWorkItem({
-      orgId: 1, itemType: 'inactivity', title: 'Inactive',
-      sourceTable: 'synthetic', sourceId: 'inactivity:42', isSandbox: true,
+      orgId: 1,
+      itemType: 'inactivity',
+      title: 'Inactive',
+      sourceTable: 'synthetic',
+      sourceId: 'inactivity:42',
+      isSandbox: true,
     });
     expect(row).toEqual(ITEM);
     const params = queryMock.mock.calls[0][1] as unknown[];
@@ -48,8 +57,13 @@ describe('insertWorkItem', () => {
   it('reopen reactivates only resolved/expired rows, clearing ack/resolve state', async () => {
     queryMock.mockResolvedValueOnce({ rows: [ITEM] });
     const row = await insertWorkItem({
-      orgId: 1, clientId: 42, itemType: 'crisis_flag', severity: 'urgent',
-      title: 'Crisis flag', sourceTable: 'therapy_sessions', sourceId: 'sess-1:high',
+      orgId: 1,
+      clientId: 42,
+      itemType: 'crisis_flag',
+      severity: 'urgent',
+      title: 'Crisis flag',
+      sourceTable: 'therapy_sessions',
+      sourceId: 'sess-1:high',
       reopen: true,
     });
     expect(row).toEqual(ITEM);
@@ -66,8 +80,13 @@ describe('insertWorkItem', () => {
     // The DO UPDATE ... WHERE excludes open/acked rows: no row returned.
     queryMock.mockResolvedValueOnce({ rows: [] });
     const row = await insertWorkItem({
-      orgId: 1, clientId: 42, itemType: 'crisis_flag', severity: 'urgent',
-      title: 'Crisis flag', sourceTable: 'therapy_sessions', sourceId: 'sess-1:high',
+      orgId: 1,
+      clientId: 42,
+      itemType: 'crisis_flag',
+      severity: 'urgent',
+      title: 'Crisis flag',
+      sourceTable: 'therapy_sessions',
+      sourceId: 'sess-1:high',
       reopen: true,
     });
     expect(row).toBeNull();
@@ -134,9 +153,9 @@ describe('expireWorkItemsBySource', () => {
 
   it('expires open/acked items and returns their ids', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ item_id: 4 }] });
-    await expect(
-      expireWorkItemsBySource('inactivity', 'synthetic', ['inactivity:42:2026-08-27'])
-    ).resolves.toEqual([4]);
+    await expect(expireWorkItemsBySource('inactivity', 'synthetic', ['inactivity:42:2026-08-27'])).resolves.toEqual([
+      4,
+    ]);
     expect(String(queryMock.mock.calls[0][0])).toContain(`'expired'`);
   });
 });

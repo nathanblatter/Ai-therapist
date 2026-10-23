@@ -50,10 +50,9 @@ export interface SessionInsightsRow {
 }
 
 export async function getSessionInsights(sessionId: string): Promise<SessionInsightsRow | null> {
-  const result = await pool.query<SessionInsightsRow>(
-    'SELECT * FROM session_insights WHERE session_id = $1',
-    [sessionId]
-  );
+  const result = await pool.query<SessionInsightsRow>('SELECT * FROM session_insights WHERE session_id = $1', [
+    sessionId,
+  ]);
   return result.rows[0] ?? null;
 }
 
@@ -63,7 +62,7 @@ export async function upsertSessionInsights(
   summary: SessionSummary,
   soapNote: SoapNote,
   model: string,
-  affectCurve: AffectPoint[] | null = null
+  affectCurve: AffectPoint[] | null = null,
 ): Promise<void> {
   await pool.query(
     `INSERT INTO session_insights (session_id, user_id, summary, soap_note, model, affect_curve)
@@ -74,8 +73,14 @@ export async function upsertSessionInsights(
            model = EXCLUDED.model,
            affect_curve = EXCLUDED.affect_curve,
            updated_at = CURRENT_TIMESTAMP`,
-    [sessionId, userId, JSON.stringify(summary), JSON.stringify(soapNote), model,
-     affectCurve === null ? null : JSON.stringify(affectCurve)]
+    [
+      sessionId,
+      userId,
+      JSON.stringify(summary),
+      JSON.stringify(soapNote),
+      model,
+      affectCurve === null ? null : JSON.stringify(affectCurve),
+    ],
   );
 }
 
@@ -85,7 +90,7 @@ export async function markSoapReviewed(sessionId: string, reviewedBy: string): P
      SET soap_status = 'reviewed', soap_reviewed_by = $2, soap_reviewed_at = CURRENT_TIMESTAMP,
          updated_at = CURRENT_TIMESTAMP
      WHERE session_id = $1`,
-    [sessionId, reviewedBy]
+    [sessionId, reviewedBy],
   );
   return (result.rowCount ?? 0) > 0;
 }
@@ -107,7 +112,7 @@ export async function getRecentUserSummaries(userId: number, limit = 3): Promise
      WHERE si.user_id = $1 AND si.summary IS NOT NULL AND ts.status = 'ended'
      ORDER BY si.created_at DESC
      LIMIT $2`,
-    [userId, limit]
+    [userId, limit],
   );
   return result.rows;
 }
@@ -116,7 +121,7 @@ export async function getRecentUserSummaries(userId: number, limit = 3): Promise
 export async function countUserEndedSessions(userId: number): Promise<number> {
   const result = await pool.query<{ n: string }>(
     `SELECT COUNT(*) AS n FROM therapy_sessions WHERE user_id = $1 AND status = 'ended'`,
-    [userId]
+    [userId],
   );
   return parseInt(result.rows[0]?.n ?? '0', 10);
 }
@@ -129,26 +134,25 @@ export interface SessionCheckin {
 }
 
 export async function setSessionCheckin(sessionId: string, checkin: SessionCheckin): Promise<void> {
-  await pool.query(
-    'UPDATE therapy_sessions SET checkin = $2 WHERE session_id = $1',
-    [sessionId, JSON.stringify(checkin)]
-  );
+  await pool.query('UPDATE therapy_sessions SET checkin = $2 WHERE session_id = $1', [
+    sessionId,
+    JSON.stringify(checkin),
+  ]);
 }
 
 /** Participant's memory-consent flag. */
 export async function getUserMemoryEnabled(userId: number): Promise<boolean> {
-  const result = await pool.query<{ memory_enabled: boolean }>(
-    'SELECT memory_enabled FROM users WHERE userid = $1',
-    [userId]
-  );
+  const result = await pool.query<{ memory_enabled: boolean }>('SELECT memory_enabled FROM users WHERE userid = $1', [
+    userId,
+  ]);
   return result.rows[0]?.memory_enabled ?? false;
 }
 
 export async function setUserMemoryEnabled(userId: number, enabled: boolean): Promise<void> {
-  await pool.query(
-    'UPDATE users SET memory_enabled = $2, updated_at = CURRENT_TIMESTAMP WHERE userid = $1',
-    [userId, enabled]
-  );
+  await pool.query('UPDATE users SET memory_enabled = $2, updated_at = CURRENT_TIMESTAMP WHERE userid = $1', [
+    userId,
+    enabled,
+  ]);
 }
 
 // ---------- Therapist-in-the-loop notes (ai-therapist-50) ----------
@@ -157,14 +161,14 @@ export async function setUserMemoryEnabled(userId: number, enabled: boolean): Pr
 export async function setSessionNotesForNextSession(
   sessionId: string,
   notes: string,
-  author: string
+  author: string,
 ): Promise<boolean> {
   const result = await pool.query(
     `UPDATE session_insights
      SET notes_for_next_session = $2, notes_author = $3, notes_created_at = CURRENT_TIMESTAMP,
          updated_at = CURRENT_TIMESTAMP
      WHERE session_id = $1`,
-    [sessionId, notes, author]
+    [sessionId, notes, author],
   );
   return (result.rowCount ?? 0) > 0;
 }
@@ -178,16 +182,26 @@ export interface ClinicianNote {
 
 /** The most recent clinician note left on any of this user's sessions (for injection into their next one). */
 export async function getLatestClinicianNote(userId: number): Promise<ClinicianNote | null> {
-  const result = await pool.query<{ session_id: string; notes_for_next_session: string; notes_author: string | null; notes_created_at: Date }>(
+  const result = await pool.query<{
+    session_id: string;
+    notes_for_next_session: string;
+    notes_author: string | null;
+    notes_created_at: Date;
+  }>(
     `SELECT session_id, notes_for_next_session, notes_author, notes_created_at
      FROM session_insights
      WHERE user_id = $1 AND notes_for_next_session IS NOT NULL AND notes_for_next_session != ''
      ORDER BY notes_created_at DESC
      LIMIT 1`,
-    [userId]
+    [userId],
   );
   const row = result.rows[0];
   return row
-    ? { notes: row.notes_for_next_session, author: row.notes_author, created_at: row.notes_created_at, session_id: row.session_id }
+    ? {
+        notes: row.notes_for_next_session,
+        author: row.notes_author,
+        created_at: row.notes_created_at,
+        session_id: row.session_id,
+      }
     : null;
 }

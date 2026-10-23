@@ -37,8 +37,18 @@ function rows(r: unknown[]) {
 describe('deleteParticipantSurveyData', () => {
   it('deletes remotely, blanks locally, and audits each response', async () => {
     rows([
-      { response_id: 'R_w', survey_id: 'SV_weekly', survey_role: 'weekly', answers: { QID8: 4, QID11_TEXT: 'private' } },
-      { response_id: 'R_d', survey_id: 'SV_wd', survey_role: 'withdrawal', answers: { QID3: 2, QID4_TEXT: 'my reasons', QID5: 1, QID6: 2 } },
+      {
+        response_id: 'R_w',
+        survey_id: 'SV_weekly',
+        survey_role: 'weekly',
+        answers: { QID8: 4, QID11_TEXT: 'private' },
+      },
+      {
+        response_id: 'R_d',
+        survey_id: 'SV_wd',
+        survey_role: 'withdrawal',
+        answers: { QID3: 2, QID4_TEXT: 'my reasons', QID5: 1, QID6: 2 },
+      },
     ]);
     fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
 
@@ -51,12 +61,14 @@ describe('deleteParticipantSurveyData', () => {
     expect(JSON.parse(updates[0][1][1])).toEqual({});
     expect(JSON.parse(updates[1][1][1])).toEqual({ QID3: 2, QID5: 1, QID6: 2 });
     expect(insertDeletionLogMock).toHaveBeenCalledTimes(2);
-    expect(insertDeletionLogMock).toHaveBeenCalledWith(expect.objectContaining({
-      artifactType: 'survey_response',
-      reason: 'participant_request',
-      triggeredByUser: 'nathan',
-      success: true,
-    }));
+    expect(insertDeletionLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactType: 'survey_response',
+        reason: 'participant_request',
+        triggeredByUser: 'nathan',
+        success: true,
+      }),
+    );
   });
 
   it('treats a remote 404 as satisfied, and reports real failures without skipping local blanking', async () => {

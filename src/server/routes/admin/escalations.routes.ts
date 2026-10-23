@@ -12,7 +12,11 @@
 // idempotently, fans out sockets, and drives notifications/email policy.
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
-import { requireBodyClientAccess, requireEscalationAccess, careNoteBelongsToClient } from '../../middleware/caseload.js';
+import {
+  requireBodyClientAccess,
+  requireEscalationAccess,
+  careNoteBelongsToClient,
+} from '../../middleware/caseload.js';
 import { orgIdFor, resolveClientOrgId } from '../../middleware/org.js';
 import {
   createEscalation,
@@ -77,7 +81,7 @@ async function enqueueResponseItem(
   escalation: EscalationRow,
   eventId: number,
   action: string,
-  actorUserId: number
+  actorUserId: number,
 ): Promise<void> {
   if (escalation.raised_by === null || escalation.raised_by === actorUserId) return;
   await enqueueWorkItem({
@@ -152,7 +156,8 @@ export default function escalationsRoutes(): Router {
           const eventClientId =
             eventInfo === null
               ? null
-              : eventInfo.client_user_id ?? (eventInfo.session_user_id === null ? null : Number(eventInfo.session_user_id));
+              : (eventInfo.client_user_id ??
+                (eventInfo.session_user_id === null ? null : Number(eventInfo.session_user_id)));
           if (eventClientId === null || eventClientId !== clientId) {
             return res.status(400).json({ error: 'crisis_event_id does not belong to this client' });
           }
@@ -160,9 +165,7 @@ export default function escalationsRoutes(): Router {
         if (sessionId !== null) {
           const sessionInfo = await getSessionAccessInfo(sessionId);
           const sessionOwner =
-            sessionInfo?.user_id === null || sessionInfo?.user_id === undefined
-              ? null
-              : Number(sessionInfo.user_id);
+            sessionInfo?.user_id === null || sessionInfo?.user_id === undefined ? null : Number(sessionInfo.user_id);
           if (sessionOwner === null || sessionOwner !== clientId) {
             return res.status(400).json({ error: 'session_id does not belong to this client' });
           }
@@ -184,7 +187,7 @@ export default function escalationsRoutes(): Router {
             sessionId,
             noteId,
           },
-          req.session.username ?? null
+          req.session.username ?? null,
         );
 
         // Single choke point: inserts the item, fans out sockets, and drives
@@ -212,67 +215,64 @@ export default function escalationsRoutes(): Router {
         log.error({ err }, 'create failed');
         res.status(500).json({ error: 'Failed to create escalation' });
       }
-    }
+    },
   );
 
   // GET /admin/api/escalations - visible escalations (care team: assignee /
   // raiser / caseload / org-unassigned; researcher: org-wide metadata).
   // ?count_only=1 -> { count } of open items (nav badge); ?mine=1 -> raised by me.
-  router.get(
-    '/admin/api/escalations',
-    requireRole('therapist', 'caseworker', 'researcher'),
-    async (req, res) => {
-      try {
-        const me = req.session.userId!;
-        const careTeam = isCareTeamRole(req.session.userRole);
+  router.get('/admin/api/escalations', requireRole('therapist', 'caseworker', 'researcher'), async (req, res) => {
+    try {
+      const me = req.session.userId!;
+      const careTeam = isCareTeamRole(req.session.userRole);
 
-        if (req.query.count_only === '1') {
-          if (careTeam) {
-            const count = await countOpenEscalationsForMember(me, req.session.userRole as 'therapist' | 'caseworker');
-            return res.json({ count });
-          }
-          const orgId = await orgIdFor(req);
-          // Defense-in-depth: under the orgIdFor contract null now means
-          // unauthenticated only, but never widen a researcher read to
-          // unscoped — fail closed to an empty count.
-          if (orgId === null) return res.json({ count: 0 });
-          const rows = await listEscalations({ orgId, openOnly: true, limit: 500 });
-          return res.json({ count: rows.length });
+      if (req.query.count_only === '1') {
+        if (careTeam) {
+          const count = await countOpenEscalationsForMember(me, req.session.userRole as 'therapist' | 'caseworker');
+          return res.json({ count });
         }
+        const orgId = await orgIdFor(req);
+        // Defense-in-depth: under the orgIdFor contract null now means
+        // unauthenticated only, but never widen a researcher read to
+        // unscoped — fail closed to an empty count.
+        if (orgId === null) return res.json({ count: 0 });
+        const rows = await listEscalations({ orgId, openOnly: true, limit: 500 });
+        return res.json({ count: rows.length });
+      }
 
-        const status = typeof req.query.status === 'string' ? (req.query.status as EscalationStatus) : null;
-        if (status !== null && !STATUSES.includes(status)) {
-          return res.status(400).json({ error: `status must be one of: ${STATUSES.join(', ')}` });
-        }
-        const clientId = Number.isInteger(Number(req.query.client_id)) && req.query.client_id !== undefined
+      const status = typeof req.query.status === 'string' ? (req.query.status as EscalationStatus) : null;
+      if (status !== null && !STATUSES.includes(status)) {
+        return res.status(400).json({ error: `status must be one of: ${STATUSES.join(', ')}` });
+      }
+      const clientId =
+        Number.isInteger(Number(req.query.client_id)) && req.query.client_id !== undefined
           ? Number(req.query.client_id)
           : null;
 
-        // Researcher reads are org-scoped; fail closed to an empty list if
-        // the org cannot be resolved (null = unauthenticated under the
-        // orgIdFor contract — defense-in-depth, never widen to unscoped).
-        const orgId = careTeam ? null : await orgIdFor(req);
-        if (!careTeam && orgId === null) {
-          return res.json({ escalations: [] });
-        }
-        let escalations = await listEscalations({
-          status,
-          clientId,
-          openOnly: req.query.open_only === '1',
-          memberId: careTeam ? me : null,
-          memberRole: careTeam ? (req.session.userRole as 'therapist' | 'caseworker') : null,
-          orgId,
-        });
-        if (req.query.mine === '1') {
-          escalations = escalations.filter((e) => e.raised_by === me);
-        }
-        res.json({ escalations });
-      } catch (err) {
-        log.error({ err }, 'list failed');
-        res.status(500).json({ error: 'Failed to list escalations' });
+      // Researcher reads are org-scoped; fail closed to an empty list if
+      // the org cannot be resolved (null = unauthenticated under the
+      // orgIdFor contract — defense-in-depth, never widen to unscoped).
+      const orgId = careTeam ? null : await orgIdFor(req);
+      if (!careTeam && orgId === null) {
+        return res.json({ escalations: [] });
       }
+      let escalations = await listEscalations({
+        status,
+        clientId,
+        openOnly: req.query.open_only === '1',
+        memberId: careTeam ? me : null,
+        memberRole: careTeam ? (req.session.userRole as 'therapist' | 'caseworker') : null,
+        orgId,
+      });
+      if (req.query.mine === '1') {
+        escalations = escalations.filter((e) => e.raised_by === me);
+      }
+      res.json({ escalations });
+    } catch (err) {
+      log.error({ err }, 'list failed');
+      res.status(500).json({ error: 'Failed to list escalations' });
     }
-  );
+  });
 
   // GET /admin/api/escalations/:escalationId - detail + event timeline
   router.get(
@@ -288,7 +288,7 @@ export default function escalationsRoutes(): Router {
         log.error({ err }, 'detail failed');
         res.status(500).json({ error: 'Failed to fetch escalation' });
       }
-    }
+    },
   );
 
   // POST /admin/api/escalations/:escalationId/acknowledge - assignee, or a
@@ -319,7 +319,7 @@ export default function escalationsRoutes(): Router {
         log.error({ err }, 'acknowledge failed');
         res.status(500).json({ error: 'Failed to acknowledge escalation' });
       }
-    }
+    },
   );
 
   // POST /admin/api/escalations/:escalationId/resolve - assignee, or a
@@ -336,9 +336,7 @@ export default function escalationsRoutes(): Router {
           return res.status(403).json({ error: 'Only the assigned therapist can resolve' });
         }
         const resolutionNote =
-          typeof req.body?.resolution_note === 'string'
-            ? req.body.resolution_note.trim().slice(0, 2000) || null
-            : null;
+          typeof req.body?.resolution_note === 'string' ? req.body.resolution_note.trim().slice(0, 2000) || null : null;
         const updated = await resolveEscalation(escalation.escalation_id, me, resolutionNote);
         if (!updated) return res.status(409).json({ error: 'Escalation is already resolved' });
         const event = await insertEscalationEvent({
@@ -350,9 +348,7 @@ export default function escalationsRoutes(): Router {
         });
         await enqueueResponseItem(updated, event.event_id, 'resolved', me);
         try {
-          await expireWorkItemsBySource('escalation_inbound', 'escalations', [
-            String(escalation.escalation_id),
-          ]);
+          await expireWorkItemsBySource('escalation_inbound', 'escalations', [String(escalation.escalation_id)]);
         } catch (err) {
           log.error({ err }, 'expiring escalation_inbound work item failed');
         }
@@ -362,7 +358,7 @@ export default function escalationsRoutes(): Router {
         log.error({ err }, 'resolve failed');
         res.status(500).json({ error: 'Failed to resolve escalation' });
       }
-    }
+    },
   );
 
   // POST /admin/api/escalations/:escalationId/reopen - raiser, care team, or
@@ -408,7 +404,7 @@ export default function escalationsRoutes(): Router {
         log.error({ err }, 'reopen failed');
         res.status(500).json({ error: 'Failed to reopen escalation' });
       }
-    }
+    },
   );
 
   // POST /admin/api/escalations/:escalationId/comments - coordination timeline
@@ -436,7 +432,7 @@ export default function escalationsRoutes(): Router {
         log.error({ err }, 'comment failed');
         res.status(500).json({ error: 'Failed to add comment' });
       }
-    }
+    },
   );
 
   // POST /admin/api/escalations/:escalationId/claim - any same-org therapist
@@ -482,7 +478,7 @@ export default function escalationsRoutes(): Router {
         log.error({ err }, 'claim failed');
         res.status(500).json({ error: 'Failed to claim escalation' });
       }
-    }
+    },
   );
 
   return router;

@@ -79,7 +79,7 @@ export default function auditRoutes(): Router {
           limit,
           offset,
         },
-        await orgIdFor(req)
+        await orgIdFor(req),
       );
       res.json({ ...page, limit, offset });
     } catch (err) {
@@ -103,10 +103,7 @@ export default function auditRoutes(): Router {
 
       try {
         if (req.session.userRole === 'researcher') {
-          const [callerOrg, participantOrg] = await Promise.all([
-            orgIdFor(req),
-            getOrganizationIdForUser(userId),
-          ]);
+          const [callerOrg, participantOrg] = await Promise.all([orgIdFor(req), getOrganizationIdForUser(userId)]);
           if (callerOrg === null || participantOrg !== callerOrg) {
             return res.status(404).json({ error: 'Not found' });
           }
@@ -129,7 +126,7 @@ export default function auditRoutes(): Router {
         log.error({ err }, 'Failed to fetch participant access history');
         res.status(500).json({ error: 'Failed to fetch participant access history' });
       }
-    }
+    },
   );
 
   // GET /admin/api/audit/redaction-review - who approved/corrected what
@@ -167,7 +164,7 @@ export default function auditRoutes(): Router {
     try {
       const page = await listAssistantAudit(
         { userId, username: optString(req.query.username), since, until, limit, offset },
-        await orgIdFor(req)
+        await orgIdFor(req),
       );
       res.json({ ...page, limit, offset });
     } catch (err) {

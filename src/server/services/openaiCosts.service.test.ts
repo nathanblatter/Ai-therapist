@@ -33,24 +33,31 @@ describe('getCostsSummary', () => {
   });
 
   it('sums buckets into days and ranks line items highest first', async () => {
-    fetchMock.mockResolvedValueOnce(ok({ data: [
-      { start_time: T0, results: [
-        { amount: { value: 1.25 }, line_item: 'gpt-5, output' },
-        { amount: { value: 0.5 }, line_item: 'gpt-4o-mini, input' },
-        { amount: { value: 'nope' }, line_item: 'broken' },
-      ] },
-      { start_time: T0 + DAY, results: [
-        { amount: { value: 2 }, line_item: 'gpt-5, output' },
-        { amount: { value: 0.1 } },
-      ] },
-    ] }));
+    fetchMock.mockResolvedValueOnce(
+      ok({
+        data: [
+          {
+            start_time: T0,
+            results: [
+              { amount: { value: 1.25 }, line_item: 'gpt-5, output' },
+              { amount: { value: 0.5 }, line_item: 'gpt-4o-mini, input' },
+              { amount: { value: 'nope' }, line_item: 'broken' },
+            ],
+          },
+          {
+            start_time: T0 + DAY,
+            results: [{ amount: { value: 2 }, line_item: 'gpt-5, output' }, { amount: { value: 0.1 } }],
+          },
+        ],
+      }),
+    );
     const s = await getCostsSummary(2);
     expect(s.configured).toBe(true);
     expect(s.totalUsd).toBeCloseTo(3.85, 2);
-    expect(s.days.map(d => d.amountUsd)).toEqual([1.75, 2.1]);
+    expect(s.days.map((d) => d.amountUsd)).toEqual([1.75, 2.1]);
     expect(s.days[0].date).toBe(new Date(T0 * 1000).toISOString().slice(0, 10));
     expect(s.byLineItem[0]).toEqual({ lineItem: 'gpt-5, output', amountUsd: 3.25 });
-    expect(s.byLineItem.map(l => l.lineItem)).toContain('unattributed');
+    expect(s.byLineItem.map((l) => l.lineItem)).toContain('unattributed');
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain('bucket_width=1d');
     expect(url).toContain('group_by=line_item');

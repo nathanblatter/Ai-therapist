@@ -66,17 +66,18 @@ export async function getLatestCrisisEventId(sessionId: string): Promise<number 
 /** Cheap existence probe — does this session already have ANY ladder step?
  *  Runs per risky turn from the pipeline trigger, so it stays index-only. */
 export async function sessionHasRiskCheck(sessionId: string): Promise<boolean> {
-  const result = await pool.query(
-    'SELECT 1 FROM risk_check_steps WHERE session_id = $1 LIMIT 1',
-    [sessionId],
-  );
+  const result = await pool.query('SELECT 1 FROM risk_check_steps WHERE session_id = $1 LIMIT 1', [sessionId]);
   return (result.rowCount ?? 0) > 0;
 }
 
 /** Core ladder order. protective_factors is a counterweight step and is
  *  deliberately excluded — it is not a rung, so it never counts as depth. */
 export const RISK_CHECK_LADDER_ORDER: readonly RiskCheckStep[] = [
-  'ideation', 'plan', 'means', 'timeframe', 'intent',
+  'ideation',
+  'plan',
+  'means',
+  'timeframe',
+  'intent',
 ] as const;
 
 const BAND_RANK: Record<RiskBand, number> = { none: 0, low: 1, moderate: 2, high: 3, imminent: 4 };
@@ -113,7 +114,7 @@ export function summarizeRiskCheckSteps(sessionId: string, steps: RiskCheckStepR
     steps,
     resolved_band: resolved,
     furthest_step: furthest,
-    completed: steps.some(s => s.step === 'intent'),
+    completed: steps.some((s) => s.step === 'intent'),
     started_at: toIso(steps[0]?.created_at),
     last_step_at: toIso(steps[steps.length - 1]?.created_at),
   };
@@ -127,10 +128,7 @@ export async function getSessionRiskCheckLadder(sessionId: string): Promise<Risk
 /** Every ladder this participant has, newest last-step first (profile panel).
  *  Joined through therapy_sessions so ownership is enforced in SQL rather than
  *  by the caller passing session ids it happens to know. */
-export async function getParticipantRiskCheckLadders(
-  userId: number,
-  limit = 20,
-): Promise<RiskCheckLadder[]> {
+export async function getParticipantRiskCheckLadders(userId: number, limit = 20): Promise<RiskCheckLadder[]> {
   const result = await pool.query<RiskCheckStepRow>(
     `SELECT rcs.check_step_id, rcs.session_id, rcs.crisis_event_id, rcs.step, rcs.answer,
             rcs.risk_band, rcs.sequence, rcs.created_at

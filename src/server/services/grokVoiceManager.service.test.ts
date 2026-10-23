@@ -23,9 +23,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // Both sockets (xAI upstream and the browser client) are EventEmitter fakes.
 
 const {
-  queryMock, insertMessagesBatchMock, insertToolInvocationMock, recordLlmUsageMock,
-  recordLiveUsageMock, runCrisisPipelineMock, executeToolMock, broadcastMock,
-  serverEndSessionMock, phaseScheduleMock, logInterventionActionMock,
+  queryMock,
+  insertMessagesBatchMock,
+  insertToolInvocationMock,
+  recordLlmUsageMock,
+  recordLiveUsageMock,
+  runCrisisPipelineMock,
+  executeToolMock,
+  broadcastMock,
+  serverEndSessionMock,
+  phaseScheduleMock,
+  logInterventionActionMock,
 } = vi.hoisted(() => ({
   queryMock: vi.fn(),
   insertMessagesBatchMock: vi.fn(),
@@ -50,7 +58,9 @@ const { FakeWs, upstreams } = await vi.hoisted(async () => {
     readyState = 1;
     url: string;
     send = vi.fn();
-    close = vi.fn(() => { this.readyState = 3; });
+    close = vi.fn(() => {
+      this.readyState = 3;
+    });
     ping = vi.fn();
     terminate = vi.fn();
     constructor(url = '') {
@@ -115,8 +125,11 @@ async function flush(): Promise<void> {
 }
 
 /** Register, attach a fake browser socket, and bring the upstream to ready. */
-async function bringUp(opts: { openingPrompt?: string | null; reconnectWindowMs?: number; conversationId?: string | null } = {}): Promise<{
-  client: InstanceType<typeof FakeWs>; upstream: InstanceType<typeof FakeWs>;
+async function bringUp(
+  opts: { openingPrompt?: string | null; reconnectWindowMs?: number; conversationId?: string | null } = {},
+): Promise<{
+  client: InstanceType<typeof FakeWs>;
+  upstream: InstanceType<typeof FakeWs>;
 }> {
   grokVoiceManager.registerPending(SESSION, {
     model: 'grok-voice-latest',
@@ -128,13 +141,25 @@ async function bringUp(opts: { openingPrompt?: string | null; reconnectWindowMs?
   const client = new FakeWs();
   await grokVoiceManager.attachClient(SESSION, client as unknown as import('ws').default);
   const upstream = upstreams[upstreams.length - 1];
-  upstream.emit('message', Buffer.from(JSON.stringify({
-    type: 'session.created', session: { id: 'x', model: 'grok-voice-3.0' },
-  })));
+  upstream.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        type: 'session.created',
+        session: { id: 'x', model: 'grok-voice-3.0' },
+      }),
+    ),
+  );
   if (opts.conversationId !== null) {
-    upstream.emit('message', Buffer.from(JSON.stringify({
-      type: 'conversation.created', conversation: { id: opts.conversationId ?? 'conv_1' },
-    })));
+    upstream.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          type: 'conversation.created',
+          conversation: { id: opts.conversationId ?? 'conv_1' },
+        }),
+      ),
+    );
   }
   upstream.emit('message', Buffer.from(JSON.stringify({ type: 'session.updated', session: SESSION_CONFIG })));
   await flush();
@@ -183,7 +208,10 @@ afterEach(() => {
 describe('bring-up', () => {
   it('dials xAI only when the browser attaches, configures the session, pins the resolved model, and speaks first', async () => {
     grokVoiceManager.registerPending(SESSION, {
-      model: 'grok-voice-latest', apiKey: 'xai-test', sessionConfig: SESSION_CONFIG, openingPrompt: 'OPENING',
+      model: 'grok-voice-latest',
+      apiKey: 'xai-test',
+      sessionConfig: SESSION_CONFIG,
+      openingPrompt: 'OPENING',
     });
     expect(upstreams).toHaveLength(0);
     expect(grokVoiceManager.owns(SESSION)).toBe(true);
@@ -200,10 +228,10 @@ describe('bring-up', () => {
     expect(events[2]).toEqual({ type: 'response.create' });
 
     expect(sent(client)[0]).toEqual({ type: 'ready', model: 'grok-voice-3.0' });
-    expect(queryMock).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE session_configurations SET ai_model'),
-      ['grok-voice-3.0', SESSION],
-    );
+    expect(queryMock).toHaveBeenCalledWith(expect.stringContaining('UPDATE session_configurations SET ai_model'), [
+      'grok-voice-3.0',
+      SESSION,
+    ]);
     expect(grokVoiceManager.isConnected(SESSION)).toBe(true);
     expect(grokVoiceManager.getActiveConnections()).toEqual([SESSION]);
   });
@@ -222,12 +250,19 @@ describe('bring-up', () => {
 
   it('ends a session whose browser never attaches', async () => {
     grokVoiceManager.registerPending(SESSION, {
-      model: 'grok-voice-latest', apiKey: 'xai-test', sessionConfig: SESSION_CONFIG, openingPrompt: null,
+      model: 'grok-voice-latest',
+      apiKey: 'xai-test',
+      sessionConfig: SESSION_CONFIG,
+      openingPrompt: null,
     });
     await vi.advanceTimersByTimeAsync(46_000);
-    expect(serverEndSessionMock).toHaveBeenCalledWith(SESSION, expect.objectContaining({
-      endedBy: 'system', reason: 'client_never_connected',
-    }));
+    expect(serverEndSessionMock).toHaveBeenCalledWith(
+      SESSION,
+      expect.objectContaining({
+        endedBy: 'system',
+        reason: 'client_never_connected',
+      }),
+    );
     expect(upstreams).toHaveLength(0);
   });
 });
@@ -237,24 +272,37 @@ describe('participant turns → crisis pipeline', () => {
     const { client, upstream } = await bringUp();
     fire(upstream, {
       type: 'conversation.item.input_audio_transcription.completed',
-      item_id: 'item_1', transcript: "  I don't want to be here anymore.  ",
+      item_id: 'item_1',
+      transcript: "  I don't want to be here anymore.  ",
     });
     await flush();
 
-    expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({
-      session_id: SESSION, role: 'user', message_type: 'voice',
-      content: "I don't want to be here anymore.",
-      metadata: expect.objectContaining({ channel: 'grok', item_id: 'item_1' }),
-    })]);
+    expect(insertMessagesBatchMock).toHaveBeenCalledWith([
+      expect.objectContaining({
+        session_id: SESSION,
+        role: 'user',
+        message_type: 'voice',
+        content: "I don't want to be here anymore.",
+        metadata: expect.objectContaining({ channel: 'grok', item_id: 'item_1' }),
+      }),
+    ]);
     expect(runCrisisPipelineMock).toHaveBeenCalledWith(
       { sessionId: SESSION, messageId: 42, content: "I don't want to be here anymore." },
       'realtime',
     );
     expect(sent(client)).toContainEqual({
-      type: 'transcript', role: 'user', itemId: 'item_1', text: "I don't want to be here anymore.", final: true,
+      type: 'transcript',
+      role: 'user',
+      itemId: 'item_1',
+      text: "I don't want to be here anymore.",
+      final: true,
     });
-    expect(broadcastMock).toHaveBeenCalledWith(expect.anything(), 'sideband:transcript',
-      expect.objectContaining({ sessionId: SESSION, role: 'user', final: true, itemId: 'item_1' }), SESSION);
+    expect(broadcastMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'sideband:transcript',
+      expect.objectContaining({ sessionId: SESSION, role: 'user', final: true, itemId: 'item_1' }),
+      SESSION,
+    );
   });
 
   it('still runs the crisis pipeline when the DB insert fails', async () => {
@@ -262,22 +310,41 @@ describe('participant turns → crisis pipeline', () => {
     insertMessagesBatchMock.mockRejectedValueOnce(new Error('db down'));
     fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'i', transcript: 'help' });
     await flush();
-    expect(runCrisisPipelineMock).toHaveBeenCalledWith({ sessionId: SESSION, messageId: null, content: 'help' }, 'realtime');
+    expect(runCrisisPipelineMock).toHaveBeenCalledWith(
+      { sessionId: SESSION, messageId: null, content: 'help' },
+      'realtime',
+    );
   });
 
   // ai-therapist-258: xAI occasionally reports one utterance twice.
   it('drops a duplicate completed transcript (same item id, or same text within 10 s)', async () => {
     const { upstream } = await bringUp();
-    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'a', transcript: 'I feel stuck lately.' });
-    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'a', transcript: 'I feel stuck lately.' });
-    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'b', transcript: 'I feel stuck lately.' });
+    fire(upstream, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'a',
+      transcript: 'I feel stuck lately.',
+    });
+    fire(upstream, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'a',
+      transcript: 'I feel stuck lately.',
+    });
+    fire(upstream, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'b',
+      transcript: 'I feel stuck lately.',
+    });
     await flush();
     expect(insertMessagesBatchMock).toHaveBeenCalledTimes(1);
     expect(runCrisisPipelineMock).toHaveBeenCalledTimes(1);
 
     // Same words after the window is a genuine repeat and is kept.
     await vi.advanceTimersByTimeAsync(11_000);
-    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'c', transcript: 'I feel stuck lately.' });
+    fire(upstream, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'c',
+      transcript: 'I feel stuck lately.',
+    });
     await flush();
     expect(runCrisisPipelineMock).toHaveBeenCalledTimes(2);
 
@@ -287,7 +354,11 @@ describe('participant turns → crisis pipeline', () => {
     fire(upstream, { type: 'response.output_audio_transcript.done', item_id: 'a7', transcript: 'I hear you.' });
     fire(upstream, { type: 'response.done', response: { id: 'r7' }, usage: {} });
     await flush();
-    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'd', transcript: 'I feel stuck lately.' });
+    fire(upstream, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'd',
+      transcript: 'I feel stuck lately.',
+    });
     await flush();
     // (insertMessagesBatch also persists the assistant row, so count user turns
     // via the crisis pipeline, which runs once per accepted user turn.)
@@ -296,9 +367,19 @@ describe('participant turns → crisis pipeline', () => {
 
   it('relays the cumulative in-progress transcript as a non-final caption only', async () => {
     const { client, upstream } = await bringUp();
-    fire(upstream, { type: 'conversation.item.input_audio_transcription.updated', item_id: 'i', transcript: 'I have been' });
+    fire(upstream, {
+      type: 'conversation.item.input_audio_transcription.updated',
+      item_id: 'i',
+      transcript: 'I have been',
+    });
     await flush();
-    expect(sent(client)).toContainEqual({ type: 'transcript', role: 'user', itemId: 'i', text: 'I have been', final: false });
+    expect(sent(client)).toContainEqual({
+      type: 'transcript',
+      role: 'user',
+      itemId: 'i',
+      text: 'I have been',
+      final: false,
+    });
     expect(insertMessagesBatchMock).not.toHaveBeenCalledWith([expect.objectContaining({ role: 'user' })]);
     expect(runCrisisPipelineMock).not.toHaveBeenCalled();
   });
@@ -309,10 +390,14 @@ describe('assistant turns', () => {
     const { client, upstream } = await bringUp();
     fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: "I'm sorry " });
     fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'to hear that.' });
-    fire(upstream, { type: 'response.output_audio_transcript.done', item_id: 'a1', transcript: "I'm sorry to hear that." });
+    fire(upstream, {
+      type: 'response.output_audio_transcript.done',
+      item_id: 'a1',
+      transcript: "I'm sorry to hear that.",
+    });
     await flush();
 
-    const toClient = sent(client).filter(m => m.type === 'transcript' && m.role === 'assistant');
+    const toClient = sent(client).filter((m) => m.type === 'transcript' && m.role === 'assistant');
     expect(toClient).toEqual([
       { type: 'transcript', role: 'assistant', itemId: 'a1', text: "I'm sorry ", final: false },
       { type: 'transcript', role: 'assistant', itemId: 'a1', text: 'to hear that.', final: false },
@@ -320,7 +405,7 @@ describe('assistant turns', () => {
     ]);
     const assistantRows = insertMessagesBatchMock.mock.calls
       .map((c: unknown[]) => (c[0] as Array<Record<string, unknown>>)[0])
-      .filter(r => r.role === 'assistant');
+      .filter((r) => r.role === 'assistant');
     expect(assistantRows).toHaveLength(1);
     expect(assistantRows[0]).toMatchObject({ message_type: 'response', content: "I'm sorry to hear that." });
   });
@@ -331,8 +416,16 @@ describe('assistant turns', () => {
     fire(upstream, { type: 'input_audio_buffer.speech_started', item_id: 'u2' });
     await flush();
     expect(sent(client)).toContainEqual({ type: 'speech_started' });
-    expect(sent(client)).toContainEqual({ type: 'transcript', role: 'assistant', itemId: 'a1', text: 'Let me explain how', final: true });
-    expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({ role: 'assistant', content: 'Let me explain how' })]);
+    expect(sent(client)).toContainEqual({
+      type: 'transcript',
+      role: 'assistant',
+      itemId: 'a1',
+      text: 'Let me explain how',
+      final: true,
+    });
+    expect(insertMessagesBatchMock).toHaveBeenCalledWith([
+      expect.objectContaining({ role: 'assistant', content: 'Let me explain how' }),
+    ]);
   });
 });
 
@@ -340,11 +433,15 @@ describe('upstream errors', () => {
   // ai-therapist-258: the barge-in cancel can race the reply's own completion.
   it('treats "Cancellation failed: no active response found" as benign', async () => {
     const { client, upstream } = await bringUp();
-    queryMock.mockClear(); broadcastMock.mockClear();
-    fire(upstream, { type: 'error', error: { code: 'cancellation_failed', message: 'Cancellation failed: no active response found' } });
+    queryMock.mockClear();
+    broadcastMock.mockClear();
+    fire(upstream, {
+      type: 'error',
+      error: { code: 'cancellation_failed', message: 'Cancellation failed: no active response found' },
+    });
     await flush();
-    expect(sent(client).some(m => m.type === 'error')).toBe(false);
-    expect(queryMock.mock.calls.some(c => String(c[0]).includes('sideband_error'))).toBe(false);
+    expect(sent(client).some((m) => m.type === 'error')).toBe(false);
+    expect(queryMock.mock.calls.some((c) => String(c[0]).includes('sideband_error'))).toBe(false);
     expect(broadcastMock).not.toHaveBeenCalledWith(expect.anything(), 'sideband:error', expect.anything(), SESSION);
   });
 
@@ -353,25 +450,31 @@ describe('upstream errors', () => {
     fire(upstream, { type: 'error', error: { code: 'server_error', message: 'upstream exploded' } });
     await flush();
     expect(sent(client)).toContainEqual(expect.objectContaining({ type: 'error', message: 'upstream exploded' }));
-    expect(queryMock.mock.calls.some(c => String(c[0]).includes('sideband_error'))).toBe(true);
+    expect(queryMock.mock.calls.some((c) => String(c[0]).includes('sideband_error'))).toBe(true);
   });
 });
 
 describe('audio relay', () => {
   it('forwards microphone frames as base64 appends once ready, and never before', async () => {
     grokVoiceManager.registerPending(SESSION, {
-      model: 'grok-voice-latest', apiKey: 'xai-test', sessionConfig: SESSION_CONFIG, openingPrompt: null,
+      model: 'grok-voice-latest',
+      apiKey: 'xai-test',
+      sessionConfig: SESSION_CONFIG,
+      openingPrompt: null,
     });
     const client = new FakeWs();
     await grokVoiceManager.attachClient(SESSION, client as unknown as import('ws').default);
     const upstream = upstreams[0];
     client.emit('message', Buffer.from([1, 2, 3, 4]), true); // before session.updated
-    expect(sent(upstream).some(e => e.type === 'input_audio_buffer.append')).toBe(false);
+    expect(sent(upstream).some((e) => e.type === 'input_audio_buffer.append')).toBe(false);
 
     fire(upstream, { type: 'session.updated', session: {} });
     await flush();
     client.emit('message', Buffer.from([1, 2, 3, 4]), true);
-    expect(sent(upstream)).toContainEqual({ type: 'input_audio_buffer.append', audio: Buffer.from([1, 2, 3, 4]).toString('base64') });
+    expect(sent(upstream)).toContainEqual({
+      type: 'input_audio_buffer.append',
+      audio: Buffer.from([1, 2, 3, 4]).toString('base64'),
+    });
   });
 
   it('decodes assistant audio deltas into binary frames for the browser', async () => {
@@ -386,14 +489,20 @@ describe('audio relay', () => {
 describe('usage metering', () => {
   it('assigns cumulative billable seconds (never sums) and dedupes token rows per response', async () => {
     const { upstream } = await bringUp();
-    const done = (id: string, secs: number) => fire(upstream, {
-      type: 'response.done', response: { id },
-      usage: { input_tokens: 10, output_tokens: 20, billable_audio_seconds: secs },
-    });
-    done('r1', 7); await flush();
-    done('r2', 9); await flush();
-    done('r2', 9); await flush(); // replay
-    done('r3', 8); await flush(); // out-of-order lower snapshot must not move it backwards
+    const done = (id: string, secs: number) =>
+      fire(upstream, {
+        type: 'response.done',
+        response: { id },
+        usage: { input_tokens: 10, output_tokens: 20, billable_audio_seconds: secs },
+      });
+    done('r1', 7);
+    await flush();
+    done('r2', 9);
+    await flush();
+    done('r2', 9);
+    await flush(); // replay
+    done('r3', 8);
+    await flush(); // out-of-order lower snapshot must not move it backwards
 
     const seconds = recordLiveUsageMock.mock.calls.map((c: unknown[]) => c[2]);
     expect(seconds).toEqual([7, 9, 9, 9]);
@@ -409,7 +518,8 @@ describe('usage metering', () => {
     await flush();
     await grokVoiceManager.disconnect(SESSION);
     expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-3.0', 12, {
-      finalized: true, closeReason: 'close_requested',
+      finalized: true,
+      closeReason: 'close_requested',
     });
   });
 });
@@ -420,28 +530,48 @@ describe('tool execution', () => {
     executeToolMock.mockResolvedValueOnce({ title: 'Thought Record' });
     fire(upstream, {
       type: 'response.function_call_arguments.done',
-      call_id: 'call_1', name: 'find_worksheet', arguments: '{"topic":"anxiety"}',
+      call_id: 'call_1',
+      name: 'find_worksheet',
+      arguments: '{"topic":"anxiety"}',
     });
     await flush();
 
-    expect(executeToolMock).toHaveBeenCalledWith('find_worksheet', { topic: 'anxiety' }, { sessionId: SESSION, channel: 'realtime' });
+    expect(executeToolMock).toHaveBeenCalledWith(
+      'find_worksheet',
+      { topic: 'anxiety' },
+      { sessionId: SESSION, channel: 'realtime' },
+    );
     const events = sent(upstream);
-    const outputIdx = events.findIndex(e => e.type === 'conversation.item.create' && e.item?.type === 'function_call_output');
+    const outputIdx = events.findIndex(
+      (e) => e.type === 'conversation.item.create' && e.item?.type === 'function_call_output',
+    );
     expect(outputIdx).toBeGreaterThan(0);
     expect(events[outputIdx].item).toEqual({
-      type: 'function_call_output', call_id: 'call_1', output: JSON.stringify({ title: 'Thought Record' }),
+      type: 'function_call_output',
+      call_id: 'call_1',
+      output: JSON.stringify({ title: 'Thought Record' }),
     });
     expect(events[outputIdx + 1]).toEqual({ type: 'response.create' });
-    expect(sent(client)).toContainEqual({ type: 'tool_call', callId: 'call_1', name: 'find_worksheet', args: { topic: 'anxiety' } });
+    expect(sent(client)).toContainEqual({
+      type: 'tool_call',
+      callId: 'call_1',
+      name: 'find_worksheet',
+      args: { topic: 'anxiety' },
+    });
     expect(insertToolInvocationMock).toHaveBeenCalledWith(SESSION, 'find_worksheet', { topic: 'anxiety' }, true);
   });
 
   it('returns a failure payload when the tool throws, and still continues', async () => {
     const { upstream } = await bringUp();
     executeToolMock.mockRejectedValueOnce(new Error('boom'));
-    fire(upstream, { type: 'response.function_call_arguments.done', call_id: 'c', name: 'run_risk_check', arguments: '{}' });
+    fire(upstream, {
+      type: 'response.function_call_arguments.done',
+      call_id: 'c',
+      name: 'run_risk_check',
+      arguments: '{}',
+    });
     await flush();
-    const out = sent(upstream).find(e => e.item?.type === 'function_call_output');
+    const out = sent(upstream).find((e) => e.item?.type === 'function_call_output');
     expect(JSON.parse(out!.item.output)).toEqual({ error: 'boom', success: false });
     expect(insertToolInvocationMock).toHaveBeenCalledWith(SESSION, 'run_risk_check', null, false);
   });
@@ -459,11 +589,17 @@ describe('control surface', () => {
     await grokVoiceManager.createResponse(SESSION, { instructions: 'say hi' });
 
     const events = sent(upstream).slice(before);
-    expect(events[0]).toMatchObject({ type: 'conversation.item.create', item: { role: 'system', content: [{ type: 'input_text', text: 'GUIDANCE' }] } });
+    expect(events[0]).toMatchObject({
+      type: 'conversation.item.create',
+      item: { role: 'system', content: [{ type: 'input_text', text: 'GUIDANCE' }] },
+    });
     expect(events[1]).toEqual({ type: 'session.update', session: { instructions: 'NEW' } });
     expect(events[2]).toEqual({ type: 'response.cancel' });
     expect(sent(client)).toContainEqual({ type: 'clear_audio' });
-    expect(events[3]).toEqual({ type: 'session.update', session: { tool_choice: { type: 'function', name: 'administer_scale' } } });
+    expect(events[3]).toEqual({
+      type: 'session.update',
+      session: { tool_choice: { type: 'function', name: 'administer_scale' } },
+    });
     expect(events[4].item.content[0].text).toContain('administer_scale');
     expect(events[4].item.content[0].text).toContain('"scale":"phq9"');
     expect(events[5]).toEqual({ type: 'response.create' });
@@ -502,10 +638,14 @@ describe('failure handling', () => {
     await flush();
 
     expect(recordLiveUsageMock).toHaveBeenCalledWith(SESSION, 'grok-voice-3.0', 30, {
-      finalized: true, closeReason: 'connection_lost',
+      finalized: true,
+      closeReason: 'connection_lost',
     });
     expect(sent(client)).toContainEqual({ type: 'closed', reason: 'upstream_lost' });
-    expect(serverEndSessionMock).toHaveBeenCalledWith(SESSION, expect.objectContaining({ endedBy: 'system', reason: 'upstream_lost' }));
+    expect(serverEndSessionMock).toHaveBeenCalledWith(
+      SESSION,
+      expect.objectContaining({ endedBy: 'system', reason: 'upstream_lost' }),
+    );
     expect(grokVoiceManager.owns(SESSION)).toBe(false);
   });
 
@@ -515,7 +655,10 @@ describe('failure handling', () => {
     expect(upstream.close).toHaveBeenCalledWith(1000, 'client disconnected');
     expect(serverEndSessionMock).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(16_000);
-    expect(serverEndSessionMock).toHaveBeenCalledWith(SESSION, expect.objectContaining({ reason: 'client_disconnected' }));
+    expect(serverEndSessionMock).toHaveBeenCalledWith(
+      SESSION,
+      expect.objectContaining({ reason: 'client_disconnected' }),
+    );
   });
 
   it('the participant "end" control closes upstream without ending the DB session itself', async () => {
@@ -538,8 +681,8 @@ describe('refusal loops (ai-therapist-255)', () => {
 
   function systemInjections(upstream: InstanceType<typeof FakeWs>): string[] {
     return sent(upstream)
-      .filter(e => e.type === 'conversation.item.create' && e.item?.role === 'system')
-      .map(e => e.item.content[0].text as string);
+      .filter((e) => e.type === 'conversation.item.create' && e.item?.role === 'system')
+      .map((e) => e.item.content[0].text as string);
   }
 
   it('leaves an ordinary reply, and a single refusal, completely alone', async () => {
@@ -563,7 +706,7 @@ describe('refusal loops (ai-therapist-255)', () => {
     expect(steers[0]).toContain('how they are feeling');
     // The steer is followed by response.create: silence is not an option.
     const events = sent(upstream);
-    const steerIdx = events.findIndex(e => e.type === 'conversation.item.create' && e.item?.role === 'system');
+    const steerIdx = events.findIndex((e) => e.type === 'conversation.item.create' && e.item?.role === 'system');
     expect(events[steerIdx + 1]).toEqual({ type: 'response.create' });
     expect(logInterventionActionMock).not.toHaveBeenCalled();
   });
@@ -574,25 +717,39 @@ describe('refusal loops (ai-therapist-255)', () => {
     await flush();
 
     const recovery = sent(client).find(
-      m => m.type === 'transcript' && m.role === 'assistant' && m.final && String(m.itemId).startsWith('grok-recovery-'),
+      (m) =>
+        m.type === 'transcript' && m.role === 'assistant' && m.final && String(m.itemId).startsWith('grok-recovery-'),
     );
     expect(recovery).toBeDefined();
     expect(recovery!.text).toContain('not with anything you said');
     expect(recovery!.text).toContain('988');
 
-    expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({
-      session_id: SESSION, role: 'assistant', content: recovery!.text,
-      metadata: expect.objectContaining({ server_authored: true, reason: 'refusal_loop' }),
-    })]);
-    expect(logInterventionActionMock).toHaveBeenCalledWith(SESSION, 'voice_refusal_recovery', expect.objectContaining({
-      channel: 'grok', streak: 4,
-    }));
-    expect(broadcastMock).toHaveBeenCalledWith(expect.anything(), 'sideband:status-update',
-      expect.objectContaining({ status: 'refusal_loop', action: 'recover', streak: 4 }), SESSION);
+    expect(insertMessagesBatchMock).toHaveBeenCalledWith([
+      expect.objectContaining({
+        session_id: SESSION,
+        role: 'assistant',
+        content: recovery!.text,
+        metadata: expect.objectContaining({ server_authored: true, reason: 'refusal_loop' }),
+      }),
+    ]);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      SESSION,
+      'voice_refusal_recovery',
+      expect.objectContaining({
+        channel: 'grok',
+        streak: 4,
+      }),
+    );
+    expect(broadcastMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'sideband:status-update',
+      expect.objectContaining({ status: 'refusal_loop', action: 'recover', streak: 4 }),
+      SESSION,
+    );
 
     // Re-steered, but without forcing speech over the line just delivered.
     const events = sent(upstream);
-    const lastSteer = events.map(e => e.type).lastIndexOf('conversation.item.create');
+    const lastSteer = events.map((e) => e.type).lastIndexOf('conversation.item.create');
     expect(events[lastSteer + 1]).toBeUndefined();
   });
 
@@ -603,8 +760,8 @@ describe('refusal loops (ai-therapist-255)', () => {
       await flush();
     }
 
-    const recoveries = sent(client).filter(m => String(m.itemId ?? '').startsWith('grok-recovery-'));
-    expect(recoveries).toHaveLength(2);           // turns 4 and 8, not 4,5,6,7,8
+    const recoveries = sent(client).filter((m) => String(m.itemId ?? '').startsWith('grok-recovery-'));
+    expect(recoveries).toHaveLength(2); // turns 4 and 8, not 4,5,6,7,8
     expect(systemInjections(upstream)).toHaveLength(4); // steer + re-steer, twice
   });
 
@@ -613,7 +770,8 @@ describe('refusal loops (ai-therapist-255)', () => {
     for (let i = 1; i <= 4; i++) {
       fire(upstream, {
         type: 'conversation.item.input_audio_transcription.completed',
-        item_id: `u${i}`, transcript: i === 4 ? 'so is the session just over?' : 'I am still here',
+        item_id: `u${i}`,
+        transcript: i === 4 ? 'so is the session just over?' : 'I am still here',
       });
       assistantTurn(upstream, CANNED, i);
       await flush();
@@ -621,14 +779,24 @@ describe('refusal loops (ai-therapist-255)', () => {
 
     expect(runCrisisPipelineMock).toHaveBeenCalledTimes(4);
     expect(runCrisisPipelineMock).toHaveBeenLastCalledWith(
-      { sessionId: SESSION, messageId: 42, content: 'so is the session just over?' }, 'realtime',
+      { sessionId: SESSION, messageId: 42, content: 'so is the session just over?' },
+      'realtime',
     );
   });
 
   it('honours admin-configured thresholds', async () => {
     grokVoiceManager.registerPending(SESSION, {
-      model: 'grok-voice-latest', apiKey: 'xai-test', sessionConfig: SESSION_CONFIG, openingPrompt: null,
-      refusalGuard: { enabled: true, patterns: ['i cant help with that'], maxChars: 200, steerAfter: 1, recoverAfter: 2 },
+      model: 'grok-voice-latest',
+      apiKey: 'xai-test',
+      sessionConfig: SESSION_CONFIG,
+      openingPrompt: null,
+      refusalGuard: {
+        enabled: true,
+        patterns: ['i cant help with that'],
+        maxChars: 200,
+        steerAfter: 1,
+        recoverAfter: 2,
+      },
       recoveryLine: 'A study-system note: our software is stuck, not you.',
     });
     const client = new FakeWs();
@@ -642,7 +810,7 @@ describe('refusal loops (ai-therapist-255)', () => {
     expect(systemInjections(upstream)).toHaveLength(1);
     assistantTurn(upstream, CANNED, 2);
     await flush();
-    expect(sent(client).some(m => m.text === 'A study-system note: our software is stuck, not you.')).toBe(true);
+    expect(sent(client).some((m) => m.text === 'A study-system note: our software is stuck, not you.')).toBe(true);
   });
 
   it('does not count a turn the participant barged in on', async () => {
@@ -665,14 +833,16 @@ describe('reconnection (ai-therapist-245)', () => {
     client.emit('close');
     await flush();
     expect(upstream.close).not.toHaveBeenCalled();
-    expect(statusUpdates().map(s => s.status)).toEqual(['client_reconnecting']);
+    expect(statusUpdates().map((s) => s.status)).toEqual(['client_reconnecting']);
 
     // Assistant audio in the gap is dropped; its transcript is still persisted.
     fire(upstream, { type: 'response.output_audio.delta', delta: Buffer.from([1, 2, 3, 4]).toString('base64') });
     fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'Still here.' });
     fire(upstream, { type: 'response.output_audio_transcript.done', item_id: 'a1', transcript: 'Still here.' });
     await flush();
-    expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({ role: 'assistant', content: 'Still here.' })]);
+    expect(insertMessagesBatchMock).toHaveBeenCalledWith([
+      expect.objectContaining({ role: 'assistant', content: 'Still here.' }),
+    ]);
 
     await vi.advanceTimersByTimeAsync(20_000);
     const client2 = new FakeWs();
@@ -683,11 +853,14 @@ describe('reconnection (ai-therapist-245)', () => {
     expect(upstreams).toHaveLength(1);
     expect(sent(upstream)).toHaveLength(sentBefore);
     expect(sent(client2)).toContainEqual({ type: 'ready', model: 'grok-voice-3.0', resumed: true });
-    expect(statusUpdates().map(s => s.status)).toEqual(['client_reconnecting', 'connected']);
+    expect(statusUpdates().map((s) => s.status)).toEqual(['client_reconnecting', 'connected']);
 
     // Audio flows on the new socket; the window timer is gone.
     client2.emit('message', Buffer.from([0, 1, 0, 1]), true);
-    expect(sent(upstream).at(-1)).toEqual({ type: 'input_audio_buffer.append', audio: Buffer.from([0, 1, 0, 1]).toString('base64') });
+    expect(sent(upstream).at(-1)).toEqual({
+      type: 'input_audio_buffer.append',
+      audio: Buffer.from([0, 1, 0, 1]).toString('base64'),
+    });
     fire(upstream, { type: 'response.output_audio.delta', delta: Buffer.from([9, 9]).toString('base64') });
     expect(binarySent(client2)).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(70_000);
@@ -701,7 +874,10 @@ describe('reconnection (ai-therapist-245)', () => {
     await vi.advanceTimersByTimeAsync(29_000);
     expect(serverEndSessionMock).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(serverEndSessionMock).toHaveBeenCalledWith(SESSION, expect.objectContaining({ reason: 'client_disconnected' }));
+    expect(serverEndSessionMock).toHaveBeenCalledWith(
+      SESSION,
+      expect.objectContaining({ reason: 'client_disconnected' }),
+    );
     expect(grokVoiceManager.owns(SESSION)).toBe(false);
 
     const late = new FakeWs();
@@ -716,12 +892,16 @@ describe('reconnection (ai-therapist-245)', () => {
     expect(upstream.close).toHaveBeenCalledWith(1000, 'participant ended');
     client.emit('close');
     await flush();
-    expect(statusUpdates().map(s => s.status)).not.toContain('client_reconnecting');
+    expect(statusUpdates().map((s) => s.status)).not.toContain('client_reconnecting');
   });
 
   it('re-dials xAI with the conversation id when the upstream drops, replays nothing, keeps usage assigned, and delivers queued steers', async () => {
     const { client, upstream } = await bringUp({ reconnectWindowMs: 60_000, conversationId: 'conv_abc' });
-    fire(upstream, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'I feel low.' });
+    fire(upstream, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'u1',
+      transcript: 'I feel low.',
+    });
     fire(upstream, { type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'I hear you.' });
     fire(upstream, { type: 'response.output_audio_transcript.done', item_id: 'a1', transcript: 'I hear you.' });
     fire(upstream, { type: 'response.done', response: { id: 'r1' }, usage: { billable_audio_seconds: 40 } });
@@ -737,7 +917,7 @@ describe('reconnection (ai-therapist-245)', () => {
     expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-3.0', 40, { finalized: false });
     expect(serverEndSessionMock).not.toHaveBeenCalled();
     expect(sent(client)).toContainEqual({ type: 'link', state: 'reconnecting' });
-    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting']);
+    expect(statusUpdates().map((s) => s.status)).toEqual(['upstream_reconnecting']);
     expect(grokVoiceManager.isConnected(SESSION)).toBe(false);
 
     // A crisis steer arriving in the gap is queued, not lost.
@@ -757,26 +937,41 @@ describe('reconnection (ai-therapist-245)', () => {
     fire(upstream2, { type: 'conversation.item.created', item: { id: 'a1', type: 'message', role: 'assistant' } });
     fire(upstream2, { type: 'session.updated', session: SESSION_CONFIG });
     // A re-reported transcript for an item already persisted is ignored too.
-    fire(upstream2, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'I feel low.' });
+    fire(upstream2, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'u1',
+      transcript: 'I feel low.',
+    });
     await flush();
 
     expect(sent(client)).toContainEqual({ type: 'link', state: 'restored' });
-    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting', 'connected']);
+    expect(statusUpdates().map((s) => s.status)).toEqual(['upstream_reconnecting', 'connected']);
     expect(insertMessagesBatchMock).not.toHaveBeenCalled();
     expect(runCrisisPipelineMock).not.toHaveBeenCalled();
     // No second opening line; the queued steer went out on the new leg.
-    const items = sent(upstream2).filter(m => m.type === 'conversation.item.create');
+    const items = sent(upstream2).filter((m) => m.type === 'conversation.item.create');
     expect(items).toHaveLength(1);
     expect(items[0].item.content[0].text).toBe('STEER');
-    expect(sent(upstream2).filter(m => m.type === 'response.create')).toHaveLength(1);
+    expect(sent(upstream2).filter((m) => m.type === 'response.create')).toHaveLength(1);
     expect(grokVoiceManager.isConnected(SESSION)).toBe(true);
-    expect(grokVoiceManager.getLinkStats(SESSION)).toMatchObject({ conversationId: 'conv_abc', upstreamResumes: 1, replayedItems: 2 });
+    expect(grokVoiceManager.getLinkStats(SESSION)).toMatchObject({
+      conversationId: 'conv_abc',
+      upstreamResumes: 1,
+      replayedItems: 2,
+    });
 
     // New turns on the resumed leg are persisted and scored as usual.
-    fire(upstream2, { type: 'conversation.item.input_audio_transcription.completed', item_id: 'u2', transcript: 'Still low.' });
+    fire(upstream2, {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: 'u2',
+      transcript: 'Still low.',
+    });
     await flush();
     expect(insertMessagesBatchMock).toHaveBeenCalledTimes(1);
-    expect(runCrisisPipelineMock).toHaveBeenCalledWith({ sessionId: SESSION, messageId: 42, content: 'Still low.' }, 'realtime');
+    expect(runCrisisPipelineMock).toHaveBeenCalledWith(
+      { sessionId: SESSION, messageId: 42, content: 'Still low.' },
+      'realtime',
+    );
 
     // Usage: xAI restarted its counter for the new socket (5 < 40), so the
     // previous leg's 40 is the offset and this leg's figure is assigned on
@@ -817,15 +1012,17 @@ describe('reconnection (ai-therapist-245)', () => {
     await flush();
     upstream.emit('close', 1006, Buffer.from(''));
     await flush();
-    expect(insertMessagesBatchMock).toHaveBeenCalledWith([expect.objectContaining({ role: 'assistant', content: 'Let me say' })]);
+    expect(insertMessagesBatchMock).toHaveBeenCalledWith([
+      expect.objectContaining({ role: 'assistant', content: 'Let me say' }),
+    ]);
     const upstream2 = upstreams[1];
     fire(upstream2, { type: 'session.updated', session: SESSION_CONFIG });
     await flush();
-    const items = sent(upstream2).filter(m => m.type === 'conversation.item.create');
+    const items = sent(upstream2).filter((m) => m.type === 'conversation.item.create');
     expect(items).toHaveLength(1);
     expect(items[0].item.role).toBe('system');
     expect(items[0].item.content[0].text).toMatch(/cut off/);
-    expect(sent(upstream2).filter(m => m.type === 'response.create')).toHaveLength(1);
+    expect(sent(upstream2).filter((m) => m.type === 'response.create')).toHaveLength(1);
   });
 
   it('retries the re-dial with backoff, and fails closed when the window elapses with no upstream', async () => {
@@ -848,10 +1045,13 @@ describe('reconnection (ai-therapist-245)', () => {
     expect(serverEndSessionMock).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(recordLiveUsageMock).toHaveBeenCalledWith(SESSION, 'grok-voice-3.0', 20, { finalized: true, closeReason: 'connection_lost' });
+    expect(recordLiveUsageMock).toHaveBeenCalledWith(SESSION, 'grok-voice-3.0', 20, {
+      finalized: true,
+      closeReason: 'connection_lost',
+    });
     expect(sent(client)).toContainEqual({ type: 'closed', reason: 'upstream_lost' });
     expect(serverEndSessionMock).toHaveBeenCalledWith(SESSION, expect.objectContaining({ reason: 'upstream_lost' }));
-    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting']);
+    expect(statusUpdates().map((s) => s.status)).toEqual(['upstream_reconnecting']);
     expect(grokVoiceManager.owns(SESSION)).toBe(false);
     // The attempt that was in flight when the window elapsed is closed, not kept.
     expect(upstreams[3].close).toHaveBeenCalledWith(1000, 'Session ended');
@@ -877,7 +1077,7 @@ describe('reconnection (ai-therapist-245)', () => {
     await flush();
     client.emit('close');
     await flush();
-    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting', 'client_reconnecting']);
+    expect(statusUpdates().map((s) => s.status)).toEqual(['upstream_reconnecting', 'client_reconnecting']);
 
     const client2 = new FakeWs();
     await grokVoiceManager.attachClient(SESSION, client2 as unknown as import('ws').default);
@@ -888,7 +1088,12 @@ describe('reconnection (ai-therapist-245)', () => {
     fire(upstreams[1], { type: 'session.updated', session: SESSION_CONFIG });
     await flush();
     expect(sent(client2)).toContainEqual({ type: 'link', state: 'restored' });
-    expect(statusUpdates().map(s => s.status)).toEqual(['upstream_reconnecting', 'client_reconnecting', 'connected', 'connected']);
+    expect(statusUpdates().map((s) => s.status)).toEqual([
+      'upstream_reconnecting',
+      'client_reconnecting',
+      'connected',
+      'connected',
+    ]);
     await vi.advanceTimersByTimeAsync(40_000);
     expect(serverEndSessionMock).not.toHaveBeenCalled();
   });

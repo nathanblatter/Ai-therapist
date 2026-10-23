@@ -42,7 +42,11 @@ const OCCURRED = new Date('2026-07-31T12:00:00Z');
 beforeEach(() => {
   vi.clearAllMocks();
   getSessionAeSnapshotMock.mockResolvedValue({
-    session_id: 'sess-1', user_id: 42, crisis_severity: 'high', crisis_risk_score: 88, crisis_flagged_at: OCCURRED,
+    session_id: 'sess-1',
+    user_id: 42,
+    crisis_severity: 'high',
+    crisis_risk_score: 88,
+    crisis_flagged_at: OCCURRED,
     is_demo: false,
   });
   getLatestCrisisEventIdMock.mockResolvedValue(7);
@@ -53,7 +57,13 @@ beforeEach(() => {
     { created_at: OCCURRED, step: 'ideation', risk_band: 'high', answer: 'RAW SECRET ANSWER' },
   ]);
   getSessionInterventionActionsMock.mockResolvedValue([
-    { action_id: 1, action_type: 'high_risk_emergency', performed_at: OCCURRED, performed_by: 'system', risk_score: 88 },
+    {
+      action_id: 1,
+      action_type: 'high_risk_emergency',
+      performed_at: OCCURRED,
+      performed_by: 'system',
+      risk_score: 88,
+    },
   ]);
   getRecentSessionMessagesMock.mockResolvedValue([
     { role: 'user', content: 'RAW PHI my name is John', content_redacted: 'my name is [REDACTED: NAME]' },
@@ -67,7 +77,11 @@ beforeEach(() => {
 describe('draftAdverseEventFromCrisis', () => {
   it('skips auto-drafts for non-study (demo/harness) sessions', async () => {
     getSessionAeSnapshotMock.mockResolvedValueOnce({
-      session_id: 'sess-1', user_id: 42, crisis_severity: 'high', crisis_risk_score: 88, crisis_flagged_at: OCCURRED,
+      session_id: 'sess-1',
+      user_id: 42,
+      crisis_severity: 'high',
+      crisis_risk_score: 88,
+      crisis_flagged_at: OCCURRED,
       is_demo: true,
     });
     const id = await draftAdverseEventFromCrisis('sess-1');
@@ -122,7 +136,11 @@ describe('draftAdverseEventFromCrisis', () => {
 
   it('still allows manual drafts from demo-role/harness (is_demo) sessions', async () => {
     getSessionAeSnapshotMock.mockResolvedValueOnce({
-      session_id: 'sess-1', user_id: 42, crisis_severity: 'high', crisis_risk_score: 88, crisis_flagged_at: OCCURRED,
+      session_id: 'sess-1',
+      user_id: 42,
+      crisis_severity: 'high',
+      crisis_risk_score: 88,
+      crisis_flagged_at: OCCURRED,
       is_demo: true,
     });
     const id = await draftAdverseEventFromCrisis('sess-1', { triggerSource: 'manual', createdBy: 'nathan' });

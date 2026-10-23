@@ -38,9 +38,7 @@ export interface SelfHarmScores {
  * requests for information rather than personal risk).
  */
 export function moderationRiskScore(scores: SelfHarmScores): number {
-  return Math.round(
-    100 * Math.max(scores.selfHarmIntent, 0.85 * scores.selfHarm, 0.6 * scores.selfHarmInstructions)
-  );
+  return Math.round(100 * Math.max(scores.selfHarmIntent, 0.85 * scores.selfHarm, 0.6 * scores.selfHarmInstructions));
 }
 
 /** Self-harm moderation scores for one text, or null on any failure. */

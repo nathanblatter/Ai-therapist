@@ -143,7 +143,7 @@ describe('executeContentWipe thread-message inclusion', () => {
       expect(toMock).toHaveBeenCalledWith('admin-broadcast');
       expect(emitMock).toHaveBeenCalledWith(
         'content:wiped',
-        expect.objectContaining({ wipeId: 'w1', messagesWiped: 5, triggeredBy: 'manual' })
+        expect.objectContaining({ wipeId: 'w1', messagesWiped: 5, triggeredBy: 'manual' }),
       );
     } finally {
       (global as unknown as { io: unknown }).io = undefined;
@@ -193,7 +193,7 @@ describe('executeContentWipe thread-message inclusion', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('db down');
-    const failLog = queryMock.mock.calls.find(c => String(c[0]).includes(`status = 'failed'`));
+    const failLog = queryMock.mock.calls.find((c) => String(c[0]).includes(`status = 'failed'`));
     expect(failLog).toBeTruthy();
   });
 });

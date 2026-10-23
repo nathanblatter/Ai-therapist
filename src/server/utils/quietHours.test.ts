@@ -73,7 +73,13 @@ describe('isQuietHoursActive / getQuietHoursStatus', () => {
     expect(isQuietHoursActive(new Date('2026-01-15T05:00:00Z'))).toBe(true); // 22:00 MST
     expect(isQuietHoursActive(new Date('2026-01-15T19:00:00Z'))).toBe(false); // 12:00 MST
     const status = getQuietHoursStatus(new Date('2026-01-15T05:00:00Z'));
-    expect(status).toMatchObject({ enabled: true, active: true, startHour: 22, endHour: 6, timezone: 'America/Denver' });
+    expect(status).toMatchObject({
+      enabled: true,
+      active: true,
+      startHour: 22,
+      endHour: 6,
+      timezone: 'America/Denver',
+    });
   });
 });
 
@@ -83,11 +89,19 @@ describe('requireOutsideQuietHours middleware', () => {
     let statusCode: number | null = null;
     let body: unknown = null;
     const res = {
-      status(code: number) { statusCode = code; return this; },
-      json(payload: unknown) { body = payload; return this; },
+      status(code: number) {
+        statusCode = code;
+        return this;
+      },
+      json(payload: unknown) {
+        body = payload;
+        return this;
+      },
     } as unknown as Response;
     let nexted = false;
-    requireOutsideQuietHours(req, res, () => { nexted = true; });
+    requireOutsideQuietHours(req, res, () => {
+      nexted = true;
+    });
     return { statusCode, body, nexted };
   }
 

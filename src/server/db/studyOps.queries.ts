@@ -82,7 +82,9 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
     `SELECT COUNT(DISTINCT ts.user_id) FILTER (WHERE ts.user_id IS NOT NULL) AS enrolled_participants,
             COUNT(DISTINCT ts.session_id) FILTER (WHERE ts.user_id IS NULL) AS anonymous_sessions
        FROM therapy_sessions ts
-      WHERE ts.is_demo IS NOT TRUE AND ${WINDOW}`, p);
+      WHERE ts.is_demo IS NOT TRUE AND ${WINDOW}`,
+    p,
+  );
 
   const weekly = await pool.query<{ week: string; new_participants: string }>(
     `SELECT to_char(date_trunc('week', first_session), 'YYYY-MM-DD') AS week,
@@ -93,13 +95,16 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
           WHERE ts.is_demo IS NOT TRUE AND ts.user_id IS NOT NULL AND ${WINDOW}
           GROUP BY ts.user_id
        ) g
-      GROUP BY 1 ORDER BY 1`, p);
+      GROUP BY 1 ORDER BY 1`,
+    p,
+  );
 
   const statusCounts = await pool.query<{ paused: string; withdrawn: string }>(
     `SELECT COUNT(*) FILTER (WHERE study_status = 'paused') AS paused,
             COUNT(*) FILTER (WHERE study_status = 'withdrawn') AS withdrawn
        FROM users
-      WHERE role = 'participant' AND is_sandbox IS NOT TRUE`);
+      WHERE role = 'participant' AND is_sandbox IS NOT TRUE`,
+  );
 
   const arms = await pool.query<{ arm_true: string; arm_false: string; arm_null: string }>(
     `SELECT COUNT(*) FILTER (WHERE sc.proactive_offering IS TRUE) AS arm_true,
@@ -107,7 +112,9 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
             COUNT(*) FILTER (WHERE sc.proactive_offering IS NULL) AS arm_null
        FROM therapy_sessions ts
        JOIN session_configurations sc ON sc.session_id = ts.session_id
-      WHERE ts.is_demo IS NOT TRUE AND ${WINDOW}`, p);
+      WHERE ts.is_demo IS NOT TRUE AND ${WINDOW}`,
+    p,
+  );
 
   const hist = await pool.query<{ n_sessions: string; n_participants: string }>(
     `SELECT n_sessions, COUNT(*) AS n_participants FROM (
@@ -115,7 +122,9 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
           FROM therapy_sessions ts
          WHERE ts.is_demo IS NOT TRUE AND ts.user_id IS NOT NULL AND ${WINDOW}
          GROUP BY ts.user_id
-     ) g GROUP BY n_sessions ORDER BY n_sessions`, p);
+     ) g GROUP BY n_sessions ORDER BY n_sessions`,
+    p,
+  );
 
   const conditions = await pool.query<{ dimension: string; value: string; n: string }>(
     `SELECT dimension, value, COUNT(*) AS n FROM (
@@ -130,12 +139,15 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
         SELECT 'theme', sc.theme
           FROM session_configurations sc JOIN therapy_sessions ts ON ts.session_id = sc.session_id
          WHERE ts.is_demo IS NOT TRUE AND sc.theme IS NOT NULL AND ${WINDOW}
-     ) d GROUP BY dimension, value ORDER BY dimension, value`, p);
+     ) d GROUP BY dimension, value ORDER BY dimension, value`,
+    p,
+  );
 
   const dev = await pool.query<{ open: string; major_open: string }>(
     `SELECT COUNT(*) FILTER (WHERE status IN ('open','acknowledged')) AS open,
             COUNT(*) FILTER (WHERE status IN ('open','acknowledged') AND severity = 'major') AS major_open
-       FROM protocol_deviations`);
+       FROM protocol_deviations`,
+  );
 
   const armTrue = parseInt(arms.rows[0]?.arm_true ?? '0', 10);
   const armFalse = parseInt(arms.rows[0]?.arm_false ?? '0', 10);
@@ -144,13 +156,13 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
   const imbalance = denom > 0 ? Math.abs(armTrue - armFalse) / denom : null;
 
   const expected = protocol.expected_sessions_per_participant;
-  const histogram = hist.rows.map(r => ({
+  const histogram = hist.rows.map((r) => ({
     n_sessions: parseInt(r.n_sessions, 10),
     n_participants: parseInt(r.n_participants, 10),
   }));
-  const below = histogram.filter(h => h.n_sessions < expected).reduce((a, h) => a + h.n_participants, 0);
-  const at = histogram.filter(h => h.n_sessions === expected).reduce((a, h) => a + h.n_participants, 0);
-  const above = histogram.filter(h => h.n_sessions > expected).reduce((a, h) => a + h.n_participants, 0);
+  const below = histogram.filter((h) => h.n_sessions < expected).reduce((a, h) => a + h.n_participants, 0);
+  const at = histogram.filter((h) => h.n_sessions === expected).reduce((a, h) => a + h.n_participants, 0);
+  const above = histogram.filter((h) => h.n_sessions > expected).reduce((a, h) => a + h.n_participants, 0);
 
   return {
     protocol,
@@ -158,19 +170,26 @@ export async function getStudyOpsSummary(): Promise<StudyOpsSummary> {
       enrolled_participants: parseInt(enrollment.rows[0]?.enrolled_participants ?? '0', 10),
       anonymous_sessions: parseInt(enrollment.rows[0]?.anonymous_sessions ?? '0', 10),
       target: protocol.enrollment_target,
-      weekly: weekly.rows.map(r => ({ week: r.week, new_participants: parseInt(r.new_participants, 10) })),
+      weekly: weekly.rows.map((r) => ({ week: r.week, new_participants: parseInt(r.new_participants, 10) })),
       paused: parseInt(statusCounts.rows[0]?.paused ?? '0', 10),
       withdrawn: parseInt(statusCounts.rows[0]?.withdrawn ?? '0', 10),
     },
     arm_balance: {
-      arm_true: armTrue, arm_false: armFalse, arm_null: armNull,
-      imbalance, threshold: protocol.arm_imbalance_threshold,
+      arm_true: armTrue,
+      arm_false: armFalse,
+      arm_null: armNull,
+      imbalance,
+      threshold: protocol.arm_imbalance_threshold,
       over_threshold: imbalance !== null && imbalance > protocol.arm_imbalance_threshold,
     },
     sessions_per_participant: {
-      histogram, expected, below_expected: below, at_expected: at, above_expected: above,
+      histogram,
+      expected,
+      below_expected: below,
+      at_expected: at,
+      above_expected: above,
     },
-    conditions: conditions.rows.map(r => ({ dimension: r.dimension, value: r.value, n: parseInt(r.n, 10) })),
+    conditions: conditions.rows.map((r) => ({ dimension: r.dimension, value: r.value, n: parseInt(r.n, 10) })),
     deviations: {
       open: parseInt(dev.rows[0]?.open ?? '0', 10),
       major_open: parseInt(dev.rows[0]?.major_open ?? '0', 10),
@@ -203,7 +222,7 @@ export async function listDeviations(status: 'open' | 'all', limit = 100): Promi
   const result = await pool.query<DeviationRow>(
     `SELECT * FROM protocol_deviations ${whereOpen}
       ORDER BY occurred_at DESC, deviation_id DESC LIMIT $1`,
-    [limit]
+    [limit],
   );
   return result.rows;
 }
@@ -223,8 +242,14 @@ export async function createDeviation(input: CreateDeviationInput): Promise<Devi
        (occurred_at, source, category, severity, session_id, description, created_by)
      VALUES (COALESCE($1::timestamptz, CURRENT_TIMESTAMP), 'manual', $2, $3, $4, $5, $6)
      RETURNING *`,
-    [input.occurred_at ?? null, input.category, input.severity ?? 'minor',
-     input.session_id ?? null, input.description, input.created_by]
+    [
+      input.occurred_at ?? null,
+      input.category,
+      input.severity ?? 'minor',
+      input.session_id ?? null,
+      input.description,
+      input.created_by,
+    ],
   );
   return result.rows[0];
 }
@@ -236,17 +261,29 @@ export interface UpdateDeviationInput {
 }
 
 export async function updateDeviation(
-  id: number, patch: UpdateDeviationInput, actor: string
+  id: number,
+  patch: UpdateDeviationInput,
+  actor: string,
 ): Promise<DeviationRow | null> {
   const sets: string[] = [];
   const params: unknown[] = [];
   let i = 1;
-  if (patch.status !== undefined) { sets.push(`status = $${i++}`); params.push(patch.status); }
-  if (patch.description !== undefined) { sets.push(`description = $${i++}`); params.push(patch.description); }
-  if (patch.severity !== undefined) { sets.push(`severity = $${i++}`); params.push(patch.severity); }
+  if (patch.status !== undefined) {
+    sets.push(`status = $${i++}`);
+    params.push(patch.status);
+  }
+  if (patch.description !== undefined) {
+    sets.push(`description = $${i++}`);
+    params.push(patch.description);
+  }
+  if (patch.severity !== undefined) {
+    sets.push(`severity = $${i++}`);
+    params.push(patch.severity);
+  }
   // Stamp resolver when moving to a terminal status.
   if (patch.status === 'resolved' || patch.status === 'dismissed') {
-    sets.push(`resolved_by = $${i++}`); params.push(actor);
+    sets.push(`resolved_by = $${i++}`);
+    params.push(actor);
     sets.push(`resolved_at = CURRENT_TIMESTAMP`);
   }
   sets.push(`updated_at = CURRENT_TIMESTAMP`);
@@ -258,17 +295,16 @@ export async function updateDeviation(
   params.push(id);
   const result = await pool.query<DeviationRow>(
     `UPDATE protocol_deviations SET ${sets.join(', ')} WHERE deviation_id = $${i} RETURNING *`,
-    params
+    params,
   );
   return result.rows[0] ?? null;
 }
 
 /** Delete a MANUAL deviation. Auto-flagged rows (source='auto') are refused. */
 export async function deleteDeviation(id: number): Promise<boolean> {
-  const result = await pool.query(
-    `DELETE FROM protocol_deviations WHERE deviation_id = $1 AND source = 'manual'`,
-    [id]
-  );
+  const result = await pool.query(`DELETE FROM protocol_deviations WHERE deviation_id = $1 AND source = 'manual'`, [
+    id,
+  ]);
   return (result.rowCount ?? 0) > 0;
 }
 
@@ -306,7 +342,9 @@ export async function scanForDeviations(): Promise<{ inserted: number }> {
             'cfg:' || dv.dim || ':' || dv.val, 'system'
        FROM distinct_vals dv JOIN dim_distinct dd ON dd.dim = dv.dim
       WHERE dd.dn > 1
-     ON CONFLICT (auto_key) DO NOTHING`, [start, end]);
+     ON CONFLICT (auto_key) DO NOTHING`,
+    [start, end],
+  );
   inserted += r1a.rowCount ?? 0;
 
   // 1b. system_config row touched within the study window (only meaningful when
@@ -323,7 +361,9 @@ export async function scanForDeviations(): Promise<{ inserted: number }> {
           AND updated_at IS NOT NULL
           AND updated_at >= $1::timestamptz
           AND ($2::timestamptz IS NULL OR updated_at <= $2)
-       ON CONFLICT (auto_key) DO NOTHING`, [start, end]);
+       ON CONFLICT (auto_key) DO NOTHING`,
+      [start, end],
+    );
     inserted += r1b.rowCount ?? 0;
   }
 
@@ -344,7 +384,9 @@ export async function scanForDeviations(): Promise<{ inserted: number }> {
             'arm:' || to_char(now(), 'IYYY-IW'), 'system'
        FROM arms
       WHERE (t + f) >= 10 AND abs(t - f)::numeric / NULLIF(t + f, 0) > $3
-     ON CONFLICT (auto_key) DO NOTHING`, [start, end, protocol.arm_imbalance_threshold]);
+     ON CONFLICT (auto_key) DO NOTHING`,
+    [start, end, protocol.arm_imbalance_threshold],
+  );
   inserted += r2.rowCount ?? 0;
 
   // 3. session-count overrun — participant with > expected+2 in-window sessions.
@@ -361,7 +403,9 @@ export async function scanForDeviations(): Promise<{ inserted: number }> {
           GROUP BY ts.user_id
        ) g
       WHERE g.n > $3 + 2
-     ON CONFLICT (auto_key) DO NOTHING`, [start, end, protocol.expected_sessions_per_participant]);
+     ON CONFLICT (auto_key) DO NOTHING`,
+    [start, end, protocol.expected_sessions_per_participant],
+  );
   inserted += r3.rowCount ?? 0;
 
   // 4. consent-version change — >1 distinct consent_version among in-window consents.
@@ -379,7 +423,9 @@ export async function scanForDeviations(): Promise<{ inserted: number }> {
             jsonb_build_object('consent_version', cv.consent_version), 'consent:' || cv.consent_version, 'system'
        FROM cv CROSS JOIN cnt
       WHERE cnt.c > 1
-     ON CONFLICT (auto_key) DO NOTHING`, [start, end]);
+     ON CONFLICT (auto_key) DO NOTHING`,
+    [start, end],
+  );
   inserted += r4.rowCount ?? 0;
 
   return { inserted };

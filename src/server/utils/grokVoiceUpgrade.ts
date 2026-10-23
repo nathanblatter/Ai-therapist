@@ -37,7 +37,9 @@ export function parseGrokVoicePath(url: string | undefined): string | null {
 function rejectUpgrade(socket: Duplex, status: number, text: string): void {
   try {
     socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
-  } catch { /* socket already gone */ }
+  } catch {
+    /* socket already gone */
+  }
   socket.destroy();
 }
 
@@ -60,7 +62,7 @@ export function attachGrokVoiceUpgrade(httpServer: HttpServer, deps: GrokUpgrade
     const sessionId = parseGrokVoicePath(req.url);
     if (!sessionId) return;
 
-    socket.on('error', err => log.warn({ err }, 'upgrade socket error'));
+    socket.on('error', (err) => log.warn({ err }, 'upgrade socket error'));
 
     // Load the express-session from the cookie. express-session only needs a
     // response object for Set-Cookie on new sessions, which never happens here
@@ -71,20 +73,25 @@ export function attachGrokVoiceUpgrade(httpServer: HttpServer, deps: GrokUpgrade
         log.error({ err }, 'Session middleware error on upgrade');
         return rejectUpgrade(socket, 500, 'Session error');
       }
-      deps.canAccess(req as unknown as Request, sessionId)
-        .then(ok => {
+      deps
+        .canAccess(req as unknown as Request, sessionId)
+        .then((ok) => {
           if (!ok) {
             log.warn(`Upgrade denied for ${sessionId.substring(0, 12)}...: not the session owner`);
             return rejectUpgrade(socket, 403, 'Forbidden');
           }
-          wss.handleUpgrade(req, socket, head, ws => {
-            deps.onClient(sessionId, ws).catch(e => {
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            deps.onClient(sessionId, ws).catch((e) => {
               log.error({ err: e }, `Client attach failed for ${sessionId.substring(0, 12)}...`);
-              try { ws.close(1011, 'attach failed'); } catch { /* ignore */ }
+              try {
+                ws.close(1011, 'attach failed');
+              } catch {
+                /* ignore */
+              }
             });
           });
         })
-        .catch(e => {
+        .catch((e) => {
           log.error({ err: e }, 'Ownership check failed on upgrade');
           rejectUpgrade(socket, 500, 'Access check failed');
         });

@@ -21,7 +21,7 @@ import pg from 'pg';
 
 const EXECUTE = process.argv.includes('--execute');
 const TEST_USERS = process.argv.flatMap((a, i) =>
-  a === '--test-user' && process.argv[i + 1] ? [process.argv[i + 1]] : []
+  a === '--test-user' && process.argv[i + 1] ? [process.argv[i + 1]] : [],
 );
 
 const token = process.env.QUALTRICS_API_TOKEN;
@@ -62,7 +62,10 @@ async function exportResponses(surveyId) {
   for (let i = 0; i < 40; i++) {
     const poll = await api('GET', `/surveys/${surveyId}/export-responses/${result.progressId}`);
     const body = await poll.json();
-    if (body.result?.status === 'complete') { fileId = body.result.fileId; break; }
+    if (body.result?.status === 'complete') {
+      fileId = body.result.fileId;
+      break;
+    }
     if (body.result?.status === 'failed') throw new Error('export failed');
     await new Promise((r) => setTimeout(r, 1500));
   }
@@ -122,8 +125,16 @@ const del = async (label, sql, params) => {
   console.log(`  deleted ${r.rowCount} ${label}`);
 };
 if (responseIds.length > 0) {
-  await del('adverse_event_reports', `DELETE FROM adverse_event_reports WHERE trigger_source = 'auto_survey' AND session_ref = ANY($1)`, [responseIds.map((r) => `qualtrics:${r}`)]);
-  await del('work_items (responses)', `DELETE FROM work_items WHERE source_table = 'qualtrics_responses' AND source_id = ANY($1)`, [responseIds]);
+  await del(
+    'adverse_event_reports',
+    `DELETE FROM adverse_event_reports WHERE trigger_source = 'auto_survey' AND session_ref = ANY($1)`,
+    [responseIds.map((r) => `qualtrics:${r}`)],
+  );
+  await del(
+    'work_items (responses)',
+    `DELETE FROM work_items WHERE source_table = 'qualtrics_responses' AND source_id = ANY($1)`,
+    [responseIds],
+  );
   await del('qualtrics_responses', `DELETE FROM qualtrics_responses WHERE response_id = ANY($1)`, [responseIds]);
 }
 for (const userId of testUserIds) {

@@ -6,26 +6,39 @@ import express from 'express';
 import request from 'supertest';
 import { Readable } from 'node:stream';
 
-const { logDataAccessMock, getSessionRecordingMock, getParticipantRecordingMock, headObjectMock, getObjectStreamMock } = vi.hoisted(() => ({
-  logDataAccessMock: vi.fn(),
-  getSessionRecordingMock: vi.fn(),
-  getParticipantRecordingMock: vi.fn(),
-  headObjectMock: vi.fn(),
-  getObjectStreamMock: vi.fn(),
-}));
+const { logDataAccessMock, getSessionRecordingMock, getParticipantRecordingMock, headObjectMock, getObjectStreamMock } =
+  vi.hoisted(() => ({
+    logDataAccessMock: vi.fn(),
+    getSessionRecordingMock: vi.fn(),
+    getParticipantRecordingMock: vi.fn(),
+    headObjectMock: vi.fn(),
+    getObjectStreamMock: vi.fn(),
+  }));
 
 vi.mock('../../db/index.js', () => ({
   logDataAccess: logDataAccessMock,
   // The rest of the barrel is irrelevant to this route; proxies keep the
   // module importable without enumerating every export.
-  getSessionWithUser: vi.fn(), getAdminSessionMessages: vi.fn(), listSessions: vi.fn(),
-  getActiveSessions: vi.fn(), updateSessionStatus: vi.fn(), insertMessagesBatch: vi.fn(),
-  getSessionCostSummary: vi.fn(), getSessionFeedback: vi.fn(), getSessionAccessInfo: vi.fn(),
-  getRedactionStatus: vi.fn(), getSessionMessages: vi.fn(), endSession: vi.fn(),
-  getUserSessions: vi.fn(), getSessionConfig: vi.fn(), getSessionCheckin: vi.fn(),
+  getSessionWithUser: vi.fn(),
+  getAdminSessionMessages: vi.fn(),
+  listSessions: vi.fn(),
+  getActiveSessions: vi.fn(),
+  updateSessionStatus: vi.fn(),
+  insertMessagesBatch: vi.fn(),
+  getSessionCostSummary: vi.fn(),
+  getSessionFeedback: vi.fn(),
+  getSessionAccessInfo: vi.fn(),
+  getRedactionStatus: vi.fn(),
+  getSessionMessages: vi.fn(),
+  endSession: vi.fn(),
+  getUserSessions: vi.fn(),
+  getSessionConfig: vi.fn(),
+  getSessionCheckin: vi.fn(),
 }));
 vi.mock('../../db/recording.queries.js', () => ({ getSessionRecording: getSessionRecordingMock }));
-vi.mock('../../db/acousticFeatures.queries.js', () => ({ getParticipantRecordingForSession: getParticipantRecordingMock }));
+vi.mock('../../db/acousticFeatures.queries.js', () => ({
+  getParticipantRecordingForSession: getParticipantRecordingMock,
+}));
 vi.mock('../../config/objectStorage.js', () => ({ headObject: headObjectMock, getObjectStream: getObjectStreamMock }));
 vi.mock('../../middleware/auth.js', () => ({
   requireRole: () => (_req: unknown, _res: unknown, next: () => void) => next(),
@@ -56,8 +69,17 @@ const WAV = Buffer.from('RIFF....WAVEfmt ');
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getSessionRecordingMock.mockResolvedValue({ status: 'ready', objectKey: 'sessions/s1/recording.wav', durationMs: 1000, sizeBytes: WAV.length });
-  getParticipantRecordingMock.mockResolvedValue({ status: 'ready', objectKey: 'sessions/s1/participant.wav', sampleRate: 24000 });
+  getSessionRecordingMock.mockResolvedValue({
+    status: 'ready',
+    objectKey: 'sessions/s1/recording.wav',
+    durationMs: 1000,
+    sizeBytes: WAV.length,
+  });
+  getParticipantRecordingMock.mockResolvedValue({
+    status: 'ready',
+    objectKey: 'sessions/s1/participant.wav',
+    sampleRate: 24000,
+  });
   headObjectMock.mockResolvedValue({ contentLength: WAV.length, contentType: 'audio/wav' });
   getObjectStreamMock.mockImplementation(async (_key: string, range?: { start: number; end: number }) => ({
     body: Readable.from([range ? WAV.subarray(range.start, range.end + 1) : WAV]),
@@ -73,9 +95,14 @@ describe('GET /admin/api/sessions/:sessionId/recording', () => {
     expect(Number(res.headers['content-length'])).toBe(WAV.length);
     // The Range header is ignored for a download: the whole object is sent.
     expect(getObjectStreamMock).toHaveBeenCalledWith('sessions/s1/recording.wav');
-    expect(logDataAccessMock).toHaveBeenCalledWith(expect.objectContaining({
-      accessedBy: 7, role: 'therapist', action: 'recording_download', sessionId: 's1',
-    }));
+    expect(logDataAccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessedBy: 7,
+        role: 'therapist',
+        action: 'recording_download',
+        sessionId: 's1',
+      }),
+    );
   });
 
   it('a plain request streams inline and audits recording_stream with the range', async () => {
@@ -83,9 +110,12 @@ describe('GET /admin/api/sessions/:sessionId/recording', () => {
     expect(res.status).toBe(206);
     expect(res.headers['content-disposition']).toBeUndefined();
     expect(res.headers['content-range']).toBe(`bytes 0-3/${WAV.length}`);
-    expect(logDataAccessMock).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'recording_stream', detail: { range: 'bytes=0-3', track: 'mixed' },
-    }));
+    expect(logDataAccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'recording_stream',
+        detail: { range: 'bytes=0-3', track: 'mixed' },
+      }),
+    );
   });
 
   it('track=participant streams the participant-only object and notes the track in the audit row', async () => {
@@ -93,9 +123,12 @@ describe('GET /admin/api/sessions/:sessionId/recording', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-disposition']).toBe('attachment; filename="session-s1-participant.wav"');
     expect(getObjectStreamMock).toHaveBeenCalledWith('sessions/s1/participant.wav');
-    expect(logDataAccessMock).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'recording_download', detail: { range: null, track: 'participant' },
-    }));
+    expect(logDataAccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'recording_download',
+        detail: { range: null, track: 'participant' },
+      }),
+    );
   });
 
   it('track=participant 404s when the participant track is not ready even if the mix is', async () => {

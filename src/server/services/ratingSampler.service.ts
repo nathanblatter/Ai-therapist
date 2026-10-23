@@ -49,8 +49,14 @@ export function isoWeekKey(date: Date): string {
 
 /** A session is crisis-adjacent when it was flagged, produced a crisis event,
  *  or its peak risk score reached the moderate band. */
-export function isCrisisAdjacent(c: Pick<RatingCandidateRow, 'crisis_flagged' | 'crisis_event_count' | 'max_risk_score'>): boolean {
-  return Boolean(c.crisis_flagged) || Number(c.crisis_event_count) > 0 || riskBand(c.max_risk_score) !== 'none' && riskBand(c.max_risk_score) !== 'low';
+export function isCrisisAdjacent(
+  c: Pick<RatingCandidateRow, 'crisis_flagged' | 'crisis_event_count' | 'max_risk_score'>,
+): boolean {
+  return (
+    Boolean(c.crisis_flagged) ||
+    Number(c.crisis_event_count) > 0 ||
+    (riskBand(c.max_risk_score) !== 'none' && riskBand(c.max_risk_score) !== 'low')
+  );
 }
 
 export function stratumOf(c: Pick<RatingCandidateRow, 'session_type' | 'max_risk_score' | 'ended_at'>): string {
@@ -117,14 +123,16 @@ export function stratifySample(candidates: RatingCandidateRow[], opts: StratifyO
 
   // Group by stratum (deterministic: candidates sorted by session_id).
   const groups = new Map<string, Array<{ c: RatingCandidateRow; crisis: boolean }>>();
-  for (const c of [...candidates].sort((a, b) => (a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0))) {
+  for (const c of [...candidates].sort((a, b) =>
+    a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0,
+  )) {
     const key = stratumOf(c);
     const list = groups.get(key) ?? [];
     list.push({ c, crisis: isCrisisAdjacent(c) });
     groups.set(key, list);
   }
   const keys = [...groups.keys()].sort();
-  const allocated = new Map<string, number>(keys.map(k => [k, 0]));
+  const allocated = new Map<string, number>(keys.map((k) => [k, 0]));
   let budget = Math.min(size, candidates.length);
 
   // 1. coverage
@@ -136,21 +144,24 @@ export function stratifySample(candidates: RatingCandidateRow[], opts: StratifyO
 
   // 2. proportional by weight with largest remainder, capped by remaining candidates
   while (budget > 0) {
-    const open = keys.filter(k => groups.get(k)!.length - allocated.get(k)! > 0);
+    const open = keys.filter((k) => groups.get(k)!.length - allocated.get(k)! > 0);
     if (open.length === 0) break;
     const weight = (k: string) => groups.get(k)!.reduce((s, x) => s + (x.crisis ? oversample : 1), 0);
     const total = open.reduce((s, k) => s + weight(k), 0);
-    const shares = open.map(k => {
+    const shares = open.map((k) => {
       const cap = groups.get(k)!.length - allocated.get(k)!;
       const exact = (budget * weight(k)) / total;
       const whole = Math.min(cap, Math.floor(exact));
       return { k, whole, remainder: exact - Math.floor(exact), cap };
     });
     let used = 0;
-    for (const s of shares) { allocated.set(s.k, allocated.get(s.k)! + s.whole); used += s.whole; }
+    for (const s of shares) {
+      allocated.set(s.k, allocated.get(s.k)! + s.whole);
+      used += s.whole;
+    }
     // Largest remainders take the leftover, one each, while capacity remains.
     const byRemainder = shares
-      .filter(s => s.cap - s.whole > 0)
+      .filter((s) => s.cap - s.whole > 0)
       .sort((a, b) => b.remainder - a.remainder || (a.k < b.k ? -1 : 1));
     for (const s of byRemainder) {
       if (used >= budget) break;
@@ -167,7 +178,7 @@ export function stratifySample(candidates: RatingCandidateRow[], opts: StratifyO
   for (const k of keys) {
     const list = groups.get(k)!;
     const n = allocated.get(k)!;
-    const keyed = list.map(x => ({ x, key: Math.pow(rng(), 1 / (x.crisis ? oversample : 1)) }));
+    const keyed = list.map((x) => ({ x, key: Math.pow(rng(), 1 / (x.crisis ? oversample : 1)) }));
     keyed.sort((a, b) => b.key - a.key || (a.x.c.session_id < b.x.c.session_id ? -1 : 1));
     for (const { x } of keyed.slice(0, n)) {
       picks.push({
@@ -177,7 +188,12 @@ export function stratifySample(candidates: RatingCandidateRow[], opts: StratifyO
         needs_second_rater: rng() < fraction,
       });
     }
-    allocations.push({ stratum: k, candidates: list.length, crisis_adjacent: list.filter(x => x.crisis).length, allocated: n });
+    allocations.push({
+      stratum: k,
+      candidates: list.length,
+      crisis_adjacent: list.filter((x) => x.crisis).length,
+      allocated: n,
+    });
   }
   return { picks, allocations };
 }
@@ -222,8 +238,8 @@ export async function enqueueStratifiedSample(opts: EnqueueSampleOptions): Promi
   const inserted = opts.dryRun
     ? []
     : await insertRatingQueueRows(
-        picks.map(p => ({ ...p, source: 'stratified' as const })),
-        opts.enqueuedBy ?? null
+        picks.map((p) => ({ ...p, source: 'stratified' as const })),
+        opts.enqueuedBy ?? null,
       );
   return {
     dry_run: Boolean(opts.dryRun),
@@ -248,12 +264,12 @@ export async function enqueueSessions(
   sessionIds: string[],
   source: Exclude<RatingQueueSource, 'stratified'>,
   enqueuedBy: number | null,
-  secondRaterFraction?: number
+  secondRaterFraction?: number,
 ): Promise<{ inserted: RatingQueueRow[]; skipped: string[] }> {
   const fraction = secondRaterFraction ?? (await getSecondRaterFraction());
   const candidates = await getRatingCandidatesByIds(sessionIds);
-  const found = new Set(candidates.map(c => c.session_id));
-  const rows = candidates.map(c => {
+  const found = new Set(candidates.map((c) => c.session_id));
+  const rows = candidates.map((c) => {
     let h = 0;
     for (const ch of c.session_id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
     return {
@@ -265,5 +281,5 @@ export async function enqueueSessions(
     };
   });
   const inserted = await insertRatingQueueRows(rows, enqueuedBy);
-  return { inserted, skipped: sessionIds.filter(id => !found.has(id)) };
+  return { inserted, skipped: sessionIds.filter((id) => !found.has(id)) };
 }

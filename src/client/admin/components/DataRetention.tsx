@@ -1,5 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Save, RotateCcw, AlertCircle, CheckCircle, Trash2, Clock, Shield, RefreshCw, AlertTriangle } from 'react-feather';
+import {
+  Save,
+  RotateCcw,
+  AlertCircle,
+  CheckCircle,
+  Trash2,
+  Clock,
+  Shield,
+  RefreshCw,
+  AlertTriangle,
+} from 'react-feather';
 import { formatDateTime } from '../../shared/format';
 import { getJson, postJson } from '../../shared/http';
 
@@ -53,7 +63,7 @@ export default function DataRetention() {
     wipe_time: '03:00',
     require_redaction_complete: true,
     last_wipe_at: null,
-    last_wipe_count: 0
+    last_wipe_count: 0,
   });
 
   useEffect(() => {
@@ -89,7 +99,11 @@ export default function DataRetention() {
     setSaveSuccess(null);
 
     try {
-      await postJson('/admin/api/content-retention', { settings }, { method: 'PUT', fallback: 'Failed to save settings' });
+      await postJson(
+        '/admin/api/content-retention',
+        { settings },
+        { method: 'PUT', fallback: 'Failed to save settings' },
+      );
 
       setSaveSuccess('Settings saved successfully!');
       setHasChanges(false);
@@ -102,12 +116,14 @@ export default function DataRetention() {
   };
 
   const handleWipeNow = async () => {
-    if (!window.confirm(
-      'Are you sure you want to wipe original content now?\n\n' +
-      'This will permanently delete original message content for all messages ' +
-      `older than ${settings.retention_hours} hours that have been redacted.\n\n` +
-      'This action cannot be undone.'
-    )) {
+    if (
+      !window.confirm(
+        'Are you sure you want to wipe original content now?\n\n' +
+          'This will permanently delete original message content for all messages ' +
+          `older than ${settings.retention_hours} hours that have been redacted.\n\n` +
+          'This action cannot be undone.',
+      )
+    ) {
       return;
     }
 
@@ -115,7 +131,11 @@ export default function DataRetention() {
     setError(null);
 
     try {
-      const data = await postJson<{ messagesWiped: number; messagesSkipped: number }>('/admin/api/content-retention/wipe', undefined, { fallback: 'Wipe failed' });
+      const data = await postJson<{ messagesWiped: number; messagesSkipped: number }>(
+        '/admin/api/content-retention/wipe',
+        undefined,
+        { fallback: 'Wipe failed' },
+      );
       setSaveSuccess(`Wipe completed: ${data.messagesWiped} messages wiped, ${data.messagesSkipped} skipped`);
       await fetchData();
     } catch (err: unknown) {
@@ -126,13 +146,12 @@ export default function DataRetention() {
   };
 
   const updateSetting = <K extends keyof RetentionSettings>(key: K, value: RetentionSettings[K]) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
+    setSettings((prev) => ({ ...prev, [key]: value }));
     setHasChanges(true);
   };
 
   // Semantic empty value: "never wiped" reads better than the shared em dash.
-  const formatDate = (dateStr: string | null | undefined) =>
-    dateStr ? formatDateTime(dateStr) : 'Never';
+  const formatDate = (dateStr: string | null | undefined) => (dateStr ? formatDateTime(dateStr) : 'Never');
 
   if (loading) {
     return (
@@ -209,9 +228,7 @@ export default function DataRetention() {
             {settings.enabled ? 'Active' : 'Disabled'}
           </p>
           {scheduler?.nextScheduledWipe && settings.enabled && (
-            <p className="text-xs text-gray-500 mt-1">
-              Next: {formatDate(scheduler.nextScheduledWipe)}
-            </p>
+            <p className="text-xs text-gray-500 mt-1">Next: {formatDate(scheduler.nextScheduledWipe)}</p>
           )}
         </div>
 
@@ -220,9 +237,7 @@ export default function DataRetention() {
             <Trash2 size={16} />
             <span className="text-xs font-medium uppercase">Ready to Wipe</span>
           </div>
-          <p className="text-lg font-bold text-amber-600">
-            {stats?.pending_wipe || 0}
-          </p>
+          <p className="text-lg font-bold text-amber-600">{stats?.pending_wipe || 0}</p>
           <p className="text-xs text-gray-500 mt-1">messages eligible</p>
         </div>
 
@@ -231,9 +246,7 @@ export default function DataRetention() {
             <Clock size={16} />
             <span className="text-xs font-medium uppercase">Awaiting Redaction</span>
           </div>
-          <p className="text-lg font-bold text-blue-600">
-            {stats?.awaiting_redaction || 0}
-          </p>
+          <p className="text-lg font-bold text-blue-600">{stats?.awaiting_redaction || 0}</p>
           <p className="text-xs text-gray-500 mt-1">in redaction queue</p>
         </div>
 
@@ -256,9 +269,9 @@ export default function DataRetention() {
           <div>
             <p className="text-blue-800 font-semibold">IRB Compliance</p>
             <p className="text-blue-700 text-sm mt-1">
-              This system automatically deletes original message content after the retention period,
-              leaving only the redacted (anonymized) content. This ensures PII is not retained
-              longer than necessary for clinical purposes.
+              This system automatically deletes original message content after the retention period, leaving only the
+              redacted (anonymized) content. This ensures PII is not retained longer than necessary for clinical
+              purposes.
             </p>
           </div>
         </div>
@@ -290,9 +303,7 @@ export default function DataRetention() {
 
           {/* Retention Period */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Retention Period (Hours)
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Retention Period (Hours)</label>
             <div className="flex items-center gap-4">
               <input
                 type="number"
@@ -336,18 +347,14 @@ export default function DataRetention() {
 
           {/* Wipe Time */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Daily Wipe Time
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Daily Wipe Time</label>
             <input
               type="time"
               value={settings.wipe_time}
               onChange={(e) => updateSetting('wipe_time', e.target.value)}
               className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Automated wipe runs daily at this time (server timezone)
-            </p>
+            <p className="text-xs text-gray-500 mt-1">Automated wipe runs daily at this time (server timezone)</p>
           </div>
 
           {/* Require Redaction Complete */}
@@ -376,23 +383,21 @@ export default function DataRetention() {
       <div className="mb-6 bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Manual Content Wipe</h3>
         <p className="text-sm text-gray-600 mb-4">
-          Trigger an immediate content wipe using current settings. This will delete original
-          content for all eligible messages (older than {settings.retention_hours} hours with completed redaction).
+          Trigger an immediate content wipe using current settings. This will delete original content for all eligible
+          messages (older than {settings.retention_hours} hours with completed redaction).
         </p>
 
         <div className="flex items-center gap-4">
           <button
             onClick={handleWipeNow}
-            disabled={wiping || (stats?.pending_wipe === 0)}
+            disabled={wiping || stats?.pending_wipe === 0}
             className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Trash2 size={16} />
             {wiping ? 'Wiping...' : `Wipe Now (${stats?.pending_wipe || 0} messages)`}
           </button>
 
-          {stats?.pending_wipe === 0 && (
-            <span className="text-sm text-gray-500">No messages eligible for wipe</span>
-          )}
+          {stats?.pending_wipe === 0 && <span className="text-sm text-gray-500">No messages eligible for wipe</span>}
         </div>
 
         {settings.last_wipe_at && (
@@ -424,37 +429,33 @@ export default function DataRetention() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {recentWipes.map((wipe) => (
                   <tr key={wipe.wipe_id}>
-                    <td className="px-4 py-2 text-sm text-gray-900">
-                      {formatDate(wipe.started_at)}
-                    </td>
+                    <td className="px-4 py-2 text-sm text-gray-900">{formatDate(wipe.started_at)}</td>
                     <td className="px-4 py-2 text-sm text-gray-600">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        wipe.triggered_by === 'manual' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
-                      }`}>
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                          wipe.triggered_by === 'manual' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                        }`}
+                      >
                         {wipe.triggered_by}
                       </span>
-                      {wipe.triggered_by_user && (
-                        <span className="ml-1 text-gray-500">({wipe.triggered_by_user})</span>
-                      )}
+                      {wipe.triggered_by_user && <span className="ml-1 text-gray-500">({wipe.triggered_by_user})</span>}
                     </td>
                     <td className="px-4 py-2 text-sm">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        wipe.status === 'completed' ? 'bg-green-100 text-green-800' :
-                        wipe.status === 'failed' ? 'bg-red-100 text-red-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                          wipe.status === 'completed'
+                            ? 'bg-green-100 text-green-800'
+                            : wipe.status === 'failed'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                        }`}
+                      >
                         {wipe.status}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-sm text-gray-900 font-medium">
-                      {wipe.messages_wiped}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-500">
-                      {wipe.messages_skipped}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-500">
-                      {wipe.retention_hours}h
-                    </td>
+                    <td className="px-4 py-2 text-sm text-gray-900 font-medium">{wipe.messages_wiped}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{wipe.messages_skipped}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{wipe.retention_hours}h</td>
                   </tr>
                 ))}
               </tbody>
@@ -505,7 +506,7 @@ function RecordingRetentionCard() {
       const [s, l] = await Promise.all([
         getJson<{ settings: DataRetentionSettings; scheduler: { running: boolean; nextScheduledRun: string | null } }>(
           '/admin/api/data-retention',
-          { fallback: 'Failed to load data retention settings' }
+          { fallback: 'Failed to load data retention settings' },
         ),
         getJson<{ entries: DeletionLogEntry[] }>('/admin/api/data-retention/log?limit=25').catch(() => null),
       ]);
@@ -517,34 +518,48 @@ function RecordingRetentionCard() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   const save = async () => {
     if (!settings) return;
-    setBusy(true); setErr(null); setMsg(null);
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
     try {
       await postJson('/admin/api/data-retention', { settings }, { method: 'PUT', fallback: 'Save failed' });
       setMsg('Retention settings saved.');
       await fetchData();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const runNow = async () => {
     if (!window.confirm('Run retention enforcement now? This permanently deletes recordings past the window.')) return;
-    setBusy(true); setErr(null); setMsg(null);
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
     try {
-      const d = await postJson<{ recordingsDeleted: number; graceDeleted: number; failures: number }>('/admin/api/data-retention/run', undefined, { fallback: 'Run failed' });
+      const d = await postJson<{ recordingsDeleted: number; graceDeleted: number; failures: number }>(
+        '/admin/api/data-retention/run',
+        undefined,
+        { fallback: 'Run failed' },
+      );
       setMsg(`Run complete: ${d.recordingsDeleted} aged-out, ${d.graceDeleted} grace, ${d.failures} failures.`);
       await fetchData();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const update = <K extends keyof DataRetentionSettings>(k: K, v: DataRetentionSettings[K]) =>
-    setSettings(prev => prev ? { ...prev, [k]: v } : prev);
+    setSettings((prev) => (prev ? { ...prev, [k]: v } : prev));
 
   if (!settings) {
     return (
@@ -564,7 +579,9 @@ function RecordingRetentionCard() {
             Nightly age-out of session recordings + wiped-user grace deletion. Ships disabled.
           </p>
         </div>
-        <span className={`px-2 py-1 rounded text-xs font-medium ${settings.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+        <span
+          className={`px-2 py-1 rounded text-xs font-medium ${settings.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
+        >
           {settings.enabled ? 'Enabled' : 'Disabled'}
         </span>
       </div>
@@ -575,37 +592,66 @@ function RecordingRetentionCard() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <label className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
           <span className="text-sm font-medium text-gray-900">Enable nightly enforcement</span>
-          <input type="checkbox" checked={settings.enabled} onChange={e => update('enabled', e.target.checked)} className="w-5 h-5" />
+          <input
+            type="checkbox"
+            checked={settings.enabled}
+            onChange={(e) => update('enabled', e.target.checked)}
+            className="w-5 h-5"
+          />
         </label>
         <label className="block text-sm">
           <span className="text-gray-700">Run time (HH:MM)</span>
-          <input type="time" value={settings.run_time} onChange={e => update('run_time', e.target.value)}
-            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          <input
+            type="time"
+            value={settings.run_time}
+            onChange={(e) => update('run_time', e.target.value)}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
+          />
         </label>
         <label className="block text-sm">
           <span className="text-gray-700">Recordings retention (days)</span>
-          <input type="number" min={1} value={settings.recordings_retention_days}
-            onChange={e => update('recordings_retention_days', parseInt(e.target.value) || 90)}
-            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          <input
+            type="number"
+            min={1}
+            value={settings.recordings_retention_days}
+            onChange={(e) => update('recordings_retention_days', parseInt(e.target.value) || 90)}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
+          />
         </label>
         <label className="block text-sm">
           <span className="text-gray-700">Wiped-user grace (days)</span>
-          <input type="number" min={0} value={settings.wiped_user_grace_days}
-            onChange={e => update('wiped_user_grace_days', parseInt(e.target.value) || 0)}
-            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          <input
+            type="number"
+            min={0}
+            value={settings.wiped_user_grace_days}
+            onChange={(e) => update('wiped_user_grace_days', parseInt(e.target.value) || 0)}
+            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg"
+          />
         </label>
       </div>
 
       <div className="flex items-center gap-3 mb-4">
-        <button onClick={save} disabled={busy}
-          className="px-4 py-2 bg-royal text-white rounded-lg hover:bg-navy disabled:opacity-50">Save</button>
-        <button onClick={runNow} disabled={busy}
-          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">Run now</button>
+        <button
+          onClick={save}
+          disabled={busy}
+          className="px-4 py-2 bg-royal text-white rounded-lg hover:bg-navy disabled:opacity-50"
+        >
+          Save
+        </button>
+        <button
+          onClick={runNow}
+          disabled={busy}
+          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+        >
+          Run now
+        </button>
         {scheduler?.nextScheduledRun && settings.enabled && (
           <span className="text-xs text-gray-500">Next: {new Date(scheduler.nextScheduledRun).toLocaleString()}</span>
         )}
         {settings.last_run_at && (
-          <span className="text-xs text-gray-500">Last: {new Date(settings.last_run_at).toLocaleString()} ({settings.last_run_deletions} deleted)</span>
+          <span className="text-xs text-gray-500">
+            Last: {new Date(settings.last_run_at).toLocaleString()} ({settings.last_run_deletions} deleted)
+          </span>
         )}
       </div>
 
@@ -617,21 +663,30 @@ function RecordingRetentionCard() {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                {['Time', 'Type', 'Ref', 'Reason', 'By', 'Result'].map(h => (
-                  <th key={h} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
+                {['Time', 'Type', 'Ref', 'Reason', 'By', 'Result'].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {log.map(e => (
+              {log.map((e) => (
                 <tr key={e.deletion_id}>
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{new Date(e.executed_at).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                    {new Date(e.executed_at).toLocaleString()}
+                  </td>
                   <td className="px-3 py-2 text-gray-700">{e.artifact_type}</td>
                   <td className="px-3 py-2 text-gray-500 font-mono text-xs max-w-xs truncate">{e.artifact_ref}</td>
                   <td className="px-3 py-2 text-gray-700">{e.reason}</td>
-                  <td className="px-3 py-2 text-gray-600">{e.triggered_by}{e.triggered_by_user ? ` (${e.triggered_by_user})` : ''}</td>
+                  <td className="px-3 py-2 text-gray-600">
+                    {e.triggered_by}
+                    {e.triggered_by_user ? ` (${e.triggered_by_user})` : ''}
+                  </td>
                   <td className="px-3 py-2">
-                    <span className={`px-2 py-0.5 rounded text-xs ${e.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs ${e.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
+                    >
                       {e.success ? 'ok' : 'failed'}
                     </span>
                   </td>

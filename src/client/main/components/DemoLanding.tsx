@@ -27,11 +27,7 @@ export default function DemoLanding() {
   }, [navigate]);
 
   if (!checked || !isDemo) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-500">
-        Loading…
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-500">Loading…</div>;
   }
 
   return (
@@ -41,13 +37,10 @@ export default function DemoLanding() {
           <span className="inline-block bg-amber-400 text-amber-950 text-xs font-semibold px-3 py-1 rounded-full mb-4">
             Portfolio demo
           </span>
-          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">
-            AI Therapist — interactive demo
-          </h1>
+          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3">AI Therapist — interactive demo</h1>
           <p className="text-blue-100 max-w-xl mx-auto">
-            A research platform for AI-assisted voice therapy: a real-time
-            therapy bot on one side, and a clinician monitoring dashboard on the
-            other. Explore either — you can switch between them any time.
+            A research platform for AI-assisted voice therapy: a real-time therapy bot on one side, and a clinician
+            monitoring dashboard on the other. Explore either — you can switch between them any time.
           </p>
         </div>
 
@@ -61,9 +54,8 @@ export default function DemoLanding() {
             </div>
             <h2 className="text-xl font-bold text-navy mb-2">Try the therapy bot</h2>
             <p className="text-gray-600 text-sm flex-1">
-              Have a real voice or text conversation with the AI therapist —
-              the actual participant experience. Sessions are capped at 5 minutes,
-              5 per day.
+              Have a real voice or text conversation with the AI therapist — the actual participant experience. Sessions
+              are capped at 5 minutes, 5 per day.
             </p>
             <span className="mt-5 inline-flex items-center gap-1 text-royal font-semibold group-hover:gap-2 transition-all">
               Start a session <ArrowRight size={18} />
@@ -79,9 +71,8 @@ export default function DemoLanding() {
             </div>
             <h2 className="text-xl font-bold text-navy mb-2">View the dashboard</h2>
             <p className="text-gray-600 text-sm flex-1">
-              Explore the clinician side: live monitoring, session transcripts,
-              analytics, and crisis management — populated with fully synthetic
-              data (no real participant information).
+              Explore the clinician side: live monitoring, session transcripts, analytics, and crisis management —
+              populated with fully synthetic data (no real participant information).
             </p>
             <span className="mt-5 inline-flex items-center gap-1 text-royal font-semibold group-hover:gap-2 transition-all">
               Open dashboard <ArrowRight size={18} />
@@ -90,8 +81,7 @@ export default function DemoLanding() {
         </div>
 
         <p className="text-center text-blue-200 text-xs mt-8">
-          This is a sandboxed demo account. Real participant data is never shown,
-          and nothing you do here is saved.
+          This is a sandboxed demo account. Real participant data is never shown, and nothing you do here is saved.
         </p>
       </div>
     </div>

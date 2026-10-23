@@ -15,9 +15,7 @@
 //   U+2605 black star (IRB question marker)
 //   U+2713 check mark, U+2715 multiplication x, U+2717 ballot x (console reports,
 //   dismiss buttons). Note U+2714 / U+2716 (the HEAVY variants) are emoji.
-const ALLOWED = new Set([
-  0x00a9, 0x00ae, 0x2122, 0x2194, 0x25b6, 0x25c0, 0x2605, 0x2713, 0x2715, 0x2717,
-]);
+const ALLOWED = new Set([0x00a9, 0x00ae, 0x2122, 0x2194, 0x25b6, 0x25c0, 0x2605, 0x2713, 0x2715, 0x2717]);
 
 const CANDIDATE = /\p{Extended_Pictographic}|[☀-➿]|️|[\u{1F000}-\u{1FFFF}]/gu;
 
@@ -28,7 +26,7 @@ function findEmoji(text) {
     const cp = m[0].codePointAt(0);
     if (ALLOWED.has(cp)) continue;
     const label = `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
-    if (!found.some(f => f.label === label)) found.push({ label, char: m[0], index: m.index });
+    if (!found.some((f) => f.label === label)) found.push({ label, char: m[0], index: m.index });
   }
   return found;
 }

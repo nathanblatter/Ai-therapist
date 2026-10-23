@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Copy } from "react-feather";
+import { useState } from 'react';
+import { Copy } from 'react-feather';
 
 interface CopyButtonProps {
   textToCopy: string;
@@ -14,19 +14,18 @@ export default function CopyButton({ textToCopy }: CopyButtonProps) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch (err) {
-      console.error("Failed to copy:", err);
+      console.error('Failed to copy:', err);
     }
   };
 
   return (
     <button
-  onClick={handleCopy}
-  className="flex items-center space-x-1 text-gray-200 hover:text-white px-2 py-1 rounded hover:bg-white/10 transition text-sm"
-  title="Copy to clipboard"
->
-
-    <Copy size={16} className="text-gray-200 group-hover:text-white" />
-      <span>{copied ? "Copied!" : "Copy"}</span>
+      onClick={handleCopy}
+      className="flex items-center space-x-1 text-gray-200 hover:text-white px-2 py-1 rounded hover:bg-white/10 transition text-sm"
+      title="Copy to clipboard"
+    >
+      <Copy size={16} className="text-gray-200 group-hover:text-white" />
+      <span>{copied ? 'Copied!' : 'Copy'}</span>
     </button>
   );
 }

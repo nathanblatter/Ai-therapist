@@ -12,7 +12,7 @@ export function errorHandler(err: HttpError, req: Request, res: Response, _next:
 
   const status = err.status || 500;
   const body: Record<string, string> = {
-    error: status === 500 ? 'Internal server error' : err.message
+    error: status === 500 ? 'Internal server error' : err.message,
   };
 
   if (process.env.NODE_ENV !== 'production') {

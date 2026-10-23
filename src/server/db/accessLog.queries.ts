@@ -49,7 +49,7 @@ export function logDataAccess(input: DataAccessLogInput): Promise<void> {
         input.sessionId ?? null,
         input.userId ?? null,
         input.detail === undefined ? null : JSON.stringify(input.detail),
-      ]
+      ],
     )
     .then(() => undefined)
     .catch((err) => {
@@ -136,7 +136,7 @@ const DATA_ACCESS_SELECT = `
  */
 export async function listDataAccessLog(
   filters: DataAccessLogFilters,
-  orgId: number | null = null
+  orgId: number | null = null,
 ): Promise<DataAccessLogPage> {
   const where = `
     WHERE ($1::int IS NULL OR COALESCE(dal.user_id, ts.user_id) = $1)
@@ -160,7 +160,7 @@ export async function listDataAccessLog(
       `${DATA_ACCESS_SELECT} ${DATA_ACCESS_FROM} ${where}
        ORDER BY dal.id DESC
        LIMIT $8 OFFSET $9`,
-      [...params, filters.limit, filters.offset]
+      [...params, filters.limit, filters.offset],
     ),
     pool.query<{ count: string }>(`SELECT COUNT(*) AS count ${DATA_ACCESS_FROM} ${where}`, params),
   ]);
@@ -190,7 +190,7 @@ export interface ParticipantAccessHistory extends DataAccessLogPage {
  */
 export async function getParticipantAccessHistory(
   participantUserId: number,
-  page: { limit: number; offset: number }
+  page: { limit: number; offset: number },
 ): Promise<ParticipantAccessHistory> {
   const where = 'WHERE COALESCE(dal.user_id, ts.user_id) = $1';
   const [rows, count, actors] = await Promise.all([
@@ -198,12 +198,9 @@ export async function getParticipantAccessHistory(
       `${DATA_ACCESS_SELECT} ${DATA_ACCESS_FROM} ${where}
        ORDER BY dal.id DESC
        LIMIT $2 OFFSET $3`,
-      [participantUserId, page.limit, page.offset]
+      [participantUserId, page.limit, page.offset],
     ),
-    pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count ${DATA_ACCESS_FROM} ${where}`,
-      [participantUserId]
-    ),
+    pool.query<{ count: string }>(`SELECT COUNT(*) AS count ${DATA_ACCESS_FROM} ${where}`, [participantUserId]),
     pool.query<ParticipantAccessActor>(
       `SELECT dal.accessed_by, actor.username AS actor_username, dal.role, dal.action,
               COUNT(*)::int AS count,
@@ -211,7 +208,7 @@ export async function getParticipantAccessHistory(
        ${DATA_ACCESS_FROM} ${where}
        GROUP BY dal.accessed_by, actor.username, dal.role, dal.action
        ORDER BY MAX(dal.created_at) DESC`,
-      [participantUserId]
+      [participantUserId],
     ),
   ]);
   return { rows: rows.rows, total: parseInt(count.rows[0].count, 10), actors: actors.rows };

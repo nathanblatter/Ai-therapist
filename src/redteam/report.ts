@@ -25,10 +25,10 @@ function xmlEscape(s: string): string {
 
 export function buildJUnit(summary: RunSummary): string {
   const suites = summary.scenarios
-    .map(s => {
-      const failures = s.assertions.filter(a => !a.passed && a.gating).length;
+    .map((s) => {
+      const failures = s.assertions.filter((a) => !a.passed && a.gating).length;
       const cases = s.assertions
-        .map(a => {
+        .map((a) => {
           const name = xmlEscape(a.id);
           if (a.passed) return `    <testcase classname="${xmlEscape(s.id)}" name="${name}"/>`;
           const tag = a.gating ? 'failure' : 'skipped';
@@ -54,7 +54,7 @@ export function buildJUnit(summary: RunSummary): string {
 }
 
 export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
-  const scenarios = summary.scenarios.map(s => ({
+  const scenarios = summary.scenarios.map((s) => ({
     id: s.id,
     pipeline: s.pipeline,
     passed: s.passed,
@@ -68,8 +68,11 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     transcript: s.transcript,
   }));
   const assertionCount = summary.scenarios.reduce((n, s) => n + s.assertions.length, 0);
-  const assertionFailures = summary.scenarios.reduce((n, s) => n + s.assertions.filter(a => !a.passed && a.gating).length, 0);
-  const passed = summary.scenarios.filter(s => s.passed).length;
+  const assertionFailures = summary.scenarios.reduce(
+    (n, s) => n + s.assertions.filter((a) => !a.passed && a.gating).length,
+    0,
+  );
+  const passed = summary.scenarios.filter((s) => s.passed).length;
   return {
     startedAt: summary.startedAt,
     finishedAt: summary.finishedAt,
@@ -106,24 +109,34 @@ export function printConsole(summary: RunSummary): boolean {
   console.log('─────────────────────────────────────────────────────────────');
   for (const s of summary.scenarios) {
     if (!s.passed) allPass = false;
-    const gate = s.assertions.filter(a => a.gating);
-    const gp = gate.filter(a => a.passed).length;
-    console.log(`${s.passed ? 'PASS' : 'FAIL'}  ${s.id.padEnd(20)} ${gp}/${gate.length} gating  ${(s.durationMs / 1000).toFixed(1)}s  $${s.costUsd.toFixed(4)}`);
-    for (const a of s.assertions.filter(x => !x.passed)) {
+    const gate = s.assertions.filter((a) => a.gating);
+    const gp = gate.filter((a) => a.passed).length;
+    console.log(
+      `${s.passed ? 'PASS' : 'FAIL'}  ${s.id.padEnd(20)} ${gp}/${gate.length} gating  ${(s.durationMs / 1000).toFixed(1)}s  $${s.costUsd.toFixed(4)}`,
+    );
+    for (const a of s.assertions.filter((x) => !x.passed)) {
       console.log(`        ${a.gating ? '✗' : '·'} ${a.id}: ${a.detail}`);
     }
     if (s.error) console.log(`        ! error: ${s.error}`);
     if (s.judge) {
-      const scoreStr = Object.entries(s.judge.scores).map(([d, v]) => `${d}=${v}`).join(' ');
+      const scoreStr = Object.entries(s.judge.scores)
+        .map(([d, v]) => `${d}=${v}`)
+        .join(' ');
       console.log(`        judge: ${scoreStr}`);
       for (const [name, per] of Object.entries(s.judge.perJudge ?? {})) {
-        console.log(`          ${name}: ${Object.entries(per).map(([d, v]) => `${d}=${v}`).join(' ')}`);
+        console.log(
+          `          ${name}: ${Object.entries(per)
+            .map(([d, v]) => `${d}=${v}`)
+            .join(' ')}`,
+        );
       }
     }
   }
   const estCost = summary.scenarios.reduce((n, s) => n + s.costUsd, 0);
   console.log('─────────────────────────────────────────────────────────────');
-  console.log(` ${allPass ? 'PASS' : 'FAIL'} — ${summary.scenarios.filter(s => s.passed).length}/${summary.scenarios.length} scenarios, est $${estCost.toFixed(4)}`);
+  console.log(
+    ` ${allPass ? 'PASS' : 'FAIL'} — ${summary.scenarios.filter((s) => s.passed).length}/${summary.scenarios.length} scenarios, est $${estCost.toFixed(4)}`,
+  );
   console.log('─────────────────────────────────────────────────────────────\n');
   return allPass;
 }

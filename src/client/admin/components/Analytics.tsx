@@ -1,20 +1,34 @@
-import { useState, useEffect } from "react";
-import { getJson } from "../../shared/http";
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import type { PieLabelRenderProps } from "recharts";
-import type { TooltipContentProps } from "recharts";
-import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
-import { Activity, MessageSquare, Clock, Mic } from "react-feather";
-import OpsPanel from "./OpsPanel";
-import Panel from "./ui/Panel";
-import StatCard from "./ui/StatCard";
-import AnalyticsFilterBar, { EMPTY_FILTERS } from "./analytics/AnalyticsFilterBar";
-import ToolUsagePanel from "./analytics/ToolUsagePanel";
-import CostUsagePanel from "./analytics/CostUsagePanel";
-import AdminUsagePanel from "./telemetry/AdminUsagePanel";
-import EngagementTelemetryPanel from "./telemetry/EngagementTelemetryPanel";
-import useAuth from "../hooks/useAuth";
-import type { AnalyticsData, AnalyticsFilterState } from "./analytics/types";
+import { useState, useEffect } from 'react';
+import { getJson } from '../../shared/http';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
+import type { PieLabelRenderProps } from 'recharts';
+import type { TooltipContentProps } from 'recharts';
+import type { ValueType, NameType } from 'recharts/types/component/DefaultTooltipContent';
+import { Activity, MessageSquare, Clock, Mic } from 'react-feather';
+import OpsPanel from './OpsPanel';
+import Panel from './ui/Panel';
+import StatCard from './ui/StatCard';
+import AnalyticsFilterBar, { EMPTY_FILTERS } from './analytics/AnalyticsFilterBar';
+import ToolUsagePanel from './analytics/ToolUsagePanel';
+import CostUsagePanel from './analytics/CostUsagePanel';
+import AdminUsagePanel from './telemetry/AdminUsagePanel';
+import EngagementTelemetryPanel from './telemetry/EngagementTelemetryPanel';
+import useAuth from '../hooks/useAuth';
+import type { AnalyticsData, AnalyticsFilterState } from './analytics/types';
 
 const COLORS = ['#0047BA', '#002E5D', '#BDD6E6', '#8B959E'];
 
@@ -44,7 +58,11 @@ function formatDuration(seconds: number | null | undefined): string {
 
 // Pie with percentage labels and palette cells — the shape every distribution
 // section on this page uses.
-function DistPie({ data, outerRadius = 100, legend = true }: {
+function DistPie({
+  data,
+  outerRadius = 100,
+  legend = true,
+}: {
   data: Array<{ name: string; value: number }>;
   outerRadius?: number;
   legend?: boolean;
@@ -57,7 +75,9 @@ function DistPie({ data, outerRadius = 100, legend = true }: {
           cx="50%"
           cy="50%"
           labelLine={false}
-          label={({ name, percent }: PieLabelRenderProps) => `${String(name ?? '')}: ${((Number(percent ?? 0)) * 100).toFixed(0)}%`}
+          label={({ name, percent }: PieLabelRenderProps) =>
+            `${String(name ?? '')}: ${(Number(percent ?? 0) * 100).toFixed(0)}%`
+          }
           outerRadius={outerRadius}
           fill="#8884d8"
           dataKey="value"
@@ -81,7 +101,10 @@ function pctTooltip(nameKey: string, titlePrefix = '') {
     const entry = payload[0].payload as Record<string, string | number>;
     return (
       <div className="bg-white p-2 border rounded shadow">
-        <p className="font-semibold">{titlePrefix}{String(entry[nameKey])}</p>
+        <p className="font-semibold">
+          {titlePrefix}
+          {String(entry[nameKey])}
+        </p>
         <p className="text-sm">Sessions: {payload[0].value}</p>
         <p className="text-sm text-gray-600">{entry.percentage}%</p>
       </div>
@@ -94,83 +117,98 @@ function pctTooltip(nameKey: string, titlePrefix = '') {
 function UsageTab({ analytics }: { analytics: AnalyticsData }) {
   const messageTypeData = [
     { name: 'Voice', value: analytics.breakdown.voice_messages || 0 },
-    { name: 'Chat', value: analytics.breakdown.chat_messages || 0 }
+    { name: 'Chat', value: analytics.breakdown.chat_messages || 0 },
   ];
 
   const roleData = [
     { name: 'User', value: analytics.breakdown.user_messages || 0 },
-    { name: 'Assistant', value: analytics.breakdown.assistant_messages || 0 }
+    { name: 'Assistant', value: analytics.breakdown.assistant_messages || 0 },
   ];
 
-  const dailyTrendData = (analytics.daily_trend || []).slice().reverse().map(item => ({
-    date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    sessions: item.session_count
-  }));
+  const dailyTrendData = (analytics.daily_trend || [])
+    .slice()
+    .reverse()
+    .map((item) => ({
+      date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      sessions: item.session_count,
+    }));
 
   // Top 20 users by session count
   const userSessionData = (analytics.user_sessions || [])
     .slice()
     .sort((a, b) => b.session_count - a.session_count)
     .slice(0, 20)
-    .map(item => ({
+    .map((item) => ({
       username: item.username || `User ${item.userid}`,
-      sessions: item.session_count
+      sessions: item.session_count,
     }));
 
   // Time distribution sorted by time order
-  const timeOrder: Record<string, number> = { 'Morning': 0, 'Afternoon': 1, 'Evening': 2 };
+  const timeOrder: Record<string, number> = { Morning: 0, Afternoon: 1, Evening: 2 };
   const timeDistributionData = (analytics.time_distribution || [])
-    .map(item => ({ name: item.time_period, value: item.session_count }))
+    .map((item) => ({ name: item.time_period, value: item.session_count }))
     .sort((a, b) => (timeOrder[a.name] ?? 99) - (timeOrder[b.name] ?? 99));
 
   // Duration distribution sorted by duration length
   const durationOrder: Record<string, number> = { 'Short (0-5 min)': 0, 'Medium (5-30 min)': 1, 'Long (30+ min)': 2 };
   const durationDistributionData = (analytics.duration_distribution || [])
-    .map(item => ({ name: item.duration_category, value: item.session_count }))
+    .map((item) => ({ name: item.duration_category, value: item.session_count }))
     .sort((a, b) => (durationOrder[a.name] ?? 99) - (durationOrder[b.name] ?? 99));
 
   // Duration trend over time (last 30 days)
-  const durationTrendData = (analytics.duration_trend || []).slice().reverse().map(item => ({
-    date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    duration: Math.round(item.avg_duration_seconds / 60) // Convert to minutes
-  }));
+  const durationTrendData = (analytics.duration_trend || [])
+    .slice()
+    .reverse()
+    .map((item) => ({
+      date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      duration: Math.round(item.avg_duration_seconds / 60), // Convert to minutes
+    }));
 
   const languageDistributionData = (analytics.language_distribution || [])
-    .map(item => ({
+    .map((item) => ({
       language: item.language.toUpperCase(),
       sessions: item.session_count,
-      percentage: item.percentage
+      percentage: item.percentage,
     }))
     .sort((a, b) => b.sessions - a.sessions);
 
   const voiceDistributionData = (analytics.voice_distribution || [])
-    .map(item => ({
+    .map((item) => ({
       voice: item.voice.charAt(0).toUpperCase() + item.voice.slice(1),
       sessions: item.session_count,
-      percentage: item.percentage
+      percentage: item.percentage,
     }))
     .sort((a, b) => b.sessions - a.sessions);
 
-  const completionPieData = (analytics.completion_patterns || []).map(item => ({
+  const completionPieData = (analytics.completion_patterns || []).map((item) => ({
     name: item.ended_by.charAt(0).toUpperCase() + item.ended_by.slice(1),
-    value: item.session_count
+    value: item.session_count,
   }));
 
-  const completionBarData = (analytics.completion_patterns || []).map(item => ({
+  const completionBarData = (analytics.completion_patterns || []).map((item) => ({
     ended_by: item.ended_by.charAt(0).toUpperCase() + item.ended_by.slice(1),
     sessions: item.session_count,
-    percentage: item.percentage
+    percentage: item.percentage,
   }));
 
-  const voicePercentage = analytics.breakdown.voice_messages && analytics.breakdown.voice_messages + analytics.breakdown.chat_messages
-    ? Math.round((analytics.breakdown.voice_messages / (analytics.breakdown.voice_messages + analytics.breakdown.chat_messages)) * 100)
-    : 0;
+  const voicePercentage =
+    analytics.breakdown.voice_messages && analytics.breakdown.voice_messages + analytics.breakdown.chat_messages
+      ? Math.round(
+          (analytics.breakdown.voice_messages /
+            (analytics.breakdown.voice_messages + analytics.breakdown.chat_messages)) *
+            100,
+        )
+      : 0;
 
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard label="Total Sessions" value={analytics.metrics.total_sessions || 0} icon={Activity} />
-        <StatCard label="Avg Messages" value={(analytics.metrics.avg_messages_per_session || 0).toFixed(1)} icon={MessageSquare} />
+        <StatCard
+          label="Avg Messages"
+          value={(analytics.metrics.avg_messages_per_session || 0).toFixed(1)}
+          icon={MessageSquare}
+        />
         <StatCard label="Avg Duration" value={formatDuration(analytics.metrics.avg_duration_seconds)} icon={Clock} />
         <StatCard label="Voice Usage" value={`${voicePercentage}%`} icon={Mic} />
       </div>
@@ -322,11 +360,13 @@ function UsageTab({ analytics }: { analytics: AnalyticsData }) {
         {analytics.session_depth && analytics.session_depth.length > 0 && (
           <Panel title="Average Session Depth by User Type" className="col-span-2">
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={analytics.session_depth.map(item => ({
-                user_type: item.user_type.charAt(0).toUpperCase() + item.user_type.slice(1),
-                avg_messages: parseFloat(String(item.avg_messages)).toFixed(1),
-                session_count: item.session_count
-              }))}>
+              <BarChart
+                data={analytics.session_depth.map((item) => ({
+                  user_type: item.user_type.charAt(0).toUpperCase() + item.user_type.slice(1),
+                  avg_messages: parseFloat(String(item.avg_messages)).toFixed(1),
+                  session_count: item.session_count,
+                }))}
+              >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="user_type" />
                 <YAxis />
@@ -380,17 +420,13 @@ function PerformanceTab({ analytics }: { analytics: AnalyticsData }) {
             <>
               <div className="border rounded p-4">
                 <p className="text-sm text-gray-600">Time to First Audio (p50)</p>
-                <p className="text-2xl font-bold text-navy mt-1">
-                  {formatMs(analytics.response_times.p50_ttfa_ms)}
-                </p>
+                <p className="text-2xl font-bold text-navy mt-1">{formatMs(analytics.response_times.p50_ttfa_ms)}</p>
                 <p className="text-xs text-gray-500 mt-1">Measured turn latency, median</p>
               </div>
 
               <div className="border rounded p-4">
                 <p className="text-sm text-gray-600">Time to First Audio (p95)</p>
-                <p className="text-2xl font-bold text-navy mt-1">
-                  {formatMs(analytics.response_times.p95_ttfa_ms)}
-                </p>
+                <p className="text-2xl font-bold text-navy mt-1">{formatMs(analytics.response_times.p95_ttfa_ms)}</p>
                 <p className="text-xs text-gray-500 mt-1">95th percentile</p>
               </div>
 
@@ -402,7 +438,8 @@ function PerformanceTab({ analytics }: { analytics: AnalyticsData }) {
                   {formatMs(analytics.response_times.p95_total_ms)}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  User turn end to response done ({analytics.response_times.measured_turns || 0} turns measured, realtime only)
+                  User turn end to response done ({analytics.response_times.measured_turns || 0} turns measured,
+                  realtime only)
                 </p>
               </div>
             </>
@@ -413,8 +450,8 @@ function PerformanceTab({ analytics }: { analytics: AnalyticsData }) {
           <p className="text-xs text-gray-500 mt-3">
             Chat turn time (p50 / p95): {formatMs(analytics.chat_response_times.p50_total_ms)}
             {' / '}
-            {formatMs(analytics.chat_response_times.p95_total_ms)}
-            {' '}({analytics.chat_response_times.measured_turns} chat turns; full tool-loop wall time, not comparable to realtime TTFA)
+            {formatMs(analytics.chat_response_times.p95_total_ms)} ({analytics.chat_response_times.measured_turns} chat
+            turns; full tool-loop wall time, not comparable to realtime TTFA)
           </p>
         )}
 
@@ -463,9 +500,7 @@ function PerformanceTab({ analytics }: { analytics: AnalyticsData }) {
               </div>
               <div>
                 <p className="text-sm text-gray-600">Total User Messages</p>
-                <p className="text-2xl font-bold text-navy mt-1">
-                  {analytics.turn_taking.total_user_messages || 0}
-                </p>
+                <p className="text-2xl font-bold text-navy mt-1">{analytics.turn_taking.total_user_messages || 0}</p>
               </div>
               <div>
                 <p className="text-sm text-gray-600">Total Assistant Messages</p>
@@ -497,7 +532,7 @@ const TABS = [
   // every other role below.
   { id: 'telemetry', label: 'Telemetry', researcherOnly: true },
 ] as const;
-type TabId = typeof TABS[number]['id'];
+type TabId = (typeof TABS)[number]['id'];
 
 export default function Analytics() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
@@ -506,7 +541,7 @@ export default function Analytics() {
   const [filters, setFilters] = useState<AnalyticsFilterState>(EMPTY_FILTERS);
   const [tab, setTab] = useState<TabId>('usage');
   const { isResearcher } = useAuth();
-  const visibleTabs = TABS.filter(t => !('researcherOnly' in t && t.researcherOnly) || isResearcher);
+  const visibleTabs = TABS.filter((t) => !('researcherOnly' in t && t.researcherOnly) || isResearcher);
 
   useEffect(() => {
     const fetchAnalytics = async () => {
@@ -526,7 +561,9 @@ export default function Analytics() {
         if (filters.endedBy.length > 0) params.append('endedBy', filters.endedBy.join(','));
         if (filters.crisisFlagged) params.append('crisisFlagged', filters.crisisFlagged);
 
-        const data = await getJson<AnalyticsData>(`/admin/api/analytics?${params}`, { fallback: 'Failed to fetch analytics' });
+        const data = await getJson<AnalyticsData>(`/admin/api/analytics?${params}`, {
+          fallback: 'Failed to fetch analytics',
+        });
         setAnalytics(data);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -546,10 +583,8 @@ export default function Analytics() {
   const mainStatus = loading ? (
     <p className="text-gray-500 text-center py-8">Loading analytics...</p>
   ) : error ? (
-    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-      Error: {error}
-    </div>
-  ) : (!analytics || !analytics.metrics) ? (
+    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">Error: {error}</div>
+  ) : !analytics || !analytics.metrics ? (
     <p className="text-gray-500 text-center py-8">No analytics data available</p>
   ) : null;
 
@@ -558,16 +593,14 @@ export default function Analytics() {
       <h2 className="text-2xl font-bold">Analytics</h2>
 
       <div className="flex gap-1 border-b" role="tablist">
-        {visibleTabs.map(t => (
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
-              tab === t.id
-                ? 'border-royal text-royal'
-                : 'border-transparent text-gray-600 hover:text-gray-900'
+              tab === t.id ? 'border-royal text-royal' : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
           >
             {t.label}

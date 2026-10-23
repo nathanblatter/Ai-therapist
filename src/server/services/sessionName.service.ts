@@ -1,9 +1,9 @@
 // generateSessionName.js
 // Auto-generate session names using AI summarization
 
-import OpenAI from "openai";
-import { getOpenAIKey } from "../config/secrets.js";
-import { getSessionMessages, updateSessionName } from "../db/index.js";
+import OpenAI from 'openai';
+import { getOpenAIKey } from '../config/secrets.js';
+import { getSessionMessages, updateSessionName } from '../db/index.js';
 
 const apiKey = await getOpenAIKey();
 const openai = new OpenAI({ apiKey });
@@ -19,10 +19,10 @@ export function buildConversationText(
   messages: Array<{ role: string; content?: string | null; content_redacted?: string | null }>,
 ): string {
   return messages
-    .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-    .map(msg => ({ role: msg.role, text: (msg.content_redacted || msg.content || '').trim() }))
-    .filter(m => m.text.length > 0)
-    .map(m => `${m.role}: ${m.text}`)
+    .filter((msg) => msg.role === 'user' || msg.role === 'assistant')
+    .map((msg) => ({ role: msg.role, text: (msg.content_redacted || msg.content || '').trim() }))
+    .filter((m) => m.text.length > 0)
+    .map((m) => `${m.role}: ${m.text}`)
     .join('\n');
 }
 
@@ -47,7 +47,7 @@ export function isJunkSessionName(name: string | null | undefined): boolean {
     /provide (?:the |more )?details/,
     /no (?:conversation|content|messages|transcript)/,
   ];
-  return junkPatterns.some(re => re.test(n));
+  return junkPatterns.some((re) => re.test(n));
 }
 
 /**
@@ -58,7 +58,7 @@ export function isJunkSessionName(name: string | null | undefined): boolean {
 export async function generateSessionName(sessionId: string): Promise<string | null> {
   try {
     // Get session to check for existing name
-    const { getSession } = await import("../db/index.js");
+    const { getSession } = await import('../db/index.js');
     const session = await getSession(sessionId);
 
     if (!session) {
@@ -85,16 +85,18 @@ export async function generateSessionName(sessionId: string): Promise<string | n
     // and leave the name UNSET rather than writing junk. Because isJunkSessionName
     // treats absent/junk as retryable, a later run (post-redaction) can still name it.
     if (truncatedText.trim() === '') {
-      console.warn(`Session ${sessionId} has no redacted transcript content yet; skipping name generation (will retry later)`);
+      console.warn(
+        `Session ${sessionId} has no redacted transcript content yet; skipping name generation (will retry later)`,
+      );
       return null;
     }
 
     // Generate session name using OpenAI
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: 'gpt-4o-mini',
       messages: [
         {
-          role: "system",
+          role: 'system',
           content: `You are a helpful assistant that summarizes therapy sessions.
           Generate a brief, empathetic session title (3-5 words) that captures the main topic or concern discussed.
           Be professional and respectful. Focus on themes, not specific details.
@@ -106,18 +108,18 @@ export async function generateSessionName(sessionId: string): Promise<string | n
           - "Processing recent loss"
           - "Building self-confidence"
 
-          Return ONLY the title, nothing else.`
+          Return ONLY the title, nothing else.`,
         },
         {
-          role: "user",
-          content: `Summarize this therapy session in 3-5 words:\n\n${truncatedText}`
-        }
+          role: 'user',
+          content: `Summarize this therapy session in 3-5 words:\n\n${truncatedText}`,
+        },
       ],
       max_tokens: 20,
-      temperature: 0.7
+      temperature: 0.7,
     });
 
-    const generatedName = response.choices[0]?.message?.content?.trim() || "";
+    const generatedName = response.choices[0]?.message?.content?.trim() || '';
 
     // Guard against the LLM returning empty/refusal-style junk: don't persist it,
     // leave the name unset so a later run can retry (isJunkSessionName re-run).
@@ -131,7 +133,7 @@ export async function generateSessionName(sessionId: string): Promise<string | n
 
     return generatedName;
   } catch (error) {
-    console.error("Failed to generate session name:", error);
+    console.error('Failed to generate session name:', error);
     // Do NOT persist a junk placeholder on error — that would block retry via
     // the idempotency check. Leave the name unset so a later run can try again.
     return null;
@@ -145,10 +147,12 @@ export async function generateSessionName(sessionId: string): Promise<string | n
 export function generateSessionNameAsync(sessionId: string): void {
   // Fire and forget - don't wait for completion
   generateSessionName(sessionId)
-    .then(name => console.log(
-      name === null
-        ? `No name generated for session ${sessionId} (blank/unredacted transcript)`
-        : `Generated name for session ${sessionId}: "${name}"`
-    ))
-    .catch(err => console.error(`Failed to generate name for session ${sessionId}:`, err));
+    .then((name) =>
+      console.log(
+        name === null
+          ? `No name generated for session ${sessionId} (blank/unredacted transcript)`
+          : `Generated name for session ${sessionId}: "${name}"`,
+      ),
+    )
+    .catch((err) => console.error(`Failed to generate name for session ${sessionId}:`, err));
 }

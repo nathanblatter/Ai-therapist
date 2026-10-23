@@ -23,9 +23,20 @@ beforeEach(() => {
 });
 
 const draftInput = {
-  sessionId: 'sess-1', crisisEventId: 7, userId: 42, sessionRef: 'sess-1', participantRef: 'user 42',
-  occurredAt: new Date('2026-07-31T12:00:00Z'), severity: 'high' as const, triggerSource: 'auto_crisis_flag' as const,
-  summary: 's', timeline: [], transcriptExcerpt: 'redacted', actionsTaken: [], dueAt: new Date('2026-08-07T12:00:00Z'), createdBy: 'system',
+  sessionId: 'sess-1',
+  crisisEventId: 7,
+  userId: 42,
+  sessionRef: 'sess-1',
+  participantRef: 'user 42',
+  occurredAt: new Date('2026-07-31T12:00:00Z'),
+  severity: 'high' as const,
+  triggerSource: 'auto_crisis_flag' as const,
+  summary: 's',
+  timeline: [],
+  transcriptExcerpt: 'redacted',
+  actionsTaken: [],
+  dueAt: new Date('2026-08-07T12:00:00Z'),
+  createdBy: 'system',
 };
 
 describe('insertAdverseEventDraft', () => {
@@ -53,7 +64,11 @@ describe('insertAdverseEventDraft', () => {
   it('auto_eligibility drafts key on the session_id partial index and carry the eligibility category', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ report_id: 10 }] });
     await insertAdverseEventDraft({
-      ...draftInput, crisisEventId: null, triggerSource: 'auto_eligibility', category: 'eligibility_violation', severity: 'medium',
+      ...draftInput,
+      crisisEventId: null,
+      triggerSource: 'auto_eligibility',
+      category: 'eligibility_violation',
+      severity: 'medium',
     });
     const [sql, params] = queryMock.mock.calls[0];
     expect(sql).toContain("ON CONFLICT (session_id) WHERE trigger_source = 'auto_eligibility'");
@@ -91,7 +106,9 @@ describe('read scoping (ai-therapist-228)', () => {
     const { sql, params } = adverseEventScopeClause(researcher);
     expect(params).toEqual([2]);
     expect(sql).toContain('organization_id = $1');
-    expect(sql).toContain("organization_id IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')");
+    expect(sql).toContain(
+      "organization_id IS NULL AND $1 = (SELECT org_id FROM organizations WHERE slug = 'irb-study')",
+    );
     expect(sql).not.toContain('created_by');
     expect(sql).not.toContain('therapist_clients');
   });

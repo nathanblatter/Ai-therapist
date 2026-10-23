@@ -102,7 +102,7 @@ export async function broadcastAdminEvent(
   event: string,
   payload: unknown,
   participantUserId: number | null | undefined,
-  tier: BroadcastTier = 'full'
+  tier: BroadcastTier = 'full',
 ): Promise<void> {
   if (typeof participantUserId !== 'number' || !Number.isFinite(participantUserId)) {
     io.to(ADMIN_BROADCAST_ROOM).emit(event, payload);
@@ -173,7 +173,7 @@ export async function broadcastAdminEventForSession(
   event: string,
   payload: unknown,
   sessionId: string,
-  tier: BroadcastTier = 'full'
+  tier: BroadcastTier = 'full',
 ): Promise<void> {
   let userId: number | null;
   if (sessionUserCache.has(sessionId)) {
@@ -203,7 +203,6 @@ export async function broadcastAdminEventForSession(
   await broadcastAdminEvent(io, event, payload, userId, tier);
 }
 
-
 /**
  * Kick a therapist's live sockets out of a client's session rooms after an
  * unassignment (docs/caseload-rbac.md revocation semantics): future emits
@@ -211,9 +210,11 @@ export async function broadcastAdminEventForSession(
  * (live unredacted transcripts) is only checked at join time.
  */
 export async function revokeTherapistSessionRooms(
-  io: { in: (room: string) => { fetchSockets: () => Promise<Array<{ rooms: Set<string>; leave: (room: string) => void }>> } },
+  io: {
+    in: (room: string) => { fetchSockets: () => Promise<Array<{ rooms: Set<string>; leave: (room: string) => void }>> };
+  },
   therapistId: number,
-  clientId: number
+  clientId: number,
 ): Promise<void> {
   try {
     const sockets = await io.in(therapistRoom(therapistId)).fetchSockets();

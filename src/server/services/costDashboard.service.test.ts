@@ -22,16 +22,24 @@ vi.mock('../db/index.js', () => ({
 import { getCostDashboard, modelFamilyOf } from './costDashboard.service.js';
 
 const VOLUME = {
-  sessions: 20, endedSessions: 18, realtimeSessions: 12,
-  chatSessions: 8, activeDays: 10, participants: 5,
+  sessions: 20,
+  endedSessions: 18,
+  realtimeSessions: 12,
+  chatSessions: 8,
+  activeDays: 10,
+  participants: 5,
 };
 
-function costs(byLineItem: Array<{ lineItem: string; amountUsd: number }>, days = [
-  { date: '2026-09-01', amountUsd: 10 },
-]) {
+function costs(
+  byLineItem: Array<{ lineItem: string; amountUsd: number }>,
+  days = [{ date: '2026-09-01', amountUsd: 10 }],
+) {
   const total = byLineItem.reduce((s, i) => s + i.amountUsd, 0);
   return {
-    configured: true, totalUsd: total, days, byLineItem,
+    configured: true,
+    totalUsd: total,
+    days,
+    byLineItem,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -39,7 +47,14 @@ function costs(byLineItem: Array<{ lineItem: string; amountUsd: number }>, days 
 beforeEach(() => {
   vi.clearAllMocks();
   usageMock.mockResolvedValue([]);
-  realtimeMock.mockResolvedValue({ responses: 0, inputTokens: 0, outputTokens: 0, inputAudioTokens: 0, outputAudioTokens: 0, cachedTokens: 0 });
+  realtimeMock.mockResolvedValue({
+    responses: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    inputAudioTokens: 0,
+    outputAudioTokens: 0,
+    cachedTokens: 0,
+  });
   volumeMock.mockResolvedValue(VOLUME);
 });
 
@@ -72,14 +87,16 @@ describe('modelFamilyOf', () => {
 
 describe('getCostDashboard attribution', () => {
   it('assigns a sole-owner model entirely to its subsystem', async () => {
-    getCostsSummaryMock.mockResolvedValue(costs([
-      { lineItem: 'gpt-5-2025-08-07, output', amountUsd: 20 },
-      { lineItem: 'gpt-5.2, output', amountUsd: 5 },
-    ]));
+    getCostsSummaryMock.mockResolvedValue(
+      costs([
+        { lineItem: 'gpt-5-2025-08-07, output', amountUsd: 20 },
+        { lineItem: 'gpt-5.2, output', amountUsd: 5 },
+      ]),
+    );
     const d = await getCostDashboard(30);
-    const byName = Object.fromEntries(d.bySubsystem.map(s => [s.subsystem, s.amountUsd]));
-    expect(byName.redaction).toBe(20);   // gpt-5 -> redaction only
-    expect(byName.chat).toBe(5);         // gpt-5.2 -> chat only
+    const byName = Object.fromEntries(d.bySubsystem.map((s) => [s.subsystem, s.amountUsd]));
+    expect(byName.redaction).toBe(20); // gpt-5 -> redaction only
+    expect(byName.chat).toBe(5); // gpt-5.2 -> chat only
   });
 
   it('splits a SHARED model by measured token share, not evenly', async () => {
@@ -91,10 +108,10 @@ describe('getCostDashboard attribution', () => {
     getCostsSummaryMock.mockResolvedValue(costs([{ lineItem: 'gpt-4o-mini, input', amountUsd: 100 }]));
 
     const d = await getCostDashboard(30);
-    const byName = Object.fromEntries(d.bySubsystem.map(s => [s.subsystem, s.amountUsd]));
-    expect(byName.crisis).toBeCloseTo(25, 1);     // 250 / 1000
-    expect(byName.insights).toBeCloseTo(75, 1);   // 750 / 1000
-    expect(d.bySubsystem.every(s => s.subsystem === 'other' || s.estimated)).toBe(true);
+    const byName = Object.fromEntries(d.bySubsystem.map((s) => [s.subsystem, s.amountUsd]));
+    expect(byName.crisis).toBeCloseTo(25, 1); // 250 / 1000
+    expect(byName.insights).toBeCloseTo(75, 1); // 750 / 1000
+    expect(d.bySubsystem.every((s) => s.subsystem === 'other' || s.estimated)).toBe(true);
   });
 
   it('falls back to call count and raises a caveat when tokens were not recorded', async () => {
@@ -106,8 +123,8 @@ describe('getCostDashboard attribution', () => {
     getCostsSummaryMock.mockResolvedValue(costs([{ lineItem: 'gpt-4o-mini, input', amountUsd: 40 }]));
 
     const d = await getCostDashboard(30);
-    const byName = Object.fromEntries(d.bySubsystem.map(s => [s.subsystem, s.amountUsd]));
-    expect(byName.crisis).toBeCloseTo(30, 1);    // 30/40 of the calls
+    const byName = Object.fromEntries(d.bySubsystem.map((s) => [s.subsystem, s.amountUsd]));
+    expect(byName.crisis).toBeCloseTo(30, 1); // 30/40 of the calls
     expect(byName.insights).toBeCloseTo(10, 1);
     expect(d.attributionCaveats.join(' ')).toMatch(/token counts not recorded/);
   });
@@ -116,17 +133,19 @@ describe('getCostDashboard attribution', () => {
     usageMock.mockResolvedValue([
       { purpose: 'crisis', model: 'gpt-4o-mini', calls: 1, tokensIn: 100, tokensOut: 0, tokensMissing: false },
     ]);
-    getCostsSummaryMock.mockResolvedValue(costs([
-      { lineItem: 'gpt-5, output', amountUsd: 12.34 },
-      { lineItem: 'gpt-4o-mini, input', amountUsd: 5.66 },
-      { lineItem: 'some-unknown-model, input', amountUsd: 2 },   // must not vanish
-    ]));
+    getCostsSummaryMock.mockResolvedValue(
+      costs([
+        { lineItem: 'gpt-5, output', amountUsd: 12.34 },
+        { lineItem: 'gpt-4o-mini, input', amountUsd: 5.66 },
+        { lineItem: 'some-unknown-model, input', amountUsd: 2 }, // must not vanish
+      ]),
+    );
     const d = await getCostDashboard(30);
     const sum = d.bySubsystem.reduce((s, x) => s + x.amountUsd, 0);
     expect(sum).toBeCloseTo(20, 1);
     expect(sum).toBeCloseTo(d.totalUsd, 1);
     // the unrecognised model lands in 'other' rather than being dropped
-    expect(d.bySubsystem.find(s => s.subsystem === 'other')?.amountUsd).toBeCloseTo(2, 1);
+    expect(d.bySubsystem.find((s) => s.subsystem === 'other')?.amountUsd).toBeCloseTo(2, 1);
   });
 
   it('computes unit economics from real dollars and real session counts', async () => {
@@ -139,7 +158,11 @@ describe('getCostDashboard attribution', () => {
 
   it('reports not-configured without touching the DB when there is no admin key', async () => {
     getCostsSummaryMock.mockResolvedValue({
-      configured: false, totalUsd: 0, days: [], byLineItem: [], fetchedAt: new Date(0).toISOString(),
+      configured: false,
+      totalUsd: 0,
+      days: [],
+      byLineItem: [],
+      fetchedAt: new Date(0).toISOString(),
     });
     const d = await getCostDashboard(30);
     expect(d.configured).toBe(false);
@@ -152,13 +175,13 @@ describe('getCostDashboard attribution', () => {
     const d = await getCostDashboard(30);
     expect(d.configured).toBe(true);
     expect(d.totalUsd).toBe(9);
-    expect(d.bySubsystem.find(s => s.subsystem === 'redaction')?.amountUsd).toBe(9);
+    expect(d.bySubsystem.find((s) => s.subsystem === 'redaction')?.amountUsd).toBe(9);
   });
 
   it('flags cap risk from the month-to-date projection', async () => {
     const today = new Date().toISOString().slice(0, 10);
     getCostsSummaryMock.mockResolvedValue(
-      costs([{ lineItem: 'gpt-5, output', amountUsd: 110 }], [{ date: today, amountUsd: 110 }])
+      costs([{ lineItem: 'gpt-5, output', amountUsd: 110 }], [{ date: today, amountUsd: 110 }]),
     );
     const d = await getCostDashboard(30);
     expect(d.budget.monthToDateUsd).toBeCloseTo(110, 1);

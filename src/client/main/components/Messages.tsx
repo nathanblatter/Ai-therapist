@@ -25,9 +25,11 @@ const DEFAULT_CRISIS: DisplayCrisisContact = {
 function clinicianLabel(thread: ParticipantThread): string {
   const name = thread.counterpart_username || 'Your care team';
   const role =
-    thread.clinician_role === 'caseworker' ? 'Care coordinator'
-    : thread.clinician_role === 'researcher' ? 'Study team'
-    : 'Therapist';
+    thread.clinician_role === 'caseworker'
+      ? 'Care coordinator'
+      : thread.clinician_role === 'researcher'
+        ? 'Study team'
+        : 'Therapist';
   return `${name} (${role})`;
 }
 
@@ -38,12 +40,16 @@ function NotForEmergenciesBanner({ crisis }: { crisis: DisplayCrisisContact }) {
       <Info size={16} className="text-blue-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
       <div className="text-sm text-blue-900">
         <p>
-          Messages are usually answered within 1&ndash;2 business days and are not monitored in
-          real time. If you need help right now:
+          Messages are usually answered within 1&ndash;2 business days and are not monitored in real time. If you need
+          help right now:
         </p>
         <p className="mt-1 font-medium">
-          Call or text <a href={`tel:${crisis.phone}`} className="underline">{crisis.phone}</a>
-          {' '}&mdash; the {crisis.hotline} &mdash; or {crisis.text.toLowerCase().startsWith('text') ? crisis.text : `text ${crisis.text}`}.
+          Call or text{' '}
+          <a href={`tel:${crisis.phone}`} className="underline">
+            {crisis.phone}
+          </a>{' '}
+          &mdash; the {crisis.hotline} &mdash; or{' '}
+          {crisis.text.toLowerCase().startsWith('text') ? crisis.text : `text ${crisis.text}`}.
         </p>
       </div>
     </div>
@@ -56,10 +62,12 @@ function FlaggedSupportNote({ crisis }: { crisis: DisplayCrisisContact }) {
     <div className="mt-1 bg-red-50 rounded-xl px-3 py-2 flex items-start gap-2 max-w-[85%]">
       <Phone size={14} className="text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
       <p className="text-xs text-red-900">
-        It sounds like things might be heavy right now. Your care team has been notified and will
-        follow up, but they may not see this immediately. If you are in danger or need support
-        right now, call or text <a href={`tel:${crisis.phone}`} className="font-semibold underline">{crisis.phone}</a> any
-        time, day or night.
+        It sounds like things might be heavy right now. Your care team has been notified and will follow up, but they
+        may not see this immediately. If you are in danger or need support right now, call or text{' '}
+        <a href={`tel:${crisis.phone}`} className="font-semibold underline">
+          {crisis.phone}
+        </a>{' '}
+        any time, day or night.
       </p>
     </div>
   );
@@ -91,7 +99,7 @@ export default function Messages() {
   useEffect(() => {
     let cancelled = false;
     fetch('/api/config/crisis', { credentials: 'include' })
-      .then(res => (res.ok ? res.json() : null))
+      .then((res) => (res.ok ? res.json() : null))
       .then((data: Partial<CrisisContact> | null) => {
         if (!cancelled && data && data.phone) {
           setCrisis({
@@ -101,8 +109,12 @@ export default function Messages() {
           });
         }
       })
-      .catch(() => { /* fallback stands */ });
-    return () => { cancelled = true; };
+      .catch(() => {
+        /* fallback stands */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Keep the newest message in view.
@@ -150,7 +162,7 @@ export default function Messages() {
             </p>
           ) : (
             <div className="space-y-3">
-              {messaging.messages.map(m => (
+              {messaging.messages.map((m) => (
                 <MessageBubble key={m.message_id} message={m} crisis={crisis} />
               ))}
               <div ref={bottomRef} />
@@ -159,23 +171,25 @@ export default function Messages() {
         </div>
 
         {messaging.error && (
-          <p className="text-sm text-red-600 px-1" role="alert">{messaging.error}</p>
+          <p className="text-sm text-red-600 px-1" role="alert">
+            {messaging.error}
+          </p>
         )}
 
         {frozen ? (
           <div className="bg-gray-50 rounded-2xl p-4 flex items-start gap-3">
             <Lock size={16} className="text-gray-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
             <p className="text-sm text-gray-500">
-              This conversation is closed because this member is no longer part of your care team.
-              You can still read your past messages here.
+              This conversation is closed because this member is no longer part of your care team. You can still read
+              your past messages here.
             </p>
           </div>
         ) : (
           <div className="bg-white rounded-2xl shadow p-3 flex items-end gap-2">
             <textarea
               value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onKeyDown={e => {
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   void send();
@@ -221,12 +235,12 @@ export default function Messages() {
           <p className="text-sm text-gray-400 py-4 text-center">Loading&hellip;</p>
         ) : messaging.threads.length === 0 ? (
           <p className="text-sm text-gray-500 py-4 text-center">
-            You do not have any message conversations yet. When a member of your care team starts
-            one, it will appear here.
+            You do not have any message conversations yet. When a member of your care team starts one, it will appear
+            here.
           </p>
         ) : (
           <ul className="divide-y divide-gray-100">
-            {messaging.threads.map(t => (
+            {messaging.threads.map((t) => (
               <li key={t.thread_id}>
                 <button
                   onClick={() => messaging.selectThread(t.thread_id)}
@@ -239,9 +253,7 @@ export default function Messages() {
                         <span className="ml-2 text-xs text-gray-400 font-normal">(closed)</span>
                       )}
                     </p>
-                    <p className="text-xs text-gray-400 truncate">
-                      {t.last_message_preview || 'No messages yet'}
-                    </p>
+                    <p className="text-xs text-gray-400 truncate">{t.last_message_preview || 'No messages yet'}</p>
                   </div>
                   {(t.unread_count ?? 0) > 0 && (
                     <span className="flex-shrink-0 text-xs font-semibold text-white bg-blue-600 rounded-full px-2 py-0.5">

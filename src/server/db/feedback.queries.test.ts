@@ -29,15 +29,23 @@ describe('isValidRating', () => {
 
 describe('upsertSessionFeedback', () => {
   it('rejects an out-of-range rating before hitting the db', async () => {
-    await expect(
-      upsertSessionFeedback('sess-1', { helpfulness_rating: 9 })
-    ).rejects.toThrow(/helpfulness_rating/);
+    await expect(upsertSessionFeedback('sess-1', { helpfulness_rating: 9 })).rejects.toThrow(/helpfulness_rating/);
     expect(queryMock).not.toHaveBeenCalled();
   });
 
   it('trims and length-caps free-text comments', async () => {
     queryMock.mockResolvedValueOnce({
-      rows: [{ feedback_id: 1, session_id: 'sess-1', helpfulness_rating: 4, ease_rating: null, would_return_rating: null, comments: 'a'.repeat(2000), created_at: new Date() }],
+      rows: [
+        {
+          feedback_id: 1,
+          session_id: 'sess-1',
+          helpfulness_rating: 4,
+          ease_rating: null,
+          would_return_rating: null,
+          comments: 'a'.repeat(2000),
+          created_at: new Date(),
+        },
+      ],
     });
     await upsertSessionFeedback('sess-1', { helpfulness_rating: 4, comments: `  ${'a'.repeat(2500)}  ` });
     const params = queryMock.mock.calls[0][1] as unknown[];

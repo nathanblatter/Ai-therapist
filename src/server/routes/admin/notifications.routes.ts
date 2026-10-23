@@ -19,8 +19,9 @@ const log = createLogger('notificationsRoutes');
 
 const EMAIL_MODES = ['immediate', 'digest', 'off'] as const;
 
-function validatePreferences(body: unknown):
-  { ok: true; prefs: Partial<Omit<NotificationPreferencesRow, 'user_id'>> } | { ok: false; error: string } {
+function validatePreferences(
+  body: unknown,
+): { ok: true; prefs: Partial<Omit<NotificationPreferencesRow, 'user_id'>> } | { ok: false; error: string } {
   if (body === null || typeof body !== 'object') return { ok: false, error: 'Invalid body' };
   const input = body as Record<string, unknown>;
   const prefs: Partial<Omit<NotificationPreferencesRow, 'user_id'>> = {};

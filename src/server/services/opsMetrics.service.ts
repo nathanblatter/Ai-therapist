@@ -9,7 +9,7 @@ import type { Request, Response, NextFunction } from 'express';
 export type RouteGroup = 'participant_api' | 'admin_api' | 'ssr' | 'static';
 
 interface Sample {
-  t: number;          // epoch ms when the response finished
+  t: number; // epoch ms when the response finished
   group: RouteGroup;
   status: number;
   durationMs: number;
@@ -28,7 +28,8 @@ export type OpsSnapshot = Record<RouteGroup, GroupSnapshot>;
 const GROUPS: RouteGroup[] = ['participant_api', 'admin_api', 'ssr', 'static'];
 
 // Anything that is clearly a build asset / dev-server internal request.
-const STATIC_RE = /(^\/(assets|@vite|@fs|@react-refresh|node_modules|src)\/)|\.(js|mjs|cjs|css|map|png|jpe?g|gif|svg|ico|woff2?|ttf|webp|mp3|wasm)(\?|$)/;
+const STATIC_RE =
+  /(^\/(assets|@vite|@fs|@react-refresh|node_modules|src)\/)|\.(js|mjs|cjs|css|map|png|jpe?g|gif|svg|ico|woff2?|ttf|webp|mp3|wasm)(\?|$)/;
 
 /** Classify a request path into one of the four dashboard route groups. */
 export function classifyRoute(path: string): RouteGroup {
@@ -63,7 +64,7 @@ export class OpsMetricsCollector {
 
   constructor(opts: { windowMs?: number; maxSamples?: number } = {}) {
     this.windowMs = opts.windowMs ?? 60 * 60 * 1000; // 60 min
-    this.maxSamples = opts.maxSamples ?? 50_000;      // memory bound
+    this.maxSamples = opts.maxSamples ?? 50_000; // memory bound
   }
 
   record(group: RouteGroup, status: number, durationMs: number, now = Date.now()): void {
@@ -87,12 +88,12 @@ export class OpsMetricsCollector {
     this.prune(now);
     const out = {} as OpsSnapshot;
     for (const group of GROUPS) {
-      const rows = this.samples.filter(s => s.group === group);
-      const durations = rows.map(s => s.durationMs);
+      const rows = this.samples.filter((s) => s.group === group);
+      const durations = rows.map((s) => s.durationMs);
       out[group] = {
         requests: rows.length,
-        status_4xx: rows.filter(s => s.status >= 400 && s.status < 500).length,
-        status_5xx: rows.filter(s => s.status >= 500).length,
+        status_4xx: rows.filter((s) => s.status >= 400 && s.status < 500).length,
+        status_5xx: rows.filter((s) => s.status >= 500).length,
         p50_ms: percentile(durations, 50),
         p95_ms: percentile(durations, 95),
       };

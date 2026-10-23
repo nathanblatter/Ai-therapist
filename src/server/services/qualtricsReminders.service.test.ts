@@ -52,8 +52,8 @@ describe('nextSendKind', () => {
           { kind: 'invite', sent_at: new Date(NOW.getTime() - 100 * H) },
           { kind: 'followup', sent_at: new Date(NOW.getTime() - 50 * H) },
         ],
-        NOW
-      )
+        NOW,
+      ),
     ).toBeNull();
   });
 });
@@ -149,7 +149,10 @@ describe('sweepSurveyReminders', () => {
       if (sql.includes('SELECT kind, sent_at')) return { rows: [] };
       if (sql.includes('INSERT INTO survey_reminders')) return { rows: [{ reminder_id: 77 }] };
       if (sql.includes('SELECT contact_id')) return { rows: [] };
-      if (sql.includes('DELETE FROM survey_reminders')) { deletes.push(sql); return { rows: [], rowCount: 1 }; }
+      if (sql.includes('DELETE FROM survey_reminders')) {
+        deletes.push(sql);
+        return { rows: [], rowCount: 1 };
+      }
       return { rows: [], rowCount: 1 };
     });
     fetchMock.mockResolvedValue(new Response('nope', { status: 500 }));

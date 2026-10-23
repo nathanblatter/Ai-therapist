@@ -43,7 +43,7 @@ export function assertSafeOutputPath(target: string): void {
     if (resolved === dir || resolved.startsWith(dir + path.sep)) {
       throw new Error(
         `Refusing to write export to ${resolved}: paths under ~/Desktop or ~/Documents are not allowed ` +
-        `(iCloud/backup-hygiene risk). Use a path under ~/docker-services/.`
+          `(iCloud/backup-hygiene risk). Use a path under ~/docker-services/.`,
       );
     }
   }
@@ -114,7 +114,7 @@ async function main() {
 const isEntrypoint = process.argv[1] === fileURLToPath(import.meta.url);
 if (isEntrypoint) {
   main()
-    .catch(err => {
+    .catch((err) => {
       console.error('[export] fatal:', err);
       process.exitCode = 1;
     })

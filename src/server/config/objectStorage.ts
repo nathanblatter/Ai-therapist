@@ -6,11 +6,11 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
-} from "@aws-sdk/client-s3";
-import type { Readable } from "node:stream";
-import { createLogger } from "../utils/logger.js";
+} from '@aws-sdk/client-s3';
+import type { Readable } from 'node:stream';
+import { createLogger } from '../utils/logger.js';
 
-const log = createLogger("storage");
+const log = createLogger('storage');
 
 // MinIO is S3-compatible: same SDK, custom endpoint + path-style addressing.
 // Swapping MINIO_ENDPOINT/creds for real AWS S3 needs no code change.
@@ -19,11 +19,10 @@ const log = createLogger("storage");
 // .env.example for the full breakdown (host vs. containerized-with-MinIO vs.
 // containerized-with-MinIO-on-host / host.docker.internal). The 127.0.0.1
 // default below only works when this process runs directly on the host.
-const endpoint = process.env.MINIO_ENDPOINT || "http://127.0.0.1:9000";
-const bucket = process.env.MINIO_BUCKET || "ai-therapist-recordings";
-const accessKeyId = process.env.MINIO_ROOT_USER || process.env.AWS_ACCESS_KEY_ID || "";
-const secretAccessKey =
-  process.env.MINIO_ROOT_PASSWORD || process.env.AWS_SECRET_ACCESS_KEY || "";
+const endpoint = process.env.MINIO_ENDPOINT || 'http://127.0.0.1:9000';
+const bucket = process.env.MINIO_BUCKET || 'ai-therapist-recordings';
+const accessKeyId = process.env.MINIO_ROOT_USER || process.env.AWS_ACCESS_KEY_ID || '';
+const secretAccessKey = process.env.MINIO_ROOT_PASSWORD || process.env.AWS_SECRET_ACCESS_KEY || '';
 
 export const RECORDINGS_BUCKET = bucket;
 
@@ -33,7 +32,7 @@ function getClient(): S3Client {
   if (!client) {
     client = new S3Client({
       endpoint,
-      region: process.env.AWS_REGION || "us-east-1",
+      region: process.env.AWS_REGION || 'us-east-1',
       credentials: { accessKeyId, secretAccessKey },
       forcePathStyle: true, // required for MinIO
     });
@@ -60,11 +59,7 @@ export async function ensureBucket(): Promise<void> {
 }
 
 /** Upload an object (used for finalized recordings). */
-export async function putObject(
-  key: string,
-  body: Buffer,
-  contentType: string,
-): Promise<void> {
+export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await getClient().send(
     new PutObjectCommand({
       Bucket: bucket,
@@ -88,12 +83,10 @@ export interface ObjectMeta {
 /** Fetch object size/type without downloading the body (for Range playback). */
 export async function headObject(key: string): Promise<ObjectMeta | null> {
   try {
-    const res = await getClient().send(
-      new HeadObjectCommand({ Bucket: bucket, Key: key }),
-    );
+    const res = await getClient().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
     return {
       contentLength: res.ContentLength ?? 0,
-      contentType: res.ContentType ?? "application/octet-stream",
+      contentType: res.ContentType ?? 'application/octet-stream',
     };
   } catch {
     return null;
@@ -118,6 +111,6 @@ export async function getObjectStream(
   return {
     body: res.Body as Readable,
     contentLength: res.ContentLength ?? 0,
-    contentType: res.ContentType ?? "application/octet-stream",
+    contentType: res.ContentType ?? 'application/octet-stream',
   };
 }

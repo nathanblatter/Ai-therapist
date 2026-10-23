@@ -137,16 +137,16 @@ function messagePage(title: string, body: string, status = 410): { status: numbe
 
 const ALREADY_USED = messagePage(
   'This link was already used',
-  'An account was already created for this survey response. <a href="/">Log in here</a>, or contact the research team if that was not you.'
+  'An account was already created for this survey response. <a href="/">Log in here</a>, or contact the research team if that was not you.',
 );
 const NOT_VERIFIED = messagePage(
   'We could not verify your survey',
-  'This link does not match a completed baseline survey. Please finish the survey first, or contact the research team.'
+  'This link does not match a completed baseline survey. Please finish the survey first, or contact the research team.',
 );
 const TRY_LATER = messagePage(
   'Please try again in a moment',
   'We could not reach the survey system to verify your completion. Your survey is saved — retry this link in a few minutes.',
-  503
+  503,
 );
 
 export default function joinStudyRoutes(): Router {

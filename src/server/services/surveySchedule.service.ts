@@ -67,7 +67,7 @@ export function computeDueSurveys(args: {
         r.surveyRole === 'weekly' &&
         r.recordedAt !== null &&
         r.recordedAt.getTime() >= windowStart &&
-        r.recordedAt.getTime() < windowStart + WEEK_MS
+        r.recordedAt.getTime() < windowStart + WEEK_MS,
     );
     if (!doneThisWeek) {
       due.push({
@@ -109,7 +109,7 @@ export function computeDueSurveys(args: {
  */
 export async function getParticipantSurveySchedule(
   userId: number,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): Promise<ParticipantSurveySchedule> {
   const config = getQualtricsSyncConfig();
   if (!config) return { enrolled: false, studyWeek: null, due: [] };

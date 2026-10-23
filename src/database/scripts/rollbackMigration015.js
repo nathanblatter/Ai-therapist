@@ -14,7 +14,7 @@ async function rollbackMigration() {
 
     const rollbackSQL = fs.readFileSync(
       path.join(__dirname, '../migrations/015_add_user_preferences_rollback.sql'),
-      'utf8'
+      'utf8',
     );
 
     await client.query(rollbackSQL);
@@ -23,7 +23,6 @@ async function rollbackMigration() {
     console.log('  - Removed preferred_voice column from users table');
     console.log('  - Removed preferred_language column from users table');
     console.log('  - Dropped index on user preferences');
-
   } catch (error) {
     console.error('Rollback of migration 015 failed:', error);
     throw error;

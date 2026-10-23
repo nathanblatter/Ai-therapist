@@ -34,7 +34,13 @@ export const OWNER_SUBJECT = 'owner';
 /** Scopes the login requests: one role:<name> per app role. The token's scope
  *  is the intersection with the user's Squawk roles, which is how the app
  *  reads the role Squawk holds for them. */
-export const ROLE_SCOPES = ['role:therapist', 'role:researcher', 'role:participant', 'role:demo', 'role:caseworker'] as const;
+export const ROLE_SCOPES = [
+  'role:therapist',
+  'role:researcher',
+  'role:participant',
+  'role:demo',
+  'role:caseworker',
+] as const;
 
 const HTTP_TIMEOUT_MS = 10_000;
 const TOKEN_REFRESH_MARGIN_S = 30;
@@ -65,7 +71,8 @@ export class SquawkError extends Error {
 type Json = Record<string, unknown>;
 
 /** The HTTP function; tests swap it. */
-export let fetchImpl: typeof fetch = (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+export let fetchImpl: typeof fetch = (input, init) =>
+  fetch(input, { ...init, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
 export function _setFetch(f: typeof fetch): void {
   fetchImpl = f;
 }
@@ -100,7 +107,11 @@ export async function serviceToken(): Promise<string> {
   const resp = await fetchImpl(`${ISSUER}/v1/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: SERVICE_ID, client_secret: CREDENTIAL }).toString(),
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: SERVICE_ID,
+      client_secret: CREDENTIAL,
+    }).toString(),
   });
   const body = await raiseFor(resp);
   serviceTok = String(body.access_token);
@@ -108,14 +119,22 @@ export async function serviceToken(): Promise<string> {
   return serviceTok;
 }
 
-async function call<T = Json>(method: string, path: string, json?: unknown, query?: Record<string, string>): Promise<T> {
+async function call<T = Json>(
+  method: string,
+  path: string,
+  json?: unknown,
+  query?: Record<string, string>,
+): Promise<T> {
   const url = new URL(`${ISSUER}${path}`);
   for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, v);
   const send = async () => {
     const token = await serviceToken();
     return fetchImpl(url, {
       method,
-      headers: { authorization: `Bearer ${token}`, ...(json !== undefined ? { 'content-type': 'application/json' } : {}) },
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(json !== undefined ? { 'content-type': 'application/json' } : {}),
+      },
       body: json !== undefined ? JSON.stringify(json) : undefined,
     });
   };
@@ -174,7 +193,12 @@ export interface SquawkUser {
   status: string;
 }
 
-export function createPasswordUser(username: string, password: string, role: string, name?: string): Promise<SquawkUser> {
+export function createPasswordUser(
+  username: string,
+  password: string,
+  role: string,
+  name?: string,
+): Promise<SquawkUser> {
   return call<SquawkUser>('POST', '/v1/users', { method: 'password', username, password, roles: [role], name });
 }
 
@@ -194,8 +218,16 @@ export function passkeyRegisterBegin(squawkUserId: string): Promise<Json> {
   return call('POST', `/v1/users/${encodeURIComponent(squawkUserId)}/passkeys/begin`);
 }
 
-export function passkeyRegisterFinish(squawkUserId: string, challengeId: string, name: string, credential: unknown): Promise<Json> {
-  return call('POST', `/v1/users/${encodeURIComponent(squawkUserId)}/passkeys/finish`, credential, { challenge: challengeId, name });
+export function passkeyRegisterFinish(
+  squawkUserId: string,
+  challengeId: string,
+  name: string,
+  credential: unknown,
+): Promise<Json> {
+  return call('POST', `/v1/users/${encodeURIComponent(squawkUserId)}/passkeys/finish`, credential, {
+    challenge: challengeId,
+    name,
+  });
 }
 
 export function listPasskeys(squawkUserId: string): Promise<Json> {
@@ -209,7 +241,11 @@ export async function exchangeCode(code: string, verifier: string): Promise<Json
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      grant_type: 'authorization_code', client_id: CLIENT_ID, code, code_verifier: verifier, redirect_uri: redirectUri(),
+      grant_type: 'authorization_code',
+      client_id: CLIENT_ID,
+      code,
+      code_verifier: verifier,
+      redirect_uri: redirectUri(),
     }).toString(),
   });
   return raiseFor(resp);
@@ -231,7 +267,15 @@ export interface SquawkClaims {
   jti?: string;
 }
 
-interface Jwk { kid: string; kty: string; crv: string; x: string; y: string; alg?: string; use?: string }
+interface Jwk {
+  kid: string;
+  kty: string;
+  crv: string;
+  x: string;
+  y: string;
+  alg?: string;
+  use?: string;
+}
 
 let jwks: { keys: Map<string, KeyObject>; fetchedAt: number } | null = null;
 
@@ -268,7 +312,10 @@ function b64url(s: string): Buffer {
 /** Verify a Squawk user access token: signature (ES256, kid from the JWKS),
  *  issuer, audience (= our service id), and lifetime. Returns null when
  *  anything is off; the reason is logged, never shown. */
-export async function verifyAccessToken(token: string, now = Math.floor(Date.now() / 1000)): Promise<SquawkClaims | null> {
+export async function verifyAccessToken(
+  token: string,
+  now = Math.floor(Date.now() / 1000),
+): Promise<SquawkClaims | null> {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   let header: { alg?: string; kid?: string };
@@ -288,7 +335,12 @@ export async function verifyAccessToken(token: string, now = Math.floor(Date.now
     log.warn({ kid: header.kid }, 'token signed by unknown key');
     return null;
   }
-  const ok = cryptoVerify('sha256', Buffer.from(`${parts[0]}.${parts[1]}`, 'ascii'), { key, dsaEncoding: 'ieee-p1363' }, b64url(parts[2]));
+  const ok = cryptoVerify(
+    'sha256',
+    Buffer.from(`${parts[0]}.${parts[1]}`, 'ascii'),
+    { key, dsaEncoding: 'ieee-p1363' },
+    b64url(parts[2]),
+  );
   if (!ok) {
     log.warn('token signature failed');
     return null;

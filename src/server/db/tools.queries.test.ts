@@ -5,11 +5,7 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-import {
-  getToolInvocationStats,
-  getToolsPerSessionDistribution,
-  getToolUsageSessionCounts,
-} from './tools.queries.js';
+import { getToolInvocationStats, getToolsPerSessionDistribution, getToolUsageSessionCounts } from './tools.queries.js';
 
 describe('getToolInvocationStats', () => {
   it('computes failure_rate as a rounded percentage of failures over invocations', async () => {
@@ -23,7 +19,14 @@ describe('getToolInvocationStats', () => {
     const stats = await getToolInvocationStats();
 
     expect(stats).toEqual([
-      { tool_name: 'log_mood', invocations: 10, sessions: 8, last_used: new Date('2026-01-01'), failures: 1, failure_rate: 10 },
+      {
+        tool_name: 'log_mood',
+        invocations: 10,
+        sessions: 8,
+        last_used: new Date('2026-01-01'),
+        failures: 1,
+        failure_rate: 10,
+      },
       { tool_name: 'end_session', invocations: 4, sessions: 4, last_used: null, failures: 0, failure_rate: 0 },
     ]);
   });

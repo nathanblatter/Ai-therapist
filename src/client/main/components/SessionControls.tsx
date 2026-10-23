@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Mic, MicOff, PhoneOff, Send, Settings, AlertCircle } from "react-feather";
+import { useState, useRef, useEffect } from 'react';
+import { Mic, MicOff, PhoneOff, Send, Settings, AlertCircle } from 'react-feather';
 import { toast } from '../../shared/components/Toast';
 
 interface SessionStoppedProps {
@@ -13,7 +13,13 @@ interface SessionStoppedProps {
   rateLimitResetsAt: string | null;
 }
 
-function SessionStopped({ startSession, onOpenSettings, isConnecting, rateLimited, rateLimitResetsAt }: SessionStoppedProps) {
+function SessionStopped({
+  startSession,
+  onOpenSettings,
+  isConnecting,
+  rateLimited,
+  rateLimitResetsAt,
+}: SessionStoppedProps) {
   const resetLabel = rateLimitResetsAt
     ? new Date(rateLimitResetsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : null;
@@ -25,9 +31,9 @@ function SessionStopped({ startSession, onOpenSettings, isConnecting, rateLimite
           className="p-3 bg-royal hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-full font-semibold px-4 py-3 flex items-center justify-center gap-2 min-h-[44px] min-w-[44px]"
           onClick={startSession}
           disabled={isConnecting || rateLimited}
-          aria-label={isConnecting ? "Connecting to session" : "Start new therapy session"}
+          aria-label={isConnecting ? 'Connecting to session' : 'Start new therapy session'}
         >
-          <span className="">{isConnecting ? "Connecting..." : "Start Session"}</span>
+          <span className="">{isConnecting ? 'Connecting...' : 'Start Session'}</span>
         </button>
         <button
           className="p-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-full flex items-center justify-center min-h-[44px] min-w-[44px]"
@@ -69,8 +75,16 @@ interface SessionActiveProps {
   micLocked: boolean;
 }
 
-function SessionActive({ stopSession, sendTextMessage, localStream, startMicOn, chatEnabled, sessionType, micLocked }: SessionActiveProps) {
-  const [message, setMessage] = useState("");
+function SessionActive({
+  stopSession,
+  sendTextMessage,
+  localStream,
+  startMicOn,
+  chatEnabled,
+  sessionType,
+  micLocked,
+}: SessionActiveProps) {
+  const [message, setMessage] = useState('');
   const [isMicOn, setIsMicOn] = useState(true);
   const [micPermission, setMicPermission] = useState('unknown'); // 'granted', 'denied', 'prompt', 'unknown'
   const streamRef = useRef<MediaStream | null>(null);
@@ -78,8 +92,9 @@ function SessionActive({ stopSession, sendTextMessage, localStream, startMicOn, 
   useEffect(() => {
     // Check microphone permission status
     if (navigator.permissions && navigator.permissions.query) {
-      navigator.permissions.query({ name: 'microphone' })
-        .then(permissionStatus => {
+      navigator.permissions
+        .query({ name: 'microphone' })
+        .then((permissionStatus) => {
           setMicPermission(permissionStatus.state);
 
           // Listen for permission changes
@@ -115,7 +130,7 @@ function SessionActive({ stopSession, sendTextMessage, localStream, startMicOn, 
   function handleSendTextMessage() {
     if (message.trim()) {
       sendTextMessage(message);
-      setMessage("");
+      setMessage('');
     }
   }
 
@@ -165,27 +180,27 @@ function SessionActive({ stopSession, sendTextMessage, localStream, startMicOn, 
             onClick={toggleMic}
             className={`p-3 sm:px-4 sm:py-2 rounded-full ${
               micPermission === 'denied' || micLocked
-                ? "bg-gray-400 cursor-not-allowed"
+                ? 'bg-gray-400 cursor-not-allowed'
                 : isMicOn
-                ? "bg-green-600 hover:bg-green-700"
-                : "bg-red-600 hover:bg-red-700"
+                  ? 'bg-green-600 hover:bg-green-700'
+                  : 'bg-red-600 hover:bg-red-700'
             } text-white flex items-center justify-center gap-2`}
             title={
               micPermission === 'denied'
-                ? "Microphone access denied - check browser permissions"
+                ? 'Microphone access denied - check browser permissions'
                 : micLocked
-                ? "Session is wrapping up - microphone is off"
-                : isMicOn
-                ? "Click to mute microphone"
-                : "Click to unmute microphone"
+                  ? 'Session is wrapping up - microphone is off'
+                  : isMicOn
+                    ? 'Click to mute microphone'
+                    : 'Click to unmute microphone'
             }
             disabled={micPermission === 'denied' || micLocked}
             aria-label={
               micPermission === 'denied'
-                ? "Microphone access denied"
+                ? 'Microphone access denied'
                 : isMicOn
-                ? "Microphone on, click to mute"
-                : "Microphone off, click to unmute"
+                  ? 'Microphone on, click to mute'
+                  : 'Microphone off, click to unmute'
             }
           >
             {micPermission === 'denied' ? (
@@ -196,11 +211,7 @@ function SessionActive({ stopSession, sendTextMessage, localStream, startMicOn, 
               <MicOff size={18} />
             )}
             <span className="hidden sm:inline text-sm font-medium">
-              {micPermission === 'denied'
-                ? "Permission Denied"
-                : isMicOn
-                ? "Mic On"
-                : "Mic Off"}
+              {micPermission === 'denied' ? 'Permission Denied' : isMicOn ? 'Mic On' : 'Mic Off'}
             </span>
           </button>
           {micPermission === 'denied' && (
@@ -216,7 +227,7 @@ function SessionActive({ stopSession, sendTextMessage, localStream, startMicOn, 
         <>
           <input
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === 'Enter') {
                 handleSendTextMessage();
               }
             }}

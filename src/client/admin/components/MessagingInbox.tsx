@@ -36,7 +36,7 @@ export default function MessagingInbox() {
   const loaded = threadsLoaded;
 
   if (selectedThreadId !== null) {
-    const thread = threads.find(t => t.thread_id === selectedThreadId);
+    const thread = threads.find((t) => t.thread_id === selectedThreadId);
     return (
       <Panel className="h-[70vh] flex flex-col">
         <MessageThreadView
@@ -55,10 +55,14 @@ export default function MessagingInbox() {
     <div className="space-y-4">
       <Panel title="Messages" icon={MessageSquare}>
         <p className="text-sm text-gray-500 -mt-2 mb-4">
-          Secure asynchronous messages with clients on your caseload. Participants are told
-          replies take 1&ndash;2 business days; every participant message is safety-scanned.
+          Secure asynchronous messages with clients on your caseload. Participants are told replies take 1&ndash;2
+          business days; every participant message is safety-scanned.
         </p>
-        {error && <p className="text-sm text-red-600 mb-3" role="alert">{error}</p>}
+        {error && (
+          <p className="text-sm text-red-600 mb-3" role="alert">
+            {error}
+          </p>
+        )}
         {!loaded && !error ? (
           <p className="text-sm text-gray-400 py-4 text-center">Loading&hellip;</p>
         ) : loaded && threads.length === 0 ? (
@@ -67,7 +71,7 @@ export default function MessagingInbox() {
           </p>
         ) : loaded ? (
           <ul className="divide-y divide-gray-100">
-            {threads.map(t => (
+            {threads.map((t) => (
               <li key={t.thread_id}>
                 <button
                   onClick={() => setSelectedThreadId(t.thread_id)}
@@ -80,9 +84,7 @@ export default function MessagingInbox() {
                         <span className="ml-2 text-xs text-gray-400 font-normal">(frozen)</span>
                       )}
                     </p>
-                    <p className="text-xs text-gray-400 truncate">
-                      {t.last_message_preview || 'No messages yet'}
-                    </p>
+                    <p className="text-xs text-gray-400 truncate">{t.last_message_preview || 'No messages yet'}</p>
                   </div>
                   {t.unread_count > 0 && (
                     <span className="flex-shrink-0 text-xs font-semibold text-white bg-blue-600 rounded-full px-2 py-0.5">

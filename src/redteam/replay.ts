@@ -39,10 +39,17 @@ function parseArgs(argv: string[]): ReplayConfig {
   for (let i = 0; i < argv.length; i++) {
     const next = () => argv[++i];
     switch (argv[i]) {
-      case '--sessions': cfg.sessions = Math.max(1, Number(next()) || 3); break;
-      case '--drop': cfg.dropThreshold = Math.max(0.5, Number(next()) || 1.0); break;
-      case '--allow-fail': cfg.allowFail = true; break;
-      default: break;
+      case '--sessions':
+        cfg.sessions = Math.max(1, Number(next()) || 3);
+        break;
+      case '--drop':
+        cfg.dropThreshold = Math.max(0.5, Number(next()) || 1.0);
+        break;
+      case '--allow-fail':
+        cfg.allowFail = true;
+        break;
+      default:
+        break;
     }
   }
   return cfg;
@@ -69,7 +76,7 @@ export function computeReplayDeltas(
     if (typeof storedScore !== 'number' || typeof replayScore !== 'number') continue;
     deltas.push({ dimension: dim, stored: storedScore, replay: replayScore, drop: storedScore - replayScore });
   }
-  return { deltas, flagged: deltas.filter(d => d.drop >= threshold) };
+  return { deltas, flagged: deltas.filter((d) => d.drop >= threshold) };
 }
 
 const MAX_REPLAY_TURNS = 12;
@@ -81,7 +88,9 @@ async function main(): Promise<void> {
   const { app, io } = await import('../server/index.js');
   const { pool } = await import('../server/config/db.js');
   const { CURRENT_CONSENT_VERSION } = await import('../server/utils/consent.js');
-  const { EVAL_PROMPT_VERSION, EVAL_DIMENSIONS, evaluateSession } = await import('../server/services/sessionEval.service.js');
+  const { EVAL_PROMPT_VERSION, EVAL_DIMENSIONS, evaluateSession } = await import(
+    '../server/services/sessionEval.service.js'
+  );
   const { insertHarnessRun } = await import('../server/db/index.js');
 
   const client = new HarnessClient(app, io, CURRENT_CONSENT_VERSION);
@@ -110,7 +119,9 @@ async function main(): Promise<void> {
   );
 
   if (candidates.length === 0) {
-    console.log(`[replay] no candidate sessions (prompt_version=${EVAL_PROMPT_VERSION}, >=${MIN_SOURCE_TURNS} redacted user turns). Nothing to do.`);
+    console.log(
+      `[replay] no candidate sessions (prompt_version=${EVAL_PROMPT_VERSION}, >=${MIN_SOURCE_TURNS} redacted user turns). Nothing to do.`,
+    );
     await flushAndExit(0);
   }
   console.log(`[replay] replaying ${candidates.length} session(s), drop threshold ${cfg.dropThreshold}`);
@@ -157,7 +168,7 @@ async function main(): Promise<void> {
       const { deltas, flagged } = computeReplayDeltas(stored, replayScores, cfg.dropThreshold);
       if (flagged.length > 0) anyFlagged = true;
 
-      const deltaStr = deltas.map(d => `${d.dimension} ${d.stored}→${d.replay}`).join(', ');
+      const deltaStr = deltas.map((d) => `${d.dimension} ${d.stored}→${d.replay}`).join(', ');
       console.log(`[replay] ${shortId}…: ${flagged.length > 0 ? 'REGRESSION' : 'ok'} (${deltaStr})`);
 
       scenarios.push({
@@ -165,7 +176,7 @@ async function main(): Promise<void> {
         variation: 0,
         pipeline: 'chat',
         passed: flagged.length === 0,
-        assertionFailures: flagged.map(d => ({
+        assertionFailures: flagged.map((d) => ({
           id: `delta-${d.dimension}`,
           detail: `${d.dimension} dropped ${d.drop} (stored ${d.stored} → replay ${d.replay})`,
         })),
@@ -193,31 +204,37 @@ async function main(): Promise<void> {
 
   try {
     const runId = await insertHarnessRun({
-      startedAt, finishedAt: new Date().toISOString(),
-      suite: 'replay', seed: 0, variations: 1,
-      judgeModel: null, gitSha: process.env.GITHUB_SHA ?? null,
-      trigger: 'replay', dryRun: false, scenarios,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      suite: 'replay',
+      seed: 0,
+      variations: 1,
+      judgeModel: null,
+      gitSha: process.env.GITHUB_SHA ?? null,
+      trigger: 'replay',
+      dryRun: false,
+      scenarios,
     });
     console.log(`[replay] persisted as harness run #${runId}`);
   } catch (err) {
     console.warn(`[replay] run not persisted (${(err as Error).message})`);
   }
 
-  const passCount = scenarios.filter(s => s.passed).length;
+  const passCount = scenarios.filter((s) => s.passed).length;
   console.log(`[replay] ${passCount}/${scenarios.length} sessions clean`);
   await flushAndExit(anyFlagged && !cfg.allowFail ? 1 : 0);
 }
 
 async function flushAndExit(code: number): Promise<never> {
-  await new Promise<void>(res => process.stdout.write('', () => res()));
-  await new Promise<void>(res => process.stderr.write('', () => res()));
+  await new Promise<void>((res) => process.stdout.write('', () => res()));
+  await new Promise<void>((res) => process.stderr.write('', () => res()));
   process.exit(code);
 }
 
 // Only run as an entrypoint — computeReplayDeltas is imported by unit tests.
 const invokedDirectly = process.argv[1]?.endsWith('replay.ts') || process.argv[1]?.endsWith('replay.js');
 if (invokedDirectly) {
-  main().catch(async err => {
+  main().catch(async (err) => {
     console.error('[replay] fatal:', err);
     await flushAndExit(1);
   });

@@ -71,7 +71,7 @@ export async function getWeeklyEvalScores(
       ORDER BY weeks_back DESC, dimension`,
     [...irbWindowParams({ ...w, from, to }), promptVersion],
   );
-  return r.rows.map(x => ({
+  return r.rows.map((x) => ({
     week_ending: x.week_ending,
     dimension: x.dimension,
     mean_score: Number(x.mean_score),
@@ -109,8 +109,15 @@ export interface NightlyRunPair {
  */
 export async function getNightlyRunPairs(w: Pick<IrbWindow, 'from' | 'to'>): Promise<NightlyRunPair[]> {
   const r = await pool.query<{
-    suite: string; started_at: Date; scenario_count: number; pass_count: number; git_sha: string | null;
-    prev_started_at: Date | null; prev_scenario_count: number | null; prev_pass_count: number | null; prev_git_sha: string | null;
+    suite: string;
+    started_at: Date;
+    scenario_count: number;
+    pass_count: number;
+    git_sha: string | null;
+    prev_started_at: Date | null;
+    prev_scenario_count: number | null;
+    prev_pass_count: number | null;
+    prev_git_sha: string | null;
   }>(
     `WITH latest AS (
        SELECT DISTINCT ON (suite) id, suite, started_at, scenario_count, pass_count, git_sha
@@ -133,11 +140,21 @@ export async function getNightlyRunPairs(w: Pick<IrbWindow, 'from' | 'to'>): Pro
       ORDER BY l.suite`,
     [w.from, w.to],
   );
-  return r.rows.map(x => ({
+  return r.rows.map((x) => ({
     suite: x.suite,
-    latest: { started_at: x.started_at, scenario_count: n(x.scenario_count), pass_count: n(x.pass_count), git_sha: x.git_sha },
+    latest: {
+      started_at: x.started_at,
+      scenario_count: n(x.scenario_count),
+      pass_count: n(x.pass_count),
+      git_sha: x.git_sha,
+    },
     previous: x.prev_started_at
-      ? { started_at: x.prev_started_at, scenario_count: n(x.prev_scenario_count), pass_count: n(x.prev_pass_count), git_sha: x.prev_git_sha }
+      ? {
+          started_at: x.prev_started_at,
+          scenario_count: n(x.prev_scenario_count),
+          pass_count: n(x.prev_pass_count),
+          git_sha: x.prev_git_sha,
+        }
       : null,
   }));
 }
@@ -165,12 +182,12 @@ export async function getCrisisAdjudicationCounts(w: IrbWindow): Promise<CrisisA
       WHERE table_schema = 'public' AND table_name = 'crisis_event_adjudications'`,
   );
   if (probe.rows.length === 0) return null;
-  const cols = new Set(probe.rows.map(c => c.column_name));
+  const cols = new Set(probe.rows.map((c) => c.column_name));
   // Migration 114 (WP2) names them `verdict` and `crisis_event_id`; the
   // fallbacks cover the pre-merge guesses so a schema drift degrades to
   // "not enabled" rather than a failed digest.
-  const outcomeCol = ['verdict', 'outcome', 'status'].find(c => cols.has(c));
-  const eventCol = ['crisis_event_id', 'event_id'].find(c => cols.has(c));
+  const outcomeCol = ['verdict', 'outcome', 'status'].find((c) => cols.has(c));
+  const eventCol = ['crisis_event_id', 'event_id'].find((c) => cols.has(c));
   if (!outcomeCol || !eventCol) return null;
   const r = await pool.query<{ outcome: string | null; n: string }>(
     `SELECT a.${outcomeCol} AS outcome, COUNT(*) AS n
@@ -182,7 +199,7 @@ export async function getCrisisAdjudicationCounts(w: IrbWindow): Promise<CrisisA
       GROUP BY 1 ORDER BY 1`,
     irbWindowParams(w),
   );
-  return r.rows.map(x => ({ outcome: x.outcome ?? 'pending', n: n(x.n) }));
+  return r.rows.map((x) => ({ outcome: x.outcome ?? 'pending', n: n(x.n) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +234,14 @@ export async function insertWeeklyDigest(input: {
     `INSERT INTO weekly_digests (org_id, week_ending, markdown, data, generated_by, generated_at)
      VALUES ($1, $2::date, $3, $4, $5, COALESCE($6::timestamptz, CURRENT_TIMESTAMP))
      RETURNING id, org_id, week_ending, markdown, data, generated_at, generated_by`,
-    [input.orgId, input.weekEnding, input.markdown, JSON.stringify(input.data), input.generatedBy, input.generatedAt ?? null],
+    [
+      input.orgId,
+      input.weekEnding,
+      input.markdown,
+      JSON.stringify(input.data),
+      input.generatedBy,
+      input.generatedAt ?? null,
+    ],
   );
   const row = r.rows[0];
   return { ...row, week_ending: toDateString(row.week_ending) };
@@ -232,7 +256,7 @@ export async function listWeeklyDigests(orgId: number, limit = 26): Promise<Week
       LIMIT $2`,
     [orgId, Math.min(Math.max(1, limit), 200)],
   );
-  return r.rows.map(x => ({ ...x, week_ending: toDateString(x.week_ending) }));
+  return r.rows.map((x) => ({ ...x, week_ending: toDateString(x.week_ending) }));
 }
 
 /** One digest, only when it belongs to the org (cross-org ids read as absent). */

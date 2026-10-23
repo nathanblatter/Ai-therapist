@@ -2,10 +2,10 @@
 // plain-text rendering for the clipboard and a standalone printable HTML
 // document for window.print (the browser's "Save as PDF" covers PDF, so no
 // PDF library). Pure functions, unit-tested in noteExport.test.ts.
-import type { CareNoteRow } from "../../../../server/db/careNotes.queries";
+import type { CareNoteRow } from '../../../../server/db/careNotes.queries';
 
-export const SOAP_ORDER = ["subjective", "objective", "assessment", "plan"] as const;
-export const CASE_ORDER = ["narrative", "contact_method", "referral_to", "outcome"] as const;
+export const SOAP_ORDER = ['subjective', 'objective', 'assessment', 'plan'] as const;
+export const CASE_ORDER = ['narrative', 'contact_method', 'referral_to', 'outcome'] as const;
 
 export interface NoteExportContext {
   /** How the clinician refers to the client (username / client reference). */
@@ -15,33 +15,33 @@ export interface NoteExportContext {
 }
 
 export function fieldLabel(key: string): string {
-  return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  return key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
 
 export function noteTitle(note: CareNoteRow): string {
-  if (note.note_type === "progress") return "Progress note (SOAP)";
-  const kind = note.case_note_kind ? ` - ${note.case_note_kind.replace(/_/g, " ")}` : "";
+  if (note.note_type === 'progress') return 'Progress note (SOAP)';
+  const kind = note.case_note_kind ? ` - ${note.case_note_kind.replace(/_/g, ' ')}` : '';
   return `Case note${kind}`;
 }
 
 export function signatureState(note: CareNoteRow): string {
-  if (note.status === "signed") return "Signed";
-  if (note.status === "amended") return "Signed, superseded by amendment";
-  return "Draft - unsigned";
+  if (note.status === 'signed') return 'Signed';
+  if (note.status === 'amended') return 'Signed, superseded by amendment';
+  return 'Draft - unsigned';
 }
 
 function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "";
+  if (!iso) return '';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 export function noteSections(note: CareNoteRow): Array<{ key: string; label: string; text: string }> {
-  const order: readonly string[] = note.note_type === "progress" ? SOAP_ORDER : CASE_ORDER;
+  const order: readonly string[] = note.note_type === 'progress' ? SOAP_ORDER : CASE_ORDER;
   const out: Array<{ key: string; label: string; text: string }> = [];
   for (const key of order) {
     const value = note.content[key];
-    if (typeof value === "string" && value.trim()) out.push({ key, label: fieldLabel(key), text: value });
+    if (typeof value === 'string' && value.trim()) out.push({ key, label: fieldLabel(key), text: value });
   }
   return out;
 }
@@ -49,56 +49,60 @@ export function noteSections(note: CareNoteRow): Array<{ key: string; label: str
 /** Header lines shared by the clipboard and print renderings. */
 export function noteHeaderLines(note: CareNoteRow, ctx: NoteExportContext = {}): Array<[string, string]> {
   const lines: Array<[string, string]> = [];
-  lines.push(["Client", ctx.clientLabel?.trim() || `#${note.client_id}`]);
+  lines.push(['Client', ctx.clientLabel?.trim() || `#${note.client_id}`]);
   if (note.session_id) {
-    lines.push(["Session", ctx.sessionDate ? `${fmtDate(ctx.sessionDate)} (${note.session_id})` : note.session_id]);
+    lines.push(['Session', ctx.sessionDate ? `${fmtDate(ctx.sessionDate)} (${note.session_id})` : note.session_id]);
   }
-  lines.push(["Clinician", `${note.author_name} (${note.author_role})`]);
-  lines.push(["Note date", fmtDate(note.created_at)]);
-  lines.push(["Signature", note.signed_at ? `${signatureState(note)} ${fmtDate(note.signed_at)}` : signatureState(note)]);
-  if (note.sign_hash) lines.push(["Signature hash", note.sign_hash]);
-  if (note.amends_note_id != null) lines.push(["Amends", `note #${note.amends_note_id}`]);
-  if (note.seed_source === "ai_soap") {
-    lines.push(["Provenance", `Drafted by AI${note.seed_model ? ` (${note.seed_model})` : ""}, edited and signed by the clinician`]);
+  lines.push(['Clinician', `${note.author_name} (${note.author_role})`]);
+  lines.push(['Note date', fmtDate(note.created_at)]);
+  lines.push([
+    'Signature',
+    note.signed_at ? `${signatureState(note)} ${fmtDate(note.signed_at)}` : signatureState(note),
+  ]);
+  if (note.sign_hash) lines.push(['Signature hash', note.sign_hash]);
+  if (note.amends_note_id != null) lines.push(['Amends', `note #${note.amends_note_id}`]);
+  if (note.seed_source === 'ai_soap') {
+    lines.push([
+      'Provenance',
+      `Drafted by AI${note.seed_model ? ` (${note.seed_model})` : ''}, edited and signed by the clinician`,
+    ]);
   }
   return lines;
 }
 
 /** Plain text for the clipboard: headers, then each section under its label. */
 export function noteToPlainText(note: CareNoteRow, ctx: NoteExportContext = {}): string {
-  const parts: string[] = [noteTitle(note).toUpperCase(), ""];
+  const parts: string[] = [noteTitle(note).toUpperCase(), ''];
   for (const [k, v] of noteHeaderLines(note, ctx)) parts.push(`${k}: ${v}`);
-  parts.push("");
+  parts.push('');
   for (const s of noteSections(note)) {
     parts.push(s.label.toUpperCase());
     parts.push(s.text.trim());
-    parts.push("");
+    parts.push('');
   }
-  return parts.join("\n").trimEnd() + "\n";
+  return parts.join('\n').trimEnd() + '\n';
 }
 
 export function escapeHtml(s: string): string {
   return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /** Standalone printable document: header block + sections, no app chrome. */
 export function noteToPrintableHtml(note: CareNoteRow, ctx: NoteExportContext = {}): string {
   const header = noteHeaderLines(note, ctx)
     .map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`)
-    .join("");
+    .join('');
   const sections = noteSections(note)
     .map((s) => `<section><h2>${escapeHtml(s.label)}</h2><p>${escapeHtml(s.text.trim())}</p></section>`)
-    .join("");
+    .join('');
   const body = sections || `<p class="empty">This note has no content.</p>`;
   const draftBanner =
-    note.status === "draft"
-      ? `<div class="banner">DRAFT - not signed. Not a record of care until signed.</div>`
-      : "";
+    note.status === 'draft' ? `<div class="banner">DRAFT - not signed. Not a record of care until signed.</div>` : '';
   return `<!doctype html>
 <html>
 <head>
@@ -132,11 +136,11 @@ export function noteToPrintableHtml(note: CareNoteRow, ctx: NoteExportContext = 
  *  downloading the HTML when the popup is blocked. */
 export function printNote(note: CareNoteRow, ctx: NoteExportContext = {}): void {
   const html = noteToPrintableHtml(note, ctx);
-  const win = window.open("", "_blank");
+  const win = window.open('', '_blank');
   if (!win) {
-    const blob = new Blob([html], { type: "text/html" });
+    const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
+    const a = document.createElement('a');
     a.href = url;
     a.download = `note-${note.note_id}.html`;
     a.click();
@@ -153,7 +157,7 @@ export function printNote(note: CareNoteRow, ctx: NoteExportContext = {}): void 
 /** Copy with the async clipboard API, falling back to a hidden textarea. */
 export async function copyText(text: string): Promise<boolean> {
   try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
       return true;
     }
@@ -161,14 +165,14 @@ export async function copyText(text: string): Promise<boolean> {
     // fall through to the legacy path
   }
   try {
-    const ta = document.createElement("textarea");
+    const ta = document.createElement('textarea');
     ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
     document.body.appendChild(ta);
     ta.select();
-    const ok = document.execCommand("copy");
+    const ok = document.execCommand('copy');
     document.body.removeChild(ta);
     return ok;
   } catch {

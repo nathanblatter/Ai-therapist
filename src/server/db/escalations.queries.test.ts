@@ -34,16 +34,20 @@ const ROW = { escalation_id: 1, org_id: 1, client_id: 42, status: 'open', assign
 describe('createEscalation', () => {
   it('inserts the escalation and its created event in one transaction', async () => {
     clientQueryMock
-      .mockResolvedValueOnce({ rows: [] })      // BEGIN
-      .mockResolvedValueOnce({ rows: [ROW] })   // INSERT escalation
-      .mockResolvedValueOnce({ rows: [] })      // INSERT event
-      .mockResolvedValueOnce({ rows: [] });     // COMMIT
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [ROW] }) // INSERT escalation
+      .mockResolvedValueOnce({ rows: [] }) // INSERT event
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
     const row = await createEscalation(
       {
-        orgId: 1, clientId: 42, raisedBy: 9, raisedByRole: 'caseworker',
-        reason: 'sleep collapse', urgency: 'urgent',
+        orgId: 1,
+        clientId: 42,
+        raisedBy: 9,
+        raisedByRole: 'caseworker',
+        reason: 'sleep collapse',
+        urgency: 'urgent',
       },
-      'cw_1'
+      'cw_1',
     );
     expect(row).toEqual(ROW);
     const sqls = clientQueryMock.mock.calls.map((c) => String(c[0]));
@@ -62,8 +66,8 @@ describe('createEscalation', () => {
     await expect(
       createEscalation(
         { orgId: 1, clientId: 42, raisedBy: 9, raisedByRole: 'caseworker', reason: 'r', urgency: 'routine' },
-        null
-      )
+        null,
+      ),
     ).rejects.toThrow('boom');
     expect(String(clientQueryMock.mock.calls[3][0])).toBe('ROLLBACK');
   });
@@ -127,7 +131,14 @@ describe('claimEscalationAudited (claim + caseload grant + audit in one transact
     expect(clientQueryMock.mock.calls[3][1]).toEqual([7, 42, 7, 'therapist']);
     const [auditSql, auditParams] = clientQueryMock.mock.calls[4] as [string, unknown[]];
     expect(auditSql).toContain('caseload_audit_log');
-    expect(auditParams).toEqual(['assign', 7, 42, 7, 'dr_t', JSON.stringify({ via: 'escalation_claim', escalation_id: 1 })]);
+    expect(auditParams).toEqual([
+      'assign',
+      7,
+      42,
+      7,
+      'dr_t',
+      JSON.stringify({ via: 'escalation_claim', escalation_id: 1 }),
+    ]);
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });
 
@@ -216,7 +227,10 @@ describe('insertEscalationEvent / getEscalationById', () => {
   it('serializes detail as JSON', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ event_id: 1 }] });
     await insertEscalationEvent({
-      escalationId: 1, eventType: 'comment', actorUserId: 7, actorUsername: 'dr_t',
+      escalationId: 1,
+      eventType: 'comment',
+      actorUserId: 7,
+      actorUsername: 'dr_t',
       detail: { text: 'checking in' },
     });
     expect(queryMock.mock.calls[0][1][4]).toBe(JSON.stringify({ text: 'checking in' }));

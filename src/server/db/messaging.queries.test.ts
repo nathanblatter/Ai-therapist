@@ -43,12 +43,16 @@ describe('getOrCreateThread', () => {
 describe('insertThreadMessage', () => {
   it('inserts and bumps last_message_at in one transaction', async () => {
     clientQueryMock
-      .mockResolvedValueOnce({ rows: [] })                                 // BEGIN
-      .mockResolvedValueOnce({ rows: [{ message_id: 9, thread_id: 1 }] })  // INSERT
-      .mockResolvedValueOnce({ rows: [] })                                 // UPDATE thread
-      .mockResolvedValueOnce({ rows: [] });                                // COMMIT
+      .mockResolvedValueOnce({ rows: [] }) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ message_id: 9, thread_id: 1 }] }) // INSERT
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE thread
+      .mockResolvedValueOnce({ rows: [] }); // COMMIT
     const row = await insertThreadMessage({
-      threadId: 1, senderId: 42, senderRole: 'participant', body: 'hi', scanStatus: 'pending',
+      threadId: 1,
+      senderId: 42,
+      senderRole: 'participant',
+      body: 'hi',
+      scanStatus: 'pending',
     });
     expect(row.message_id).toBe(9);
     const sqls = clientQueryMock.mock.calls.map((c) => String(c[0]));
@@ -63,7 +67,7 @@ describe('insertThreadMessage', () => {
       .mockRejectedValueOnce(new Error('too long'))
       .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
     await expect(
-      insertThreadMessage({ threadId: 1, senderId: 42, senderRole: 'participant', body: 'x' })
+      insertThreadMessage({ threadId: 1, senderId: 42, senderRole: 'participant', body: 'x' }),
     ).rejects.toThrow('too long');
     expect(String(clientQueryMock.mock.calls[2][0])).toBe('ROLLBACK');
   });
@@ -107,9 +111,7 @@ describe('unread counts', () => {
 
   it('countUnreadByClientForMember groups by client', async () => {
     queryMock.mockResolvedValueOnce({ rows: [{ client_id: 42, unread_count: 2 }] });
-    await expect(countUnreadByClientForMember(7)).resolves.toEqual([
-      { client_id: 42, unread_count: 2 },
-    ]);
+    await expect(countUnreadByClientForMember(7)).resolves.toEqual([{ client_id: 42, unread_count: 2 }]);
     expect(String(queryMock.mock.calls[0][0])).toContain('GROUP BY t.client_id');
   });
 });
@@ -143,7 +145,7 @@ describe('listMessageOriginCrisisEvents', () => {
     await listMessageOriginCrisisEvents(null, 3);
     const sql = String(queryMock.mock.calls[0][0]);
     expect(sql).toContain(
-      'AND EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ce.client_user_id AND ou.organization_id = $2)'
+      'AND EXISTS (SELECT 1 FROM users ou WHERE ou.userid = ce.client_user_id AND ou.organization_id = $2)',
     );
     expect(sql).not.toMatch(/client_user_id IS NULL OR/i);
   });

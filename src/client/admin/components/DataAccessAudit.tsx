@@ -28,7 +28,15 @@ const TABS: Array<{ id: Tab; label: string }> = [
 ];
 
 const PAGE_SIZE = 50;
-const ACTIONS = ['transcript_view', 'recording_stream', 'recording_download', 'export', 'dataset_export', 'audit_log_view', 'worksheet_review'];
+const ACTIONS = [
+  'transcript_view',
+  'recording_stream',
+  'recording_download',
+  'export',
+  'dataset_export',
+  'audit_log_view',
+  'worksheet_review',
+];
 
 interface Column<Row> {
   key: string;
@@ -38,7 +46,12 @@ interface Column<Row> {
 }
 
 /** The one table shell every tab renders through. */
-function AuditTable<Row>({ columns, rows, rowKey, emptyText }: {
+function AuditTable<Row>({
+  columns,
+  rows,
+  rowKey,
+  emptyText,
+}: {
   columns: Column<Row>[];
   rows: Row[];
   rowKey: (row: Row) => string | number;
@@ -50,16 +63,20 @@ function AuditTable<Row>({ columns, rows, rowKey, emptyText }: {
       <table className="min-w-full divide-y divide-gray-200" role="table">
         <thead className="bg-gray-50">
           <tr>
-            {columns.map(c => (
-              <th key={c.key} className={`${TH} ${c.className ?? ''}`} scope="col">{c.label}</th>
+            {columns.map((c) => (
+              <th key={c.key} className={`${TH} ${c.className ?? ''}`} scope="col">
+                {c.label}
+              </th>
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
-          {rows.map(row => (
+          {rows.map((row) => (
             <tr key={rowKey(row)}>
-              {columns.map(c => (
-                <td key={c.key} className={`${TD} ${c.className ?? ''}`}>{c.render(row)}</td>
+              {columns.map((c) => (
+                <td key={c.key} className={`${TD} ${c.className ?? ''}`}>
+                  {c.render(row)}
+                </td>
               ))}
             </tr>
           ))}
@@ -140,13 +157,16 @@ function DataAccessTab({ onViewSession }: { onViewSession?: (sessionId: string) 
     params.set('until', d.toISOString().slice(0, 10));
   }
   const { data, loading, error } = useAdminFetch<{ rows: DataAccessLogRow[]; total: number }>(
-    `/admin/api/audit/data-access?${params}`
+    `/admin/api/audit/data-access?${params}`,
   );
 
   if (drillIn) {
     return (
       <Panel>
-        <button onClick={() => setDrillIn(null)} className="text-sm text-royal hover:underline flex items-center gap-1 mb-4">
+        <button
+          onClick={() => setDrillIn(null)}
+          className="text-sm text-royal hover:underline flex items-center gap-1 mb-4"
+        >
           <ArrowLeft size={14} /> Back to the full log
         </button>
         <h4 className="text-lg font-semibold mb-4">
@@ -157,72 +177,134 @@ function DataAccessTab({ onViewSession }: { onViewSession?: (sessionId: string) 
     );
   }
 
-  const apply = () => { setApplied(draft); setOffset(0); };
-  const clear = () => { setDraft(EMPTY_FILTERS); setApplied(EMPTY_FILTERS); setOffset(0); };
+  const apply = () => {
+    setApplied(draft);
+    setOffset(0);
+  };
+  const clear = () => {
+    setDraft(EMPTY_FILTERS);
+    setApplied(EMPTY_FILTERS);
+    setOffset(0);
+  };
 
   const columns: Column<DataAccessLogRow>[] = [
-    { key: 'when', label: 'When', className: 'whitespace-nowrap', render: r => formatDateTime(r.created_at) },
-    { key: 'who', label: 'Who', render: r => <Actor username={r.actor_username} id={r.accessed_by} role={r.role} /> },
-    { key: 'action', label: 'Action', render: r => actionLabel(r.action, r.detail) },
+    { key: 'when', label: 'When', className: 'whitespace-nowrap', render: (r) => formatDateTime(r.created_at) },
+    { key: 'who', label: 'Who', render: (r) => <Actor username={r.actor_username} id={r.accessed_by} role={r.role} /> },
+    { key: 'action', label: 'Action', render: (r) => actionLabel(r.action, r.detail) },
     {
-      key: 'participant', label: 'Participant',
-      render: r => r.participant_user_id !== null ? (
-        <button
-          onClick={() => setDrillIn({ userId: r.participant_user_id!, username: r.participant_username })}
-          className="text-royal hover:underline"
-          title="Open this participant's access history"
-        >
-          {r.participant_username ?? `user #${r.participant_user_id}`}
-        </button>
-      ) : <span className="text-gray-400">—</span>,
+      key: 'participant',
+      label: 'Participant',
+      render: (r) =>
+        r.participant_user_id !== null ? (
+          <button
+            onClick={() => setDrillIn({ userId: r.participant_user_id!, username: r.participant_username })}
+            className="text-royal hover:underline"
+            title="Open this participant's access history"
+          >
+            {r.participant_username ?? `user #${r.participant_user_id}`}
+          </button>
+        ) : (
+          <span className="text-gray-400">—</span>
+        ),
     },
     {
-      key: 'session', label: 'Session', className: 'font-mono text-xs',
-      render: r => r.session_id ? (
-        onViewSession
-          ? <button onClick={() => onViewSession(r.session_id!)} className="text-royal hover:underline">{r.session_id.slice(0, 8)}…</button>
-          : <span title={r.session_id}>{r.session_id.slice(0, 8)}…</span>
-      ) : '—',
+      key: 'session',
+      label: 'Session',
+      className: 'font-mono text-xs',
+      render: (r) =>
+        r.session_id ? (
+          onViewSession ? (
+            <button onClick={() => onViewSession(r.session_id!)} className="text-royal hover:underline">
+              {r.session_id.slice(0, 8)}…
+            </button>
+          ) : (
+            <span title={r.session_id}>{r.session_id.slice(0, 8)}…</span>
+          )
+        ) : (
+          '—'
+        ),
     },
-    { key: 'detail', label: 'Detail', className: 'text-xs text-gray-500', render: r => detailSummary(r.detail) || '—' },
+    {
+      key: 'detail',
+      label: 'Detail',
+      className: 'text-xs text-gray-500',
+      render: (r) => detailSummary(r.detail) || '—',
+    },
   ];
 
   return (
     <Panel>
       <form
         className="flex flex-wrap items-end gap-3 mb-4"
-        onSubmit={e => { e.preventDefault(); apply(); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          apply();
+        }}
         aria-label="Filter the data access log"
       >
         <label className="text-xs text-gray-600 flex flex-col gap-1">
           Participant user id
-          <input className={INPUT} inputMode="numeric" value={draft.participantUserId}
-            onChange={e => setDraft({ ...draft, participantUserId: e.target.value })} placeholder="e.g. 42" />
+          <input
+            className={INPUT}
+            inputMode="numeric"
+            value={draft.participantUserId}
+            onChange={(e) => setDraft({ ...draft, participantUserId: e.target.value })}
+            placeholder="e.g. 42"
+          />
         </label>
         <label className="text-xs text-gray-600 flex flex-col gap-1">
           Actor username
-          <input className={INPUT} value={draft.actorUsername}
-            onChange={e => setDraft({ ...draft, actorUsername: e.target.value })} placeholder="contains…" />
+          <input
+            className={INPUT}
+            value={draft.actorUsername}
+            onChange={(e) => setDraft({ ...draft, actorUsername: e.target.value })}
+            placeholder="contains…"
+          />
         </label>
         <label className="text-xs text-gray-600 flex flex-col gap-1">
           Action
-          <select className={INPUT} value={draft.action} onChange={e => setDraft({ ...draft, action: e.target.value })}>
+          <select
+            className={INPUT}
+            value={draft.action}
+            onChange={(e) => setDraft({ ...draft, action: e.target.value })}
+          >
             <option value="">Any</option>
-            {ACTIONS.map(a => <option key={a} value={a}>{actionLabel(a)}</option>)}
+            {ACTIONS.map((a) => (
+              <option key={a} value={a}>
+                {actionLabel(a)}
+              </option>
+            ))}
           </select>
         </label>
         <label className="text-xs text-gray-600 flex flex-col gap-1">
           From
-          <input type="date" className={INPUT} value={draft.since} onChange={e => setDraft({ ...draft, since: e.target.value })} />
+          <input
+            type="date"
+            className={INPUT}
+            value={draft.since}
+            onChange={(e) => setDraft({ ...draft, since: e.target.value })}
+          />
         </label>
         <label className="text-xs text-gray-600 flex flex-col gap-1">
           To
-          <input type="date" className={INPUT} value={draft.until} onChange={e => setDraft({ ...draft, until: e.target.value })} />
+          <input
+            type="date"
+            className={INPUT}
+            value={draft.until}
+            onChange={(e) => setDraft({ ...draft, until: e.target.value })}
+          />
         </label>
-        <button type="submit" className="px-3 py-1.5 bg-royal text-white rounded hover:bg-navy transition text-sm min-h-[36px] flex items-center gap-1">
+        <button
+          type="submit"
+          className="px-3 py-1.5 bg-royal text-white rounded hover:bg-navy transition text-sm min-h-[36px] flex items-center gap-1"
+        >
           <Filter size={14} /> Apply
         </button>
-        <button type="button" onClick={clear} className="px-3 py-1.5 text-sm border border-gray-300 rounded min-h-[36px]">
+        <button
+          type="button"
+          onClick={clear}
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded min-h-[36px]"
+        >
           Clear
         </button>
       </form>
@@ -230,7 +312,12 @@ function DataAccessTab({ onViewSession }: { onViewSession?: (sessionId: string) 
       <Status loading={loading && !data} error={error} />
       {data && (
         <>
-          <AuditTable columns={columns} rows={data.rows} rowKey={r => r.id} emptyText="No data access matches these filters." />
+          <AuditTable
+            columns={columns}
+            rows={data.rows}
+            rowKey={(r) => r.id}
+            emptyText="No data access matches these filters."
+          />
           <Pager offset={offset} total={data.total} onChange={setOffset} />
         </>
       )}
@@ -244,36 +331,57 @@ function RedactionReviewTab({ onViewSession }: { onViewSession?: (sessionId: str
   const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
   if (action) params.set('action', action);
   const { data, loading, error } = useAdminFetch<{ rows: RedactionReviewLogRow[]; total: number }>(
-    `/admin/api/audit/redaction-review?${params}`
+    `/admin/api/audit/redaction-review?${params}`,
   );
   const columns: Column<RedactionReviewLogRow>[] = [
-    { key: 'when', label: 'When', className: 'whitespace-nowrap', render: r => formatDateTime(r.created_at) },
-    { key: 'who', label: 'Reviewer', render: r => <Actor username={r.reviewer_username} id={r.reviewed_by} /> },
+    { key: 'when', label: 'When', className: 'whitespace-nowrap', render: (r) => formatDateTime(r.created_at) },
+    { key: 'who', label: 'Reviewer', render: (r) => <Actor username={r.reviewer_username} id={r.reviewed_by} /> },
     {
-      key: 'action', label: 'Outcome',
-      render: r => (
-        <span className={`text-xs px-2 py-0.5 rounded ${r.action === 'corrected' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+      key: 'action',
+      label: 'Outcome',
+      render: (r) => (
+        <span
+          className={`text-xs px-2 py-0.5 rounded ${r.action === 'corrected' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}
+        >
           {r.action}
         </span>
       ),
     },
-    { key: 'message', label: 'Message id', className: 'font-mono text-xs', render: r => r.message_id },
+    { key: 'message', label: 'Message id', className: 'font-mono text-xs', render: (r) => r.message_id },
     {
-      key: 'session', label: 'Session', className: 'font-mono text-xs',
-      render: r => r.session_id ? (
-        onViewSession
-          ? <button onClick={() => onViewSession(r.session_id!)} className="text-royal hover:underline">{r.session_id.slice(0, 8)}…</button>
-          : <span title={r.session_id}>{r.session_id.slice(0, 8)}…</span>
-      ) : <span className="text-gray-400" title="Message no longer exists">—</span>,
+      key: 'session',
+      label: 'Session',
+      className: 'font-mono text-xs',
+      render: (r) =>
+        r.session_id ? (
+          onViewSession ? (
+            <button onClick={() => onViewSession(r.session_id!)} className="text-royal hover:underline">
+              {r.session_id.slice(0, 8)}…
+            </button>
+          ) : (
+            <span title={r.session_id}>{r.session_id.slice(0, 8)}…</span>
+          )
+        ) : (
+          <span className="text-gray-400" title="Message no longer exists">
+            —
+          </span>
+        ),
     },
-    { key: 'participant', label: 'Participant id', render: r => r.participant_user_id ?? '—' },
+    { key: 'participant', label: 'Participant id', render: (r) => r.participant_user_id ?? '—' },
   ];
   return (
     <Panel>
       <div className="flex items-center gap-3 mb-4">
         <label className="text-xs text-gray-600 flex items-center gap-2">
           Outcome
-          <select className={INPUT} value={action} onChange={e => { setAction(e.target.value); setOffset(0); }}>
+          <select
+            className={INPUT}
+            value={action}
+            onChange={(e) => {
+              setAction(e.target.value);
+              setOffset(0);
+            }}
+          >
             <option value="">Any</option>
             <option value="approved">approved</option>
             <option value="corrected">corrected</option>
@@ -283,7 +391,12 @@ function RedactionReviewTab({ onViewSession }: { onViewSession?: (sessionId: str
       <Status loading={loading && !data} error={error} />
       {data && (
         <>
-          <AuditTable columns={columns} rows={data.rows} rowKey={r => r.review_id} emptyText="No redaction reviews recorded yet." />
+          <AuditTable
+            columns={columns}
+            rows={data.rows}
+            rowKey={(r) => r.review_id}
+            emptyText="No redaction reviews recorded yet."
+          />
           <Pager offset={offset} total={data.total} onChange={setOffset} />
         </>
       )}
@@ -298,39 +411,81 @@ function AssistantTab() {
   const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
   if (applied) params.set('username', applied);
   const { data, loading, error } = useAdminFetch<{ rows: AssistantAuditRow[]; total: number }>(
-    `/admin/api/audit/assistant?${params}`
+    `/admin/api/audit/assistant?${params}`,
   );
   const columns: Column<AssistantAuditRow>[] = [
-    { key: 'when', label: 'When', className: 'whitespace-nowrap', render: r => formatDateTime(r.created_at) },
-    { key: 'who', label: 'Who', render: r => <Actor username={r.username} id={r.user_id} role={r.role} /> },
-    { key: 'question', label: 'Question', className: 'max-w-md', render: r => <span className="line-clamp-2" title={r.question}>{r.question}</span> },
+    { key: 'when', label: 'When', className: 'whitespace-nowrap', render: (r) => formatDateTime(r.created_at) },
+    { key: 'who', label: 'Who', render: (r) => <Actor username={r.username} id={r.user_id} role={r.role} /> },
     {
-      key: 'tools', label: 'Tools run (rows returned)', className: 'text-xs',
-      render: r => r.tools.length === 0 ? <span className="text-gray-400">none</span> : (
-        <ul className="space-y-0.5">
-          {r.tools.map((t, i) => <li key={i} className="font-mono">{t.name} ({t.row_count})</li>)}
-        </ul>
+      key: 'question',
+      label: 'Question',
+      className: 'max-w-md',
+      render: (r) => (
+        <span className="line-clamp-2" title={r.question}>
+          {r.question}
+        </span>
       ),
     },
-    { key: 'model', label: 'Model', className: 'text-xs', render: r => r.model },
     {
-      key: 'tokens', label: 'Tokens in / out', className: 'text-xs tabular-nums whitespace-nowrap',
-      render: r => `${r.input_tokens ?? '—'} / ${r.output_tokens ?? '—'}`,
+      key: 'tools',
+      label: 'Tools run (rows returned)',
+      className: 'text-xs',
+      render: (r) =>
+        r.tools.length === 0 ? (
+          <span className="text-gray-400">none</span>
+        ) : (
+          <ul className="space-y-0.5">
+            {r.tools.map((t, i) => (
+              <li key={i} className="font-mono">
+                {t.name} ({t.row_count})
+              </li>
+            ))}
+          </ul>
+        ),
+    },
+    { key: 'model', label: 'Model', className: 'text-xs', render: (r) => r.model },
+    {
+      key: 'tokens',
+      label: 'Tokens in / out',
+      className: 'text-xs tabular-nums whitespace-nowrap',
+      render: (r) => `${r.input_tokens ?? '—'} / ${r.output_tokens ?? '—'}`,
     },
   ];
   return (
     <Panel>
-      <form className="flex items-end gap-3 mb-4" onSubmit={e => { e.preventDefault(); setApplied(username); setOffset(0); }}>
+      <form
+        className="flex items-end gap-3 mb-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setApplied(username);
+          setOffset(0);
+        }}
+      >
         <label className="text-xs text-gray-600 flex flex-col gap-1">
           Asked by (username)
-          <input className={INPUT} value={username} onChange={e => setUsername(e.target.value)} placeholder="contains…" />
+          <input
+            className={INPUT}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="contains…"
+          />
         </label>
-        <button type="submit" className="px-3 py-1.5 bg-royal text-white rounded hover:bg-navy transition text-sm min-h-[36px]">Apply</button>
+        <button
+          type="submit"
+          className="px-3 py-1.5 bg-royal text-white rounded hover:bg-navy transition text-sm min-h-[36px]"
+        >
+          Apply
+        </button>
       </form>
       <Status loading={loading && !data} error={error} />
       {data && (
         <>
-          <AuditTable columns={columns} rows={data.rows} rowKey={r => r.audit_id} emptyText="No assistant turns recorded yet." />
+          <AuditTable
+            columns={columns}
+            rows={data.rows}
+            rowKey={(r) => r.audit_id}
+            emptyText="No assistant turns recorded yet."
+          />
           <Pager offset={offset} total={data.total} onChange={setOffset} />
         </>
       )}
@@ -341,18 +496,32 @@ function AssistantTab() {
 function CaseloadTab() {
   const { data, loading, error } = useAdminFetch<{ audit: CaseloadAuditRow[] }>('/admin/api/caseload/audit');
   const columns: Column<CaseloadAuditRow>[] = [
-    { key: 'when', label: 'When', className: 'whitespace-nowrap', render: r => formatDateTime(r.created_at) },
-    { key: 'who', label: 'Actor', render: r => <Actor username={r.actor_username} id={r.actor_user_id} /> },
-    { key: 'action', label: 'Action', render: r => r.action.replace(/_/g, ' ') },
-    { key: 'member', label: 'Care-team member id', render: r => r.therapist_id ?? '—' },
-    { key: 'client', label: 'Client id', render: r => r.client_id ?? '—' },
-    { key: 'detail', label: 'Detail', className: 'text-xs text-gray-500', render: r => detailSummary(r.detail) || '—' },
+    { key: 'when', label: 'When', className: 'whitespace-nowrap', render: (r) => formatDateTime(r.created_at) },
+    { key: 'who', label: 'Actor', render: (r) => <Actor username={r.actor_username} id={r.actor_user_id} /> },
+    { key: 'action', label: 'Action', render: (r) => r.action.replace(/_/g, ' ') },
+    { key: 'member', label: 'Care-team member id', render: (r) => r.therapist_id ?? '—' },
+    { key: 'client', label: 'Client id', render: (r) => r.client_id ?? '—' },
+    {
+      key: 'detail',
+      label: 'Detail',
+      className: 'text-xs text-gray-500',
+      render: (r) => detailSummary(r.detail) || '—',
+    },
   ];
   return (
     <Panel>
-      <p className="text-sm text-gray-500 mb-4">Assignments, invites, work-queue actions and adverse-event filings. Most recent 200 rows.</p>
+      <p className="text-sm text-gray-500 mb-4">
+        Assignments, invites, work-queue actions and adverse-event filings. Most recent 200 rows.
+      </p>
       <Status loading={loading && !data} error={error} />
-      {data && <AuditTable columns={columns} rows={data.audit} rowKey={r => r.audit_id} emptyText="No caseload changes recorded yet." />}
+      {data && (
+        <AuditTable
+          columns={columns}
+          rows={data.audit}
+          rowKey={(r) => r.audit_id}
+          emptyText="No caseload changes recorded yet."
+        />
+      )}
     </Panel>
   );
 }
@@ -361,32 +530,59 @@ type WipeRow = Record<string, unknown>;
 function WipesTab() {
   const [offset, setOffset] = useState(0);
   const { data, loading, error } = useAdminFetch<{ wipes: WipeRow[]; total: number }>(
-    `/admin/api/content-retention/log?limit=${PAGE_SIZE}&offset=${offset}`
+    `/admin/api/content-retention/log?limit=${PAGE_SIZE}&offset=${offset}`,
   );
   const str = (v: unknown) => (v === null || v === undefined ? '—' : String(v));
   const columns: Column<WipeRow>[] = [
-    { key: 'started', label: 'Started', className: 'whitespace-nowrap', render: r => formatDateTime(r.started_at as string) },
-    { key: 'completed', label: 'Completed', className: 'whitespace-nowrap', render: r => formatDateTime(r.completed_at as string | null) },
     {
-      key: 'status', label: 'Status',
-      render: r => (
-        <span className={`text-xs px-2 py-0.5 rounded ${r.status === 'failed' ? 'bg-red-100 text-red-800' : r.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'}`}>
+      key: 'started',
+      label: 'Started',
+      className: 'whitespace-nowrap',
+      render: (r) => formatDateTime(r.started_at as string),
+    },
+    {
+      key: 'completed',
+      label: 'Completed',
+      className: 'whitespace-nowrap',
+      render: (r) => formatDateTime(r.completed_at as string | null),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      render: (r) => (
+        <span
+          className={`text-xs px-2 py-0.5 rounded ${r.status === 'failed' ? 'bg-red-100 text-red-800' : r.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'}`}
+        >
           {str(r.status)}
         </span>
       ),
     },
-    { key: 'trigger', label: 'Triggered by', render: r => `${str(r.triggered_by)}${r.triggered_by_user ? ` (${String(r.triggered_by_user)})` : ''}` },
-    { key: 'wiped', label: 'Wiped', className: 'text-right tabular-nums', render: r => str(r.messages_wiped) },
-    { key: 'skipped', label: 'Skipped', className: 'text-right tabular-nums', render: r => str(r.messages_skipped) },
-    { key: 'retention', label: 'Retention (h)', className: 'text-right tabular-nums', render: r => str(r.retention_hours) },
-    { key: 'error', label: 'Error', className: 'text-xs text-red-700', render: r => str(r.error_message) },
+    {
+      key: 'trigger',
+      label: 'Triggered by',
+      render: (r) => `${str(r.triggered_by)}${r.triggered_by_user ? ` (${String(r.triggered_by_user)})` : ''}`,
+    },
+    { key: 'wiped', label: 'Wiped', className: 'text-right tabular-nums', render: (r) => str(r.messages_wiped) },
+    { key: 'skipped', label: 'Skipped', className: 'text-right tabular-nums', render: (r) => str(r.messages_skipped) },
+    {
+      key: 'retention',
+      label: 'Retention (h)',
+      className: 'text-right tabular-nums',
+      render: (r) => str(r.retention_hours),
+    },
+    { key: 'error', label: 'Error', className: 'text-xs text-red-700', render: (r) => str(r.error_message) },
   ];
   return (
     <Panel>
       <Status loading={loading && !data} error={error} />
       {data && (
         <>
-          <AuditTable columns={columns} rows={data.wipes} rowKey={r => String(r.wipe_id)} emptyText="No content wipes recorded yet." />
+          <AuditTable
+            columns={columns}
+            rows={data.wipes}
+            rowKey={(r) => String(r.wipe_id)}
+            emptyText="No content wipes recorded yet."
+          />
           <Pager offset={offset} total={data.total} onChange={setOffset} />
         </>
       )}
@@ -411,7 +607,7 @@ export default function DataAccessAudit({ onViewSession }: { onViewSession?: (se
       </div>
 
       <div className="flex flex-wrap gap-1 border-b border-gray-200" role="tablist" aria-label="Audit trails">
-        {TABS.map(t => (
+        {TABS.map((t) => (
           <button
             key={t.id}
             role="tab"

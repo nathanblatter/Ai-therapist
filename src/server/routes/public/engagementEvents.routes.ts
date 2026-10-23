@@ -34,8 +34,8 @@ export const ENGAGEMENT_EVENT_KINDS = [
 ] as const;
 
 const KIND_FLAG: Record<string, 'telemetry_interaction_timing' | 'telemetry_engagement_events'> = {
-  ...Object.fromEntries(INTERACTION_TIMING_KINDS.map(k => [k, 'telemetry_interaction_timing' as const])),
-  ...Object.fromEntries(ENGAGEMENT_EVENT_KINDS.map(k => [k, 'telemetry_engagement_events' as const])),
+  ...Object.fromEntries(INTERACTION_TIMING_KINDS.map((k) => [k, 'telemetry_interaction_timing' as const])),
+  ...Object.fromEntries(ENGAGEMENT_EVENT_KINDS.map((k) => [k, 'telemetry_engagement_events' as const])),
 };
 
 export const MAX_EVENTS_PER_BATCH = 50;

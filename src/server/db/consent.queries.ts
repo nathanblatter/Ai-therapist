@@ -30,7 +30,13 @@ export async function recordConsent(input: RecordConsentInput): Promise<ConsentR
     `INSERT INTO participant_consents (session_id, user_id, consent_version, recording_enabled, body_hash)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
-    [input.sessionId ?? null, input.userId ?? null, input.consentVersion, input.recordingEnabled, input.bodyHash ?? null]
+    [
+      input.sessionId ?? null,
+      input.userId ?? null,
+      input.consentVersion,
+      input.recordingEnabled,
+      input.bodyHash ?? null,
+    ],
   );
   return result.rows[0];
 }
@@ -60,7 +66,7 @@ export interface ConsentDocumentRow {
  *  Defaults to 'research' — the pre-078 behavior exactly (every pre-078 row
  *  is backfilled audience='research'). */
 export async function getActiveConsentDocument(
-  audience: ConsentAudience = 'research'
+  audience: ConsentAudience = 'research',
 ): Promise<ConsentDocumentRow | null> {
   const result = await pool.query<ConsentDocumentRow>(
     `SELECT document_id, version, body, body_hash, effective_at, published_by, created_at, audience
@@ -68,7 +74,7 @@ export async function getActiveConsentDocument(
      WHERE effective_at <= CURRENT_TIMESTAMP AND audience = $1
      ORDER BY effective_at DESC
      LIMIT 1`,
-    [audience]
+    [audience],
   );
   return result.rows[0] ?? null;
 }
@@ -78,7 +84,7 @@ export async function getConsentDocumentByVersion(version: string): Promise<Cons
   const result = await pool.query<ConsentDocumentRow>(
     `SELECT document_id, version, body, body_hash, effective_at, published_by, created_at
      FROM consent_documents WHERE version = $1`,
-    [version]
+    [version],
   );
   return result.rows[0] ?? null;
 }
@@ -96,7 +102,7 @@ export async function listConsentDocuments(): Promise<ConsentDocumentListRow[]> 
      FROM consent_documents cd
      LEFT JOIN participant_consents pc ON pc.consent_version = cd.version
      GROUP BY cd.document_id
-     ORDER BY cd.effective_at DESC, cd.document_id DESC`
+     ORDER BY cd.effective_at DESC, cd.document_id DESC`,
   );
   return result.rows;
 }
@@ -118,7 +124,7 @@ export async function insertConsentDocument(input: {
       `INSERT INTO consent_documents (version, body, body_hash, effective_at, published_by, audience)
        VALUES ($1, $2, $3, COALESCE($4, CURRENT_TIMESTAMP), $5, $6)
        RETURNING document_id, version, body, body_hash, effective_at, published_by, created_at, audience`,
-      [input.version, input.body, input.bodyHash, input.effectiveAt, input.publishedBy, input.audience]
+      [input.version, input.body, input.bodyHash, input.effectiveAt, input.publishedBy, input.audience],
     );
     return result.rows[0];
   }
@@ -126,7 +132,7 @@ export async function insertConsentDocument(input: {
     `INSERT INTO consent_documents (version, body, body_hash, effective_at, published_by)
      VALUES ($1, $2, $3, COALESCE($4, CURRENT_TIMESTAMP), $5)
      RETURNING document_id, version, body, body_hash, effective_at, published_by, created_at`,
-    [input.version, input.body, input.bodyHash, input.effectiveAt, input.publishedBy]
+    [input.version, input.body, input.bodyHash, input.effectiveAt, input.publishedBy],
   );
   return result.rows[0];
 }
@@ -135,7 +141,7 @@ export async function insertConsentDocument(input: {
 export async function getLatestConsentForUser(userId: number): Promise<ConsentRow | null> {
   const result = await pool.query<ConsentRow>(
     `SELECT * FROM participant_consents WHERE user_id = $1 ORDER BY accepted_at DESC LIMIT 1`,
-    [userId]
+    [userId],
   );
   return result.rows[0] ?? null;
 }
@@ -158,8 +164,7 @@ export async function isRecordingConsentedForSession(sessionId: string): Promise
        LIMIT 1
      ) pc ON true
      WHERE ts.session_id = $1 AND ts.user_id IS NOT NULL`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0]?.recording_enabled ?? true;
 }
-

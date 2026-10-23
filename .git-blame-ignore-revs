@@ -1,0 +1,3 @@
+# Commits to skip in git blame: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# Initial Prettier format (ai-therapist-241a)
+bfe20e93b8c3da14a87bb983678af47658056079

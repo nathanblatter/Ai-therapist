@@ -35,7 +35,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.ASSISTANT_ENABLED = 'true';
   orgMocks.orgIdFor.mockResolvedValue(1);
-  serviceMocks.runAssistantTurn.mockResolvedValue({ answer: '42 sessions.', toolCalls: [{ name: 'session_stats', rowCount: 42 }] });
+  serviceMocks.runAssistantTurn.mockResolvedValue({
+    answer: '42 sessions.',
+    toolCalls: [{ name: 'session_stats', rowCount: 42 }],
+  });
 });
 
 describe('POST /admin/api/assistant/chat', () => {
@@ -55,10 +58,25 @@ describe('POST /admin/api/assistant/chat', () => {
   it('400s malformed histories', async () => {
     const app = appAs('researcher');
     expect((await request(app).post('/admin/api/assistant/chat').send({ messages: [] })).status).toBe(400);
-    expect((await request(app).post('/admin/api/assistant/chat').send({ messages: [{ role: 'system', content: 'x' }] })).status).toBe(400);
-    expect((await request(app).post('/admin/api/assistant/chat').send({
-      messages: [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }],
-    })).status).toBe(400); // must end with a user turn
+    expect(
+      (
+        await request(app)
+          .post('/admin/api/assistant/chat')
+          .send({ messages: [{ role: 'system', content: 'x' }] })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app)
+          .post('/admin/api/assistant/chat')
+          .send({
+            messages: [
+              { role: 'user', content: 'q' },
+              { role: 'assistant', content: 'a' },
+            ],
+          })
+      ).status,
+    ).toBe(400); // must end with a user turn
   });
 
   it('builds the context from the session, not the request body', async () => {
@@ -69,7 +87,7 @@ describe('POST /admin/api/assistant/chat', () => {
     expect(res.body.answer).toBe('42 sessions.');
     expect(serviceMocks.runAssistantTurn).toHaveBeenCalledWith(
       { userId: 33, role: 'caseworker', username: 'user33', orgId: 1 },
-      MSGS.messages
+      MSGS.messages,
     );
   });
 

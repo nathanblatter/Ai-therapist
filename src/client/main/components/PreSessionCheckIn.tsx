@@ -27,7 +27,9 @@ const MOOD_LABELS: Record<number, string> = {
 };
 
 function moodLabel(mood: number): string {
-  const keys = Object.keys(MOOD_LABELS).map(Number).sort((a, b) => a - b);
+  const keys = Object.keys(MOOD_LABELS)
+    .map(Number)
+    .sort((a, b) => a - b);
   let label = MOOD_LABELS[keys[0]];
   for (const k of keys) {
     if (mood >= k) label = MOOD_LABELS[k];
@@ -79,7 +81,11 @@ export default function PreSessionCheckIn({ isOpen, onCancel, onStart }: PreSess
         aria-modal="true"
         aria-labelledby="checkin-modal-title"
       >
-        <div ref={panelRef} tabIndex={-1} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fadeIn focus:outline-none">
+        <div
+          ref={panelRef}
+          tabIndex={-1}
+          className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fadeIn focus:outline-none"
+        >
           <header className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 id="checkin-modal-title" className="text-lg font-semibold text-gray-800">
               Before we start…
@@ -113,7 +119,10 @@ export default function PreSessionCheckIn({ isOpen, onCancel, onStart }: PreSess
                 min={1}
                 max={10}
                 value={mood}
-                onChange={(e) => { setMood(Number(e.target.value)); setMoodTouched(true); }}
+                onChange={(e) => {
+                  setMood(Number(e.target.value));
+                  setMoodTouched(true);
+                }}
                 className="w-full accent-blue-600"
               />
               <div className="flex justify-between text-xs text-gray-400 mt-1">
@@ -154,10 +163,7 @@ export default function PreSessionCheckIn({ isOpen, onCancel, onStart }: PreSess
           </div>
 
           <footer className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
-            <button
-              onClick={() => onStart(null)}
-              className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2"
-            >
+            <button onClick={() => onStart(null)} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">
               Skip
             </button>
             <button

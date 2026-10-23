@@ -17,7 +17,9 @@ vi.mock('ws', async () => {
       super();
       sockets.push(this);
     }
-    send(data: string) { this.sent.push(data); }
+    send(data: string) {
+      this.sent.push(data);
+    }
     close() {
       if (this.closed) return;
       this.closed = true;

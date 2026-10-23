@@ -121,24 +121,21 @@ export async function insertWorkItem(input: EnqueueWorkItemInput): Promise<WorkI
       input.sourceTable,
       input.sourceId,
       input.isSandbox ?? false,
-    ]
+    ],
   );
   return result.rows[0] ?? null;
 }
 
 /** One work item by id, or null (researcher/org read path). */
 export async function getWorkItemById(itemId: number): Promise<WorkItemRow | null> {
-  const result = await pool.query<WorkItemRow>(
-    `SELECT ${ITEM_COLUMNS} FROM work_items WHERE item_id = $1`,
-    [itemId]
-  );
+  const result = await pool.query<WorkItemRow>(`SELECT ${ITEM_COLUMNS} FROM work_items WHERE item_id = $1`, [itemId]);
   return result.rows[0] ?? null;
 }
 
 /** A member's visible items (own + caseload pool), newest first. */
 export async function listWorkItemsForMember(
   memberId: number,
-  options: { statuses?: WorkItemStatus[]; limit?: number } = {}
+  options: { statuses?: WorkItemStatus[]; limit?: number } = {},
 ): Promise<WorkItemRow[]> {
   const statuses = options.statuses ?? ['open', 'acked'];
   const result = await pool.query<WorkItemRow>(
@@ -147,7 +144,7 @@ export async function listWorkItemsForMember(
        AND status = ANY($2)
      ORDER BY created_at DESC, item_id DESC
      LIMIT $3`,
-    [memberId, statuses, options.limit ?? 200]
+    [memberId, statuses, options.limit ?? 200],
   );
   return result.rows;
 }
@@ -155,7 +152,7 @@ export async function listWorkItemsForMember(
 /** Org-wide items (researcher read), newest first. */
 export async function listWorkItemsForOrg(
   orgId: number,
-  options: { statuses?: WorkItemStatus[]; limit?: number } = {}
+  options: { statuses?: WorkItemStatus[]; limit?: number } = {},
 ): Promise<WorkItemRow[]> {
   const statuses = options.statuses ?? ['open', 'acked'];
   const result = await pool.query<WorkItemRow>(
@@ -163,7 +160,7 @@ export async function listWorkItemsForOrg(
      WHERE org_id = $1 AND status = ANY($2)
      ORDER BY created_at DESC, item_id DESC
      LIMIT $3`,
-    [orgId, statuses, options.limit ?? 200]
+    [orgId, statuses, options.limit ?? 200],
   );
   return result.rows;
 }
@@ -179,7 +176,7 @@ export async function ackWorkItem(itemId: number, memberId: number): Promise<Wor
      SET status = 'acked', acked_by = $1, acked_at = now()
      WHERE item_id = $2 AND status = 'open' AND ${MEMBER_VISIBILITY}
      RETURNING ${ITEM_COLUMNS}`,
-    [memberId, itemId]
+    [memberId, itemId],
   );
   return result.rows[0] ?? null;
 }
@@ -191,7 +188,7 @@ export async function ackWorkItemForOrg(itemId: number, orgId: number, actorId: 
      SET status = 'acked', acked_by = $1, acked_at = now()
      WHERE item_id = $2 AND status = 'open' AND org_id = $3
      RETURNING ${ITEM_COLUMNS}`,
-    [actorId, itemId, orgId]
+    [actorId, itemId, orgId],
   );
   return result.rows[0] ?? null;
 }
@@ -201,14 +198,14 @@ export async function resolveWorkItemForOrg(
   itemId: number,
   orgId: number,
   actorId: number,
-  resolutionNote: string | null
+  resolutionNote: string | null,
 ): Promise<WorkItemRow | null> {
   const result = await pool.query<WorkItemRow>(
     `UPDATE work_items
      SET status = 'resolved', resolved_by = $1, resolved_at = now(), resolution_note = $4
      WHERE item_id = $2 AND status IN ('open', 'acked') AND org_id = $3
      RETURNING ${ITEM_COLUMNS}`,
-    [actorId, itemId, orgId, resolutionNote]
+    [actorId, itemId, orgId, resolutionNote],
   );
   return result.rows[0] ?? null;
 }
@@ -217,14 +214,14 @@ export async function resolveWorkItemForOrg(
 export async function resolveWorkItem(
   itemId: number,
   memberId: number,
-  resolutionNote: string | null
+  resolutionNote: string | null,
 ): Promise<WorkItemRow | null> {
   const result = await pool.query<WorkItemRow>(
     `UPDATE work_items
      SET status = 'resolved', resolved_by = $1, resolved_at = now(), resolution_note = $3
      WHERE item_id = $2 AND status IN ('open', 'acked') AND ${MEMBER_VISIBILITY}
      RETURNING ${ITEM_COLUMNS}`,
-    [memberId, itemId, resolutionNote]
+    [memberId, itemId, resolutionNote],
   );
   return result.rows[0] ?? null;
 }
@@ -238,7 +235,7 @@ export async function getSandboxWorkItemIds(itemIds: number[]): Promise<number[]
   if (itemIds.length === 0) return [];
   const result = await pool.query<{ item_id: number }>(
     `SELECT item_id FROM work_items WHERE item_id = ANY($1) AND is_sandbox = TRUE`,
-    [itemIds]
+    [itemIds],
   );
   return result.rows.map((row) => Number(row.item_id));
 }
@@ -250,7 +247,7 @@ export async function getSandboxWorkItemIds(itemIds: number[]): Promise<number[]
 export async function expireWorkItemsBySource(
   itemType: WorkItemType,
   sourceTable: string,
-  sourceIds: string[]
+  sourceIds: string[],
 ): Promise<number[]> {
   if (sourceIds.length === 0) return [];
   const result = await pool.query<{ item_id: number }>(
@@ -259,7 +256,7 @@ export async function expireWorkItemsBySource(
      WHERE item_type = $1 AND source_table = $2 AND source_id = ANY($3)
        AND status IN ('open', 'acked')
      RETURNING item_id`,
-    [itemType, sourceTable, sourceIds]
+    [itemType, sourceTable, sourceIds],
   );
   return result.rows.map((row) => row.item_id);
 }

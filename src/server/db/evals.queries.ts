@@ -31,17 +31,17 @@ export async function getSessionEval(sessionId: string): Promise<SessionEvalRow 
      WHERE session_id = $1
      ORDER BY created_at DESC
      LIMIT 1`,
-    [sessionId]
+    [sessionId],
   );
   return result.rows[0] ?? null;
 }
 
 /** Whether a session already has an eval for the given prompt version. */
 export async function hasSessionEval(sessionId: string, promptVersion: string): Promise<boolean> {
-  const result = await pool.query(
-    'SELECT 1 FROM session_evals WHERE session_id = $1 AND prompt_version = $2',
-    [sessionId, promptVersion]
-  );
+  const result = await pool.query('SELECT 1 FROM session_evals WHERE session_id = $1 AND prompt_version = $2', [
+    sessionId,
+    promptVersion,
+  ]);
   return (result.rowCount ?? 0) > 0;
 }
 
@@ -52,7 +52,7 @@ export async function upsertSessionEval(
   overallComments: string | null,
   judgeModel: string,
   promptVersion: string,
-  judgeSpread: Record<string, number> | null = null
+  judgeSpread: Record<string, number> | null = null,
 ): Promise<SessionEvalRow> {
   const result = await pool.query<SessionEvalRow>(
     `INSERT INTO session_evals (session_id, rubric, overall_comments, judge_model, prompt_version, judge_spread)
@@ -64,7 +64,14 @@ export async function upsertSessionEval(
            judge_spread = EXCLUDED.judge_spread,
            created_at = CURRENT_TIMESTAMP
      RETURNING *`,
-    [sessionId, JSON.stringify(rubric), overallComments, judgeModel, promptVersion, judgeSpread ? JSON.stringify(judgeSpread) : null]
+    [
+      sessionId,
+      JSON.stringify(rubric),
+      overallComments,
+      judgeModel,
+      promptVersion,
+      judgeSpread ? JSON.stringify(judgeSpread) : null,
+    ],
   );
   return result.rows[0];
 }
@@ -97,21 +104,29 @@ export interface NewJudgeRun {
 export async function replaceSessionEvalJudges(
   sessionId: string,
   promptVersion: string,
-  runs: NewJudgeRun[]
+  runs: NewJudgeRun[],
 ): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(
-      'DELETE FROM session_eval_judges WHERE session_id = $1 AND prompt_version = $2',
-      [sessionId, promptVersion]
-    );
+    await client.query('DELETE FROM session_eval_judges WHERE session_id = $1 AND prompt_version = $2', [
+      sessionId,
+      promptVersion,
+    ]);
     for (const run of runs) {
       await client.query(
         `INSERT INTO session_eval_judges
            (session_id, prompt_version, judge_model, run_index, seed, rubric, overall_comments)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [sessionId, promptVersion, run.judgeModel, run.runIndex, run.seed, JSON.stringify(run.rubric), run.overallComments]
+        [
+          sessionId,
+          promptVersion,
+          run.judgeModel,
+          run.runIndex,
+          run.seed,
+          JSON.stringify(run.rubric),
+          run.overallComments,
+        ],
       );
     }
     await client.query('COMMIT');
@@ -132,18 +147,21 @@ export async function getSessionEvalJudgeRuns(promptVersion: string, limit = 500
      WHERE prompt_version = $1
      ORDER BY created_at DESC, session_id, judge_model, run_index
      LIMIT $2`,
-    [promptVersion, limit]
+    [promptVersion, limit],
   );
   return result.rows;
 }
 
 /** Judge runs behind one session's consensus row (any prompt version given). */
-export async function getSessionEvalJudgesForSession(sessionId: string, promptVersion: string): Promise<SessionEvalJudgeRow[]> {
+export async function getSessionEvalJudgesForSession(
+  sessionId: string,
+  promptVersion: string,
+): Promise<SessionEvalJudgeRow[]> {
   const result = await pool.query<SessionEvalJudgeRow>(
     `SELECT * FROM session_eval_judges
      WHERE session_id = $1 AND prompt_version = $2
      ORDER BY judge_model, run_index`,
-    [sessionId, promptVersion]
+    [sessionId, promptVersion],
   );
   return result.rows;
 }
@@ -152,7 +170,7 @@ export async function getSessionEvalJudgesForSession(sessionId: string, promptVe
  *  (max spread over dimensions, desc). Only rows with a spread recorded. */
 export async function getHighDisagreementEvals(
   promptVersion: string,
-  limit = 10
+  limit = 10,
 ): Promise<Array<{ session_id: string; judge_spread: Record<string, number>; created_at: Date }>> {
   const result = await pool.query<{ session_id: string; judge_spread: Record<string, number>; created_at: Date }>(
     `SELECT session_id, judge_spread, created_at
@@ -160,7 +178,7 @@ export async function getHighDisagreementEvals(
      WHERE prompt_version = $1 AND judge_spread IS NOT NULL
      ORDER BY (SELECT MAX((v)::int) FROM jsonb_each_text(judge_spread) AS e(k, v)) DESC, created_at DESC
      LIMIT $2`,
-    [promptVersion, limit]
+    [promptVersion, limit],
   );
   return result.rows;
 }
@@ -175,9 +193,9 @@ export async function getUnevaluatedEndedSessions(promptVersion: string, limit =
      WHERE ts.status = 'ended' AND se.eval_id IS NULL
      ORDER BY ts.created_at DESC
      LIMIT $2`,
-    [promptVersion, limit]
+    [promptVersion, limit],
   );
-  return result.rows.map(r => r.session_id);
+  return result.rows.map((r) => r.session_id);
 }
 
 // ---- Drift / trend monitoring (ai-therapist-84) ----
@@ -214,9 +232,9 @@ export async function getEvalScoreTrend(weeks: number): Promise<EvalTrendRow[]> 
        AND (d.value->>'score') ~ '^[0-9]+$'
      GROUP BY 1, 2, 3, 4
      ORDER BY 1, 2, 3, 4`,
-    [String(weeks)]
+    [String(weeks)],
   );
-  return result.rows.map(r => ({
+  return result.rows.map((r) => ({
     week: r.week,
     ai_model: r.ai_model,
     prompt_version: r.prompt_version,
@@ -232,7 +250,7 @@ export async function getRecentDimensionScores(
   dimension: string,
   aiModel: string | null,
   promptVersion: string,
-  limit: number
+  limit: number,
 ): Promise<number[]> {
   const result = await pool.query<{ score: number }>(
     `SELECT (se.rubric->$1->>'score')::int AS score
@@ -243,14 +261,14 @@ export async function getRecentDimensionScores(
        AND se.rubric ? $1
      ORDER BY se.created_at DESC
      LIMIT $4`,
-    [dimension, aiModel, promptVersion, limit]
+    [dimension, aiModel, promptVersion, limit],
   );
-  return result.rows.map(r => Number(r.score));
+  return result.rows.map((r) => Number(r.score));
 }
 
 /** Distinct (ai_model, prompt_version) buckets with >= minN evals. */
 export async function getEvalBuckets(
-  minN: number
+  minN: number,
 ): Promise<Array<{ ai_model: string | null; prompt_version: string; n: number }>> {
   const result = await pool.query<{ ai_model: string | null; prompt_version: string; n: number }>(
     `SELECT sc.ai_model, se.prompt_version, COUNT(*)::int AS n
@@ -259,7 +277,7 @@ export async function getEvalBuckets(
      GROUP BY sc.ai_model, se.prompt_version
      HAVING COUNT(*) >= $1
      ORDER BY se.prompt_version, sc.ai_model`,
-    [minN]
+    [minN],
   );
-  return result.rows.map(r => ({ ai_model: r.ai_model, prompt_version: r.prompt_version, n: Number(r.n) }));
+  return result.rows.map((r) => ({ ai_model: r.ai_model, prompt_version: r.prompt_version, n: Number(r.n) }));
 }

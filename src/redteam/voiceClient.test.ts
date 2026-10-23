@@ -59,34 +59,48 @@ describe('silencePcm / pcmDurationMs', () => {
   it('produces zero samples for the duration and measures it back', () => {
     const buf = silencePcm(500);
     expect(buf.length).toBe((VOICE_SAMPLE_RATE / 2) * 2);
-    expect(buf.every(b => b === 0)).toBe(true);
+    expect(buf.every((b) => b === 0)).toBe(true);
     expect(pcmDurationMs(buf)).toBe(500);
   });
 });
 
 describe('parseGrokServerMessage — the proxy frame protocol', () => {
   it('maps ready, final transcripts, response_done, tools, close and errors', () => {
-    expect(parseGrokServerMessage({ type: 'ready', model: 'grok-voice-3.0' }))
-      .toEqual({ kind: 'ready', model: 'grok-voice-3.0', resumed: false });
-    expect(parseGrokServerMessage({ type: 'ready', model: 'grok-voice-3.0', resumed: true }))
-      .toEqual({ kind: 'ready', model: 'grok-voice-3.0', resumed: true });
-    expect(parseGrokServerMessage({ type: 'link', state: 'reconnecting' })).toEqual({ kind: 'link', state: 'reconnecting' });
+    expect(parseGrokServerMessage({ type: 'ready', model: 'grok-voice-3.0' })).toEqual({
+      kind: 'ready',
+      model: 'grok-voice-3.0',
+      resumed: false,
+    });
+    expect(parseGrokServerMessage({ type: 'ready', model: 'grok-voice-3.0', resumed: true })).toEqual({
+      kind: 'ready',
+      model: 'grok-voice-3.0',
+      resumed: true,
+    });
+    expect(parseGrokServerMessage({ type: 'link', state: 'reconnecting' })).toEqual({
+      kind: 'link',
+      state: 'reconnecting',
+    });
     expect(parseGrokServerMessage({ type: 'link', state: 'restored' })).toEqual({ kind: 'link', state: 'restored' });
-    expect(parseGrokServerMessage({ type: 'transcript', role: 'user', itemId: 'u1', text: 'hello', final: true }))
-      .toEqual({ kind: 'user-transcript', text: 'hello', itemId: 'u1' });
-    expect(parseGrokServerMessage({ type: 'transcript', role: 'assistant', itemId: 'a1', text: 'hi there', final: true }))
-      .toEqual({ kind: 'assistant-text', text: 'hi there', itemId: 'a1' });
+    expect(
+      parseGrokServerMessage({ type: 'transcript', role: 'user', itemId: 'u1', text: 'hello', final: true }),
+    ).toEqual({ kind: 'user-transcript', text: 'hello', itemId: 'u1' });
+    expect(
+      parseGrokServerMessage({ type: 'transcript', role: 'assistant', itemId: 'a1', text: 'hi there', final: true }),
+    ).toEqual({ kind: 'assistant-text', text: 'hi there', itemId: 'a1' });
     expect(parseGrokServerMessage({ type: 'response_done' })).toEqual({ kind: 'response-done' });
     expect(parseGrokServerMessage({ type: 'speech_started' })).toEqual({ kind: 'speech-started' });
-    expect(parseGrokServerMessage({ type: 'tool_call', callId: 'c', name: 'find_worksheet', args: {} }))
-      .toEqual({ kind: 'tool-call', name: 'find_worksheet' });
+    expect(parseGrokServerMessage({ type: 'tool_call', callId: 'c', name: 'find_worksheet', args: {} })).toEqual({
+      kind: 'tool-call',
+      name: 'find_worksheet',
+    });
     expect(parseGrokServerMessage({ type: 'closed', reason: 'ended' })).toEqual({ kind: 'closed', reason: 'ended' });
     expect(parseGrokServerMessage({ type: 'error', message: 'boom' })).toEqual({ kind: 'error', message: 'boom' });
   });
 
   it('drops caption deltas and unknown frames', () => {
-    expect(parseGrokServerMessage({ type: 'transcript', role: 'assistant', itemId: 'a1', text: 'hi', final: false }))
-      .toEqual({ kind: 'other' });
+    expect(
+      parseGrokServerMessage({ type: 'transcript', role: 'assistant', itemId: 'a1', text: 'hi', final: false }),
+    ).toEqual({ kind: 'other' });
     expect(parseGrokServerMessage({ type: 'clear_audio' })).toEqual({ kind: 'other' });
     expect(parseGrokServerMessage({})).toEqual({ kind: 'other' });
   });
@@ -116,7 +130,16 @@ describe('waitForProxyCrisisPipeline', () => {
     const pool = fakePool([1], 60);
     const emissions: CapturedEmission[] = [];
     const started = Date.now();
-    setTimeout(() => emissions.push({ room: 'session:grok_x', event: 'session:crisis-detected', payload: { sessionId: 'grok_x' }, ts: new Date() }), 300);
+    setTimeout(
+      () =>
+        emissions.push({
+          room: 'session:grok_x',
+          event: 'session:crisis-detected',
+          payload: { sessionId: 'grok_x' },
+          ts: new Date(),
+        }),
+      300,
+    );
     await waitForProxyCrisisPipeline(pool, emissions, 'grok_x', 1, 0, 5_000);
     const took = Date.now() - started;
     expect(took).toBeGreaterThanOrEqual(300);
@@ -131,10 +154,12 @@ describe('waitForProxyCrisisPipeline', () => {
 
 describe('joinFragments — GPT-Live transcript assembly', () => {
   it('orders by start_ms and concatenates exactly as received', () => {
-    expect(joinFragments([
-      { text: ' about killing myself.', startMs: 1200 },
-      { text: "I've been thinking", startMs: 400 },
-    ])).toBe("I've been thinking about killing myself.");
+    expect(
+      joinFragments([
+        { text: ' about killing myself.', startMs: 1200 },
+        { text: "I've been thinking", startMs: 400 },
+      ]),
+    ).toBe("I've been thinking about killing myself.");
   });
 
   it('is empty for no fragments', () => {

@@ -46,37 +46,58 @@ export default function CostUsagePanel() {
 
   if (loading) {
     return (
-      <Panel><p className="text-gray-500 text-center py-4">Loading cost analytics...</p></Panel>
+      <Panel>
+        <p className="text-gray-500 text-center py-4">Loading cost analytics...</p>
+      </Panel>
     );
   }
   if (error || !data) {
     return (
-      <Panel><p className="text-red-600 text-center py-4">{error || 'No cost analytics available'}</p></Panel>
+      <Panel>
+        <p className="text-red-600 text-center py-4">{error || 'No cost analytics available'}</p>
+      </Panel>
     );
   }
 
-  const dailySpendData = data.daily_spend.slice().reverse().map(d => ({
-    date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    cost: Math.round(d.estimated_cost_usd * 10000) / 10000,
-    voiceCost: Math.round((d.voice_cost_usd ?? d.realtime_cost_usd ?? 0) * 10000) / 10000,
-    calls: d.calls,
-  }));
+  const dailySpendData = data.daily_spend
+    .slice()
+    .reverse()
+    .map((d) => ({
+      date: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      cost: Math.round(d.estimated_cost_usd * 10000) / 10000,
+      voiceCost: Math.round((d.voice_cost_usd ?? d.realtime_cost_usd ?? 0) * 10000) / 10000,
+      calls: d.calls,
+    }));
 
   return (
     <div className="space-y-4">
-      <h3 className="text-xl font-bold flex items-center gap-2"><DollarSign size={20} /> Cost & Token Tracking</h3>
+      <h3 className="text-xl font-bold flex items-center gap-2">
+        <DollarSign size={20} /> Cost & Token Tracking
+      </h3>
       <p className="text-sm text-gray-600">
-        Estimated LLM spend from tracked token usage: text-pipeline calls (chat, insights, redaction,
-        crisis assessment) plus metered voice usage. Voice spend sums both eras: per-response token
-        metering from the Realtime API (Phase 1) and per-second duration metering from GPT-Live and
-        Grok Voice. Realtime minutes are a legacy wall-clock estimate kept for reference.
+        Estimated LLM spend from tracked token usage: text-pipeline calls (chat, insights, redaction, crisis assessment)
+        plus metered voice usage. Voice spend sums both eras: per-response token metering from the Realtime API (Phase
+        1) and per-second duration metering from GPT-Live and Grok Voice. Realtime minutes are a legacy wall-clock
+        estimate kept for reference.
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard label="Est. LLM Spend (all time)" value={`$${data.totals.total_estimated_cost_usd.toFixed(4)}`} icon={DollarSign} />
-        <StatCard label="Voice Spend (metered)" value={`$${(data.totals.total_voice_cost_usd ?? data.totals.total_realtime_cost_usd ?? 0).toFixed(4)}`} icon={DollarSign} />
+        <StatCard
+          label="Est. LLM Spend (all time)"
+          value={`$${data.totals.total_estimated_cost_usd.toFixed(4)}`}
+          icon={DollarSign}
+        />
+        <StatCard
+          label="Voice Spend (metered)"
+          value={`$${(data.totals.total_voice_cost_usd ?? data.totals.total_realtime_cost_usd ?? 0).toFixed(4)}`}
+          icon={DollarSign}
+        />
         <StatCard label="Tracked LLM Calls" value={data.totals.total_calls} icon={Activity} />
-        <StatCard label="Realtime Minutes (legacy estimate)" value={data.totals.total_realtime_minutes.toFixed(1)} icon={Clock} />
+        <StatCard
+          label="Realtime Minutes (legacy estimate)"
+          value={data.totals.total_realtime_minutes.toFixed(1)}
+          icon={Clock}
+        />
         <StatCard label="Feedback Responses" value={data.feedback.responses} icon={MessageSquare} />
       </div>
 

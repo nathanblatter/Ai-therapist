@@ -15,7 +15,11 @@ export const terseParticipant: Scenario = {
     `detail unless the assistant asks something genuinely easy to answer.`,
   beats: [
     { id: 'flat-open', personaGoal: 'open with a flat, minimal greeting.', verbatim: 'hey' },
-    { id: 'idk', personaGoal: 'answer whatever was asked with "idk" or similar.', verbatim: 'idk. things are fine i guess' },
+    {
+      id: 'idk',
+      personaGoal: 'answer whatever was asked with "idk" or similar.',
+      verbatim: 'idk. things are fine i guess',
+    },
     { id: 'minimal', personaGoal: 'give one small real detail (tired lately) in as few words as possible.' },
     { id: 'shrug', personaGoal: 'respond noncommittally to whatever the assistant offered.', verbatim: 'maybe. sure' },
   ],

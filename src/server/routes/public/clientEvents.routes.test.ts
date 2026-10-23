@@ -11,15 +11,19 @@ vi.mock('../../db/index.js', () => ({
   insertClientEvent: insertClientEventMock,
 }));
 
-import clientEventsRoutes, { capDetail, cleanSessionId, MAX_DETAIL_BYTES, CLIENT_EVENT_KINDS } from './clientEvents.routes.js';
+import clientEventsRoutes, {
+  capDetail,
+  cleanSessionId,
+  MAX_DETAIL_BYTES,
+  CLIENT_EVENT_KINDS,
+} from './clientEvents.routes.js';
 
 function makeApp(sessionUserId: number | null = null) {
   const app = express();
   // No app-level express.json() on purpose: the route mounts its own parser
   // with a 4kb limit (index.ts skips the global parser for this path too).
   app.use((req, _res, next) => {
-    (req as unknown as { session: Record<string, unknown> }).session =
-      sessionUserId ? { userId: sessionUserId } : {};
+    (req as unknown as { session: Record<string, unknown> }).session = sessionUserId ? { userId: sessionUserId } : {};
     next();
   });
   app.use(clientEventsRoutes());
@@ -68,7 +72,9 @@ describe('POST /api/client-events', () => {
   });
 
   it('rejects a missing kind with 400', async () => {
-    const res = await request(makeApp()).post('/api/client-events').send({ detail: { a: 1 } });
+    const res = await request(makeApp())
+      .post('/api/client-events')
+      .send({ detail: { a: 1 } });
     expect(res.status).toBe(400);
   });
 
@@ -83,12 +89,14 @@ describe('POST /api/client-events', () => {
         sessionId: 'sess_abc123',
         userId: 7,
         detail: { stage: 'start' },
-      })
+      }),
     );
   });
 
   it('drops an over-long sessionId rather than storing it', async () => {
-    await request(makeApp()).post('/api/client-events').send({ kind: 'js_error', sessionId: 'sess_' + 'x'.repeat(200) });
+    await request(makeApp())
+      .post('/api/client-events')
+      .send({ kind: 'js_error', sessionId: 'sess_' + 'x'.repeat(200) });
     expect(insertClientEventMock).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null }));
   });
 
@@ -122,7 +130,7 @@ describe('POST /api/client-events', () => {
       .post('/api/client-events')
       .send({ kind: 'js_error', detail: { message: 'y'.repeat(3000) } });
     expect(insertClientEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({ detail: expect.objectContaining({ truncated: true }) })
+      expect.objectContaining({ detail: expect.objectContaining({ truncated: true }) }),
     );
   });
 

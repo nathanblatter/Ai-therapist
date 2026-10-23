@@ -148,8 +148,10 @@ describe('metadata allowlist on redacted export paths', () => {
   const REDACTED_PATHS: Array<[string, () => Promise<Record<string, unknown>[]>]> = [
     ['getAnonymizedExport', () => getAnonymizedExport(FILTERS, 'content_redacted', null)],
     ['getFullExport', () => getFullExport(FILTERS, 'content_redacted', null)],
-    ['getFullExport single-session', () =>
-      getFullExport({ ...FILTERS, sessionId: 'sess-1' }, 'content_redacted', null)],
+    [
+      'getFullExport single-session',
+      () => getFullExport({ ...FILTERS, sessionId: 'sess-1' }, 'content_redacted', null),
+    ],
   ];
 
   for (const [name, run] of REDACTED_PATHS) {

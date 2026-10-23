@@ -27,10 +27,17 @@ const {
 
 /** Matches the real crisis.queries helper; the barrel is mocked wholesale. */
 function hasSafetyContextImpl(ctx: {
-  crisisEvents: unknown[]; escalations: unknown[]; resourceCards: unknown[]; adverseEvents: unknown[];
+  crisisEvents: unknown[];
+  escalations: unknown[];
+  resourceCards: unknown[];
+  adverseEvents: unknown[];
 }): boolean {
-  return ctx.crisisEvents.length > 0 || ctx.escalations.length > 0
-    || ctx.resourceCards.length > 0 || ctx.adverseEvents.length > 0;
+  return (
+    ctx.crisisEvents.length > 0 ||
+    ctx.escalations.length > 0 ||
+    ctx.resourceCards.length > 0 ||
+    ctx.adverseEvents.length > 0
+  );
 }
 
 const EMPTY_SAFETY = { crisisEvents: [], escalations: [], resourceCards: [], adverseEvents: [] };
@@ -122,17 +129,33 @@ describe('generateSessionInsights', () => {
     const AT = new Date('2026-09-20T14:35:00Z');
     const FULL_SAFETY = {
       crisisEvents: [{ event_type: 'crisis_flagged', severity: 'high', created_at: AT }],
-      escalations: [{ source: 'tool', reason: 'domestic violence disclosure', urgency: 'urgent', status: null, created_at: AT }],
+      escalations: [
+        { source: 'tool', reason: 'domestic violence disclosure', urgency: 'urgent', status: null, created_at: AT },
+      ],
       resourceCards: [{ tool_name: 'show_resource_card', resource_type: 'domestic_violence', created_at: AT }],
-      adverseEvents: [{ report_id: 77, severity: 'high', category: 'crisis', status: 'draft', summary: 'DV disclosure', created_at: AT }],
+      adverseEvents: [
+        {
+          report_id: 77,
+          severity: 'high',
+          category: 'crisis',
+          status: 'draft',
+          summary: 'DV disclosure',
+          created_at: AT,
+        },
+      ],
     };
 
     it('injects crisis events, escalations, resource cards and AE drafts into the LLM context', async () => {
       getSessionSafetyContextMock.mockResolvedValue(FULL_SAFETY);
-      createMock.mockResolvedValue(llmResponse({
-        summary: { ...BASIC_SUMMARY, safety: 'High-severity crisis flag after a DV disclosure; resources shown and escalated.' },
-        soap: BASIC_SOAP,
-      }));
+      createMock.mockResolvedValue(
+        llmResponse({
+          summary: {
+            ...BASIC_SUMMARY,
+            safety: 'High-severity crisis flag after a DV disclosure; resources shown and escalated.',
+          },
+          soap: BASIC_SOAP,
+        }),
+      );
 
       await generateSessionInsights('s1');
 
@@ -167,7 +190,9 @@ describe('generateSessionInsights', () => {
 
       await generateSessionInsights('s1');
 
-      expect(upsertSessionInsightsMock.mock.calls[0][2].safety).toMatch(/^Safety: this session recorded 1 crisis event/);
+      expect(upsertSessionInsightsMock.mock.calls[0][2].safety).toMatch(
+        /^Safety: this session recorded 1 crisis event/,
+      );
     });
 
     it('adds no safety block or field for a session with nothing safety-relevant', async () => {
@@ -200,7 +225,9 @@ describe('generateSessionInsights', () => {
       getUserMemoryEnabledMock.mockResolvedValue(true);
       getUserCaseProfileMock.mockResolvedValue(null);
       const freshProfile = { presenting_concerns: ['work stress'], coping_repertoire: [] };
-      createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP, case_profile: freshProfile }));
+      createMock.mockResolvedValue(
+        llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP, case_profile: freshProfile }),
+      );
 
       await generateSessionInsights('s1');
 
@@ -211,13 +238,18 @@ describe('generateSessionInsights', () => {
 
     it('passes the existing profile to the model and stores the MERGED result (not appended)', async () => {
       getUserMemoryEnabledMock.mockResolvedValue(true);
-      const priorProfile = { presenting_concerns: ['sleep'], coping_repertoire: [{ technique: 'breathing', helpfulness: 'helped' }] };
+      const priorProfile = {
+        presenting_concerns: ['sleep'],
+        coping_repertoire: [{ technique: 'breathing', helpfulness: 'helped' }],
+      };
       getUserCaseProfileMock.mockResolvedValue({ user_id: 42, profile: priorProfile, updated_at: new Date() });
       const mergedProfile = {
         presenting_concerns: ['sleep', 'work stress'],
         coping_repertoire: [{ technique: 'breathing', helpfulness: 'helped' }],
       };
-      createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP, case_profile: mergedProfile }));
+      createMock.mockResolvedValue(
+        llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP, case_profile: mergedProfile }),
+      );
 
       await generateSessionInsights('s1');
 
@@ -234,7 +266,9 @@ describe('generateSessionInsights', () => {
       getUserMemoryEnabledMock.mockResolvedValue(true);
       getUserCaseProfileMock.mockResolvedValue(null);
       upsertUserCaseProfileMock.mockRejectedValue(new Error('db down'));
-      createMock.mockResolvedValue(llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP, case_profile: { presenting_concerns: [] } }));
+      createMock.mockResolvedValue(
+        llmResponse({ summary: BASIC_SUMMARY, soap: BASIC_SOAP, case_profile: { presenting_concerns: [] } }),
+      );
 
       await expect(generateSessionInsights('s1')).resolves.not.toThrow();
       expect(upsertSessionInsightsMock).toHaveBeenCalled();
@@ -257,8 +291,8 @@ describe('sanitizeAffectCurve (ai-therapist-86)', () => {
     const raw = [
       { turn: 3, valence: 2.5, arousal: -0.2, label: 'ANXIOUS' },
       { turn: 1, valence: -0.4, arousal: 0.7, label: 'sad' },
-      { turn: 'x', valence: 0.1, arousal: 0.1 },              // bad turn
-      { turn: 2, valence: 'high', arousal: 0.5 },              // bad valence
+      { turn: 'x', valence: 0.1, arousal: 0.1 }, // bad turn
+      { turn: 2, valence: 'high', arousal: 0.5 }, // bad valence
       { turn: 4, valence: 0.2, arousal: 0.3, label: 'a quoted sentence from the user' }, // label rejected
     ];
     const out = sanitizeAffectCurve(raw)!;

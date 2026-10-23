@@ -71,7 +71,7 @@ export function getJson<T = unknown>(url: string, opts?: Pick<RequestJsonOptions
 export function postJson<T = unknown>(
   url: string,
   body?: object,
-  opts?: { method?: 'POST' | 'PUT' | 'PATCH' } & Pick<RequestJsonOptions, 'fallback' | 'headers'>
+  opts?: { method?: 'POST' | 'PUT' | 'PATCH' } & Pick<RequestJsonOptions, 'fallback' | 'headers'>,
 ): Promise<T> {
   return requestJson<T>(url, { ...opts, method: opts?.method ?? 'POST', body: body ?? {} });
 }
@@ -80,7 +80,7 @@ export function postJson<T = unknown>(
 export function deleteJson<T = unknown>(
   url: string,
   body?: object,
-  opts?: Pick<RequestJsonOptions, 'fallback' | 'headers'>
+  opts?: Pick<RequestJsonOptions, 'fallback' | 'headers'>,
 ): Promise<T> {
   return requestJson<T>(url, { ...opts, method: 'DELETE', body });
 }

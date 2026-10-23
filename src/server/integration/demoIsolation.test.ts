@@ -43,9 +43,9 @@ beforeAll(async () => {
         return Promise.resolve({ rows: [{ sid }], rowCount: 1 });
       }
       if (/^UPDATE/i.test(text.trim())) {
-        const sid = (params as unknown[]).find(
-          p => typeof p === 'string' && sessionRows.has(p)
-        ) as string | undefined;
+        const sid = (params as unknown[]).find((p) => typeof p === 'string' && sessionRows.has(p)) as
+          | string
+          | undefined;
         return Promise.resolve({ rows: sid ? [{ sid }] : [], rowCount: sid ? 1 : 0 });
       }
       if (/SELECT sess/i.test(text)) {
@@ -62,10 +62,17 @@ beforeAll(async () => {
       const username = (params as [string])[0];
       if (username === 'dr_real') {
         return Promise.resolve({
-          rows: [{
-            userid: 7, username: 'dr_real', password: therapistPasswordHash,
-            role: 'therapist', mfa_enabled: false, mfa_secret: null, mfa_backup_codes: null,
-          }],
+          rows: [
+            {
+              userid: 7,
+              username: 'dr_real',
+              password: therapistPasswordHash,
+              role: 'therapist',
+              mfa_enabled: false,
+              mfa_secret: null,
+              mfa_backup_codes: null,
+            },
+          ],
           rowCount: 1,
         });
       }
@@ -96,8 +103,8 @@ beforeAll(async () => {
 function appQueriesSince(callIndex: number): string[] {
   return queryMock.mock.calls
     .slice(callIndex)
-    .map(c => (typeof c[0] === 'string' ? c[0] : ''))
-    .filter(t => !t.includes('"user_sessions"'));
+    .map((c) => (typeof c[0] === 'string' ? c[0] : ''))
+    .filter((t) => !t.includes('"user_sessions"'));
 }
 
 async function demoAgent() {
@@ -110,9 +117,7 @@ async function demoAgent() {
 
 async function therapistAgent() {
   const agent = request.agent(app);
-  const res = await agent
-    .post('/api/auth/login')
-    .send({ username: 'dr_real', password: 'correct-horse' });
+  const res = await agent.post('/api/auth/login').send({ username: 'dr_real', password: 'correct-horse' });
   expect(res.status).toBe(200);
   return agent;
 }
@@ -239,7 +244,7 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
     // (ai-therapist-279). What the wall guarantees is that the REAL handler
     // never ran: it would read therapy_sessions / sideband state.
     const handlerTables = /therapy_sessions|session_configurations|sideband/i;
-    expect(appQueriesSince(mark).filter(q => handlerTables.test(q))).toEqual([]);
+    expect(appQueriesSince(mark).filter((q) => handlerTables.test(q))).toEqual([]);
   });
 });
 
@@ -250,14 +255,14 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
     const res = await agent.get('/admin/api/sessions/active');
     expect(res.status).toBe(200);
     const queries = appQueriesSince(mark);
-    expect(queries.some(q => q.includes('therapy_sessions'))).toBe(true);
+    expect(queries.some((q) => q.includes('therapy_sessions'))).toBe(true);
   });
 
   it('the active-sessions query filters out is_demo sessions', async () => {
     const agent = await therapistAgent();
     const mark = queryMock.mock.calls.length;
     await agent.get('/admin/api/sessions/active');
-    const q = appQueriesSince(mark).find(t => t.includes('therapy_sessions'));
+    const q = appQueriesSince(mark).find((t) => t.includes('therapy_sessions'));
     expect(q).toContain('is_demo IS NOT TRUE');
   });
 
@@ -265,7 +270,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
     const agent = await therapistAgent();
     const mark = queryMock.mock.calls.length;
     await agent.get('/admin/api/sessions');
-    const listQueries = appQueriesSince(mark).filter(t => t.includes('therapy_sessions'));
+    const listQueries = appQueriesSince(mark).filter((t) => t.includes('therapy_sessions'));
     expect(listQueries.length).toBeGreaterThan(0);
     for (const q of listQueries) {
       expect(q).toContain('is_demo IS NOT TRUE');
@@ -276,7 +281,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
     const agent = await therapistAgent();
     const mark = queryMock.mock.calls.length;
     await agent.get('/admin/api/analytics');
-    const q = appQueriesSince(mark).find(t => t.includes('therapy_sessions'));
+    const q = appQueriesSince(mark).find((t) => t.includes('therapy_sessions'));
     expect(q).toContain('is_demo IS NOT TRUE');
   });
 
@@ -286,7 +291,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
       const mark = queryMock.mock.calls.length;
       const res = await agent.get(`/admin/api/export?type=${type}`);
       expect(res.status).toBeLessThan(500);
-      const q = appQueriesSince(mark).find(t => t.includes('therapy_sessions'));
+      const q = appQueriesSince(mark).find((t) => t.includes('therapy_sessions'));
       if (q) expect(q).toContain('is_demo IS NOT TRUE');
     }
   });
@@ -295,7 +300,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
     const agent = await therapistAgent();
     const mark = queryMock.mock.calls.length;
     await agent.get('/admin/api/crisis/all');
-    const joins = appQueriesSince(mark).filter(t => t.includes('therapy_sessions'));
+    const joins = appQueriesSince(mark).filter((t) => t.includes('therapy_sessions'));
     expect(joins.length).toBeGreaterThan(0);
     for (const q of joins) {
       expect(q).toContain('is_demo IS NOT TRUE');

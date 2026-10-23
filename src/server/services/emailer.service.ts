@@ -38,12 +38,7 @@ export interface OutgoingEmail {
 
 /** The slice of a nodemailer transport we use. */
 export interface MailTransport {
-  sendMail(options: {
-    from: string;
-    to: string;
-    subject: string;
-    text: string;
-  }): Promise<unknown>;
+  sendMail(options: { from: string; to: string; subject: string; text: string }): Promise<unknown>;
 }
 
 type TransportFactory = () => Promise<MailTransport | null>;
@@ -137,8 +132,10 @@ async function defaultTransportFactory(): Promise<MailTransport | null> {
   } catch (err) {
     if (!warnedMissingModule) {
       warnedMissingModule = true;
-      log.warn({ err: err instanceof Error ? err.message : err },
-        '[email] nodemailer unavailable; email delivery is a no-op until the dependency is installed');
+      log.warn(
+        { err: err instanceof Error ? err.message : err },
+        '[email] nodemailer unavailable; email delivery is a no-op until the dependency is installed',
+      );
     }
     return null;
   }
@@ -185,7 +182,9 @@ export async function sendEmail(email: OutgoingEmail): Promise<EmailSendResult> 
     if (!env) {
       if (!warnedMissingConfig) {
         warnedMissingConfig = true;
-        log.warn('[email] no transport configured (EMAIL_API_URL+EMAIL_API_KEY or SMTP_HOST, plus EMAIL_FROM); email delivery is a no-op');
+        log.warn(
+          '[email] no transport configured (EMAIL_API_URL+EMAIL_API_KEY or SMTP_HOST, plus EMAIL_FROM); email delivery is a no-op',
+        );
       }
       return 'skipped';
     }

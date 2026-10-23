@@ -30,7 +30,7 @@ export async function redactSession(sessionId: string): Promise<void> {
         AND content_redacted IS NULL
         AND ${REDACTABLE_ROWS_SQL}
       ORDER BY message_id ASC`,
-    [sessionId]
+    [sessionId],
   );
 
   if (rows.length === 0) {
@@ -44,15 +44,18 @@ export async function redactSession(sessionId: string): Promise<void> {
   // or the per-item fallback. One session_llm_usage row per call.
   const usage: RedactionUsage[] = [];
   try {
-    const redacted = await redactPHIBatch(rows.map(r => ({ id: r.message_id, content: r.content })), { usage });
+    const redacted = await redactPHIBatch(
+      rows.map((r) => ({ id: r.message_id, content: r.content })),
+      { usage },
+    );
     const redactedAt = new Date().toISOString();
 
     // Cost tracking (ai-therapist-25c): fire-and-forget, measured tokens.
     import('../db/index.js')
-      .then(({ recordLlmUsage }) => Promise.all(
-        usage.map(u => recordLlmUsage(sessionId, 'redaction', u.model, u.tokensIn, u.tokensOut)),
-      ))
-      .catch(err => console.error('Failed to record redaction LLM usage (non-fatal):', err));
+      .then(({ recordLlmUsage }) =>
+        Promise.all(usage.map((u) => recordLlmUsage(sessionId, 'redaction', u.model, u.tokensIn, u.tokensOut))),
+      )
+      .catch((err) => console.error('Failed to record redaction LLM usage (non-fatal):', err));
 
     // Persist each redacted message. A stale redaction_error from an earlier
     // failed attempt is cleared on success — leaving it would permanently
@@ -65,17 +68,22 @@ export async function redactSession(sessionId: string): Promise<void> {
                 metadata = (COALESCE(metadata, '{}'::jsonb) - 'redaction_error')
                            || jsonb_build_object('redacted_at', $2::text)
           WHERE message_id = $3`,
-        [content, redactedAt, messageId]
+        [content, redactedAt, messageId],
       );
     }
 
     // Notify admin dashboards so a just-ended session's redacted view refreshes.
     if (global.io) {
-      void broadcastAdminEventForSession(global.io, 'session:redaction-complete', {
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:redaction-complete',
+        {
+          sessionId,
+          count: redacted.size,
+          redactedAt,
+        },
         sessionId,
-        count: redacted.size,
-        redactedAt,
-      }, sessionId);
+      );
     }
 
     console.log(`Session ${sessionId.substring(0, 12)}... redacted (${redacted.size} messages)`);
@@ -85,18 +93,25 @@ export async function redactSession(sessionId: string): Promise<void> {
     // the review queue. Fire-and-forget and fail-soft: it must never delay the
     // wipe, naming or insights, and only redacted text leaves the box.
     import('./redactionVerifier.service.js')
-      .then(m => m.verifyRedactedMessages(sessionId, [...redacted].map(([id, text]) => ({ id, text }))))
-      .catch(err => console.error('[RedactionVerifier] leak-check failed (non-fatal):', err));
+      .then((m) =>
+        m.verifyRedactedMessages(
+          sessionId,
+          [...redacted].map(([id, text]) => ({ id, text })),
+        ),
+      )
+      .catch((err) => console.error('[RedactionVerifier] leak-check failed (non-fatal):', err));
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`Session redaction failed for ${sessionId}:`, errorMessage);
 
     // Mark the still-unredacted messages so the failure is visible and re-runnable.
-    await pool.query(
-      `UPDATE messages
+    await pool
+      .query(
+        `UPDATE messages
           SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('redaction_error', $1::text)
         WHERE session_id = $2 AND content_redacted IS NULL AND ${REDACTABLE_ROWS_SQL}`,
-      [errorMessage, sessionId]
-    ).catch(err => console.error('Failed to record redaction error:', err));
+        [errorMessage, sessionId],
+      )
+      .catch((err) => console.error('Failed to record redaction error:', err));
   }
 }

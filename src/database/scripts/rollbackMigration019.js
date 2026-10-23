@@ -15,7 +15,7 @@ async function rollbackMigration() {
     // Read the rollback SQL file
     const rollbackSQL = fs.readFileSync(
       path.join(__dirname, '../migrations/019_add_system_prompts_rollback.sql'),
-      'utf8'
+      'utf8',
     );
 
     // Execute the rollback
@@ -25,7 +25,6 @@ async function rollbackMigration() {
 
     console.log('OK: Migration 019 rolled back successfully!');
     console.log('System prompts configuration removed from system_config table');
-
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('FAIL: Rollback of migration 019 failed:', error);

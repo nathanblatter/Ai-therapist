@@ -4,11 +4,11 @@
 // and weekly mood/stress/helpfulness trends. Data: GET
 // /admin/api/qualtrics/data (researcher-only; 503 until the integration env
 // is configured). Scores are computed server-side from verified QID maps.
-import { useState } from "react";
-import { Clipboard, Check, Minus, Users, TrendingUp, AlertTriangle } from "react-feather";
-import useAdminFetch from "../hooks/useAdminFetch";
-import Panel from "./ui/Panel";
-import StatCard from "./ui/StatCard";
+import { useState } from 'react';
+import { Clipboard, Check, Minus, Users, TrendingUp, AlertTriangle } from 'react-feather';
+import useAdminFetch from '../hooks/useAdminFetch';
+import Panel from './ui/Panel';
+import StatCard from './ui/StatCard';
 
 interface WeeklyCell {
   responseId: string;
@@ -51,7 +51,7 @@ interface Overview {
     avgHelpfulness: number | null;
   }>;
   instrumentAggregates: Array<{
-    role: "baseline" | "exit" | "week12";
+    role: 'baseline' | 'exit' | 'week12';
     n: number;
     avgPhq2: number | null;
     avgGad2: number | null;
@@ -61,16 +61,16 @@ interface Overview {
 }
 
 const WEEKS = [1, 2, 3, 4, 5, 6, 7, 8];
-const ROLE_LABELS = { baseline: "Baseline", exit: "Exit (Week 8)", week12: "Week 12" } as const;
+const ROLE_LABELS = { baseline: 'Baseline', exit: 'Exit (Week 8)', week12: 'Week 12' } as const;
 
 function shortDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleDateString() : "";
+  return iso ? new Date(iso).toLocaleDateString() : '';
 }
 
 function scoreText(s: ScoredResponse | null): string {
-  if (!s) return "-";
-  const phq = s.phq2 === null ? "?" : String(s.phq2);
-  const gad = s.gad2 === null ? "?" : String(s.gad2);
+  if (!s) return '-';
+  const phq = s.phq2 === null ? '?' : String(s.phq2);
+  const gad = s.gad2 === null ? '?' : String(s.gad2);
   return `${phq} / ${gad}`;
 }
 
@@ -80,16 +80,24 @@ function weekCell(p: ParticipantRow, week: number) {
   const cell = p.weekly[week];
   if (cell) {
     return (
-      <span title={`${shortDate(cell.recordedAt)} - mood ${cell.mood ?? "?"}, stress ${cell.stress ?? "?"}`}>
+      <span title={`${shortDate(cell.recordedAt)} - mood ${cell.mood ?? '?'}, stress ${cell.stress ?? '?'}`}>
         <Check size={16} className="text-green-600 inline" aria-label={`Week ${week} completed`} />
       </span>
     );
   }
   if (week < p.studyWeek || p.studyWeek > 8) {
-    return <span className="text-red-500 font-semibold" title={`Week ${week} missed`}>x</span>;
+    return (
+      <span className="text-red-500 font-semibold" title={`Week ${week} missed`}>
+        x
+      </span>
+    );
   }
   if (week === p.studyWeek) {
-    return <span className="text-amber-600 font-semibold" title={`Week ${week} in progress`}>due</span>;
+    return (
+      <span className="text-amber-600 font-semibold" title={`Week ${week} in progress`}>
+        due
+      </span>
+    );
   }
   return <Minus size={14} className="text-gray-300 inline" aria-label={`Week ${week} upcoming`} />;
 }
@@ -97,7 +105,7 @@ function weekCell(p: ParticipantRow, week: number) {
 function endpointCell(scored: ScoredResponse | null, reached: boolean) {
   if (scored) {
     return (
-      <span title={`${shortDate(scored.recordedAt)} - PHQ-2 ${scored.phq2 ?? "?"}, GAD-2 ${scored.gad2 ?? "?"}`}>
+      <span title={`${shortDate(scored.recordedAt)} - PHQ-2 ${scored.phq2 ?? '?'}, GAD-2 ${scored.gad2 ?? '?'}`}>
         <Check size={16} className="text-green-600 inline" />
       </span>
     );
@@ -107,17 +115,17 @@ function endpointCell(scored: ScoredResponse | null, reached: boolean) {
 }
 
 export default function SurveyData() {
-  const { data, loading, error } = useAdminFetch<Overview>("/admin/api/qualtrics/data");
+  const { data, loading, error } = useAdminFetch<Overview>('/admin/api/qualtrics/data');
   const [expanded, setExpanded] = useState<number | null>(null);
 
   if (loading) return <p className="text-gray-500">Loading survey data...</p>;
   if (error) {
-    const notConfigured = error.includes("503");
+    const notConfigured = error.includes('503');
     return (
       <Panel title="Survey Data" icon={Clipboard}>
-        <p className={notConfigured ? "text-gray-600" : "text-red-600"}>
+        <p className={notConfigured ? 'text-gray-600' : 'text-red-600'}>
           {notConfigured
-            ? "The Qualtrics integration is not configured on this deployment; survey data will appear once it is."
+            ? 'The Qualtrics integration is not configured on this deployment; survey data will appear once it is.'
             : `Failed to load survey data: ${error}`}
         </p>
       </Panel>
@@ -126,15 +134,10 @@ export default function SurveyData() {
   if (!data) return null;
 
   const { participants, weeklyAggregates, instrumentAggregates } = data;
-  const expectedWeekly = participants.reduce(
-    (n, p) => n + Math.min(Math.max(p.studyWeek - 1, 0), 8),
-    0
-  );
+  const expectedWeekly = participants.reduce((n, p) => n + Math.min(Math.max(p.studyWeek - 1, 0), 8), 0);
   const completedWeekly = participants.reduce((n, p) => n + Object.keys(p.weekly).length, 0);
   const completionPct = expectedWeekly > 0 ? Math.round((completedWeekly / expectedWeekly) * 100) : null;
-  const screenPositives = participants.filter(
-    (p) => p.baseline?.phq2Positive || p.baseline?.gad2Positive
-  ).length;
+  const screenPositives = participants.filter((p) => p.baseline?.phq2Positive || p.baseline?.gad2Positive).length;
 
   return (
     <div className="space-y-6">
@@ -149,7 +152,7 @@ export default function SurveyData() {
         />
         <StatCard
           label="Weekly completion"
-          value={completionPct === null ? "-" : `${completionPct}%`}
+          value={completionPct === null ? '-' : `${completionPct}%`}
           sub={`${completedWeekly} of ${expectedWeekly} elapsed weeks`}
           icon={TrendingUp}
         />
@@ -179,7 +182,9 @@ export default function SurveyData() {
                   <th className="py-2 pr-4">Enrolled</th>
                   <th className="py-2 pr-3">Wk</th>
                   {WEEKS.map((w) => (
-                    <th key={w} className="py-2 px-2 text-center">W{w}</th>
+                    <th key={w} className="py-2 px-2 text-center">
+                      W{w}
+                    </th>
                   ))}
                   <th className="py-2 px-2 text-center">Exit</th>
                   <th className="py-2 px-2 text-center">W12</th>
@@ -198,7 +203,9 @@ export default function SurveyData() {
                       <td className="py-2 pr-4 text-gray-600">{shortDate(p.enrolledAt)}</td>
                       <td className="py-2 pr-3 text-gray-600">{Math.min(p.studyWeek, 12)}</td>
                       {WEEKS.map((w) => (
-                        <td key={w} className="py-2 px-2 text-center">{weekCell(p, w)}</td>
+                        <td key={w} className="py-2 px-2 text-center">
+                          {weekCell(p, w)}
+                        </td>
                       ))}
                       <td className="py-2 px-2 text-center">{endpointCell(p.exit, p.studyWeek > 8)}</td>
                       <td className="py-2 px-2 text-center">{endpointCell(p.week12, p.studyWeek > 12)}</td>
@@ -231,10 +238,10 @@ export default function SurveyData() {
                                         <tr key={w}>
                                           <td className="pr-3">W{w}</td>
                                           <td className="pr-3">{shortDate(c.recordedAt)}</td>
-                                          <td className="pr-3">{c.mood ?? "-"}</td>
-                                          <td className="pr-3">{c.stress ?? "-"}</td>
-                                          <td className="pr-3">{c.helpfulness ?? "-"}</td>
-                                          <td>{c.usage ?? "-"}</td>
+                                          <td className="pr-3">{c.mood ?? '-'}</td>
+                                          <td className="pr-3">{c.stress ?? '-'}</td>
+                                          <td className="pr-3">{c.helpfulness ?? '-'}</td>
+                                          <td>{c.usage ?? '-'}</td>
                                         </tr>
                                       );
                                     })}
@@ -251,7 +258,7 @@ export default function SurveyData() {
                               <p className="font-semibold text-gray-700 mb-1">Instruments (PHQ-2 / GAD-2)</p>
                               <table className="text-xs">
                                 <tbody>
-                                  {(["baseline", "exit", "week12"] as const).map((role) => (
+                                  {(['baseline', 'exit', 'week12'] as const).map((role) => (
                                     <tr key={role}>
                                       <td className="pr-3 text-gray-500">{ROLE_LABELS[role]}</td>
                                       <td className="pr-3 font-mono">{scoreText(p[role])}</td>
@@ -293,9 +300,9 @@ export default function SurveyData() {
                   <tr key={w.week} className="border-b last:border-0">
                     <td className="py-2 pr-4 font-medium">W{w.week}</td>
                     <td className="py-2 pr-4">{w.n}</td>
-                    <td className="py-2 pr-4">{w.avgMood ?? "-"}</td>
-                    <td className="py-2 pr-4">{w.avgStress ?? "-"}</td>
-                    <td className="py-2">{w.avgHelpfulness ?? "-"}</td>
+                    <td className="py-2 pr-4">{w.avgMood ?? '-'}</td>
+                    <td className="py-2 pr-4">{w.avgStress ?? '-'}</td>
+                    <td className="py-2">{w.avgHelpfulness ?? '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -322,8 +329,8 @@ export default function SurveyData() {
                   <tr key={a.role} className="border-b last:border-0">
                     <td className="py-2 pr-4 font-medium">{ROLE_LABELS[a.role]}</td>
                     <td className="py-2 pr-4">{a.n}</td>
-                    <td className="py-2 pr-4">{a.avgPhq2 ?? "-"}</td>
-                    <td className="py-2 pr-4">{a.avgGad2 ?? "-"}</td>
+                    <td className="py-2 pr-4">{a.avgPhq2 ?? '-'}</td>
+                    <td className="py-2 pr-4">{a.avgGad2 ?? '-'}</td>
                     <td className="py-2">
                       {a.phq2Positive} PHQ / {a.gad2Positive} GAD
                     </td>

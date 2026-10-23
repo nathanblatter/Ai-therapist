@@ -64,7 +64,7 @@ export async function insertHarnessRun(run: NewHarnessRun): Promise<number> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const passCount = run.scenarios.filter(s => s.passed).length;
+    const passCount = run.scenarios.filter((s) => s.passed).length;
     const estCost = run.scenarios.reduce((n, s) => n + s.costUsd, 0);
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO harness_runs
@@ -72,9 +72,18 @@ export async function insertHarnessRun(run: NewHarnessRun): Promise<number> {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
-        run.startedAt, run.finishedAt, run.suite, run.seed, run.variations,
-        run.judgeModel ?? null, run.gitSha ?? null, run.trigger ?? 'manual',
-        run.dryRun ?? false, run.scenarios.length, passCount, estCost.toFixed(4),
+        run.startedAt,
+        run.finishedAt,
+        run.suite,
+        run.seed,
+        run.variations,
+        run.judgeModel ?? null,
+        run.gitSha ?? null,
+        run.trigger ?? 'manual',
+        run.dryRun ?? false,
+        run.scenarios.length,
+        passCount,
+        estCost.toFixed(4),
       ],
     );
     const runId = rows[0].id;
@@ -84,9 +93,17 @@ export async function insertHarnessRun(run: NewHarnessRun): Promise<number> {
            (run_id, scenario_id, variation, pipeline, passed, assertion_failures, judge_scores, session_id, error, duration_ms, cost_usd)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
-          runId, s.scenarioId, s.variation, s.pipeline, s.passed,
-          JSON.stringify(s.assertionFailures), s.judgeScores ? JSON.stringify(s.judgeScores) : null,
-          s.sessionId ?? null, s.error ?? null, s.durationMs, s.costUsd.toFixed(4),
+          runId,
+          s.scenarioId,
+          s.variation,
+          s.pipeline,
+          s.passed,
+          JSON.stringify(s.assertionFailures),
+          s.judgeScores ? JSON.stringify(s.judgeScores) : null,
+          s.sessionId ?? null,
+          s.error ?? null,
+          s.durationMs,
+          s.costUsd.toFixed(4),
         ],
       );
     }
@@ -102,10 +119,9 @@ export async function insertHarnessRun(run: NewHarnessRun): Promise<number> {
 
 /** Newest-first run list for the admin panel. */
 export async function listHarnessRuns(limit = 50): Promise<HarnessRunRow[]> {
-  const { rows } = await pool.query<HarnessRunRow>(
-    `SELECT * FROM harness_runs ORDER BY started_at DESC LIMIT $1`,
-    [Math.min(Math.max(1, limit), 200)],
-  );
+  const { rows } = await pool.query<HarnessRunRow>(`SELECT * FROM harness_runs ORDER BY started_at DESC LIMIT $1`, [
+    Math.min(Math.max(1, limit), 200),
+  ]);
   return rows;
 }
 

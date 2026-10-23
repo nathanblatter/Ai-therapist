@@ -36,8 +36,13 @@ import weeklyDigestRoutes from './weeklyDigest.routes.js';
 import { defaultWeekEnding } from '../../services/weeklyDigest.service.js';
 
 const row = (id: number, orgId: number) => ({
-  id, org_id: orgId, week_ending: '2026-10-18', markdown: '# Weekly quality digest - week ending 2026-10-18\n',
-  data: { meta: { week_ending: '2026-10-18' } }, generated_at: new Date('2026-10-19T06:00:00Z'), generated_by: 'scheduler',
+  id,
+  org_id: orgId,
+  week_ending: '2026-10-18',
+  markdown: '# Weekly quality digest - week ending 2026-10-18\n',
+  data: { meta: { week_ending: '2026-10-18' } },
+  generated_at: new Date('2026-10-19T06:00:00Z'),
+  generated_by: 'scheduler',
 });
 
 function appAs(session: Record<string, unknown> | null) {
@@ -57,10 +62,20 @@ beforeEach(() => {
   mocks.getOrganizationIdForUser.mockResolvedValue(1);
   mocks.getIrbStudyOrgId.mockResolvedValue(1);
   mocks.listWeeklyDigests.mockImplementation(async (orgId: number) => [row(1, orgId)]);
-  mocks.getWeeklyDigest.mockImplementation(async (id: number, orgId: number) => (id === 1 && orgId === 1 ? row(1, 1) : null));
-  mocks.generateAndStoreWeeklyDigest.mockImplementation(async (i: { weekEnding: string; orgId: number }) => ({ ...row(2, i.orgId), week_ending: i.weekEnding }));
+  mocks.getWeeklyDigest.mockImplementation(async (id: number, orgId: number) =>
+    id === 1 && orgId === 1 ? row(1, 1) : null,
+  );
+  mocks.generateAndStoreWeeklyDigest.mockImplementation(async (i: { weekEnding: string; orgId: number }) => ({
+    ...row(2, i.orgId),
+    week_ending: i.weekEnding,
+  }));
   mocks.getDigestSchedule.mockResolvedValue({ enabled: false, weekday: 1, hour_utc: 6 });
-  mocks.setDigestSchedule.mockImplementation(async (raw: unknown) => ({ enabled: false, weekday: 1, hour_utc: 6, ...(raw as object) }));
+  mocks.setDigestSchedule.mockImplementation(async (raw: unknown) => ({
+    enabled: false,
+    weekday: 1,
+    hour_utc: 6,
+    ...(raw as object),
+  }));
 });
 
 describe('role matrix', () => {
@@ -75,7 +90,11 @@ describe('role matrix', () => {
     it(`${method.toUpperCase()} ${path}: 401 anonymous, 403 other roles, 404 sandbox, ${ok} researcher`, async () => {
       const send = (session: Record<string, unknown> | null) => {
         const r = request(appAs(session));
-        return method === 'get' ? r.get(path) : method === 'post' ? r.post(path).send({}) : r.put(path).send({ enabled: true });
+        return method === 'get'
+          ? r.get(path)
+          : method === 'post'
+            ? r.post(path).send({})
+            : r.put(path).send({ enabled: true });
       };
       expect((await send(null)).status).toBe(401);
       for (const role of ['participant', 'therapist', 'caseworker', 'demo']) {
@@ -99,7 +118,7 @@ describe('org scope', () => {
     expect(res.body.default_week_ending).toBe(defaultWeekEnding());
   });
 
-  it('reads another org\'s digest as 404 (json and download)', async () => {
+  it("reads another org's digest as 404 (json and download)", async () => {
     expect((await request(appAs(researcher(5))).get('/admin/api/evals/digests/1')).status).toBe(404);
     expect((await request(appAs(researcher(5))).get('/admin/api/evals/digests/1.md')).status).toBe(404);
     expect(mocks.getWeeklyDigest).toHaveBeenCalledWith(1, 5);
@@ -110,9 +129,15 @@ describe('org scope', () => {
   });
 
   it('generates for the session org with the caller as generator, and never logs data access', async () => {
-    const res = await request(appAs(researcher(5))).post('/admin/api/evals/digests/generate').send({ week_ending: '2026-10-11', orgId: 1 });
+    const res = await request(appAs(researcher(5)))
+      .post('/admin/api/evals/digests/generate')
+      .send({ week_ending: '2026-10-11', orgId: 1 });
     expect(res.status).toBe(201);
-    expect(mocks.generateAndStoreWeeklyDigest).toHaveBeenCalledWith({ weekEnding: '2026-10-11', orgId: 5, generatedBy: 'res1' });
+    expect(mocks.generateAndStoreWeeklyDigest).toHaveBeenCalledWith({
+      weekEnding: '2026-10-11',
+      orgId: 5,
+      generatedBy: 'res1',
+    });
     expect(res.body.digest.week_ending).toBe('2026-10-11');
     expect(mocks.logDataAccess).not.toHaveBeenCalled();
   });
@@ -132,7 +157,9 @@ describe('validation', () => {
   it('defaults week_ending to the last complete week', async () => {
     const res = await request(appAs(researcher())).post('/admin/api/evals/digests/generate').send({});
     expect(res.status).toBe(201);
-    expect(mocks.generateAndStoreWeeklyDigest).toHaveBeenCalledWith(expect.objectContaining({ weekEnding: defaultWeekEnding() }));
+    expect(mocks.generateAndStoreWeeklyDigest).toHaveBeenCalledWith(
+      expect.objectContaining({ weekEnding: defaultWeekEnding() }),
+    );
   });
 
   it('rejects malformed, far-past and future weeks', async () => {
@@ -156,8 +183,10 @@ describe('validation', () => {
     expect(res.text).toContain('# Weekly quality digest');
   });
 
-  it('saves the schedule under the caller\'s username', async () => {
-    const res = await request(appAs(researcher())).put('/admin/api/evals/digests/schedule').send({ enabled: true, weekday: 2, hour_utc: 7 });
+  it("saves the schedule under the caller's username", async () => {
+    const res = await request(appAs(researcher()))
+      .put('/admin/api/evals/digests/schedule')
+      .send({ enabled: true, weekday: 2, hour_utc: 7 });
     expect(res.status).toBe(200);
     expect(mocks.setDigestSchedule).toHaveBeenCalledWith({ enabled: true, weekday: 2, hour_utc: 7 }, 'res1');
     expect(res.body.schedule).toMatchObject({ enabled: true, weekday: 2, hour_utc: 7 });

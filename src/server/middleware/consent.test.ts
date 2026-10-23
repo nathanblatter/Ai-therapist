@@ -44,7 +44,7 @@ describe('requireConsent (async, DB-backed active version)', () => {
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(412);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'consent_required', currentVersion: ACTIVE.version, reconsent: false })
+      expect.objectContaining({ error: 'consent_required', currentVersion: ACTIVE.version, reconsent: false }),
     );
   });
 

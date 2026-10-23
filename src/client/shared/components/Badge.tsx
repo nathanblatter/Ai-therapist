@@ -28,7 +28,14 @@ interface BadgeProps {
   children: ReactNode;
 }
 
-export default function Badge({ tone = 'gray', toneClass, weight = 'semibold', className, title, children }: BadgeProps) {
+export default function Badge({
+  tone = 'gray',
+  toneClass,
+  weight = 'semibold',
+  className,
+  title,
+  children,
+}: BadgeProps) {
   return (
     <span
       title={title}

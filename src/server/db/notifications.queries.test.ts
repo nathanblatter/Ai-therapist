@@ -75,7 +75,9 @@ describe('preferences', () => {
     queryMock
       .mockResolvedValueOnce({ rows: [] }) // getNotificationPreferences miss -> defaults
       .mockResolvedValueOnce({
-        rows: [{ user_id: 7, email_mode: 'off', urgent_email_immediate: true, digest_hour_local: 8, in_app_enabled: true }],
+        rows: [
+          { user_id: 7, email_mode: 'off', urgent_email_immediate: true, digest_hour_local: 8, in_app_enabled: true },
+        ],
       });
     const row = await upsertNotificationPreferences(7, { email_mode: 'off' });
     expect(row.email_mode).toBe('off');
