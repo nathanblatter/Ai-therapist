@@ -163,11 +163,3 @@ export async function isRecordingConsentedForSession(sessionId: string): Promise
   return result.rows[0]?.recording_enabled ?? true;
 }
 
-/** The consent record tied to a specific session, or null. */
-export async function getConsentForSession(sessionId: string): Promise<ConsentRow | null> {
-  const result = await pool.query<ConsentRow>(
-    `SELECT * FROM participant_consents WHERE session_id = $1 ORDER BY accepted_at DESC LIMIT 1`,
-    [sessionId]
-  );
-  return result.rows[0] ?? null;
-}

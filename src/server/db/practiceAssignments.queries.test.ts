@@ -9,7 +9,6 @@ import {
   insertPracticeAssignment,
   listUserAssignments,
   completeAssignment,
-  countOpenAssignments,
 } from './practiceAssignments.queries.js';
 
 beforeEach(() => {
@@ -80,20 +79,5 @@ describe('completeAssignment (scoping)', () => {
     queryMock.mockResolvedValueOnce({ rows: [ROW] });
     await completeAssignment(5, 42);
     expect(queryMock.mock.calls[0][1]).toEqual([5, 42, null]);
-  });
-});
-
-describe('countOpenAssignments', () => {
-  it("counts only status = 'assigned' rows for the user", async () => {
-    queryMock.mockResolvedValueOnce({ rows: [{ count: '2' }] });
-    expect(await countOpenAssignments(42)).toBe(2);
-    const [sql, params] = queryMock.mock.calls[0];
-    expect(sql).toContain("status = 'assigned'");
-    expect(params).toEqual([42]);
-  });
-
-  it('returns 0 when there are no rows', async () => {
-    queryMock.mockResolvedValueOnce({ rows: [] });
-    expect(await countOpenAssignments(42)).toBe(0);
   });
 });

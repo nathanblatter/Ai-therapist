@@ -659,14 +659,14 @@ node src/database/scripts/runMigration005.js
 
 ## Future Considerations
 
-### Potential Improvements
-1. **Split `index.js`**: Move routes to separate files (`src/server/routes/`)
-2. **Environment-based Config**: Create `config/development.js`, `config/production.js`
-3. **API Versioning**: Add `/api/v1/` prefix to allow future API changes
-4. **WebSocket Support**: Add real-time updates to admin dashboard
-5. **Testing**: Add `src/server/__tests__/` and `src/client/__tests__/`
-6. **Logging**: Integrate Winston or Pino for structured logging
-7. **Monitoring**: Add health check endpoints and metrics
+### Potential Improvements (status 2026-10-22)
+1. ~~Split `index.js`~~ done: routes live in `src/server/routes/{public,admin}/`, index.ts is a composition root
+2. **Environment-based Config**: still a single `.env` by design (plain .env, one compose file)
+3. **API Versioning**: not done, not planned
+4. ~~WebSocket Support~~ done: Socket.io admin broadcasts
+5. ~~Testing~~ done: colocated Vitest `*.test.ts` files (1900+ tests)
+6. ~~Logging~~ done: Pino via `src/server/utils/logger.ts` (some console.* remain, ai-therapist-238)
+7. ~~Monitoring~~ done: `/health` and `/health/deep`, ops panel
 
 ### Scaling Considerations
 - Current architecture supports horizontal scaling (stateless server)

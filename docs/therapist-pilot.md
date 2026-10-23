@@ -101,10 +101,9 @@ associate. Before pilot launch:
    hashed-token link (`/join/<token>`, 7-day default TTL) from the Caseload
    view; the client self-registers and is auto-assigned to the inviting
    therapist. Link delivery is copy-paste (no email sending yet).
-3. **Clinical-mode consent copy.** Current consent flow is IRB study
-   language; clinical mode needs plain "your therapist supervises this tool"
-   consent (the versioned-consent machinery can be reused as-is). NOW THE
-   TOP REMAINING BLOCKER.
+3. **Clinical-mode consent copy.** SHIPPED 2026-08-27: migration 078 added
+   `consent_documents.audience`, the clinical consent is seeded (2026-08-27.c1)
+   and `ConsentVersions.tsx` has audience tabs. Remaining blockers are 4 and 5.
 4. **Billing.** None exists. Not needed for a free pilot; needed before any
    paid conversion (likely per-seat per-month).
 5. Smaller: therapist-facing onboarding docs; BAA paperwork from section 2;

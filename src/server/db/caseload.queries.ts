@@ -235,11 +235,6 @@ export function getCaseworkerIdsForClient(clientId: number): Promise<number[]> {
   return getCareTeamMemberIds(clientId, 'caseworker');
 }
 
-/** Every care-team member id for a client, regardless of role. */
-export function getCareTeamMemberIdsForClient(clientId: number): Promise<number[]> {
-  return getCareTeamMemberIds(clientId);
-}
-
 /** A client's care team with member usernames and roles. */
 export async function getCareTeam(clientId: number): Promise<CareTeamMember[]> {
   const result = await pool.query<CareTeamMember>(

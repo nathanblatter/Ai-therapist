@@ -1,6 +1,6 @@
 # Admin Assistant (natural-language data chat) — spec for approval
 
-**Status: DRAFT — awaiting Nathan approval. Not scheduled, not built.**
+**Status: BUILT (assistant.service.ts, assistant.routes.ts, Assistant.tsx) and live on stage; dark in prod pending the red-team scenarios in ai-therapist-207.** This document is the original spec, kept as the design record.
 Origin: Gaskin suggestion, 2026-09-09 (flightdeck ai-therapist-161).
 
 ## Goal

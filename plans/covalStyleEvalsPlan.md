@@ -1,5 +1,7 @@
 # Plan: Coval-Style Simulation Evals (with real voice runs + recordings)
 
+> STATUS 2026-10-22: implemented. Quality scenarios, the voice suite (ported to the Grok proxy and GPT-Live on 2026-10-22; the Realtime-API design below is historical), the server-side harness runner and the admin Evals view all shipped. Kept as the design record; `docs/redteam.md` is current.
+
 ## Context
 
 The red-team harness (`src/redteam/`) already does Coval's core loop — LLM-driven
