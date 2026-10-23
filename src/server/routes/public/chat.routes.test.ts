@@ -230,7 +230,9 @@ describe('POST /api/chat/message rate limiting', () => {
       lastStatus = res.status;
     }
     expect(lastStatus).toBe(429);
-  });
+    // 31 sequential supertest round-trips can exceed the 5 s default when the
+    // whole suite runs in parallel (ai-therapist-279).
+  }, 30_000);
 });
 
 // ai-therapist-222: a restart that leaves the session unrehydratable is a
