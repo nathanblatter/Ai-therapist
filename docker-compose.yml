@@ -67,6 +67,12 @@ services:
       QUALTRICS_STUDY_ORG_ID: ${QUALTRICS_STUDY_ORG_ID}
       QUALTRICS_SYNC_INTERVAL_MINUTES: ${QUALTRICS_SYNC_INTERVAL_MINUTES}
       QUALTRICS_WEBHOOK_SECRET_HASH: ${QUALTRICS_WEBHOOK_SECRET_HASH}
+      # Care-team email via email-api on the tailnet (same hop as the iMessage
+      # pager); see .env.example. Prod picks these up from env_file.
+      EMAIL_API_URL: ${EMAIL_API_URL:-http://100.79.61.79:4500}
+      EMAIL_API_KEY: ${EMAIL_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      APP_BASE_URL: ${APP_BASE_URL}
     networks:
       - default
       - flightdeck
