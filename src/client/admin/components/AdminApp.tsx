@@ -282,7 +282,10 @@ export default function AdminApp() {
         { id: 'sandbox', label: 'Sandbox Invites', icon: Box, researcherOnly: true, researchOnly: true },
         { id: 'qualtrics', label: 'Qualtrics Sync', icon: RefreshCw, researcherOnly: true, researchOnly: true },
         { id: 'survey-data', label: 'Survey Data', icon: Clipboard, researcherOnly: true, researchOnly: true },
-        { id: 'export', label: 'Export', icon: Download, researchOnly: true },
+        // Export stays visible in clinical mode (ai-therapist-199): the server
+        // scopes therapists to single assigned-client sessions and refuses
+        // bulk/aggregate pulls, and ExportPanel renders the clinician variant.
+        { id: 'export', label: 'Export', icon: Download, roles: ['therapist', 'researcher', 'demo'] },
       ],
     },
     {

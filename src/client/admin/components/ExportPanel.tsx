@@ -1,5 +1,11 @@
+// Export panel. Researchers get the full research export (bulk, aggregated,
+// de-identified dataset). Therapists get the clinician variant
+// (ai-therapist-199): one assigned client's session at a time, matching
+// what export.routes.ts enforces (403 on bulk/aggregate, 404 on unassigned
+// sessions). The session list itself is caseload-scoped by the server, and
+// every export writes a data_access_log row.
 import { useState, useEffect } from "react";
-import { Download } from "react-feather";
+import { Download, Info } from "react-feather";
 import useAuth from "../hooks/useAuth";
 
 interface ExportSession {
@@ -21,6 +27,8 @@ export default function ExportPanel() {
   const [error, setError] = useState<string | null>(null);
   const [exportWarning, setExportWarning] = useState<string | null>(null);
   const { role: userRole } = useAuth();
+  // Clinician variant: single-session, no bulk/aggregate options.
+  const clinician = userRole === 'therapist';
 
   useEffect(() => {
     const fetchSessions = async () => {
@@ -54,11 +62,16 @@ export default function ExportPanel() {
     setExportWarning(null);
 
     try {
+      if (clinician && !sessionId) {
+        setError('Select a client session to export.');
+        setLoading(false);
+        return;
+      }
       // For researchers, check redaction status if specific session selected
       if (userRole === 'researcher' && sessionId) {
         const pendingRedactions = await checkRedactionStatus(sessionId);
         if (pendingRedactions > 0) {
-          setExportWarning(`⏳ ${pendingRedactions} message(s) still being redacted. Please wait for redaction to complete before exporting.`);
+          setExportWarning(`${pendingRedactions} message(s) still being redacted. Please wait for redaction to complete before exporting.`);
           setLoading(false);
           return;
         }
@@ -130,7 +143,20 @@ export default function ExportPanel() {
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold mb-6">Export Data</h2>
+      <h2 className="text-2xl font-bold mb-6">{clinician ? 'Export client material' : 'Export Data'}</h2>
+
+      {clinician && (
+        <div className="mb-6 bg-lightBlue bg-opacity-30 border border-royal border-opacity-30 rounded-lg p-4 flex gap-3">
+          <Info size={18} className="text-royal flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="text-sm text-gray-700 space-y-1">
+            <p>
+              Exports are limited to sessions of clients on your caseload, one session at a time.
+              Message content is included unredacted, as in the session view.
+            </p>
+            <p>Every export is recorded in the data access log.</p>
+          </div>
+        </div>
+      )}
 
       {userRole === 'researcher' && (
         <div className="mb-6 bg-white p-6 rounded-lg shadow border border-royal border-opacity-30">
@@ -180,7 +206,7 @@ export default function ExportPanel() {
               <option value="full">Full Data (All messages & metadata)</option>
               <option value="metadata">Metadata Only (No messages)</option>
               <option value="anonymized">Anonymized (Research IDs only)</option>
-              <option value="aggregated">Aggregated Statistics</option>
+              {!clinician && <option value="aggregated">Aggregated Statistics</option>}
             </select>
             <p className="text-sm text-gray-500 mt-1">
               {exportType === 'full' && 'Complete session data with HIPAA redaction'}
@@ -218,6 +244,7 @@ export default function ExportPanel() {
             </div>
           )}
 
+          {!clinician && (
           <div className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -230,18 +257,21 @@ export default function ExportPanel() {
               Export only crisis-flagged sessions
             </label>
           </div>
+          )}
 
           <div>
-            <label className="block font-medium mb-2 text-gray-700">
-              Specific Session (Optional)
+            <label htmlFor="exportSessionId" className="block font-medium mb-2 text-gray-700">
+              {clinician ? 'Client session' : 'Specific Session (Optional)'}
             </label>
             <select
+              id="exportSessionId"
               value={sessionId}
               onChange={(e) => setSessionId(e.target.value)}
               className="border rounded px-3 py-2 w-full"
               disabled={loadingSessions}
+              required={clinician}
             >
-              <option value="">All Sessions</option>
+              <option value="">{clinician ? 'Select a session' : 'All Sessions'}</option>
               {sessions.map((session) => {
                 const sessionIdShort = session.session_id.length > 12
                   ? session.session_id.substring(0, 12) + '...'
@@ -258,10 +288,15 @@ export default function ExportPanel() {
               })}
             </select>
             <p className="text-sm text-gray-500 mt-1">
-              {loadingSessions ? 'Loading sessions...' : 'Select a session or leave as "All Sessions" to export all'}
+              {loadingSessions
+                ? 'Loading sessions...'
+                : clinician
+                  ? 'Only sessions of clients assigned to you are listed'
+                  : 'Select a session or leave as "All Sessions" to export all'}
             </p>
           </div>
 
+          {!clinician && (
           <div>
             <label className="block font-medium mb-2 text-gray-700">
               Date Range (Optional)
@@ -287,6 +322,7 @@ export default function ExportPanel() {
               Only applies when no specific session is selected
             </p>
           </div>
+          )}
 
           {error && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
@@ -302,7 +338,7 @@ export default function ExportPanel() {
 
           <button
             onClick={handleExport}
-            disabled={loading}
+            disabled={loading || (clinician && !sessionId)}
             className="w-full bg-royal text-white py-3 rounded-lg font-semibold hover:bg-navy transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
             aria-label={loading ? 'Exporting data' : 'Download export file'}
           >
@@ -312,6 +348,18 @@ export default function ExportPanel() {
         </div>
       </div>
 
+      {clinician ? (
+        <div className="mt-6 bg-lightBlue bg-opacity-30 border border-royal border-opacity-30 rounded-lg p-4">
+          <h3 className="font-semibold mb-2">Export Information</h3>
+          <ul className="text-sm space-y-1 text-gray-700">
+            <li>• <strong>Full Data:</strong> every message in the session with timestamps</li>
+            <li>• <strong>Metadata Only:</strong> session details without message content</li>
+            <li>• <strong>Anonymized:</strong> the client's username replaced with a research ID</li>
+            <li>• JSON preserves full structure; CSV opens in a spreadsheet</li>
+            <li>• Signed care notes are copied or printed from the client's profile, not exported here</li>
+          </ul>
+        </div>
+      ) : (
       <div className="mt-6 bg-lightBlue bg-opacity-30 border border-royal border-opacity-30 rounded-lg p-4">
         <h3 className="font-semibold mb-2">Export Information</h3>
         <ul className="text-sm space-y-1 text-gray-700">
@@ -324,6 +372,7 @@ export default function ExportPanel() {
           <li>• Large exports may take a few moments to process</li>
         </ul>
       </div>
+      )}
     </div>
   );
 }
