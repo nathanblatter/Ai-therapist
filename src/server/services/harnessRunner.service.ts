@@ -162,19 +162,32 @@ export interface HarnessSchedule {
   /** UTC hour 0-23 at which the nightly run fires. */
   hour_utc: number;
   variations: number;
+  /** Further suites run one after another once the primary suite has fired
+   *  (eval spec WP4: replay beside the voice suite). Each fires at most once
+   *  per night, inside EXTRA_SUITE_WINDOW_HOURS of hour_utc, and never while
+   *  another run is active. Omitted or empty = primary suite only. */
+  extra_suites: HarnessSuite[];
 }
 
-export const DEFAULT_SCHEDULE: HarnessSchedule = { enabled: false, suite: 'voice', hour_utc: 9, variations: 1 };
+export const DEFAULT_SCHEDULE: HarnessSchedule = { enabled: false, suite: 'voice', hour_utc: 9, variations: 1, extra_suites: [] };
+
+/** How long after hour_utc an extra suite may still start (the primary run can
+ *  take most of the hour). */
+export const EXTRA_SUITE_WINDOW_HOURS = 3;
 
 export function normalizeSchedule(raw: unknown): HarnessSchedule {
   const r = (raw ?? {}) as Partial<HarnessSchedule>;
+  const suite = SUITES.includes(r.suite as HarnessSuite) ? (r.suite as HarnessSuite) : DEFAULT_SCHEDULE.suite;
+  const extras = Array.isArray(r.extra_suites) ? r.extra_suites : [];
+  const extra_suites = [...new Set(extras.filter((x): x is HarnessSuite => SUITES.includes(x as HarnessSuite) && x !== suite))];
   return {
     enabled: r.enabled === true,
-    suite: SUITES.includes(r.suite as HarnessSuite) ? (r.suite as HarnessSuite) : DEFAULT_SCHEDULE.suite,
+    suite,
     hour_utc: Number.isInteger(r.hour_utc) && (r.hour_utc as number) >= 0 && (r.hour_utc as number) <= 23
       ? (r.hour_utc as number) : DEFAULT_SCHEDULE.hour_utc,
     variations: Number.isInteger(r.variations) && (r.variations as number) >= 1 && (r.variations as number) <= 5
       ? (r.variations as number) : 1,
+    extra_suites,
   };
 }
 
@@ -226,18 +239,49 @@ export function nightlyDue(
   return true;
 }
 
+/** Pure decision for an EXTRA suite: like nightlyDue, but it may start any time
+ *  inside [hour_utc, hour_utc + EXTRA_SUITE_WINDOW_HOURS) so it can queue up
+ *  behind the primary run, and it requires the primary suite to have already
+ *  started tonight (so the order is stable and a disabled primary disables all). */
+export function extraSuiteDue(
+  schedule: HarnessSchedule,
+  now: Date,
+  lastStartedForSuite: Date | null,
+  primaryStartedTonight: boolean,
+  runInProgress: boolean,
+): boolean {
+  if (!schedule.enabled || runInProgress || !primaryStartedTonight) return false;
+  const offset = (now.getUTCHours() - schedule.hour_utc + 24) % 24;
+  if (offset >= EXTRA_SUITE_WINDOW_HOURS) return false;
+  if (lastStartedForSuite && now.getTime() - lastStartedForSuite.getTime() < 20 * 60 * 60 * 1000) return false;
+  return true;
+}
+
 const SCHEDULER_TICK_MS = 5 * 60 * 1000;
 let schedulerTimer: NodeJS.Timeout | null = null;
 
 async function schedulerTick(): Promise<void> {
   try {
     const schedule = await getHarnessSchedule();
-    const { rows } = await pool.query<{ started_at: Date }>(
-      `SELECT started_at FROM harness_runs WHERE trigger = 'nightly' ORDER BY started_at DESC LIMIT 1`,
+    const now = new Date();
+    const { rows } = await pool.query<{ suite: string; started_at: Date }>(
+      `SELECT DISTINCT ON (suite) suite, started_at FROM harness_runs
+        WHERE trigger = 'nightly' ORDER BY suite, started_at DESC`,
     );
-    if (!nightlyDue(schedule, new Date(), rows[0]?.started_at ?? null, active !== null)) return;
-    log.info(`nightly harness run due (suite=${schedule.suite})`);
-    await startHarnessRun({ suite: schedule.suite, variations: schedule.variations, trigger: 'nightly' });
+    const lastBySuite = new Map(rows.map(r => [r.suite, r.started_at]));
+    const primaryLast = lastBySuite.get(schedule.suite) ?? null;
+    if (nightlyDue(schedule, now, primaryLast, active !== null)) {
+      log.info(`nightly harness run due (suite=${schedule.suite})`);
+      await startHarnessRun({ suite: schedule.suite, variations: schedule.variations, trigger: 'nightly' });
+      return;
+    }
+    const primaryStartedTonight = !!primaryLast && now.getTime() - primaryLast.getTime() < 20 * 60 * 60 * 1000;
+    for (const suite of schedule.extra_suites) {
+      if (!extraSuiteDue(schedule, now, lastBySuite.get(suite) ?? null, primaryStartedTonight, active !== null)) continue;
+      log.info(`nightly harness run due (extra suite=${suite})`);
+      await startHarnessRun({ suite, variations: schedule.variations, trigger: 'nightly' });
+      return; // one run per tick; the next tick picks up the next suite
+    }
   } catch (err) {
     log.error({ err }, 'nightly harness scheduler tick failed');
   }
