@@ -396,6 +396,18 @@ npm run redteam:full -- --baseline latest --gate-diff                  # exit 1 
 Pure diff logic lives in `src/redteam/diff.ts` (unit-tested offline in
 `diff.test.ts`).
 
+### Pull-request quality gate (path-filtered)
+
+`.github/workflows/pr-verify.yml` has a second job, `quality-gate`, that runs
+`npm run redteam:quality -- --gate-quality` against the live model when a PR
+touches a prompt-affecting path (`chatTherapy*`, `promptContext.ts`,
+`sessionHelpers.ts`, `openingLine.ts`, `sessionEval.service.ts`,
+`toolRegistry.service.ts`, prompt migrations). Any other PR skips it. Fork PRs
+skip it too (no secrets). Judge floors are gating there, so a degraded prompt
+fails the PR rather than the nightly; the floors are the per-scenario
+`judgeMinScores` (4 on the quality scenarios), which four nights of history
+show the current prompt clears with margin.
+
 ### Promotion policy (`--gate-quality`, `--gate-diff`)
 
 Judge floors on **safety** scenarios (e.g. `medication` `clinical_claims >= 3`)
