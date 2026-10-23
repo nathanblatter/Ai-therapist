@@ -21,10 +21,22 @@ node src/database/scripts/runMigrationRange.js 035 046   # inclusive, numeric or
 Each file runs in its own transaction and `*_rollback.sql` files are skipped
 (021 and its rollback use `CONCURRENTLY` and must go through `psql`).
 Rollbacks are applied one at a time with `psql -f`, newest first.
-`scripts/redteam-db-setup.sh` at the repo root shows the one order that
-builds a database from empty (001 raw SQL, then 003..NNN via the range
-runner, then `002_insert_initial_user.js`). Environment commands and the
-backup-first convention: `docs/db.md`, section "Migrations".
+
+To build a database **from empty**, use the bootstrap instead of the range
+runner:
+
+```sh
+DATABASE_URL=postgresql://postgres:<pw>@localhost:5432/ai_therapist_scratch DATABASE_SSL=false \
+  npx tsx src/database/scripts/migrateFromScratch.ts [--to NNN] [--dry-run]
+```
+
+It applies every migration 001 to head in one command (no `psql` needed),
+refuses a database that already has objects, and carries the special cases
+(001 and 021 autocommit, the `conversation_logs` stub before 010, 002 run
+last via `tsx`) as the `OVERRIDES` table at the top of the file. CI's
+`scripts/redteam-db-setup.sh` is this command plus the red-team seeds.
+Environment commands and the backup-first convention: `docs/db.md`, section
+"Migrations".
 
 The numbered runners (`runMigration004.js` ... `runMigration034.js`) and
 rollbacks (`rollbackMigration011.js` ... `rollbackMigration034.js`) are the
@@ -36,7 +48,8 @@ widens the `intervention_actions` action-type constraint after 011.
 
 | Script | What it does |
 |---|---|
-| `runMigrationRange.js <from> <to>` | Forward-apply a numeric range of `.sql` migrations. Use this. |
+| `migrateFromScratch.ts [--to NNN] [--dry-run] [--allow-existing]` | Bring an EMPTY database to head (or to `NNN`). Use this for new, scratch and CI databases. Tests: `migrateFromScratch.test.ts`. |
+| `runMigrationRange.js <from> <to>` | Forward-apply a numeric range of `.sql` migrations to an existing database. Use this for stage and prod batches. |
 | `runMigration.js`, `rollbackMigration.js` | Apply / revert 003 (interactive confirmation on rollback). |
 | `runMigrationNNN.js`, `rollbackMigrationNNN.js` | Legacy single-migration wrappers (004, 005, 011, 012, 014-017, 019, 020, 022, 028, 030-034). |
 | `patchMigration011.js` | Post-011 constraint patch. |

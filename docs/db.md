@@ -33,8 +33,9 @@ Authentication and authorization table for the AI Therapist application.
 
 The original single-table message log. Replaced by `messages` in 003 and
 dropped by `036_drop_conversation_logs_table.sql`; it no longer exists in any
-environment. `scripts/redteam-db-setup.sh` creates a two-column stub only so
-010 can alter it before 036 drops it again.
+environment. `src/database/scripts/migrateFromScratch.ts` creates a
+two-column stub (an `OVERRIDES` row) only so 010 can alter it before 036 drops
+it again.
 
 ### 3. GPT-Live voice tables (migration 098)
 
@@ -155,7 +156,7 @@ session actually ran on — see `docs/model-pinning.md`.
 
 Schema changes are plain SQL files in `src/database/migrations/`, numbered
 `NNN_<name>.sql` with a matching `NNN_<name>_rollback.sql`. **Current head:
-110** (`110_seed_runtime_config_defaults.sql`). There is no migrations table
+113** (`113_worksheet_review.sql`). There is no migrations table
 and nothing applies them automatically: both stage and prod are migrated **by
 hand**, and the record of what has been applied is the Flightdeck log plus the
 backup file names below. Author-side conventions live in
@@ -170,14 +171,50 @@ backup file names below. Author-side conventions live in
   tool for a batch; for one file, `psql -f` is simpler and is the only option
   for 021 and its rollback (`CREATE/DROP INDEX CONCURRENTLY` cannot run in a
   transaction).
-- `scripts/redteam-db-setup.sh` builds a database from **empty** and is what
-  CI runs on every deploy: 001 via psql, a `conversation_logs` stub (010
-  alters it, 036 drops it), `runMigrationRange 003 020`, 021 via psql,
-  `runMigrationRange 022 <newest number on disk>`, then
-  `002_insert_initial_user.js` and the red-team config seed. It is also the
+- `src/database/scripts/migrateFromScratch.ts` builds a database from
+  **empty** to the current head in one command (see "Bootstrapping from
+  empty" below). `scripts/redteam-db-setup.sh`, which CI runs on every
+  deploy, is that command followed by the red-team seeds. Either is the
   fastest way to get a scratch database for testing a rollback.
 - Rollbacks are applied with `psql -f`, in reverse numeric order, one file at
   a time. There is no rollback range runner.
+
+### Bootstrapping from empty
+
+```sh
+export PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH
+DATABASE_URL=postgresql://postgres:<pw>@localhost:5432/ai_therapist_scratch DATABASE_SSL=false \
+  npx tsx src/database/scripts/migrateFromScratch.ts [--to NNN] [--dry-run] [--allow-existing]
+```
+
+`migrateFromScratch.ts` discovers every `NNN_*.sql` and `NNN_*.js` in
+`src/database/migrations/` (rollbacks excluded), applies them in prefix-then-
+filename order with one transaction per SQL file on a single `pg` client, and
+logs one line per file. It does not need `psql`, and it deliberately does not
+read `.env`: `DATABASE_URL` must be set explicitly so it cannot land on stage
+by accident. It **refuses a non-empty database** (any user table, view or
+sequence) because, with no migrations table, nothing can say what was
+already applied; use `runMigrationRange.js` for those. `--dry-run` prints
+the plan without connecting, `--to NNN` stops after that prefix (steps that
+need a later migration are logged as skipped), and `--allow-existing` only
+disables the emptiness check for throwaway databases (every file re-applies,
+and 091's `DROP CONSTRAINT` is not idempotent).
+
+Everything the bootstrap has to do differently from "sort and apply" is a
+row in the `OVERRIDES` table at the top of the script. That table is the only
+place such rules live; add to it, never to a shell script:
+
+| File | Override | Why |
+| --- | --- | --- |
+| `001_create_users_table.sql` | autocommit (statement by statement, dedicated client) | Historically applied raw with `psql -f` before the range runner started at 003; kept identical to that record. |
+| `002_insert_initial_user.js` | run via `tsx` after every SQL migration; skipped if `--to` is below 069 | Seeds the first researcher through the app pool; `users.organization_id` is NOT NULL since 069 and needs the `irb-study` row from 069. |
+| `010_fix_timestamp_columns.sql` | pre-step: `CREATE TABLE IF NOT EXISTS conversation_logs (id SERIAL PRIMARY KEY, created_at TIMESTAMP ...)` | `conversation_logs` is a pre-001 legacy table no migration creates; 010 alters it and 036 drops it. |
+| `021_add_composite_message_index.sql` | autocommit (statement by statement, dedicated client) | `CREATE INDEX CONCURRENTLY` cannot run inside a transaction block. |
+
+Verified 2026-10-23: a database built by the new runner and one built by the
+previous hand-ordered sequence (001 via psql, stub, `runMigrationRange 003
+020`, 021 via psql, `runMigrationRange 022 113`, 002) gave byte-identical
+`pg_dump --schema-only` output and identical row counts across all 67 tables.
 
 ### Stage (local docker Postgres, database `ai_therapist`)
 
@@ -237,7 +274,7 @@ pre-migration backup (or the nightly dump), never a hand-written restore.
 
 Everything else has a rollback. The ones added in the 2026-10-22 backfill
 (008, 009, 010, 011-patch, 021, 022, 037) were each validated on a scratch
-database built by `redteam-db-setup.sh`: rollback applied, state checked,
+database built by the bootstrap: rollback applied, state checked,
 forward re-applied, state checked. Caveats recorded in their headers: 010's
 rollback needs 095's view dropped first and 010 forward needs the
 `conversation_logs` stub after 036; the 011-patch rollback (like 025/027/068/
@@ -256,8 +293,8 @@ rather than renumbered because:
 - `runMigrationRange.js` selects by `Number(name.slice(0, 3))` and sorts by
   full filename, so both files are inside any range that includes 091 and
   apply deterministically in the order `091_access_audit...` then
-  `091_researcher_care_comms...`. `redteam-db-setup.sh` inherits that, so CI
-  has been building schemas with both since September.
+  `091_researcher_care_comms...`. `migrateFromScratch.ts` orders the same
+  way, so CI has been building schemas with both since September.
 - Renumbering the second file to the next free number (111) would re-apply
   it on any environment that runs "everything after 110", and its `DROP
   CONSTRAINT` statements are not idempotent (no `IF EXISTS`), so a fresh
