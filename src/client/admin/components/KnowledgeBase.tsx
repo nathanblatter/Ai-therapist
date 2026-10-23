@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Search, BookOpen, Target, List } from 'react-feather';
+import { Plus, Search, BookOpen, Target, List, Clipboard } from 'react-feather';
 import ChunkCard from './knowledge/ChunkCard';
 import ChunkForm from './knowledge/ChunkForm';
 import TestRetrievalPanel from './knowledge/TestRetrievalPanel';
 import RetrievalLog from './knowledge/RetrievalLog';
+import WorksheetReviewPanel from './knowledge/WorksheetReviewPanel';
 import { deleteJson, getJson, postJson, HttpError } from '../../shared/http';
 import {
   KINDS, EMPTY_FORM, formValuesFromChunk,
@@ -12,7 +13,7 @@ import {
 
 const PAGE_SIZE = 50;
 
-type Tab = 'content' | 'test' | 'log';
+type Tab = 'content' | 'review' | 'test' | 'log';
 
 export default function KnowledgeBase() {
   const [tab, setTab] = useState<Tab>('content');
@@ -164,6 +165,7 @@ export default function KnowledgeBase() {
 
   const tabs: { id: Tab; label: string; icon: typeof BookOpen }[] = [
     { id: 'content', label: 'Content', icon: BookOpen },
+    { id: 'review', label: 'Worksheet review', icon: Clipboard },
     { id: 'test', label: 'Test retrieval', icon: Target },
     { id: 'log', label: 'Retrieval log', icon: List },
   ];
@@ -193,6 +195,7 @@ export default function KnowledgeBase() {
         })}
       </div>
 
+      {tab === 'review' && <WorksheetReviewPanel />}
       {tab === 'test' && <TestRetrievalPanel />}
       {tab === 'log' && <RetrievalLog />}
 

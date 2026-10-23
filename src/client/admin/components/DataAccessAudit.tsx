@@ -28,7 +28,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
 ];
 
 const PAGE_SIZE = 50;
-const ACTIONS = ['transcript_view', 'recording_stream', 'recording_download', 'export', 'dataset_export', 'audit_log_view'];
+const ACTIONS = ['transcript_view', 'recording_stream', 'recording_download', 'export', 'dataset_export', 'audit_log_view', 'worksheet_review'];
 
 interface Column<Row> {
   key: string;

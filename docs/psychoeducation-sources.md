@@ -47,6 +47,22 @@ tools and follow the same table + vetting rules:
   Rollnick as the standard approach (description only). Vet clinical accuracy +
   attribution before relying on them.
 
+## Worksheet-promoted templates (`source='worksheet_promotion'`)
+A fourth way content enters the worksheet corpus is the review loop for
+personalized worksheets (`create_custom_worksheet`, ai-therapist-73/89). Each
+completed instance waits in the Knowledge Base tab's **Worksheet review** queue;
+a researcher sees the filled instance but promotes only its de-personalised
+TEMPLATE: the section structure and prompt labels plus the vetted template's
+rationale. The participant's answers and the personalized intro are stripped
+before the reviewer sees the editable text, and the server refuses a promotion
+whose text still repeats an answer (`utils/worksheetTemplate.ts`). Opening an
+instance is logged to `data_access_log` as `worksheet_review`. The promoted chunk
+is `kind='worksheet'`, `source='worksheet_promotion'`, ingested as **pending**
+like any other new content, and carries `metadata.provenance =
+{worksheet_instance_id, reviewer, promoted_at, template_kind}` plus the section
+types (so it can itself serve as a `create_custom_worksheet` template once
+approved). Promotion is idempotent per instance (`promoted_chunk_id`, migration 113).
+
 ## Approval workflow (per-chunk gating)
 Every chunk has an `active` flag. Retrieval only returns `active = true` chunks,
 so content can sit embedded-but-gated until it clears review — approve as much as

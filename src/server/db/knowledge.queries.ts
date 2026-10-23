@@ -190,6 +190,9 @@ export interface KnowledgeChunkAdmin {
   updated_at: Date | null;
   /** Provenance flag: chunks without an embedding can never be retrieved. */
   has_embedding: boolean;
+  /** Structured provenance; promoted worksheets carry metadata.provenance
+   *  {worksheet_instance_id, reviewer, promoted_at, template_kind}. */
+  metadata: Record<string, unknown> | null;
 }
 
 export interface KnowledgeListFilter {
@@ -215,7 +218,7 @@ export async function listKnowledgeChunks(filter: KnowledgeListFilter): Promise<
   const q = filter.q && filter.q.trim() ? `%${filter.q.trim()}%` : null;
   const result = await pool.query<KnowledgeChunkAdmin & { total_count: string | number }>(
     `SELECT chunk_id, kind, topic, title, content, source, source_url, license, modality, active,
-            approved_by, approved_at, approval_note, created_at, updated_at,
+            approved_by, approved_at, approval_note, created_at, updated_at, metadata,
             (embedding IS NOT NULL) AS has_embedding,
             COUNT(*) OVER() AS total_count
      FROM knowledge_chunks
