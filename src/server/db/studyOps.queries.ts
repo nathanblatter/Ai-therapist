@@ -13,6 +13,11 @@ export interface StudyProtocol {
   study_start: string | null;
   study_end: string | null;
   arm_imbalance_threshold: number;
+  /** Study identifiers for the IRB packet header (ai-therapist-107); optional,
+   *  blank until a researcher fills them in on the Study Ops protocol form. */
+  protocol_id?: string | null;
+  principal_investigator?: string | null;
+  study_title?: string | null;
 }
 
 const DEFAULT_PROTOCOL: StudyProtocol = {
