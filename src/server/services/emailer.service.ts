@@ -1,11 +1,20 @@
-// SMTP email transport for care-team notifications (caseworker portal, spec
+// Email transport for care-team notifications (caseworker portal, spec
 // section 5). Mirrors crisisAlert.service's fail-safe posture: every branch
 // is caught here, a delivery problem can never propagate into the work-queue
 // or crisis paths that (indirectly) trigger it.
 //
+// Two transports, chosen by env:
+//   - email-api (EMAIL_API_URL + EMAIL_API_KEY): the house mail gateway on the
+//     tailnet, same hop crisisAlert.service uses for iMessage. Preferred: it
+//     owns relay choice, spool/retry and paging, and EMAIL_FROM can be any
+//     address under its domains (alerts@byuisresearch.com).
+//   - SMTP (SMTP_HOST ...): direct nodemailer, kept for environments without
+//     tailnet access.
+//
 // Degrades to a logged no-op when:
 //   - the system_config 'email_notifications' kill switch is off,
-//   - SMTP env (SMTP_HOST / EMAIL_FROM) is absent — local dev never sends,
+//   - neither transport's env is present (EMAIL_FROM is always required) —
+//     local dev never sends,
 //   - the nodemailer dependency is not installed yet (it is added to
 //     package.json by the integration slice; we import it lazily via a
 //     dynamic, non-statically-resolvable specifier so this module loads and
@@ -52,11 +61,21 @@ export function _setTransportFactoryForTests(factory: TransportFactory | null): 
   warnedMissingModule = false;
 }
 
-function smtpEnv(): { host: string; port: number; user: string; pass: string; from: string } | null {
-  const host = (process.env.SMTP_HOST ?? '').trim();
+type TransportEnv =
+  | { kind: 'email-api'; url: string; key: string; from: string }
+  | { kind: 'smtp'; host: string; port: number; user: string; pass: string; from: string };
+
+/** email-api wins when both are configured. */
+function transportEnv(): TransportEnv | null {
   const from = (process.env.EMAIL_FROM ?? '').trim();
-  if (!host || !from) return null;
+  if (!from) return null;
+  const url = (process.env.EMAIL_API_URL ?? '').trim().replace(/\/+$/, '');
+  const key = (process.env.EMAIL_API_KEY ?? '').trim();
+  if (url && key) return { kind: 'email-api', url, key, from };
+  const host = (process.env.SMTP_HOST ?? '').trim();
+  if (!host) return null;
   return {
+    kind: 'smtp',
     host,
     port: Number(process.env.SMTP_PORT ?? '587'),
     user: (process.env.SMTP_USER ?? '').trim(),
@@ -65,10 +84,40 @@ function smtpEnv(): { host: string; port: number; user: string; pass: string; fr
   };
 }
 
-/** Default factory: lazily import nodemailer and build an SMTP transport. */
+/**
+ * email-api transport: POST /send with the named key. email-api answers 200
+ * (sent) or 202 (queued: relay down or budget spent; it retries and pages
+ * Nathan itself), both of which count as handed over here. Anything else is
+ * a failure the caller sees as 'failed'.
+ */
+function emailApiTransport(env: { url: string; key: string }): MailTransport {
+  return {
+    async sendMail(options) {
+      const res = await fetch(`${env.url}/send`, {
+        method: 'POST',
+        headers: { 'X-API-Key': env.key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: options.from,
+          to: [options.to],
+          subject: options.subject,
+          text: options.text,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`email-api /send answered ${res.status}: ${body.slice(0, 200)}`);
+      }
+      return res.json().catch(() => ({}));
+    },
+  };
+}
+
+/** Default factory: email-api when configured, else lazily import nodemailer. */
 async function defaultTransportFactory(): Promise<MailTransport | null> {
-  const env = smtpEnv();
+  const env = transportEnv();
   if (!env) return null;
+  if (env.kind === 'email-api') return emailApiTransport(env);
   try {
     // Variable specifier: TypeScript does not try to resolve the module, so
     // this file typechecks and tests run before the dependency is installed.
@@ -117,8 +166,8 @@ async function emailNotificationsEnabled(): Promise<boolean> {
 
 /**
  * Send one email. Never throws. Returns:
- *   'sent'    — handed to the SMTP transport successfully
- *   'skipped' — deliberately not sent (kill switch off, SMTP not configured,
+ *   'sent'    — handed to the transport successfully
+ *   'skipped' — deliberately not sent (kill switch off, no transport configured,
  *               nodemailer missing, or no recipient address)
  *   'failed'  — transport error (logged)
  */
@@ -132,11 +181,11 @@ export async function sendEmail(email: OutgoingEmail): Promise<EmailSendResult> 
       log.warn('[email] email_notifications disabled via admin config; skipping');
       return 'skipped';
     }
-    const env = smtpEnv();
+    const env = transportEnv();
     if (!env) {
       if (!warnedMissingConfig) {
         warnedMissingConfig = true;
-        log.warn('[email] SMTP not configured (SMTP_HOST / EMAIL_FROM); email delivery is a no-op');
+        log.warn('[email] no transport configured (EMAIL_API_URL+EMAIL_API_KEY or SMTP_HOST, plus EMAIL_FROM); email delivery is a no-op');
       }
       return 'skipped';
     }
