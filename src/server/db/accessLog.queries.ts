@@ -13,7 +13,11 @@ export type DataAccessAction =
   | 'dataset_export'
   /** Reading a participant's access history (ai-therapist-197): the audit
    *  trail is self-auditing; the global list view is NOT logged. */
-  | 'audit_log_view';
+  | 'audit_log_view'
+  /** Opening a filled worksheet instance in the review queue (ai-therapist-89):
+   *  the participant's answers are shown to the reviewer. The queue list
+   *  (titles only) is NOT logged. */
+  | 'worksheet_review';
 
 export interface DataAccessLogInput {
   /** userid of the account performing the access (null if unknown). */
@@ -70,6 +74,7 @@ export const DATA_ACCESS_ACTIONS: readonly DataAccessAction[] = [
   'export',
   'dataset_export',
   'audit_log_view',
+  'worksheet_review',
 ] as const;
 
 export function isDataAccessAction(value: unknown): value is DataAccessAction {

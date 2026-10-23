@@ -48,6 +48,7 @@ import insightsRoutes from "./routes/admin/insights.routes.js";
 import participantProfileRoutes from "./routes/admin/participantProfile.routes.js";
 import studyStatusRoutes from "./routes/admin/studyStatus.routes.js";
 import knowledgeRoutes from "./routes/admin/knowledge.routes.js";
+import worksheetReviewRoutes from "./routes/admin/worksheetReview.routes.js";
 import qualtricsSyncRoutes from "./routes/admin/qualtricsSync.routes.js";
 import prepRoutes from "./routes/admin/prep.routes.js";
 import evalsRoutes from "./routes/admin/evals.routes.js";
@@ -840,6 +841,9 @@ app.use(qualtricsWebhookRoutes());
 
 // RAG knowledge-base curation (Knowledge Base tab) -> routes/admin/knowledge.routes.ts.
 app.use(knowledgeRoutes());
+
+// Worksheet review queue (promote/reject personalized worksheets) -> routes/admin/worksheetReview.routes.ts (ai-therapist-89)
+app.use(worksheetReviewRoutes());
 
 // Qualtrics response sync (researcher-only, env-gated) -> routes/admin/qualtricsSync.routes.ts
 app.use(qualtricsSyncRoutes());

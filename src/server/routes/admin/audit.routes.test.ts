@@ -12,7 +12,7 @@ const dbMocks = vi.hoisted(() => ({
   listAssistantAudit: vi.fn(),
   logDataAccess: vi.fn(),
   isDataAccessAction: (v: unknown) =>
-    ['transcript_view', 'recording_stream', 'recording_download', 'export', 'dataset_export', 'audit_log_view'].includes(String(v)),
+    ['transcript_view', 'recording_stream', 'recording_download', 'export', 'dataset_export', 'audit_log_view', 'worksheet_review'].includes(String(v)),
   // Caseload middleware (requireClientAccess).
   isAssigned: vi.fn(),
   getSessionAccessInfo: vi.fn(),

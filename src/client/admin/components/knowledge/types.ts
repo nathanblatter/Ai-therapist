@@ -17,6 +17,32 @@ export interface Chunk {
   created_at: string;
   updated_at: string | null;
   has_embedding: boolean;
+  metadata: Record<string, unknown> | null;
+}
+
+/** Provenance stamped on chunks promoted from the worksheet review queue
+ *  (source = 'worksheet_promotion'); null for everything else. */
+export interface WorksheetPromotionProvenance {
+  worksheet_instance_id: number;
+  reviewer: string;
+  promoted_at: string;
+  template_kind: string;
+}
+
+export function promotionProvenance(c: Chunk): WorksheetPromotionProvenance | null {
+  if (c.source !== 'worksheet_promotion') return null;
+  const p = c.metadata?.provenance;
+  if (!p || typeof p !== 'object') return null;
+  const rec = p as Partial<Record<keyof WorksheetPromotionProvenance, unknown>>;
+  // BIGSERIAL ids may arrive as strings from pg; accept either.
+  const instanceId = Number(rec.worksheet_instance_id);
+  if (!Number.isFinite(instanceId) || typeof rec.reviewer !== 'string') return null;
+  return {
+    worksheet_instance_id: instanceId,
+    reviewer: rec.reviewer,
+    promoted_at: typeof rec.promoted_at === 'string' ? rec.promoted_at : '',
+    template_kind: typeof rec.template_kind === 'string' ? rec.template_kind : '',
+  };
 }
 
 export interface StatusCount {

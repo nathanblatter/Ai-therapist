@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { CheckCircle, Clock, Trash2, ExternalLink, Edit2, ChevronDown, ChevronUp, Award, Moon, AlertTriangle } from 'react-feather';
-import { type Chunk, type ChunkUsage, formatDate, formatDateTime } from './types';
+import { CheckCircle, Clock, Trash2, ExternalLink, Edit2, ChevronDown, ChevronUp, Award, Moon, AlertTriangle, FileText } from 'react-feather';
+import { type Chunk, type ChunkUsage, formatDate, formatDateTime, promotionProvenance } from './types';
 
 const PREVIEW_CHARS = 240;
 
@@ -29,6 +29,7 @@ export default function ChunkCard({ chunk: c, usage, workhorseThreshold, busy, o
   const chosen = usage?.chosen_count ?? 0;
   const deadWeight = c.active && chosen === 0;
   const workhorse = workhorseThreshold !== null && chosen > 0 && chosen >= workhorseThreshold;
+  const promotion = promotionProvenance(c);
 
   return (
     <div className="bg-white rounded-lg shadow p-4">
@@ -50,6 +51,11 @@ export default function ChunkCard({ chunk: c, usage, workhorseThreshold, busy, o
             {deadWeight && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500" title="Active but never chosen by retrieval">
                 <Moon size={12} /> Dead weight
+              </span>
+            )}
+            {promotion && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-violet-100 text-violet-700 font-medium" title="Template promoted from a reviewed personalized worksheet">
+                <FileText size={12} /> Promoted worksheet
               </span>
             )}
             {!c.has_embedding && (
@@ -92,6 +98,13 @@ export default function ChunkCard({ chunk: c, usage, workhorseThreshold, busy, o
             Added {formatDateTime(c.created_at)}
             {c.updated_at && c.updated_at !== c.created_at && <> · updated {formatDateTime(c.updated_at)}</>}
           </p>
+          {promotion && (
+            <p className="text-xs text-gray-500 mt-1">
+              Promoted from worksheet instance #{promotion.worksheet_instance_id} by <strong>{promotion.reviewer}</strong>
+              {promotion.promoted_at && ` · ${formatDate(promotion.promoted_at)}`}
+              {promotion.template_kind && ` · ${promotion.template_kind.replace(/_/g, ' ')}`}
+            </p>
+          )}
           {c.active && c.approved_by && (
             <p className="text-xs text-gray-500 mt-1">
               Approved by <strong>{c.approved_by}</strong>

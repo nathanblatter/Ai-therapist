@@ -100,6 +100,7 @@ describe('isDataAccessAction', () => {
   it('accepts the known actions including the self-audit one and rejects others', () => {
     expect(isDataAccessAction('transcript_view')).toBe(true);
     expect(isDataAccessAction('audit_log_view')).toBe(true);
+    expect(isDataAccessAction('worksheet_review')).toBe(true);
     expect(isDataAccessAction('drop_table')).toBe(false);
     expect(isDataAccessAction(7)).toBe(false);
   });
