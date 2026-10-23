@@ -124,7 +124,7 @@ async function bringUp(opts: { openingPrompt?: string | null } = {}): Promise<{
   await grokVoiceManager.attachClient(SESSION, client as unknown as import('ws').default);
   const upstream = upstreams[upstreams.length - 1];
   upstream.emit('message', Buffer.from(JSON.stringify({
-    type: 'session.created', session: { id: 'x', model: 'grok-voice-think-fast-2.0' },
+    type: 'session.created', session: { id: 'x', model: 'grok-voice-3.0' },
   })));
   upstream.emit('message', Buffer.from(JSON.stringify({ type: 'session.updated', session: SESSION_CONFIG })));
   await flush();
@@ -182,10 +182,10 @@ describe('bring-up', () => {
     expect(events[1].item.content[0].text).toBe('OPENING');
     expect(events[2]).toEqual({ type: 'response.create' });
 
-    expect(sent(client)[0]).toEqual({ type: 'ready', model: 'grok-voice-think-fast-2.0' });
+    expect(sent(client)[0]).toEqual({ type: 'ready', model: 'grok-voice-3.0' });
     expect(queryMock).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE session_configurations SET ai_model'),
-      ['grok-voice-think-fast-2.0', SESSION],
+      ['grok-voice-3.0', SESSION],
     );
     expect(grokVoiceManager.isConnected(SESSION)).toBe(true);
     expect(grokVoiceManager.getActiveConnections()).toEqual([SESSION]);
@@ -330,10 +330,10 @@ describe('usage metering', () => {
 
     const seconds = recordLiveUsageMock.mock.calls.map((c: unknown[]) => c[2]);
     expect(seconds).toEqual([7, 9, 9, 9]);
-    expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-think-fast-2.0', 9, { finalized: false });
+    expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-3.0', 9, { finalized: false });
     expect(grokVoiceManager.getUsageSeconds(SESSION)).toBe(9);
     expect(recordLlmUsageMock).toHaveBeenCalledTimes(3);
-    expect(recordLlmUsageMock).toHaveBeenCalledWith(SESSION, 'grok_voice', 'grok-voice-think-fast-2.0', 10, 20);
+    expect(recordLlmUsageMock).toHaveBeenCalledWith(SESSION, 'grok_voice', 'grok-voice-3.0', 10, 20);
   });
 
   it('confirms final usage on disconnect', async () => {
@@ -341,7 +341,7 @@ describe('usage metering', () => {
     fire(upstream, { type: 'response.done', response: { id: 'r1' }, usage: { billable_audio_seconds: 12 } });
     await flush();
     await grokVoiceManager.disconnect(SESSION);
-    expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-think-fast-2.0', 12, {
+    expect(recordLiveUsageMock).toHaveBeenLastCalledWith(SESSION, 'grok-voice-3.0', 12, {
       finalized: true, closeReason: 'close_requested',
     });
   });
@@ -434,7 +434,7 @@ describe('failure handling', () => {
     upstream.emit('close', 1006, Buffer.from(''));
     await flush();
 
-    expect(recordLiveUsageMock).toHaveBeenCalledWith(SESSION, 'grok-voice-think-fast-2.0', 30, {
+    expect(recordLiveUsageMock).toHaveBeenCalledWith(SESSION, 'grok-voice-3.0', 30, {
       finalized: true, closeReason: 'connection_lost',
     });
     expect(sent(client)).toContainEqual({ type: 'closed', reason: 'upstream_lost' });

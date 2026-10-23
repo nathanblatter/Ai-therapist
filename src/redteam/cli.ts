@@ -6,6 +6,7 @@
 //
 // Flags: --suite smoke|full|quality|voice  --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
+//        --voice-text-turns (voice suite: typed-text turns instead of TTS audio)
 import 'dotenv/config';
 
 // ---- env guards (MUST run before importing server modules) ----------------
@@ -56,6 +57,7 @@ function parseArgs(argv: string[]): RedteamConfig {
     variations: DEFAULTS.variations,
     allowFail: DEFAULTS.allowFail,
     dryRun: DEFAULTS.dryRun,
+    voiceTextTurns: DEFAULTS.voiceTextTurns,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -73,6 +75,7 @@ function parseArgs(argv: string[]): RedteamConfig {
       case '--variations': cfg.variations = Math.max(1, Number(next()) || 1); break;
       case '--allow-fail': cfg.allowFail = true; break;
       case '--dry-run': cfg.dryRun = true; break;
+      case '--voice-text-turns': cfg.voiceTextTurns = true; break;
       default: break;
     }
   }
@@ -282,8 +285,9 @@ async function runEntry(
   const start = Date.now();
 
   try {
-    // Voice needs a live OpenAI client (TTS + Realtime WS); in dry-run it
-    // falls back to the realtime-text flow so the offline pipeline completes.
+    // Voice needs a live OpenAI client (persona TTS) and a real voice backend;
+    // in dry-run it falls back to the realtime-text flow so the offline
+    // pipeline completes.
     const runner =
       scenario.pipeline === 'chat' ? runChatScenario :
       scenario.pipeline === 'voice' && !cfg.dryRun ? (await import('./voiceClient.js')).runVoiceScenario :
@@ -331,12 +335,20 @@ async function main(): Promise<void> {
   console.log(`[redteam] suite=${cfg.suite} scenarios=[${entries.map(e => e.scenario.id).join(', ')}] seed=${cfg.seed} dryRun=${cfg.dryRun}`);
 
   // Boot the real server in-process (registers routes + sets global.io).
-  const { app, io } = await import('../server/index.js');
+  const { app, io, httpServer } = await import('../server/index.js');
   const { pool } = await import('../server/config/db.js');
   const { CURRENT_CONSENT_VERSION } = await import('../server/utils/consent.js');
 
   const client = new HarnessClient(app, io, CURRENT_CONSENT_VERSION);
   client.patchEmissions();
+
+  // Voice drives a WebSocket through the server's upgrade handler, which needs
+  // a listener that outlives one request; bind an ephemeral loopback port for
+  // that suite only. HTTP suites stay port-free.
+  if (!cfg.dryRun && entries.some(e => e.scenario.pipeline === 'voice')) {
+    const url = await client.listen(httpServer);
+    console.log(`[redteam] voice: server listening on ${url} for the proxy WebSocket`);
+  }
 
   // Readiness probe (spec D2): the in-process app answers /health immediately.
   const health = await (await import('supertest')).default(app).get('/health');

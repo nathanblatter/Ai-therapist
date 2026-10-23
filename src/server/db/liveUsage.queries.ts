@@ -21,10 +21,15 @@ import { pool } from '../config/db.js';
  */
 export const LIVE_RATES_PER_MINUTE: Record<string, number> = {
   'gpt-live-1': 0.05,
-  // Grok Voice (xAI, docs/grok-voice.md): $0.08/min of billable audio as
-  // published 2026-09. The proxy records the RESOLVED model id, so both the
-  // alias and the dated release are listed.
+  // Grok Voice (xAI, docs/grok-voice.md): $0.08/min ($4.80/hr) of billable
+  // audio, as published on docs.x.ai/docs/models for grok-voice-3.0 (released
+  // 2026-10-14; grok-voice-latest now resolves to it) and unchanged from the
+  // deprecated 2.0 generation. The proxy records the RESOLVED model id, so the
+  // alias, the current release and the retired ids that older sessions were
+  // pinned to are all listed.
   'grok-voice-latest': 0.08,
+  'grok-voice-3.0': 0.08,
+  'grok-voice-2.0': 0.08,
   'grok-voice-think-fast-2.0': 0.08,
 };
 const LIVE_DEFAULT_RATE_PER_MINUTE = 0.05;

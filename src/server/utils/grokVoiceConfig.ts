@@ -18,6 +18,17 @@ import { GROK_SAMPLE_RATE } from '../../shared/grokVoiceProtocol.js';
 const GROK_MODEL_PREFIX = 'grok-voice';
 
 /**
+ * The current Grok Voice generation, as listed on docs.x.ai/docs/models:
+ * `grok-voice-3.0` (Speech to Speech, $0.08/min), released 2026-10-14. xAI
+ * moved the `grok-voice-latest` alias onto it the same day, so either id
+ * opens a 3.0 session; the explicit id pins the generation for the study
+ * record, the alias follows xAI's releases. `grok-voice-2.0` (resolved as
+ * `grok-voice-think-fast-2.0` in September probes) is deprecated upstream.
+ */
+export const GROK_CURRENT_MODEL = 'grok-voice-3.0';
+export const GROK_LATEST_ALIAS = 'grok-voice-latest';
+
+/**
  * Whether a configured ai_model names a Grok Voice model. Together with
  * isLiveModel this is the ONLY switch between the two voice backends: set
  * system_config.ai_model to 'grok-voice-latest' to roll onto Grok, back to a

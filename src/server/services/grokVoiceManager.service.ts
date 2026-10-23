@@ -16,9 +16,13 @@
  * steer the model — see shared/grokVoiceProtocol.ts.
  *
  * Protocol facts below were verified against the live API on 2026-09-20 (see
- * the probe transcript in the flightdeck decision for ai-therapist-244):
+ * the probe transcript in the flightdeck decision for ai-therapist-244) and
+ * re-verified on 2026-10-22 against Grok Voice 3.0 through the red-team voice
+ * harness (src/redteam/voiceClient.ts):
  *   - `session.created` reports the RESOLVED model (grok-voice-think-fast-2.0
- *     for the grok-voice-latest alias); it is pinned to the session.
+ *     for the alias in September; grok-voice-3.0 since xAI moved
+ *     grok-voice-latest onto the 3.0 generation on 2026-10-14); it is pinned
+ *     to the session. Pricing is unchanged at $0.08/min (LIVE_RATES_PER_MINUTE).
  *   - user speech arrives whole: `conversation.item.input_audio_transcription
  *     .completed` with an item id — no fragment assembly needed.
  *   - assistant speech streams as `response.output_audio_transcript.delta` and

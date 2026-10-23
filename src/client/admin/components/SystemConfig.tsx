@@ -94,7 +94,8 @@ interface SystemConfigData {
 // new session picks up the current value.
 const REALTIME_MODEL_OPTIONS = [
   { model: 'gpt-live-1', tier: 'OpenAI GPT-Live', description: 'Full-duplex voice model; delegates reasoning to the backend in live_backend_model' },
-  { model: 'grok-voice-latest', tier: 'xAI Grok Voice', description: 'Speech-to-speech model via the server-side proxy; needs XAI_API_KEY on the server' },
+  { model: 'grok-voice-3.0', tier: 'xAI Grok Voice', description: 'Grok Voice 3.0 (pinned release) via the server-side proxy; needs XAI_API_KEY on the server' },
+  { model: 'grok-voice-latest', tier: 'xAI Grok Voice', description: 'Speech-to-speech model via the server-side proxy, following xAI\'s latest release (3.0 since 2026-10-14); needs XAI_API_KEY on the server' },
   { model: 'gpt-realtime-2.1-mini', tier: 'Legacy', description: 'Realtime API (no longer wired to a session path)' },
   { model: 'gpt-realtime-2.1', tier: 'Legacy', description: 'Realtime API (no longer wired to a session path)' },
 ];
