@@ -4,6 +4,10 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import busboy from 'busboy';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('bugReportRoutes');
+
 const MAX_FILES = 4;
 const MAX_FILE_BYTES = 8 * 1024 * 1024; // 8MB, mirrors flightdeck's cap
 
@@ -74,7 +78,7 @@ export default function bugReportRoutes(): Router {
       const created = (await r.json().catch(() => null)) as { id?: string } | null;
       res.json({ ok: true, id: created?.id || null });
     } catch (err) {
-      console.error('bug-report forward failed:', err);
+      log.error({ err }, 'bug-report forward failed');
       res.status(502).json({ error: 'Could not reach the bug tracker.' });
     }
   });
@@ -110,7 +114,7 @@ export default function bugReportRoutes(): Router {
         limits: { files: MAX_FILES, fileSize: MAX_FILE_BYTES, fields: 0, parts: MAX_FILES + 1 },
       });
     } catch (err) {
-      console.error('screenshot upload: bad multipart headers:', err);
+      log.error({ err }, 'screenshot upload: bad multipart headers');
       return res.status(400).json({ error: 'Malformed upload.' });
     }
 
@@ -133,7 +137,7 @@ export default function bugReportRoutes(): Router {
     bb.on('partsLimit', () => fail(400, `At most ${MAX_FILES} screenshots per report.`));
     bb.on('fieldsLimit', () => fail(400, 'Only file parts are allowed.'));
     bb.on('error', (err: unknown) => {
-      console.error('screenshot upload parse failed:', err);
+      log.error({ err }, 'screenshot upload parse failed');
       fail(400, 'Malformed upload.');
     });
 
@@ -152,13 +156,13 @@ export default function bugReportRoutes(): Router {
         });
         const body = await r.json().catch(() => null);
         if (!r.ok) {
-          console.error('screenshot forward rejected:', r.status, body);
+          log.error({ status: r.status, body }, 'screenshot forward rejected');
           return res.status(r.status === 404 || r.status === 410 ? 410 : 502)
             .json({ error: 'Could not attach screenshots.' });
         }
         res.status(201).json({ ok: true, attachments: body });
       } catch (err) {
-        console.error('screenshot forward failed:', err);
+        log.error({ err }, 'screenshot forward failed');
         res.status(502).json({ error: 'Could not reach the bug tracker.' });
       }
     });

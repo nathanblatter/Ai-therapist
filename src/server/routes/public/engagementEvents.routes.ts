@@ -14,6 +14,10 @@ import { insertEngagementEvents } from '../../db/index.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import { cleanSessionId, capDetail } from './clientEvents.routes.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('engagementEventsRoutes');
+
 // Kinds gated by features.telemetry_interaction_timing.
 export const INTERACTION_TIMING_KINDS = ['turn_timing'] as const;
 
@@ -77,7 +81,7 @@ export default function engagementEventsRoutes(): Router {
         await insertEngagementEvents(accepted);
       } catch (err) {
         // Telemetry must never surface errors to participants; log and move on.
-        console.error('engagement-events insert failed:', err);
+        log.error({ err }, 'engagement-events insert failed');
       }
     }
 

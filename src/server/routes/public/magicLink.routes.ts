@@ -11,6 +11,10 @@ import rateLimit from 'express-rate-limit';
 import { tokensMatch } from '../../utils/crypto.js';
 import { createDemoUser } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('magicLinkRoutes');
+
 /** Production guard: the demo magic link must never work on a real production
  *  box. It is only enabled outside production, on the demo/stage site
  *  (DEMO_SITE=true), or with an explicit ALLOW_DEMO=true override. */
@@ -23,8 +27,8 @@ export default function magicLinkRoutes(): Router {
   const router = Router();
 
   if (!isMagicLinkAllowed() && process.env.DEMO_MAGIC_TOKEN) {
-    console.warn(
-      '[MagicLink] DEMO_MAGIC_TOKEN is set but NODE_ENV=production and neither DEMO_SITE=true nor ALLOW_DEMO=true — demo magic-link route disabled.'
+    log.warn(
+      'DEMO_MAGIC_TOKEN is set but NODE_ENV=production and neither DEMO_SITE=true nor ALLOW_DEMO=true — demo magic-link route disabled.',
     );
   }
 
@@ -62,7 +66,7 @@ export default function magicLinkRoutes(): Router {
       // orgId would scope org-gated lookups for the demo user to a real org).
       req.session.regenerate((regenErr) => {
         if (regenErr) {
-          console.error('[MagicLink] Session regenerate error:', regenErr);
+          log.error({ err: regenErr }, 'Session regenerate error');
           return res.status(500).send('Could not start demo session.');
         }
         req.session.userId = demoUser.userid;
@@ -72,15 +76,15 @@ export default function magicLinkRoutes(): Router {
 
         req.session.save((err) => {
           if (err) {
-            console.error('[MagicLink] Session save error:', err);
+            log.error({ err }, 'Session save error');
             return res.status(500).send('Could not start demo session.');
           }
-          console.log(`[MagicLink] Provisioned demo account ${demoUser.username} (id ${demoUser.userid})`);
+          log.info(`Provisioned demo account ${demoUser.username} (id ${demoUser.userid})`);
           res.redirect('/demo');
         });
       });
     } catch (error) {
-      console.error('[MagicLink] Failed to provision demo account:', error);
+      log.error({ err: error }, 'Failed to provision demo account');
       res.status(500).send('Could not start demo session.');
     }
   });

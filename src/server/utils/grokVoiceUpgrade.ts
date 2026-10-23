@@ -15,6 +15,10 @@ import type { Request, RequestHandler, Response } from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { GROK_VOICE_WS_PATH } from '../../shared/grokVoiceProtocol.js';
 
+import { createLogger } from './logger.js';
+
+const log = createLogger('grokVoiceUpgrade');
+
 /** Session id from a request URL, or null when the path is not ours. */
 export function parseGrokVoicePath(url: string | undefined): string | null {
   if (!url) return null;
@@ -56,7 +60,7 @@ export function attachGrokVoiceUpgrade(httpServer: HttpServer, deps: GrokUpgrade
     const sessionId = parseGrokVoicePath(req.url);
     if (!sessionId) return;
 
-    socket.on('error', err => console.warn('[Grok] upgrade socket error:', err.message));
+    socket.on('error', err => log.warn({ err }, 'upgrade socket error'));
 
     // Load the express-session from the cookie. express-session only needs a
     // response object for Set-Cookie on new sessions, which never happens here
@@ -64,24 +68,24 @@ export function attachGrokVoiceUpgrade(httpServer: HttpServer, deps: GrokUpgrade
     // handshake in index.ts does exactly the same.
     deps.sessionMiddleware(req as unknown as Request, {} as Response, (err?: unknown) => {
       if (err) {
-        console.error('[Grok] Session middleware error on upgrade:', err);
+        log.error({ err }, 'Session middleware error on upgrade');
         return rejectUpgrade(socket, 500, 'Session error');
       }
       deps.canAccess(req as unknown as Request, sessionId)
         .then(ok => {
           if (!ok) {
-            console.warn(`[Grok] Upgrade denied for ${sessionId.substring(0, 12)}...: not the session owner`);
+            log.warn(`Upgrade denied for ${sessionId.substring(0, 12)}...: not the session owner`);
             return rejectUpgrade(socket, 403, 'Forbidden');
           }
           wss.handleUpgrade(req, socket, head, ws => {
             deps.onClient(sessionId, ws).catch(e => {
-              console.error(`[Grok] Client attach failed for ${sessionId.substring(0, 12)}...:`, e);
+              log.error({ err: e }, `Client attach failed for ${sessionId.substring(0, 12)}...`);
               try { ws.close(1011, 'attach failed'); } catch { /* ignore */ }
             });
           });
         })
         .catch(e => {
-          console.error('[Grok] Ownership check failed on upgrade:', e);
+          log.error({ err: e }, 'Ownership check failed on upgrade');
           rejectUpgrade(socket, 500, 'Access check failed');
         });
     });

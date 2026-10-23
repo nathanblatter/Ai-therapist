@@ -111,10 +111,8 @@ describe('GET /admin/api/sessions/:sessionId/risk-check', () => {
 
   it('returns 500 rather than a partial payload when the read fails', async () => {
     dbMocks.getSessionRiskCheckLadder.mockRejectedValue(new Error('db down'));
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = await request(appAs('researcher')).get('/admin/api/sessions/sess_1/risk-check');
     expect(res.status).toBe(500);
-    spy.mockRestore();
   });
 });
 

@@ -7,6 +7,10 @@ import { requireRole } from '../../middleware/auth.js';
 import { opsMetrics } from '../../services/opsMetrics.service.js';
 import { getClientEventStats, getFunnel } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('opsRoutes');
+
 export default function opsRoutes(): Router {
   const router = Router();
 
@@ -36,7 +40,7 @@ export default function opsRoutes(): Router {
       try {
         clientErrors = await getClientEventStats(7);
       } catch (err) {
-        console.error('Failed to fetch client-event stats:', err);
+        log.error({ err }, 'Failed to fetch client-event stats');
       }
 
       const memory = process.memoryUsage();
@@ -50,7 +54,7 @@ export default function opsRoutes(): Router {
         clientErrors,
       });
     } catch (err) {
-      console.error('Failed to fetch ops telemetry:', err);
+      log.error({ err }, 'Failed to fetch ops telemetry');
       res.status(500).json({ error: 'Failed to fetch ops telemetry' });
     }
   });
@@ -64,7 +68,7 @@ export default function opsRoutes(): Router {
       const funnel = await getFunnel(days);
       res.json({ days, funnel });
     } catch (err) {
-      console.error('Failed to fetch funnel analytics:', err);
+      log.error({ err }, 'Failed to fetch funnel analytics');
       res.status(500).json({ error: 'Failed to fetch funnel analytics' });
     }
   });
@@ -80,7 +84,7 @@ export default function opsRoutes(): Router {
       const { getCostsSummary } = await import('../../services/openaiCosts.service.js');
       res.json({ ...(await getCostsSummary(days)), days });
     } catch (err) {
-      console.error('Failed to fetch OpenAI costs:', err);
+      log.error({ err }, 'Failed to fetch OpenAI costs');
       res.status(500).json({ error: 'Failed to fetch OpenAI costs' });
     }
   });
@@ -96,7 +100,7 @@ export default function opsRoutes(): Router {
       const { getCostDashboard } = await import('../../services/costDashboard.service.js');
       res.json(await getCostDashboard(days));
     } catch (err) {
-      console.error('Failed to build cost dashboard:', err);
+      log.error({ err }, 'Failed to build cost dashboard');
       res.status(500).json({ error: 'Failed to build cost dashboard' });
     }
   });

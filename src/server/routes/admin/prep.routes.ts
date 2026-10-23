@@ -24,6 +24,10 @@ import {
 } from '../../db/index.js';
 import type { PracticeAssignment, ScaleScorePoint } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('prepRoutes');
+
 /** Screener deltas: latest vs previous response per scale (newest-first input). */
 function computeScreenerDeltas(scaleHistory: ScaleScorePoint[]) {
   const byScale = new Map<string, { score: number; created_at: Date }[]>();
@@ -185,7 +189,7 @@ export default function prepRoutes(): Router {
         })),
       });
     } catch (err) {
-      console.error('Failed to build prep digest:', err);
+      log.error({ err }, 'Failed to build prep digest');
       res.status(500).json({ error: 'Failed to build prep digest' });
     }
   });

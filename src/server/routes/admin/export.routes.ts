@@ -16,6 +16,10 @@ import {
 } from '../../db/index.js';
 import { buildDataset, streamDatasetZip } from '../../services/datasetExport.service.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('exportRoutes');
+
 // Serialise rows to CSV using the given header order; quote/escape every cell.
 function toCsv(headers: string[], rows: ExportRow[]): string {
   const csvRows = [headers.join(',')];
@@ -135,7 +139,7 @@ export default function exportRoutes(): Router {
         res.json(rows);
       }
     } catch (err) {
-      console.error('Failed to export data:', err);
+      log.error({ err }, 'Failed to export data');
       res.status(500).json({ error: 'Failed to export data' });
     }
   });
@@ -167,7 +171,7 @@ export default function exportRoutes(): Router {
       res.setHeader('Content-Disposition', `attachment; filename="ai-therapist-dataset-${dateStamp}.zip"`);
       await streamDatasetZip(result, res);
     } catch (err) {
-      console.error('Failed to export dataset:', err);
+      log.error({ err }, 'Failed to export dataset');
       if (!res.headersSent) res.status(500).json({ error: 'Failed to export dataset' });
       else res.end();
     }

@@ -60,6 +60,10 @@ import {
 import { sidebandManager } from '../../services/sidebandManager.service.js';
 
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('liveSessionRoutes');
+
 const PARTICIPANT_COOKIE = 'att_pid';
 const PARTICIPANT_COOKIE_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
 
@@ -120,8 +124,8 @@ export default function liveSessionRoutes(): Router {
         // fail with an opaque 400 mid-handshake. Fail loudly and early instead.
         const aiModel = await getAiModel();
         if (!isLiveModel(aiModel)) {
-          console.error(
-            `[Live] system_config.ai_model is '${aiModel}', which is not a GPT-Live model. ` +
+          log.error(
+            `system_config.ai_model is '${aiModel}', which is not a GPT-Live model. ` +
             'Voice sessions cannot start until it is set to a gpt-live-* id.',
           );
           return res.status(409).json({
@@ -152,7 +156,7 @@ export default function liveSessionRoutes(): Router {
 
         const limitCheck = await checkSessionLimits(userId, userRole);
         if (!limitCheck.allowed && !isRecovery) {
-          console.log(`Session limit exceeded for user ${userId}:`, limitCheck.reason);
+          log.info({ reason: limitCheck.reason }, `Session limit exceeded for user ${userId}`);
           return res.status(429).json({
             error: 'rate_limit_exceeded',
             reason: limitCheck.reason,
@@ -190,7 +194,7 @@ export default function liveSessionRoutes(): Router {
             userVoice = userVoice || prefs?.preferred_voice;
             userLanguage = userLanguage || prefs?.preferred_language;
           } catch (err) {
-            console.error('[Live] Failed to load user preferences, using defaults:', err);
+            log.error({ err }, 'Failed to load user preferences, using defaults');
           }
         }
         userVoice = resolveLiveVoice(userVoice);
@@ -198,7 +202,7 @@ export default function liveSessionRoutes(): Router {
 
         if (userId) {
           updateUserPreferences(userId, userVoice, userLanguage).catch(err =>
-            console.error('[Live] Failed to save user preferences:', err));
+            log.error({ err }, 'Failed to save user preferences'));
         }
 
         // Assemble the clinical prompt exactly as the Realtime path does, so the
@@ -242,15 +246,15 @@ export default function liveSessionRoutes(): Router {
         ].filter(Boolean).join(' ');
 
         if (isRecovery && !limitCheck.allowed) {
-          console.warn(
-            `[Live] Session limits BYPASSED for a crisis recovery start (reason: ${limitCheck.reason}). ` +
+          log.warn(
+            `Session limits BYPASSED for a crisis recovery start (reason: ${limitCheck.reason}). ` +
             'A content-filter termination is a continuation, not a new session.',
           );
         }
 
         if (isRecovery) {
-          console.warn(
-            `[Live] RECOVERY session start for user ${userId ?? 'anonymous'} — the previous voice ` +
+          log.warn(
+            `RECOVERY session start for user ${userId ?? 'anonymous'} — the previous voice ` +
             'session was terminated by the content filter. Resuming in crisis-support mode.',
           );
         }
@@ -284,12 +288,12 @@ export default function liveSessionRoutes(): Router {
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('[Live] OpenAI session creation failed:', response.status, errorText);
+          log.error({ status: response.status, body: errorText }, 'OpenAI session creation failed');
 
           const { isIdentifierBlockedError } = await import('../../utils/safetyIdentifier.js');
           if (isIdentifierBlockedError(null, errorText)) {
-            console.error(
-              `[Live] BLOCKED SAFETY IDENTIFIER for user ${userId ?? 'anonymous'} — ` +
+            log.error(
+              `BLOCKED SAFETY IDENTIFIER for user ${userId ?? 'anonymous'} — ` +
               'participant cannot start sessions; study team must re-enroll or contact OpenAI.',
             );
             return res.status(403).json({ error: 'identifier_blocked' });
@@ -301,7 +305,7 @@ export default function liveSessionRoutes(): Router {
         const liveSessionId: string | undefined = data?.session?.id;
         const sdpAnswer: string | undefined = data?.transport?.sdp;
         if (!liveSessionId || !sdpAnswer) {
-          console.error('[Live] Invalid session response structure:', data);
+          log.error({ data }, 'Invalid session response structure');
           throw new Error('Invalid response from OpenAI Live API — missing session.id or transport.sdp');
         }
 
@@ -326,7 +330,7 @@ export default function liveSessionRoutes(): Router {
 
           if (checkin) {
             setSessionCheckin(sessionId, checkin).catch(err =>
-              console.error('[Live] Failed to store check-in:', err));
+              log.error({ err }, 'Failed to store check-in'));
           }
 
           recordConsent({
@@ -334,7 +338,7 @@ export default function liveSessionRoutes(): Router {
             userId,
             consentVersion: req.session!.consentVersion!,
             recordingEnabled: (systemConfig.features?.session_recording_enabled as boolean | undefined) ?? false,
-          }).catch(err => console.error('[Consent] Failed to record per-session consent:', err));
+          }).catch(err => log.error({ err }, '[Consent] Failed to record per-session consent'));
 
           void broadcastAdminEvent(global.io, 'session:created', {
             sessionId, userId, username, status: 'active', created_at: new Date(),
@@ -362,7 +366,7 @@ export default function liveSessionRoutes(): Router {
             proactive_offering: proactiveOffering,
           });
         } catch (dbError) {
-          console.error('[Live] Failed to create session in database:', dbError);
+          log.error({ err: dbError }, 'Failed to create session in database');
           // Continue: the voice session is already live and billing. Losing it
           // over a DB hiccup would be worse than running with a lazily-created row.
         }
@@ -386,8 +390,8 @@ export default function liveSessionRoutes(): Router {
         if (!sidebandEnabled) {
           // Explicitly loud. This kill switch now disables crisis detection on
           // the voice path, which it did not under Realtime.
-          console.warn(
-            '[Live] SIDEBAND_ENABLED=false — starting a voice session with NO crisis detection. ' +
+          log.warn(
+            'SIDEBAND_ENABLED=false — starting a voice session with NO crisis detection. ' +
             'This switch is far more dangerous under GPT-Live than it was under Realtime.',
           );
           // ...and queryable, not just loud in a log nobody reads. Without this
@@ -395,16 +399,17 @@ export default function liveSessionRoutes(): Router {
           // row from one whose attach simply has not landed yet.
           await markSidebandUnmonitored(
             sessionId, 'monitoring_disabled: SIDEBAND_ENABLED=false at session start',
-          ).catch((e: unknown) => console.error('[Live] Failed to record the disabled sideband:', e));
+          ).catch((e: unknown) => log.error({ err: e }, 'Failed to record the disabled sideband'));
         } else {
           try {
             await sidebandManager.connectAndWait(sessionId, liveSessionId, apiKey, {
               model: aiModel, backendModel,
             });
           } catch (err) {
-            console.error(
-              `[Live] Sideband attach FAILED for ${sessionId} — refusing to start an unmonitored ` +
-              'voice session:', err instanceof Error ? err.message : err,
+            log.error(
+              { err },
+              `Sideband attach FAILED for ${sessionId} — refusing to start an unmonitored ` +
+              'voice session',
             );
 
             // Hang up the OpenAI side so the participant's browser cannot keep
@@ -413,10 +418,10 @@ export default function liveSessionRoutes(): Router {
             await fetch(
               `https://api.openai.com/v1/live/sessions/${encodeURIComponent(liveSessionId)}/hangup`,
               { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` } },
-            ).catch((e: unknown) => console.error('[Live] hangup after failed attach also failed:', e));
+            ).catch((e: unknown) => log.error({ err: e }, 'hangup after failed attach also failed'));
 
             await updateSessionStatus(sessionId, 'ended', 'system')
-              .catch((e: unknown) => console.error('[Live] Failed to mark unmonitored session ended:', e));
+              .catch((e: unknown) => log.error({ err: e }, 'Failed to mark unmonitored session ended'));
 
             return res.status(503).json({
               error: 'monitoring_unavailable',
@@ -447,7 +452,7 @@ export default function liveSessionRoutes(): Router {
           session_limits: limitCheck.allowed ? (limitCheck.limits || null) : null,
         });
       } catch (error) {
-        console.error('[Live] Session creation error:', error);
+        log.error({ err: error }, 'Session creation error');
         res.status(500).json({ error: 'Failed to create Live session' });
       }
     },

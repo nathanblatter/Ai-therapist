@@ -16,6 +16,10 @@ import {
   type LanguagesConfig,
 } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('usersRoutes');
+
 interface UserUpdates {
   username?: string;
   password?: string;
@@ -61,7 +65,7 @@ export default function usersRoutes(): Router {
       const users = await getAllUsers(null, await orgIdFor(req));
       res.json({ users });
     } catch (error) {
-      console.error('Error fetching users:', error);
+      log.error({ err: error }, 'Error fetching users');
       res.status(500).json({ error: 'Failed to fetch users' });
     }
   });
@@ -103,7 +107,7 @@ export default function usersRoutes(): Router {
 
       res.json({ voice, language, theme, memory_enabled });
     } catch (error) {
-      console.error('Error fetching user preferences:', error);
+      log.error({ err: error }, 'Error fetching user preferences');
       res.status(500).json({ error: 'Failed to fetch preferences' });
     }
   });
@@ -119,7 +123,7 @@ export default function usersRoutes(): Router {
       await setUserMemoryEnabled(req.session.userId!, enabled);
       res.json({ success: true, memory_enabled: enabled });
     } catch (error) {
-      console.error('Error saving memory preference:', error);
+      log.error({ err: error }, 'Error saving memory preference');
       res.status(500).json({ error: 'Failed to save memory preference' });
     }
   });
@@ -134,7 +138,7 @@ export default function usersRoutes(): Router {
       await setUserPreferredTheme(req.session.userId!, theme);
       res.json({ success: true, theme });
     } catch (error) {
-      console.error('Error saving theme preference:', error);
+      log.error({ err: error }, 'Error saving theme preference');
       res.status(500).json({ error: 'Failed to save theme preference' });
     }
   });
@@ -163,7 +167,7 @@ export default function usersRoutes(): Router {
       await updateUserPreferences(userId!, voice, language);
       res.json({ success: true, voice, language });
     } catch (error) {
-      console.error('Error saving user preferences:', error);
+      log.error({ err: error }, 'Error saving user preferences');
       res.status(500).json({ error: 'Failed to save preferences' });
     }
   });
@@ -185,7 +189,7 @@ export default function usersRoutes(): Router {
       }
       res.json({ user });
     } catch (error) {
-      console.error('Error fetching user:', error);
+      log.error({ err: error }, 'Error fetching user');
       res.status(500).json({ error: 'Failed to fetch user' });
     }
   });
@@ -247,7 +251,7 @@ export default function usersRoutes(): Router {
       if (error instanceof Error && error.name === 'AccountSyncError') {
         return res.status(502).json({ error: error.message });
       }
-      console.error('Error updating user:', error);
+      log.error({ err: error }, 'Error updating user');
       res.status(500).json({ error: 'Failed to update user' });
     }
   });
@@ -262,7 +266,7 @@ export default function usersRoutes(): Router {
       if (error instanceof Error && error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
-      console.error('Error deleting user:', error);
+      log.error({ err: error }, 'Error deleting user');
       res.status(500).json({ error: 'Failed to delete user' });
     }
   });
@@ -297,7 +301,7 @@ export default function usersRoutes(): Router {
       if (error instanceof Error && error.name === 'AccountSyncError') {
         return res.status(502).json({ error: error.message });
       }
-      console.error('User creation error:', error);
+      log.error({ err: error }, 'User creation error');
       res.status(500).json({ error: 'Failed to create user' });
     }
   });

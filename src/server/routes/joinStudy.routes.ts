@@ -28,6 +28,10 @@ import { enqueueWorkItem } from '../services/workQueue.service.js';
 import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
 import { registerAccount } from '../services/accounts.service.js';
 
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('joinStudyRoutes');
+
 const PAGE_STYLE = `
   body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f4; color: #1c1917; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
   .card { background: #fff; border: 1px solid #e7e5e4; border-radius: 12px; padding: 2rem; width: 100%; max-width: 22rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
@@ -179,7 +183,7 @@ export default function joinStudyRoutes(): Router {
 
       res.type('html').send(registrationPage());
     } catch (error) {
-      console.error('Error loading study join page:', error);
+      log.error({ err: error }, 'Error loading study join page');
       res.status(500).json({ error: 'Failed to load signup page' });
     }
   });
@@ -230,7 +234,7 @@ export default function joinStudyRoutes(): Router {
       } catch (error: unknown) {
         // Registration failed — release the claim so the link stays usable.
         await releaseQualtricsClaim(claim.signup_id).catch((releaseError: unknown) => {
-          console.error('Error releasing qualtrics claim after failed registration:', releaseError);
+          log.error({ err: releaseError }, 'Error releasing qualtrics claim after failed registration');
         });
         if (error instanceof Error && error.message === 'Username already exists') {
           return res.status(409).json({ error: 'Username already exists' });
@@ -253,14 +257,14 @@ export default function joinStudyRoutes(): Router {
         sourceId: String(claim.signup_id),
         clientId: user.userid,
         notifyOrgTherapists: true,
-      }).catch((err) => console.error('[JoinStudy] enrollment work item failed:', err));
+      }).catch((err) => log.error({ err }, 'enrollment work item failed'));
 
       // Establish the session on a fresh id, mirroring login (fixation +
       // no leftover fields from a previous account on this browser).
       const createdUser = user;
       req.session.regenerate((regenErr) => {
         if (regenErr) {
-          console.error('Session regenerate error:', regenErr);
+          log.error({ err: regenErr }, 'Session regenerate error');
           return res.status(500).json({ error: 'Account created — please log in from the home page.' });
         }
         req.session.userId = createdUser.userid;
@@ -272,7 +276,7 @@ export default function joinStudyRoutes(): Router {
 
         req.session.save((err) => {
           if (err) {
-            console.error('Session save error:', err);
+            log.error({ err }, 'Session save error');
             return res.status(500).json({ error: 'Account created — please log in from the home page.' });
           }
           res.json({
@@ -282,7 +286,7 @@ export default function joinStudyRoutes(): Router {
         });
       });
     } catch (error) {
-      console.error('Error completing study registration:', error);
+      log.error({ err: error }, 'Error completing study registration');
       res.status(500).json({ error: 'Registration failed' });
     }
   });

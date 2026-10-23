@@ -25,6 +25,10 @@ import {
 } from '../../db/index.js';
 import type { RiskCheckLadder } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('crisisRoutes');
+
 // Caseload guard for session ids arriving via query string (the
 // requireSessionClientAccess middleware only covers :sessionId path params).
 // Caseworkers pass when assigned — this surface is summaries-tier (payloads
@@ -114,7 +118,7 @@ export default function crisisRoutes(): Router {
         modelSteered: steered,
       });
     } catch (err) {
-      console.error('Failed to flag session as crisis:', err);
+      log.error({ err }, 'Failed to flag session as crisis');
       res.status(500).json({ error: 'Failed to flag session' });
     }
   });
@@ -153,7 +157,7 @@ export default function crisisRoutes(): Router {
           : 'No live sideband — session is being ended server-side now.',
       });
     } catch (err) {
-      console.error('Failed to initiate crisis wind-down:', err);
+      log.error({ err }, 'Failed to initiate crisis wind-down');
       res.status(500).json({ error: 'Failed to initiate crisis wind-down' });
     }
   });
@@ -191,7 +195,7 @@ export default function crisisRoutes(): Router {
         unflaggedAt: new Date(),
       });
     } catch (err) {
-      console.error('Failed to unflag session:', err);
+      log.error({ err }, 'Failed to unflag session');
       res.status(500).json({ error: 'Failed to unflag session' });
     }
   });
@@ -211,7 +215,7 @@ export default function crisisRoutes(): Router {
       }
       res.json(data);
     } catch (err: unknown) {
-      console.error('[Crisis API] Failed to fetch comprehensive crisis data:', err);
+      log.error({ err }, 'Failed to fetch comprehensive crisis data');
       const errMsg = err instanceof Error ? err.message : String(err);
       res.status(500).json({ error: 'Failed to fetch crisis management data', details: errMsg });
     }
@@ -240,7 +244,7 @@ export default function crisisRoutes(): Router {
         res.json({ events: isSummaryTier ? projectRows(events, CRISIS_EVENT_SUMMARY_FIELDS) : events });
       }
     } catch (err) {
-      console.error('Failed to fetch crisis events:', err);
+      log.error({ err }, 'Failed to fetch crisis events');
       res.status(500).json({ error: 'Failed to fetch crisis events' });
     }
   });
@@ -260,7 +264,7 @@ export default function crisisRoutes(): Router {
       }
       res.json({ history });
     } catch (err) {
-      console.error('Failed to fetch session risk history:', err);
+      log.error({ err }, 'Failed to fetch session risk history');
       res.status(500).json({ error: 'Failed to fetch session risk history' });
     }
   });
@@ -278,7 +282,7 @@ export default function crisisRoutes(): Router {
       const ladder = await getSessionRiskCheckLadder(req.params.sessionId);
       res.json({ ladder: scrubLadder(ladder, req) });
     } catch (err) {
-      console.error('Failed to fetch session risk check:', err);
+      log.error({ err }, 'Failed to fetch session risk check');
       res.status(500).json({ error: 'Failed to fetch session risk check' });
     }
   });
@@ -293,7 +297,7 @@ export default function crisisRoutes(): Router {
       const ladders = await getParticipantRiskCheckLadders(userId);
       res.json({ ladders: ladders.map((ladder) => scrubLadder(ladder, req)) });
     } catch (err) {
-      console.error('Failed to fetch participant risk checks:', err);
+      log.error({ err }, 'Failed to fetch participant risk checks');
       res.status(500).json({ error: 'Failed to fetch participant risk checks' });
     }
   });
@@ -319,7 +323,7 @@ export default function crisisRoutes(): Router {
       }
       res.json({ sessions });
     } catch (err) {
-      console.error('Failed to fetch active crisis sessions:', err);
+      log.error({ err }, 'Failed to fetch active crisis sessions');
       res.status(500).json({ error: 'Failed to fetch active crisis sessions' });
     }
   });

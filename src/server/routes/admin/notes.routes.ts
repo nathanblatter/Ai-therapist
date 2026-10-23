@@ -38,6 +38,10 @@ import { emitSummaryEvent } from '../../utils/adminBroadcast.js';
 import { enqueueWorkItem } from '../../services/workQueue.service.js';
 import type { CareTeamRole } from '../../../shared/roles.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('notesRoutes');
+
 const CASE_NOTE_KINDS: readonly CaseNoteKind[] = [
   'contact',
   'referral',
@@ -171,7 +175,7 @@ export default function notesRoutes(): Router {
         }
         res.status(201).json({ note });
       } catch (err) {
-        console.error('[Notes] create failed:', err);
+        log.error({ err }, 'create failed');
         res.status(500).json({ error: 'Failed to create note' });
       }
     }
@@ -192,7 +196,7 @@ export default function notesRoutes(): Router {
         });
         res.json({ notes });
       } catch (err) {
-        console.error('[Notes] list failed:', err);
+        log.error({ err }, 'list failed');
         res.status(500).json({ error: 'Failed to list notes' });
       }
     }
@@ -237,7 +241,7 @@ export default function notesRoutes(): Router {
       if (!updated) return res.status(409).json({ error: 'Note is no longer an editable draft' });
       res.json({ note: updated });
     } catch (err) {
-      console.error('[Notes] update failed:', err);
+      log.error({ err }, 'update failed');
       res.status(500).json({ error: 'Failed to update note' });
     }
   });
@@ -256,7 +260,7 @@ export default function notesRoutes(): Router {
       if (!deleted) return res.status(409).json({ error: 'Note is no longer a draft' });
       res.json({ success: true });
     } catch (err) {
-      console.error('[Notes] delete failed:', err);
+      log.error({ err }, 'delete failed');
       res.status(500).json({ error: 'Failed to delete note' });
     }
   });
@@ -279,18 +283,18 @@ export default function notesRoutes(): Router {
         try {
           await markSoapReviewed(signed.session_id, req.session.username ?? 'unknown');
         } catch (err) {
-          console.error('[Notes] markSoapReviewed after sign failed:', err);
+          log.error({ err }, 'markSoapReviewed after sign failed');
         }
       }
       try {
         await expireWorkItemsBySource('note_awaiting_signature', 'care_notes', [String(signed.note_id)]);
       } catch (err) {
-        console.error('[Notes] expiring note_awaiting_signature work item failed:', err);
+        log.error({ err }, 'expiring note_awaiting_signature work item failed');
       }
       emitNoteSigned(signed);
       res.json({ note: signed });
     } catch (err) {
-      console.error('[Notes] sign failed:', err);
+      log.error({ err }, 'sign failed');
       res.status(500).json({ error: 'Failed to sign note' });
     }
   });
@@ -310,7 +314,7 @@ export default function notesRoutes(): Router {
       if (!amendment) return res.status(409).json({ error: 'Note is not amendable' });
       res.status(201).json({ note: amendment });
     } catch (err) {
-      console.error('[Notes] amend failed:', err);
+      log.error({ err }, 'amend failed');
       res.status(500).json({ error: 'Failed to amend note' });
     }
   });
@@ -331,7 +335,7 @@ export default function notesRoutes(): Router {
       if (!updated) return res.status(404).json({ error: 'Not found' });
       res.json({ note: updated });
     } catch (err) {
-      console.error('[Notes] share failed:', err);
+      log.error({ err }, 'share failed');
       res.status(500).json({ error: 'Failed to update sharing' });
     }
   });
@@ -416,7 +420,7 @@ export default function notesRoutes(): Router {
 
         res.status(201).json({ note, existing: false });
       } catch (err) {
-        console.error('[Notes] from-insights seed failed:', err);
+        log.error({ err }, 'from-insights seed failed');
         res.status(500).json({ error: 'Failed to seed note from insights' });
       }
     }

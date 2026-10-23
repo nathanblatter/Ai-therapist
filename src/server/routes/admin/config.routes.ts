@@ -13,6 +13,10 @@ import {
 } from '../../db/index.js';
 import { getSystemPrompt, invalidateConfigCache, DEFAULT_MODALITY_PRESETS } from '../../utils/sessionHelpers.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('adminConfigRoutes');
+
 export default function adminConfigRoutes(): Router {
   const router = Router();
 
@@ -45,7 +49,7 @@ export default function adminConfigRoutes(): Router {
       }));
       res.json({ tools });
     } catch (err) {
-      console.error('Failed to list tools:', err);
+      log.error({ err }, 'Failed to list tools');
       res.status(500).json({ error: 'Failed to list tools' });
     }
   });
@@ -75,7 +79,7 @@ export default function adminConfigRoutes(): Router {
       }
       res.json(config);
     } catch (err) {
-      console.error('Failed to fetch system configuration:', err);
+      log.error({ err }, 'Failed to fetch system configuration');
       res.status(500).json({ error: 'Failed to fetch system configuration' });
     }
   });
@@ -100,7 +104,7 @@ export default function adminConfigRoutes(): Router {
         characterCount: interpolatedPrompt.length,
       });
     } catch (err) {
-      console.error('Failed to generate system prompt preview:', err);
+      log.error({ err }, 'Failed to generate system prompt preview');
       res.status(500).json({ error: 'Failed to generate system prompt preview' });
     }
   });
@@ -132,7 +136,7 @@ export default function adminConfigRoutes(): Router {
         updated_by: row.updated_by,
       });
     } catch (err) {
-      console.error('Failed to fetch configuration:', err);
+      log.error({ err }, 'Failed to fetch configuration');
       res.status(500).json({ error: 'Failed to fetch configuration' });
     }
   });
@@ -213,7 +217,7 @@ export default function adminConfigRoutes(): Router {
       // Force the public/realtime config cache to reload on next read.
       invalidateConfigCache();
 
-      console.log(`Config updated: ${key} by ${req.session.username}`);
+      log.info(`Config updated: ${key} by ${req.session.username}`);
 
       res.json({
         success: true,
@@ -223,7 +227,7 @@ export default function adminConfigRoutes(): Router {
         updated_by: updated.updated_by,
       });
     } catch (err) {
-      console.error('Failed to update configuration:', err);
+      log.error({ err }, 'Failed to update configuration');
       res.status(500).json({ error: 'Failed to update configuration' });
     }
   });

@@ -80,22 +80,18 @@ describe('broadcastAdminEvent tier routing', () => {
 
   it('a caseworker lookup failure skips caseworker rooms without throwing', async () => {
     const { io, to } = makeIo();
-    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
     mocks.getCaseworkerIdsForClient.mockRejectedValue(new Error('db down'));
     await expect(
       broadcastAdminEvent(io, 'session:ended', {}, 42, 'summary')
     ).resolves.toBeUndefined();
     expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'therapist:7']);
-    consoleErr.mockRestore();
   });
 
   it('a therapist lookup failure still lets summary reach caseworkers', async () => {
     const { io, to } = makeIo();
-    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
     mocks.getTherapistIdsForClient.mockRejectedValue(new Error('db down'));
     await broadcastAdminEvent(io, 'session:ended', {}, 42, 'summary');
     expect(to.mock.calls.map((c) => c[0])).toEqual(['admin-broadcast', 'caseworker:21']);
-    consoleErr.mockRestore();
   });
 
   it('sandbox summary events skip admin-broadcast but reach the sandbox care team (C13)', async () => {

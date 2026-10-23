@@ -8,6 +8,10 @@ import { getRateLimitedParticipants } from '../../db/index.js';
 
 import type { SessionLimits } from '../../../shared/systemConfig.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('adminRateLimitsRoutes');
+
 // This surface only makes sense with a configured cap, so narrow the shared
 // (optional-field) blob type to require max_sessions_per_day, as the old
 // local declaration did.
@@ -40,7 +44,7 @@ export default function adminRateLimitsRoutes(): Router {
 
       res.json({ rateLimitedUsers, config: limits });
     } catch (err) {
-      console.error('Error fetching rate-limited users:', err);
+      log.error({ err }, 'Error fetching rate-limited users');
       res.status(500).json({ error: 'Failed to fetch rate-limited users' });
     }
   });

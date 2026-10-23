@@ -60,6 +60,10 @@ import { pool } from '../../config/db.js';
 import { grokVoiceManager } from '../../services/grokVoiceManager.service.js';
 import { GROK_SAMPLE_RATE, GROK_VOICE_WS_PATH } from '../../../shared/grokVoiceProtocol.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('grokSessionRoutes');
+
 export default function grokSessionRoutes(): Router {
   const router = Router();
 
@@ -88,8 +92,8 @@ export default function grokSessionRoutes(): Router {
           });
         }
         if (!hasXaiKey()) {
-          console.error(
-            `[Grok] system_config.ai_model is '${aiModel}' but XAI_API_KEY is not set. ` +
+          log.error(
+            `system_config.ai_model is '${aiModel}' but XAI_API_KEY is not set. ` +
             'Voice sessions cannot start until the key is configured or the model is switched back.',
           );
           return res.status(409).json({
@@ -103,7 +107,7 @@ export default function grokSessionRoutes(): Router {
 
         const limitCheck = await checkSessionLimits(userId, userRole);
         if (!limitCheck.allowed) {
-          console.log(`Session limit exceeded for user ${userId}:`, limitCheck.reason);
+          log.info({ reason: limitCheck.reason }, `Session limit exceeded for user ${userId}`);
           return res.status(429).json({
             error: 'rate_limit_exceeded',
             reason: limitCheck.reason,
@@ -137,7 +141,7 @@ export default function grokSessionRoutes(): Router {
             userVoice = userVoice || prefs?.preferred_voice;
             userLanguage = userLanguage || prefs?.preferred_language;
           } catch (err) {
-            console.error('[Grok] Failed to load user preferences, using defaults:', err);
+            log.error({ err }, 'Failed to load user preferences, using defaults');
           }
         }
         userVoice = resolveGrokVoice(userVoice);
@@ -145,7 +149,7 @@ export default function grokSessionRoutes(): Router {
 
         if (userId) {
           updateUserPreferences(userId, userVoice, userLanguage).catch(err =>
-            console.error('[Grok] Failed to save user preferences:', err));
+            log.error({ err }, 'Failed to save user preferences'));
         }
 
         // The clinical prompt, assembled exactly as the GPT-Live route does so
@@ -202,7 +206,7 @@ export default function grokSessionRoutes(): Router {
 
           if (checkin) {
             setSessionCheckin(sessionId, checkin).catch(err =>
-              console.error('[Grok] Failed to store check-in:', err));
+              log.error({ err }, 'Failed to store check-in'));
           }
 
           recordConsent({
@@ -210,7 +214,7 @@ export default function grokSessionRoutes(): Router {
             userId,
             consentVersion: req.session!.consentVersion!,
             recordingEnabled: (systemConfig.features?.session_recording_enabled as boolean | undefined) ?? false,
-          }).catch(err => console.error('[Consent] Failed to record per-session consent:', err));
+          }).catch(err => log.error({ err }, '[Consent] Failed to record per-session consent'));
 
           void broadcastAdminEvent(global.io, 'session:created', {
             sessionId, userId, username, status: 'active', created_at: new Date(),
@@ -234,7 +238,7 @@ export default function grokSessionRoutes(): Router {
         } catch (dbError) {
           // Unlike the GPT-Live route nothing is billing yet, so a DB failure
           // here can and should fail the start.
-          console.error('[Grok] Failed to create session in database:', dbError);
+          log.error({ err: dbError }, 'Failed to create session in database');
           return res.status(500).json({ error: 'Failed to create session' });
         }
 
@@ -270,7 +274,7 @@ export default function grokSessionRoutes(): Router {
           session_limits: limitCheck.limits || null,
         });
       } catch (error) {
-        console.error('[Grok] Session creation error:', error);
+        log.error({ err: error }, 'Session creation error');
         res.status(500).json({ error: 'Failed to create Grok session' });
       }
     },
@@ -306,7 +310,7 @@ export default function grokSessionRoutes(): Router {
       }
       res.json({ injected: true });
     } catch (error) {
-      console.error('[Grok] typed text inject failed:', error);
+      log.error({ err: error }, 'typed text inject failed');
       res.status(500).json({ error: 'Failed to send text' });
     }
   });

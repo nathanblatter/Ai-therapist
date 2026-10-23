@@ -7,6 +7,10 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getStudyStatus } from '../db/studyStatus.queries.js';
 
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('studyStatusMiddleware');
+
 export async function requireActiveStudyStatus(
   req: Request,
   res: Response,
@@ -22,7 +26,7 @@ export async function requireActiveStudyStatus(
     status = await getStudyStatus(req.session.userId);
   } catch (err) {
     // Fail open: a transient DB error must not lock active participants out.
-    console.error('[StudyStatus] gate lookup failed:', err);
+    log.error({ err }, 'gate lookup failed');
     next();
     return;
   }

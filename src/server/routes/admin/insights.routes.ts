@@ -19,6 +19,10 @@ import {
   type CareNoteRow,
 } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('insightsRoutes');
+
 export default function insightsRoutes(): Router {
   const router = Router();
 
@@ -63,7 +67,7 @@ export default function insightsRoutes(): Router {
       }
       res.json(payload);
     } catch (err) {
-      console.error('Failed to fetch session insights:', err);
+      log.error({ err }, 'Failed to fetch session insights');
       res.status(500).json({ error: 'Failed to fetch session insights' });
     }
   });
@@ -77,7 +81,7 @@ export default function insightsRoutes(): Router {
       }
       res.json({ success: true });
     } catch (err) {
-      console.error('Failed to mark SOAP note reviewed:', err);
+      log.error({ err }, 'Failed to mark SOAP note reviewed');
       res.status(500).json({ error: 'Failed to mark SOAP note reviewed' });
     }
   });
@@ -96,7 +100,7 @@ export default function insightsRoutes(): Router {
       }
       res.json(insights);
     } catch (err) {
-      console.error('Failed to regenerate session insights:', err);
+      log.error({ err }, 'Failed to regenerate session insights');
       res.status(500).json({ error: 'Failed to regenerate session insights' });
     }
   });
@@ -111,7 +115,7 @@ export default function insightsRoutes(): Router {
       }
       res.json({ success: true, notes });
     } catch (err) {
-      console.error('Failed to save notes for next session:', err);
+      log.error({ err }, 'Failed to save notes for next session');
       res.status(500).json({ error: 'Failed to save notes for next session' });
     }
   });
@@ -129,7 +133,7 @@ export default function insightsRoutes(): Router {
       await setUserRiskContextEnabled(userId, enabled);
       res.json({ success: true, enabled });
     } catch (err) {
-      console.error('Failed to update risk-context sharing flag:', err);
+      log.error({ err }, 'Failed to update risk-context sharing flag');
       res.status(500).json({ error: 'Failed to update risk-context sharing flag' });
     }
   });

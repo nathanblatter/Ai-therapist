@@ -8,6 +8,10 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getQuietHoursStatus } from '../utils/quietHours.js';
 
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('quietHoursMiddleware');
+
 /**
  * Whether this request resumes a session that OpenAI's content filter
  * terminated, rather than starting a new one.
@@ -33,7 +37,7 @@ export function requireOutsideQuietHours(req: Request, res: Response, next: Next
   // crisis is most likely to be alone. Blocking the assistant's return here
   // would make the overnight window the one where we hang up and stay hung up.
   if (isCrisisContinuation(req)) {
-    console.warn('[QuietHours] Bypassed for a crisis continuation — resuming a terminated session.');
+    log.warn('Bypassed for a crisis continuation — resuming a terminated session.');
     next();
     return;
   }

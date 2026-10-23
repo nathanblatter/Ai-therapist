@@ -90,6 +90,12 @@ import { startSurveyReminderScheduler } from "./services/qualtricsReminders.serv
 import { startMessageScanSweeper } from "./services/messageSafety.service.js";
 import { noteSessionActivity, scheduleAbandonCheck, startAbandonedSessionSweeper } from "./services/sessionLifecycle.service.js";
 
+import { createLogger } from './utils/logger.js';
+
+const log = createLogger('server');
+const socketLog = createLogger('socketio');
+const cspLog = createLogger('csp');
+
 // ---------- local type helpers ----------
 
 /** Minimal typed request used inside socket.io session middleware */
@@ -148,7 +154,7 @@ if (process.env.SOCKET_PG_ADAPTER !== 'off') {
   io.adapter(createPostgresAdapter(pool));
 }
 pool.on('error', (err) => {
-  console.error('[Postgres adapter] pool error:', err);
+  log.error({ err }, '[Postgres adapter] pool error');
 });
 
 // Make 'io' available globally for event emission
@@ -213,9 +219,9 @@ if (process.env.NODE_ENV === 'production') {
   );
 
   if (CSP_ENFORCE) {
-    console.log('[CSP] Enforcement mode enabled (CSP_ENFORCE=true)');
+    cspLog.info('Enforcement mode enabled (CSP_ENFORCE=true)');
   } else {
-    console.log('[CSP] Report-only mode (CSP_ENFORCE not set); violations logged to /csp-report');
+    cspLog.info('Report-only mode (CSP_ENFORCE not set); violations logged to /csp-report');
   }
 }
 
@@ -224,7 +230,7 @@ app.post(
   '/csp-report',
   express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '50kb' }),
   (req, res) => {
-    console.warn('[CSP] violation report:', JSON.stringify(req.body));
+    cspLog.warn({ report: req.body }, 'violation report');
     res.sendStatus(204);
   }
 );
@@ -316,7 +322,7 @@ io.use((socket: AuthSocket, next) => {
   // Reuse the same session middleware as HTTP to load the handshake session.
   sessionMiddleware(req as unknown as Request, {} as Response, (err) => {
     if (err) {
-      console.error('[Socket.io] Session middleware error:', err);
+      socketLog.error({ err }, 'Session middleware error');
       return next(new Error('Session error'));
     }
 
@@ -325,11 +331,11 @@ io.use((socket: AuthSocket, next) => {
       socket.userId = req.session.userId;
       socket.username = req.session.username;
       socket.userRole = req.session.userRole;
-      console.log(`[Socket.io] Authenticated: ${socket.username} (${socket.userRole || 'participant'})`);
+      socketLog.info(`Authenticated: ${socket.username} (${socket.userRole || 'participant'})`);
       next();
     } else {
       // Allow anonymous connections for participants (they can still join session rooms)
-      console.log('[Socket.io] Anonymous participant connected');
+      socketLog.info('Anonymous participant connected');
       socket.userRole = 'anonymous';
       next();
     }
@@ -358,7 +364,7 @@ import('./services/sidebandManager.service.js')
       onClient: (sessionId, ws) => grokVoiceManager.attachClient(sessionId, ws),
     });
   })
-  .catch(err => console.error('[Grok] Failed to wire the voice proxy:', err));
+  .catch(err => log.error({ err }, '[Grok] Failed to wire the voice proxy'));
 
 // Connection handler
 io.on('connection', (socket: AuthSocket) => {
@@ -373,7 +379,7 @@ io.on('connection', (socket: AuthSocket) => {
   }
 
   if (isAdmin) {
-    console.log(`[Socket.io] Admin connected: ${socket.username} (${socket.id})`);
+    socketLog.info(`Admin connected: ${socket.username} (${socket.id})`);
 
     // Caseload RBAC (docs/caseload-rbac.md): 'admin-broadcast' is
     // researchers-only. Therapists join their own therapist:<id> room and
@@ -402,7 +408,7 @@ io.on('connection', (socket: AuthSocket) => {
       role: socket.userRole
     });
   } else {
-    console.log(`[Socket.io] Participant connected (${socket.id})`);
+    socketLog.info(`Participant connected (${socket.id})`);
   }
 
   // Handle session room subscriptions. Session rooms receive live unredacted
@@ -426,11 +432,11 @@ io.on('connection', (socket: AuthSocket) => {
           const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
           const ok = await canAdminAccessSessionLive(socket.userRole, socket.userId, Number.isInteger(ownerId) ? ownerId : null);
           if (!ok) {
-            console.warn(`[Socket.io] Denied ${socket.userRole} session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not permitted)`);
+            socketLog.warn(`Denied ${socket.userRole} session:join for ${sessionId.substring(0, 12)}... (${socket.username}: not permitted)`);
             return;
           }
         } catch (err) {
-          console.error('[Socket.io] caseload session:join check failed:', err);
+          socketLog.error({ err }, 'caseload session:join check failed');
           return;
         }
       }
@@ -445,16 +451,16 @@ io.on('connection', (socket: AuthSocket) => {
         const info = await getSessionAccessInfo(sessionId);
         allowed = !!info && info.user_id === socket.userId;
       } catch (err) {
-        console.error('[Socket.io] session:join ownership lookup failed:', err);
+        socketLog.error({ err }, 'session:join ownership lookup failed');
       }
     }
 
     if (!allowed) {
-      console.warn(`[Socket.io] Denied session:join for ${sessionId.substring(0, 12)}... from ${socket.id} (not owner)`);
+      socketLog.warn(`Denied session:join for ${sessionId.substring(0, 12)}... from ${socket.id} (not owner)`);
       return;
     }
 
-    console.log(`[Socket.io] User joining session ${sessionId}`);
+    socketLog.info(`User joining session ${sessionId}`);
     socket.join(`session:${sessionId}`);
     if (!isAdmin) {
       // A live participant socket in the room is a sign of life: cancel any
@@ -464,14 +470,14 @@ io.on('connection', (socket: AuthSocket) => {
   });
 
   socket.on('session:leave', ({ sessionId }) => {
-    console.log(`[Socket.io] User leaving session ${sessionId}`);
+    socketLog.info(`User leaving session ${sessionId}`);
     socket.leave(`session:${sessionId}`);
   });
 
   // Handle admin request for sideband connections (admin only)
   socket.on('admin:get-sideband-connections', async () => {
     if (!isAdmin) {
-      console.warn(`[Socket.io] Unauthorized admin:get-sideband-connections attempt from ${socket.id}`);
+      socketLog.warn(`Unauthorized admin:get-sideband-connections attempt from ${socket.id}`);
       return;
     }
 
@@ -479,7 +485,7 @@ io.on('connection', (socket: AuthSocket) => {
     // section 2: sideband routes + live session streams are Blocked for the
     // summaries tier). Mirrors canAdminAccessSessionLive's caseworker deny.
     if (socket.userRole === 'caseworker') {
-      console.warn(`[Socket.io] Caseworker denied admin:get-sideband-connections (${socket.id})`);
+      socketLog.warn(`Caseworker denied admin:get-sideband-connections (${socket.id})`);
       return;
     }
 
@@ -506,7 +512,7 @@ io.on('connection', (socket: AuthSocket) => {
 
       socket.emit('admin:sideband-connections', connections);
     } catch (error) {
-      console.error('[Socket.io] Error fetching sideband connections:', error);
+      socketLog.error({ err: error }, 'Error fetching sideband connections');
       socket.emit('admin:sideband-connections', []);
     }
   });
@@ -514,7 +520,7 @@ io.on('connection', (socket: AuthSocket) => {
   // Handle admin messages to participants (admin only)
   socket.on('admin:sendMessage', async ({ sessionId, message, messageType }) => {
     if (!isAdmin) {
-      console.warn(`[Socket.io] Unauthorized admin:sendMessage attempt from ${socket.id}`);
+      socketLog.warn(`Unauthorized admin:sendMessage attempt from ${socket.id}`);
       return;
     }
 
@@ -527,16 +533,16 @@ io.on('connection', (socket: AuthSocket) => {
         const ownerId = info && info.user_id != null ? Number(info.user_id) : null;
         const ok = await canAdminAccessSessionLive(socket.userRole, socket.userId, Number.isInteger(ownerId) ? ownerId : null);
         if (!ok) {
-          console.warn(`[Socket.io] Denied therapist admin:sendMessage for ${String(sessionId).substring(0, 12)}... (${socket.username}: not in caseload)`);
+          socketLog.warn(`Denied therapist admin:sendMessage for ${String(sessionId).substring(0, 12)}... (${socket.username}: not in caseload)`);
           return;
         }
       } catch (err) {
-        console.error('[Socket.io] caseload admin:sendMessage check failed:', err);
+        socketLog.error({ err }, 'caseload admin:sendMessage check failed');
         return;
       }
     }
 
-    console.log(`[Socket.io] Admin ${socket.username} sending ${messageType} message to session ${sessionId}`);
+    socketLog.info(`Admin ${socket.username} sending ${messageType} message to session ${sessionId}`);
 
     // Invisible steers go over the server-side sideband when one is live —
     // the old path (relay to the participant's browser, which re-injects over
@@ -551,7 +557,7 @@ io.on('connection', (socket: AuthSocket) => {
           deliveredVia = 'sideband';
         }
       } catch (err) {
-        console.error('[Socket.io] Sideband inject for admin message failed, falling back to relay:', err);
+        socketLog.error({ err }, 'Sideband inject for admin message failed, falling back to relay');
       }
     }
 
@@ -587,9 +593,9 @@ io.on('connection', (socket: AuthSocket) => {
     // Insert admin message into database
     try {
       await insertMessagesBatch([logData]);
-      console.log(`Admin message logged to database`);
+      log.info(`Admin message logged to database`);
     } catch (err) {
-      console.error('Failed to log admin message:', err);
+      log.error({ err }, 'Failed to log admin message');
     }
   });
 
@@ -615,7 +621,7 @@ io.on('connection', (socket: AuthSocket) => {
 
   // Disconnect handler
   socket.on('disconnect', (reason) => {
-    console.log(`[Socket.io] User disconnected: ${reason}`);
+    socketLog.info(`User disconnected: ${reason}`);
     if (isAdmin) {
       socket.to('admin-broadcast').emit('admin:left', { username: socket.username });
     }
@@ -831,7 +837,7 @@ function applyDemoBranding(html: string): string {
 }
 
 async function startProdServer() {
-  console.log("Starting in production mode...");
+  log.info("Starting in production mode...");
 
   // Cache policy: hashed build assets are content-addressed, so cache them
   // forever (immutable); HTML must never be cached or browsers keep loading a
@@ -870,7 +876,7 @@ async function startProdServer() {
       const html = applyDemoBranding(fs.readFileSync(path.resolve(__dirname, '../../dist/admin-client/admin.html'), 'utf-8'));
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
-      console.error(e instanceof Error ? e.stack : String(e));
+      log.error({ err: e }, 'Failed to serve the admin panel');
       res.status(500).send('Internal server error');
     }
   });
@@ -887,14 +893,14 @@ async function startProdServer() {
       const html = template.replace(`<!--ssr-outlet-->`, appHtml.html);
       res.status(200).set({ 'Content-Type': 'text/html', 'Cache-Control': 'no-store, must-revalidate' }).end(html);
     } catch (e: unknown) {
-      console.error(e instanceof Error ? e.stack : String(e));
+      log.error({ err: e }, 'SSR render failed');
       res.status(500).send('Internal server error');
     }
   });
 }
 
 async function startDevServer() {
-  console.log("Starting in development mode...");
+  log.info("Starting in development mode...");
 
   const vite = await createViteServer({
     server: { middlewareMode: true },
@@ -979,24 +985,24 @@ if (isEntrypoint) {
   initializeServer();
 
   httpServer.listen(port, async () => {
-    console.log(`Express server running on http://localhost:${port}`);
-    console.log(`Socket.io server ready for real-time connections`);
+    log.info(`Express server running on http://localhost:${port}`);
+    log.info(`Socket.io server ready for real-time connections`);
 
     // Start the content wipe scheduler
     try {
       await startContentWipeScheduler();
-      console.log(`Content wipe scheduler initialized`);
+      log.info(`Content wipe scheduler initialized`);
     } catch (err) {
-      console.error('Failed to start content wipe scheduler:', err);
+      log.error({ err }, 'Failed to start content wipe scheduler');
     }
 
     // Start the data retention scheduler (ai-therapist-97). Ships disabled via
     // system_config.data_retention.enabled; no-ops until enabled deliberately.
     try {
       await startDataRetentionScheduler();
-      console.log(`Data retention scheduler initialized`);
+      log.info(`Data retention scheduler initialized`);
     } catch (err) {
-      console.error('Failed to start data retention scheduler:', err);
+      log.error({ err }, 'Failed to start data retention scheduler');
     }
 
     // Daily sweep of expired magic-link demo accounts and their data
@@ -1045,9 +1051,9 @@ if (isEntrypoint) {
     if (process.env.SOCKET_PG_ADAPTER !== 'off' && process.env.EVALS_ENABLED === 'true') {
       import('./services/harnessRunner.service.js')
         .then(m => m.startHarnessScheduler())
-        .catch(err => console.error('Failed to start harness scheduler:', err));
+        .catch(err => log.error({ err }, 'Failed to start harness scheduler'));
     } else if (process.env.SOCKET_PG_ADAPTER !== 'off') {
-      console.log('Automatic evals disabled (EVALS_ENABLED not set) — stage-only feature');
+      log.info('Automatic evals disabled (EVALS_ENABLED not set) — stage-only feature');
     }
 
     // Backstop sweep for sessions abandoned without a clean /end (dropped
@@ -1065,7 +1071,7 @@ if (isEntrypoint) {
         const { sidebandManager } = await import('./services/sidebandManager.service.js');
         await sidebandManager.reattachActiveSessions(await getOpenAIKey());
       } catch (err) {
-        console.error('[Sideband] startup re-attach sweep failed:', err);
+        log.error({ err }, '[Sideband] startup re-attach sweep failed');
       }
     }, 5000);
   });

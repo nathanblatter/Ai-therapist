@@ -36,6 +36,10 @@ import { isCareTeamRole } from '../../shared/roles.js';
 import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
 import { registerAccount } from '../services/accounts.service.js';
 
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('joinRoutes');
+
 const GONE_MESSAGE = 'This invite link is no longer valid. Ask your therapist for a new one.';
 const SANDBOX_GONE_MESSAGE = 'This sandbox link is no longer valid. Ask whoever sent it for a new one.';
 
@@ -203,7 +207,7 @@ export default function joinRoutes(): Router {
       }
       res.type('html').send(registrationPage(CLIENT_PAGE_OPTIONS));
     } catch (error) {
-      console.error('Error loading invite page:', error);
+      log.error({ err: error }, 'Error loading invite page');
       res.status(500).json({ error: 'Failed to load invite' });
     }
   });
@@ -235,7 +239,7 @@ export default function joinRoutes(): Router {
       const inviterRole = inviter?.role;
       if (!inviter || !isCareTeamRole(inviterRole)) {
         await releaseInvite(invite.invite_id).catch((releaseError: unknown) => {
-          console.error('Error releasing invite after inviter lookup failure:', releaseError);
+          log.error({ err: releaseError }, 'Error releasing invite after inviter lookup failure');
         });
         return res.status(410).json({ error: GONE_MESSAGE });
       }
@@ -253,7 +257,7 @@ export default function joinRoutes(): Router {
       } catch (error: unknown) {
         // Registration failed — release the invite so the link stays usable.
         await releaseInvite(invite.invite_id).catch((releaseError: unknown) => {
-          console.error('Error releasing invite after failed registration:', releaseError);
+          log.error({ err: releaseError }, 'Error releasing invite after failed registration');
         });
         if (error instanceof Error && error.message === 'Username already exists') {
           return res.status(409).json({ error: 'Username already exists' });
@@ -267,9 +271,9 @@ export default function joinRoutes(): Router {
         // The inviting member vanished (or changed role) between consume
         // and assign: undo everything — no orphaned unassigned participant,
         // and the client can ask for a fresh link if it was transient.
-        console.error('Invite assignment failed; rolling back registration:', assignErr);
-        try { await deleteUser(user.userid); } catch (e) { console.error('orphan cleanup failed:', e); }
-        try { await releaseInvite(invite.invite_id); } catch (e) { console.error('invite release failed:', e); }
+        log.error({ err: assignErr }, 'Invite assignment failed; rolling back registration');
+        try { await deleteUser(user.userid); } catch (e) { log.error({ err: e }, 'orphan cleanup failed'); }
+        try { await releaseInvite(invite.invite_id); } catch (e) { log.error({ err: e }, 'invite release failed'); }
         return res.status(410).json({ error: GONE_MESSAGE });
       }
       void insertCaseloadAudit({
@@ -291,7 +295,7 @@ export default function joinRoutes(): Router {
       req.session.isSandbox = user.is_sandbox === true;
 
       req.session.save((err) => {
-        if (err) console.error('Session save error:', err);
+        if (err) log.error({ err }, 'Session save error');
       });
 
       res.json({
@@ -299,7 +303,7 @@ export default function joinRoutes(): Router {
         user: { userid: user.userid, username: user.username, role: user.role },
       });
     } catch (error) {
-      console.error('Error completing invite registration:', error);
+      log.error({ err: error }, 'Error completing invite registration');
       res.status(500).json({ error: 'Registration failed' });
     }
   });
@@ -316,7 +320,7 @@ export default function joinRoutes(): Router {
         registrationPage({ ...SANDBOX_PAGE_OPTIONS, intro: sandboxIntro(invite!.invite_role) })
       );
     } catch (error) {
-      console.error('Error loading sandbox invite page:', error);
+      log.error({ err: error }, 'Error loading sandbox invite page');
       res.status(500).json({ error: 'Failed to load invite' });
     }
   });
@@ -345,7 +349,7 @@ export default function joinRoutes(): Router {
 
       const release = () =>
         releaseSandboxInvite(invite.invite_id).catch((err: unknown) => {
-          console.error('Error releasing sandbox invite:', err);
+          log.error({ err }, 'Error releasing sandbox invite');
         });
 
       // 1. Fresh per-account sandbox org (C8: never shared across strangers).
@@ -353,7 +357,7 @@ export default function joinRoutes(): Router {
       try {
         org = await createOrganization({ name: `${username.trim()}'s Sandbox`, kind: 'sandbox' });
       } catch (error) {
-        console.error('Sandbox org creation failed:', error);
+        log.error({ err: error }, 'Sandbox org creation failed');
         await release();
         return res.status(500).json({ error: 'Could not create the sandbox. Please try again.' });
       }
@@ -367,13 +371,13 @@ export default function joinRoutes(): Router {
         });
       } catch (error: unknown) {
         await deleteSandboxOrganization(org.org_id).catch((e: unknown) =>
-          console.error('sandbox org cleanup failed:', e)
+          log.error({ err: e }, 'sandbox org cleanup failed')
         );
         await release();
         if (error instanceof Error && error.message === 'Username already exists') {
           return res.status(409).json({ error: 'Username already exists' });
         }
-        console.error('Sandbox user creation failed:', error);
+        log.error({ err: error }, 'Sandbox user creation failed');
         return res.status(500).json({ error: 'Registration failed' });
       }
 
@@ -390,9 +394,9 @@ export default function joinRoutes(): Router {
           tokenHash: invite.token_hash,
         });
       } catch (seedErr) {
-        console.error('Sandbox seeding failed; rolling back signup:', seedErr);
-        try { await deleteUser(user.userid); } catch (e) { console.error('sandbox owner cleanup failed:', e); }
-        try { await deleteSandboxOrganization(org.org_id); } catch (e) { console.error('sandbox org cleanup failed:', e); }
+        log.error({ err: seedErr }, 'Sandbox seeding failed; rolling back signup');
+        try { await deleteUser(user.userid); } catch (e) { log.error({ err: e }, 'sandbox owner cleanup failed'); }
+        try { await deleteSandboxOrganization(org.org_id); } catch (e) { log.error({ err: e }, 'sandbox org cleanup failed'); }
         await release();
         return res.status(500).json({ error: 'Could not assemble the sandbox. Please try again.' });
       }
@@ -402,12 +406,12 @@ export default function joinRoutes(): Router {
       } catch (markErr) {
         // Full compensation: seeded users first (org FK is RESTRICT), then
         // the owner, then the org, then the invite.
-        console.error('Sandbox invite bookkeeping failed; rolling back signup:', markErr);
+        log.error({ err: markErr }, 'Sandbox invite bookkeeping failed; rolling back signup');
         for (const seededId of seeded.seededUserIds) {
-          try { await deleteUser(seededId); } catch (e) { console.error('seeded user cleanup failed:', e); }
+          try { await deleteUser(seededId); } catch (e) { log.error({ err: e }, 'seeded user cleanup failed'); }
         }
-        try { await deleteUser(user.userid); } catch (e) { console.error('sandbox owner cleanup failed:', e); }
-        try { await deleteSandboxOrganization(org.org_id); } catch (e) { console.error('sandbox org cleanup failed:', e); }
+        try { await deleteUser(user.userid); } catch (e) { log.error({ err: e }, 'sandbox owner cleanup failed'); }
+        try { await deleteSandboxOrganization(org.org_id); } catch (e) { log.error({ err: e }, 'sandbox org cleanup failed'); }
         await release();
         return res.status(500).json({ error: 'Could not assemble the sandbox. Please try again.' });
       }
@@ -437,7 +441,7 @@ export default function joinRoutes(): Router {
       req.session.isSandbox = true;
 
       req.session.save((err) => {
-        if (err) console.error('Session save error:', err);
+        if (err) log.error({ err }, 'Session save error');
       });
 
       res.json({
@@ -450,7 +454,7 @@ export default function joinRoutes(): Router {
         },
       });
     } catch (error) {
-      console.error('Error completing sandbox registration:', error);
+      log.error({ err: error }, 'Error completing sandbox registration');
       res.status(500).json({ error: 'Registration failed' });
     }
   });

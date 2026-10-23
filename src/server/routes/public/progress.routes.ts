@@ -18,6 +18,10 @@ import {
   getMessageHistoryForClient,
 } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('progressRoutes');
+
 export default function progressRoutes(): Router {
   const router = Router();
 
@@ -30,7 +34,7 @@ export default function progressRoutes(): Router {
       const progress = await getOwnProgress(req.session.userId!);
       res.json(progress);
     } catch (error) {
-      console.error('Error fetching own progress:', error);
+      log.error({ err: error }, 'Error fetching own progress');
       res.status(500).json({ error: 'Failed to fetch progress' });
     }
   });
@@ -41,7 +45,7 @@ export default function progressRoutes(): Router {
       const safetyPlan = await getUserLatestSafetyPlan(req.session.userId!);
       res.json({ safety_plan: safetyPlan });
     } catch (error) {
-      console.error('Error fetching own safety plan:', error);
+      log.error({ err: error }, 'Error fetching own safety plan');
       res.status(500).json({ error: 'Failed to fetch safety plan' });
     }
   });
@@ -52,7 +56,7 @@ export default function progressRoutes(): Router {
       const worksheets = await listUserWorksheetInstances(req.session.userId!);
       res.json({ worksheets });
     } catch (error) {
-      console.error('Error fetching own worksheets:', error);
+      log.error({ err: error }, 'Error fetching own worksheets');
       res.status(500).json({ error: 'Failed to fetch worksheets' });
     }
   });
@@ -63,7 +67,7 @@ export default function progressRoutes(): Router {
       const assignments = await listUserAssignments(req.session.userId!, { limit: 50 });
       res.json({ assignments });
     } catch (error) {
-      console.error('Error fetching own assignments:', error);
+      log.error({ err: error }, 'Error fetching own assignments');
       res.status(500).json({ error: 'Failed to fetch assignments' });
     }
   });
@@ -95,7 +99,7 @@ export default function progressRoutes(): Router {
         message_threads: messageThreads,
       });
     } catch (error) {
-      console.error('Error building participant data export:', error);
+      log.error({ err: error }, 'Error building participant data export');
       res.status(500).json({ error: 'Failed to build data export' });
     }
   });
@@ -118,7 +122,7 @@ export default function progressRoutes(): Router {
       }
       res.json({ assignment });
     } catch (error) {
-      console.error('Error completing assignment:', error);
+      log.error({ err: error }, 'Error completing assignment');
       res.status(500).json({ error: 'Failed to complete assignment' });
     }
   });

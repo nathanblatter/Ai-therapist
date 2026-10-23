@@ -21,6 +21,10 @@ import {
   getCaseloadClientIds,
 } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('sidebandRoutes');
+
 // Caseload guard for session ids arriving in the request BODY (most sideband
 // control endpoints), where the :sessionId path-param middleware cannot apply.
 // Live sideband control is full-tier: a therapist must be assigned, a
@@ -61,11 +65,11 @@ export default function sidebandRoutes(): Router {
         timestamp: new Date(),
       }, sessionId);
 
-      console.log(`Instructions updated for session ${sessionId} by ${req.session.username}`);
+      log.info(`Instructions updated for session ${sessionId} by ${req.session.username}`);
 
       res.json({ success: true, message: 'Instructions updated successfully' });
     } catch (error: unknown) {
-      console.error('Failed to update instructions:', error);
+      log.error({ err: error }, 'Failed to update instructions');
       res.status(500).json({
         error: 'Failed to update instructions',
         details: error instanceof Error ? error.message : String(error),
@@ -99,7 +103,7 @@ export default function sidebandRoutes(): Router {
         sessions,
       });
     } catch (error: unknown) {
-      console.error('Failed to fetch sideband status:', error);
+      log.error({ err: error }, 'Failed to fetch sideband status');
       res.status(500).json({
         error: 'Failed to fetch sideband status',
         details: error instanceof Error ? error.message : String(error),
@@ -153,7 +157,7 @@ export default function sidebandRoutes(): Router {
 
       res.json({ success: true, message: 'Session config updated successfully' });
     } catch (error: unknown) {
-      console.error('Failed to update session via sideband:', error);
+      log.error({ err: error }, 'Failed to update session via sideband');
       res.status(500).json({
         error: 'Failed to update session',
         details: error instanceof Error ? error.message : String(error),
@@ -184,7 +188,7 @@ export default function sidebandRoutes(): Router {
 
       res.json({ success: true, message: 'Response interrupted' });
     } catch (error: unknown) {
-      console.error('Failed to interrupt via sideband:', error);
+      log.error({ err: error }, 'Failed to interrupt via sideband');
       res.status(500).json({ error: 'Failed to interrupt', details: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -220,7 +224,7 @@ export default function sidebandRoutes(): Router {
 
       res.json({ success: true, message: 'Message injected' });
     } catch (error: unknown) {
-      console.error('Failed to inject message via sideband:', error);
+      log.error({ err: error }, 'Failed to inject message via sideband');
       res.status(500).json({ error: 'Failed to inject message', details: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -249,7 +253,7 @@ export default function sidebandRoutes(): Router {
 
       res.json({ success: true, message: 'Response triggered' });
     } catch (error: unknown) {
-      console.error('Failed to force response via sideband:', error);
+      log.error({ err: error }, 'Failed to force response via sideband');
       res.status(500).json({ error: 'Failed to force response', details: error instanceof Error ? error.message : String(error) });
     }
   });
@@ -309,7 +313,7 @@ export default function sidebandRoutes(): Router {
           details: 'The model is still responding; wait for the current response to finish and retry.',
         });
       }
-      console.error('Failed to trigger tool via sideband:', error);
+      log.error({ err: error }, 'Failed to trigger tool via sideband');
       res.status(500).json({ error: 'Failed to trigger tool', details: message });
     }
   });
@@ -341,7 +345,7 @@ export default function sidebandRoutes(): Router {
 
       res.json({ success: true, message: 'Sideband connection disconnected successfully' });
     } catch (error: unknown) {
-      console.error('Failed to disconnect sideband:', error);
+      log.error({ err: error }, 'Failed to disconnect sideband');
       res.status(500).json({
         error: 'Failed to disconnect sideband connection',
         details: error instanceof Error ? error.message : String(error),

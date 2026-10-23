@@ -24,6 +24,10 @@ import { embedText } from '../../services/embeddings.service.js';
 import { rerankChunks } from '../../services/rerank.service.js';
 import { parsePagination } from '../../utils/pagination.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('knowledgeRoutes');
+
 const KINDS = ['psychoeducation', 'worksheet', 'technique'];
 const MAX_CONTENT_CHARS = 20_000;
 
@@ -117,7 +121,7 @@ export default function knowledgeRoutes(): Router {
       ]);
       res.json({ counts, chunks: list.chunks, total: list.total });
     } catch (error) {
-      console.error('[Knowledge] list failed:', error);
+      log.error({ err: error }, 'list failed');
       res.status(500).json({ error: 'Failed to load knowledge base' });
     }
   });
@@ -129,7 +133,7 @@ export default function knowledgeRoutes(): Router {
       const usage = await getChunkRetrievalStats();
       res.json({ usage });
     } catch (error) {
-      console.error('[Knowledge] usage failed:', error);
+      log.error({ err: error }, 'usage failed');
       res.status(500).json({ error: 'Failed to load usage stats' });
     }
   });
@@ -148,7 +152,7 @@ export default function knowledgeRoutes(): Router {
       ]);
       res.json({ stats, decisions });
     } catch (error) {
-      console.error('[Knowledge] rerank-decisions failed:', error);
+      log.error({ err: error }, 'rerank-decisions failed');
       res.status(500).json({ error: 'Failed to load rerank decisions' });
     }
   });
@@ -171,7 +175,7 @@ export default function knowledgeRoutes(): Router {
       }
       res.status(201).json({ success: true, chunk_id: chunkId, active: false });
     } catch (error) {
-      console.error('[Knowledge] create failed:', error);
+      log.error({ err: error }, 'create failed');
       res.status(500).json({ error: 'Failed to create chunk' });
     }
   });
@@ -201,7 +205,7 @@ export default function knowledgeRoutes(): Router {
       if ((error as { code?: string }).code === '23505') {
         return res.status(409).json({ error: 'Another chunk already has identical content' });
       }
-      console.error('[Knowledge] update failed:', error);
+      log.error({ err: error }, 'update failed');
       res.status(500).json({ error: 'Failed to update chunk' });
     }
   });
@@ -246,7 +250,7 @@ export default function knowledgeRoutes(): Router {
         latency_ms: rerank.latencyMs,
       });
     } catch (error) {
-      console.error('[Knowledge] test-retrieval failed:', error);
+      log.error({ err: error }, 'test-retrieval failed');
       res.status(500).json({ error: 'Test retrieval failed' });
     }
   });
@@ -267,7 +271,7 @@ export default function knowledgeRoutes(): Router {
       if (!ok) return res.status(404).json({ error: 'chunk not found' });
       res.json({ success: true, id, active });
     } catch (error) {
-      console.error('[Knowledge] set active failed:', error);
+      log.error({ err: error }, 'set active failed');
       res.status(500).json({ error: 'Failed to update chunk' });
     }
   });
@@ -285,7 +289,7 @@ export default function knowledgeRoutes(): Router {
       const approved = await approveKnowledgeChunks({ kind, topic }, actor, note);
       res.json({ success: true, approved });
     } catch (error) {
-      console.error('[Knowledge] bulk approve failed:', error);
+      log.error({ err: error }, 'bulk approve failed');
       res.status(500).json({ error: 'Failed to approve chunks' });
     }
   });
@@ -299,7 +303,7 @@ export default function knowledgeRoutes(): Router {
       if (!ok) return res.status(404).json({ error: 'chunk not found' });
       res.json({ success: true });
     } catch (error) {
-      console.error('[Knowledge] delete failed:', error);
+      log.error({ err: error }, 'delete failed');
       res.status(500).json({ error: 'Failed to delete chunk' });
     }
   });

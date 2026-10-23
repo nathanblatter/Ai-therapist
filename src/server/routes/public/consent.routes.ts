@@ -9,6 +9,10 @@ import { recordConsent, getLatestConsentForUser } from '../../db/index.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import { getActiveConsent } from '../../utils/consent.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('consentRoutes');
+
 export default function consentRoutes(): Router {
   const router = Router();
 
@@ -49,7 +53,7 @@ export default function consentRoutes(): Router {
         reconsentRequired: !accepted && !!acceptedVersion,
       });
     } catch (err) {
-      console.error('Failed to fetch consent status:', err);
+      log.error({ err }, 'Failed to fetch consent status');
       res.status(500).json({ error: 'Failed to fetch consent status' });
     }
   });
@@ -93,7 +97,7 @@ export default function consentRoutes(): Router {
 
       res.json({ success: true, consentVersion, acceptedAt, recordingEnabled });
     } catch (err) {
-      console.error('Failed to record consent:', err);
+      log.error({ err }, 'Failed to record consent');
       res.status(500).json({ error: 'Failed to record consent' });
     }
   });

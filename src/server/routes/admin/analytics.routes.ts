@@ -5,6 +5,10 @@ import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { getDashboardAnalytics } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('analyticsRoutes');
+
 // Split a comma-separated query param into a non-empty string[] (or null).
 function parseList(value: unknown): string[] | null {
   if (!value) return null;
@@ -50,7 +54,7 @@ export default function analyticsRoutes(): Router {
         sideband_reliability: data.sideband_reliability || {},
       });
     } catch (err) {
-      console.error('Failed to fetch analytics:', err);
+      log.error({ err }, 'Failed to fetch analytics');
       res.status(500).json({ error: 'Failed to fetch analytics' });
     }
   });
@@ -95,7 +99,7 @@ export default function analyticsRoutes(): Router {
         total_sessions: sessionCounts.total_sessions,
       });
     } catch (err) {
-      console.error('Failed to fetch tool analytics:', err);
+      log.error({ err }, 'Failed to fetch tool analytics');
       res.status(500).json({ error: 'Failed to fetch tool analytics' });
     }
   });
@@ -114,7 +118,7 @@ export default function analyticsRoutes(): Router {
       ]);
       res.json({ totals, daily_spend: dailySpend, feedback });
     } catch (err) {
-      console.error('Failed to fetch cost analytics:', err);
+      log.error({ err }, 'Failed to fetch cost analytics');
       res.status(500).json({ error: 'Failed to fetch cost analytics' });
     }
   });
@@ -152,7 +156,7 @@ export default function analyticsRoutes(): Router {
 
       res.json({ prompt_version: promptVersion, comparisons });
     } catch (err) {
-      console.error('Failed to fetch pairwise analytics:', err);
+      log.error({ err }, 'Failed to fetch pairwise analytics');
       res.status(500).json({ error: 'Failed to fetch pairwise analytics' });
     }
   });
@@ -167,7 +171,7 @@ export default function analyticsRoutes(): Router {
       const [trend, openAlerts] = await Promise.all([getEvalScoreTrend(weeks), getOpenDriftAlerts()]);
       res.json({ trend, open_alerts: openAlerts });
     } catch (err) {
-      console.error('Failed to fetch eval trend analytics:', err);
+      log.error({ err }, 'Failed to fetch eval trend analytics');
       res.status(500).json({ error: 'Failed to fetch eval trend analytics' });
     }
   });

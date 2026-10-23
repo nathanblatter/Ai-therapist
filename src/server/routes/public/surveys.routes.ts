@@ -8,6 +8,10 @@ import { getParticipantSurveySchedule, buildSurveyUrl } from '../../services/sur
 import { getQualtricsSyncConfig } from '../../services/qualtricsSync.service.js';
 import { getStudyStatus } from '../../db/studyStatus.queries.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('surveysRoutes');
+
 export default function surveysRoutes(): Router {
   const router = Router();
 
@@ -19,7 +23,7 @@ export default function surveysRoutes(): Router {
       }
       res.json(await getParticipantSurveySchedule(req.session.userId!));
     } catch (err) {
-      console.error('[Surveys] failed to compute due surveys:', err);
+      log.error({ err }, 'failed to compute due surveys');
       res.status(500).json({ error: 'Failed to load survey schedule' });
     }
   });
@@ -45,7 +49,7 @@ export default function surveysRoutes(): Router {
         studyStatus,
       });
     } catch (err) {
-      console.error('[Surveys] failed to build withdrawal link:', err);
+      log.error({ err }, 'failed to build withdrawal link');
       res.status(500).json({ error: 'Failed to load withdrawal link' });
     }
   });

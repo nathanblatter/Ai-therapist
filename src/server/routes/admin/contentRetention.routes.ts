@@ -17,6 +17,10 @@ import {
   type DataRetentionSettings,
 } from '../../services/dataRetention.service.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('contentRetentionRoutes');
+
 export default function contentRetentionRoutes(): Router {
   const router = Router();
 
@@ -27,7 +31,7 @@ export default function contentRetentionRoutes(): Router {
       const schedulerStatus = getSchedulerStatus();
       res.json({ ...stats, scheduler: schedulerStatus });
     } catch (err) {
-      console.error('Failed to fetch content retention stats:', err);
+      log.error({ err }, 'Failed to fetch content retention stats');
       res.status(500).json({ error: 'Failed to fetch content retention stats' });
     }
   });
@@ -57,7 +61,7 @@ export default function contentRetentionRoutes(): Router {
       const updatedSettings = await updateRetentionSettings(settings, req.session.username!);
       res.json({ success: true, settings: updatedSettings });
     } catch (err) {
-      console.error('Failed to update content retention settings:', err);
+      log.error({ err }, 'Failed to update content retention settings');
       res.status(500).json({ error: 'Failed to update content retention settings' });
     }
   });
@@ -77,7 +81,7 @@ export default function contentRetentionRoutes(): Router {
         res.status(500).json({ success: false, error: result.error });
       }
     } catch (err) {
-      console.error('Failed to execute content wipe:', err);
+      log.error({ err }, 'Failed to execute content wipe');
       res.status(500).json({ error: 'Failed to execute content wipe' });
     }
   });
@@ -90,7 +94,7 @@ export default function contentRetentionRoutes(): Router {
       const { wipes, total } = await getContentWipeLog(limit, offset);
       res.json({ wipes, total, limit, offset });
     } catch (err) {
-      console.error('Failed to fetch content wipe log:', err);
+      log.error({ err }, 'Failed to fetch content wipe log');
       res.status(500).json({ error: 'Failed to fetch content wipe log' });
     }
   });
@@ -103,7 +107,7 @@ export default function contentRetentionRoutes(): Router {
       const settings = await getDataRetentionSettings();
       res.json({ settings, scheduler: getRetentionSchedulerStatus() });
     } catch (err) {
-      console.error('Failed to fetch data retention settings:', err);
+      log.error({ err }, 'Failed to fetch data retention settings');
       res.status(500).json({ error: 'Failed to fetch data retention settings' });
     }
   });
@@ -126,7 +130,7 @@ export default function contentRetentionRoutes(): Router {
       const updated = await updateDataRetentionSettings(settings, req.session.username!);
       res.json({ success: true, settings: updated });
     } catch (err) {
-      console.error('Failed to update data retention settings:', err);
+      log.error({ err }, 'Failed to update data retention settings');
       res.status(500).json({ error: 'Failed to update data retention settings' });
     }
   });
@@ -137,7 +141,7 @@ export default function contentRetentionRoutes(): Router {
       const result = await enforceRetention('manual', req.session.username);
       res.json({ success: true, ...result });
     } catch (err) {
-      console.error('Failed to run data retention:', err);
+      log.error({ err }, 'Failed to run data retention');
       res.status(500).json({ error: 'Failed to run data retention' });
     }
   });
@@ -149,7 +153,7 @@ export default function contentRetentionRoutes(): Router {
       const { entries, total } = await getDataDeletionLog(limit, offset);
       res.json({ entries, total, limit, offset });
     } catch (err) {
-      console.error('Failed to fetch data deletion log:', err);
+      log.error({ err }, 'Failed to fetch data deletion log');
       res.status(500).json({ error: 'Failed to fetch data deletion log' });
     }
   });

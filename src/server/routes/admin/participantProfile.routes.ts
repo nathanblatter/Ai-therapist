@@ -25,6 +25,10 @@ import {
   recordLlmUsage,
 } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('participantProfileRoutes');
+
 const BRIEF_MODEL = 'gpt-4o-mini';
 const BRIEF_SYSTEM_PROMPT =
   'You are a clinical documentation assistant for an AI-assisted therapy research study. ' +
@@ -129,7 +133,7 @@ export default function participantProfileRoutes(): Router {
         ...bundle,
       });
     } catch (err) {
-      console.error('Failed to fetch participant profile:', err);
+      log.error({ err }, 'Failed to fetch participant profile');
       res.status(500).json({ error: 'Failed to fetch participant profile' });
     }
   });
@@ -181,7 +185,7 @@ export default function participantProfileRoutes(): Router {
       if (brief) briefCache.set(userId, { key: cacheKey, brief });
       res.json({ brief });
     } catch (err) {
-      console.error('Failed to generate participant brief (fail-soft):', err);
+      log.error({ err }, 'Failed to generate participant brief (fail-soft)');
       res.json({ brief: null });
     }
   });
@@ -237,7 +241,7 @@ export default function participantProfileRoutes(): Router {
         pagination: { page: pageNum, limit: limitNum, totalCount },
       });
     } catch (err) {
-      console.error('Failed to fetch participant sessions:', err);
+      log.error({ err }, 'Failed to fetch participant sessions');
       res.status(500).json({ error: 'Failed to fetch participant sessions' });
     }
   });

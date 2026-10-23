@@ -18,6 +18,10 @@ import {
   getHarnessRun,
 } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('evalsRoutes');
+
 export default function evalsRoutes(): Router {
   const router = Router();
 
@@ -37,7 +41,7 @@ export default function evalsRoutes(): Router {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start run';
       const inProgress = /already in progress/.test(message);
-      if (!inProgress) console.error('Failed to start harness run:', err);
+      if (!inProgress) log.error({ err }, 'Failed to start harness run');
       res.status(inProgress ? 409 : /unknown suite/.test(message) ? 400 : 500).json({ error: message });
     }
   });
@@ -48,7 +52,7 @@ export default function evalsRoutes(): Router {
       const { getRunnerStatus, getHarnessSchedule } = await import('../../services/harnessRunner.service.js');
       res.json({ ...getRunnerStatus(), schedule: await getHarnessSchedule() });
     } catch (err) {
-      console.error('Failed to fetch harness status:', err);
+      log.error({ err }, 'Failed to fetch harness status');
       res.status(500).json({ error: 'Failed to fetch harness status' });
     }
   });
@@ -60,7 +64,7 @@ export default function evalsRoutes(): Router {
       const schedule = await setHarnessSchedule(req.body, req.session?.username ?? 'researcher');
       res.json({ schedule });
     } catch (err) {
-      console.error('Failed to save harness schedule:', err);
+      log.error({ err }, 'Failed to save harness schedule');
       res.status(500).json({ error: 'Failed to save harness schedule' });
     }
   });
@@ -72,7 +76,7 @@ export default function evalsRoutes(): Router {
       const { limit } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 500 });
       res.json({ runs: await listHarnessRuns(limit) });
     } catch (err) {
-      console.error('Failed to list harness runs:', err);
+      log.error({ err }, 'Failed to list harness runs');
       res.status(500).json({ error: 'Failed to list harness runs' });
     }
   });
@@ -86,7 +90,7 @@ export default function evalsRoutes(): Router {
       if (!out) return res.status(404).json({ error: 'Run not found' });
       res.json(out);
     } catch (err) {
-      console.error('Failed to fetch harness run:', err);
+      log.error({ err }, 'Failed to fetch harness run');
       res.status(500).json({ error: 'Failed to fetch harness run' });
     }
   });
@@ -98,7 +102,7 @@ export default function evalsRoutes(): Router {
       if (!evalRow) return res.status(404).json({ error: 'No eval for this session yet' });
       res.json({ eval: evalRow });
     } catch (err) {
-      console.error('Failed to fetch session eval:', err);
+      log.error({ err }, 'Failed to fetch session eval');
       res.status(500).json({ error: 'Failed to fetch session eval' });
     }
   });
@@ -119,7 +123,7 @@ export default function evalsRoutes(): Router {
       }
       res.json({ eval: row });
     } catch (err) {
-      console.error(`Eval run failed for ${sessionId}:`, err);
+      log.error({ err }, `Eval run failed for ${sessionId}`);
       res.status(500).json({
         error: 'Eval run failed',
         details: err instanceof Error ? err.message : String(err),
@@ -134,7 +138,7 @@ export default function evalsRoutes(): Router {
       const ratings = await getSessionHumanRatings(req.params.sessionId);
       res.json({ ratings, my_user_id: req.session.userId });
     } catch (err) {
-      console.error('Failed to fetch human ratings:', err);
+      log.error({ err }, 'Failed to fetch human ratings');
       res.status(500).json({ error: 'Failed to fetch human ratings' });
     }
   });
@@ -165,7 +169,7 @@ export default function evalsRoutes(): Router {
       );
       res.json({ rating });
     } catch (err) {
-      console.error(`Failed to save human rating for ${sessionId}:`, err);
+      log.error({ err }, `Failed to save human rating for ${sessionId}`);
       res.status(500).json({ error: 'Failed to save human rating' });
     }
   });
@@ -184,7 +188,7 @@ export default function evalsRoutes(): Router {
       ]);
       res.json({ report, available_prompt_versions: availableVersions, judge_agreement: judgeAgreement });
     } catch (err) {
-      console.error('Failed to compute calibration:', err);
+      log.error({ err }, 'Failed to compute calibration');
       res.status(500).json({ error: 'Failed to compute calibration' });
     }
   });
@@ -196,7 +200,7 @@ export default function evalsRoutes(): Router {
       if (!alert) return res.status(404).json({ error: 'Alert not found or already acknowledged' });
       res.json({ alert });
     } catch (err) {
-      console.error('Failed to acknowledge drift alert:', err);
+      log.error({ err }, 'Failed to acknowledge drift alert');
       res.status(500).json({ error: 'Failed to acknowledge drift alert' });
     }
   });

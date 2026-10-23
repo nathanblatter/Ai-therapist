@@ -7,6 +7,10 @@ import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { getActiveUserSessions, deleteUserSession } from '../../db/index.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('userSessionsRoutes');
+
 export default function userSessionsRoutes(): Router {
   const router = Router();
 
@@ -22,7 +26,7 @@ export default function userSessionsRoutes(): Router {
             ? (JSON.parse(row.sess) as Record<string, unknown>)
             : (row.sess as Record<string, unknown>);
         } catch (err) {
-          console.error('Failed to parse session data:', err);
+          log.error({ err }, 'Failed to parse session data');
         }
 
         return {
@@ -37,7 +41,7 @@ export default function userSessionsRoutes(): Router {
 
       res.json(sessions);
     } catch (err) {
-      console.error('Failed to fetch user sessions:', err);
+      log.error({ err }, 'Failed to fetch user sessions');
       res.status(500).json({ error: 'Failed to fetch user sessions' });
     }
   });
@@ -50,10 +54,10 @@ export default function userSessionsRoutes(): Router {
       if (!deletedSid) {
         return res.status(404).json({ error: 'Session not found' });
       }
-      console.log(`[Admin] Session ${sid} deleted by ${req.session.username}`);
+      log.info(`[Admin] Session ${sid} deleted by ${req.session.username}`);
       res.json({ message: 'Session deleted successfully', sid: deletedSid });
     } catch (err) {
-      console.error('Failed to delete user session:', err);
+      log.error({ err }, 'Failed to delete user session');
       res.status(500).json({ error: 'Failed to delete user session' });
     }
   });

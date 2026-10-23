@@ -3,6 +3,10 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('mfaRoutes');
+
 export default function mfaRoutes(): Router {
   const router = Router();
 
@@ -14,7 +18,7 @@ export default function mfaRoutes(): Router {
       const { secret: _secret, ...statusWithoutSecret } = status;
       res.json({ success: true, mfa: statusWithoutSecret });
     } catch (error) {
-      console.error('Failed to get MFA status:', error);
+      log.error({ err: error }, 'Failed to get MFA status');
       res.status(500).json({ error: 'Failed to get MFA status' });
     }
   });
@@ -36,7 +40,7 @@ export default function mfaRoutes(): Router {
 
       res.json({ success: true, secret, qrCode });
     } catch (error) {
-      console.error('Failed to initialize MFA setup:', error);
+      log.error({ err: error }, 'Failed to initialize MFA setup');
       res.status(500).json({ error: 'Failed to initialize MFA setup' });
     }
   });
@@ -66,7 +70,7 @@ export default function mfaRoutes(): Router {
 
       res.json({ success: true, message: 'MFA enabled successfully', backupCodes: codes });
     } catch (error) {
-      console.error('Failed to verify MFA setup:', error);
+      log.error({ err: error }, 'Failed to verify MFA setup');
       res.status(500).json({ error: 'Failed to complete MFA setup' });
     }
   });
@@ -90,7 +94,7 @@ export default function mfaRoutes(): Router {
       await disableMFA(req.session.userId!);
       res.json({ success: true, message: 'MFA disabled successfully' });
     } catch (error) {
-      console.error('Failed to disable MFA:', error);
+      log.error({ err: error }, 'Failed to disable MFA');
       res.status(500).json({ error: 'Failed to disable MFA' });
     }
   });
@@ -121,7 +125,7 @@ export default function mfaRoutes(): Router {
 
       res.json({ success: true, message: 'Backup codes regenerated successfully', backupCodes: codes });
     } catch (error) {
-      console.error('Failed to regenerate backup codes:', error);
+      log.error({ err: error }, 'Failed to regenerate backup codes');
       res.status(500).json({ error: 'Failed to regenerate backup codes' });
     }
   });
