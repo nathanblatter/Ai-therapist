@@ -11,6 +11,7 @@ const {
   listUnemailedNotificationsMock,
   listUserIdsWithUnemailedNotificationsMock,
   getSandboxWorkItemIdsMock,
+  getSystemConfigByKeyMock,
   sendEmailMock,
 } = vi.hoisted(() => ({
   getUserByIdMock: vi.fn(),
@@ -20,6 +21,7 @@ const {
   listUnemailedNotificationsMock: vi.fn(),
   listUserIdsWithUnemailedNotificationsMock: vi.fn(),
   getSandboxWorkItemIdsMock: vi.fn(),
+  getSystemConfigByKeyMock: vi.fn(),
   sendEmailMock: vi.fn(),
 }));
 
@@ -31,6 +33,7 @@ vi.mock('../db/index.js', () => ({
   listUnemailedNotifications: listUnemailedNotificationsMock,
   listUserIdsWithUnemailedNotifications: listUserIdsWithUnemailedNotificationsMock,
   getSandboxWorkItemIds: getSandboxWorkItemIdsMock,
+  getSystemConfigByKey: getSystemConfigByKeyMock,
   // Transitive imports of utils/adminBroadcast.js (real module, mocked barrel):
   getSessionAccessInfo: vi.fn(),
   getTherapistIdsForClient: vi.fn(),
@@ -43,8 +46,13 @@ const {
   runDigestSweep,
   emailPolicyFor,
   emailAddressForUsername,
+  notificationAddressFor,
+  loadNotificationEmailGate,
   localHour,
 } = await import('./notification.service.js');
+
+/** The recipient gate (ai-therapist-154) as an admin would open it. */
+const OPEN_GATE_ROW = { config_key: 'notification_email_recipients', config_value: { enabled: true, allowed_domains: ['example.com'] } };
 
 const DEFAULT_PREFS = {
   user_id: 9,
@@ -88,6 +96,7 @@ beforeEach(() => {
   });
   markNotificationsEmailedMock.mockResolvedValue(undefined);
   getSandboxWorkItemIdsMock.mockResolvedValue([]);
+  getSystemConfigByKeyMock.mockResolvedValue(OPEN_GATE_ROW);
   sendEmailMock.mockResolvedValue('sent');
 });
 
@@ -111,6 +120,53 @@ describe('emailAddressForUsername', () => {
     expect(emailAddressForUsername('cw@example.com')).toBe('cw@example.com');
     expect(emailAddressForUsername('caseworker1')).toBeNull();
     expect(emailAddressForUsername(null)).toBeNull();
+  });
+});
+
+describe('recipient gate (ai-therapist-154: no users.email column, no verification)', () => {
+  it('loads enabled + lower-cased domains from system_config, and fails CLOSED on a missing, malformed or disabled row', async () => {
+    await expect(loadNotificationEmailGate()).resolves.toEqual({ enabled: true, allowedDomains: ['example.com'] });
+    expect(getSystemConfigByKeyMock).toHaveBeenCalledWith('notification_email_recipients');
+
+    getSystemConfigByKeyMock.mockResolvedValue({ config_value: { enabled: true, allowed_domains: [' Clinic.ORG ', 7, ''] } });
+    await expect(loadNotificationEmailGate()).resolves.toEqual({ enabled: true, allowedDomains: ['clinic.org'] });
+
+    getSystemConfigByKeyMock.mockResolvedValue(null);
+    await expect(loadNotificationEmailGate()).resolves.toEqual({ enabled: false, allowedDomains: [] });
+    getSystemConfigByKeyMock.mockResolvedValue({ config_value: { enabled: false, allowed_domains: ['example.com'] } });
+    await expect(loadNotificationEmailGate()).resolves.toEqual({ enabled: false, allowedDomains: [] });
+    getSystemConfigByKeyMock.mockResolvedValue({ config_value: 'yes' });
+    await expect(loadNotificationEmailGate()).resolves.toEqual({ enabled: false, allowedDomains: [] });
+    getSystemConfigByKeyMock.mockRejectedValue(new Error('db down'));
+    await expect(loadNotificationEmailGate()).resolves.toEqual({ enabled: false, allowedDomains: [] });
+  });
+
+  it('notificationAddressFor requires an email-shaped username, an open gate and an exact domain match', () => {
+    const gate = { enabled: true, allowedDomains: ['example.com'] };
+    expect(notificationAddressFor('cw@example.com', gate)).toBe('cw@example.com');
+    expect(notificationAddressFor('cw@EXAMPLE.com', gate)).toBe('cw@EXAMPLE.com');
+    expect(notificationAddressFor('cw@sub.example.com', gate)).toBeNull(); // no wildcard
+    expect(notificationAddressFor('cw@example.com.evil.net', gate)).toBeNull();
+    expect(notificationAddressFor('cw@other.org', gate)).toBeNull();
+    expect(notificationAddressFor('caseworker1', gate)).toBeNull();
+    expect(notificationAddressFor('cw@example.com', { enabled: false, allowedDomains: ['example.com'] })).toBeNull();
+    expect(notificationAddressFor('cw@example.com', { enabled: true, allowedDomains: [] })).toBeNull();
+  });
+
+  it('notifyWorkItem reads the gate once per call and emails nobody when it is closed (in-app still delivered)', async () => {
+    getSystemConfigByKeyMock.mockResolvedValue(null);
+    await notifyWorkItem(workItem(), [{ userId: 9, role: 'caseworker' }, { userId: 9, role: 'caseworker' }]);
+    expect(getSystemConfigByKeyMock).toHaveBeenCalledTimes(1);
+    expect(insertNotificationMock).toHaveBeenCalledTimes(2);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(markNotificationsEmailedMock).not.toHaveBeenCalled();
+  });
+
+  it('notifyWorkItem skips email for an email-shaped username whose domain is not allowlisted', async () => {
+    getUserByIdMock.mockResolvedValue({ userid: 9, username: 'cw@unlisted.org', role: 'caseworker', is_sandbox: false });
+    await notifyWorkItem(workItem(), [{ userId: 9, role: 'caseworker' }]);
+    expect(insertNotificationMock).toHaveBeenCalled();
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 });
 
@@ -276,6 +332,15 @@ describe('runDigestSweep', () => {
     getNotificationPreferencesMock.mockResolvedValue({ ...DEFAULT_PREFS, digest_hour_local: localHour(NOW) });
     getSandboxWorkItemIdsMock.mockResolvedValue([1, 2, 3]);
     await runDigestSweep(NOW);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+    expect(markNotificationsEmailedMock).toHaveBeenCalledWith([1, 2, 3]);
+  });
+
+  it('with the recipient gate closed, stamps the backlog without sending (same as a user with no address)', async () => {
+    getSystemConfigByKeyMock.mockResolvedValue({ config_value: { enabled: false, allowed_domains: ['example.com'] } });
+    getNotificationPreferencesMock.mockResolvedValue({ ...DEFAULT_PREFS, digest_hour_local: localHour(NOW) });
+    await runDigestSweep(NOW);
+    expect(getSystemConfigByKeyMock).toHaveBeenCalledTimes(1);
     expect(sendEmailMock).not.toHaveBeenCalled();
     expect(markNotificationsEmailedMock).toHaveBeenCalledWith([1, 2, 3]);
   });

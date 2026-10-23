@@ -11,8 +11,14 @@
 //   - Delivery policy (spec section 5): urgent kinds email immediately when
 //     urgent_email_immediate; mid kinds follow email_mode; low kinds are
 //     digest-only.
+//   - Recipient gate (ai-therapist-154): there is still no users.email /
+//     notification_email column and no verification flow, so the only
+//     address we have is an email-shaped username. Nothing is sent to one
+//     unless the system_config switch `notification_email_recipients` is
+//     enabled AND the username's domain is on its allowlist. Default: off.
 import {
   getUserById,
+  getSystemConfigByKey,
   getNotificationPreferences,
   insertNotification,
   markNotificationsEmailed,
@@ -70,6 +76,54 @@ export function emailAddressForUsername(username: string | undefined | null): st
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username) ? username.trim() : null;
 }
 
+/** system_config key gating which username-derived addresses may be emailed. */
+export const NOTIFICATION_EMAIL_GATE_KEY = 'notification_email_recipients';
+
+export interface NotificationEmailGate {
+  enabled: boolean;
+  /** Lower-cased domains; a username's domain must match one exactly. */
+  allowedDomains: string[];
+}
+
+export const CLOSED_GATE: NotificationEmailGate = { enabled: false, allowedDomains: [] };
+
+/**
+ * Load the recipient gate from system_config. Fails CLOSED: a missing row, a
+ * malformed value or a lookup error all mean "email nobody" (in-app delivery
+ * is unaffected). Read once per notify/sweep call, not per recipient.
+ */
+export async function loadNotificationEmailGate(): Promise<NotificationEmailGate> {
+  try {
+    const row = await getSystemConfigByKey(NOTIFICATION_EMAIL_GATE_KEY);
+    const value = row?.config_value as { enabled?: unknown; allowed_domains?: unknown } | null | undefined;
+    if (!value || typeof value !== 'object' || value.enabled !== true) return CLOSED_GATE;
+    const domains = Array.isArray(value.allowed_domains) ? value.allowed_domains : [];
+    const allowedDomains = domains
+      .filter((d): d is string => typeof d === 'string')
+      .map((d) => d.trim().toLowerCase())
+      .filter((d) => d.length > 0);
+    return { enabled: true, allowedDomains };
+  } catch (err) {
+    log.error({ err }, '[notify] failed to read the recipient gate; emailing nobody');
+    return CLOSED_GATE;
+  }
+}
+
+/**
+ * The address a notification email may go to, or null. Requires an
+ * email-shaped username AND an open gate whose allowlist contains the
+ * username's domain (case-insensitive, exact match: no subdomain wildcard).
+ */
+export function notificationAddressFor(
+  username: string | undefined | null,
+  gate: NotificationEmailGate
+): string | null {
+  const address = emailAddressForUsername(username);
+  if (!address || !gate.enabled) return null;
+  const domain = address.slice(address.lastIndexOf('@') + 1).toLowerCase();
+  return gate.allowedDomains.includes(domain) ? address : null;
+}
+
 function memberRoomFor(role: string | null | undefined, userId: number): string | null {
   if (role === 'caseworker') return caseworkerRoom(userId);
   if (role === 'therapist') return therapistRoom(userId);
@@ -99,6 +153,7 @@ export async function notifyWorkItem(
   item: WorkItemRow,
   recipients: NotificationRecipient[]
 ): Promise<void> {
+  const gate = await loadNotificationEmailGate();
   for (const recipient of recipients) {
     try {
       const user = await getUserById(recipient.userId);
@@ -126,9 +181,9 @@ export async function notifyWorkItem(
         (policy === 'per_mode' && prefs.email_mode === 'immediate');
       if (!sendNow) continue; // digest sweep picks up the rest
 
-      const address = emailAddressForUsername(user.username);
+      const address = notificationAddressFor(user.username, gate);
       if (!address) {
-        log.debug({ userId: recipient.userId }, '[notify] no email address for user; in-app only');
+        log.debug({ userId: recipient.userId }, '[notify] no emailable address for user; in-app only');
         continue;
       }
       // PHI-free by construction: template inputs are kind + severity only.
@@ -174,6 +229,7 @@ export async function runDigestSweep(now: Date = new Date()): Promise<void> {
     return;
   }
   const hour = localHour(now);
+  const gate = await loadNotificationEmailGate();
 
   for (const userId of userIds) {
     try {
@@ -199,7 +255,7 @@ export async function runDigestSweep(now: Date = new Date()): Promise<void> {
           (row) => row.work_item_id == null || !sandboxItemIds.has(Number(row.work_item_id))
         );
 
-        const address = emailAddressForUsername(user.username);
+        const address = notificationAddressFor(user.username, gate);
         if (address && emailable.length > 0) {
           const counts: Record<string, number> = {};
           for (const row of emailable) counts[row.kind] = (counts[row.kind] ?? 0) + 1;
@@ -208,8 +264,8 @@ export async function runDigestSweep(now: Date = new Date()): Promise<void> {
           // the rows unstamped so the next matching hour retries them.
           if (result !== 'sent') continue;
         }
-        // No address / nothing emailable: fall through and stamp — there is
-        // nowhere (or nothing) to send.
+        // No emailable address (none, or gated off) / nothing emailable:
+        // fall through and stamp — there is nowhere (or nothing) to send.
       }
       await markNotificationsEmailed(pending.map((row) => row.notification_id));
     } catch (err) {

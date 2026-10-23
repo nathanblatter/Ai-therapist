@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+const { queryMock, clientQueryMock, releaseMock, connectMock } = vi.hoisted(() => {
+  const clientQueryMock = vi.fn();
+  const releaseMock = vi.fn();
+  const connectMock = vi.fn(async () => ({ query: clientQueryMock, release: releaseMock }));
+  return { queryMock: vi.fn(), clientQueryMock, releaseMock, connectMock };
+});
 vi.mock('../config/db.js', () => ({
-  pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
+  pool: { query: queryMock, connect: connectMock, on: vi.fn() },
 }));
 
 import {
@@ -10,12 +15,43 @@ import {
   findSandboxInviteByToken,
   consumeSandboxInvite,
   markSandboxInviteUsed,
+  markSandboxInviteUsedAudited,
   releaseSandboxInvite,
   listSandboxInviteBatches,
 } from './sandboxInvites.queries.js';
 
 beforeEach(() => {
   queryMock.mockReset();
+  clientQueryMock.mockReset();
+  releaseMock.mockReset();
+  connectMock.mockClear();
+});
+
+describe('markSandboxInviteUsedAudited (bookkeeping + audit in one transaction, ai-therapist-154)', () => {
+  const clientSql = () => clientQueryMock.mock.calls.map((c) => String(c[0]).trim().split(/\s+/)[0]);
+  const AUDIT = { therapistId: 99, clientId: null, actorUserId: 99, actorUsername: 'owner', detail: { sandbox: true } };
+
+  it('stamps used_by/org_id and writes the invite_consumed row, then COMMITs', async () => {
+    clientQueryMock.mockResolvedValue({ rows: [], rowCount: 1 });
+    await markSandboxInviteUsedAudited(4, 99, 12, AUDIT);
+    expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'INSERT', 'COMMIT']);
+    expect(queryMock).not.toHaveBeenCalled();
+    expect(clientQueryMock.mock.calls[1][1]).toEqual([99, 12, 4]);
+    const [auditSql, auditParams] = clientQueryMock.mock.calls[2] as [string, unknown[]];
+    expect(auditSql).toContain('caseload_audit_log');
+    expect(auditParams).toEqual(['invite_consumed', 99, null, 99, 'owner', JSON.stringify({ sandbox: true })]);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ROLLBACKs the stamp when the audit insert fails, and rethrows', async () => {
+    clientQueryMock.mockImplementation(async (sql: string) => {
+      if (/caseload_audit_log/.test(sql)) throw new Error('audit down');
+      return { rows: [], rowCount: 1 };
+    });
+    await expect(markSandboxInviteUsedAudited(4, 99, 12, AUDIT)).rejects.toThrow('audit down');
+    expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'INSERT', 'ROLLBACK']);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('createSandboxInviteBatch', () => {

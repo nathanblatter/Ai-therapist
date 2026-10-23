@@ -3,9 +3,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createHash } from 'crypto';
 
-const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+const { queryMock, clientQueryMock, releaseMock, connectMock } = vi.hoisted(() => {
+  const clientQueryMock = vi.fn();
+  const releaseMock = vi.fn();
+  const connectMock = vi.fn(async () => ({ query: clientQueryMock, release: releaseMock }));
+  return { queryMock: vi.fn(), clientQueryMock, releaseMock, connectMock };
+});
 vi.mock('../config/db.js', () => ({
-  pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
+  pool: { query: queryMock, connect: connectMock, on: vi.fn() },
 }));
 
 import {
@@ -15,7 +20,9 @@ import {
   markInviteUsedBy,
   releaseInvite,
   listInvites,
+  completeInviteGrant,
 } from './invites.queries.js';
+import { CaseloadRoleError } from './caseload.queries.js';
 
 const INVITE_ROW = {
   invite_id: 7,
@@ -30,6 +37,62 @@ const INVITE_ROW = {
 
 beforeEach(() => {
   queryMock.mockReset();
+  clientQueryMock.mockReset();
+  releaseMock.mockReset();
+  connectMock.mockClear();
+});
+
+describe('completeInviteGrant (grant + audit + used_by in one transaction, ai-therapist-154)', () => {
+  const clientSql = () => clientQueryMock.mock.calls.map((c) => String(c[0]).trim().split(/\s+/)[0]);
+  const INPUT = { inviteId: 7, memberId: 3, memberRole: 'caseworker' as const, clientId: 42, clientUsername: 'newclient' };
+  const VALID_PAIR = { therapist_role: 'caseworker', client_role: 'participant', member_org: 1, client_org: 1, member_org_kind: 'clinical' };
+
+  it('validates the pair, inserts the edge, the invite_consumed audit row and the used_by stamp, then COMMITs', async () => {
+    clientQueryMock.mockImplementation(async (sql: string) =>
+      /^\s*SELECT/.test(sql) ? { rows: [VALID_PAIR] } : { rows: [], rowCount: 1 }
+    );
+    await completeInviteGrant(INPUT);
+    expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'INSERT', 'INSERT', 'UPDATE', 'COMMIT']);
+    expect(queryMock).not.toHaveBeenCalled();
+    const [edgeSql, edgeParams] = clientQueryMock.mock.calls[2] as [string, unknown[]];
+    expect(edgeSql).toContain('therapist_clients');
+    expect(edgeParams).toEqual([3, 42, 3, 'caseworker']);
+    const [auditSql, auditParams] = clientQueryMock.mock.calls[3] as [string, unknown[]];
+    expect(auditSql).toContain('caseload_audit_log');
+    expect(auditParams).toEqual(['invite_consumed', 3, 42, 42, 'newclient', JSON.stringify({ invite_id: 7, member_role: 'caseworker' })]);
+    expect(clientQueryMock.mock.calls[4]).toEqual(['UPDATE client_invites SET used_by = $1 WHERE invite_id = $2', [42, 7]]);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ROLLBACKs the grant when the audit insert fails', async () => {
+    clientQueryMock.mockImplementation(async (sql: string) => {
+      if (/^\s*SELECT/.test(sql)) return { rows: [VALID_PAIR] };
+      if (/caseload_audit_log/.test(sql)) throw new Error('audit down');
+      return { rows: [], rowCount: 1 };
+    });
+    await expect(completeInviteGrant(INPUT)).rejects.toThrow('audit down');
+    expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'INSERT', 'INSERT', 'ROLLBACK']);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ROLLBACKs without stamping used_by when the stamp fails after the grant', async () => {
+    clientQueryMock.mockImplementation(async (sql: string) => {
+      if (/^\s*SELECT/.test(sql)) return { rows: [VALID_PAIR] };
+      if (/client_invites/.test(sql)) throw new Error('stamp down');
+      return { rows: [], rowCount: 1 };
+    });
+    await expect(completeInviteGrant(INPUT)).rejects.toThrow('stamp down');
+    expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'INSERT', 'INSERT', 'UPDATE', 'ROLLBACK']);
+  });
+
+  it('throws CaseloadRoleError and writes nothing when the inviter no longer holds the role', async () => {
+    clientQueryMock.mockResolvedValue({ rows: [] });
+    clientQueryMock.mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...VALID_PAIR, therapist_role: 'participant' }] });
+    await expect(completeInviteGrant(INPUT)).rejects.toBeInstanceOf(CaseloadRoleError);
+    expect(clientSql()).toEqual(['BEGIN', 'SELECT', 'ROLLBACK']);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('createInvite', () => {

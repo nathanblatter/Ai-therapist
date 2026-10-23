@@ -26,6 +26,12 @@ import {
 } from '../services/qualtrics.service.js';
 import { enqueueWorkItem } from '../services/workQueue.service.js';
 import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
+import {
+  MIN_USERNAME_LENGTH,
+  MAX_USERNAME_LENGTH,
+  USERNAME_HTML_PATTERN,
+  usernamePolicyError,
+} from '../utils/usernamePolicy.js';
 import { registerAccount } from '../services/accounts.service.js';
 
 import { createLogger } from '../utils/logger.js';
@@ -63,7 +69,7 @@ function registrationPage(): string {
   <p>Thank you! The last step is creating the account you will use to talk with the AI support agent. Choose a username and password.</p>
   <form id="join-form">
     <label for="username">Username</label>
-    <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="64">
+    <input id="username" name="username" autocomplete="username" required minlength="${MIN_USERNAME_LENGTH}" maxlength="${MAX_USERNAME_LENGTH}" pattern="${USERNAME_HTML_PATTERN}">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="new-password" required minlength="${MIN_PASSWORD_LENGTH}">
     <button type="submit" id="submit-btn">Create account</button>
@@ -201,6 +207,10 @@ export default function joinStudyRoutes(): Router {
     const { username, password } = req.body ?? {};
     if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
+    }
+    const usernameError = usernamePolicyError(username);
+    if (usernameError) {
+      return res.status(400).json({ error: usernameError });
     }
     const pwError = passwordPolicyError(password);
     if (pwError) {

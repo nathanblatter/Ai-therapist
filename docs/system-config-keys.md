@@ -56,6 +56,7 @@ section at the end is the part most likely to go stale.
 | `redaction_verifier` | `{enabled?, backend?: 'decisions'\|'responses'\|'auto', threshold?: 0..1}` | 110 | `redactionVerifier.service.getVerifierConfig` | generic PUT only |
 | `attention_ranking` | partial override of `DEFAULT_ATTENTION_RANKING` (`practice_overdue`, `inactivity_days`, `low_mood_threshold`, ...) | 110 (full default object) | `caseworkerDashboard.routes.loadRankingConfig` | generic PUT only |
 | `email_notifications` | bare boolean or `{enabled: boolean}`; absent = enabled | 110 (`{enabled: true}`) | `emailer.service.emailNotificationsEnabled` | generic PUT only |
+| `notification_email_recipients` | `{enabled: boolean, allowed_domains: string[]}`; absent or malformed = disabled (fail closed) | 111 (`{enabled: false, allowed_domains: []}`) | `notification.service.loadNotificationEmailGate` (immediate sends and the digest sweep) | generic PUT only |
 | `coping_strategies` | `Record<category, [{name, how}]>` merged over `DEFAULT_COPING_LIBRARY` | 110 (`{}` = no overrides; the library itself stays in code) | `utils/copingLibrary.getCopingLibrary` | generic PUT only |
 | `grok_voice` | `{vad: {threshold, silence_duration_ms, prefix_padding_ms}, reasoning_effort: 'none'\|'high', speed}` | 110 | `grokSession.routes` (coerced by `utils/grokVoiceConfig`) | UI (Grok turn-taking form) |
 | `grok_refusal_guard` | `{enabled, patterns: string[], maxChars, steerAfter, recoverAfter}` | 110 | `grokSession.routes` (coerced by `utils/grokRefusalGuard`), `grokVoiceManager` | generic PUT only |

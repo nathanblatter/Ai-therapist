@@ -5,6 +5,8 @@
 import { randomBytes } from 'crypto';
 import { pool } from '../config/db.js';
 import { hashToken } from '../utils/crypto.js';
+import { assertAssignable, insertAssignment, insertCaseloadAuditRow } from './caseload.queries.js';
+import type { CareTeamRole } from '../../shared/roles.js';
 
 export interface ClientInviteRow {
   invite_id: number;
@@ -101,4 +103,51 @@ export async function listInvites(therapistId: number): Promise<ClientInviteRow[
     [therapistId]
   );
   return result.rows;
+}
+
+export interface InviteGrantInput {
+  inviteId: number;
+  /** The inviting care-team member (client_invites.therapist_id). */
+  memberId: number;
+  memberRole: CareTeamRole;
+  /** The participant account the invite just produced. */
+  clientId: number;
+  clientUsername: string;
+}
+
+/**
+ * Finish consuming a client invite in ONE transaction (ai-therapist-154):
+ * validate the inviter/participant pair with the caseload rules, grant the
+ * caseload edge, write the 'invite_consumed' caseload_audit_log row, and
+ * stamp client_invites.used_by. Any failure rolls the whole thing back, so a
+ * caseload grant can never exist without its audit row (and vice versa).
+ * Throws CaseloadRoleError when the inviter is no longer a member of the
+ * invite's role; the caller compensates (deletes the account, releases the
+ * invite).
+ */
+export async function completeInviteGrant(input: InviteGrantInput): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await assertAssignable(client, input.memberId, input.clientId, input.memberRole);
+    await insertAssignment(client, input.memberId, input.clientId, input.memberId, input.memberRole);
+    await insertCaseloadAuditRow(client, {
+      action: 'invite_consumed',
+      therapistId: input.memberId,
+      clientId: input.clientId,
+      actorUserId: input.clientId,
+      actorUsername: input.clientUsername,
+      detail: { invite_id: input.inviteId, member_role: input.memberRole },
+    });
+    await client.query('UPDATE client_invites SET used_by = $1 WHERE invite_id = $2', [
+      input.clientId,
+      input.inviteId,
+    ]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }

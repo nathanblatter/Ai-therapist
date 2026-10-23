@@ -50,6 +50,8 @@ export default function invitesRoutes(): Router {
       }
 
       const { rawToken, invite } = await createInvite(req.session.userId as number, label, ttlHours);
+      // Minting grants nothing (the grant happens at consumption, inside
+      // completeInviteGrant's transaction), so its audit stays best-effort.
       void insertCaseloadAudit({
         action: 'invite_created',
         therapistId: req.session.userId as number,

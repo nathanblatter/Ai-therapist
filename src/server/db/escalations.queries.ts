@@ -4,7 +4,13 @@
 // ack/resolve fields). Every transition is a guarded UPDATE ... WHERE
 // status = expected, returning null on a lost race so the route can 409.
 import { pool } from '../config/db.js';
-import type { StaffCommsRole } from '../../shared/roles.js';
+import type { StaffCommsRole, CareTeamRole } from '../../shared/roles.js';
+import {
+  CaseloadRoleError,
+  assertAssignable,
+  insertAssignment,
+  insertCaseloadAuditRow,
+} from './caseload.queries.js';
 
 export type EscalationUrgency = 'routine' | 'urgent' | 'emergency';
 export type EscalationStatus = 'open' | 'acknowledged' | 'resolved';
@@ -266,6 +272,75 @@ export async function claimEscalation(
     [escalationId, therapistId]
   );
   return result.rows[0] ?? null;
+}
+
+export interface ClaimEscalationResult {
+  escalation: EscalationRow;
+  /** 'granted': the claimer now holds an audited caseload edge to the client.
+   *  'rejected': the caseload rules refused the grant (CaseloadRoleError,
+   *  e.g. a researcher claiming); the claim itself still stands, as before. */
+  grant: 'granted' | 'rejected';
+  grantError?: CaseloadRoleError;
+}
+
+/**
+ * claimEscalation + the claimer's audited caseload grant in ONE transaction
+ * (ai-therapist-154). Previously the claim committed first and the grant ran
+ * afterwards, so a failed grant left an assigned escalation whose assignee
+ * could not see the client. Now: lost race -> null (nothing written);
+ * caseload-rule rejection -> the claim commits without a grant (same outcome
+ * the route always had for that path); any other failure -> ROLLBACK of the
+ * claim too, and the error propagates.
+ */
+export async function claimEscalationAudited(
+  escalationId: number,
+  therapistId: number,
+  audit: { actorUsername: string | null; memberRole?: CareTeamRole }
+): Promise<ClaimEscalationResult | null> {
+  const memberRole = audit.memberRole ?? 'therapist';
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query<EscalationRow>(
+      `UPDATE escalations
+       SET assigned_to = $2, updated_at = now()
+       WHERE escalation_id = $1 AND assigned_to IS NULL AND status <> 'resolved'
+       RETURNING ${ESCALATION_COLUMNS}`,
+      [escalationId, therapistId]
+    );
+    const escalation = result.rows[0];
+    if (!escalation) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    let grantError: CaseloadRoleError | undefined;
+    try {
+      await assertAssignable(client, therapistId, escalation.client_id, memberRole);
+    } catch (err) {
+      if (!(err instanceof CaseloadRoleError)) throw err;
+      grantError = err;
+    }
+    if (!grantError) {
+      await insertAssignment(client, therapistId, escalation.client_id, therapistId, memberRole);
+      await insertCaseloadAuditRow(client, {
+        action: 'assign',
+        therapistId,
+        clientId: escalation.client_id,
+        actorUserId: therapistId,
+        actorUsername: audit.actorUsername,
+        detail: { via: 'escalation_claim', escalation_id: escalationId },
+      });
+    }
+    await client.query('COMMIT');
+    return grantError
+      ? { escalation, grant: 'rejected', grantError }
+      : { escalation, grant: 'granted' };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export interface EscalationEventRow {

@@ -19,22 +19,25 @@ import {
   findInviteByToken,
   consumeInvite,
   releaseInvite,
-  markInviteUsedBy,
-  deleteUser,
+  completeInviteGrant,
   getUserById,
-  assignClient,
-  insertCaseloadAudit,
   findSandboxInviteByToken,
   consumeSandboxInvite,
   releaseSandboxInvite,
-  markSandboxInviteUsed,
+  markSandboxInviteUsedAudited,
   createOrganization,
   deleteSandboxOrganization,
 } from '../db/index.js';
 import { seedSandboxCaseload } from '../services/sandboxSeed.js';
 import { isCareTeamRole } from '../../shared/roles.js';
 import { MIN_PASSWORD_LENGTH, passwordPolicyError } from '../utils/passwordPolicy.js';
-import { registerAccount } from '../services/accounts.service.js';
+import {
+  MIN_USERNAME_LENGTH,
+  MAX_USERNAME_LENGTH,
+  USERNAME_HTML_PATTERN,
+  usernamePolicyError,
+} from '../utils/usernamePolicy.js';
+import { registerAccount, removeAccount } from '../services/accounts.service.js';
 
 import { createLogger } from '../utils/logger.js';
 
@@ -84,7 +87,7 @@ function registrationPage(opts: RegistrationPageOptions): string {
   ${opts.notice ? `<div class="notice">${opts.notice}</div>` : ''}
   <form id="join-form">
     <label for="username">Username</label>
-    <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="64">
+    <input id="username" name="username" autocomplete="username" required minlength="${MIN_USERNAME_LENGTH}" maxlength="${MAX_USERNAME_LENGTH}" pattern="${USERNAME_HTML_PATTERN}">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="new-password" required minlength="${MIN_PASSWORD_LENGTH}">
     <button type="submit" id="submit-btn">${opts.buttonLabel}</button>
@@ -219,6 +222,12 @@ export default function joinRoutes(): Router {
     if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
     }
+    // Server-side mirror of the page's username rules + password policy
+    // (ai-therapist-154): nothing is consumed or hashed for a bad body.
+    const usernameError = usernamePolicyError(username);
+    if (usernameError) {
+      return res.status(400).json({ error: usernameError });
+    }
     const pwError = passwordPolicyError(password);
     if (pwError) {
       return res.status(400).json({ error: pwError });
@@ -265,26 +274,31 @@ export default function joinRoutes(): Router {
         throw error;
       }
 
+      // Caseload grant + 'invite_consumed' audit row + used_by stamp commit
+      // together or not at all (ai-therapist-154): a grant can never exist
+      // without its audit row. On failure undo everything — no orphaned
+      // unassigned participant (removeAccount also drops the Squawk copy),
+      // and the link stays usable if it was transient.
       try {
-        await assignClient(invite.therapist_id, user.userid, invite.therapist_id, inviterRole);
-      } catch (assignErr) {
-        // The inviting member vanished (or changed role) between consume
-        // and assign: undo everything — no orphaned unassigned participant,
-        // and the client can ask for a fresh link if it was transient.
-        log.error({ err: assignErr }, 'Invite assignment failed; rolling back registration');
-        try { await deleteUser(user.userid); } catch (e) { log.error({ err: e }, 'orphan cleanup failed'); }
+        await completeInviteGrant({
+          inviteId: invite.invite_id,
+          memberId: invite.therapist_id,
+          memberRole: inviterRole,
+          clientId: user.userid,
+          clientUsername: user.username,
+        });
+      } catch (grantErr) {
+        log.error({ err: grantErr }, 'Invite grant failed; rolling back registration');
+        try { await removeAccount(user.userid); } catch (e) { log.error({ err: e }, 'orphan cleanup failed'); }
         try { await releaseInvite(invite.invite_id); } catch (e) { log.error({ err: e }, 'invite release failed'); }
-        return res.status(410).json({ error: GONE_MESSAGE });
+        // The inviting member changed role between consume and grant: the
+        // invite is dead (410). Anything else is an outage: 500.
+        // Name check (not instanceof): route tests mock db/index.js wholesale.
+        if (grantErr instanceof Error && grantErr.name === 'CaseloadRoleError') {
+          return res.status(410).json({ error: GONE_MESSAGE });
+        }
+        return res.status(500).json({ error: 'Registration failed' });
       }
-      void insertCaseloadAudit({
-        action: 'invite_consumed',
-        therapistId: invite.therapist_id,
-        clientId: user.userid,
-        actorUserId: user.userid,
-        actorUsername: user.username,
-        detail: { invite_id: invite.invite_id, member_role: inviterRole },
-      });
-      await markInviteUsedBy(invite.invite_id, user.userid);
 
       // Establish the session, mirroring login (incl. org/sandbox stamps).
       req.session.userId = user.userid;
@@ -334,6 +348,12 @@ export default function joinRoutes(): Router {
 
     if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
+    }
+    // Server-side mirror of the page's username rules + password policy
+    // (ai-therapist-154): nothing is consumed or hashed for a bad body.
+    const usernameError = usernamePolicyError(username);
+    if (usernameError) {
+      return res.status(400).json({ error: usernameError });
     }
     const pwError = passwordPolicyError(password);
     if (pwError) {
@@ -395,42 +415,41 @@ export default function joinRoutes(): Router {
         });
       } catch (seedErr) {
         log.error({ err: seedErr }, 'Sandbox seeding failed; rolling back signup');
-        try { await deleteUser(user.userid); } catch (e) { log.error({ err: e }, 'sandbox owner cleanup failed'); }
+        try { await removeAccount(user.userid); } catch (e) { log.error({ err: e }, 'sandbox owner cleanup failed'); }
         try { await deleteSandboxOrganization(org.org_id); } catch (e) { log.error({ err: e }, 'sandbox org cleanup failed'); }
         await release();
         return res.status(500).json({ error: 'Could not assemble the sandbox. Please try again.' });
       }
 
+      // Invite bookkeeping + its 'invite_consumed' audit row are one
+      // transaction (ai-therapist-154).
       try {
-        await markSandboxInviteUsed(invite.invite_id, user.userid, org.org_id);
+        await markSandboxInviteUsedAudited(invite.invite_id, user.userid, org.org_id, {
+          therapistId: user.userid,
+          clientId: null,
+          actorUserId: user.userid,
+          actorUsername: user.username,
+          detail: {
+            sandbox: true,
+            invite_id: invite.invite_id,
+            batch_id: invite.batch_id,
+            org_id: org.org_id,
+            seeded_clients: seeded.clientIds.length,
+            seeded_sessions: seeded.sessionCount,
+          },
+        });
       } catch (markErr) {
         // Full compensation: seeded users first (org FK is RESTRICT), then
         // the owner, then the org, then the invite.
         log.error({ err: markErr }, 'Sandbox invite bookkeeping failed; rolling back signup');
         for (const seededId of seeded.seededUserIds) {
-          try { await deleteUser(seededId); } catch (e) { log.error({ err: e }, 'seeded user cleanup failed'); }
+          try { await removeAccount(seededId); } catch (e) { log.error({ err: e }, 'seeded user cleanup failed'); }
         }
-        try { await deleteUser(user.userid); } catch (e) { log.error({ err: e }, 'sandbox owner cleanup failed'); }
+        try { await removeAccount(user.userid); } catch (e) { log.error({ err: e }, 'sandbox owner cleanup failed'); }
         try { await deleteSandboxOrganization(org.org_id); } catch (e) { log.error({ err: e }, 'sandbox org cleanup failed'); }
         await release();
         return res.status(500).json({ error: 'Could not assemble the sandbox. Please try again.' });
       }
-
-      void insertCaseloadAudit({
-        action: 'invite_consumed',
-        therapistId: user.userid,
-        clientId: null,
-        actorUserId: user.userid,
-        actorUsername: user.username,
-        detail: {
-          sandbox: true,
-          invite_id: invite.invite_id,
-          batch_id: invite.batch_id,
-          org_id: org.org_id,
-          seeded_clients: seeded.clientIds.length,
-          seeded_sessions: seeded.sessionCount,
-        },
-      });
 
       // Establish the session, mirroring login (incl. org/sandbox stamps).
       req.session.userId = user.userid;
