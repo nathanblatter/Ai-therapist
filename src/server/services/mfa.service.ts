@@ -16,9 +16,18 @@ export function generateMFASecret(username: string): { secret: string; otpauthUr
     length: 32
   });
 
+  // generateSecret() drops the issuer from its otpauth_url, so authenticator
+  // apps showed only the label. Build the URL explicitly so the issuer is
+  // carried (found while backfilling tests, ai-therapist-236).
+  const otpauthUrl = speakeasy.otpauthURL({
+    secret: secret.ascii,
+    label: `AI Therapy (${username})`,
+    issuer: 'AI Therapy Platform',
+  });
+
   return {
     secret: secret.base32,
-    otpauthUrl: secret.otpauth_url
+    otpauthUrl
   };
 }
 
