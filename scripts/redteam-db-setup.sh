@@ -6,9 +6,9 @@
 # "migrate from scratch" command (see spec §14 R2). This script applies them in
 # the one order that works on a genuinely empty database:
 #
-#   1. 001_create_users_table.sql        (raw SQL; runMigrationRange skips 001)
-#   2. runMigrationRange.js 003 046      (the normalized schema through 046;
-#                                         007 also seeds system_config)
+#   1. 001_create_users_table.sql        (raw SQL, before the range runner)
+#   2. runMigrationRange.js 003 020, 021 via psql (CONCURRENTLY), then
+#      runMigrationRange.js 022 <newest on disk>  (007 also seeds system_config)
 #   3. 002_insert_initial_user.js        (needs the users table from step 1)
 #   4. redteam-seed.sql                  (idempotent belt-and-braces: ensure the
 #                                         config rows the code reads exist, and
@@ -60,7 +60,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$MIG_DIR/001_create_users_table.s
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c \
   "CREATE TABLE IF NOT EXISTS conversation_logs (id SERIAL PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);"
 
-# --- Step 2: 003..046 forward migrations -------------------------------------
+# --- Step 2: 003..newest forward migrations----------------------------------
 # runMigrationRange wraps each file in a transaction, but 021 uses
 # CREATE INDEX CONCURRENTLY (illegal inside a transaction), so it must be applied
 # on its own via psql (autocommit). Split the range around it. (spec §14 R2)

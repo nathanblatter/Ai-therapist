@@ -418,7 +418,7 @@ applies them in the only order that works:
    creates but `010` ALTERs and `036` drops)
 3. `runMigrationRange 003 020`, then `021` via `psql` (it uses
    `CREATE INDEX CONCURRENTLY`, illegal inside the runner's transaction), then
-   `runMigrationRange 022 046`
+   `runMigrationRange 022 <newest number on disk>`
 4. `002_insert_initial_user.js`
 5. `redteam-seed.sql` (idempotent config; **forces `crisis_alert.enabled=false`**)
 

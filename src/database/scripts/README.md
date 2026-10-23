@@ -10,16 +10,21 @@ these run automatically. Schema docs: `docs/db.md`; migration history:
 ## Migrations
 
 Migrations are plain SQL files numbered `NNN_*.sql` with a matching
-`NNN_*_rollback.sql`. Apply them with the generic range runner:
+`NNN_*_rollback.sql` (001, 035 and 036 are intentionally irreversible; see
+`docs/db.md`). Number 091 is used by two independent files that both apply,
+in filename order (documented in `docs/db.md`). Apply with the range runner:
 
 ```sh
 node src/database/scripts/runMigrationRange.js 035 046   # inclusive, numeric order
 ```
 
-Each file runs in its own transaction and `*_rollback.sql` files are skipped.
+Each file runs in its own transaction and `*_rollback.sql` files are skipped
+(021 and its rollback use `CONCURRENTLY` and must go through `psql`).
+Rollbacks are applied one at a time with `psql -f`, newest first.
 `scripts/redteam-db-setup.sh` at the repo root shows the one order that
 builds a database from empty (001 raw SQL, then 003..NNN via the range
-runner, then `002_insert_initial_user.js`).
+runner, then `002_insert_initial_user.js`). Environment commands and the
+backup-first convention: `docs/db.md`, section "Migrations".
 
 The numbered runners (`runMigration004.js` ... `runMigration034.js`) and
 rollbacks (`rollbackMigration011.js` ... `rollbackMigration034.js`) are the
