@@ -166,13 +166,17 @@ export async function getCrisisAdjudicationCounts(w: IrbWindow): Promise<CrisisA
   );
   if (probe.rows.length === 0) return null;
   const cols = new Set(probe.rows.map(c => c.column_name));
-  const outcomeCol = ['outcome', 'verdict', 'status'].find(c => cols.has(c));
-  if (!outcomeCol || !cols.has('event_id')) return null;
+  // Migration 114 (WP2) names them `verdict` and `crisis_event_id`; the
+  // fallbacks cover the pre-merge guesses so a schema drift degrades to
+  // "not enabled" rather than a failed digest.
+  const outcomeCol = ['verdict', 'outcome', 'status'].find(c => cols.has(c));
+  const eventCol = ['crisis_event_id', 'event_id'].find(c => cols.has(c));
+  if (!outcomeCol || !eventCol) return null;
   const r = await pool.query<{ outcome: string | null; n: string }>(
     `SELECT a.${outcomeCol} AS outcome, COUNT(*) AS n
        FROM crisis_events ce
        JOIN therapy_sessions ts ON ts.session_id = ce.session_id
-       LEFT JOIN crisis_event_adjudications a ON a.event_id = ce.event_id
+       LEFT JOIN crisis_event_adjudications a ON a.${eventCol} = ce.event_id
       WHERE ${SESSION_SCOPE}
         AND ce.created_at >= $1::timestamptz AND ce.created_at <= $2::timestamptz
       GROUP BY 1 ORDER BY 1`,
