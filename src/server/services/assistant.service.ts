@@ -249,7 +249,7 @@ const TOOLS: AssistantTool[] = [
   {
     name: 'user_lookup',
     description:
-      'Look up participants by (partial) username: id, role, study status, created date. Care-team callers can only resolve clients on their caseload.',
+      'Look up participants by (partial) username: id, role, study status, created date. Researchers resolve participants in their own organization; care-team callers only clients on their caseload.',
     parameters: {
       type: 'object',
       properties: { username: { type: 'string', description: 'Exact or partial username' } },
@@ -260,7 +260,12 @@ const TOOLS: AssistantTool[] = [
     run: async (ctx, args) => {
       const q = String(args.username ?? '').trim().toLowerCase();
       if (!q) return [];
-      const users = await getAllUsers();
+      // Organization scope (ai-therapist-277): the same org-scoped read the
+      // Users view makes, so a researcher never resolves another org's
+      // participants. orgIdFor never yields null for an authenticated
+      // caller; if it ever did, fail closed rather than read every org.
+      if (ctx.orgId === null) return [];
+      const users = await getAllUsers(null, ctx.orgId);
       let matches = users.filter((u) => u.username.toLowerCase().includes(q));
       if (isCareTeamRole(ctx.role)) {
         const assigned = await Promise.all(matches.map((u) => isAssigned(ctx.userId, u.userid)));

@@ -99,10 +99,49 @@ describe('runAssistantTurn', () => {
     ]);
     setAssistantClientForTest(client as never);
     await runAssistantTurn(CTX_CASEWORKER, [{ role: 'user', content: 'who is p4?' }]);
+    // Org-scoped read (ai-therapist-277) and then the caseload filter.
+    expect(dbMocks.getAllUsers).toHaveBeenCalledWith(null, 5);
     const secondCall = create.mock.calls[1][0] as { input: Array<Record<string, unknown>> };
     const toolOutput = secondCall.input.find((i) => i.type === 'function_call_output') as { output: string };
     expect(toolOutput.output).toContain('p42');
     expect(toolOutput.output).not.toContain('p43');
+  });
+
+  it('scopes user_lookup to the researcher organization (ai-therapist-277)', async () => {
+    // getAllUsers is the org-scoped read: a cross-org participant never comes
+    // back from it, so the only rows the model can see are the caller org's.
+    dbMocks.getAllUsers.mockImplementation((_scope: number | null, orgId: number | null) =>
+      Promise.resolve(orgId === 5
+        ? [{ userid: 42, username: 'p42', role: 'participant', study_status: 'active', created_at: 't' }]
+        : [{ userid: 42, username: 'p42', role: 'participant', study_status: 'active', created_at: 't' },
+           { userid: 77, username: 'p42_other_org', role: 'participant', study_status: 'active', created_at: 't' }]));
+    const { client, create } = fakeClient([
+      { output: [{ type: 'function_call', name: 'user_lookup', call_id: 'c1', arguments: '{"username":"p42"}' }] },
+      { output_text: 'Found p42.' },
+    ]);
+    setAssistantClientForTest(client as never);
+    await runAssistantTurn(CTX_RESEARCHER, [{ role: 'user', content: 'who is p42?' }]);
+    expect(dbMocks.getAllUsers).toHaveBeenCalledTimes(1);
+    expect(dbMocks.getAllUsers).toHaveBeenCalledWith(null, 5);
+    expect(dbMocks.isAssigned).not.toHaveBeenCalled();
+    const secondCall = create.mock.calls[1][0] as { input: Array<Record<string, unknown>> };
+    const toolOutput = secondCall.input.find((i) => i.type === 'function_call_output') as { output: string };
+    expect(toolOutput.output).toContain('p42');
+    expect(toolOutput.output).not.toContain('p42_other_org');
+  });
+
+  it('fails closed on user_lookup when the caller has no resolvable organization', async () => {
+    const { client, create } = fakeClient([
+      { output: [{ type: 'function_call', name: 'user_lookup', call_id: 'c1', arguments: '{"username":"p4"}' }] },
+      { output_text: 'Nothing.' },
+    ]);
+    setAssistantClientForTest(client as never);
+    const result = await runAssistantTurn({ ...CTX_RESEARCHER, orgId: null }, [{ role: 'user', content: 'who is p4?' }]);
+    expect(dbMocks.getAllUsers).not.toHaveBeenCalled();
+    expect(result.toolCalls).toEqual([{ name: 'user_lookup', rowCount: 0 }]);
+    const secondCall = create.mock.calls[1][0] as { input: Array<Record<string, unknown>> };
+    const toolOutput = secondCall.input.find((i) => i.type === 'function_call_output') as { output: string };
+    expect(JSON.parse(toolOutput.output)).toEqual([]);
   });
 
   it('records the audit row with tools and usage', async () => {
