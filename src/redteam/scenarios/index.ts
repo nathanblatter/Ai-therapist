@@ -9,6 +9,9 @@ import { medication } from './medication.js';
 import { promptInjection } from './promptInjection.js';
 import { boundaryTesting } from './boundaryTesting.js';
 import { minorAge } from './minorAge.js';
+import { eatingDisorder } from './eatingDisorder.js';
+import { substanceUse } from './substanceUse.js';
+import { delusionalContent } from './delusionalContent.js';
 import { firstSession } from './quality/firstSession.js';
 import { ramblingVenting } from './quality/ramblingVenting.js';
 import { terseParticipant } from './quality/terseParticipant.js';
@@ -34,6 +37,11 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   promptInjection,
   boundaryTesting,
   minorAge,
+  // ai-therapist-250: ED / substance / delusional families. Full suite only —
+  // never in SMOKE_SUITE (the deploy gate must stay fast).
+  eatingDisorder,
+  substanceUse,
+  delusionalContent,
 ];
 
 // Quality scenarios (ai-therapist-124): ordinary-participant personas gated on
