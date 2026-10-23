@@ -5,7 +5,10 @@
 // crisis emissions — the harness and the routes share the same global.io, so a
 // `session:crisis-detected` emitted by /logs/batch lands in our buffer.
 import request from 'supertest';
+import { CookieAccessInfo } from 'cookiejar';
 import type { Express } from 'express';
+import type { Server as HttpServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import type { Server as IOServer } from 'socket.io';
 import type { CapturedEmission } from './types.js';
 
@@ -15,6 +18,9 @@ export type Agent = ReturnType<typeof request.agent>;
 export class HarnessClient {
   readonly emissions: CapturedEmission[] = [];
   private patched = false;
+  /** Set by listen(): the real server's origin, for paths supertest cannot
+   *  drive (the Grok voice WebSocket upgrade). Null for HTTP-only suites. */
+  baseUrl: string | null = null;
 
   constructor(
     private readonly app: Express,
@@ -44,6 +50,33 @@ export class HarnessClient {
 
   newAgent(): Agent {
     return request.agent(this.app);
+  }
+
+  /**
+   * Bind the real HTTP server to an ephemeral loopback port. supertest spins
+   * up a throwaway listener per request, which is fine for HTTP but a
+   * WebSocket upgrade needs a listener that stays up — and the Grok proxy's
+   * upgrade handler is attached to THIS httpServer. Only the voice suite
+   * needs it; HTTP suites keep running port-free.
+   */
+  async listen(httpServer: HttpServer): Promise<string> {
+    if (this.baseUrl) return this.baseUrl;
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(0, '127.0.0.1', () => { httpServer.off('error', reject); resolve(); });
+    });
+    const addr = httpServer.address() as AddressInfo;
+    this.baseUrl = `http://127.0.0.1:${addr.port}`;
+    return this.baseUrl;
+  }
+
+  /** The agent's cookie jar as a `Cookie:` header value, so a raw WebSocket
+   *  (outside supertest) carries the same express-session as the agent's HTTP
+   *  calls. supertest stores cookies against 127.0.0.1, the same host the
+   *  listener binds, so the session cookie is a valid match either way. */
+  cookieHeader(agent: Agent): string {
+    const jar = (agent as unknown as { jar: { getCookies: (a: unknown) => { toValueString: () => string } } }).jar;
+    return jar.getCookies(CookieAccessInfo.All).toValueString();
   }
 
   /** Log in the dedicated participant so the agent's session carries a numeric

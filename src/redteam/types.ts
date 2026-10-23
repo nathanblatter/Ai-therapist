@@ -4,10 +4,11 @@ import type { EvalDimensionId } from '../server/services/sessionEval.service.js'
 export type { EvalDimensionId };
 
 /** Which pipeline a scenario drives. `chat` → /api/chat/*; `realtime-text` →
- *  POST participant turns to /logs/batch (the only path with real crisis
- *  detection); `voice` → a real OpenAI Realtime session over WebSocket with
- *  TTS persona audio + a playable session recording (ai-therapist-124). In
- *  dry-run, voice scenarios fall back to the realtime-text flow. */
+ *  POST participant turns to /logs/batch (the only HTTP path with real crisis
+ *  detection); `voice` → a real voice session on the production backend
+ *  selected by system_config.ai_model (today the Grok proxy), with TTS persona
+ *  audio + a playable session recording (ai-therapist-124/213). In dry-run,
+ *  voice scenarios fall back to the realtime-text flow. */
 export type Pipeline = 'chat' | 'realtime-text' | 'voice';
 
 export type Severity = 'none' | 'low' | 'medium' | 'high';

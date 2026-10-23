@@ -1,9 +1,11 @@
 // Harness configuration + a small cost tracker (spec §8, §11).
 
+import { LIVE_RATES_PER_MINUTE, estimateLiveCostUsd } from '../server/db/liveUsage.queries.js';
+
 /** smoke: fast safety subset, gates deploys. full: all safety + quality
  *  scenarios. quality: rubric-floor scenarios only (nightly). voice: real
- *  Realtime audio scenarios (opt-in — minutes of wall-clock + audio billing;
- *  never a deploy gate). */
+ *  voice sessions on the production backend (opt-in — minutes of wall-clock +
+ *  per-minute voice billing; never a deploy gate). */
 export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice';
 
 export interface RedteamConfig {
@@ -39,6 +41,9 @@ export interface RedteamConfig {
    *  scenarios fail the scenario. Off by default — see docs/redteam.md
    *  "Promotion policy". Safety scenarios' floors always gate. */
   gateQuality: boolean;
+  /** Voice suite: drive persona turns through the typed-text path instead of
+   *  TTS audio (cheaper, skips VAD; never the default). */
+  voiceTextTurns: boolean;
 }
 
 export const DEFAULTS = {
@@ -53,6 +58,7 @@ export const DEFAULTS = {
   dryRun: false,
   gateDiff: false,
   gateQuality: false,
+  voiceTextTurns: false,
 };
 
 /** The chat therapy reply model (chatTherapy.service.ts) — used only for cost
@@ -68,6 +74,18 @@ export const MODEL_PRICING: Record<string, { inPerM: number; outPerM: number }> 
   'gpt-5.2': { inPerM: 1.25, outPerM: 10.0 }, // assumed; see R5
   default: { inPerM: 0.5, outPerM: 1.5 },
 };
+
+/** Voice backends bill per minute of session audio, not per token. These are
+ *  the same figures the admin cost dashboard uses (liveUsage.queries.ts):
+ *  GPT-Live $0.05/min (plus the delegated backend's tokens, not estimated
+ *  here) and Grok Voice $0.08/min. Re-exported so the harness and the
+ *  dashboard can never disagree. */
+export const VOICE_RATES_PER_MINUTE = LIVE_RATES_PER_MINUTE;
+
+/** Persona TTS (gpt-4o-mini-tts): OpenAI's published estimate is about
+ *  $0.015 per minute of generated audio ($0.60/1M text-in + $12/1M audio-out
+ *  tokens). Pennies per scenario; tracked so the voice figure is honest. */
+export const TTS_USD_PER_MINUTE = 0.015;
 
 interface Usage {
   prompt_tokens?: number | null;
@@ -93,6 +111,20 @@ export class CostTracker {
   estimate(model: string, inTok: number, outTok: number): void {
     const price = MODEL_PRICING[model] ?? MODEL_PRICING.default;
     this.usd += (inTok / 1e6) * price.inPerM + (outTok / 1e6) * price.outPerM;
+    this.calls += 1;
+  }
+
+  /** Voice-session minutes on a per-minute backend (GPT-Live / Grok), priced
+   *  from the model the session resolved to. `seconds` is the backend's own
+   *  cumulative billable figure (live_usage), never a harness stopwatch. */
+  addVoiceSeconds(model: string, seconds: number): void {
+    this.usd += estimateLiveCostUsd(model, seconds);
+    this.calls += 1;
+  }
+
+  /** One persona TTS call: billed on generated audio duration. */
+  addTts(_chars: number, audioSeconds: number): void {
+    this.usd += (audioSeconds / 60) * TTS_USD_PER_MINUTE;
     this.calls += 1;
   }
 }

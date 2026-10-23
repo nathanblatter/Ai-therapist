@@ -11,6 +11,8 @@ import {
   GROK_DEFAULT_TUNING,
   GROK_VOICES,
   GROK_DEFAULT_VOICE,
+  GROK_CURRENT_MODEL,
+  GROK_LATEST_ALIAS,
 } from './grokVoiceConfig.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 
@@ -31,9 +33,20 @@ beforeEach(() => {
 });
 
 describe('isGrokVoiceModel — the admin switch', () => {
-  it('matches the alias and dated releases', () => {
-    expect(isGrokVoiceModel('grok-voice-latest')).toBe(true);
+  it('matches the alias, the current 3.0 release and the retired 2.0 ids', () => {
+    expect(isGrokVoiceModel(GROK_LATEST_ALIAS)).toBe(true);
+    expect(isGrokVoiceModel(GROK_CURRENT_MODEL)).toBe(true);
+    expect(isGrokVoiceModel('grok-voice-3.0')).toBe(true);
+    expect(isGrokVoiceModel('grok-voice-2.0')).toBe(true);
     expect(isGrokVoiceModel('grok-voice-think-fast-2.0')).toBe(true);
+  });
+
+  it('names 3.0 as the current generation and prices every id it can resolve to', async () => {
+    expect(GROK_CURRENT_MODEL).toBe('grok-voice-3.0');
+    const { LIVE_RATES_PER_MINUTE } = await import('../db/liveUsage.queries.js');
+    for (const id of [GROK_LATEST_ALIAS, GROK_CURRENT_MODEL, 'grok-voice-2.0', 'grok-voice-think-fast-2.0']) {
+      expect(LIVE_RATES_PER_MINUTE[id]).toBe(0.08);
+    }
   });
 
   it('rejects GPT-Live, Realtime, and the xAI transcription family', () => {
@@ -129,6 +142,7 @@ describe('buildGrokOpeningPrompt', () => {
 describe('grokRealtimeUrl', () => {
   it('encodes the model as a query parameter', () => {
     expect(grokRealtimeUrl('grok-voice-latest')).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-latest');
+    expect(grokRealtimeUrl(GROK_CURRENT_MODEL)).toBe('wss://api.x.ai/v1/realtime?model=grok-voice-3.0');
   });
 });
 

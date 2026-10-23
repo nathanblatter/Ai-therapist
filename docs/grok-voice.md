@@ -1,4 +1,4 @@
-# Grok Voice backend (xAI, `grok-voice-latest`)
+# Grok Voice backend (xAI, Grok Voice 3.0: `grok-voice-3.0` / `grok-voice-latest`)
 
 A second voice backend that runs **alongside** GPT-Live (`docs/gpt-live.md`).
 Nothing is removed; the study picks one per deployment with a single admin
@@ -7,7 +7,17 @@ setting, and every new session follows the current value:
 | `system_config.ai_model` | Backend | Transport |
 |---|---|---|
 | `gpt-live-1` (any `gpt-live-*`) | OpenAI GPT-Live | browser WebRTC to OpenAI + server sideband attach |
-| `grok-voice-latest` (any `grok-voice-*`) | xAI Grok Voice | browser WebSocket to **our server**, server WebSocket to xAI |
+| `grok-voice-3.0` or `grok-voice-latest` (any `grok-voice-*`) | xAI Grok Voice | browser WebSocket to **our server**, server WebSocket to xAI |
+
+**Model line (checked against docs.x.ai/docs/models on 2026-10-22):**
+`grok-voice-3.0` is the current Speech to Speech release ($0.08/min, $4.80/hr,
+released 2026-10-14); `grok-voice-2.0` is marked Deprecated there (it resolved
+as `grok-voice-think-fast-2.0` in the September probes). xAI moved the
+`grok-voice-latest` alias onto 3.0 the day it shipped, so a deployment left on
+the alias is already on 3.0. Use the explicit `grok-voice-3.0` preset (Admin ->
+System Config -> AI Model) to pin the generation for the study record; the
+alias follows xAI's releases. Both ids are priced in `LIVE_RATES_PER_MINUTE`,
+alongside the retired 2.0 ids so older sessions still cost correctly.
 
 Set it from Admin → System Config → AI Model (both presets are listed) or
 directly in `system_config`. Roll back by setting it back. No redeploy. The
@@ -122,8 +132,9 @@ WS   /api/grok/voice/<session_id> cookie auth + ownership → attachClient()
    anonymous participants, `user_id` for logged-in ones. Only then does the
    manager dial xAI, send `session.update`, and wait for `session.updated`.
 3. **Ready.** The browser gets `{ type: 'ready', model }`; the resolved model
-   id from `session.created` (e.g. `grok-voice-think-fast-2.0` for the
-   `grok-voice-latest` alias) is pinned to `session_configurations.ai_model`
+   id from `session.created` (`grok-voice-3.0` since 2026-10-14, whether the
+   configured id is the alias or the explicit release; it was
+   `grok-voice-think-fast-2.0` in September) is pinned to `session_configurations.ai_model`
    (ai-therapist-61). The server injects the opening line as a system item
    plus `response.create`, so the assistant speaks first exactly as it does
    on GPT-Live. `therapy_sessions.sideband_connected` is set: a ready Grok
@@ -220,8 +231,8 @@ across four responses in the probe). Two rules follow:
 - `billable_audio_seconds` is **assigned**, never summed, into `live_usage`
   (one row per session, latest snapshot wins, `finalized` on close). The cost
   dashboard's per-minute pricing picks it up through `LIVE_RATES_PER_MINUTE`
-  — $0.08/min as published 2026-09, keyed by both the alias and the resolved
-  release id.
+  — $0.08/min, unchanged from 2.0 to 3.0 per docs.x.ai (2026-10-22), keyed by
+  the alias, `grok-voice-3.0`, and the retired 2.0 ids.
 - Token counts go to `session_llm_usage` with `purpose='grok_voice'` for the
   research record and are priced at **zero** there (`estimateCostUsd`), so the
   session is not double-counted. Migration 104 adds the value to the column's
@@ -329,10 +340,12 @@ back to `eve` with a warning rather than failing the session.
 - **Resumption.** xAI can cache the session for 30 min (`resumption.enabled`)
   so a client reconnect could continue the conversation. Today any socket
   loss ends the session (fail closed).
-- **Red-team voice suite.** `src/redteam/voiceClient.ts` still speaks the
-  OpenAI Realtime protocol directly and is not wired to either backend
-  (`docs/redteam.md`). Pointing it at the proxy path would exercise Grok
-  end-to-end.
+- ~~Red-team voice suite.~~ Done 2026-10-22: `npm run redteam:voice` drives
+  this proxy end to end as a headless browser (`src/redteam/voiceClient.ts`,
+  `docs/redteam.md` "Voice suite"). Both voice scenarios pass live on
+  `grok-voice-3.0`; one run hit an xAI moderation refusal loop that the
+  refusal guard (section 7b) recovered from, costing the judge's
+  `safety_protocol` floor for that run. Worth watching as a metric.
 - **Content-filter recovery.** The GPT-Live recovery flow (incident
   2026-09-11) is OpenAI-specific; no equivalent termination class has been
   observed on xAI, so the Grok path has no recovery start.
@@ -341,7 +354,21 @@ back to `eve` with a warning rather than failing the session.
   socket; a container death ends the session (fail closed), it is not
   re-attached.
 
-## 11. Verified against the live API (2026-09-20)
+## 11. Verified against the live API (2026-09-20; re-verified on 3.0 2026-10-22)
+
+Re-verification on Grok Voice 3.0 came from the red-team voice suite running
+through this proxy (`docs/redteam.md`): `session.created` now reports
+`grok-voice-3.0` for both `grok-voice-latest` and the explicit id; the event
+sequence below is unchanged; `billable_audio_seconds` still arrives
+cumulatively (73 s for a 68 s four-beat session); tools (`log_mood`,
+`run_risk_check`, `show_resource_card`, `get_crisis_resources`,
+`retrieve_safety_plan`) round-trip; the crisis ladder scores 0 -> 20 -> 55 ->
+100 and the steers land. One new observation: a barge-in `response.cancel`
+sent before xAI has started generating is answered with
+`invalid_request_error: Cancellation failed: no active response found`, which
+the proxy already relays as a non-terminal `error`.
+
+Original probe (2026-09-20, Grok Voice 2.0):
 
 Probe transcript summary, run with a real key from a Node script:
 `session.created` (resolved model reported) → `session.updated` echoing our
