@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: pr-verify-${{ github.ref }}
@@ -34,3 +35,64 @@ jobs:
         run: npm run lint:emoji
       - name: Test
         run: npm test
+
+  # Path-filtered judge-floor gate (eval spec WP4): a PR that touches the
+  # prompt-affecting paths re-runs the quality suite against the live model
+  # with judgeMinScores GATING (--gate-quality). Costs about USD 0.10 per run
+  # and only fires for same-repo PRs (secrets are unavailable to forks, and the
+  # job is skipped cleanly then). Everything else gets the fast verify job only.
+  quality-gate:
+    runs-on: ubuntu-latest
+    needs: verify
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
+    # and redteam-nightly.yml (composite actions cannot declare services). The
+    # setup-node -> npm ci -> migrate+seed sequence lives in
+    # .github/actions/redteam-db-setup; keep the copies of this block identical.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod)
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_therapist_redteam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam
+      DATABASE_SSL: 'false'
+      SESSION_SECRET: ci-redteam-secret
+      NODE_ENV: test
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect prompt-affecting changes
+        id: changed
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          files=$(git diff --name-only "$base" "$head")
+          echo "$files"
+          if echo "$files" | grep -Eq '^(src/server/services/chatTherapy|src/server/utils/promptContext\.ts|src/server/utils/sessionHelpers\.ts|src/server/utils/openingLine\.ts|src/server/services/sessionEval\.service\.ts|src/database/migrations/.*prompt|src/server/services/toolRegistry\.service\.ts)'; then
+            echo "prompt=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prompt=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: ./.github/actions/redteam-db-setup
+        if: steps.changed.outputs.prompt == 'true'
+      - name: Red-team quality suite (judge floors gating)
+        if: steps.changed.outputs.prompt == 'true'
+        run: npm run redteam:quality -- --gate-quality
+      - name: Upload results
+        if: always() && steps.changed.outputs.prompt == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteam-quality-results-pr
+          path: redteam-results/
+      - name: Skipped
+        if: steps.changed.outputs.prompt != 'true'
+        run: echo "No prompt-affecting paths changed; quality gate not required."
