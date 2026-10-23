@@ -447,7 +447,7 @@ unchanged (synthetic fixtures, write-swallowed); participant has no admin access
 | POST/GET client invites | Yes | **Yes** (intake minting; consumed client gets inviter's `member_role` + org) | Yes |
 | Export routes (bulk, aggregated, dataset) | per current | Blocked | Yes (org-scoped — highest-stakes org filter) |
 | Sideband routes (all 8) | per current | Blocked | per current |
-| Adverse events | per current | **Blocked** initially (Q6) | per current |
+| Adverse events (list/detail/print/lifecycle) | Org + caseload-or-own-filed (ai-therapist-228) | Own filed reports only, within org (s10 item 6) | Org (NULL-org rows only for irb-study) |
 | userSessions (login-session admin) | Blocked | Blocked | Yes |
 | **Caseworker dashboard/roster** `/admin/api/caseworker/roster*` | Yes | Yes | Yes (org) |
 | **Work queue** `/admin/api/work-items*` | Yes (own/pool) | Yes (own/pool) | Yes (org read) |
@@ -878,3 +878,45 @@ Dependency graph: F → {A, B, C, D} → I. Total: 6 slices, 10 migrations.
 12. **Sandbox invites in prod**: ALLOWED EVERYWHERE — no env kill-switch; sandbox org isolation is the boundary (useful for sales demos on the real domain).
 
 Items 2, 6, 8 are net-new scope: implement as a follow-up slice after slice I verifies green (or fold into slice I if it has not started).
+
+---
+
+## 11. Adverse-event register scoping (ai-therapist-228, migration 108, 2026-10-22)
+
+`adverse_event_reports` carried no organization column (048), so every
+therapist/researcher read returned every organization's reports — the most
+sensitive table in the system had no tenant boundary. The fix:
+
+- **Schema**: `adverse_event_reports.organization_id` (nullable, FK
+  `organizations(org_id)` ON DELETE RESTRICT, indexed). Migration 108 backfills
+  it from the participant (`user_id -> users.organization_id`, falling back to
+  the linked session's owner); rows with no resolvable participant (anonymous
+  sessions, fully orphaned provenance) stay NULL. `insertAdverseEventDraft`
+  stamps new rows in SQL (`COALESCE(explicit, participant's org)`), so every
+  producer (crisis auto-draft, eligibility auto-draft, manual session filing,
+  caseworker filing) scopes correctly without resolving the org itself.
+- **Read rule** (`AdverseEventScope`, built by `scopeFor(req)` in
+  `adverseEvents.routes.ts`; enforced in SQL by `adverseEventScopeClause`, so
+  there is no unscoped read):
+  - **researcher**: every report whose `organization_id` is their org. Rows
+    with `organization_id IS NULL` are "unattributed, in IRB-study custody" and
+    are visible only when the caller's org is `irb-study`.
+  - **therapist**: their org's reports, further restricted to participants on
+    their caseload (`therapist_clients`) or reports they filed themselves
+    (`created_by`). This matches the session browser (caseload-scoped) and the
+    manual filing route (`requireSessionClientAccess`): a therapist who cannot
+    draft from an off-caseload session cannot read its redacted excerpt either.
+  - **caseworker**: only reports they filed (`created_by`), within their org
+    (s10 item 6), transcript excerpt scrubbed.
+  - **sandbox accounts**: still 404 on every AE route (the earlier stopgap is
+    kept; a sandbox tester never reads the real register).
+- **Every surface** goes through the scope: list, counts, detail, print/export,
+  and the lifecycle writes (PATCH, submit, reopen, close load the row through
+  the scope first, 404 if invisible, then run the guarded transition). The
+  researcher path of `POST /sessions/:sessionId/adverse-events` also checks
+  that the session's owner is in the caller's org (anonymous session = irb-study
+  custody) before drafting.
+- **Denial is 404, never 403**, matching the caseload middleware: existence of
+  another organization's report is not confirmable.
+- **Fail closed**: `orgIdFor` throws on a failed lookup and the routes 500; a
+  resolution failure never widens to an org-wide or global read.
