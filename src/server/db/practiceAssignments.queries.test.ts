@@ -81,3 +81,101 @@ describe('completeAssignment (scoping)', () => {
     expect(queryMock.mock.calls[0][1]).toEqual([5, 42, null]);
   });
 });
+
+// ---------- clinician half (ai-therapist-200) ----------
+
+import {
+  createAssignment,
+  updateAssignment,
+  cancelAssignment,
+  reissueAssignment,
+  listAssignmentsForClient,
+} from './practiceAssignments.queries.js';
+
+describe('listUserAssignments (participant view)', () => {
+  it('never returns cancelled rows', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    await listUserAssignments(42);
+    expect(String(queryMock.mock.calls[0][0])).toContain("status <> 'cancelled'");
+  });
+});
+
+describe('createAssignment', () => {
+  it("inserts with source 'therapist' and the author id", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ ...ROW, source: 'therapist', authored_by: 9 }] });
+    const row = await createAssignment({
+      userId: 42, authoredBy: 9, title: 'Worry log', description: 'd', kind: 'worksheet', suggestedFrequency: 'daily',
+    });
+    expect(row.source).toBe('therapist');
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain("'therapist'");
+    expect(params).toEqual([42, 'Worry log', 'd', 'worksheet', 'daily', 9]);
+  });
+});
+
+describe('updateAssignment', () => {
+  it('is scoped by (id, user_id) and only edits open rows', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ ...ROW, title: 'Edited' }] });
+    const row = await updateAssignment(5, 42, { title: 'Edited' });
+    expect(row?.title).toBe('Edited');
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain("WHERE id = $1 AND user_id = $2 AND status = 'assigned'");
+    // Untouched fields pass null (COALESCE keeps them); frequency flag off.
+    expect(params).toEqual([5, 42, 'Edited', null, null, false, null]);
+  });
+
+  it('can clear the frequency explicitly (flag on, value null)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [ROW] });
+    await updateAssignment(5, 42, { suggestedFrequency: null });
+    expect(queryMock.mock.calls[0][1]).toEqual([5, 42, null, null, null, true, null]);
+  });
+
+  it('returns null when no open row matched', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    expect(await updateAssignment(5, 999, { title: 'x' })).toBeNull();
+  });
+});
+
+describe('cancelAssignment', () => {
+  it('flips status to cancelled with reason + actor, never deletes', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ ...ROW, status: 'cancelled' }] });
+    const row = await cancelAssignment(5, 42, 9, 'superseded');
+    expect(row?.status).toBe('cancelled');
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain("SET status = 'cancelled'");
+    expect(sql).not.toMatch(/DELETE/i);
+    expect(sql).toContain("WHERE id = $1 AND user_id = $2 AND status = 'assigned'");
+    expect(params).toEqual([5, 42, 9, 'superseded']);
+  });
+});
+
+describe('reissueAssignment', () => {
+  it('inserts a new row copied from a CLOSED original, linked via reissued_from', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ ...ROW, id: 6, reissued_from: 5 }] });
+    const row = await reissueAssignment(5, 42, 9);
+    expect(row?.reissued_from).toBe(5);
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain('INSERT INTO practice_assignments');
+    expect(sql).toContain('reissued_from');
+    expect(sql).toContain("WHERE id = $1 AND user_id = $2 AND status <> 'assigned'");
+    expect(params).toEqual([5, 42, 9]);
+  });
+
+  it('returns null when the original is still open', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    expect(await reissueAssignment(5, 42, 9)).toBeNull();
+  });
+});
+
+describe('listAssignmentsForClient', () => {
+  it('returns every status with author/canceller usernames, newest first', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ ...ROW, authored_by_username: 'dr_t', cancelled_by_username: null }] });
+    const rows = await listAssignmentsForClient(42);
+    expect(rows[0].authored_by_username).toBe('dr_t');
+    const [sql, params] = queryMock.mock.calls[0];
+    expect(sql).toContain('WHERE pa.user_id = $1');
+    expect(sql).not.toContain('status');
+    expect(sql).toContain('ORDER BY pa.assigned_at DESC');
+    expect(params).toEqual([42, 100]);
+  });
+});

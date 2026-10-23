@@ -106,7 +106,18 @@ associate. Before pilot launch:
    and `ConsentVersions.tsx` has audience tabs. Remaining blockers are 4 and 5.
 4. **Billing.** None exists. Not needed for a free pilot; needed before any
    paid conversion (likely per-seat per-month).
-5. Smaller: therapist-facing onboarding docs; BAA paperwork from section 2;
+5. **Clinician-writable homework loop** — DONE 2026-10-22 (ai-therapist-200,
+   migration 109). Between-session practice was AI-only (the `assign_practice`
+   tool). Therapists and researchers now create, edit, cancel (with a
+   recorded reason, never deleted) and re-issue assignments from the
+   Homework panel on the participant profile
+   (`/admin/api/clients/:userId/assignments`); rows carry `source`
+   (`ai` | `therapist`) and `authored_by`, every write appends a
+   `caseload_audit_log` row, and the participant home renders
+   therapist-set items in the same "Your practice" card with the
+   completion note flowing back to the panel. Caseload (404) and org
+   scoping apply; caseworkers are excluded (403).
+6. Smaller: therapist-facing onboarding docs; BAA paperwork from section 2;
    confirm `deployment_mode=clinical` hides the research surfaces end to
    end; email delivery for invite links.
 

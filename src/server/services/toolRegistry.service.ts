@@ -5,6 +5,7 @@
 
 import { pool } from '../config/db.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { PRACTICE_KINDS } from '../../shared/practice.js';
 
 export interface ToolDefinition {
   type: string;
@@ -1347,7 +1348,7 @@ export class ToolRegistry {
           properties: {
             title: { type: 'string', description: 'Short name for the practice, in plain words (e.g. "Two-minute breathing before bed").' },
             description: { type: 'string', description: 'What to actually do, phrased close to how you agreed on it together. One or two sentences.' },
-            kind: { type: 'string', enum: ['worksheet', 'exercise', 'observation', 'custom'], description: 'What kind of practice this is.' },
+            kind: { type: 'string', enum: [...PRACTICE_KINDS], description: 'What kind of practice this is.' },
             suggested_frequency: { type: 'string', description: 'How often, if you agreed on one (e.g. "daily", "when the worry shows up").' },
           },
           required: ['title', 'description'],
@@ -1359,8 +1360,7 @@ export class ToolRegistry {
         const title = typeof args['title'] === 'string' ? args['title'].trim().substring(0, 200) : '';
         const description = typeof args['description'] === 'string' ? args['description'].trim().substring(0, 1000) : '';
         if (!title || !description) return { error: 'title and description are both required' };
-        const kinds = ['worksheet', 'exercise', 'observation', 'custom'] as const;
-        const kind = kinds.find(k => k === args['kind']) ?? 'custom';
+        const kind = PRACTICE_KINDS.find(k => k === args['kind']) ?? 'custom';
         const suggestedFrequency = typeof args['suggested_frequency'] === 'string'
           ? args['suggested_frequency'].trim().substring(0, 200) || null
           : null;

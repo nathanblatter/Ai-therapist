@@ -291,7 +291,11 @@ export type CaseloadAuditAction =
   | 'invite_consumed'
   | 'work_item_ack'
   | 'work_item_resolve'
-  | 'adverse_event_filed';
+  | 'adverse_event_filed'
+  | 'assignment_created'
+  | 'assignment_updated'
+  | 'assignment_cancelled'
+  | 'assignment_reissued';
 
 export interface CaseloadAuditInput {
   action: CaseloadAuditAction;

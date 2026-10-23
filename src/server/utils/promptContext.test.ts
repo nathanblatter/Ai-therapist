@@ -227,6 +227,7 @@ describe('buildPracticeBlock (ai-therapist-123)', () => {
     id: 1, user_id: 42, session_id: 's1', title: 'Practice', description: 'd',
     kind: 'custom' as const, suggested_frequency: null, status: 'assigned' as const,
     assigned_at: new Date('2026-08-01T00:00:00Z'), completed_at: null, completion_note: null,
+    source: 'ai' as const, authored_by: null, cancelled_at: null, cancelled_by: null, cancel_reason: null, reissued_from: null,
     ...over,
   });
 
