@@ -104,7 +104,7 @@ services:
     # connect and never error. Newer releases fix the stale-QUIC handling.
     # If QUIC keeps dying after this upgrade, add
     # TUNNEL_TRANSPORT_PROTOCOL: http2 (websockets ride HTTP/2 CONNECT fine).
-    image: cloudflare/cloudflared:2026.8.3
+    image: cloudflare/cloudflared:2026.10.3
     restart: unless-stopped
     command: tunnel run
     environment:
