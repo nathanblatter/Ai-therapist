@@ -123,6 +123,80 @@ export class ToolRegistry {
    * @param {object} args - Tool arguments
    * @returns {Promise<unknown>} - Tool execution result
    */
+  /**
+   * The crisis guard on end_session. Returns the refusal result to hand the
+   * model, or null when the end may proceed.
+   *
+   * Refuses when the session is crisis-flagged AND nobody but the model wants
+   * it over: no server grant (modelEndAuthorization) and no participant
+   * request. Fails OPEN on a lookup error — a broken crisis read must not pin a
+   * participant who really asked to leave inside a session.
+   */
+  private async refuseCrisisEnd(
+    sessionId: string,
+    participantRequested: boolean,
+  ): Promise<Record<string, unknown> | null> {
+    let crisis: { crisis_flagged: boolean; crisis_severity: string | null; crisis_risk_score: number | null } | null;
+    try {
+      const { getSessionCrisisState } = await import('../db/index.js');
+      crisis = await getSessionCrisisState(sessionId);
+    } catch (err) {
+      console.error('[end_session] crisis state lookup failed; allowing the end:', err);
+      return null;
+    }
+    if (!crisis?.crisis_flagged) return null;
+
+    const { isModelEndAuthorized } = await import('../utils/modelEndAuthorization.js');
+    if (isModelEndAuthorized(sessionId)) return null;
+    if (participantRequested) return null;
+
+    console.warn(
+      `[end_session] REFUSED model-initiated end for crisis-flagged session ${sessionId.substring(0, 12)}… ` +
+        `(${crisis.crisis_severity ?? 'unknown'} severity, score ${crisis.crisis_risk_score ?? 'n/a'})`,
+    );
+
+    // The participant's client tears the call down when it sees the tool call
+    // itself, so it has to hear the refusal too. Best-effort over the socket.
+    global.io?.to(`session:${sessionId}`).emit('session:end-vetoed', {
+      sessionId,
+      reason: 'crisis_active',
+    });
+
+    try {
+      const { logInterventionAction } = await import('./crisisDetection.service.js');
+      await logInterventionAction(sessionId, 'model_end_refused', {
+        riskScore: crisis.crisis_risk_score ?? undefined,
+        severity: crisis.crisis_severity ?? undefined,
+        participantRequested,
+      });
+    } catch (err) {
+      console.error('[end_session] failed to log the refusal:', err);
+    }
+    if (global.io) {
+      void broadcastAdminEventForSession(
+        global.io,
+        'session:model-end-refused',
+        {
+          sessionId,
+          severity: crisis.crisis_severity,
+          riskScore: crisis.crisis_risk_score,
+          refusedAt: new Date(),
+        },
+        sessionId,
+      );
+    }
+
+    return {
+      success: false,
+      refused: true,
+      reason: 'crisis_active',
+      message:
+        'The session was NOT ended: a safety concern is active, and the participant has not asked to stop. ' +
+        'Stay with them. Keep your replies short and warm, keep listening, and keep the crisis resources available. ' +
+        'Do not say goodbye. Only if the participant clearly says they want to end the session, call end_session again with participant_requested set to true.',
+    };
+  }
+
   async executeTool(name: string, args: Record<string, unknown>, ctx: ToolContext = {}): Promise<unknown> {
     const tool = this.tools.get(name);
     if (!tool) {
@@ -894,16 +968,39 @@ export class ToolRegistry {
     );
 
     // Graceful model-initiated session end (the client performs the teardown).
+    //
+    // Refused on a crisis-flagged session unless the participant asked or the
+    // server did (duration limit, admin wind-down): a model that has just heard
+    // a suicidal disclosure and reaches for "goodbye, please call 988" is
+    // hanging up on someone in crisis. The refusal goes back to the model as
+    // the tool result, to the participant's client (which otherwise tears the
+    // call down on the call itself) and to intervention_actions.
     this.registerTool(
       'end_session',
       {
         type: 'function',
         name: 'end_session',
         description:
-          'End the session cleanly. Call ONLY after you have fully said goodbye and the participant has agreed the conversation is complete — the session closes a few seconds after you call this.',
-        parameters: { type: 'object', properties: {}, required: [] },
+          'End the session cleanly. Call ONLY after you have fully said goodbye and the participant has agreed the conversation is complete — the session closes a few seconds after you call this. ' +
+          'Never call it because the participant disclosed suicidal thoughts, self-harm or another safety concern: stay with them instead. ' +
+          'Set participant_requested to true only when the participant themselves clearly asked to stop.',
+        parameters: {
+          type: 'object',
+          properties: {
+            participant_requested: {
+              type: 'boolean',
+              description:
+                'True only if the participant explicitly asked to end the session in their own words. False when you are ending it for any other reason.',
+            },
+          },
+          required: [],
+        },
       },
-      async (_args: Record<string, unknown>, ctx: ToolContext) => {
+      async (args: Record<string, unknown>, ctx: ToolContext) => {
+        if (ctx.sessionId) {
+          const refusal = await this.refuseCrisisEnd(ctx.sessionId, args.participant_requested === true);
+          if (refusal) return refusal;
+        }
         // Server-side backstop (ai-therapist-113): ending used to depend
         // entirely on the client reacting to this tool call and POSTing /end
         // — a lost POST left the session active until the abandonment sweep.

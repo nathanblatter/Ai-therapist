@@ -15,6 +15,7 @@
 
 import { getSessionAccessInfo, updateSessionStatus } from '../db/index.js';
 import { broadcastAdminEventForSession } from './adminBroadcast.js';
+import { authorizeModelEnd } from './modelEndAuthorization.js';
 
 import { createLogger } from './logger.js';
 
@@ -140,8 +141,11 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
       const current = await getSessionAccessInfo(sessionId);
       if (!current || current.status !== 'active') return;
 
-      // Phase 1: ask the model to close out and end the session itself.
+      // Phase 1: ask the model to close out and end the session itself. The
+      // grant comes first: on a crisis-flagged session end_session refuses a
+      // model-initiated end unless the server asked for it.
       try {
+        authorizeModelEnd(sessionId);
         await steer(sessionId, TIME_LIMIT_STEER, true);
         log.info(
           `Session ${sessionId} hit ${maxDurationMinutes}min limit — asked model to wrap up ` +

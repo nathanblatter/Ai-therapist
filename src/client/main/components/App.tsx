@@ -233,6 +233,12 @@ export default function App() {
   // Tool calls arrive on the data channel AND on the server's sideband. Ours is
   // UI-only, but a redelivered envelope must not re-open an overlay.
   const handledToolCallsRef = useRef<Set<string>>(new Set());
+  // When the server REFUSES a model-initiated end_session (crisis-flagged
+  // session, nobody but the model asked), it says so over the socket. The
+  // browser sees the tool call on the data channel before the server's verdict
+  // exists, so the end_session handler waits its grace period and then checks
+  // this timestamp instead of tearing the call down blindly.
+  const endVetoedAtRef = useRef(0);
   const captionRowsRef = useRef<{ user: CaptionRow[]; assistant: CaptionRow[] }>({ user: [], assistant: [] });
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
@@ -2115,6 +2121,15 @@ export default function App() {
       void moderationHandlerRef.current(data?.sessionId ?? null);
     });
 
+    // The server refused the model's end_session on a crisis-flagged session.
+    // The end_session tool handler consults this before tearing down.
+    socket.on('session:end-vetoed', (data: { reason?: string } | undefined) => {
+      endVetoedAtRef.current = Date.now();
+      console.warn(
+        `[Live] Model-initiated end refused by the server (${data?.reason ?? 'no reason'}); staying in session.`,
+      );
+    });
+
     // Listen for crisis intervention messages
     socket.on('messages:new', (data) => {
       console.log('[Crisis] Received messages:new event:', data);
@@ -2855,7 +2870,19 @@ export default function App() {
       // Give the model's goodbye audio a moment to finish before teardown.
       // Via the latest-ref: the direct call here used the session-start
       // render's stale closure (sessionId=null) and never POSTed /end.
-      setTimeout(() => void stopSessionRef.current(), 6000);
+      //
+      // The server may refuse this call (crisis-flagged session, nobody but
+      // the model asked) and announces that over the socket; the grace period
+      // is also the window for that verdict to arrive. A veto newer than the
+      // call keeps the conversation up — the model has been told to stay.
+      const calledAt = Date.now();
+      setTimeout(() => {
+        if (endVetoedAtRef.current >= calledAt - 2000) {
+          console.warn('[Live] end_session was refused by the server; not tearing down.');
+          return;
+        }
+        void stopSessionRef.current();
+      }, 6000);
       return { ending: true };
     },
   };

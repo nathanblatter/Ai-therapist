@@ -151,6 +151,35 @@ The automated system never sends a chat message *as itself* to the participant; 
 agent's replies via steering and surfaces resources through the agent and the UI. The
 researcher on duty decides whether and how to intervene directly.
 
+### The agent must not hang up (2026-11-01)
+
+Two things used to make the agent end the session on a suicidal disclosure:
+
+- **The prompt.** The stored Crisis Protocol (seeded by migration 019 and never
+  migrated since) told the model to "immediately stop normal conversation",
+  state that it "cannot handle crises", give resources and ask whether the
+  participant will seek help. A voice model following that says goodbye and
+  calls `end_session`. Migration 117 rewrites the block in both stored prompts
+  (and `DEFAULT_SYSTEM_PROMPT`): stay, respond directly, offer the resources
+  alongside yourself, be honest about limits without withdrawing, and never
+  end the session because risk came up.
+- **The tool.** `end_session` now refuses a model-initiated end on a
+  crisis-flagged session (`toolRegistry.refuseCrisisEnd`). The refusal is the
+  tool result the model sees ("the session was NOT ended ... stay with them"),
+  is logged as `intervention_actions.model_end_refused`, and is announced to
+  the participant's client as `session:end-vetoed`, which the browser's
+  `end_session` handler checks before tearing the call down. Under Grok Voice
+  the proxy simply does not forward a refused `end_session` to the browser.
+  Two callers legitimately steer a crisis session to end — the duration limit
+  and the admin wind-down — and they record a grant in
+  `utils/modelEndAuthorization.ts` first. A participant who clearly asks to
+  stop is honoured: the model passes `participant_requested: true`. The guard
+  fails open if the crisis lookup throws.
+
+The third way a crisis conversation vanishes — OpenAI's own content filter
+closing a GPT-Live session with reason `content` — is handled by the recovery
+flow described in `docs/gpt-live.md` (incident 2026-09-11).
+
 ---
 
 ## Auto-Flag Condition
