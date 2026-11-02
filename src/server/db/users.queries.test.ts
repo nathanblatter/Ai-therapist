@@ -19,7 +19,7 @@ describe('getAllUsers caseload scoping', () => {
     await getAllUsers();
     const [sql, params] = queryMock.mock.calls[0];
     expect(sql).toBe(
-      'SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users ORDER BY created_at DESC',
+      'SELECT userid, username, role, email, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users ORDER BY created_at DESC',
     );
     expect(params).toEqual([]);
   });
