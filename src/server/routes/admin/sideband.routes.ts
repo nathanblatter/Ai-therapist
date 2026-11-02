@@ -324,6 +324,14 @@ export default function sidebandRoutes(): Router {
           .json({ error: 'No active sideband connection', details: 'Session must have an active sideband connection' });
       }
 
+      // A forced end_session is a server-driven end: grant it, or the registry
+      // refuses the model's call on a crisis-flagged session and this route
+      // would report success while nothing ends.
+      if (toolName === 'end_session') {
+        const { authorizeModelEnd } = await import('../../utils/modelEndAuthorization.js');
+        authorizeModelEnd(String(sessionId));
+      }
+
       await sidebandManager.triggerTool(sessionId, toolName, args as Record<string, unknown> | undefined);
 
       await logSidebandAction(sessionId, `Admin triggered tool ${toolName} via sideband`, {

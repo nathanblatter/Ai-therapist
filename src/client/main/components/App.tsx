@@ -2115,6 +2115,29 @@ export default function App() {
       void moderationHandlerRef.current(data?.sessionId ?? null);
     });
 
+    // The server refused the model's end_session on a crisis-flagged session.
+    // The end_session tool handler consults this before tearing down.
+    socket.on('session:end-vetoed', (data: { reason?: string } | undefined) => {
+      console.warn(
+        `[Live] Model-initiated end refused by the server (${data?.reason ?? 'no reason'}); staying in session.`,
+      );
+    });
+
+    // The server accepted the model's end_session. This is the ONLY thing
+    // that tears a GPT-Live call down for a model-initiated end: the browser
+    // sees the tool call on the data channel before the server has ruled on
+    // it, and a refused end must leave the conversation up. If this message is
+    // lost, the server's own backstop closes the live session and the browser
+    // tears down on session.closed instead. Grok ends on the proxy's tool_call,
+    // which the proxy only forwards once the end is confirmed.
+    socket.on('session:end-approved', () => {
+      if (voiceBackendRef.current !== 'live') return;
+      console.log('[Live] end_session approved by the server; closing after the goodbye.');
+      // Give the model's goodbye audio a moment to finish before teardown.
+      // Via the latest-ref (stale-closure reason as session:status above).
+      setTimeout(() => void stopSessionRef.current(), 6000);
+    });
+
     // Listen for crisis intervention messages
     socket.on('messages:new', (data) => {
       console.log('[Crisis] Received messages:new event:', data);
@@ -2852,10 +2875,17 @@ export default function App() {
       return { shown: Boolean(a.scale) };
     },
     end_session: async () => {
-      // Give the model's goodbye audio a moment to finish before teardown.
-      // Via the latest-ref: the direct call here used the session-start
-      // render's stale closure (sessionId=null) and never POSTed /end.
-      setTimeout(() => void stopSessionRef.current(), 6000);
+      // The server rules on this call (it is refused on a crisis-flagged
+      // session when nobody but the model asked). GPT-Live tears down only on
+      // the server's `session:end-approved` socket event; under Grok the proxy
+      // forwards the tool call only once the end is confirmed, so here it is
+      // the go-ahead. Via the latest-ref: the direct call here used the
+      // session-start render's stale closure (sessionId=null) and never POSTed
+      // /end.
+      if (voiceBackendRef.current === 'grok') {
+        // Give the model's goodbye audio a moment to finish before teardown.
+        setTimeout(() => void stopSessionRef.current(), 6000);
+      }
       return { ending: true };
     },
   };

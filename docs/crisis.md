@@ -151,6 +151,41 @@ The automated system never sends a chat message *as itself* to the participant; 
 agent's replies via steering and surfaces resources through the agent and the UI. The
 researcher on duty decides whether and how to intervene directly.
 
+### The agent must not hang up (2026-11-01)
+
+Two things used to make the agent end the session on a suicidal disclosure:
+
+- **The prompt.** The stored Crisis Protocol (seeded by migration 019 and never
+  migrated since) told the model to "immediately stop normal conversation",
+  state that it "cannot handle crises", give resources and ask whether the
+  participant will seek help. A voice model following that says goodbye and
+  calls `end_session`. Migration 117 rewrites the block in both stored prompts
+  (and `DEFAULT_SYSTEM_PROMPT`): stay, respond directly, offer the resources
+  alongside yourself, be honest about limits without withdrawing, and never
+  end the session because risk came up.
+- **The tool.** `end_session` now refuses a model-initiated end on a
+  crisis-flagged session (`toolRegistry.refuseCrisisEnd`). The refusal is the
+  tool result the model sees ("the session was NOT ended ... stay with them"),
+  is logged as `intervention_actions.model_end_refused`, and the browser is
+  told either way: an accepted end emits `session:end-approved`, which is the
+  only thing that makes a GPT-Live browser tear the call down for a
+  model-initiated end (a lost message fails safe: the server backstop closes
+  the live session and the browser ends on `session.closed`). Under Grok Voice
+  the proxy forwards `end_session` to the browser only once the end is
+  confirmed. Three callers legitimately steer a session to end — the duration
+  limit (nudge and hard limit), the admin wind-down and the admin trigger-tool
+  — and they record a single-shot grant in `utils/modelEndAuthorization.ts`
+  first. A participant who clearly asks to stop is honoured: the model passes
+  `participant_requested: true`, which is logged as
+  `model_end_participant_requested` because the model's word is the only
+  evidence. The guard fails open if the crisis lookup throws. Migration 117
+  fails (rather than warns) if a stored prompt matches neither known Crisis
+  Protocol variant.
+
+The third way a crisis conversation vanishes — OpenAI's own content filter
+closing a GPT-Live session with reason `content` — is handled by the recovery
+flow described in `docs/gpt-live.md` (incident 2026-09-11).
+
 ---
 
 ## Auto-Flag Condition

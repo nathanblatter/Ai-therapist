@@ -382,6 +382,10 @@ const WIND_DOWN_GRACE_MS = 75 * 1000;
 
 export async function initiateCrisisWindDown(sessionId: string, initiatedBy: string): Promise<{ injected: boolean }> {
   const { sidebandManager } = await import('./sidebandManager.service.js');
+  // A wind-down is, by definition, a crisis session being asked to end:
+  // grant it, or the end_session tool refuses the model's call.
+  const { authorizeModelEnd } = await import('../utils/modelEndAuthorization.js');
+  authorizeModelEnd(sessionId);
   // The trailing `true` (respond-now) is INERT under GPT-Live and kept only for
   // signature compatibility. Realtime could force a reply with response.create;
   // GPT-Live decides for itself when to speak, and an appended instruction can

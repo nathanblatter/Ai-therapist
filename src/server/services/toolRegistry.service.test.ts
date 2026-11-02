@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const {
   queryMock,
@@ -1146,5 +1146,90 @@ describe('toRealtimeTools', () => {
     for (const t of toRealtimeTools(all)) {
       expect(Object.keys(t).sort()).toEqual(['description', 'name', 'parameters', 'type']);
     }
+  });
+});
+
+describe('end_session crisis guard', () => {
+  const flagged = { crisis_flagged: true, crisis_severity: 'high', crisis_risk_score: 92 };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('refuses a model-initiated end on a crisis-flagged session and logs it', async () => {
+    getSessionCrisisStateMock.mockResolvedValue(flagged);
+    const result = (await toolRegistry.executeTool('end_session', {}, { sessionId: 'crisis-1' })) as {
+      success?: boolean;
+      refused?: boolean;
+      reason?: string;
+      message?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.refused).toBe(true);
+    expect(result.reason).toBe('crisis_active');
+    expect(result.message).toMatch(/Stay with them/);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'crisis-1',
+      'model_end_refused',
+      expect.objectContaining({ severity: 'high', riskScore: 92, participantRequested: false }),
+    );
+  });
+
+  it('allows the end when the participant asked for it', async () => {
+    vi.useFakeTimers();
+    getSessionCrisisStateMock.mockResolvedValue(flagged);
+    const result = (await toolRegistry.executeTool(
+      'end_session',
+      { participant_requested: true },
+      { sessionId: 'crisis-2' },
+    )) as { success?: boolean; refused?: boolean };
+    expect(result.success).toBe(true);
+    expect(result.refused).toBeUndefined();
+    // Honoured, but recorded: the model's assertion is the only evidence.
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'crisis-2',
+      'model_end_participant_requested',
+      expect.objectContaining({ severity: 'high', riskScore: 92 }),
+    );
+  });
+
+  it('allows the end when the server asked for it (duration limit, wind-down)', async () => {
+    vi.useFakeTimers();
+    const { authorizeModelEnd, clearModelEndAuthorization } = await import('../utils/modelEndAuthorization.js');
+    getSessionCrisisStateMock.mockResolvedValue(flagged);
+    authorizeModelEnd('crisis-3');
+    try {
+      const result = (await toolRegistry.executeTool('end_session', {}, { sessionId: 'crisis-3' })) as {
+        success?: boolean;
+      };
+      expect(result.success).toBe(true);
+    } finally {
+      clearModelEndAuthorization('crisis-3');
+    }
+  });
+
+  it('is a no-op on an unflagged session', async () => {
+    vi.useFakeTimers();
+    const result = (await toolRegistry.executeTool('end_session', {}, { sessionId: 'calm-1' })) as {
+      success?: boolean;
+    };
+    expect(result.success).toBe(true);
+    expect(logInterventionActionMock).not.toHaveBeenCalled();
+  });
+
+  it('fails open when the crisis lookup throws', async () => {
+    vi.useFakeTimers();
+    getSessionCrisisStateMock.mockRejectedValue(new Error('db down'));
+    const result = (await toolRegistry.executeTool('end_session', {}, { sessionId: 'crisis-4' })) as {
+      success?: boolean;
+    };
+    expect(result.success).toBe(true);
+  });
+
+  it('exposes participant_requested to the model', () => {
+    const def = toolRegistry.getAllToolDefinitions().find((d) => d.name === 'end_session');
+    const props = (def?.parameters as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+    expect(Object.keys(props)).toContain('participant_requested');
+    expect(def?.description).toMatch(/Never call it because the participant disclosed/);
   });
 });

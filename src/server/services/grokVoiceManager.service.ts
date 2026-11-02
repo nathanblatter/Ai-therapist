@@ -1082,7 +1082,14 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
     // UI-only notification: the browser opens the matching overlay. Execution
     // stays here, so the model receives exactly one result per call.
-    this.sendToClient(sessionId, { type: 'tool_call', callId, name: call.name, args });
+    //
+    // end_session is the exception: the browser tears the call down when it
+    // hears that one, and the registry may REFUSE it (crisis-flagged session,
+    // nobody but the model asked). So it is forwarded only after the result,
+    // and not at all when refused.
+    const notifyClient = (): void => this.sendToClient(sessionId, { type: 'tool_call', callId, name: call.name, args });
+    const deferClientNotice = call.name === 'end_session';
+    if (!deferClientNotice) notifyClient();
 
     await insertMessagesBatch([
       {
@@ -1124,6 +1131,14 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
 
     state.pendingCalls.delete(callId);
     const output = failure ? { error: failure, success: false } : result;
+    if (deferClientNotice) {
+      // Only a confirmed end reaches the browser: a refusal or an error means
+      // the server scheduled no backstop and the model was not told goodbye.
+      const ended = (output as { success?: boolean } | undefined)?.success === true;
+      if (ended) notifyClient();
+      else
+        console.warn(`[Grok] end_session not confirmed for ${sessionId.substring(0, 12)}...; browser not told to end`);
+    }
     try {
       this.sendUpstream(sessionId, {
         type: 'conversation.item.create',

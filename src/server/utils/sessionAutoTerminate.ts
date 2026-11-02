@@ -15,6 +15,7 @@
 
 import { getSessionAccessInfo, updateSessionStatus } from '../db/index.js';
 import { broadcastAdminEventForSession } from './adminBroadcast.js';
+import { authorizeModelEnd } from './modelEndAuthorization.js';
 
 import { createLogger } from './logger.js';
 
@@ -125,6 +126,9 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
         try {
           const current = await getSessionAccessInfo(sessionId);
           if (!current || current.status !== 'active') return;
+          // The nudge is already a server request to wrap up; a model that
+          // closes early must not be refused and then told to end again.
+          authorizeModelEnd(sessionId);
           await steer(sessionId, WRAP_UP_NUDGE, false);
         } catch (err) {
           log.error({ err }, `T-60s wrap-up nudge failed for ${sessionId}`);
@@ -140,8 +144,11 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
       const current = await getSessionAccessInfo(sessionId);
       if (!current || current.status !== 'active') return;
 
-      // Phase 1: ask the model to close out and end the session itself.
+      // Phase 1: ask the model to close out and end the session itself. The
+      // grant comes first: on a crisis-flagged session end_session refuses a
+      // model-initiated end unless the server asked for it.
       try {
+        authorizeModelEnd(sessionId);
         await steer(sessionId, TIME_LIMIT_STEER, true);
         log.info(
           `Session ${sessionId} hit ${maxDurationMinutes}min limit — asked model to wrap up ` +
