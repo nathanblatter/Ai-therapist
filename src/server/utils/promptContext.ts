@@ -93,6 +93,11 @@ export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
       '- When they say they want to end and you have said goodbye, CALL end_session. Do not leave them to find the button.',
     );
   }
+  if (has('get_session_time')) {
+    lines.push(
+      '- Sessions have a time limit. The system tells you as time runs down; you do not need to check. If they ask how long is left, or you need to pace an exercise, CALL get_session_time and answer truthfully.',
+    );
+  }
   if (has('flag_notable_moment')) {
     lines.push(
       '- When you notice a breakthrough, or a technique clearly landing or failing, silently CALL flag_notable_moment.',

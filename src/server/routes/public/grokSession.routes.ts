@@ -286,6 +286,7 @@ export default function grokSessionRoutes(): Router {
             maxDurationMinutes: limitCheck.limits.max_duration_minutes,
             steer: (id, text, respond) => grokVoiceManager.tryInject(id, 'system', text, respond),
             teardown: (id) => grokVoiceManager.disconnect(id),
+            backend: 'grok',
           });
         }
 

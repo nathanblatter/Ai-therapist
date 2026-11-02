@@ -233,6 +233,11 @@ export default function App() {
   // Tool calls arrive on the data channel AND on the server's sideband. Ours is
   // UI-only, but a redelivered envelope must not re-open an overlay.
   const handledToolCallsRef = useRef<Set<string>>(new Set());
+  // The server flagged THIS voice session high (session:crisis-emergency).
+  // Decides whether the vendor's 60-minute expiry is an ordinary end or a
+  // conversation that must be recovered (ai-therapist-281). A recovery session
+  // inherits it; a genuinely new session starts clear.
+  const crisisActiveRef = useRef(false);
   const captionRowsRef = useRef<{ user: CaptionRow[]; assistant: CaptionRow[] }>({ user: [], assistant: [] });
   const [sessionSettings, setSessionSettings] = useState<SessionSettings>({
     voice: 'cedar',
@@ -1194,6 +1199,8 @@ export default function App() {
     // would be swallowed by the first one's dedupe guard and the participant
     // would land on the post-session screen after all.
     moderationHandledRef.current = false;
+    // A recovery session is still the same crisis; a new session starts clear.
+    crisisActiveRef.current = recovery;
     if (!recovery) {
       // A genuinely new conversation: the crisis that spent these is over.
       moderationTakeoverRef.current = false;
@@ -1406,7 +1413,13 @@ export default function App() {
           // them onto the generic post-session screen — we hung up on someone in
           // crisis. This branch takes over instead: recovery screen with crisis
           // resources, then the same conversation continued in text.
-          if (event.reason === 'content') {
+          //
+          // reason 'expired' is the vendor's 60-minute ceiling. On a session the
+          // server has flagged high it is the same harm, and gets the same
+          // recovery (ai-therapist-281): the server lifted our own timer so
+          // this is the only clock left, and the model was told to expect a
+          // brief reset. The server's socket backstop covers a flag we missed.
+          if (event.reason === 'content' || (event.reason === 'expired' && crisisActiveRef.current)) {
             void moderationHandlerRef.current(liveSessionIdRef.current);
           } else if (!waiter && !isTearingDownRef.current) {
             // The session ended on its own (duration limit, safety filter,
@@ -1830,6 +1843,7 @@ export default function App() {
     moderationTakeoverRef.current = false;
     moderationVoiceSessionIdRef.current = null;
     moderationVoiceAttemptsRef.current = 0;
+    crisisActiveRef.current = false;
 
     // Microphone first: a denied permission must never create a session.
     const ms = await navigator.mediaDevices.getUserMedia({
@@ -2103,6 +2117,7 @@ export default function App() {
     // depend on the model choosing to call show_resource_card — the server's
     // crisis-emergency event opens the resource card directly.
     socket.on('session:crisis-emergency', () => {
+      crisisActiveRef.current = true;
       setToolUI({ kind: 'resource', resourceType: 'all' });
     });
 

@@ -520,3 +520,56 @@ export async function getSessionSafetyContext(sessionId: string): Promise<Sessio
     adverseEvents: adverseEvents.rows,
   };
 }
+
+/**
+ * Flag a crisis RECOVERY session as a continuation of the crisis that cut its
+ * predecessor (ai-therapist-281). The new row inherits the user's most recent
+ * flagged score (100 when none is known) so every server-side crisis path on
+ * the continuation — the vendor-ceiling recovery, the on-call wording, the
+ * end_session guard — sees a high flag from the first turn. Records a
+ * crisis_events row for the audit trail; deliberately does NOT draft a second
+ * adverse event (flagSessionCrisis would), the AE belongs to the original.
+ */
+export async function markSessionCrisisContinuation(sessionId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query<{ crisis_risk_score: number | null }>(
+      `UPDATE therapy_sessions ts
+       SET crisis_flagged = TRUE,
+           crisis_severity = 'high',
+           crisis_risk_score = COALESCE(
+             (SELECT p.crisis_risk_score FROM therapy_sessions p
+               WHERE p.user_id = ts.user_id AND p.crisis_flagged = TRUE AND p.session_id <> ts.session_id
+               ORDER BY p.crisis_flagged_at DESC NULLS LAST LIMIT 1),
+             100),
+           crisis_flagged_at = CURRENT_TIMESTAMP,
+           crisis_flagged_by = 'system',
+           monitoring_frequency = 'critical'
+       WHERE ts.session_id = $1
+       RETURNING crisis_risk_score`,
+      [sessionId],
+    );
+    await recordCrisisEvent(
+      {
+        sessionId,
+        eventType: 'flagged',
+        severity: 'high',
+        riskScore: updated.rows[0]?.crisis_risk_score ?? 100,
+        triggeredBy: 'system',
+        triggerMethod: 'recovery_continuation',
+        messageId: null,
+        riskFactors: ['recovery_continuation'],
+        notes:
+          'Continuation of a crisis-flagged voice session that the platform cut (content filter or vendor ceiling).',
+      },
+      client,
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}

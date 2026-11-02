@@ -452,6 +452,11 @@ export default function sessionsRoutes(): Router {
 
       const updatedSession = await updateSessionStatus(sessionId, 'ended', 'user');
 
+      // The session's duration timers (and any crisis lift) die with it.
+      import('../../utils/sessionAutoTerminate.js')
+        .then((m) => m.cancelAutoTermination(sessionId))
+        .catch(() => undefined);
+
       // Cleanly tear down the sideband observer so it doesn't 1006 and churn
       // through reconnect attempts after the call ends. A closing note is
       // injected first so the transcript records WHY the conversation stops

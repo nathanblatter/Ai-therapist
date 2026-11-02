@@ -1206,3 +1206,58 @@ describe('error handling', () => {
     expect(runCrisisPipelineMock).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Vendor ceiling during a crisis (ai-therapist-281)
+// ---------------------------------------------------------------------------
+
+describe('session.closed reason=expired', () => {
+  it('runs the crisis recovery path when the session is flagged', async () => {
+    const sessionId = 's-expired-crisis';
+    await attach(sessionId);
+    queryMock.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes('crisis_flagged')) {
+        return { rows: [{ crisis_flagged: true, crisis_severity: 'high' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const emit = vi.fn();
+    (global as { io?: unknown }).io = { to: vi.fn(() => ({ emit })) };
+    try {
+      await fire(sessionId, { type: 'session.closed', reason: 'expired', usage: { seconds: 3600 } });
+      await flush();
+      expect(emit).toHaveBeenCalledWith(
+        'session:moderation-terminated',
+        expect.objectContaining({ sessionId, reason: 'expired' }),
+      );
+      expect(broadcastMock).toHaveBeenCalledWith(
+        expect.anything(),
+        'session:moderation-terminated',
+        expect.objectContaining({ sessionId, cause: 'expired', crisisFlagged: true }),
+        sessionId,
+      );
+    } finally {
+      delete (global as { io?: unknown }).io;
+    }
+  });
+
+  it('is an ordinary end when the session is not flagged', async () => {
+    const sessionId = 's-expired-calm';
+    await attach(sessionId);
+    queryMock.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes('crisis_flagged')) {
+        return { rows: [{ crisis_flagged: false, crisis_severity: null }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const emit = vi.fn();
+    (global as { io?: unknown }).io = { to: vi.fn(() => ({ emit })) };
+    try {
+      await fire(sessionId, { type: 'session.closed', reason: 'expired', usage: { seconds: 3600 } });
+      await flush();
+      expect(emit).not.toHaveBeenCalledWith('session:moderation-terminated', expect.anything());
+    } finally {
+      delete (global as { io?: unknown }).io;
+    }
+  });
+});

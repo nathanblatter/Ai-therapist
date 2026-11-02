@@ -575,6 +575,42 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
 
     await updateMonitoringFrequency(sessionId, 'critical');
 
+    // Our own session timer must not cut them off (ai-therapist-281): lift it
+    // to the vendor ceiling. Additive and non-fatal.
+    try {
+      const [{ liftLimitForCrisis }, { resolveVendorCeilingMinutes }] = await Promise.all([
+        import('../utils/sessionAutoTerminate.js'),
+        import('../utils/sessionHelpers.js'),
+      ]);
+      const ceiling = await resolveVendorCeilingMinutes();
+      const lift = liftLimitForCrisis(sessionId, ceiling);
+      if (lift.lifted) {
+        await logInterventionAction(sessionId, 'crisis_timer_extended', {
+          riskScore,
+          previousLimitMinutes: lift.previousLimitMinutes,
+          ceilingMinutes: lift.ceilingMinutes,
+        });
+        if (global.io) {
+          void broadcastAdminEventForSession(
+            global.io,
+            'session:crisis-timer-extended',
+            {
+              sessionId,
+              previousLimitMinutes: lift.previousLimitMinutes,
+              ceilingMinutes: lift.ceilingMinutes,
+              extendedAt: new Date(),
+            },
+            sessionId,
+          );
+        }
+        console.log(
+          `Session timer lifted for ${sessionId}: ${lift.previousLimitMinutes} -> ${lift.ceilingMinutes} minutes (crisis)`,
+        );
+      }
+    } catch (err) {
+      console.error('Error lifting the session timer for crisis:', err);
+    }
+
     console.log(`HIGH RISK alert sent to admins for session ${sessionId}`);
   } catch (error) {
     console.error('Error executing high risk response:', error);
