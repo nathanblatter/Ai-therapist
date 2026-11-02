@@ -177,8 +177,10 @@ describe("planAfterTermination — the browser's content-filter recovery, mirror
     expect(planAfterTermination('live', 'content', MAX_VOICE_RECOVERY_ATTEMPTS)).toBe('stop');
   });
 
-  it('treats the vendor ceiling on a crisis session like the filter', () => {
-    expect(planAfterTermination('live', 'expired', 0)).toBe('recover');
+  it('treats the vendor ceiling like the filter only on a high-flagged session (App.tsx crisisActiveRef)', () => {
+    expect(planAfterTermination('live', 'expired', 0, true)).toBe('recover');
+    expect(planAfterTermination('live', 'expired', 0, false)).toBe('stop');
+    expect(planAfterTermination('live', 'expired', MAX_VOICE_RECOVERY_ATTEMPTS, true)).toBe('stop');
   });
 
   it('never recovers on Grok or for any other close reason', () => {

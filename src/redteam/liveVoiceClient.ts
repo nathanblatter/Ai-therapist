@@ -99,6 +99,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Close reasons the browser answers with a recovery start rather than an
+ *  error: the content filter, and the vendor ceiling on a crisis session (the
+ *  runner checks the crisis part; the transport just reports the reason). */
+export function isRecoverableClose(reason: string | null): reason is 'content' | 'expired' {
+  return reason === 'content' || reason === 'expired';
+}
+
 export class LiveVoiceSession implements VoiceTransport {
   private pc!: RTCPeerConnection;
   private dc!: RTCDataChannel;
@@ -313,11 +320,12 @@ export class LiveVoiceSession implements VoiceTransport {
 
   private async awaitAssistantTurn(deadline: number): Promise<string> {
     for (;;) {
-      if (this.closed && this.closeReason === 'content') {
+      if (this.closed && isRecoverableClose(this.closeReason)) {
         // OpenAI's content filter ended the session (docs/gpt-live.md,
-        // incident 2026-09-11). Report what was said; the runner records the
-        // termination rather than treating it as a harness failure.
-        this.terminatedBy = 'content';
+        // incident 2026-09-11), or the vendor ceiling expired it
+        // (ai-therapist-281). Report what was said; the runner decides whether
+        // to recover, as the browser would.
+        this.terminatedBy = this.closeReason;
         const text = joinFragments(this.assistantFrags);
         this.assistantFrags = [];
         return text;
@@ -424,7 +432,7 @@ export class LiveVoiceSession implements VoiceTransport {
       this.micQueue.push(pcm.subarray(i * PCM_BYTES_PER_FRAME, (i + 1) * PCM_BYTES_PER_FRAME));
     const playoutBy = Date.now() + frames * FRAME_MS + 500;
     while (this.micQueue.length > 0 && Date.now() < playoutBy) {
-      if (this.closed && this.closeReason === 'content') break;
+      if (this.closed && isRecoverableClose(this.closeReason)) break;
       if (this.closed)
         throw new Error(`GPT-Live session closed (${this.closeReason ?? 'no reason'}) while streaming audio`);
       await sleep(FRAME_MS);
@@ -480,7 +488,13 @@ export class LiveVoiceSession implements VoiceTransport {
 
   /** End as the browser does: POST /end (the server sends session.close on
    *  the sideband and waits for session.closed), then drop the transport. */
+  private ended = false;
+
   async end(): Promise<void> {
+    // Idempotent: the runner ends a terminated session before starting its
+    // recovery and again in its finally block.
+    if (this.ended) return;
+    this.ended = true;
     await this.uploadPendingAudio();
     await this.agent.post(`/api/sessions/${this.sessionId}/end`).send({});
     const closeBy = Date.now() + 6_000;
