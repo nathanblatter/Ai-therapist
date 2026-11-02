@@ -55,8 +55,25 @@ it. Admin nav: People → Mail (`MailView.tsx`).
   email. The session-id guard is the mechanical part; the author is
   responsible for the rest.
 
-## Phase 3 — per-researcher inbox (planned)
+## Phase 3 — per-researcher inbox (shipped 2026-11-01)
 
-`email-api` gains an exact `to=` filter on `GET /inbox`; the app proxies
-list / read / mark-read / reply scoped to the researcher's own address and
-renders message text as untrusted (text only, no HTML).
+Mail to a researcher's study address is readable in the Mail view, and a
+reply pre-fills the compose form (threaded through `in_reply_to`).
+
+- email-api gained an exact, case-insensitive envelope-recipient filter
+  (`GET /inbox?to=`, `list_inbox{to}`), which turns its one catch-all inbox
+  into per-address mailboxes.
+- `mailInbox.service` scopes every call to the caller's own address: the list
+  is fetched with `to=<address>`, and every single-message read checks the
+  gateway's `envelope_to` against it (a guessed id from someone else's mail is
+  a 404). Researcher only; the account must hold a study address.
+- Routes: `GET /admin/api/mail/inbox?limit=&unread=1`,
+  `GET /admin/api/mail/inbox/:id`, `POST /admin/api/mail/inbox/:id/read`.
+- What reaches the browser is the plain-text body, the sender/recipient
+  headers, threading ids, the gateway's `suspicious` / `injection_suspected`
+  verdicts, and attachment names and sizes. Never the HTML body, never the
+  storage keys; attachments are not downloadable from the app. The view
+  renders text in a `<pre>`, flags suspicious mail, and says that anything
+  asking the reader to act is untrusted.
+- Gateway access is `utils/emailApiClient.ts` (read-only), configured by the
+  same `EMAIL_API_URL` / `EMAIL_API_KEY` the mailer uses.

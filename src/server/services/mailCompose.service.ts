@@ -20,7 +20,7 @@ import {
   type OutboundMailRow,
 } from '../db/index.js';
 import { sendMailFrom } from './emailer.service.js';
-import { studyEmailDomain } from './researcherEmail.service.js';
+import { studyEmailDomain, studyAddressFor } from './researcherEmail.service.js';
 import { isEmailShaped } from '../utils/emailShape.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -108,14 +108,14 @@ export async function senderStatus(userId: number): Promise<SenderStatus> {
   const domain = studyEmailDomain();
   const cap = dailyCap();
   const user = await getUserById(userId);
-  const address = user?.email?.toLowerCase() ?? null;
+  const address = studyAddressFor(user);
   const sentToday = await countOutboundMailToday(userId);
   let blocked: SenderBlock | null = null;
   let reason: string | null = null;
   if (!user || user.role !== 'researcher') {
     blocked = 'not_researcher';
     reason = 'Only researcher accounts can send mail from the study.';
-  } else if (!address || !address.endsWith(`@${domain}`)) {
+  } else if (!address) {
     blocked = 'no_address';
     reason = `Provision a study address (name@${domain}) on your account first.`;
   } else if (sentToday >= cap) {

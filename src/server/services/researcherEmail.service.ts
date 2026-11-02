@@ -23,6 +23,16 @@ export function studyEmailDomain(): string {
   return configured || 'byuisresearch.com';
 }
 
+/**
+ * The one definition of "this account has a study mailbox": a researcher whose
+ * address is on the study domain. Compose and inbox both key on it.
+ */
+export function studyAddressFor(user: { role?: string; email?: string | null } | null | undefined): string | null {
+  if (!user || user.role !== 'researcher') return null;
+  const address = (user.email ?? '').trim().toLowerCase();
+  return address.endsWith(`@${studyEmailDomain()}`) ? address : null;
+}
+
 /** Roles that may hold an address. Participants are anonymous. */
 export const EMAIL_ELIGIBLE_ROLES: ReadonlySet<string> = new Set(['researcher', 'therapist', 'caseworker']);
 

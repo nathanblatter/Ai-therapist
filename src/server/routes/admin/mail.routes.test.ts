@@ -4,6 +4,11 @@ import request from 'supertest';
 
 const dbMocks = vi.hoisted(() => ({ listOutboundMailForUser: vi.fn() }));
 const svcMocks = vi.hoisted(() => ({ sendStaffMail: vi.fn(), senderStatus: vi.fn() }));
+const inboxMocks = vi.hoisted(() => ({
+  listMailboxFor: vi.fn(),
+  readMailboxMessage: vi.fn(),
+  markMailboxMessageRead: vi.fn(),
+}));
 vi.mock('../../db/index.js', () => dbMocks);
 vi.mock('../../services/mailCompose.service.js', async () => {
   const actual = await vi.importActual<typeof import('../../services/mailCompose.service.js')>(
@@ -12,7 +17,15 @@ vi.mock('../../services/mailCompose.service.js', async () => {
   return { ...actual, sendStaffMail: svcMocks.sendStaffMail, senderStatus: svcMocks.senderStatus };
 });
 
+vi.mock('../../services/mailInbox.service.js', async () => {
+  const actual = await vi.importActual<typeof import('../../services/mailInbox.service.js')>(
+    '../../services/mailInbox.service.js',
+  );
+  return { ...actual, ...inboxMocks };
+});
+
 import mailRoutes from './mail.routes.js';
+import { MailInboxError } from '../../services/mailInbox.service.js';
 import { MailComposeError } from '../../services/mailCompose.service.js';
 
 function appAs(role: string | null, userId = 3) {
@@ -42,6 +55,9 @@ beforeEach(() => {
   });
   svcMocks.sendStaffMail.mockResolvedValue({ mail_id: 1, status: 'sent', body_text: 'secret body' });
   dbMocks.listOutboundMailForUser.mockResolvedValue([{ mail_id: 1, subject: 'x' }]);
+  inboxMocks.listMailboxFor.mockResolvedValue({ address: 'jane@byuisresearch.com', messages: [] });
+  inboxMocks.readMailboxMessage.mockResolvedValue({ id: 'm1', text: 'hi' });
+  inboxMocks.markMailboxMessageRead.mockResolvedValue(undefined);
 });
 
 describe('mail routes (ai-therapist-283 phase 2)', () => {
@@ -87,5 +103,25 @@ describe('mail routes (ai-therapist-283 phase 2)', () => {
     const res = await request(appAs('researcher', 7)).get('/admin/api/mail/sent?limit=10');
     expect(res.status).toBe(200);
     expect(dbMocks.listOutboundMailForUser).toHaveBeenCalledWith(7, { limit: 10, offset: 0 });
+  });
+});
+
+describe('inbox routes (phase 3)', () => {
+  it('are researcher-only and scoped to the caller', async () => {
+    expect((await request(appAs('therapist')).get('/admin/api/mail/inbox')).status).toBeGreaterThanOrEqual(401);
+    const res = await request(appAs('researcher', 7)).get('/admin/api/mail/inbox?limit=5&unread=1');
+    expect(res.status).toBe(200);
+    expect(inboxMocks.listMailboxFor).toHaveBeenCalledWith(7, { limit: 5, unread: true });
+  });
+
+  it('reads and marks a message through the service, mapping its errors', async () => {
+    const read = await request(appAs('researcher', 7)).get('/admin/api/mail/inbox/m1?mark_read=1');
+    expect(read.status).toBe(200);
+    expect(inboxMocks.readMailboxMessage).toHaveBeenCalledWith(7, 'm1', { markRead: true });
+    const mark = await request(appAs('researcher', 7)).post('/admin/api/mail/inbox/m1/read').send({ read: false });
+    expect(mark.status).toBe(200);
+    expect(inboxMocks.markMailboxMessageRead).toHaveBeenCalledWith(7, 'm1', false);
+    inboxMocks.readMailboxMessage.mockRejectedValue(new MailInboxError('Message not found', 404));
+    expect((await request(appAs('researcher', 7)).get('/admin/api/mail/inbox/other')).status).toBe(404);
   });
 });
