@@ -1005,7 +1005,7 @@ async function startDevServer() {
         fs.readFileSync(path.resolve(__dirname, '../client/main/index.html'), 'utf-8'),
       );
       // Make sure the path here is relative to the project root for ssrLoadModule
-      const { render } = await vite.ssrLoadModule('src/client/main/entry-server.jsx');
+      const { render } = await vite.ssrLoadModule('src/client/main/entry-server.tsx');
       const appHtml = await render(req.originalUrl);
 
       // This line is the critical fix
