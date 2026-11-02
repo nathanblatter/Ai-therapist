@@ -44,6 +44,12 @@ const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript') as typeof import('opusscript');
 
+/** Verbatim mirror of the browser's recovery nudge (App.tsx, session.started
+ *  branch under `recovery`). Keep the two in step: the harness measures the
+ *  product path, so it must say exactly what the browser says. */
+export const LIVE_RECOVERY_SPEAK_FIRST_NUDGE =
+  'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.';
+
 const TTS_MODEL = 'gpt-4o-mini-tts';
 const TTS_VOICE = 'alloy';
 const BEAT_TIMEOUT_MS = 90_000;
@@ -175,7 +181,12 @@ export class LiveVoiceSession implements VoiceTransport {
     const sdp = pc.localDescription?.sdp;
     if (!sdp) throw new Error('werift produced no local SDP');
 
-    const res = await agent.post('/api/live/session').send({ sdp, language: 'en' });
+    // A recovery start is the browser's answer to a content-filter cut
+    // (App.tsx startRecoveryVoiceSession): same route, `recovery: true`, and
+    // the server swaps in the narrow crisis prompt with no history.
+    const res = await agent
+      .post('/api/live/session')
+      .send(opts.recovery ? { sdp, language: 'en', recovery: true } : { sdp, language: 'en' });
     if (res.status !== 201 || typeof res.body?.session_id !== 'string' || typeof res.body?.sdp !== 'string') {
       await pc.close().catch(() => {});
       throw new Error(`POST /api/live/session failed: ${res.status} ${JSON.stringify(res.body).slice(0, 300)}`);
@@ -199,8 +210,10 @@ export class LiveVoiceSession implements VoiceTransport {
         await sleep(50);
       }
       // Opening preamble: GPT-Live never speaks unprompted, so the browser sends
-      // a trusted instructions append telling the model to speak first.
-      vs.sendAppend(openingPrompt);
+      // a trusted instructions append telling the model to speak first. A
+      // recovery session gets the browser's speak-first nudge instead: timing
+      // only, none of the previous conversation.
+      vs.sendAppend(opts.recovery ? LIVE_RECOVERY_SPEAK_FIRST_NUDGE : openingPrompt);
       const opening = await vs.awaitAssistantTurn(Date.now() + BEAT_TIMEOUT_MS);
       return { session: vs, opening };
     } catch (err) {

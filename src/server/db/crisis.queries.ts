@@ -557,7 +557,9 @@ export async function markSessionCrisisContinuation(sessionId: string): Promise<
         severity: 'high',
         riskScore: updated.rows[0]?.crisis_risk_score ?? 100,
         triggeredBy: 'system',
-        triggerMethod: 'recovery_continuation',
+        // crisis_events.trigger_method is CHECK-constrained (011/068); the
+        // continuation is identified by its risk factor and notes instead.
+        triggerMethod: 'system',
         messageId: null,
         riskFactors: ['recovery_continuation'],
         notes:
