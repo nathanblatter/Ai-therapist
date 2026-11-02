@@ -4,6 +4,7 @@
 // settle. The networked parts (proxy WS, TTS) are exercised only by live
 // `--suite voice` runs.
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 vi.mock('openai', () => ({ default: class {} }));
 
@@ -17,9 +18,11 @@ import {
   waitForProxyCrisisPipeline,
   VOICE_SAMPLE_RATE,
   FRAME_BYTES,
+  planAfterTermination,
+  MAX_VOICE_RECOVERY_ATTEMPTS,
 } from './voiceClient.js';
 import type { CapturedEmission } from './types.js';
-import { joinFragments } from './liveVoiceClient.js';
+import { joinFragments, LIVE_RECOVERY_SPEAK_FIRST_NUDGE } from './liveVoiceClient.js';
 
 describe('detectVoiceBackend — follows system_config.ai_model like production', () => {
   it('routes grok-voice-* to the proxy and gpt-live-* to GPT-Live', () => {
@@ -164,5 +167,32 @@ describe('joinFragments — GPT-Live transcript assembly', () => {
 
   it('is empty for no fragments', () => {
     expect(joinFragments([])).toBe('');
+  });
+});
+
+describe("planAfterTermination — the browser's content-filter recovery, mirrored (ai-therapist-268)", () => {
+  it('recovers a GPT-Live content cut up to the browser cap, then stops', () => {
+    expect(planAfterTermination('live', 'content', 0)).toBe('recover');
+    expect(planAfterTermination('live', 'content', 1)).toBe('recover');
+    expect(planAfterTermination('live', 'content', MAX_VOICE_RECOVERY_ATTEMPTS)).toBe('stop');
+  });
+
+  it('treats the vendor ceiling like the filter only on a high-flagged session (App.tsx crisisActiveRef)', () => {
+    expect(planAfterTermination('live', 'expired', 0, true)).toBe('recover');
+    expect(planAfterTermination('live', 'expired', 0, false)).toBe('stop');
+    expect(planAfterTermination('live', 'expired', MAX_VOICE_RECOVERY_ATTEMPTS, true)).toBe('stop');
+  });
+
+  it('never recovers on Grok or for any other close reason', () => {
+    expect(planAfterTermination('grok', 'content', 0)).toBe('stop');
+    expect(planAfterTermination('live', 'connection_lost', 0)).toBe('stop');
+    expect(planAfterTermination('live', 'close_requested', 0)).toBe('stop');
+  });
+});
+
+describe('LIVE_RECOVERY_SPEAK_FIRST_NUDGE', () => {
+  it("is the browser's nudge, verbatim (App.tsx session.started under recovery)", () => {
+    const app = readFileSync(new URL('../client/main/components/App.tsx', import.meta.url), 'utf8');
+    expect(app).toContain(LIVE_RECOVERY_SPEAK_FIRST_NUDGE);
   });
 });

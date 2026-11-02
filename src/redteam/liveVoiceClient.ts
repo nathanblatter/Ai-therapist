@@ -44,6 +44,12 @@ const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript') as typeof import('opusscript');
 
+/** Verbatim mirror of the browser's recovery nudge (App.tsx, session.started
+ *  branch under `recovery`). Keep the two in step: the harness measures the
+ *  product path, so it must say exactly what the browser says. */
+export const LIVE_RECOVERY_SPEAK_FIRST_NUDGE =
+  'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.';
+
 const TTS_MODEL = 'gpt-4o-mini-tts';
 const TTS_VOICE = 'alloy';
 const BEAT_TIMEOUT_MS = 90_000;
@@ -91,6 +97,13 @@ export function joinFragments(frags: Fragment[]): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Close reasons the browser answers with a recovery start rather than an
+ *  error: the content filter, and the vendor ceiling on a crisis session (the
+ *  runner checks the crisis part; the transport just reports the reason). */
+export function isRecoverableClose(reason: string | null): reason is 'content' | 'expired' {
+  return reason === 'content' || reason === 'expired';
 }
 
 export class LiveVoiceSession implements VoiceTransport {
@@ -175,7 +188,12 @@ export class LiveVoiceSession implements VoiceTransport {
     const sdp = pc.localDescription?.sdp;
     if (!sdp) throw new Error('werift produced no local SDP');
 
-    const res = await agent.post('/api/live/session').send({ sdp, language: 'en' });
+    // A recovery start is the browser's answer to a content-filter cut
+    // (App.tsx startRecoveryVoiceSession): same route, `recovery: true`, and
+    // the server swaps in the narrow crisis prompt with no history.
+    const res = await agent
+      .post('/api/live/session')
+      .send(opts.recovery ? { sdp, language: 'en', recovery: true } : { sdp, language: 'en' });
     if (res.status !== 201 || typeof res.body?.session_id !== 'string' || typeof res.body?.sdp !== 'string') {
       await pc.close().catch(() => {});
       throw new Error(`POST /api/live/session failed: ${res.status} ${JSON.stringify(res.body).slice(0, 300)}`);
@@ -199,8 +217,10 @@ export class LiveVoiceSession implements VoiceTransport {
         await sleep(50);
       }
       // Opening preamble: GPT-Live never speaks unprompted, so the browser sends
-      // a trusted instructions append telling the model to speak first.
-      vs.sendAppend(openingPrompt);
+      // a trusted instructions append telling the model to speak first. A
+      // recovery session gets the browser's speak-first nudge instead: timing
+      // only, none of the previous conversation.
+      vs.sendAppend(opts.recovery ? LIVE_RECOVERY_SPEAK_FIRST_NUDGE : openingPrompt);
       const opening = await vs.awaitAssistantTurn(Date.now() + BEAT_TIMEOUT_MS);
       return { session: vs, opening };
     } catch (err) {
@@ -300,11 +320,12 @@ export class LiveVoiceSession implements VoiceTransport {
 
   private async awaitAssistantTurn(deadline: number): Promise<string> {
     for (;;) {
-      if (this.closed && this.closeReason === 'content') {
+      if (this.closed && isRecoverableClose(this.closeReason)) {
         // OpenAI's content filter ended the session (docs/gpt-live.md,
-        // incident 2026-09-11). Report what was said; the runner records the
-        // termination rather than treating it as a harness failure.
-        this.terminatedBy = 'content';
+        // incident 2026-09-11), or the vendor ceiling expired it
+        // (ai-therapist-281). Report what was said; the runner decides whether
+        // to recover, as the browser would.
+        this.terminatedBy = this.closeReason;
         const text = joinFragments(this.assistantFrags);
         this.assistantFrags = [];
         return text;
@@ -411,7 +432,7 @@ export class LiveVoiceSession implements VoiceTransport {
       this.micQueue.push(pcm.subarray(i * PCM_BYTES_PER_FRAME, (i + 1) * PCM_BYTES_PER_FRAME));
     const playoutBy = Date.now() + frames * FRAME_MS + 500;
     while (this.micQueue.length > 0 && Date.now() < playoutBy) {
-      if (this.closed && this.closeReason === 'content') break;
+      if (this.closed && isRecoverableClose(this.closeReason)) break;
       if (this.closed)
         throw new Error(`GPT-Live session closed (${this.closeReason ?? 'no reason'}) while streaming audio`);
       await sleep(FRAME_MS);
@@ -467,7 +488,13 @@ export class LiveVoiceSession implements VoiceTransport {
 
   /** End as the browser does: POST /end (the server sends session.close on
    *  the sideband and waits for session.closed), then drop the transport. */
+  private ended = false;
+
   async end(): Promise<void> {
+    // Idempotent: the runner ends a terminated session before starting its
+    // recovery and again in its finally block.
+    if (this.ended) return;
+    this.ended = true;
     await this.uploadPendingAudio();
     await this.agent.post(`/api/sessions/${this.sessionId}/end`).send({});
     const closeBy = Date.now() + 6_000;

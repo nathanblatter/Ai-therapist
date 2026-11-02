@@ -533,9 +533,7 @@ async function runEntry(
             ? (await import('./voiceClient.js')).runVoiceScenario
             : runRealtimeScenario;
     const res = await runner(scenario, beats, runJudgeFlag, client, openai, vcfg, cost, canaries, pool, classify);
-    const { assertions, judge, judgeBreaches, sessionId } = res;
-    // Voice runner may not carry a transcript; chat/realtime always do.
-    const transcript = (res as { transcript?: Turn[] }).transcript;
+    const { assertions, judge, judgeBreaches, sessionId, transcript } = res;
     const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
     return {
       id: label,
