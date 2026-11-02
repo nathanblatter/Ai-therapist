@@ -29,6 +29,7 @@ import {
   RefreshCw,
   ExternalLink,
   Eye,
+  Mail,
 } from 'react-feather';
 import AdminHeader from './AdminHeader';
 import SandboxBanner from './SandboxBanner';
@@ -50,6 +51,7 @@ import BugReport from '../../main/components/BugReport';
 const SessionList = lazy(() => import('./SessionList'));
 const SessionDetail = lazy(() => import('./SessionDetail'));
 const Analytics = lazy(() => import('./Analytics'));
+const MailView = lazy(() => import('./MailView'));
 const ExportPanel = lazy(() => import('./ExportPanel'));
 const UserManagement = lazy(() => import('./UserManagement'));
 const LiveMonitoring = lazy(() => import('./LiveMonitoring'));
@@ -343,6 +345,8 @@ export default function AdminApp() {
         },
         { id: 'messages', label: 'Messages', icon: MessageSquare, roles: ['therapist', 'caseworker', 'researcher'] },
         { id: 'user-sessions', label: 'User Sessions', icon: Key, researcherOnly: true },
+        // Staff email from the study domain (ai-therapist-283 phase 2).
+        { id: 'mail', label: 'Mail', icon: Mail, researcherOnly: true, demoVisible: false },
         { id: 'rate-limits', label: 'Rate Limits', icon: AlertCircle, roles: ['therapist', 'researcher', 'demo'] },
       ],
     },
@@ -551,6 +555,7 @@ export default function AdminApp() {
               {currentView === 'rate-limits' && <RateLimitedUsers />}
               {currentView === 'mfa' && <MFASetup />}
               {currentView === 'users' && <UserManagement onViewUser={setSelectedUser} />}
+              {currentView === 'mail' && <MailView />}
               {currentView === 'user-sessions' && <UserSessions />}
               {currentView === 'caseload' && <CaseloadView userRole={userRole} />}
               {currentView === 'prompts' && <SystemPrompts />}

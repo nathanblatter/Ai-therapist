@@ -27,12 +27,33 @@ Tracked as ai-therapist-283, in three phases.
   `byuisresearch.com` to its allowlist; the gate's `enabled` flag is still
   seeded off and is a Nathan decision). Email bodies remain PHI-free.
 
-## Phase 2 — compose and send from the admin app (planned)
+## Phase 2 — compose and send from the admin app (shipped 2026-11-01)
 
-`POST /admin/api/mail/send` for researchers, from their provisioned address
-through `email-api`, with an `outbound_mail` audit table, a per-user daily
-cap, and a Mail tab whose compose form carries a standing warning: no
-participant content in email, ever.
+A researcher with a provisioned study address writes to outside parties from
+it. Admin nav: People → Mail (`MailView.tsx`).
+
+- `POST /admin/api/mail/send { to, cc?, subject, text, in_reply_to? }`,
+  `GET /admin/api/mail/me` (address, cap, whether sending is possible and why
+  not), `GET /admin/api/mail/sent` (the caller's own messages). Researcher
+  only; self-scoped.
+- `mailCompose.service.sendStaffMail` enforces: researcher role; an address on
+  the study domain (the gateway's SES policy only sends from it); at most 10
+  recipients; subject ≤ 200 and body ≤ 20,000 characters; a body that carries
+  nothing shaped like a participant session id (`live_…`, `grok_…`,
+  `chat_…`); and `STAFF_MAIL_DAILY_CAP` messages per sender per UTC day
+  (default 50). The From is `<username> (AI Therapist Study) <address>` with
+  Reply-To the address; `in_reply_to` threads a reply via In-Reply-To /
+  References.
+- Every message is recorded in `outbound_mail` (migration 120) with the
+  gateway's verdict — `sent`, `queued` (email-api spools and retries itself)
+  or `failed` (the request is refused with the gateway's reason). The row is
+  the study's correspondence record and survives account deletion.
+- `emailer.sendMailFrom` is the explicit-sender path (cc, reply-to, headers);
+  it ignores the `email_notifications` kill switch, which governs notification
+  traffic only.
+- Policy, stated on every compose: participant content never goes into
+  email. The session-id guard is the mechanical part; the author is
+  responsible for the rest.
 
 ## Phase 3 — per-researcher inbox (planned)
 

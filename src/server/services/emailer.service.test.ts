@@ -11,7 +11,7 @@ vi.mock('../db/index.js', () => ({
   getSystemConfigByKey: getSystemConfigByKeyMock,
 }));
 
-import { sendEmail, _setTransportFactoryForTests, type MailTransport } from './emailer.service.js';
+import { sendEmail, sendMailFrom, _setTransportFactoryForTests, type MailTransport } from './emailer.service.js';
 
 const SMTP_KEYS = [
   'SMTP_HOST',
@@ -202,5 +202,58 @@ describe('sendEmail', () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(sendMail).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('sendMailFrom (staff mail, ai-therapist-283 phase 2)', () => {
+  it('fails cleanly with no transport configured', async () => {
+    delete process.env.EMAIL_API_URL;
+    delete process.env.EMAIL_API_KEY;
+    delete process.env.SMTP_HOST;
+    delete process.env.EMAIL_FROM;
+    _setTransportFactoryForTests(null);
+    const out = await sendMailFrom({ from: 'x@byuisresearch.com', to: ['a@b.co'], subject: 's', text: 't' });
+    expect(out.status).toBe('failed');
+    expect(out.error).toMatch(/no mail transport/);
+    expect(out.error).toMatch(/EMAIL_FROM/);
+  });
+
+  it('passes the explicit sender, cc, reply-to and headers through and reads the gateway verdict', async () => {
+    process.env.EMAIL_FROM = 'AI Therapist <alerts@byuisresearch.com>';
+    process.env.EMAIL_API_URL = 'http://gateway';
+    process.env.EMAIL_API_KEY = 'k';
+    const sendMail = vi.fn(async () => ({ id: 'gw-7', status: 'queued' }));
+    _setTransportFactoryForTests(async () => ({ sendMail }) as MailTransport);
+    const out = await sendMailFrom({
+      from: 'Jane (AI Therapist Study) <jane@byuisresearch.com>',
+      to: ['a@b.co'],
+      cc: ['c@d.io'],
+      replyTo: 'jane@byuisresearch.com',
+      subject: 's',
+      text: 't',
+      headers: { 'In-Reply-To': '<m@x>' },
+    });
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: 'Jane (AI Therapist Study) <jane@byuisresearch.com>',
+        cc: ['c@d.io'],
+        replyTo: 'jane@byuisresearch.com',
+        headers: { 'In-Reply-To': '<m@x>' },
+      }),
+    );
+    expect(out).toEqual({ status: 'queued', gatewayId: 'gw-7' });
+  });
+
+  it('reports a transport throw as failed with the message', async () => {
+    process.env.EMAIL_FROM = 'AI Therapist <alerts@byuisresearch.com>';
+    process.env.EMAIL_API_URL = 'http://gateway';
+    process.env.EMAIL_API_KEY = 'k';
+    _setTransportFactoryForTests(async () => ({
+      sendMail: vi.fn(async () => {
+        throw new Error('email-api /send answered 400: bad address');
+      }),
+    }));
+    const out = await sendMailFrom({ from: 'x@byuisresearch.com', to: ['a@b.co'], subject: 's', text: 't' });
+    expect(out).toMatchObject({ status: 'failed', error: expect.stringMatching(/400/) });
   });
 });

@@ -36,9 +36,20 @@ export interface OutgoingEmail {
   text: string;
 }
 
+/** One outgoing message as the transport sees it. */
+export interface TransportMessage {
+  from: string;
+  to: string | string[];
+  cc?: string[];
+  replyTo?: string;
+  subject: string;
+  text: string;
+  headers?: Record<string, string>;
+}
+
 /** The slice of a nodemailer transport we use. */
 export interface MailTransport {
-  sendMail(options: { from: string; to: string; subject: string; text: string }): Promise<unknown>;
+  sendMail(options: TransportMessage): Promise<unknown>;
 }
 
 type TransportFactory = () => Promise<MailTransport | null>;
@@ -59,6 +70,14 @@ export function _setTransportFactoryForTests(factory: TransportFactory | null): 
 type TransportEnv =
   | { kind: 'email-api'; url: string; key: string; from: string }
   | { kind: 'smtp'; host: string; port: number; user: string; pass: string; from: string };
+
+/** The email-api gateway's URL and key, when configured (inbox reads need
+ *  the gateway itself; SMTP has no inbox). */
+export function emailApiEnv(): { url: string; key: string } | null {
+  const url = (process.env.EMAIL_API_URL ?? '').trim().replace(/\/+$/, '');
+  const key = (process.env.EMAIL_API_KEY ?? '').trim();
+  return url && key ? { url, key } : null;
+}
 
 /** email-api wins when both are configured. */
 function transportEnv(): TransportEnv | null {
@@ -93,9 +112,12 @@ function emailApiTransport(env: { url: string; key: string }): MailTransport {
         headers: { 'X-API-Key': env.key, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           from: options.from,
-          to: [options.to],
+          to: Array.isArray(options.to) ? options.to : [options.to],
+          ...(options.cc && options.cc.length > 0 ? { cc: options.cc } : {}),
+          ...(options.replyTo ? { reply_to: options.replyTo } : {}),
           subject: options.subject,
           text: options.text,
+          ...(options.headers ? { headers: options.headers } : {}),
         }),
         signal: AbortSignal.timeout(15_000),
       });
@@ -204,5 +226,51 @@ export async function sendEmail(email: OutgoingEmail): Promise<EmailSendResult> 
   } catch (err) {
     log.error({ err }, '[email] send failed');
     return 'failed';
+  }
+}
+
+export interface StaffMailOutcome {
+  status: 'sent' | 'queued' | 'failed';
+  gatewayId?: string | null;
+  error?: string | null;
+}
+
+/**
+ * Send one message FROM an explicit address (staff mail, ai-therapist-283
+ * phase 2). Unlike sendEmail this ignores the email_notifications kill switch
+ * (that switch is about notification traffic) and reports the gateway's
+ * verdict instead of a bare sent/skipped: email-api answers 200 sent or 202
+ * queued (relay down / budget; it retries itself), and anything else, or no
+ * transport at all, is 'failed' with the reason. Never throws.
+ */
+export async function sendMailFrom(message: TransportMessage): Promise<StaffMailOutcome> {
+  try {
+    // Staff mail carries its own From, so EMAIL_FROM is not required here:
+    // the gateway alone is enough. SMTP still goes through transportEnv.
+    const gateway = emailApiEnv();
+    const env = gateway ? ({ kind: 'email-api', ...gateway, from: '' } as TransportEnv) : transportEnv();
+    if (!env) {
+      return {
+        status: 'failed',
+        error: 'no mail transport configured (EMAIL_API_URL + EMAIL_API_KEY, or SMTP_HOST + EMAIL_FROM)',
+      };
+    }
+    if (!cachedTransport) {
+      cachedTransport = transportFactory
+        ? await transportFactory()
+        : env.kind === 'email-api'
+          ? emailApiTransport(env)
+          : await defaultTransportFactory();
+    }
+    if (!cachedTransport) return { status: 'failed', error: 'mail transport unavailable' };
+    const raw = (await cachedTransport.sendMail(message)) as { id?: unknown; status?: unknown } | undefined;
+    const gatewayId = raw && typeof raw.id === 'string' ? raw.id : null;
+    const status = raw && raw.status === 'queued' ? 'queued' : 'sent';
+    log.info({ subject: message.subject, status, gatewayId }, '[email] staff mail handed over');
+    return { status, gatewayId };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    log.error({ err }, '[email] staff mail send failed');
+    return { status: 'failed', error };
   }
 }

@@ -4,6 +4,6 @@
  *  accepted on save silently gets no mail. */
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function isEmailShaped(value: string | null | undefined): value is string {
+export function isEmailShaped(value: string | null | undefined): boolean {
   return typeof value === 'string' && value.length <= 254 && EMAIL_SHAPE.test(value);
 }
