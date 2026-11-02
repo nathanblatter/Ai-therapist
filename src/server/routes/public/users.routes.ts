@@ -5,6 +5,12 @@ import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { orgIdFor } from '../../middleware/org.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
 import { registerAccount, updateAccount, removeAccount } from '../../services/accounts.service.js';
+import {
+  setAccountEmail,
+  validateAccountEmail,
+  provisionStudyAddress,
+  EmailAccountError,
+} from '../../services/researcherEmail.service.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import {
   getAllUsers,
@@ -198,7 +204,7 @@ export default function usersRoutes(): Router {
     const { userid } = req.params;
     const requestingUserId = req.session.userId;
     const requestingUserRole = req.session.userRole;
-    const { username, password, role } = req.body;
+    const { username, password, role, email } = req.body;
 
     const isSelf = parseInt(userid) === requestingUserId;
     const isResearcher = requestingUserRole === 'researcher';
@@ -208,6 +214,14 @@ export default function usersRoutes(): Router {
     }
     if (!isResearcher && role !== undefined) {
       return res.status(403).json({ error: 'Only researchers can change user roles' });
+    }
+    // Staff email (ai-therapist-283): admin-managed, researcher-only, and the
+    // service refuses it for participants whoever asks.
+    if (email !== undefined && !isResearcher) {
+      return res.status(403).json({ error: 'Only researchers can change email addresses' });
+    }
+    if (email !== undefined && email !== null && typeof email !== 'string') {
+      return res.status(400).json({ error: 'Invalid email address' });
     }
     if (role !== undefined && !VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
@@ -225,11 +239,28 @@ export default function usersRoutes(): Router {
       if (password !== undefined) updates.password = password;
       if (role !== undefined && isResearcher) updates.role = role;
 
-      if (Object.keys(updates).length === 0) {
+      if (Object.keys(updates).length === 0 && email === undefined) {
         return res.status(400).json({ error: 'No fields to update' });
       }
 
-      const updatedUser = await updateAccount(userid, updates);
+      // The email is checked (eligibility against the role this edit will
+      // leave, shape, uniqueness) BEFORE anything is written, so a rejected
+      // address never leaves a half-applied edit behind.
+      if (email !== undefined) await validateAccountEmail(userid, email, updates.role);
+
+      let updatedUser = Object.keys(updates).length > 0 ? await updateAccount(userid, updates) : null;
+      if (email !== undefined) {
+        const withEmail = await setAccountEmail(userid, email);
+        updatedUser = updatedUser ? { ...updatedUser, email: withEmail.email } : withEmail;
+        log.info(
+          { userid, by: requestingUserId, email: withEmail.email ?? null },
+          'account email address changed by a researcher',
+        );
+      }
+      if (!updatedUser) {
+        // Unreachable (the empty-update guard above), kept for the type.
+        return res.status(400).json({ error: 'No fields to update' });
+      }
 
       if (isSelf) {
         if (updates.username) req.session.username = updatedUser.username;
@@ -238,8 +269,14 @@ export default function usersRoutes(): Router {
 
       res.json({ success: true, user: updatedUser });
     } catch (error: unknown) {
+      if (error instanceof EmailAccountError) {
+        return res.status(error.status).json({ error: error.message });
+      }
       if (error instanceof Error && error.message === 'Username already exists') {
         return res.status(409).json({ error: 'Username already exists' });
+      }
+      if (error instanceof Error && error.message === 'Email already in use') {
+        return res.status(409).json({ error: 'Email already in use' });
       }
       if (error instanceof Error && error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
@@ -256,6 +293,26 @@ export default function usersRoutes(): Router {
   });
 
   // DELETE /api/users/:userid - researcher only
+  // Give a staff account its study address, <slug>@byuisresearch.com
+  // (ai-therapist-283 phase 1). Idempotent; participants are refused.
+  router.post('/api/users/:userid/provision-email', requireRole('researcher'), async (req, res) => {
+    try {
+      const { user, address } = await provisionStudyAddress(req.params.userid);
+      log.info({ userid: user.userid, by: req.session.userId, address }, 'study email address provisioned');
+      res.json({
+        success: true,
+        email: address,
+        user: { userid: user.userid, username: user.username, role: user.role },
+      });
+    } catch (error: unknown) {
+      if (error instanceof EmailAccountError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      log.error({ err: error }, 'Error provisioning a study email address');
+      res.status(500).json({ error: 'Failed to provision email address' });
+    }
+  });
+
   router.delete('/api/users/:userid', requireRole('researcher'), async (req, res) => {
     const { userid } = req.params;
     try {

@@ -14,6 +14,8 @@ export interface UserRow {
   is_sandbox?: boolean;
   /** The account's id in Squawk (auth-service-33), once it exists there. */
   squawk_user_id?: string | null;
+  /** Staff email address (119, ai-therapist-283); never set for participants. */
+  email?: string | null;
   password?: string;
   preferred_voice?: string | null;
   preferred_language?: string | null;
@@ -231,7 +233,7 @@ export async function getAllUsers(scopeTherapistId?: number | null, orgId?: numb
     }
     const scopeClause = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
     const result = await pool.query<UserRow>(
-      `SELECT userid, username, role, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users${scopeClause} ORDER BY created_at DESC`,
+      `SELECT userid, username, role, email, preferred_voice, preferred_language, mfa_enabled, mfa_enabled_at, risk_context_share_enabled, memory_enabled, created_at, updated_at FROM users${scopeClause} ORDER BY created_at DESC`,
       params,
     );
     return result.rows;
@@ -294,7 +296,7 @@ export async function isSandboxAccountSession(sessionId: string): Promise<boolea
 export async function getUserById(userid: number | string): Promise<UserRow | null> {
   try {
     const result = await pool.query<UserRow>(
-      'SELECT userid, username, role, organization_id, is_sandbox, preferred_voice, preferred_language, mfa_enabled, risk_context_share_enabled, memory_enabled, study_status, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
+      'SELECT userid, username, role, email, organization_id, is_sandbox, preferred_voice, preferred_language, mfa_enabled, risk_context_share_enabled, memory_enabled, study_status, created_at, updated_at FROM users WHERE userid = $1 ORDER BY userid asc',
       [userid],
     );
 
@@ -418,4 +420,43 @@ export async function syncRoleFromSquawk(userid: number | string, role: string):
     role,
     userid,
   ]);
+}
+
+/**
+ * Set or clear a staff account's email address (119, ai-therapist-283).
+ * Uniqueness is case-insensitive (idx_users_email_lower). Callers decide who
+ * may have an address — this is the write only.
+ */
+export async function setUserEmail(userid: number | string, email: string | null): Promise<UserRow> {
+  try {
+    const result = await pool.query<UserRow>(
+      `UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE userid = $2
+       RETURNING userid, username, role, email, organization_id, is_sandbox`,
+      [email, userid],
+    );
+    if (result.rows.length === 0) throw new Error('User not found');
+    return result.rows[0];
+  } catch (error: unknown) {
+    const pgErr = error as { code?: string };
+    if (pgErr.code === '23505') throw new Error('Email already in use');
+    throw error;
+  }
+}
+
+/** Every stored address that is <slug>@domain or <slug>-N@domain (case-insensitive). */
+export async function listEmailsWithPrefix(slug: string, domain: string): Promise<string[]> {
+  const result = await pool.query<{ email: string }>(
+    `SELECT email FROM users WHERE email IS NOT NULL AND lower(email) ~ $1`,
+    [`^${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(-[0-9]+)?@${domain.replace(/[.]/g, '\\.')}$`],
+  );
+  return result.rows.map((r) => r.email);
+}
+
+/** The account holding an email address (case-insensitive), or null. */
+export async function findUserByEmail(email: string): Promise<UserRow | null> {
+  const result = await pool.query<UserRow>(
+    'SELECT userid, username, role, email, organization_id, is_sandbox FROM users WHERE lower(email) = lower($1)',
+    [email],
+  );
+  return result.rows[0] ?? null;
 }

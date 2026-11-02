@@ -413,3 +413,21 @@ describe('runDigestSweep', () => {
     expect(markNotificationsEmailedMock).toHaveBeenCalledWith([1, 2, 3]);
   });
 });
+
+describe('users.email takes precedence (ai-therapist-283 phase 1)', () => {
+  const gate = { enabled: true, allowedDomains: ['byuisresearch.com', 'example.com'] };
+  it('uses the account email when present, behind the same domain gate', () => {
+    expect(notificationAddressFor({ username: 'ra7', email: 'ra@byuisresearch.com' }, gate)).toBe(
+      'ra@byuisresearch.com',
+    );
+    expect(notificationAddressFor({ username: 'ra@example.com', email: 'ra@other.org' }, gate)).toBeNull();
+  });
+  it('falls back to an email-shaped username when there is no account email', () => {
+    expect(notificationAddressFor({ username: 'cw@example.com', email: null }, gate)).toBe('cw@example.com');
+    expect(notificationAddressFor({ username: 'cw@example.com', email: '  ' }, gate)).toBe('cw@example.com');
+    expect(notificationAddressFor({ username: 'plain', email: null }, gate)).toBeNull();
+  });
+  it('still accepts a bare username string', () => {
+    expect(notificationAddressFor('cw@example.com', gate)).toBe('cw@example.com');
+  });
+});

@@ -18,6 +18,9 @@ const dbMocks = vi.hoisted(() => ({
   setUserPreferredTheme: vi.fn(),
   getUserMemoryEnabled: vi.fn(),
   setUserMemoryEnabled: vi.fn(),
+  setUserEmail: vi.fn(),
+  findUserByEmail: vi.fn(),
+  listEmailsWithPrefix: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
 vi.mock('../../utils/sessionHelpers.js', () => ({
@@ -103,5 +106,72 @@ describe('PUT /api/users/:userid role validation', () => {
     const res = await request(appAs('researcher', 1)).put('/api/users/4242').send({ role: 'caseworker' });
     expect(res.status).toBe(200);
     expect(dbMocks.updateUser).toHaveBeenCalledWith('4242', { role: 'caseworker' });
+  });
+});
+
+describe('staff email (ai-therapist-283 phase 1)', () => {
+  beforeEach(() => {
+    dbMocks.findUserByEmail.mockResolvedValue(null);
+    dbMocks.listEmailsWithPrefix.mockResolvedValue([]);
+    dbMocks.setUserEmail.mockImplementation(async (userid: number, email: string | null) => ({
+      userid,
+      username: 'ra',
+      role: 'researcher',
+      email,
+    }));
+  });
+
+  it('a researcher can set a staff address through PUT', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'ra', role: 'researcher' });
+    const res = await request(appAs('researcher')).put('/api/users/5').send({ email: 'RA@byuisresearch.com' });
+    expect(res.status).toBe(200);
+    expect(dbMocks.setUserEmail).toHaveBeenCalledWith(5, 'ra@byuisresearch.com');
+    expect(dbMocks.updateUser).not.toHaveBeenCalled();
+  });
+
+  it('a non-researcher cannot change an address, even their own', async () => {
+    const res = await request(appAs('therapist', 5)).put('/api/users/5').send({ email: 'me@byuisresearch.com' });
+    expect(res.status).toBe(403);
+    expect(dbMocks.setUserEmail).not.toHaveBeenCalled();
+  });
+
+  it('participants never get an address', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 8, username: 'p8', role: 'participant' });
+    const res = await request(appAs('researcher')).put('/api/users/8').send({ email: 'p8@byuisresearch.com' });
+    expect(res.status).toBe(403);
+    const prov = await request(appAs('researcher')).post('/api/users/8/provision-email');
+    expect(prov.status).toBe(403);
+    expect(dbMocks.setUserEmail).not.toHaveBeenCalled();
+  });
+
+  it('a rejected email leaves the rest of the edit unapplied', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'ra', role: 'researcher' });
+    dbMocks.findUserByEmail.mockResolvedValue({ userid: 9, username: 'other', role: 'therapist' });
+    const res = await request(appAs('researcher'))
+      .put('/api/users/5')
+      .send({ username: 'ra', role: 'therapist', email: 'taken@byuisresearch.com' });
+    expect(res.status).toBe(409);
+    expect(dbMocks.updateUser).not.toHaveBeenCalled();
+    expect(dbMocks.setUserEmail).not.toHaveBeenCalled();
+  });
+
+  it('demoting a staff account to participant clears its address', async () => {
+    dbMocks.getUserById.mockResolvedValue({
+      userid: 5,
+      username: 'cw',
+      role: 'caseworker',
+      email: 'cw@byuisresearch.com',
+    });
+    const res = await request(appAs('researcher')).put('/api/users/5').send({ username: 'cw', role: 'participant' });
+    expect(res.status).toBe(200);
+    expect(dbMocks.setUserEmail).toHaveBeenCalledWith('5', null);
+  });
+
+  it('provision-email assigns <slug>@byuisresearch.com', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'Jane Doe', role: 'therapist' });
+    const res = await request(appAs('researcher')).post('/api/users/5/provision-email');
+    expect(res.status).toBe(200);
+    expect(res.body.email).toBe('jane-doe@byuisresearch.com');
+    expect(dbMocks.setUserEmail).toHaveBeenCalledWith(5, 'jane-doe@byuisresearch.com');
   });
 });

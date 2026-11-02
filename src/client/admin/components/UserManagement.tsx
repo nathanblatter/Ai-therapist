@@ -48,6 +48,8 @@ interface User {
   mfa_enabled: boolean;
   risk_context_share_enabled?: boolean;
   memory_enabled?: boolean;
+  /** Staff address on the study domain (ai-therapist-283); never for participants. */
+  email?: string | null;
   created_at: string;
 }
 
@@ -65,7 +67,11 @@ interface UserUpdates {
   username: string;
   role: string;
   password?: string;
+  /** Set to a string to change, null to clear; omitted = untouched. */
+  email?: string | null;
 }
+
+const STAFF_ROLES = new Set(['researcher', 'therapist', 'caseworker']);
 
 interface UserFormData {
   username: string;
@@ -182,6 +188,15 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
     }
   };
 
+  const provisionEmail = async (userid: number) => {
+    try {
+      await postJson(`/api/users/${userid}/provision-email`, {}, { fallback: 'Failed to provision email address' });
+      await fetchUsers();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const toggleRiskContext = async (userid: number, enabled: boolean) => {
     try {
       await postJson(
@@ -200,6 +215,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
       username: user.username,
       role: user.role,
       password: '',
+      email: user.email ?? '',
     });
     const usernameInputRef = useRef<HTMLInputElement>(null);
 
@@ -227,6 +243,11 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
       const updates: UserUpdates = { username: editData.username, role: editData.role };
       if (editData.password) {
         updates.password = editData.password;
+      }
+      // Staff only; a blank field clears the address. Untouched = not sent.
+      if (STAFF_ROLES.has(editData.role)) {
+        const next = (editData.email ?? '').trim();
+        if (next !== (user.email ?? '')) updates.email = next ? next : null;
       }
       onSave(user.userid, updates);
     };
@@ -285,6 +306,23 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                 <option value="researcher">Researcher</option>
               </select>
             </div>
+
+            {STAFF_ROLES.has(editData.role) && (
+              <div>
+                <label htmlFor="edit-email" className="block text-sm font-medium text-gray-700 mb-1">
+                  Email (study address or external; blank to clear)
+                </label>
+                <input
+                  id="edit-email"
+                  type="email"
+                  value={editData.email ?? ''}
+                  onChange={(e) => setEditData((prev) => ({ ...prev, email: e.target.value }))}
+                  aria-label="Email address"
+                  placeholder="name@study-domain"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
+                />
+              </div>
+            )}
 
             <div>
               <label htmlFor="edit-password" className="block text-sm font-medium text-gray-700 mb-1">
@@ -736,6 +774,12 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                 className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                 scope="col"
               >
+                Email
+              </th>
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                scope="col"
+              >
                 Preferred Voice
               </th>
               <th
@@ -818,6 +862,23 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                   >
                     {user.role}
                   </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                  {STAFF_ROLES.has(user.role) ? (
+                    user.email ? (
+                      <span className="font-mono text-xs">{user.email}</span>
+                    ) : (
+                      <button
+                        onClick={() => provisionEmail(user.userid)}
+                        className="text-royal hover:underline text-xs font-medium"
+                        aria-label={`Provision a study email address for ${user.username}`}
+                      >
+                        Provision study address
+                      </button>
+                    )
+                  ) : (
+                    <span className="text-gray-400 text-xs">anonymous</span>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                   <span className="capitalize">{user.preferred_voice || 'cedar'}</span>

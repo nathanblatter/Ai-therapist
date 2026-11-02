@@ -11,11 +11,12 @@
 //   - Delivery policy (spec section 5): urgent kinds email immediately when
 //     urgent_email_immediate; mid kinds follow email_mode; low kinds are
 //     digest-only.
-//   - Recipient gate (ai-therapist-154): there is still no users.email /
-//     notification_email column and no verification flow, so the only
-//     address we have is an email-shaped username. Nothing is sent to one
-//     unless the system_config switch `notification_email_recipients` is
-//     enabled AND the username's domain is on its allowlist. Default: off.
+//   - Recipient gate (ai-therapist-154, 283): the address is users.email when
+//     the account has one (staff addresses, usually provisioned on the study
+//     domain — researcherEmail.service), else an email-shaped username.
+//     Nothing is sent to either unless the system_config switch
+//     `notification_email_recipients` is enabled AND the address's domain is
+//     on its allowlist. Default: off.
 import {
   getUserById,
   getSystemConfigByKey,
@@ -31,6 +32,7 @@ import { workItemSuppressesEmail, recipientSuppressesEmail, emailSuppressedWorkI
 import { therapistRoom, caseworkerRoom } from '../utils/adminBroadcast.js';
 import { immediateEmail, digestEmail } from './emailTemplates.js';
 import { sendEmail } from './emailer.service.js';
+import { isEmailShaped } from '../utils/emailShape.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('notification');
@@ -62,14 +64,27 @@ export function emailPolicyFor(kind: string, severity: string): EmailPolicy {
 }
 
 /**
- * Recipient email address. There is no users.email column yet, so the only
- * address we can use is an email-shaped username; anything else means "no
- * email for this user" (in-app + digest UI still work). Flagged as a known
- * gap in the portal spec rollout.
+ * Fallback recipient address: an email-shaped username. Kept for accounts
+ * created before users.email existed (119); anything else means "no email
+ * for this user" (in-app + digest UI still work).
  */
 export function emailAddressForUsername(username: string | undefined | null): string | null {
   if (!username) return null;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username) ? username.trim() : null;
+  return isEmailShaped(username.trim()) ? username.trim() : null;
+}
+
+/** What notificationAddressFor needs to know about a recipient. */
+export interface AddressableUser {
+  username?: string | null;
+  email?: string | null;
+}
+
+/** The account's own address first (users.email), else the username heuristic. */
+export function candidateAddressFor(user: AddressableUser | string | null | undefined): string | null {
+  if (typeof user === 'string' || user == null) return emailAddressForUsername(user ?? null);
+  const own = (user.email ?? '').trim();
+  if (isEmailShaped(own)) return own;
+  return emailAddressForUsername(user.username);
 }
 
 /** system_config key gating which username-derived addresses may be emailed. */
@@ -106,15 +121,16 @@ export async function loadNotificationEmailGate(): Promise<NotificationEmailGate
 }
 
 /**
- * The address a notification email may go to, or null. Requires an
- * email-shaped username AND an open gate whose allowlist contains the
- * username's domain (case-insensitive, exact match: no subdomain wildcard).
+ * The address a notification email may go to, or null. Requires an address
+ * (users.email, else an email-shaped username) AND an open gate whose
+ * allowlist contains the address's domain (case-insensitive, exact match: no
+ * subdomain wildcard). A bare string is treated as a username.
  */
 export function notificationAddressFor(
-  username: string | undefined | null,
+  user: AddressableUser | string | undefined | null,
   gate: NotificationEmailGate,
 ): string | null {
-  const address = emailAddressForUsername(username);
+  const address = candidateAddressFor(user);
   if (!address || !gate.enabled) return null;
   const domain = address.slice(address.lastIndexOf('@') + 1).toLowerCase();
   return gate.allowedDomains.includes(domain) ? address : null;
@@ -174,7 +190,7 @@ export async function notifyWorkItem(item: WorkItemRow, recipients: Notification
         (policy === 'per_mode' && prefs.email_mode === 'immediate');
       if (!sendNow) continue; // digest sweep picks up the rest
 
-      const address = notificationAddressFor(user.username, gate);
+      const address = notificationAddressFor(user, gate);
       if (!address) {
         log.debug({ userId: recipient.userId }, '[notify] no emailable address for user; in-app only');
         continue;
@@ -249,7 +265,7 @@ export async function runDigestSweep(now: Date = new Date()): Promise<void> {
           (row) => row.work_item_id == null || !sandboxItemIds.has(Number(row.work_item_id)),
         );
 
-        const address = notificationAddressFor(user.username, gate);
+        const address = notificationAddressFor(user, gate);
         if (address && emailable.length > 0) {
           const counts: Record<string, number> = {};
           for (const row of emailable) counts[row.kind] = (counts[row.kind] ?? 0) + 1;
