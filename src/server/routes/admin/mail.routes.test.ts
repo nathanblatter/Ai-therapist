@@ -115,9 +115,9 @@ describe('inbox routes (phase 3)', () => {
   });
 
   it('reads and marks a message through the service, mapping its errors', async () => {
-    const read = await request(appAs('researcher', 7)).get('/admin/api/mail/inbox/m1');
+    const read = await request(appAs('researcher', 7)).get('/admin/api/mail/inbox/m1?mark_read=1');
     expect(read.status).toBe(200);
-    expect(inboxMocks.readMailboxMessage).toHaveBeenCalledWith(7, 'm1');
+    expect(inboxMocks.readMailboxMessage).toHaveBeenCalledWith(7, 'm1', { markRead: true });
     const mark = await request(appAs('researcher', 7)).post('/admin/api/mail/inbox/m1/read').send({ read: false });
     expect(mark.status).toBe(200);
     expect(inboxMocks.markMailboxMessageRead).toHaveBeenCalledWith(7, 'm1', false);

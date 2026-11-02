@@ -48,7 +48,12 @@ export class EmailApiError extends Error {
   }
 }
 
-async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * One gateway call. A 404 means "no such message" only on the per-message
+ * routes (`notFoundMeans`); anywhere else it is the gateway itself answering
+ * wrongly (inbox not mounted, bad EMAIL_API_URL) and is reported as such.
+ */
+async function call<T>(path: string, init: RequestInit = {}, notFoundMeans?: string): Promise<T> {
   const env = emailApiEnv();
   if (!env) throw new EmailApiError('mail gateway not configured (EMAIL_API_URL/EMAIL_API_KEY)', 503);
   const res = await fetch(`${env.url}${path}`, {
@@ -56,7 +61,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: { 'X-API-Key': env.key, Accept: 'application/json', ...(init.headers ?? {}) },
     signal: AbortSignal.timeout(15_000),
   });
-  if (res.status === 404) throw new EmailApiError('Message not found', 404);
+  if (res.status === 404 && notFoundMeans) throw new EmailApiError(notFoundMeans, 404);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new EmailApiError(`mail gateway answered ${res.status}: ${body.slice(0, 160)}`, 502);
@@ -64,21 +69,27 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Mail delivered to exactly `to` (the gateway filters on the envelope recipient). */
+/** Mail delivered to exactly `to` (the gateway filters on the envelope
+ *  recipient). suspicious=all: the gateway hides flagged mail by default, but
+ *  a mailbox must show it, labelled, rather than lose it. */
 export async function listInbox(opts: {
   to: string;
   limit?: number;
   unread?: boolean;
 }): Promise<{ messages: GatewayInboxSummary[] }> {
-  const params = new URLSearchParams({ to: opts.to, limit: String(opts.limit ?? 50) });
+  const params = new URLSearchParams({ to: opts.to, limit: String(opts.limit ?? 50), suspicious: 'all' });
   if (opts.unread) params.set('unread', 'true');
   return call<{ messages: GatewayInboxSummary[] }>(`/inbox?${params.toString()}`);
 }
 
-export async function getInboxMessage(id: string): Promise<GatewayInboxMessage> {
-  return call<GatewayInboxMessage>(`/inbox/${encodeURIComponent(id)}`);
+/** One message, scoped by the gateway to `to` (404 unless delivered there). */
+export async function getInboxMessage(id: string, to: string): Promise<GatewayInboxMessage> {
+  const params = new URLSearchParams({ to });
+  return call<GatewayInboxMessage>(`/inbox/${encodeURIComponent(id)}?${params.toString()}`, {}, 'Message not found');
 }
 
-export async function markInboxRead(id: string, read: boolean): Promise<void> {
-  await call(`/inbox/${encodeURIComponent(id)}/read?read=${read ? 'true' : 'false'}`, { method: 'POST' });
+/** Mark read/unread, scoped the same way. */
+export async function markInboxRead(id: string, to: string, read: boolean): Promise<void> {
+  const params = new URLSearchParams({ to, read: read ? 'true' : 'false' });
+  await call(`/inbox/${encodeURIComponent(id)}/read?${params.toString()}`, { method: 'POST' }, 'Message not found');
 }

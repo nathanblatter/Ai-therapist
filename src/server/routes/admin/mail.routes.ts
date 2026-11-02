@@ -79,10 +79,11 @@ export default function mailRoutes(): Router {
     }
   });
 
-  // GET /admin/api/mail/inbox/:id — text only; 404 unless delivered to the caller.
+  // GET /admin/api/mail/inbox/:id?mark_read=1 — text only; 404 unless delivered to the caller.
   router.get('/admin/api/mail/inbox/:id', requireRole('researcher'), async (req, res) => {
     try {
-      res.json({ message: await readMailboxMessage(req.session.userId!, req.params.id) });
+      const markRead = req.query.mark_read === '1' || req.query.mark_read === 'true';
+      res.json({ message: await readMailboxMessage(req.session.userId!, req.params.id, { markRead }) });
     } catch (err) {
       if (err instanceof MailInboxError) return res.status(err.status).json({ error: err.message });
       log.error({ err }, 'inbox read failed');

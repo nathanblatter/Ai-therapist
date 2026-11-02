@@ -78,22 +78,35 @@ describe('mailbox scoping (ai-therapist-283 phase 3)', () => {
 
   it('reads a message delivered to the caller, text only, without storage keys', async () => {
     const m = await readMailboxMessage(3, 'm1');
+    expect(getInboxMessageMock).toHaveBeenCalledWith('m1', 'jane@byuisresearch.com');
     expect(m.text).toBe('Hello Jane');
     expect((m as unknown as Record<string, unknown>).html).toBeUndefined();
     expect(m.attachment_files[0]).toEqual({ id: 'a1', filename: 'x.pdf', content_type: 'application/pdf', size: 10 });
     expect(m.message_id).toBe('<abc@example.com>');
   });
 
-  it("404s a message that was delivered to someone else's address", async () => {
+  it("404s a message the gateway reports for someone else's address (belt and braces)", async () => {
     getInboxMessageMock.mockResolvedValue({ ...RAW, envelope_to: 'other@byuisresearch.com' });
-    await expect(readMailboxMessage(3, 'm1')).rejects.toMatchObject({ status: 404 });
-    await expect(markMailboxMessageRead(3, 'm1', true)).rejects.toMatchObject({ status: 404 });
+    await expect(readMailboxMessage(3, 'm1', { markRead: true })).rejects.toMatchObject({ status: 404 });
     expect(markInboxReadMock).not.toHaveBeenCalled();
   });
 
-  it('marks read only after the ownership check passes', async () => {
-    await markMailboxMessageRead(3, 'm1', true);
-    expect(markInboxReadMock).toHaveBeenCalledWith('m1', true);
+  it('open-and-mark is one operation scoped to the caller', async () => {
+    const m = await readMailboxMessage(3, 'm1', { markRead: true });
+    expect(markInboxReadMock).toHaveBeenCalledWith('m1', 'jane@byuisresearch.com', true);
+    expect(m.read).toBe(true);
+    expect(getInboxMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-mark an already-read message', async () => {
+    getInboxMessageMock.mockResolvedValue({ ...RAW, read: true });
+    await readMailboxMessage(3, 'm1', { markRead: true });
+    expect(markInboxReadMock).not.toHaveBeenCalled();
+  });
+
+  it('mark-read passes the caller scope to the gateway', async () => {
+    await markMailboxMessageRead(3, 'm1', false);
+    expect(markInboxReadMock).toHaveBeenCalledWith('m1', 'jane@byuisresearch.com', false);
   });
 
   it('maps gateway errors to the status they carry', async () => {

@@ -51,6 +51,16 @@ interface SentRow {
   created_at: string;
 }
 
+/** A mailbox exists only for an address on the study domain (same rule as the server). */
+function hasMailbox(s: SenderStatus | null): s is SenderStatus & { address: string } {
+  return !!s?.address && s.address.toLowerCase().endsWith(`@${s.domain}`);
+}
+
+/** In-Reply-To must be a single <id@domain> Message-ID; the server refuses anything else. */
+const MESSAGE_ID = /^<[^\s<>@]+@[^\s<>@]+>$/;
+/** Leave headroom under the server's 20,000-character body cap for the reply itself. */
+const QUOTE_CAP = 12_000;
+
 const inputClass =
   'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]';
 
@@ -77,7 +87,7 @@ export default function MailView() {
       setSent(list.mail);
       setError(null);
       // The inbox is a separate concern: a gateway hiccup must not hide compose.
-      if (me.address && me.address.endsWith(`@${me.domain}`) && me.canSend !== undefined) {
+      if (hasMailbox(me)) {
         try {
           const box = await getJson<{ messages: InboxSummary[] }>('/admin/api/mail/inbox?limit=50', {
             fallback: 'Failed to load the inbox',
@@ -133,36 +143,33 @@ export default function MailView() {
   const openMessage = async (id: string) => {
     setInboxError(null);
     try {
-      const { message } = await getJson<{ message: InboxMessage }>(`/admin/api/mail/inbox/${encodeURIComponent(id)}`, {
-        fallback: 'Failed to load the message',
-      });
+      // Opening marks read in the same request; the row reflects what the server did.
+      const { message } = await getJson<{ message: InboxMessage }>(
+        `/admin/api/mail/inbox/${encodeURIComponent(id)}?mark_read=1`,
+        { fallback: 'Failed to load the message' },
+      );
       setOpen(message);
-      if (!message.read) {
-        await postJson(
-          `/admin/api/mail/inbox/${encodeURIComponent(id)}/read`,
-          { read: true },
-          {
-            fallback: 'Failed to mark the message read',
-          },
-        ).catch(() => undefined);
-        setInbox((rows) => rows.map((r) => (r.id === id ? { ...r, read: true } : r)));
-      }
+      setInbox((rows) => rows.map((r) => (r.id === id ? { ...r, read: message.read } : r)));
     } catch (err: unknown) {
       setInboxError(err instanceof Error ? err.message : String(err));
     }
   };
 
   const replyTo = (m: InboxMessage) => {
-    const quoted = m.text
+    const body = m.text.length > QUOTE_CAP ? `${m.text.slice(0, QUOTE_CAP)}\n[…]` : m.text;
+    const quoted = body
       .split('\n')
       .map((line) => `> ${line}`)
       .join('\n');
+    // Thread only on a well-formed Message-ID; otherwise reply unthreaded
+    // rather than hand the server a value it will refuse.
+    const threadId = m.message_id && MESSAGE_ID.test(m.message_id) ? m.message_id : '';
     setForm({
       to: m.reply_to || m.from,
       cc: '',
       subject: /^re:/i.test(m.subject) ? m.subject : `Re: ${m.subject}`,
       text: `\n\nOn ${new Date(m.received_at).toLocaleString()}, ${m.from} wrote:\n${quoted}`,
-      in_reply_to: m.message_id ?? '',
+      in_reply_to: threadId,
     });
     setNotice(null);
     document.getElementById('mail-text')?.focus();
@@ -227,6 +234,19 @@ export default function MailView() {
             <p className="text-sm text-gray-700">{status.reason}</p>
           ) : (
             <form onSubmit={submit} className="space-y-3">
+              {form.in_reply_to && (
+                <p className="text-xs text-gray-600 flex items-center gap-2" role="status">
+                  Replying in thread <span className="font-mono">{form.in_reply_to}</span>
+                  <button
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, in_reply_to: '' }))}
+                    className="text-royal hover:underline"
+                    aria-label="Stop replying in this thread"
+                  >
+                    clear
+                  </button>
+                </p>
+              )}
               <div>
                 <label htmlFor="mail-to" className="block text-sm font-medium text-gray-700 mb-1">
                   To (comma-separated)
@@ -295,7 +315,7 @@ export default function MailView() {
         </section>
       ) : null}
 
-      {status?.address && (
+      {hasMailbox(status) && (
         <section className="bg-white rounded-lg shadow" aria-labelledby="inbox-heading">
           <div className="px-6 pt-5 pb-3 flex items-center justify-between">
             <h2 id="inbox-heading" className="text-lg font-semibold text-gray-800 flex items-center gap-2">
