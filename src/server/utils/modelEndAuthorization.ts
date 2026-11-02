@@ -30,15 +30,17 @@ export function authorizeModelEnd(sessionId: string): void {
   prune(now);
 }
 
-/** True while a server-issued end request for this session is current. */
+/**
+ * True once while a server-issued end request for this session is current.
+ * Single-shot: the grant is consumed by the call that uses it, so one steer
+ * authorizes one end and a session the model later wants to leave on its own
+ * is refused again.
+ */
 export function isModelEndAuthorized(sessionId: string): boolean {
   const at = grants.get(sessionId);
   if (at === undefined) return false;
-  if (Date.now() - at > GRANT_TTL_MS) {
-    grants.delete(sessionId);
-    return false;
-  }
-  return true;
+  grants.delete(sessionId);
+  return Date.now() - at <= GRANT_TTL_MS;
 }
 
 /** Drop a grant (session ended, or tests). */

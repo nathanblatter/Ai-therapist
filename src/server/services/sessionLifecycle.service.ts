@@ -120,6 +120,10 @@ export async function serverEndSession(
 
   await updateSessionStatus(sessionId, 'ended', opts.endedBy);
 
+  import('../utils/modelEndAuthorization.js')
+    .then((m) => m.clearModelEndAuthorization(sessionId))
+    .catch(() => undefined);
+
   try {
     const { sidebandManager } = await import('./sidebandManager.service.js');
     await sidebandManager.disconnect(sessionId);

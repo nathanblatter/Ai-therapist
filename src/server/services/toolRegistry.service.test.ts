@@ -1185,7 +1185,12 @@ describe('end_session crisis guard', () => {
     )) as { success?: boolean; refused?: boolean };
     expect(result.success).toBe(true);
     expect(result.refused).toBeUndefined();
-    expect(logInterventionActionMock).not.toHaveBeenCalled();
+    // Honoured, but recorded: the model's assertion is the only evidence.
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'crisis-2',
+      'model_end_participant_requested',
+      expect.objectContaining({ severity: 'high', riskScore: 92 }),
+    );
   });
 
   it('allows the end when the server asked for it (duration limit, wind-down)', async () => {

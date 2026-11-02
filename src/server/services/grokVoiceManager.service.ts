@@ -1132,10 +1132,12 @@ export class GrokVoiceManager implements VoiceSidebandDelegate {
     state.pendingCalls.delete(callId);
     const output = failure ? { error: failure, success: false } : result;
     if (deferClientNotice) {
-      const refused = (output as { refused?: boolean } | undefined)?.refused === true;
-      if (refused)
-        console.warn(`[Grok] end_session refused for ${sessionId.substring(0, 12)}...; browser not told to end`);
-      else notifyClient();
+      // Only a confirmed end reaches the browser: a refusal or an error means
+      // the server scheduled no backstop and the model was not told goodbye.
+      const ended = (output as { success?: boolean } | undefined)?.success === true;
+      if (ended) notifyClient();
+      else
+        console.warn(`[Grok] end_session not confirmed for ${sessionId.substring(0, 12)}...; browser not told to end`);
     }
     try {
       this.sendUpstream(sessionId, {

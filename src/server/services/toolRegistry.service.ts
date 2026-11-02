@@ -148,7 +148,20 @@ export class ToolRegistry {
 
     const { isModelEndAuthorized } = await import('../utils/modelEndAuthorization.js');
     if (isModelEndAuthorized(sessionId)) return null;
-    if (participantRequested) return null;
+    if (participantRequested) {
+      // Honoured, but the model's own assertion is all we have — record it so
+      // a crisis session the model talked itself out of is countable.
+      try {
+        const { logInterventionAction } = await import('./crisisDetection.service.js');
+        await logInterventionAction(sessionId, 'model_end_participant_requested', {
+          riskScore: crisis.crisis_risk_score ?? undefined,
+          severity: crisis.crisis_severity ?? undefined,
+        });
+      } catch (err) {
+        console.error('[end_session] failed to log the participant-requested end:', err);
+      }
+      return null;
+    }
 
     console.warn(
       `[end_session] REFUSED model-initiated end for crisis-flagged session ${sessionId.substring(0, 12)}… ` +
@@ -193,7 +206,7 @@ export class ToolRegistry {
       message:
         'The session was NOT ended: a safety concern is active, and the participant has not asked to stop. ' +
         'Stay with them. Keep your replies short and warm, keep listening, and keep the crisis resources available. ' +
-        'Do not say goodbye. Only if the participant clearly says they want to end the session, call end_session again with participant_requested set to true.',
+        'Do not say goodbye. The participant can still choose to stop whenever they want; if they clearly say so, honour it.',
     };
   }
 
@@ -1000,6 +1013,12 @@ export class ToolRegistry {
         if (ctx.sessionId) {
           const refusal = await this.refuseCrisisEnd(ctx.sessionId, args.participant_requested === true);
           if (refusal) return refusal;
+          // Positive acknowledgement for the participant's browser: it tears
+          // the call down only on this (plus its own grace for the goodbye),
+          // never on the raw tool call. A lost message fails safe — the
+          // conversation stays up until the server backstop below closes the
+          // live session, which the browser sees as session.closed.
+          global.io?.to(`session:${ctx.sessionId}`).emit('session:end-approved', { sessionId: ctx.sessionId });
         }
         // Server-side backstop (ai-therapist-113): ending used to depend
         // entirely on the client reacting to this tool call and POSTing /end

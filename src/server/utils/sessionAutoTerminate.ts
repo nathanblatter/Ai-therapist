@@ -126,6 +126,9 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
         try {
           const current = await getSessionAccessInfo(sessionId);
           if (!current || current.status !== 'active') return;
+          // The nudge is already a server request to wrap up; a model that
+          // closes early must not be refused and then told to end again.
+          authorizeModelEnd(sessionId);
           await steer(sessionId, WRAP_UP_NUDGE, false);
         } catch (err) {
           log.error({ err }, `T-60s wrap-up nudge failed for ${sessionId}`);

@@ -35,7 +35,7 @@ WHERE config_key = 'system_prompts';
 
 DROP TABLE crisis_protocol_117_rb;
 
-DELETE FROM intervention_actions WHERE action_type = 'model_end_refused';
+DELETE FROM intervention_actions WHERE action_type IN ('model_end_refused', 'model_end_participant_requested');
 
 ALTER TABLE intervention_actions DROP CONSTRAINT IF EXISTS intervention_actions_action_type_check;
 ALTER TABLE intervention_actions ADD CONSTRAINT intervention_actions_action_type_check

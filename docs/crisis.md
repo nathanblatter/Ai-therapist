@@ -166,15 +166,21 @@ Two things used to make the agent end the session on a suicidal disclosure:
 - **The tool.** `end_session` now refuses a model-initiated end on a
   crisis-flagged session (`toolRegistry.refuseCrisisEnd`). The refusal is the
   tool result the model sees ("the session was NOT ended ... stay with them"),
-  is logged as `intervention_actions.model_end_refused`, and is announced to
-  the participant's client as `session:end-vetoed`, which the browser's
-  `end_session` handler checks before tearing the call down. Under Grok Voice
-  the proxy simply does not forward a refused `end_session` to the browser.
-  Two callers legitimately steer a crisis session to end — the duration limit
-  and the admin wind-down — and they record a grant in
-  `utils/modelEndAuthorization.ts` first. A participant who clearly asks to
-  stop is honoured: the model passes `participant_requested: true`. The guard
-  fails open if the crisis lookup throws.
+  is logged as `intervention_actions.model_end_refused`, and the browser is
+  told either way: an accepted end emits `session:end-approved`, which is the
+  only thing that makes a GPT-Live browser tear the call down for a
+  model-initiated end (a lost message fails safe: the server backstop closes
+  the live session and the browser ends on `session.closed`). Under Grok Voice
+  the proxy forwards `end_session` to the browser only once the end is
+  confirmed. Three callers legitimately steer a session to end — the duration
+  limit (nudge and hard limit), the admin wind-down and the admin trigger-tool
+  — and they record a single-shot grant in `utils/modelEndAuthorization.ts`
+  first. A participant who clearly asks to stop is honoured: the model passes
+  `participant_requested: true`, which is logged as
+  `model_end_participant_requested` because the model's word is the only
+  evidence. The guard fails open if the crisis lookup throws. Migration 117
+  fails (rather than warns) if a stored prompt matches neither known Crisis
+  Protocol variant.
 
 The third way a crisis conversation vanishes — OpenAI's own content filter
 closing a GPT-Live session with reason `content` — is handled by the recovery

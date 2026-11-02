@@ -71,8 +71,11 @@ WHERE config_key = 'system_prompts'
     OR config_value->'chat'->>'prompt' LIKE '%' || p.old_default || '%'
   );
 
--- Surface a prompt this migration could not rewrite (customised text), so the
--- operator applies the change by hand instead of assuming it landed.
+-- A prompt this migration could not rewrite (customised text) FAILS the
+-- migration rather than warning: the node runner does not surface NOTICEs, and
+-- a green deploy that left the hang-up script in place is the worst outcome.
+-- Fix the stored prompt's Crisis Protocol by hand (or restore a known variant)
+-- and re-run.
 DO $$
 DECLARE
   rt text;
@@ -82,10 +85,10 @@ BEGIN
     INTO rt, ch
     FROM system_config WHERE config_key = 'system_prompts';
   IF rt IS NOT NULL AND rt NOT LIKE '%Never end the session yourself because risk came up.%' THEN
-    RAISE NOTICE 'migration 117: realtime prompt did not match a known Crisis Protocol block; update it by hand';
+    RAISE EXCEPTION 'migration 117: the stored realtime prompt matched no known Crisis Protocol block and was not rewritten; update it by hand and re-run';
   END IF;
   IF ch IS NOT NULL AND ch NOT LIKE '%Never end the session yourself because risk came up.%' THEN
-    RAISE NOTICE 'migration 117: chat prompt did not match a known Crisis Protocol block; update it by hand';
+    RAISE EXCEPTION 'migration 117: the stored chat prompt matched no known Crisis Protocol block and was not rewritten; update it by hand and re-run';
   END IF;
 END $$;
 
@@ -98,5 +101,6 @@ ALTER TABLE intervention_actions ADD CONSTRAINT intervention_actions_action_type
     'supervisor_review', 'clinical_review', 'handoff_initiated',
     'monitoring_increased', 'external_api_called', 'auto_flag', 'manual_flag',
     'risk_steering', 'ai_escalation', 'crisis_sms_alert', 'safety_protocol',
-    'eligibility_minor_end', 'voice_refusal_recovery', 'model_end_refused'
+    'eligibility_minor_end', 'voice_refusal_recovery', 'model_end_refused',
+    'model_end_participant_requested'
   ));
