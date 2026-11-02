@@ -79,6 +79,7 @@ import caseworkerDashboardRoutes from './routes/admin/caseworkerDashboard.routes
 import assistantRoutes from './routes/admin/assistant.routes.js';
 import workQueueRoutes from './routes/admin/workQueue.routes.js';
 import notificationsRoutes from './routes/admin/notifications.routes.js';
+import mailRoutes from './routes/admin/mail.routes.js';
 import escalationsRoutes from './routes/admin/escalations.routes.js';
 import notesRoutes from './routes/admin/notes.routes.js';
 import practiceAssignmentsRoutes from './routes/admin/practiceAssignments.routes.js';
@@ -832,6 +833,7 @@ app.use(workQueueRoutes());
 
 // In-app notifications + preferences -> routes/admin/notifications.routes.ts
 app.use(notificationsRoutes());
+app.use(mailRoutes());
 
 // Caseworker->therapist escalations -> routes/admin/escalations.routes.ts
 app.use(escalationsRoutes());

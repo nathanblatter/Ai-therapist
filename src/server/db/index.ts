@@ -74,3 +74,5 @@ export * from './sandboxInvites.queries.js';
 export * from './caseworkerDashboard.queries.js';
 export * from './qualtricsSignups.queries.js';
 export * from './qualtricsResponses.queries.js';
+// Staff email from the admin app (ai-therapist-283 phase 2).
+export * from './mail.queries.js';
