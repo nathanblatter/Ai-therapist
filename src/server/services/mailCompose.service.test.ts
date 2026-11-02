@@ -132,7 +132,12 @@ describe('sendStaffMail', () => {
 
   it('refuses participant content before touching the gateway', async () => {
     await expect(
-      sendStaffMail({ senderUserId: 3, to: 'a@b.co', subject: 'x', text: 'see session live_u7_Efaf4p3oNCT16l0N9RcC0aaKTqqx04Zf' }),
+      sendStaffMail({
+        senderUserId: 3,
+        to: 'a@b.co',
+        subject: 'x',
+        text: 'see session live_u7_Efaf4p3oNCT16l0N9RcC0aaKTqqx04Zf',
+      }),
     ).rejects.toMatchObject({ status: 400 });
     expect(sendMailFromMock).not.toHaveBeenCalled();
     expect(reserveMock).not.toHaveBeenCalled();
