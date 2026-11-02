@@ -32,8 +32,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   svcMocks.senderStatus.mockResolvedValue({
     address: 'jane@byuisresearch.com',
+    username: 'jane',
     domain: 'byuisresearch.com',
     canSend: true,
+    blocked: null,
     reason: null,
     sentToday: 1,
     dailyCap: 50,

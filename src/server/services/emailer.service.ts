@@ -71,6 +71,14 @@ type TransportEnv =
   | { kind: 'email-api'; url: string; key: string; from: string }
   | { kind: 'smtp'; host: string; port: number; user: string; pass: string; from: string };
 
+/** The email-api gateway's URL and key, when configured (inbox reads need
+ *  the gateway itself; SMTP has no inbox). */
+export function emailApiEnv(): { url: string; key: string } | null {
+  const url = (process.env.EMAIL_API_URL ?? '').trim().replace(/\/+$/, '');
+  const key = (process.env.EMAIL_API_KEY ?? '').trim();
+  return url && key ? { url, key } : null;
+}
+
 /** email-api wins when both are configured. */
 function transportEnv(): TransportEnv | null {
   const from = (process.env.EMAIL_FROM ?? '').trim();
@@ -237,9 +245,23 @@ export interface StaffMailOutcome {
  */
 export async function sendMailFrom(message: TransportMessage): Promise<StaffMailOutcome> {
   try {
-    const env = transportEnv();
-    if (!env) return { status: 'failed', error: 'no mail transport configured (EMAIL_API_URL/EMAIL_API_KEY)' };
-    if (!cachedTransport) cachedTransport = await (transportFactory ?? defaultTransportFactory)();
+    // Staff mail carries its own From, so EMAIL_FROM is not required here:
+    // the gateway alone is enough. SMTP still goes through transportEnv.
+    const gateway = emailApiEnv();
+    const env = gateway ? ({ kind: 'email-api', ...gateway, from: '' } as TransportEnv) : transportEnv();
+    if (!env) {
+      return {
+        status: 'failed',
+        error: 'no mail transport configured (EMAIL_API_URL + EMAIL_API_KEY, or SMTP_HOST + EMAIL_FROM)',
+      };
+    }
+    if (!cachedTransport) {
+      cachedTransport = transportFactory
+        ? await transportFactory()
+        : env.kind === 'email-api'
+          ? emailApiTransport(env)
+          : await defaultTransportFactory();
+    }
     if (!cachedTransport) return { status: 'failed', error: 'mail transport unavailable' };
     const raw = (await cachedTransport.sendMail(message)) as { id?: unknown; status?: unknown } | undefined;
     const gatewayId = raw && typeof raw.id === 'string' ? raw.id : null;

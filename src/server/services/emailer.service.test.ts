@@ -215,6 +215,7 @@ describe('sendMailFrom (staff mail, ai-therapist-283 phase 2)', () => {
     const out = await sendMailFrom({ from: 'x@byuisresearch.com', to: ['a@b.co'], subject: 's', text: 't' });
     expect(out.status).toBe('failed');
     expect(out.error).toMatch(/no mail transport/);
+    expect(out.error).toMatch(/EMAIL_FROM/);
   });
 
   it('passes the explicit sender, cc, reply-to and headers through and reads the gateway verdict', async () => {

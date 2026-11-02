@@ -12,7 +12,13 @@
 // and a per-sender daily cap. Keeping participant data out of email is a
 // standing policy the Mail view states on every compose; this guard is the
 // cheap mechanical part of it, not a substitute.
-import { getUserById, insertOutboundMail, countOutboundMailToday, type OutboundMailRow } from '../db/index.js';
+import {
+  getUserById,
+  reserveOutboundMail,
+  setOutboundMailVerdict,
+  countOutboundMailToday,
+  type OutboundMailRow,
+} from '../db/index.js';
 import { sendMailFrom } from './emailer.service.js';
 import { studyEmailDomain } from './researcherEmail.service.js';
 import { isEmailShaped } from '../utils/emailShape.js';
@@ -40,9 +46,15 @@ export class MailComposeError extends Error {
   }
 }
 
-/** Therapy session ids (live_u7_…, grok_…, chat_…) and the like: participant
- *  identifiers that have no business in outbound email. */
-const PARTICIPANT_CONTENT = /\b(?:live|grok|chat|sess|session)_[A-Za-z0-9_-]{6,}\b/;
+/** Therapy session ids as the system actually mints them — live_u7_<32 alnum>
+ *  (GPT-Live), grok_<hex> (Grok), chat_<epoch>_<base36> (chat) — plus the
+ *  realtime sess_ prefix. Anchored on those shapes so ordinary vocabulary
+ *  such as chat_completions or session_limits is not mistaken for one. */
+const PARTICIPANT_CONTENT =
+  /\b(?:live_u7_[A-Za-z0-9]{16,}|grok_[0-9a-f]{8,}|chat_[0-9]{10,}_[a-z0-9]{3,}|sess_[A-Za-z0-9]{12,})\b/;
+
+/** A Message-ID as it appears in In-Reply-To: <local@domain>, one line, bounded. */
+const MESSAGE_ID = /^<[^\s<>@]+@[^\s<>@]+>$/;
 
 /** Why a body is refused as participant content, or null when it is clean. */
 export function participantContentReason(text: string): string | null {
@@ -75,33 +87,63 @@ export interface ComposeInput {
   inReplyTo?: unknown;
 }
 
+export type SenderBlock = 'not_researcher' | 'no_address' | 'cap';
+
 export interface SenderStatus {
   address: string | null;
+  username: string | null;
   domain: string;
   canSend: boolean;
+  /** Why not, as a code the client and the status mapping key on. */
+  blocked: SenderBlock | null;
   reason: string | null;
   sentToday: number;
   dailyCap: number;
 }
 
+const BLOCK_STATUS: Record<SenderBlock, number> = { not_researcher: 403, no_address: 403, cap: 429 };
+
 /** What the Mail view needs to know before offering the compose form. */
 export async function senderStatus(userId: number): Promise<SenderStatus> {
   const domain = studyEmailDomain();
+  const cap = dailyCap();
   const user = await getUserById(userId);
   const address = user?.email?.toLowerCase() ?? null;
   const sentToday = await countOutboundMailToday(userId);
+  let blocked: SenderBlock | null = null;
   let reason: string | null = null;
-  if (!user || user.role !== 'researcher') reason = 'Only researcher accounts can send mail from the study.';
-  else if (!address || !address.endsWith(`@${domain}`)) {
+  if (!user || user.role !== 'researcher') {
+    blocked = 'not_researcher';
+    reason = 'Only researcher accounts can send mail from the study.';
+  } else if (!address || !address.endsWith(`@${domain}`)) {
+    blocked = 'no_address';
     reason = `Provision a study address (name@${domain}) on your account first.`;
-  } else if (sentToday >= dailyCap()) reason = 'Daily sending cap reached; try again tomorrow (UTC).';
-  return { address, domain, canSend: reason === null, reason, sentToday, dailyCap: dailyCap() };
+  } else if (sentToday >= cap) {
+    blocked = 'cap';
+    reason = 'Daily sending cap reached; try again tomorrow (UTC).';
+  }
+  return {
+    address,
+    username: user?.username ?? null,
+    domain,
+    canSend: blocked === null,
+    blocked,
+    reason,
+    sentToday,
+    dailyCap: cap,
+  };
+}
+
+/** RFC 5322 display name: quoted, with quotes and backslashes removed. */
+export function displayName(username: string | null): string {
+  const cleaned = (username ?? '').replace(/["\\\r\n]/g, '').trim() || 'Study staff';
+  return `"${cleaned} (AI Therapist Study)"`;
 }
 
 export async function sendStaffMail(input: ComposeInput): Promise<OutboundMailRow> {
   const status = await senderStatus(input.senderUserId);
-  if (!status.canSend || !status.address) {
-    throw new MailComposeError(status.reason ?? 'Cannot send', status.reason?.startsWith('Daily') ? 429 : 403);
+  if (status.blocked || !status.address) {
+    throw new MailComposeError(status.reason ?? 'Cannot send', status.blocked ? BLOCK_STATUS[status.blocked] : 403);
   }
 
   const to = normalizeRecipients(input.to, 'recipient');
@@ -118,13 +160,33 @@ export async function sendStaffMail(input: ComposeInput): Promise<OutboundMailRo
   if (!text) throw new MailComposeError('Message body is required', 400);
   if (text.length > MAX_BODY_CHARS) throw new MailComposeError('Message body is too long', 400);
   const inReplyTo = typeof input.inReplyTo === 'string' && input.inReplyTo.trim() ? input.inReplyTo.trim() : null;
+  if (inReplyTo !== null && (inReplyTo.length > 998 || !MESSAGE_ID.test(inReplyTo))) {
+    throw new MailComposeError('in_reply_to must be a single Message-ID like <id@domain>', 400);
+  }
 
   const reason = participantContentReason(`${subject}\n${text}`);
   if (reason) throw new MailComposeError(`Not sent: ${reason}. Participant content never goes into email.`, 400);
 
-  const user = await getUserById(input.senderUserId);
   const fromAddress = status.address;
-  const from = `${user?.username ?? 'Study staff'} (AI Therapist Study) <${fromAddress}>`;
+  const from = `${displayName(status.username)} <${fromAddress}>`;
+
+  // Audit first: the row exists (as 'pending', counted against the cap under
+  // a per-sender lock) before the gateway is asked. A crash between the two
+  // leaves a 'pending' row that says "may have gone out" instead of nothing.
+  const reserved = await reserveOutboundMail(
+    {
+      sentBy: input.senderUserId,
+      fromAddress,
+      toAddresses: to,
+      ccAddresses: cc,
+      replyTo: fromAddress,
+      inReplyTo,
+      subject,
+      bodyText: text,
+    },
+    status.dailyCap,
+  );
+  if (!reserved) throw new MailComposeError('Daily sending cap reached; try again tomorrow (UTC).', 429);
 
   const outcome = await sendMailFrom({
     from,
@@ -136,15 +198,7 @@ export async function sendStaffMail(input: ComposeInput): Promise<OutboundMailRo
     headers: inReplyTo ? { 'In-Reply-To': inReplyTo, References: inReplyTo } : undefined,
   });
 
-  const row = await insertOutboundMail({
-    sentBy: input.senderUserId,
-    fromAddress,
-    toAddresses: to,
-    ccAddresses: cc,
-    replyTo: fromAddress,
-    inReplyTo,
-    subject,
-    bodyText: text,
+  const row = await setOutboundMailVerdict(reserved.mail_id, {
     status: outcome.status,
     gatewayId: outcome.gatewayId ?? null,
     error: outcome.error ?? null,

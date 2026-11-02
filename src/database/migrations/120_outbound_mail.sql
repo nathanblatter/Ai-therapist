@@ -1,9 +1,12 @@
 -- 120: outbound_mail — audit of email sent by staff from the admin app
 -- (ai-therapist-283, phase 2).
 --
--- Every message a researcher composes in the Mail view is recorded here
--- before it is handed to the email-api gateway, with the gateway's verdict
--- (sent / queued / failed) written back. The sender row is kept even if the
+-- Every message a researcher composes in the Mail view is recorded here as
+-- 'pending' BEFORE it is handed to the email-api gateway (under a per-sender
+-- advisory lock that also enforces the daily cap), and the gateway's verdict
+-- (sent / queued / failed) is written back. A row stuck at 'pending' means the
+-- process died between the two steps: the message may or may not have gone
+-- out, and the row says so rather than nothing. The sender row is kept even if the
 -- account is later deleted (sent_by goes null; from_address stays), because
 -- this is the study's correspondence record.
 --
@@ -22,7 +25,7 @@ CREATE TABLE IF NOT EXISTS outbound_mail (
   in_reply_to    TEXT,
   subject        TEXT NOT NULL,
   body_text      TEXT NOT NULL,
-  status         TEXT NOT NULL CHECK (status IN ('sent', 'queued', 'failed')),
+  status         TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'queued', 'failed')),
   gateway_id     TEXT,
   error          TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
