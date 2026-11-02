@@ -123,6 +123,7 @@ export async function serverEndSession(
   import('../utils/modelEndAuthorization.js')
     .then((m) => m.clearModelEndAuthorization(sessionId))
     .catch(() => undefined);
+  import('../utils/sessionAutoTerminate.js').then((m) => m.cancelAutoTermination(sessionId)).catch(() => undefined);
 
   try {
     const { sidebandManager } = await import('./sidebandManager.service.js');

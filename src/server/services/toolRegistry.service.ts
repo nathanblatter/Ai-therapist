@@ -1057,7 +1057,7 @@ export class ToolRegistry {
           'How long this session has run and roughly how long remains. Call it when the participant asks about time ' +
           'or when you need to pace an exercise; the system also tells you as time runs down, so there is no need to poll.',
         parameters: { type: 'object', properties: {}, required: [] },
-        channel: 'both',
+        // Voice only: chat sessions arm no timer, so there is nothing true to say.
       },
       async (_args: Record<string, unknown>, ctx: ToolContext) => {
         if (!ctx.sessionId) return { error: 'No session context available' };

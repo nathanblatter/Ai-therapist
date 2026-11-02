@@ -12,6 +12,7 @@ import type {
   VoicesConfig,
   LanguagesConfig,
 } from '../../../shared/systemConfig';
+import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../../shared/systemConfig';
 
 type CrisisContactForm = Required<CrisisContact>;
 type SessionLimitsForm = Required<SessionLimits>;
@@ -201,7 +202,7 @@ export default function SystemConfig() {
     max_duration_minutes: 30,
     max_sessions_per_day: 3,
     cooldown_minutes: 30,
-    vendor_ceiling_minutes: 60,
+    vendor_ceiling_minutes: DEFAULT_VENDOR_CEILING_MINUTES,
     enabled: true,
   });
 
@@ -299,7 +300,7 @@ export default function SystemConfig() {
           max_duration_minutes: 30,
           max_sessions_per_day: 3,
           cooldown_minutes: 30,
-          vendor_ceiling_minutes: 60,
+          vendor_ceiling_minutes: DEFAULT_VENDOR_CEILING_MINUTES,
           ...data.session_limits.value,
         });
       }

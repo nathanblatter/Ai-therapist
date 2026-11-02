@@ -28,7 +28,8 @@
 
 import { getSessionAccessInfo, updateSessionStatus } from '../db/index.js';
 import { broadcastAdminEventForSession } from './adminBroadcast.js';
-import { authorizeModelEnd } from './modelEndAuthorization.js';
+import { authorizeModelEnd, clearModelEndAuthorization } from './modelEndAuthorization.js';
+import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
 
 import { createLogger } from './logger.js';
 
@@ -56,8 +57,7 @@ export interface AutoTerminateOptions {
   backend?: 'live' | 'grok';
 }
 
-/** The vendor's own maximum session length, past which our timers are moot. */
-export const DEFAULT_VENDOR_CEILING_MINUTES = 60;
+export { DEFAULT_VENDOR_CEILING_MINUTES };
 
 const WRAP_UP_NUDGE =
   '[About one minute remains in this session. Begin wrapping up naturally — consolidate one takeaway, ' +
@@ -85,7 +85,7 @@ function crisisTimeNotice(remainingMinutes: number): string {
     `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
     `The platform's maximum connection time is about ${remainingMinutes} minutes away; the session timer was ` +
     `lifted so you are not cut off early, but that ceiling cannot be moved. Stay with them. Use this time to make ` +
-    `sure they know how to reach ${'988'} (call or text) and whether someone can be with them in person. ` +
+    `sure they know how to reach 988 (call or text) and whether someone can be with them in person. ` +
     `Do not say goodbye and do not end the session.`
   );
 }
@@ -96,6 +96,12 @@ const CRISIS_CEILING_LIVE =
   `reconnected with them automatically. In your next reply, calmly tell them the line may drop for a moment ` +
   `and that you will be right back with them; remind them they can call or text 988 at any time. ` +
   `Do not say goodbye as if the conversation is over, and do NOT call end_session.`;
+
+const CRISIS_DISREGARD_WRAP_UP =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  `Disregard the earlier instruction to wrap up or end the session: the session timer has been lifted because of ` +
+  `what the participant just shared. Do not say goodbye and do not call end_session. Stay with them, keep replies ` +
+  `short and warm, and follow your crisis protocol.`;
 
 const CRISIS_CEILING_WRAP_UP =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
@@ -111,6 +117,8 @@ interface ArmedSession {
   limitMinutes: number;
   /** Our own limit was lifted to the vendor ceiling for a crisis. */
   liftedForCrisis: boolean;
+  /** A wrap-up or end steer has already been sent to the model. */
+  endRequested: boolean;
   timers: Set<NodeJS.Timeout>;
 }
 
@@ -149,7 +157,7 @@ async function hardEnd(opts: AutoTerminateOptions, limitMinutes: number): Promis
   const { sessionId, teardown } = opts;
   log.info(`Auto-terminating session ${sessionId} after ${limitMinutes} minutes (+grace)`);
   await updateSessionStatus(sessionId, 'ended', 'system');
-  armed.delete(sessionId);
+  cancelAutoTermination(sessionId);
 
   try {
     await teardown(sessionId);
@@ -215,6 +223,7 @@ function armGracefulEnd(entry: ArmedSession, limitMs: number, steerText: string)
       // grant comes first: on a crisis-flagged session end_session refuses a
       // model-initiated end unless the server asked for it.
       try {
+        entry.endRequested = true;
         authorizeModelEnd(sessionId);
         await steer(sessionId, steerText, true);
         log.info(
@@ -261,6 +270,7 @@ function armNormal(entry: ArmedSession): void {
       async () => {
         // The nudge is already a server request to wrap up; a model that
         // closes early must not be refused and then told to end again.
+        entry.endRequested = true;
         authorizeModelEnd(sessionId);
         await steer(sessionId, WRAP_UP_NUDGE, false);
       },
@@ -324,6 +334,7 @@ export function scheduleAutoTermination(opts: AutoTerminateOptions): void {
     startedAt: Date.now(),
     limitMinutes: maxDurationMinutes,
     liftedForCrisis: false,
+    endRequested: false,
     timers: new Set(),
   };
   armed.set(sessionId, entry);
@@ -360,18 +371,27 @@ export function liftLimitForCrisis(sessionId: string, ceilingMinutes = DEFAULT_V
     return { lifted: false, previousLimitMinutes: entry.limitMinutes, ceilingMinutes, reason: 'already_lifted' };
   }
   const previous = entry.limitMinutes;
-  if (previous >= ceilingMinutes) {
-    // Nothing to gain in minutes, but the model should still hear the crisis
-    // phrasing rather than "say goodbye and call end_session".
-    clearTimers(entry);
-    entry.liftedForCrisis = true;
-    armCrisis(entry);
-    return { lifted: false, previousLimitMinutes: previous, ceilingMinutes, reason: 'limit_at_ceiling' };
-  }
   clearTimers(entry);
+  // The ceiling is the clock from here on, whichever way the old limit sat
+  // relative to it: a limit above the vendor ceiling was never real.
   entry.limitMinutes = ceilingMinutes;
   entry.liftedForCrisis = true;
+
+  // A wrap-up or end steer may already be out, with its grant: revoke the
+  // grant and tell the model to disregard the wrap-up, or the flag raised in
+  // the last minute still ends in a goodbye.
+  clearModelEndAuthorization(sessionId);
+  if (entry.endRequested) {
+    entry.endRequested = false;
+    void entry.opts.steer(sessionId, CRISIS_DISREGARD_WRAP_UP, false).catch((err) => {
+      log.error({ err }, `disregard-wrap-up steer failed for ${sessionId}`);
+    });
+  }
+
   armCrisis(entry);
+  if (previous >= ceilingMinutes) {
+    return { lifted: false, previousLimitMinutes: previous, ceilingMinutes, reason: 'limit_at_ceiling' };
+  }
   log.warn(`Session ${sessionId} duration limit lifted from ${previous} to ${ceilingMinutes} minutes (crisis)`);
   return { lifted: true, previousLimitMinutes: previous, ceilingMinutes };
 }
@@ -388,11 +408,12 @@ export interface SessionTimeStatus {
 export function getSessionTimeStatus(sessionId: string): SessionTimeStatus | null {
   const entry = armed.get(sessionId);
   if (!entry) return null;
-  const elapsedMinutes = Math.floor((Date.now() - entry.startedAt) / 60000);
+  const elapsedMs = Date.now() - entry.startedAt;
+  const elapsedMinutes = Math.floor(elapsedMs / 60000);
   return {
     elapsedMinutes,
     limitMinutes: entry.limitMinutes,
-    remainingMinutes: Math.max(0, entry.limitMinutes - elapsedMinutes),
+    remainingMinutes: Math.max(0, Math.ceil((entry.limitMinutes * 60000 - elapsedMs) / 60000)),
     liftedForCrisis: entry.liftedForCrisis,
   };
 }

@@ -453,6 +453,18 @@ export default function liveSessionRoutes(): Router {
         // limits/bypass. A recovery start can now proceed while denied, so this
         // must be guarded rather than assuming the allowed shape. A recovery
         // session still gets its duration cap when one applies.
+        // A recovery session continues a crisis the platform cut. Its own row
+        // must say so, or every server-side crisis path (vendor-ceiling
+        // recovery, on-call wording, the end_session guard) runs blind on it.
+        if (isRecovery) {
+          try {
+            const { markSessionCrisisContinuation } = await import('../../db/index.js');
+            await markSessionCrisisContinuation(sessionId);
+          } catch (err) {
+            log.error({ err }, `failed to flag recovery session ${sessionId} as a crisis continuation`);
+          }
+        }
+
         if (limitCheck.allowed && limitCheck.limits?.max_duration_minutes && !limitCheck.bypass) {
           scheduleAutoTermination({
             sessionId,
@@ -467,7 +479,19 @@ export default function liveSessionRoutes(): Router {
           if (isRecovery) {
             const { liftLimitForCrisis } = await import('../../utils/sessionAutoTerminate.js');
             const { resolveVendorCeilingMinutes } = await import('../../utils/sessionHelpers.js');
-            liftLimitForCrisis(sessionId, await resolveVendorCeilingMinutes());
+            const ceiling = await resolveVendorCeilingMinutes();
+            const lift = liftLimitForCrisis(sessionId, ceiling);
+            if (lift.lifted) {
+              import('../../services/crisisDetection.service.js')
+                .then((m) =>
+                  m.logInterventionAction(sessionId, 'crisis_timer_extended', {
+                    trigger: 'recovery_continuation',
+                    previousLimitMinutes: lift.previousLimitMinutes,
+                    ceilingMinutes: lift.ceilingMinutes,
+                  }),
+                )
+                .catch((err) => log.error({ err }, 'failed to log the recovery timer lift'));
+            }
           }
         }
 

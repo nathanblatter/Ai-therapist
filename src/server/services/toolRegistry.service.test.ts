@@ -1267,8 +1267,8 @@ describe('get_session_time (ai-therapist-281)', () => {
     expect(result).toMatchObject({ elapsed_minutes: 30, remaining_minutes: null, limit_minutes: null });
   });
 
-  it('is offered on both channels', async () => {
+  it('is voice-only: chat sessions arm no timer', async () => {
     const chat = await toolRegistry.getEnabledToolDefinitions({ channel: 'chat' });
-    expect(chat.map((d) => d.name)).toContain('get_session_time');
+    expect(chat.map((d) => d.name)).not.toContain('get_session_time');
   });
 });

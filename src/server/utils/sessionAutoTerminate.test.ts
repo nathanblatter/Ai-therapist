@@ -1,17 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { getSessionAccessInfoMock, updateSessionStatusMock, authorizeModelEndMock } = vi.hoisted(() => ({
-  getSessionAccessInfoMock: vi.fn(),
-  updateSessionStatusMock: vi.fn(),
-  authorizeModelEndMock: vi.fn(),
-}));
+const { getSessionAccessInfoMock, updateSessionStatusMock, authorizeModelEndMock, clearModelEndAuthorizationMock } =
+  vi.hoisted(() => ({
+    getSessionAccessInfoMock: vi.fn(),
+    updateSessionStatusMock: vi.fn(),
+    authorizeModelEndMock: vi.fn(),
+    clearModelEndAuthorizationMock: vi.fn(),
+  }));
 
 vi.mock('../db/index.js', () => ({
   getSessionAccessInfo: getSessionAccessInfoMock,
   updateSessionStatus: updateSessionStatusMock,
 }));
 vi.mock('./adminBroadcast.js', () => ({ broadcastAdminEventForSession: vi.fn() }));
-vi.mock('./modelEndAuthorization.js', () => ({ authorizeModelEnd: authorizeModelEndMock }));
+vi.mock('./modelEndAuthorization.js', () => ({
+  authorizeModelEnd: authorizeModelEndMock,
+  clearModelEndAuthorization: clearModelEndAuthorizationMock,
+}));
 // hardEnd's fire-and-forget post-session imports: stub them so they resolve.
 vi.mock('../services/chatTherapy.service.js', () => ({ endChatSession: vi.fn() }));
 vi.mock('../services/sessionRedaction.service.js', () => ({ redactSession: vi.fn(async () => undefined) }));
@@ -46,10 +51,11 @@ beforeEach(() => {
   getSessionAccessInfoMock.mockReset().mockResolvedValue({ status: 'active' });
   updateSessionStatusMock.mockReset().mockResolvedValue(undefined);
   authorizeModelEndMock.mockReset();
+  clearModelEndAuthorizationMock.mockReset();
 });
 
 afterEach(() => {
-  for (const id of ['n1', 'c1', 'g1', 's1', 'x1']) cancelAutoTermination(id);
+  for (const id of ['n1', 'c1', 'g1', 's1', 'x1', 'l1', 'h1']) cancelAutoTermination(id);
   vi.useRealTimers();
 });
 
@@ -140,6 +146,33 @@ describe('crisis lift', () => {
     harness('c1', 15);
     expect(liftLimitForCrisis('c1', 60).lifted).toBe(true);
     expect(liftLimitForCrisis('c1', 60)).toMatchObject({ lifted: false, reason: 'already_lifted' });
+  });
+
+  it('a flag in the last minute revokes the grant and tells the model to disregard the wrap-up', async () => {
+    const { steer } = harness('l1', 15);
+    await vi.advanceTimersByTimeAsync(14 * MIN + 5); // T-60s nudge has fired, grant issued
+    expect(steerTexts(steer)[steerTexts(steer).length - 1]).toMatch(/About one minute remains/);
+    expect(authorizeModelEndMock).toHaveBeenCalledWith('l1');
+
+    liftLimitForCrisis('l1', 60);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(clearModelEndAuthorizationMock).toHaveBeenCalledWith('l1');
+    const texts = steerTexts(steer);
+    expect(texts[texts.length - 1]).toMatch(/Disregard the earlier instruction to wrap up/);
+
+    // The 15-minute end never comes.
+    await vi.advanceTimersByTimeAsync(3 * MIN);
+    expect(updateSessionStatusMock).not.toHaveBeenCalled();
+    expect(steerTexts(steer).some((t) => /TIME LIMIT REACHED/.test(t))).toBe(false);
+  });
+
+  it('a limit above the ceiling is pulled down to the ceiling', async () => {
+    const { steer } = harness('h1', 90);
+    const lift = liftLimitForCrisis('h1', 60);
+    expect(lift).toMatchObject({ lifted: false, reason: 'limit_at_ceiling', previousLimitMinutes: 90 });
+    expect(getSessionTimeStatus('h1')).toMatchObject({ limitMinutes: 60, liftedForCrisis: true });
+    await vi.advanceTimersByTimeAsync(50 * MIN + 5);
+    expect(steerTexts(steer)[0]).toMatch(/about 10 minutes away/);
   });
 
   it('getSessionTimeStatus is null for an unarmed session', () => {

@@ -13,6 +13,9 @@ export interface CrisisContact {
   enabled?: boolean;
 }
 
+/** The voice vendor's own maximum session length in minutes (GPT-Live: 60). */
+export const DEFAULT_VENDOR_CEILING_MINUTES = 60;
+
 /** Daily/session rate-limit config blob. */
 export interface SessionLimits {
   enabled: boolean;

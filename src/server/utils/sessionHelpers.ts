@@ -1,3 +1,4 @@
+import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
 import { pool } from '../config/db.js';
 import { fetchSystemConfigRows } from '../db/index.js';
 import { getStartOfTodaySLC } from './timezoneHelpers.js';
@@ -228,7 +229,7 @@ export async function getSystemConfig(): Promise<SystemConfig> {
         max_duration_minutes: 30,
         max_sessions_per_day: 3,
         cooldown_minutes: 30,
-        vendor_ceiling_minutes: 60,
+        vendor_ceiling_minutes: DEFAULT_VENDOR_CEILING_MINUTES,
         enabled: true,
       },
     };
@@ -514,7 +515,7 @@ export async function resolveVendorCeilingMinutes(): Promise<number> {
   } catch {
     // fall through to the default
   }
-  return 60;
+  return DEFAULT_VENDOR_CEILING_MINUTES;
 }
 
 export async function getSystemPrompt(
