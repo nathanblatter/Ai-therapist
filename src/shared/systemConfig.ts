@@ -19,6 +19,11 @@ export interface SessionLimits {
   max_duration_minutes?: number;
   max_sessions_per_day?: number;
   cooldown_minutes?: number;
+  /**
+   * The voice vendor's own maximum session length (60 on GPT-Live). A crisis
+   * lifts max_duration_minutes to this; it cannot be moved from our side.
+   */
+  vendor_ceiling_minutes?: number;
 }
 
 export interface VoiceOption {

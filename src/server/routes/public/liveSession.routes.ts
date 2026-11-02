@@ -459,7 +459,16 @@ export default function liveSessionRoutes(): Router {
             maxDurationMinutes: limitCheck.limits.max_duration_minutes,
             steer: (id, text, respond) => sidebandManager.tryInject(id, 'system', text, respond),
             teardown: (id) => sidebandManager.disconnect(id),
+            backend: 'live',
           });
+          // A recovery session IS a crisis session: it is a continuation of
+          // one that was flagged and cut. Run it to the vendor ceiling, never
+          // to the ordinary limit (ai-therapist-281).
+          if (isRecovery) {
+            const { liftLimitForCrisis } = await import('../../utils/sessionAutoTerminate.js');
+            const { resolveVendorCeilingMinutes } = await import('../../utils/sessionHelpers.js');
+            liftLimitForCrisis(sessionId, await resolveVendorCeilingMinutes());
+          }
         }
 
         res.status(201).json({

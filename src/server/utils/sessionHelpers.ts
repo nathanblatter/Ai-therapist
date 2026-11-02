@@ -228,6 +228,7 @@ export async function getSystemConfig(): Promise<SystemConfig> {
         max_duration_minutes: 30,
         max_sessions_per_day: 3,
         cooldown_minutes: 30,
+        vendor_ceiling_minutes: 60,
         enabled: true,
       },
     };
@@ -497,6 +498,23 @@ export async function resolveProactiveOffering(): Promise<boolean> {
   if (mode === 'always') return true;
   if (mode === 'never') return false;
   return Math.random() < 0.5;
+}
+
+/**
+ * The voice vendor's hard session ceiling in minutes (session_limits
+ * .vendor_ceiling_minutes, default 60 = GPT-Live). A crisis lifts our own
+ * duration limit to this, never past it.
+ */
+export async function resolveVendorCeilingMinutes(): Promise<number> {
+  try {
+    const config = await getSystemConfig();
+    const limits = config.session_limits as SessionLimits | undefined;
+    const raw = limits?.vendor_ceiling_minutes;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 5 && raw <= 240) return raw;
+  } catch {
+    // fall through to the default
+  }
+  return 60;
 }
 
 export async function getSystemPrompt(

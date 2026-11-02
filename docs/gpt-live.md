@@ -553,6 +553,24 @@ cannot drift apart on something safety- and data-relevant.
   intact.
 - **+75 s (phase 2):** hard server-side end as a backstop — status update,
   sideband teardown, redaction, recorder finalize, insights, auto-eval.
+- **T-10 min and T-5 min:** plain time notices so the model can pace
+  (ai-therapist-281). Time is pushed, never polled; `get_session_time` exists
+  for the participant's own "how long do we have".
+
+**Crisis (ai-therapist-281, Nathan 2026-11-01).** A high flag lifts our own
+limit to the vendor ceiling (`session_limits.vendor_ceiling_minutes`, default
+60, the one limit we cannot move): `executeHighRiskResponse` calls
+`liftLimitForCrisis`, the pending timers are dropped, crisis-phrased notices
+are armed at 10/5/2 minutes before the ceiling, and no end is requested from
+our side. A minute before the ceiling the model is told the line will reset
+and that it will be reconnected. When the vendor closes the session
+(`session.closed` reason `expired`) on a crisis-flagged session, the sideband
+emits the same `session:moderation-terminated` the content filter does (with
+`reason: 'expired'`), the on-call is paged, and the client runs the recovery
+flow: interstitial, a new voice session on the crisis prompt (which is itself
+run to the ceiling, not the ordinary limit), text fallback. Logged as
+`intervention_actions.crisis_timer_extended` (migration 118). Under Grok, which
+has no known ceiling, the graceful wrap-up moves to the ceiling instead.
 
 The two-phase design exists because the participant's Socket.io channel is
 unreliable through the tunnel: a purely server-side end is invisible to them,

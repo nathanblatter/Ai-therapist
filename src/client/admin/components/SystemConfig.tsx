@@ -201,6 +201,7 @@ export default function SystemConfig() {
     max_duration_minutes: 30,
     max_sessions_per_day: 3,
     cooldown_minutes: 30,
+    vendor_ceiling_minutes: 60,
     enabled: true,
   });
 
@@ -298,6 +299,7 @@ export default function SystemConfig() {
           max_duration_minutes: 30,
           max_sessions_per_day: 3,
           cooldown_minutes: 30,
+          vendor_ceiling_minutes: 60,
           ...data.session_limits.value,
         });
       }
@@ -701,6 +703,21 @@ export default function SystemConfig() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
               />
               <p className="text-xs text-gray-500 mt-1">Wait time between sessions</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor ceiling (minutes)</label>
+              <input
+                type="number"
+                value={sessionLimits.vendor_ceiling_minutes}
+                onChange={(e) => updateSessionLimits('vendor_ceiling_minutes', parseInt(e.target.value))}
+                min="5"
+                max="240"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-royal"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                The voice platform&apos;s own limit (60 on GPT-Live). A crisis flag lifts the duration limit to this.
+              </p>
             </div>
           </div>
         </div>

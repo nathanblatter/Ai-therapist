@@ -186,6 +186,12 @@ The third way a crisis conversation vanishes — OpenAI's own content filter
 closing a GPT-Live session with reason `content` — is handled by the recovery
 flow described in `docs/gpt-live.md` (incident 2026-09-11).
 
+The fourth is a clock. Our own `session_limits.max_duration_minutes` is lifted
+to the vendor ceiling on a high flag (`crisis_timer_extended`), the model is
+told the time at fixed points so it can prepare the participant, and the
+vendor's own 60-minute expiry on a flagged session runs the same recovery as
+the filter. See `docs/gpt-live.md` section 11 (ai-therapist-281).
+
 ---
 
 ## Auto-Flag Condition

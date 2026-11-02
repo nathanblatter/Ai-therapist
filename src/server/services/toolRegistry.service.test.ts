@@ -1233,3 +1233,42 @@ describe('end_session crisis guard', () => {
     expect(def?.description).toMatch(/Never call it because the participant disclosed/);
   });
 });
+
+describe('get_session_time (ai-therapist-281)', () => {
+  it('reports the armed clock, including a crisis lift', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-01T12:00:00Z'));
+    const { scheduleAutoTermination, liftLimitForCrisis, cancelAutoTermination } = await import(
+      '../utils/sessionAutoTerminate.js'
+    );
+    scheduleAutoTermination({
+      sessionId: 'clock-1',
+      maxDurationMinutes: 15,
+      steer: async () => true,
+      teardown: async () => undefined,
+    });
+    try {
+      vi.setSystemTime(new Date('2026-11-01T12:07:00Z'));
+      const before = await toolRegistry.executeTool('get_session_time', {}, { sessionId: 'clock-1' });
+      expect(before).toMatchObject({ elapsed_minutes: 7, remaining_minutes: 8, limit_minutes: 15 });
+      liftLimitForCrisis('clock-1', 60);
+      const after = await toolRegistry.executeTool('get_session_time', {}, { sessionId: 'clock-1' });
+      expect(after).toMatchObject({ remaining_minutes: 53, limit_minutes: 60, limit_lifted_for_safety: true });
+    } finally {
+      cancelAutoTermination('clock-1');
+    }
+  });
+
+  it('falls back to elapsed-only when no limit is armed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-01T12:30:00Z'));
+    getSessionMock.mockResolvedValue({ user_id: 42, created_at: '2026-11-01T12:00:00Z' });
+    const result = await toolRegistry.executeTool('get_session_time', {}, { sessionId: 'clock-2' });
+    expect(result).toMatchObject({ elapsed_minutes: 30, remaining_minutes: null, limit_minutes: null });
+  });
+
+  it('is offered on both channels', async () => {
+    const chat = await toolRegistry.getEnabledToolDefinitions({ channel: 'chat' });
+    expect(chat.map((d) => d.name)).toContain('get_session_time');
+  });
+});

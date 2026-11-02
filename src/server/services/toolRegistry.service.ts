@@ -1045,6 +1045,49 @@ export class ToolRegistry {
       },
     );
 
+    // The session clock, for "how long do we have?" (ai-therapist-281). Time
+    // is normally PUSHED to the model by sessionAutoTerminate notices; this
+    // exists so a direct question gets a true answer rather than a guess.
+    this.registerTool(
+      'get_session_time',
+      {
+        type: 'function',
+        name: 'get_session_time',
+        description:
+          'How long this session has run and roughly how long remains. Call it when the participant asks about time ' +
+          'or when you need to pace an exercise; the system also tells you as time runs down, so there is no need to poll.',
+        parameters: { type: 'object', properties: {}, required: [] },
+        channel: 'both',
+      },
+      async (_args: Record<string, unknown>, ctx: ToolContext) => {
+        if (!ctx.sessionId) return { error: 'No session context available' };
+        const { getSessionTimeStatus } = await import('../utils/sessionAutoTerminate.js');
+        const status = getSessionTimeStatus(ctx.sessionId);
+        if (status) {
+          return {
+            elapsed_minutes: status.elapsedMinutes,
+            remaining_minutes: status.remainingMinutes,
+            limit_minutes: status.limitMinutes,
+            limit_lifted_for_safety: status.liftedForCrisis,
+            note: status.liftedForCrisis
+              ? 'The usual session limit was lifted so you are not cut off; the platform ceiling still applies.'
+              : undefined,
+          };
+        }
+        // No limit armed (none configured, or a researcher bypass): elapsed only.
+        const { getSession } = await import('../db/index.js');
+        const session = await getSession(ctx.sessionId);
+        const createdAt = session?.created_at ? new Date(session.created_at as unknown as string).getTime() : NaN;
+        return {
+          elapsed_minutes: Number.isFinite(createdAt) ? Math.floor((Date.now() - createdAt) / 60000) : null,
+          remaining_minutes: null,
+          limit_minutes: null,
+          limit_lifted_for_safety: false,
+          note: 'No session time limit is set beyond the platform ceiling.',
+        };
+      },
+    );
+
     // Mid-session language switch (steers the model; config recorded).
     this.registerTool(
       'switch_language',

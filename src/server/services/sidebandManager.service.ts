@@ -624,23 +624,13 @@ export class SidebandManager {
    *   3. Record it, so how often the vendor terminates a therapeutic
    *      conversation is a measurable number rather than an anecdote.
    */
-  private async handleModerationTermination(sessionId: string): Promise<void> {
+  private async handleModerationTermination(sessionId: string, cause: 'content_filter' | 'expired'): Promise<void> {
     const short = sessionId.substring(0, 12);
-    console.error(
-      `[Live] MODERATION TERMINATION for ${short}... — OpenAI's safety filter ended this session. ` +
-        'Surfacing crisis resources to the participant and alerting the study team.',
-    );
 
-    // 1. Participant-facing. Emitted before anything that can throw.
-    global.io?.to(`session:${sessionId}`).emit('session:moderation-terminated', {
-      sessionId,
-      reason: 'content_filter',
-      message: 'The connection ended unexpectedly. That was not your fault, and nothing you said was wrong.',
-    });
-
-    // Was this session already known to be in crisis? Changes what we tell the
-    // on-call: "cut during a flagged crisis" is more urgent than "cut for some
-    // other reason", and the first is the case actually observed.
+    // Was this session already known to be in crisis? For the filter it changes
+    // what we tell the on-call ("cut during a flagged crisis" is more urgent).
+    // For the vendor ceiling it decides everything: an unflagged session that
+    // expires is an ordinary end and none of this applies.
     let flagged = false;
     try {
       const result = await pool.query<{ crisis_flagged: boolean | null; crisis_severity: string | null }>(
@@ -651,29 +641,48 @@ export class SidebandManager {
     } catch (err) {
       console.error(`[Live] Could not read crisis state for ${short}...:`, err);
     }
+    if (cause === 'expired' && !flagged) return;
+
+    console.error(
+      cause === 'content_filter'
+        ? `[Live] MODERATION TERMINATION for ${short}... — OpenAI's safety filter ended this session. ` +
+            'Surfacing crisis resources to the participant and alerting the study team.'
+        : `[Live] VENDOR CEILING for ${short}... — the session expired during an active crisis flag. ` +
+            'Surfacing crisis resources and asking the client to reconnect.',
+    );
+
+    // 1. Participant-facing, first. The client runs the same recovery for both.
+    global.io?.to(`session:${sessionId}`).emit('session:moderation-terminated', {
+      sessionId,
+      reason: cause,
+      message: 'The connection ended unexpectedly. That was not your fault, and nothing you said was wrong.',
+    });
 
     // 2. Alert the study team.
     try {
       const { sendCrisisAlert } = await import('./crisisAlert.service.js');
       await sendCrisisAlert(
-        `AI-Therapist: OpenAI's safety filter TERMINATED voice session ${short}... mid-conversation` +
-          `${flagged ? ' DURING AN ACTIVE CRISIS FLAG' : ''}. The participant lost the assistant without warning. ` +
-          'Review the transcript and consider reaching out.',
+        cause === 'content_filter'
+          ? `AI-Therapist: OpenAI's safety filter TERMINATED voice session ${short}... mid-conversation` +
+              `${flagged ? ' DURING AN ACTIVE CRISIS FLAG' : ''}. The participant lost the assistant without warning. ` +
+              'Review the transcript and consider reaching out.'
+          : `AI-Therapist: voice session ${short}... hit the platform's 60-minute ceiling DURING AN ACTIVE CRISIS FLAG. ` +
+              'The client is reconnecting them automatically; review the transcript and consider reaching out.',
       );
     } catch (err) {
-      console.error(`[Live] Failed to alert on moderation termination for ${short}...:`, err);
+      console.error(`[Live] Failed to alert on ${cause} termination for ${short}...:`, err);
     }
 
     // 3. Record it against the session.
     try {
       const { logInterventionAction } = await import('./crisisDetection.service.js');
       await logInterventionAction(sessionId, 'external_api_called', {
-        event: 'moderation_terminated_session',
+        event: cause === 'content_filter' ? 'moderation_terminated_session' : 'session_expired_in_crisis',
         vendor: 'openai',
         crisisFlaggedAtTermination: flagged,
       });
     } catch (err) {
-      console.error(`[Live] Failed to record moderation termination for ${short}...:`, err);
+      console.error(`[Live] Failed to record ${cause} termination for ${short}...:`, err);
     }
 
     if (global.io) {
@@ -682,6 +691,7 @@ export class SidebandManager {
         'session:moderation-terminated',
         {
           sessionId,
+          cause,
           crisisFlagged: flagged,
           timestamp: new Date(),
         },
@@ -913,7 +923,13 @@ export class SidebandManager {
         // crisis resources instead of a generic end screen (see the client), the
         // study team is told, and the frequency is measurable.
         if (event.reason === 'content') {
-          await this.handleModerationTermination(sessionId);
+          await this.handleModerationTermination(sessionId, 'content_filter');
+        } else if (event.reason === 'expired') {
+          // The vendor's 60-minute ceiling (ai-therapist-281). For a session
+          // in crisis that is the same harm as the filter — the conversation
+          // vanishes — and gets the same recovery. Ordinary sessions end as
+          // before.
+          await this.handleModerationTermination(sessionId, 'expired');
         }
         break;
       }

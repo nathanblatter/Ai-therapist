@@ -10,11 +10,19 @@ const {
   sendCrisisAlertMock,
   isSandboxAccountSessionMock,
   sidebandManagerMock,
+  liftLimitForCrisisMock,
 } = vi.hoisted(() => ({
   poolQueryMock: vi.fn(),
   logInterventionActionMock: vi.fn(),
   sendCrisisAlertMock: vi.fn(),
   isSandboxAccountSessionMock: vi.fn(),
+  liftLimitForCrisisMock: vi.fn(
+    (): { lifted: boolean; previousLimitMinutes: number | null; ceilingMinutes: number } => ({
+      lifted: false,
+      previousLimitMinutes: null,
+      ceilingMinutes: 60,
+    }),
+  ),
   sidebandManagerMock: {
     // maybeSteerSession gates on isConnected(), not getActiveConnections():
     // map membership reports true while the socket is still CONNECTING or
@@ -32,6 +40,11 @@ vi.mock('../config/db.js', () => ({ pool: { query: poolQueryMock } }));
 vi.mock('./crisisDetection.service.js', () => ({ logInterventionAction: logInterventionActionMock }));
 vi.mock('./crisisAlert.service.js', () => ({ sendCrisisAlert: sendCrisisAlertMock }));
 vi.mock('./sidebandManager.service.js', () => ({ sidebandManager: sidebandManagerMock }));
+vi.mock('../utils/sessionAutoTerminate.js', () => ({ liftLimitForCrisis: liftLimitForCrisisMock }));
+vi.mock('../utils/sessionHelpers.js', () => ({
+  getSystemConfig: vi.fn(async () => ({})),
+  resolveVendorCeilingMinutes: vi.fn(async () => 60),
+}));
 vi.mock('../db/index.js', () => ({
   isSandboxAccountSession: isSandboxAccountSessionMock,
   // Transitive imports of utils/adminBroadcast.js:
@@ -85,6 +98,27 @@ beforeEach(() => {
   logInterventionActionMock.mockResolvedValue(undefined);
   sendCrisisAlertMock.mockResolvedValue(undefined);
   isSandboxAccountSessionMock.mockResolvedValue(false);
+});
+
+describe('executeGraduatedResponse — session timer (ai-therapist-281)', () => {
+  it('lifts the duration limit to the vendor ceiling and logs it when something was lifted', async () => {
+    liftLimitForCrisisMock.mockReturnValueOnce({ lifted: true, previousLimitMinutes: 15, ceilingMinutes: 60 });
+    await executeGraduatedResponse('sess-t', 'high', 95);
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert'); // let the fire-and-forget page land here, not in the next test
+    expect(liftLimitForCrisisMock).toHaveBeenCalledWith('sess-t', 60);
+    expect(logInterventionActionMock).toHaveBeenCalledWith('sess-t', 'crisis_timer_extended', {
+      riskScore: 95,
+      previousLimitMinutes: 15,
+      ceilingMinutes: 60,
+    });
+  });
+
+  it('logs nothing when there was no limit to lift', async () => {
+    await executeGraduatedResponse('sess-u', 'high', 95);
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    expect(liftLimitForCrisisMock).toHaveBeenCalledWith('sess-u', 60);
+    expect(logInterventionActionMock).not.toHaveBeenCalledWith('sess-u', 'crisis_timer_extended', expect.anything());
+  });
 });
 
 describe('executeGraduatedResponse — high-risk paging', () => {
