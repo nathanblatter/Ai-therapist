@@ -20,6 +20,7 @@ const dbMocks = vi.hoisted(() => ({
   setUserMemoryEnabled: vi.fn(),
   setUserEmail: vi.fn(),
   findUserByEmail: vi.fn(),
+  listEmailsWithPrefix: vi.fn(),
 }));
 vi.mock('../../db/index.js', () => dbMocks);
 vi.mock('../../utils/sessionHelpers.js', () => ({
@@ -111,6 +112,7 @@ describe('PUT /api/users/:userid role validation', () => {
 describe('staff email (ai-therapist-283 phase 1)', () => {
   beforeEach(() => {
     dbMocks.findUserByEmail.mockResolvedValue(null);
+    dbMocks.listEmailsWithPrefix.mockResolvedValue([]);
     dbMocks.setUserEmail.mockImplementation(async (userid: number, email: string | null) => ({
       userid,
       username: 'ra',
@@ -140,6 +142,29 @@ describe('staff email (ai-therapist-283 phase 1)', () => {
     const prov = await request(appAs('researcher')).post('/api/users/8/provision-email');
     expect(prov.status).toBe(403);
     expect(dbMocks.setUserEmail).not.toHaveBeenCalled();
+  });
+
+  it('a rejected email leaves the rest of the edit unapplied', async () => {
+    dbMocks.getUserById.mockResolvedValue({ userid: 5, username: 'ra', role: 'researcher' });
+    dbMocks.findUserByEmail.mockResolvedValue({ userid: 9, username: 'other', role: 'therapist' });
+    const res = await request(appAs('researcher'))
+      .put('/api/users/5')
+      .send({ username: 'ra', role: 'therapist', email: 'taken@byuisresearch.com' });
+    expect(res.status).toBe(409);
+    expect(dbMocks.updateUser).not.toHaveBeenCalled();
+    expect(dbMocks.setUserEmail).not.toHaveBeenCalled();
+  });
+
+  it('demoting a staff account to participant clears its address', async () => {
+    dbMocks.getUserById.mockResolvedValue({
+      userid: 5,
+      username: 'cw',
+      role: 'caseworker',
+      email: 'cw@byuisresearch.com',
+    });
+    const res = await request(appAs('researcher')).put('/api/users/5').send({ username: 'cw', role: 'participant' });
+    expect(res.status).toBe(200);
+    expect(dbMocks.setUserEmail).toHaveBeenCalledWith('5', null);
   });
 
   it('provision-email assigns <slug>@byuisresearch.com', async () => {

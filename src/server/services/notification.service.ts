@@ -32,6 +32,7 @@ import { workItemSuppressesEmail, recipientSuppressesEmail, emailSuppressedWorkI
 import { therapistRoom, caseworkerRoom } from '../utils/adminBroadcast.js';
 import { immediateEmail, digestEmail } from './emailTemplates.js';
 import { sendEmail } from './emailer.service.js';
+import { isEmailShaped } from '../utils/emailShape.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('notification');
@@ -62,8 +63,6 @@ export function emailPolicyFor(kind: string, severity: string): EmailPolicy {
   }
 }
 
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 /**
  * Fallback recipient address: an email-shaped username. Kept for accounts
  * created before users.email existed (119); anything else means "no email
@@ -71,7 +70,7 @@ const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  */
 export function emailAddressForUsername(username: string | undefined | null): string | null {
   if (!username) return null;
-  return EMAIL_SHAPE.test(username) ? username.trim() : null;
+  return isEmailShaped(username.trim()) ? username.trim() : null;
 }
 
 /** What notificationAddressFor needs to know about a recipient. */
@@ -84,7 +83,7 @@ export interface AddressableUser {
 export function candidateAddressFor(user: AddressableUser | string | null | undefined): string | null {
   if (typeof user === 'string' || user == null) return emailAddressForUsername(user ?? null);
   const own = (user.email ?? '').trim();
-  if (own && EMAIL_SHAPE.test(own)) return own;
+  if (isEmailShaped(own)) return own;
   return emailAddressForUsername(user.username);
 }
 

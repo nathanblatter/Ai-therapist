@@ -17,6 +17,7 @@ import {
   type UserRow,
 } from '../db/index.js';
 import * as squawk from './squawk.service.js';
+import { clearEmailIfIneligible } from './researcherEmail.service.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('accounts');
@@ -75,6 +76,9 @@ export async function updateAccount(userid: number | string, updates: AccountUpd
     throw new Error('Username cannot be changed');
   }
   const updated = await updateUser(userid, updates as Record<string, string>);
+  // Leaving the staff roles drops the account's email (participants are
+  // anonymous; ai-therapist-283).
+  if (updates.role !== undefined) await clearEmailIfIneligible(userid, updates.role);
   if (!linked) return updated;
   try {
     if (updates.password !== undefined) await squawk.setPassword(linked, updates.password);

@@ -5,7 +5,12 @@ import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { orgIdFor } from '../../middleware/org.js';
 import { passwordPolicyError } from '../../utils/passwordPolicy.js';
 import { registerAccount, updateAccount, removeAccount } from '../../services/accounts.service.js';
-import { setAccountEmail, provisionStudyAddress, EmailAccountError } from '../../services/researcherEmail.service.js';
+import {
+  setAccountEmail,
+  validateAccountEmail,
+  provisionStudyAddress,
+  EmailAccountError,
+} from '../../services/researcherEmail.service.js';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import {
   getAllUsers,
@@ -238,9 +243,14 @@ export default function usersRoutes(): Router {
         return res.status(400).json({ error: 'No fields to update' });
       }
 
+      // The email is checked (eligibility against the role this edit will
+      // leave, shape, uniqueness) BEFORE anything is written, so a rejected
+      // address never leaves a half-applied edit behind.
+      if (email !== undefined) await validateAccountEmail(userid, email, updates.role);
+
       let updatedUser = Object.keys(updates).length > 0 ? await updateAccount(userid, updates) : null;
       if (email !== undefined) {
-        const withEmail = await setAccountEmail(userid, email === null ? null : String(email));
+        const withEmail = await setAccountEmail(userid, email);
         updatedUser = updatedUser ? { ...updatedUser, email: withEmail.email } : withEmail;
         log.info(
           { userid, by: requestingUserId, email: withEmail.email ?? null },
@@ -248,7 +258,8 @@ export default function usersRoutes(): Router {
         );
       }
       if (!updatedUser) {
-        return res.status(500).json({ error: 'Failed to update user' });
+        // Unreachable (the empty-update guard above), kept for the type.
+        return res.status(400).json({ error: 'No fields to update' });
       }
 
       if (isSelf) {
@@ -263,6 +274,9 @@ export default function usersRoutes(): Router {
       }
       if (error instanceof Error && error.message === 'Username already exists') {
         return res.status(409).json({ error: 'Username already exists' });
+      }
+      if (error instanceof Error && error.message === 'Email already in use') {
+        return res.status(409).json({ error: 'Email already in use' });
       }
       if (error instanceof Error && error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });

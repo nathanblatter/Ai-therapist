@@ -11,8 +11,9 @@
 // prefers users.email over the old email-shaped-username heuristic, behind the
 // same recipient gate) and, in later phases, composing from and reading mail
 // at that address.
-import { getUserById, setUserEmail, findUserByEmail, type UserRow } from '../db/index.js';
+import { getUserById, setUserEmail, findUserByEmail, listEmailsWithPrefix, type UserRow } from '../db/index.js';
 import { createLogger } from '../utils/logger.js';
+import { isEmailShaped } from '../utils/emailShape.js';
 
 const log = createLogger('researcherEmail');
 
@@ -35,48 +36,77 @@ export class EmailAccountError extends Error {
   }
 }
 
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export function isValidEmailAddress(value: string): boolean {
-  return value.length <= 254 && EMAIL_SHAPE.test(value);
+  return isEmailShaped(value);
 }
 
 /**
  * The local part derived from a username: lower-cased, an email-shaped
  * username reduced to its local part, anything outside [a-z0-9.-] collapsed
- * to a single hyphen, trimmed of leading/trailing dots and hyphens, capped at
- * 40 characters. Never empty.
+ * to a single hyphen, any run of dots/hyphens collapsed to one hyphen (a
+ * dot-atom may not contain consecutive dots), trimmed of leading/trailing
+ * dots and hyphens, capped at 40 characters. Never empty.
  */
 export function studyAddressSlug(username: string): string {
   const base = username.includes('@') ? username.slice(0, username.indexOf('@')) : username;
   const slug = base
     .toLowerCase()
     .replace(/[^a-z0-9.-]+/g, '-')
-    .replace(/-{2,}/g, '-')
+    .replace(/[.-]{2,}/g, '-')
     .replace(/^[.-]+|[.-]+$/g, '')
     .slice(0, 40)
     .replace(/[.-]+$/g, '');
   return slug || 'user';
 }
 
+const INELIGIBLE_MESSAGE = 'Only researcher, therapist and caseworker accounts may hold an email address';
+
 async function loadEligible(userid: number | string): Promise<UserRow> {
   const user = await getUserById(userid);
   if (!user) throw new EmailAccountError('User not found', 404);
-  if (!EMAIL_ELIGIBLE_ROLES.has(user.role)) {
-    throw new EmailAccountError('Participants are anonymous and cannot have an email address', 403);
-  }
+  if (!EMAIL_ELIGIBLE_ROLES.has(user.role)) throw new EmailAccountError(INELIGIBLE_MESSAGE, 403);
   return user;
 }
 
-/** Set (or clear, with null) a staff account's address. */
-export async function setAccountEmail(userid: number | string, email: string | null): Promise<UserRow> {
-  const user = await loadEligible(userid);
-  if (email === null) return setUserEmail(user.userid, null);
+/**
+ * Everything setAccountEmail checks, without writing: the normalized address
+ * (or null to clear). Lets a caller that also changes other fields validate
+ * the email BEFORE persisting anything, so a rejected address never leaves a
+ * half-applied edit behind. `roleAfter` is the role the account will have
+ * once the caller's own update lands.
+ */
+export async function validateAccountEmail(
+  userid: number | string,
+  email: string | null,
+  roleAfter?: string,
+): Promise<{ user: UserRow; email: string | null }> {
+  const user = await getUserById(userid);
+  if (!user) throw new EmailAccountError('User not found', 404);
+  if (email === null) return { user, email: null };
+  if (!EMAIL_ELIGIBLE_ROLES.has(roleAfter ?? user.role)) throw new EmailAccountError(INELIGIBLE_MESSAGE, 403);
   const normalized = email.trim().toLowerCase();
   if (!isValidEmailAddress(normalized)) throw new EmailAccountError('Invalid email address', 400);
   const holder = await findUserByEmail(normalized);
   if (holder && holder.userid !== user.userid) throw new EmailAccountError('Email already in use', 409);
-  return setUserEmail(user.userid, normalized);
+  return { user, email: normalized };
+}
+
+/** Set (or clear, with null) a staff account's address. */
+export async function setAccountEmail(userid: number | string, email: string | null): Promise<UserRow> {
+  const { user, email: normalized } = await validateAccountEmail(userid, email);
+  try {
+    return await setUserEmail(user.userid, normalized);
+  } catch (err) {
+    // Lost a uniqueness race after the pre-check: still an ordinary conflict.
+    if (err instanceof Error && err.message === 'Email already in use') throw new EmailAccountError(err.message, 409);
+    throw err;
+  }
+}
+
+/** An account leaving the staff roles loses its address (anonymity invariant). */
+export async function clearEmailIfIneligible(userid: number | string, role: string): Promise<void> {
+  if (EMAIL_ELIGIBLE_ROLES.has(role)) return;
+  await setUserEmail(userid, null);
 }
 
 /**
@@ -91,16 +121,18 @@ export async function provisionStudyAddress(userid: number | string): Promise<{ 
   if (current.endsWith(`@${domain}`)) return { user, address: current };
 
   const slug = studyAddressSlug(user.username);
-  for (let n = 1; n <= 20; n++) {
-    const candidate = `${n === 1 ? slug : `${slug}-${n}`}@${domain}`;
-    const holder = await findUserByEmail(candidate);
-    if (holder && holder.userid !== user.userid) continue;
+  // One query for every address already on this slug, then the first free
+  // suffix; a lost race on the write (someone provisioned the same slug in
+  // between) just re-reads and tries again.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const taken = new Set((await listEmailsWithPrefix(slug, domain)).map((e) => e.toLowerCase()));
+    let candidate = `${slug}@${domain}`;
+    for (let n = 2; taken.has(candidate); n++) candidate = `${slug}-${n}@${domain}`;
     try {
       const updated = await setUserEmail(user.userid, candidate);
       log.info({ userid: user.userid, address: candidate }, 'study email address provisioned');
       return { user: updated, address: candidate };
     } catch (err) {
-      // Lost a race to the same address; try the next suffix.
       if (err instanceof Error && err.message === 'Email already in use') continue;
       throw err;
     }

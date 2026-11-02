@@ -1,20 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { getUserByIdMock, setUserEmailMock, findUserByEmailMock } = vi.hoisted(() => ({
+const { getUserByIdMock, setUserEmailMock, findUserByEmailMock, listEmailsWithPrefixMock } = vi.hoisted(() => ({
   getUserByIdMock: vi.fn(),
   setUserEmailMock: vi.fn(),
   findUserByEmailMock: vi.fn(),
+  listEmailsWithPrefixMock: vi.fn(),
 }));
 vi.mock('../db/index.js', () => ({
   getUserById: getUserByIdMock,
   setUserEmail: setUserEmailMock,
   findUserByEmail: findUserByEmailMock,
+  listEmailsWithPrefix: listEmailsWithPrefixMock,
 }));
 
 import {
   studyAddressSlug,
   isValidEmailAddress,
   setAccountEmail,
+  validateAccountEmail,
+  clearEmailIfIneligible,
   provisionStudyAddress,
   EmailAccountError,
 } from './researcherEmail.service.js';
@@ -22,6 +26,7 @@ import {
 beforeEach(() => {
   getUserByIdMock.mockReset();
   findUserByEmailMock.mockReset().mockResolvedValue(null);
+  listEmailsWithPrefixMock.mockReset().mockResolvedValue([]);
   setUserEmailMock.mockReset().mockImplementation(async (userid: number, email: string | null) => ({
     userid,
     username: 'x',
@@ -36,6 +41,10 @@ describe('studyAddressSlug', () => {
     expect(studyAddressSlug('Nathan Blatter')).toBe('nathan-blatter');
     expect(studyAddressSlug('j.gaskin')).toBe('j.gaskin');
     expect(studyAddressSlug('ra_2026!!')).toBe('ra-2026');
+  });
+  it('never leaves consecutive dots or dot/hyphen runs (dot-atom rule)', () => {
+    expect(studyAddressSlug('j..gaskin')).toBe('j-gaskin');
+    expect(studyAddressSlug('ra_.x')).toBe('ra-x');
   });
   it('reduces an email-shaped username to its local part', () => {
     expect(studyAddressSlug('cw@example.com')).toBe('cw');
@@ -67,10 +76,26 @@ describe('setAccountEmail', () => {
     expect(setUserEmailMock).toHaveBeenCalledWith(3, 'ra@byuisresearch.com');
     expect(row.email).toBe('ra@byuisresearch.com');
   });
-  it('rejects an address held by another account', async () => {
+  it('rejects an address held by another account, including a lost write race', async () => {
     getUserByIdMock.mockResolvedValue({ userid: 3, username: 'ra', role: 'researcher' });
     findUserByEmailMock.mockResolvedValue({ userid: 9, username: 'other', role: 'therapist' });
     await expect(setAccountEmail(3, 'ra@byuisresearch.com')).rejects.toMatchObject({ status: 409 });
+    findUserByEmailMock.mockResolvedValue(null);
+    setUserEmailMock.mockRejectedValueOnce(new Error('Email already in use'));
+    await expect(setAccountEmail(3, 'ra@byuisresearch.com')).rejects.toMatchObject({ status: 409 });
+  });
+  it('validateAccountEmail judges eligibility against the role the edit will leave', async () => {
+    getUserByIdMock.mockResolvedValue({ userid: 3, username: 'cw', role: 'caseworker' });
+    await expect(validateAccountEmail(3, 'cw@byuisresearch.com', 'participant')).rejects.toMatchObject({ status: 403 });
+    expect((await validateAccountEmail(3, 'CW@byuisresearch.com', 'therapist')).email).toBe('cw@byuisresearch.com');
+    expect((await validateAccountEmail(3, null, 'participant')).email).toBeNull();
+  });
+  it('clearEmailIfIneligible drops the address only when the new role is not staff', async () => {
+    await clearEmailIfIneligible(3, 'participant');
+    expect(setUserEmailMock).toHaveBeenCalledWith(3, null);
+    setUserEmailMock.mockClear();
+    await clearEmailIfIneligible(3, 'therapist');
+    expect(setUserEmailMock).not.toHaveBeenCalled();
   });
   it('clears with null and 404s on a missing account', async () => {
     getUserByIdMock.mockResolvedValue({ userid: 3, username: 'ra', role: 'therapist', email: 'x@y.com' });
@@ -99,11 +124,24 @@ describe('provisionStudyAddress', () => {
     expect(address).toBe('jane@byuisresearch.com');
     expect(setUserEmailMock).not.toHaveBeenCalled();
   });
-  it('steps to the next suffix when the slug is taken', async () => {
+  it('steps to the first free suffix from one lookup', async () => {
     getUserByIdMock.mockResolvedValue({ userid: 3, username: 'jane', role: 'therapist' });
-    findUserByEmailMock.mockImplementation(async (addr: string) =>
-      addr === 'jane@byuisresearch.com' ? { userid: 1, username: 'jane1', role: 'researcher' } : null,
-    );
+    listEmailsWithPrefixMock.mockResolvedValue(['jane@byuisresearch.com', 'Jane-2@byuisresearch.com']);
+    const { address } = await provisionStudyAddress(3);
+    expect(address).toBe('jane-3@byuisresearch.com');
+    expect(listEmailsWithPrefixMock).toHaveBeenCalledWith('jane', 'byuisresearch.com');
+  });
+  it('re-reads after losing a write race', async () => {
+    getUserByIdMock.mockResolvedValue({ userid: 3, username: 'jane', role: 'therapist' });
+    listEmailsWithPrefixMock.mockResolvedValueOnce([]).mockResolvedValueOnce(['jane@byuisresearch.com']);
+    setUserEmailMock
+      .mockRejectedValueOnce(new Error('Email already in use'))
+      .mockImplementationOnce(async (userid: number, email: string | null) => ({
+        userid,
+        username: 'jane',
+        role: 'therapist',
+        email,
+      }));
     const { address } = await provisionStudyAddress(3);
     expect(address).toBe('jane-2@byuisresearch.com');
   });

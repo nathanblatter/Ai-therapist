@@ -318,7 +318,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                   value={editData.email ?? ''}
                   onChange={(e) => setEditData((prev) => ({ ...prev, email: e.target.value }))}
                   aria-label="Email address"
-                  placeholder="name@byuisresearch.com"
+                  placeholder="name@study-domain"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-royal min-h-[44px]"
                 />
               </div>
@@ -873,7 +873,7 @@ export default function UserManagement({ onViewUser }: UserManagementProps = {})
                         className="text-royal hover:underline text-xs font-medium"
                         aria-label={`Provision a study email address for ${user.username}`}
                       >
-                        Provision @byuisresearch.com
+                        Provision study address
                       </button>
                     )
                   ) : (

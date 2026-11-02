@@ -443,6 +443,15 @@ export async function setUserEmail(userid: number | string, email: string | null
   }
 }
 
+/** Every stored address that is <slug>@domain or <slug>-N@domain (case-insensitive). */
+export async function listEmailsWithPrefix(slug: string, domain: string): Promise<string[]> {
+  const result = await pool.query<{ email: string }>(
+    `SELECT email FROM users WHERE email IS NOT NULL AND lower(email) ~ $1`,
+    [`^${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(-[0-9]+)?@${domain.replace(/[.]/g, '\\.')}$`],
+  );
+  return result.rows.map((r) => r.email);
+}
+
 /** The account holding an email address (case-insensitive), or null. */
 export async function findUserByEmail(email: string): Promise<UserRow | null> {
   const result = await pool.query<UserRow>(

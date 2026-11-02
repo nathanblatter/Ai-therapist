@@ -10,4 +10,5 @@ SET config_value = jsonb_set(
     ),
     updated_at = CURRENT_TIMESTAMP,
     updated_by = 'rollback 119'
-WHERE config_key = 'notification_email_recipients';
+WHERE config_key = 'notification_email_recipients'
+  AND jsonb_typeof(config_value->'allowed_domains') = 'array';
