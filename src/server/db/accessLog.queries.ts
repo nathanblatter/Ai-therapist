@@ -17,7 +17,11 @@ export type DataAccessAction =
   /** Opening a filled worksheet instance in the review queue (ai-therapist-89):
    *  the participant's answers are shown to the reviewer. The queue list
    *  (titles only) is NOT logged. */
-  | 'worksheet_review';
+  | 'worksheet_review'
+  /** Researcher semantic search over redacted transcripts (ai-therapist-177):
+   *  one row per session that had messages returned, carrying the query text
+   *  and the returned message ids; one session-less row when nothing matched. */
+  | 'semantic_search';
 
 export interface DataAccessLogInput {
   /** userid of the account performing the access (null if unknown). */
@@ -75,6 +79,7 @@ export const DATA_ACCESS_ACTIONS: readonly DataAccessAction[] = [
   'dataset_export',
   'audit_log_view',
   'worksheet_review',
+  'semantic_search',
 ] as const;
 
 export function isDataAccessAction(value: unknown): value is DataAccessAction {
