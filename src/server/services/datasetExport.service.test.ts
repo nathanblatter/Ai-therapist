@@ -87,6 +87,25 @@ describe('codebook / CSV registry (drift guard)', () => {
       expect(sectionColumns(tBook, spec.file), spec.file).toEqual(spec.columns.map((c) => c.name));
     }
   });
+
+  // The pre-registered analysis (analysis/, ai-therapist-108) refuses an export
+  // whose files, column order or column types differ from this JSON. Changing
+  // the registry is fine, but it must be a visible, reviewed change on the
+  // analysis side too: run `python -m phase2.sync_schema` from analysis/ and
+  // check whether the analysis uses the column you touched.
+  it('matches the schema the Phase 2 analysis expects (analysis/expected_schema.json)', () => {
+    const expected = JSON.parse(
+      readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../analysis/expected_schema.json'),
+        'utf8',
+      ),
+    ) as { files: Record<string, { name: string; type: string }[]> };
+    const actual = Object.fromEntries(
+      DATASET_FILES.map((spec) => [spec.file, spec.columns.map((c) => ({ name: c.name, type: c.type }))]),
+    );
+    expect(actual).toEqual(expected.files);
+    expect(Object.keys(actual)).toEqual(Object.keys(expected.files));
+  });
 });
 
 describe('buildDataset', () => {
