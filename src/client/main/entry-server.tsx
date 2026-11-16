@@ -1,7 +1,6 @@
 import { StrictMode } from 'react';
 import { renderToString } from 'react-dom/server';
-import { StaticRouter } from 'react-router-dom/server';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { StaticRouter, Routes, Route } from 'react-router';
 import App from './components/App';
 import Login from './components/Login';
 import Profile from './components/Profile';
@@ -11,7 +10,7 @@ import ProtectedRoute from '../shared/components/ProtectedRoute';
 export function render(url: string) {
   const html = renderToString(
     <StrictMode>
-      <StaticRouter location={url} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <StaticRouter location={url}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route

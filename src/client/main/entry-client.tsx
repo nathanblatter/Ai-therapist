@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import App from './components/App';
 import Login from './components/Login';
 import Profile from './components/Profile';
@@ -16,7 +16,7 @@ installGlobalErrorReporting();
 ReactDOM.hydrateRoot(
   document.getElementById('root') as Element,
   <StrictMode>
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { Shield, Key, Lock, User } from 'react-feather';
 import { decodeAssertionOptions, encodeAssertion, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
 
