@@ -11,7 +11,7 @@ import ProtectedRoute from '../shared/components/ProtectedRoute';
 export function render(url: string) {
   const html = renderToString(
     <StrictMode>
-      <StaticRouter location={url}>
+      <StaticRouter location={url} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route
