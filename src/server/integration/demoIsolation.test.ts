@@ -5,6 +5,8 @@
 // must exclude is_demo sessions, so demo therapy activity never pollutes real
 // dashboards, analytics, or exports.
 import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { RequestListener } from 'node:http';
 import request from 'supertest';
 import bcrypt from 'bcrypt';
 import type { Express } from 'express';
@@ -20,7 +22,18 @@ vi.mock('../config/db.js', () => ({
   pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
 }));
 
-let app: Express;
+// Every request the tests send runs inside its own async context carrying a
+// sequence number, and every pool.query records the context it was issued
+// from. "Queries this request caused" is then exact: work that outlives an
+// earlier request, and app-level background work with no request at all (the
+// socket.io Postgres adapter's heartbeat was the one that made the old global
+// "zero queries between two instants" assertion flake, ai-therapist-279), is
+// never attributed to the request under test.
+const requestContext = new AsyncLocalStorage<number>();
+let requestSeq = 0;
+const queryRequestIds: (number | undefined)[] = [];
+
+let app: RequestListener;
 
 // In-memory stand-in for connect-pg-simple's "session" table so login cookies
 // survive across requests against the mocked pool. The store hands the sess
@@ -33,6 +46,7 @@ beforeAll(async () => {
   therapistPasswordHash = await bcrypt.hash('correct-horse', 10);
 
   queryMock.mockImplementation((sql: unknown, params?: unknown[]) => {
+    queryRequestIds.push(requestContext.getStore());
     const text = typeof sql === 'string' ? sql : '';
 
     // --- express-session store (connect-pg-simple, tableName user_sessions) ---
@@ -94,16 +108,27 @@ beforeAll(async () => {
     return Promise.resolve({ rows: [], rowCount: 0 });
   });
 
-  app = (await import('../index.js')).app as Express;
+  const serverApp = (await import('../index.js')).app as Express;
+  app = (req, res) => requestContext.run(++requestSeq, () => serverApp(req, res));
   // Importing the server graph vite-transforms hundreds of modules; on a loaded
   // machine (or cold cache) that legitimately exceeds the 10s default.
 }, 60_000);
 
-/** Queries issued during a window, excluding express-session bookkeeping. */
-function appQueriesSince(callIndex: number): string[] {
+/** Marks the point after which requests' queries are collected. */
+function markQueries(): number {
+  return requestSeq;
+}
+
+/**
+ * Queries issued on behalf of requests sent after `mark`, excluding
+ * express-session bookkeeping. Queries with no request context (background
+ * timers) or from a request sent before the mark are not counted.
+ */
+function appQueriesSince(mark: number): string[] {
   return queryMock.mock.calls
-    .slice(callIndex)
-    .map((c) => (typeof c[0] === 'string' ? c[0] : ''))
+    .map((c, i) => ({ text: typeof c[0] === 'string' ? c[0] : '', requestId: queryRequestIds[i] }))
+    .filter((q) => q.requestId !== undefined && q.requestId > mark)
+    .map((q) => q.text)
     .filter((t) => !t.includes('"user_sessions"'));
 }
 
@@ -136,7 +161,7 @@ describe('magic-link provisioning', () => {
 describe('wall 1: demo accounts only ever see synthetic admin data', () => {
   it('GET /admin/api/sessions/active returns fixtures without touching therapy_sessions', async () => {
     const agent = await demoAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     const res = await agent.get('/admin/api/sessions/active');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.sessions)).toBe(true);
@@ -145,7 +170,7 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
 
   it('GET /admin/api/analytics returns fixtures without touching the DB', async () => {
     const agent = await demoAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     const res = await agent.get('/admin/api/analytics');
     expect(res.status).toBe(200);
     expect(appQueriesSince(mark)).toEqual([]);
@@ -155,7 +180,7 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
     // The Dashboard tab dereferences arrays from these payloads unguarded; the
     // catch-all's `{}` white-screened the whole demo admin portal.
     const agent = await demoAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
 
     const tools = await agent.get('/admin/api/analytics/tools');
     expect(tools.status).toBe(200);
@@ -186,7 +211,7 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
 
   it('GET /api/users returns a synthetic roster, not real users', async () => {
     const agent = await demoAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     const res = await agent.get('/api/users');
     expect(res.status).toBe(200);
     expect(res.body.users.map((u: { username: string }) => u.username)).toContain('dr_demo');
@@ -195,7 +220,7 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
 
   it('admin API writes are swallowed: acknowledged but never persisted', async () => {
     const agent = await demoAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     const res = await agent.post('/admin/api/config').send({ anything: true });
     expect(res.status).toBe(200);
     expect(res.body.demo).toBe(true);
@@ -208,7 +233,7 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
     // PUT /api/users/123/ or /API/users/123 would bypass the demo wall and
     // reach the real handler (demo self-edits would persist).
     const agent = await demoAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
 
     const trailingSlash = await agent.put('/api/users/4242/').send({ username: 'evil' });
     expect(trailingSlash.status).toBe(200);
@@ -235,23 +260,17 @@ describe('wall 1: demo accounts only ever see synthetic admin data', () => {
 
   it('unmatched admin GETs never fall through to a real handler', async () => {
     const agent = await demoAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     const res = await agent.get('/admin/api/sideband/connections');
     expect(res.status).toBe(200);
-    // The app boots its background schedulers (embedding sweep, abandoned
-    // session sweeper, Qualtrics sync, ...), which may issue a query at any
-    // instant, so "zero queries globally" flaked under parallel load
-    // (ai-therapist-279). What the wall guarantees is that the REAL handler
-    // never ran: it would read therapy_sessions / sideband state.
-    const handlerTables = /therapy_sessions|session_configurations|sideband/i;
-    expect(appQueriesSince(mark).filter((q) => handlerTables.test(q))).toEqual([]);
+    expect(appQueriesSince(mark)).toEqual([]);
   });
 });
 
 describe('wall 2: real admin queries exclude demo sessions', () => {
   it('therapists pass through the demo router to the real handler', async () => {
     const agent = await therapistAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     const res = await agent.get('/admin/api/sessions/active');
     expect(res.status).toBe(200);
     const queries = appQueriesSince(mark);
@@ -260,7 +279,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
 
   it('the active-sessions query filters out is_demo sessions', async () => {
     const agent = await therapistAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     await agent.get('/admin/api/sessions/active');
     const q = appQueriesSince(mark).find((t) => t.includes('therapy_sessions'));
     expect(q).toContain('is_demo IS NOT TRUE');
@@ -268,7 +287,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
 
   it('the session-list and count queries filter out is_demo sessions', async () => {
     const agent = await therapistAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     await agent.get('/admin/api/sessions');
     const listQueries = appQueriesSince(mark).filter((t) => t.includes('therapy_sessions'));
     expect(listQueries.length).toBeGreaterThan(0);
@@ -279,7 +298,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
 
   it('the analytics query filters out is_demo sessions', async () => {
     const agent = await therapistAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     await agent.get('/admin/api/analytics');
     const q = appQueriesSince(mark).find((t) => t.includes('therapy_sessions'));
     expect(q).toContain('is_demo IS NOT TRUE');
@@ -288,7 +307,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
   it('every export variant filters out is_demo sessions', async () => {
     const agent = await therapistAgent();
     for (const type of ['metadata', 'anonymized', 'aggregated', 'full']) {
-      const mark = queryMock.mock.calls.length;
+      const mark = markQueries();
       const res = await agent.get(`/admin/api/export?type=${type}`);
       expect(res.status).toBeLessThan(500);
       const q = appQueriesSince(mark).find((t) => t.includes('therapy_sessions'));
@@ -298,7 +317,7 @@ describe('wall 2: real admin queries exclude demo sessions', () => {
 
   it('crisis dashboard queries filter out is_demo sessions', async () => {
     const agent = await therapistAgent();
-    const mark = queryMock.mock.calls.length;
+    const mark = markQueries();
     await agent.get('/admin/api/crisis/all');
     const joins = appQueriesSince(mark).filter((t) => t.includes('therapy_sessions'));
     expect(joins.length).toBeGreaterThan(0);
