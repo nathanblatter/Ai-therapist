@@ -91,7 +91,7 @@ vi.mock('../utils/sessionHelpers.js', () => ({
 }));
 
 import WebSocketCtor from 'ws';
-import { sidebandManager, TranscriptAssembler } from './sidebandManager.service.js';
+import { sidebandManager, TranscriptAssembler, LiveDelegationUnsupportedError } from './sidebandManager.service.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Internal = any;
@@ -1056,8 +1056,27 @@ describe('reattachActiveSessions', () => {
     expect(connectSpy).toHaveBeenCalledWith('s-orphan', 'live_1', 'sk-standard', {
       model: 'gpt-live-1',
       backendModel: 'gpt-5.6-terra',
+      delegationMode: 'responses',
     });
     connectSpy.mockRestore();
+  });
+
+  it('re-attaches a recovery session (recovery_continuation marker) in client delegation mode', async () => {
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('openai_live_session_id')) {
+        return Promise.resolve({
+          rows: [
+            { session_id: 's-recovered', openai_live_session_id: 'live_r', ai_model: 'gpt-live-1', recovery: true },
+          ],
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    await sidebandManager.reattachActiveSessions('sk-standard');
+
+    expect(queryMock.mock.calls[0][0]).toContain('recovery_continuation');
+    expect(sidebandManager.getDelegationMode('s-recovered')).toBe('client');
   });
 
   it('continues past an individual re-attach failure', async () => {
@@ -1171,6 +1190,110 @@ describe('admin control surface', () => {
     await sidebandManager.unmuteInput(sessionId);
 
     expect(sentEvents(ws).map((e) => e.type)).toEqual(['session.input_audio.mute', 'session.input_audio.unmute']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Crisis recovery sessions: client delegation, no backend, no tools
+// (ai-therapist-282)
+// ---------------------------------------------------------------------------
+
+describe('recovery session (client delegation)', () => {
+  async function attachRecovery(sessionId: string): Promise<FakeSocket> {
+    const ws = await sidebandManager.connect(sessionId, `live_${sessionId}`, 'sk-test', {
+      model: MODEL,
+      backendModel: BACKEND_MODEL,
+      delegationMode: 'client',
+    });
+    return ws as unknown as FakeSocket;
+  }
+
+  it('reports its delegation mode; ordinary sessions default to responses', async () => {
+    await attachRecovery('s-rec-mode');
+    await attach('s-ordinary-mode');
+
+    expect(sidebandManager.getDelegationMode('s-rec-mode')).toBe('client');
+    expect(sidebandManager.getDelegationMode('s-ordinary-mode')).toBe('responses');
+    expect(sidebandManager.getDelegationMode('s-unknown')).toBeNull();
+  });
+
+  it('triggerTool refuses with a typed error and sends nothing', async () => {
+    const sessionId = 's-rec-trigger';
+    const ws = await attachRecovery(sessionId);
+
+    const err = await sidebandManager.triggerTool(sessionId, 'end_session').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(LiveDelegationUnsupportedError);
+    expect((err as LiveDelegationUnsupportedError).code).toBe('live_delegation_unsupported');
+    expect((err as Error).message).toMatch(/recovery session/i);
+    expect((err as Error).message).toMatch(/End Session/);
+    // No session.update the Live API would reject, and no nudge telling a
+    // tool-less model to call a tool.
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(sb.sessions.get(sessionId).toolChoiceReset).toBeNull();
+  });
+
+  it('updateSession refuses with the same typed error instead of sending a responses update', async () => {
+    const sessionId = 's-rec-update';
+    const ws = await attachRecovery(sessionId);
+
+    await expect(sidebandManager.updateSession(sessionId, { instructions: 'x' })).rejects.toBeInstanceOf(
+      LiveDelegationUnsupportedError,
+    );
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps every instruction-channel safety steer working (crisis steering, wind-down, interrupt)', async () => {
+    const sessionId = 's-rec-steer';
+    const ws = await attachRecovery(sessionId);
+
+    expect(await sidebandManager.tryInject(sessionId, 'system', 'crisis steer', true)).toBe(true);
+    await sidebandManager.injectMessage(sessionId, 'system', 'wind down now', false);
+    await sidebandManager.interrupt(sessionId);
+
+    const events = sentEvents(ws);
+    expect(events.map((e) => e.type)).toEqual([
+      'session.instructions.append',
+      'session.instructions.append',
+      'session.instructions.append',
+    ]);
+    expect(events[0].content).toBe('crisis steer');
+    expect(events[1].content).toBe('wind down now');
+  });
+
+  it('the plain end path (disconnect) closes a recovery session without any delegation update', async () => {
+    const sessionId = 's-rec-end';
+    const ws = await attachRecovery(sessionId);
+
+    sb.sessions.get(sessionId).finalized = true;
+    await sidebandManager.disconnect(sessionId, { graceMs: 0 });
+
+    expect(sentEvents(ws).some((e) => e.type === 'session.update')).toBe(false);
+    expect(ws.close).toHaveBeenCalledWith(1000, 'Session ended');
+    expect(sb.sessions.has(sessionId)).toBe(false);
+    expect(sb.endedSessions.has(sessionId)).toBe(true);
+  });
+
+  it('a reconnect keeps the session client-delegated', async () => {
+    const sessionId = 's-rec-reconnect';
+    await attachRecovery(sessionId);
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT status')) return Promise.resolve({ rows: [{ status: 'active' }] });
+      return Promise.resolve({ rows: [] });
+    });
+    const connectSpy = vi.spyOn(sb, 'connect');
+
+    await sb.handleClose(sessionId, 1006, Buffer.from('dropped'));
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(connectSpy).toHaveBeenCalledWith(
+      sessionId,
+      `live_${sessionId}`,
+      'sk-test',
+      expect.objectContaining({ delegationMode: 'client' }),
+    );
+    expect(sidebandManager.getDelegationMode(sessionId)).toBe('client');
+    connectSpy.mockRestore();
   });
 });
 

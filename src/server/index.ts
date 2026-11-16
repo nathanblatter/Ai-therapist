@@ -559,6 +559,9 @@ io.on('connection', (socket: AuthSocket) => {
         callId: session.openai_call_id,
         connectedAt: session.sideband_connected_at,
         status: session.sideband_connected ? 'connected' : 'disconnected',
+        // 'client' marks a crisis recovery session (no backend, no tools), so
+        // the monitor can disable its trigger-tool control (ai-therapist-282).
+        delegationMode: sidebandManager.getDelegationMode(String(session.session_id)),
       }));
 
       socket.emit('admin:sideband-connections', connections);
