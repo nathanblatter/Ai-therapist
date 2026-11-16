@@ -31,7 +31,9 @@ vi.mock('../config/db.js', () => ({
 // never attributed to the request under test.
 const requestContext = new AsyncLocalStorage<number>();
 let requestSeq = 0;
-const queryRequestIds: (number | undefined)[] = [];
+// Kept apart from queryMock.mock.calls so it does not depend on whether
+// the runner clears mock state between tests.
+const queryLog: { text: string; requestId: number | undefined }[] = [];
 
 let app: RequestListener;
 
@@ -46,8 +48,8 @@ beforeAll(async () => {
   therapistPasswordHash = await bcrypt.hash('correct-horse', 10);
 
   queryMock.mockImplementation((sql: unknown, params?: unknown[]) => {
-    queryRequestIds.push(requestContext.getStore());
     const text = typeof sql === 'string' ? sql : '';
+    queryLog.push({ text, requestId: requestContext.getStore() });
 
     // --- express-session store (connect-pg-simple, tableName user_sessions) ---
     if (text.includes('"user_sessions"')) {
@@ -125,8 +127,7 @@ function markQueries(): number {
  * timers) or from a request sent before the mark are not counted.
  */
 function appQueriesSince(mark: number): string[] {
-  return queryMock.mock.calls
-    .map((c, i) => ({ text: typeof c[0] === 'string' ? c[0] : '', requestId: queryRequestIds[i] }))
+  return queryLog
     .filter((q) => q.requestId !== undefined && q.requestId > mark)
     .map((q) => q.text)
     .filter((t) => !t.includes('"user_sessions"'));
