@@ -23,6 +23,7 @@
     "redteam:voice": "tsx src/redteam/cli.ts --suite voice",
     "redteam:replay": "tsx src/redteam/replay.ts",
     "counterfactual": "tsx src/database/scripts/runCounterfactual.ts",
+    "irb:prompts": "tsx src/server/irb/buildPromptsAttachment.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

@@ -50,7 +50,7 @@ const CLIENT_RENDERED_TOOLS = new Set([
 // Cap on tool-execution rounds per turn; the final round forces a text reply.
 const MAX_TOOL_ROUNDS = 5;
 
-const CHAT_MODEL = 'gpt-5.2';
+export const CHAT_MODEL = 'gpt-5.2';
 
 // Minimal structural view of the Responses API surface we use (the SDK's own
 // types are much wider; this keeps the existing cast-based call style).

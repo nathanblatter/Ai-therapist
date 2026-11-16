@@ -8,6 +8,30 @@ import { getSessionMessages, updateSessionName } from '../db/index.js';
 const apiKey = await getOpenAIKey();
 const openai = new OpenAI({ apiKey });
 
+export const SESSION_NAME_MODEL = 'gpt-4o-mini';
+
+/**
+ * System prompt for session naming. The continuation lines keep the
+ * indentation they have always had: the model receives these leading spaces.
+ */
+export const SESSION_NAME_SYSTEM_PROMPT = `You are a helpful assistant that summarizes therapy sessions.
+          Generate a brief, empathetic session title (3-5 words) that captures the main topic or concern discussed.
+          Be professional and respectful. Focus on themes, not specific details.
+
+          Examples:
+          - "Coping with work anxiety"
+          - "Family relationship stress"
+          - "Sleep improvement strategies"
+          - "Processing recent loss"
+          - "Building self-confidence"
+
+          Return ONLY the title, nothing else.`;
+
+/** User message for session naming (transcript already truncated). */
+export function buildSessionNameUserMessage(truncatedText: string): string {
+  return `Summarize this therapy session in 3-5 words:\n\n${truncatedText}`;
+}
+
 /**
  * Build the LLM prompt transcript from redacted session messages. Only
  * user/assistant turns with non-empty text contribute. Exported for testing the
@@ -93,26 +117,15 @@ export async function generateSessionName(sessionId: string): Promise<string | n
 
     // Generate session name using OpenAI
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: SESSION_NAME_MODEL,
       messages: [
         {
           role: 'system',
-          content: `You are a helpful assistant that summarizes therapy sessions.
-          Generate a brief, empathetic session title (3-5 words) that captures the main topic or concern discussed.
-          Be professional and respectful. Focus on themes, not specific details.
-
-          Examples:
-          - "Coping with work anxiety"
-          - "Family relationship stress"
-          - "Sleep improvement strategies"
-          - "Processing recent loss"
-          - "Building self-confidence"
-
-          Return ONLY the title, nothing else.`,
+          content: SESSION_NAME_SYSTEM_PROMPT,
         },
         {
           role: 'user',
-          content: `Summarize this therapy session in 3-5 words:\n\n${truncatedText}`,
+          content: buildSessionNameUserMessage(truncatedText),
         },
       ],
       max_tokens: 20,
