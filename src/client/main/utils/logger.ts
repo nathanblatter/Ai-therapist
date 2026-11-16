@@ -49,7 +49,7 @@ export async function initializeLogger() {
       // If config fetch fails, disable logging by default
       disableLogging();
     }
-  } catch (error) {
+  } catch {
     // If anything fails, disable logging by default
     disableLogging();
   }
