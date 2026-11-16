@@ -226,6 +226,10 @@ export default function App() {
   //                  final usage; a transport close on its own does not.
   const liveSessionIdRef = useRef<string | null>(null);
   const liveStartedRef = useRef(false);
+  // The server locked this session's data channel (data_channel_locked in the
+  // POST /api/live/session response): the API refuses instruction appends from
+  // the browser, so every steer is server-side and none may be attempted here.
+  const liveChannelLockedRef = useRef(false);
   const liveFinalizedRef = useRef(false);
   const liveClosedWaiterRef = useRef<(() => void) | null>(null);
   const liveStartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1182,6 +1186,7 @@ export default function App() {
     // Reset per-session Live state before anything can dispatch into it.
     liveSessionIdRef.current = null;
     liveStartedRef.current = false;
+    liveChannelLockedRef.current = false;
     liveFinalizedRef.current = false;
     liveClosedWaiterRef.current = null;
     // The previous session's teardown left this true so that its own late
@@ -1323,30 +1328,12 @@ export default function App() {
           setAssistantStream('');
           startPeriodicFlush();
 
-          if (recovery) {
-            // The recovery session must speak first — "never go silent" is the
-            // whole point of it — and GPT-Live never speaks unprompted, so it
-            // still needs the documented instructions-append nudge. What it must
-            // NOT get is any of the previous conversation: the server left that
-            // history out deliberately, because restating the disclosure that
-            // tripped the filter is the most likely way to trip it again. This
-            // nudge carries timing only, no content.
-            sendInvisiblePrompt(
-              'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.',
-              'Recovery session: speak-first nudge',
-            );
-            break;
-          }
-
-          // Opening preamble. Realtime got this as a hidden user turn plus a
-          // forced response; GPT-Live has neither, so it is delivered the
-          // documented way — a trusted instructions append that tells the model
-          // to speak first instead of waiting for the participant.
-          const initialPrompt = getInitialPromptForLanguage(sessionSettings.language);
-          sendInvisiblePrompt(
-            `${initialPrompt} Say it immediately, before the participant speaks, then pause and listen.`,
-            `Initial prompt: ${initialPrompt}`,
-          );
+          // GPT-Live never speaks unprompted, so the session needs an opening
+          // instruction: the disclosure preamble, or on a recovery session the
+          // speak-first nudge ("never go silent" is the whole point of it). The
+          // server authors and delivers it; this only tells the server the
+          // audio path is up. See requestLiveOpening.
+          void requestLiveOpening(recovery);
           break;
         }
 
@@ -1605,6 +1592,7 @@ export default function App() {
     }
 
     liveSessionIdRef.current = newSessionId;
+    liveChannelLockedRef.current = data.data_channel_locked === true;
     setSessionId(newSessionId);
     setSessionType('realtime');
     pendingStartSessionRef.current = { id: newSessionId, kind: 'realtime' };
@@ -1833,6 +1821,7 @@ export default function App() {
     voiceBackendRef.current = 'grok';
     liveSessionIdRef.current = null;
     liveStartedRef.current = false;
+    liveChannelLockedRef.current = false;
     liveFinalizedRef.current = false;
     liveClosedWaiterRef.current = null;
     isTearingDownRef.current = false;
@@ -2710,6 +2699,16 @@ export default function App() {
       console.log('[sendInvisiblePrompt] Grok session: steer is server-side; skipping client copy.');
       return;
     }
+    // Locked channel (ai-therapist-214): the API refuses an instructions append
+    // from the browser, so sending one would only produce an error event. Every
+    // caller reaches this as a FALLBACK after the server-side sideband path did
+    // not deliver, so a steer landing here is one the model will not receive.
+    // Report it rather than drop it silently.
+    if (liveChannelLockedRef.current) {
+      console.error('[sendInvisiblePrompt] Data channel is locked and the server did not deliver this steer.');
+      reportClientEvent('data_channel_error', { stage: 'steer_undelivered_locked_channel' }, liveSessionIdRef.current);
+      return;
+    }
     console.log('[sendInvisiblePrompt] Appending instructions, length:', text.length);
     sendClientEvent({
       type: 'session.instructions.append',
@@ -2729,6 +2728,55 @@ export default function App() {
         message: logMessage,
       });
     }
+  }
+
+  /**
+   * Ask the server to deliver this session's opening over the sideband
+   * (ai-therapist-214). Called once, on `session.started`: the browser still
+   * owns the TIMING, because only it knows its audio path is up, but the text
+   * is authored server-side and never passes through here.
+   *
+   * The data-channel append survives only for a session the server did not
+   * lock (no sideband, or a server from before the lock during a deploy).
+   */
+  async function requestLiveOpening(recovery: boolean) {
+    const id = liveSessionIdRef.current;
+    let delivered = false;
+    for (let attempt = 0; id && attempt < 2 && !delivered; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+      try {
+        const res = await fetch(`/api/sessions/${id}/opening`, { method: 'POST' });
+        if (res.ok) delivered = ((await res.json()) as { delivered?: boolean }).delivered === true;
+      } catch (err) {
+        console.error('[Live] Opening request failed:', err);
+      }
+    }
+    if (delivered) return;
+
+    if (liveChannelLockedRef.current) {
+      // Nothing more the browser can do: the server's own timer is the
+      // remaining backstop. Reported because a session that never speaks its
+      // disclosure is a study-integrity problem, not a diagnostic.
+      console.error('[Live] The server did not deliver the opening and the data channel is locked.');
+      reportClientEvent('data_channel_error', { stage: 'opening_undelivered' }, id);
+      return;
+    }
+
+    if (recovery) {
+      // Timing only, none of the previous conversation: restating the
+      // disclosure that tripped the filter is the most likely way to trip it
+      // again.
+      sendInvisiblePrompt(
+        'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.',
+        'Recovery session: speak-first nudge',
+      );
+      return;
+    }
+    const initialPrompt = getInitialPromptForLanguage(sessionSettings.language);
+    sendInvisiblePrompt(
+      `${initialPrompt} Say it immediately, before the participant speaks, then pause and listen.`,
+      `Initial prompt: ${initialPrompt}`,
+    );
   }
 
   // Report a participant-side tool outcome (exercise finished, worksheet
@@ -3061,10 +3109,11 @@ export default function App() {
           }
         }}
         onInvisibleMessage={(text) => {
-          // Chat sessions have no data channel — report server-side so the
-          // text rides the next chat turn instead (ai-therapist-118).
-          if (sessionType === 'chat') void reportToolEvent('scale_result', text);
-          else sendInvisiblePrompt(text);
+          // Server-side for every session type: chat has no data channel
+          // (ai-therapist-118) and a voice session's is locked against
+          // instruction appends (ai-therapist-214). reportToolEvent keeps the
+          // data-channel append as the fallback where it is still allowed.
+          void reportToolEvent('scale_result', text);
         }}
         onToolEvent={(kind, summary) => {
           recordEngagementEvent('tool_event', { kind });

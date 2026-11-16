@@ -324,6 +324,40 @@ export default function sessionsRoutes(): Router {
     }
   });
 
+  // POST /api/sessions/:sessionId/opening - deliver the server-authored
+  // opening of a GPT-Live voice session over the sideband (ai-therapist-214).
+  //
+  // The browser's data channel is locked against instruction appends, so it
+  // can no longer speak the disclosure preamble itself. It calls this once, on
+  // `session.started`, which is the earliest moment its audio path is up; the
+  // request carries NO text. The opening was authored and registered by
+  // POST /api/live/session, and is delivered at most once. Owner-gated.
+  router.post('/api/sessions/:sessionId/opening', async (req, res) => {
+    const { sessionId } = req.params;
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const { deliverLiveOpeningViaSideband } = await import('../../services/liveOpening.service.js');
+      const result = await deliverLiveOpeningViaSideband(sessionId);
+
+      if (!result.delivered) {
+        // Loud: on a locked channel there is no other way for the participant
+        // to hear the AI disclosure.
+        log.error(`Live opening NOT delivered for ${sessionId} (${result.reason})`);
+        return res.json({ delivered: false, reason: result.reason });
+      }
+
+      res.json({ delivered: true, already: result.already });
+    } catch (err) {
+      log.error({ err }, 'Failed to deliver live opening');
+      res.status(500).json({ error: 'Failed to deliver opening' });
+    }
+  });
+
   // POST /api/sessions/:sessionId/feedback - post-session participant survey
   // (ai-therapist-25b): 2-3 Likert ratings (1-5) + optional free text, shown
   // once on the post-session screen. Upsert so a resubmit just overwrites.

@@ -44,9 +44,9 @@ const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript') as typeof import('opusscript');
 
-/** Verbatim mirror of the browser's recovery nudge (App.tsx, session.started
- *  branch under `recovery`). Keep the two in step: the harness measures the
- *  product path, so it must say exactly what the browser says. */
+/** Verbatim mirror of the recovery nudge (server: liveSessionConfig.ts; browser
+ *  fallback: App.tsx requestLiveOpening). Used here only on an unlocked data
+ *  channel. Keep the copies in step: the harness measures the product path. */
 export const LIVE_RECOVERY_SPEAK_FIRST_NUDGE =
   'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.';
 
@@ -216,11 +216,22 @@ export class LiveVoiceSession implements VoiceTransport {
         if (Date.now() > startedBy) throw new Error('timeout waiting for session.started on the data channel');
         await sleep(50);
       }
-      // Opening preamble: GPT-Live never speaks unprompted, so the browser sends
-      // a trusted instructions append telling the model to speak first. A
-      // recovery session gets the browser's speak-first nudge instead: timing
-      // only, none of the previous conversation.
-      vs.sendAppend(opts.recovery ? LIVE_RECOVERY_SPEAK_FIRST_NUDGE : openingPrompt);
+      // Opening preamble: GPT-Live never speaks unprompted, so it needs an
+      // instructions append telling it to speak first (on a recovery session,
+      // the speak-first nudge: timing only, none of the previous conversation).
+      // The server authors and delivers that over the sideband; like the
+      // browser (App.tsx requestLiveOpening), the harness only says when the
+      // call is up. The data-channel append is the fallback for a session the
+      // server did not lock (ai-therapist-214); on a locked one it is refused.
+      const openingRes = await agent.post(`/api/sessions/${vs.sessionId}/opening`).send({});
+      if (openingRes.status !== 200 || openingRes.body?.delivered !== true) {
+        if (res.body?.data_channel_locked === true) {
+          throw new Error(
+            `server did not deliver the live opening: ${openingRes.status} ${JSON.stringify(openingRes.body).slice(0, 200)}`,
+          );
+        }
+        vs.sendAppend(opts.recovery ? LIVE_RECOVERY_SPEAK_FIRST_NUDGE : openingPrompt);
+      }
       const opening = await vs.awaitAssistantTurn(Date.now() + BEAT_TIMEOUT_MS);
       return { session: vs, opening };
     } catch (err) {

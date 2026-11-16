@@ -530,7 +530,51 @@ export interface LiveSessionConfigInput {
    * the most likely way to be terminated again.
    */
   recovery?: { crisisLine: string };
+  /**
+   * Leave the browser's data channel unrestricted (the pre-2026-11-16
+   * behaviour) instead of locking it to LIVE_CLIENT_EVENTS.
+   *
+   * True ONLY when the server has no sideband for this session
+   * (SIDEBAND_ENABLED=false): with no server-side channel, the browser's
+   * instructions append is the only way the opening disclosure can be
+   * delivered at all, so locking it would start a silent session. Every
+   * monitored session leaves this unset.
+   */
+  allowClientSteering?: boolean;
 }
+
+/**
+ * Client events the participant's browser may send on the WebRTC data channel
+ * (`session.client.data_channel.allowed_client_events`).
+ *
+ * Deliberately absent: `session.instructions.append`, `session.thinking.append`,
+ * `session.commentary.append` and `session.update`. Those are the application's
+ * steering surface and are sent by the server over the sideband, which the
+ * permission block does not affect.
+ *
+ *  - session.close         graceful end; the browser must be able to hang up.
+ *  - response.item.create  typed participant text, queued for the backend.
+ *  - response.create       continues the backend after a typed message.
+ *
+ * Every string here is a documented Live client event `type`. Do not add a
+ * name that is not in the API reference.
+ */
+export const LIVE_CLIENT_EVENTS = ['session.close', 'response.item.create', 'response.create'] as const;
+
+/**
+ * The recovery session runs in client delegation mode with no Responses
+ * backend. `response.item.create` and `response.create` both require Responses
+ * delegation, so there is nothing for the browser to send but the hang-up.
+ */
+export const LIVE_RECOVERY_CLIENT_EVENTS = ['session.close'] as const;
+
+/**
+ * Speak-first nudge for a content-filter recovery session. Timing only: it
+ * carries none of the previous conversation, because restating the disclosure
+ * that tripped the filter is the most likely way to trip it again.
+ */
+export const LIVE_RECOVERY_SPEAK_FIRST_NUDGE =
+  'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.';
 
 /**
  * Project registry tool definitions into the Responses function schema that
@@ -608,28 +652,43 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
     store: storable === true,
   };
 
-  // OPEN ITEM — frontend data-channel permissions.
+  // Frontend data-channel permissions (ai-therapist-214).
   //
-  // Because the browser owns the WebRTC data channel, it can send client events
-  // directly to the session, including `session.instructions.append` — which is
-  // the trusted-application-instruction channel. A participant with devtools
-  // could therefore steer their own therapist. Under the Realtime API the
-  // equivalent hole existed (`conversation.item.create` with role system), so
-  // this is not a regression, but instructions.append is the stronger lever.
+  // The browser owns the WebRTC data channel, so without this block it can send
+  // any client event straight to the session, including
+  // `session.instructions.append`, the trusted-application-instruction channel:
+  // a participant with devtools could steer their own therapist.
   //
-  // The docs reference "frontend client permissions" and "frontend data-channel
-  // permissions" as a real WebRTC session concept — the fork section states
-  // that WebRTC forks preserve them and WebSocket forks discard them — but no
-  // guide documents the field name or its shape. Guessing an unknown key here
-  // would be rejected as an unknown configuration field and 400 the entire
-  // handshake, taking voice sessions down.
+  // Documented in the POST /v1/live/sessions reference as of 2026-11-16
+  // (https://developers.openai.com/api/reference/resources/live/methods/create):
   //
-  // Until that field is documented, the mitigation is architectural rather than
-  // configured: every safety-relevant instruction (crisis steering, minor
-  // safeguard, phase guidance, wind-down) is authored and delivered SERVER-side
-  // over the sideband, so a tampered client cannot suppress them — only add
-  // noise alongside them. Revisit and lock the channel down as soon as the
-  // permissions schema is published.
+  //   client: optional ClientConfig. "Startup-only capabilities for an
+  //     untrusted frontend attached to a unified WebRTC session. Trusted
+  //     sideband connections are unaffected."
+  //   client.data_channel.allowed_client_events: optional "all" or array of
+  //     string. "Client event types that the frontend data channel may send.
+  //     Use 'all' to allow every client event; an empty array allows none.
+  //     Omission preserves the existing allow-all behavior."
+  //
+  // `allowed_server_events` is left out on purpose: omission keeps allow-all,
+  // and the browser needs the transcript, lifecycle and response events it
+  // reads today.
+  //
+  // Startup-only, so it cannot be tightened or loosened mid-session. An unknown
+  // key here 400s the whole handshake, which is why nothing was set until the
+  // schema was published; keep this block to exactly the documented shape.
+  //
+  // Consequence for the client: everything it used to append as instructions
+  // (opening preamble, recovery nudge, and the relay fallbacks for admin
+  // prompts and tool outcomes) must come from the server over the sideband.
+  // See POST /api/sessions/:sessionId/opening and liveOpening.service.ts.
+  if (!input.allowClientSteering) {
+    session.client = {
+      data_channel: {
+        allowed_client_events: [...(recovery ? LIVE_RECOVERY_CLIENT_EVENTS : LIVE_CLIENT_EVENTS)],
+      },
+    };
+  }
 
   // Recovery sessions carry NO history, unconditionally — even if a caller
   // passes some. Replaying the disclosure that tripped the content filter into

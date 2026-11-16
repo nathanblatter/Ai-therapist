@@ -153,6 +153,36 @@ Realtime opened the conversation with a hidden user turn plus a forced response.
 GPT-Live has neither. The preamble is delivered as a trusted instructions append
 telling the model to speak first, immediately, then pause and listen.
 
+The server authors that append and sends it over the sideband. The browser only
+reports when its audio path is up, by calling `POST /api/sessions/:id/opening`
+on `session.started`; the request carries no text. If the browser never asks
+(a tab still running an older bundle), the server delivers the opening itself
+after 10 seconds. A recovery session gets the speak-first nudge the same way.
+
+### Data-channel permissions
+
+The browser owns the WebRTC data channel, so by default it can send any client
+event, including `session.instructions.append`. Session creation therefore sets
+`session.client.data_channel.allowed_client_events` (documented in the
+`POST /v1/live/sessions` reference) to an allowlist:
+
+| Session | Browser may send |
+|---|---|
+| Normal (Responses delegation) | `session.close`, `response.item.create`, `response.create` |
+| Recovery (client delegation) | `session.close` |
+| `SIDEBAND_ENABLED=false` | everything (block omitted; there is no server-side channel to steer from) |
+
+The sideband is unaffected by this block. The session response tells the
+browser whether its channel is locked (`data_channel_locked`); on a locked
+session the browser never attempts an instructions append, and a steer that
+only the browser could have delivered is reported as a `data_channel_error`
+client event (`steer_undelivered_locked_channel`, `opening_undelivered`).
+
+Two levers remain with the participant and are not closed by this block:
+`response.item.create` accepts developer-role items for the delegated backend,
+and `/tool-event` and `/worksheet-response` relay client-composed summaries as
+instructions over the sideband.
+
 ---
 
 ## 3. The sideband
