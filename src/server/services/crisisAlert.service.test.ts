@@ -79,3 +79,62 @@ describe('sendCrisisAlert', () => {
     await expect(sendCrisisAlert('test message')).resolves.toBeUndefined();
   });
 });
+
+// ai-therapist-190: a hard OpenAI spend cap takes down the risk assessor, the
+// moderation screen and the session mint together. It reaches the on-call
+// through the same pager the other safety-infrastructure failures use.
+describe('reportOpenAIQuotaExhausted', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    fetchMock.mockReset().mockResolvedValue({ ok: true });
+    getSystemConfigMock.mockReset().mockResolvedValue({});
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.IMESSAGE_API_KEY = 'test-key';
+    process.env.CRISIS_ALERT_PHONE = '+15550000000';
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    delete process.env.IMESSAGE_API_KEY;
+    delete process.env.CRISIS_ALERT_PHONE;
+  });
+
+  const sentMessages = () =>
+    fetchMock.mock.calls.map((c) => JSON.parse((c[1] as RequestInit).body as string).message as string);
+
+  it('pages the on-call with an operational message that cannot be mistaken for a participant crisis', async () => {
+    const { reportOpenAIQuotaExhausted } = await import('./crisisAlert.service.js');
+    await reportOpenAIQuotaExhausted('risk_assessor', 'organization_spend_limit_exceeded');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [message] = sentMessages();
+    expect(message).toContain('spend or usage limit');
+    expect(message).toContain('organization_spend_limit_exceeded');
+    expect(message).toContain('not a participant crisis');
+    expect(message).toContain('keyword screen only');
+  });
+
+  it('pages once per hour however many calls and components hit the limit', async () => {
+    const { reportOpenAIQuotaExhausted } = await import('./crisisAlert.service.js');
+    await reportOpenAIQuotaExhausted('moderation', 'insufficient_quota');
+    await reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota');
+    await reportOpenAIQuotaExhausted('voice_session_mint', 'insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(59 * 60 * 1000);
+    await reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60 * 1000);
+    await reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('never throws, even when the pager itself is down', async () => {
+    fetchMock.mockRejectedValue(new Error('pager down'));
+    const { reportOpenAIQuotaExhausted } = await import('./crisisAlert.service.js');
+    await expect(reportOpenAIQuotaExhausted('risk_assessor', null)).resolves.toBeUndefined();
+  });
+});

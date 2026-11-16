@@ -76,3 +76,48 @@ export async function sendCrisisAlert(message: string): Promise<void> {
     log.error({ err }, '[alert] crisis SMS failed');
   }
 }
+
+// ============================================
+// OPENAI QUOTA EXHAUSTION (ai-therapist-190)
+// ============================================
+// The OpenAI org runs under a hard spend cap. Once it is hit every call is
+// rejected with a billing-class 429 - the risk assessor, the moderation
+// screen and the voice session mint alike - so crisis detection silently
+// drops to the keyword screen for EVERY session until a human raises the
+// limit. That is an operational failure of the safety infrastructure, the
+// same class as an unmonitored voice session or a filter-terminated one, and
+// it reaches a human the same way those do: the on-call page.
+//
+// Throttled in-process to one page per interval (the condition is global, not
+// per session, and every participant message re-detects it); the first
+// detection after a restart pages again, which is the safe direction.
+
+export type OpenAIQuotaComponent = 'risk_assessor' | 'moderation' | 'voice_session_mint';
+
+const QUOTA_PAGE_INTERVAL_MS = 60 * 60 * 1000;
+let lastQuotaPageAt: number | null = null;
+
+/**
+ * Record that OpenAI rejected a safety-relevant call because a billing, spend
+ * or usage ceiling was reached. Always logs at error level; pages the on-call
+ * at most once per hour. Never throws.
+ */
+export async function reportOpenAIQuotaExhausted(component: OpenAIQuotaComponent, code: string | null): Promise<void> {
+  try {
+    log.error(
+      { component, code },
+      '[alert] OpenAI quota/spend limit reached: crisis detection is degraded to the keyword screen',
+    );
+    const now = Date.now();
+    if (lastQuotaPageAt !== null && now - lastQuotaPageAt < QUOTA_PAGE_INTERVAL_MS) return;
+    lastQuotaPageAt = now;
+    await sendCrisisAlert(
+      `AI-Therapist: OpenAI is rejecting requests because the account spend or usage limit has been reached` +
+        `${code ? ` (${code})` : ''}. This is a system alert, not a participant crisis. Until the limit is raised, ` +
+        'crisis detection runs on the keyword screen only (no AI risk assessment, no moderation screen) and new ' +
+        'voice sessions cannot start (chat replies fail too). Raise the limit in the OpenAI billing settings. Repeats hourly.',
+    );
+  } catch (err) {
+    log.error({ err }, '[alert] failed to report OpenAI quota exhaustion');
+  }
+}

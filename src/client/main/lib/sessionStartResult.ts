@@ -20,6 +20,7 @@ export type SessionStartRefusal =
   | 'study_status'
   | 'identifier_blocked'
   | 'live_not_active'
+  | 'provider_unavailable'
   | 'session_exists';
 
 export type SessionStartResult = { ok: true } | { ok: false; refusal: SessionStartRefusal };
@@ -58,6 +59,12 @@ export function classifySessionStartRefusal(
     if (body?.error === 'live_not_active') return 'live_not_active';
     return null;
   }
+  // The voice provider cannot start a session right now (billing ceiling, rate
+  // limit, overload, timeout - ai-therapist-190). Terminal for this attempt and
+  // nothing to do with the participant's connection, so it must not fall
+  // through to the "check your connection" toast. Other 503s (for example
+  // monitoring_unavailable) keep throwing in the caller as before.
+  if (status === 503 && body?.error === 'provider_unavailable') return 'provider_unavailable';
   return null;
 }
 
@@ -74,6 +81,8 @@ export function describeSessionStartRefusal(refusal: SessionStartRefusal): strin
       return 'Server refused the session start: identifier blocked';
     case 'live_not_active':
       return 'Server refused the session start: Live backend is not active';
+    case 'provider_unavailable':
+      return 'Server refused the session start: voice provider unavailable';
     case 'session_exists':
       return 'Server refused the session start: a session is already active';
   }

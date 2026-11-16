@@ -7,6 +7,12 @@ import { IRB_STUDY_ORG_ID_SQL } from '../db/organizations.queries.js';
 import { createLogger } from '../utils/logger.js';
 import type { HistoryMessage } from './minorSafeguard.service.js';
 import { withFlex } from '../utils/flexTier.js';
+import {
+  classifyOpenAIError,
+  withOpenAIRetry,
+  CRISIS_RETRY_POLICY,
+  type OpenAIErrorInfo,
+} from '../utils/openaiErrors.js';
 
 const log = createLogger('crisisDetection');
 
@@ -393,12 +399,43 @@ function resetSweep(sessionId: string): void {
   sweepCounters.set(sessionId, 0);
 }
 
-/** LLM contextual assessment of the recent conversation. Throws on failure. */
+// Per-attempt cap on a LIVE assessor call. The SDK default is 10 minutes with
+// 2 automatic retries, which let a stalled assessor hold a keyword-hit turn
+// (and the flag/page its keyword score already justifies) for up to half an
+// hour. The default assessor answers in 1-2s; 10s leaves room for a slow day
+// without leaving a participant's reply or an on-call page waiting on it.
+const ASSESSOR_TIMEOUT_MS = 10_000;
+
+/**
+ * The assessor failed: classify why, and if OpenAI rejected the call because a
+ * billing/spend/usage ceiling was reached, page the on-call (throttled inside
+ * the reporter). Fire-and-forget; never throws and never delays the fallback.
+ */
+function noteAssessorFailure(err: unknown): OpenAIErrorInfo {
+  const info = classifyOpenAIError(err);
+  if (info.kind === 'quota') {
+    void import('./crisisAlert.service.js')
+      .then((m) => m.reportOpenAIQuotaExhausted('risk_assessor', info.code))
+      .catch((reportErr) => log.error({ err: reportErr }, '[risk] failed to report assessor quota exhaustion'));
+  }
+  return info;
+}
+
+/**
+ * LLM contextual assessment of the recent conversation. Throws on failure.
+ *
+ * `budget` 'live' (the default: session turns and thread messages) runs under
+ * ASSESSOR_TIMEOUT_MS and CRISIS_RETRY_POLICY with the SDK's own retries
+ * switched off, so there is exactly one retry layer and the caller's keyword
+ * fallback fires within seconds. 'offline' (the calibration harness, possibly
+ * on the slow flex tier) keeps the SDK defaults.
+ */
 async function assessRiskWithLLM(
   latestContent: string,
   conversationHistory: HistoryMessage[],
   sessionId?: string,
   extraParams: Record<string, string> = {},
+  budget: 'live' | 'offline' = 'live',
 ): Promise<LlmRiskAssessment> {
   const client = await getClient();
 
@@ -422,8 +459,8 @@ async function assessRiskWithLLM(
     }
   }
 
-  const callAssessor = (useStrictSchema: boolean) =>
-    client.chat.completions.create({
+  const requestAssessment = (useStrictSchema: boolean) => {
+    const body = {
       model: riskModel,
       temperature: 0,
       max_tokens: 300,
@@ -441,7 +478,15 @@ async function assessRiskWithLLM(
           content: `Recent transcript:\n${transcript}\n\nLatest participant message (the one that tripped the screen):\n"${latestContent}"`,
         },
       ],
-    });
+    } satisfies Parameters<typeof client.chat.completions.create>[0];
+    return budget === 'live'
+      ? client.chat.completions.create(body, { timeout: ASSESSOR_TIMEOUT_MS, maxRetries: 0 })
+      : client.chat.completions.create(body);
+  };
+  const callAssessor = (useStrictSchema: boolean) =>
+    budget === 'live'
+      ? withOpenAIRetry(() => requestAssessment(useStrictSchema), CRISIS_RETRY_POLICY)
+      : requestAssessment(useStrictSchema);
 
   let response;
   if (strictSchemaUnsupported) {
@@ -548,7 +593,7 @@ export async function assessRiskOffline(
   history: HistoryMessage[] = [],
 ): Promise<OfflineRiskAssessment> {
   const model = await resolveRiskModel();
-  const llm = await withFlex(model, (extra) => assessRiskWithLLM(latestContent, history, undefined, extra));
+  const llm = await withFlex(model, (extra) => assessRiskWithLLM(latestContent, history, undefined, extra, 'offline'));
   return {
     risk_score: llm.risk_score,
     severity: llm.severity,
@@ -620,17 +665,24 @@ export async function analyzeStandaloneRisk(
       method: 'llm_assessed',
     };
   } catch (err) {
+    const failure = noteAssessorFailure(err);
     // LLM unavailable. If keywords hit, the keyword tier score stands (fail
     // toward detection). If there were NO keywords, we have no signal at all —
     // return INDETERMINATE so the caller retries rather than recording "clear"
     // (ai-therapist-142): a means/farewell message the LLM would have caught
     // must not be dismissed just because the model was briefly down.
     if (keywordAnalysis.keywordScore === 0) {
-      log.error({ err }, '[risk] standalone LLM unavailable with no keyword floor; verdict indeterminate');
+      log.error(
+        { err, kind: failure.kind },
+        '[risk] standalone LLM unavailable with no keyword floor; verdict indeterminate',
+      );
       return { riskScore: 0, severity: 'none', factors: [], method: 'llm_unavailable', indeterminate: true };
     }
     const riskScore = Math.min(keywordAnalysis.keywordScore, 100);
-    log.error({ err }, `[risk] standalone LLM assessment failed; using keyword tier score ${riskScore}`);
+    log.error(
+      { err, kind: failure.kind },
+      `[risk] standalone LLM assessment failed; using keyword tier score ${riskScore}`,
+    );
     return {
       riskScore,
       severity: severityForScore(riskScore),
@@ -739,7 +791,7 @@ export async function analyzeMessageRisk(
     // Free moderation screen runs in parallel with the keyword/trajectory
     // work (ai-therapist-167). It is a supplementary signal: null on outage.
     const moderationPromise = import('./moderation.service.js')
-      .then((m) => m.getSelfHarmScores(message.content).then((scores) => ({ scores, riskOf: m.moderationRiskScore })))
+      .then((m) => m.getSelfHarmScreen(message.content).then((screen) => ({ screen, riskOf: m.moderationRiskScore })))
       .catch(() => null);
 
     const keywordAnalysis = detectCrisisKeywords(message.content);
@@ -749,7 +801,11 @@ export async function analyzeMessageRisk(
     const trajectory = await trackEmotionalTrajectory(message.session_id);
 
     const moderationResult = await moderationPromise;
-    const moderation = moderationResult?.scores ?? null;
+    const moderation = moderationResult?.screen.scores ?? null;
+    // The screen could not run (as opposed to: ran and found nothing). The
+    // keyword tier still stands; this is recorded so a zero here never reads
+    // as "moderation looked and it was clean".
+    const moderationUnavailable = moderationResult ? moderationResult.screen.failed : true;
     const moderationScore = moderation ? moderationResult!.riskOf(moderation) : 0;
 
     let riskScore = Math.min(keywordAnalysis.keywordScore, 100);
@@ -757,6 +813,7 @@ export async function analyzeMessageRisk(
     let method = 'keyword_only';
     let llm: LlmRiskAssessment | null = null;
     let llmFloored = false;
+    let llmErrorKind: string | null = null;
 
     const isSweep = keywordAnalysis.keywordScore === 0 && sweepDue(message.session_id);
     // Moderation as a second screen: when the keyword tier saw nothing but
@@ -783,10 +840,14 @@ export async function analyzeMessageRisk(
         // LLM unavailable — fall back to the best available screen signal
         // (fail toward detection, never away from it). Moderation is capped
         // below 90 so a screen alone cannot mimic the very top band.
+        // The sweep counter is deliberately NOT reset: a failed sweep is
+        // retried on the participant's next message.
+        const failure = noteAssessorFailure(err);
+        llmErrorKind = failure.kind;
         riskScore = Math.max(riskScore, Math.min(85, moderationScore));
         method = 'keyword_fallback';
         log.error(
-          { err },
+          { err, kind: failure.kind },
           `[risk] LLM assessment failed for session ${message.session_id}; using screen-tier score ${riskScore}`,
         );
       }
@@ -841,6 +902,11 @@ export async function analyzeMessageRisk(
                   moderation_self_harm_instructions: moderation.selfHarmInstructions,
                 }
               : {}),
+            // Degraded-screen markers: which tier was down when this score
+            // was produced, so a low score is auditable as "assessed" vs
+            // "the assessor / moderation screen never ran".
+            ...(moderationUnavailable ? { moderation_unavailable: true } : {}),
+            ...(llmErrorKind ? { llm_error: llmErrorKind } : {}),
             ...(llmFloored ? { passive_ideation_floor: PASSIVE_IDEATION_SCORE } : {}),
             ...(llm
               ? {
