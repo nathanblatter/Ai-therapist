@@ -6,8 +6,8 @@
 // (messageEmbedding.service.ts) computes from content_redacted only, never raw
 // content. Same model, dimensions and distance operator as the sweep and the
 // knowledge-base RAG: text-embedding-3-small, VECTOR(1536), cosine (<=>), so
-// the partial HNSW index idx_messages_embedding_hnsw (vector_cosine_ops) can
-// drive the ORDER BY.
+// the partial HNSW index idx_messages_embedding_hnsw (vector_cosine_ops)
+// drives study-wide searches (plan notes on semanticSearchSql).
 //
 // Redacted-only, structurally:
 //   1. The only text column this module ever selects is content_redacted. No
@@ -113,32 +113,34 @@ function toHit(row: HitRow): SemanticSearchHit {
   };
 }
 
-// $1 query vector, $2 org, $3 session, $4 from, $5 to, $6 max cosine distance,
-// $7 limit (+1 for hasMore), $8 offset.
-//
-// Query plan: ORDER BY embedding <=> $1 with LIMIT lets the planner use the
-// partial HNSW index (its predicate, embedding IS NOT NULL, is repeated here so
-// the index qualifies); the remaining predicates filter the index's candidate
-// stream. HNSW without iterative scans yields at most hnsw.ef_search
-// candidates, so the caller raises ef_search for the page being read. A narrow
-// filter (one session, a short date range) is usually cheaper as an exact scan
-// via idx_messages_session_id / idx_messages_created_at, which the planner is
-// free to pick. No new index is added.
-//
-// Built on call, not at import: modules that mock organizations.queries
-// partially must still be able to import the db barrel.
-export function semanticSearchSql(): string {
+/**
+ * Candidate pool for study-wide searches: the nearest this-many embedded
+ * messages, which the redaction, org and date predicates then filter. Also
+ * used as hnsw.ef_search, since an HNSW scan without iterative scans never
+ * yields more than ef_search rows. 4x the page window, at least 200, at most
+ * pgvector's 1000.
+ */
+export function semanticSearchCandidates(limit: number, offset: number): number {
+  return Math.min(1000, Math.max(200, (limit + offset + 1) * 4));
+}
+
+export type SemanticSearchMode = 'index' | 'exact';
+
+// Shared SELECT list + filters. Parameters: $1 query vector, $2 org,
+// $3 session, $4 from, $5 to, $6 max cosine distance, $7 limit (+1 for
+// hasMore), $8 offset, and in index mode $9 candidate pool size.
+function selectAndFilters(distanceExpr: string, fromClause: string): string {
   return `
   SELECT m.message_id::text AS message_id,
          m.session_id AS session_id,
          m.role,
          m.content_redacted AS redacted_text,
          m.created_at::text AS created_at,
-         1 - (m.embedding <=> $1::vector) AS similarity,
+         1 - ${distanceExpr} AS similarity,
          ts.session_name,
          ts.created_at::text AS session_started_at,
          ts.user_id AS owner_user_id
-    FROM messages m
+    ${fromClause}
     JOIN therapy_sessions ts ON ts.session_id = m.session_id
     LEFT JOIN users u ON u.userid = ts.user_id
    WHERE m.embedding IS NOT NULL
@@ -150,15 +152,52 @@ export function semanticSearchSql(): string {
      AND ($3::text IS NULL OR m.session_id = $3::text)
      AND ($4::timestamptz IS NULL OR m.created_at >= $4::timestamptz)
      AND ($5::timestamptz IS NULL OR m.created_at < $5::timestamptz)
-     AND (m.embedding <=> $1::vector) <= $6::float8
-   ORDER BY m.embedding <=> $1::vector
+     AND ${distanceExpr} <= $6::float8
+   ORDER BY ${distanceExpr}
    LIMIT $7 OFFSET $8`;
+}
+
+/**
+ * The search statement for a mode.
+ *
+ * Query plan (checked with EXPLAIN ANALYZE on a 30k-message scratch database):
+ * one statement with the redaction predicate inline gets a badly low row
+ * estimate on messages (the jsonb and btrim conditions multiply default
+ * selectivities: about 50 rows estimated against about 15,000 actual), which
+ * makes the HNSW index look like it must be walked to the end, so the planner
+ * would never pick it however large the table grows. Hence two shapes:
+ *   - 'index' (study-wide): a MATERIALIZED candidate CTE that orders ONLY by
+ *     distance under the partial index's own predicate (embedding IS NOT
+ *     NULL) with a small LIMIT, the shape idx_messages_embedding_hnsw is
+ *     costed for; every other predicate filters the pool. The planner still
+ *     chooses: on a small table an exact top-N sort is cheaper and is used,
+ *     and the index takes over as the table grows. Recall is bounded by the
+ *     pool, the same bound an HNSW scan without iterative scans imposes.
+ *   - 'exact' (one session): the session_id index finds the session's rows and
+ *     they are ranked exactly, with no pool bound.
+ * No new index is added.
+ *
+ * Built on call, not at import: modules that mock organizations.queries
+ * partially must still be able to import the db barrel.
+ */
+export function semanticSearchSql(mode: SemanticSearchMode): string {
+  if (mode === 'exact') {
+    return selectAndFilters('(m.embedding <=> $1::vector)', 'FROM messages m');
+  }
+  return `
+  WITH candidates AS MATERIALIZED (
+    SELECT c.message_id, c.embedding <=> $1::vector AS distance
+      FROM messages c
+     WHERE c.embedding IS NOT NULL
+     ORDER BY c.embedding <=> $1::vector
+     LIMIT $9
+  )${selectAndFilters('cand.distance', 'FROM candidates cand\n    JOIN messages m ON m.message_id = cand.message_id')}`;
 }
 
 /**
  * Rank redacted messages in the caller's organization by cosine similarity to
  * a query embedding. Read-only transaction so SET LOCAL scopes the ef_search
- * bump to this one statement's connection checkout.
+ * bump to this one checkout.
  */
 export async function searchRedactedMessages(params: SemanticSearchParams): Promise<SemanticSearchPage> {
   const limit = Math.max(1, Math.floor(params.limit));
@@ -167,24 +206,25 @@ export async function searchRedactedMessages(params: SemanticSearchParams): Prom
     throw new Error(`semantic search window exceeds ${SEMANTIC_SEARCH_MAX_WINDOW}`);
   }
   const minSimilarity = Math.min(1, Math.max(0, params.minSimilarity));
-  // Candidates the index must surface so post-filtering can still fill the
-  // page: a 4x margin over the window, inside pgvector's 1..1000 range.
-  const efSearch = Math.min(1000, Math.max(100, (limit + offset + 1) * 4));
+  const mode: SemanticSearchMode = params.sessionId ? 'exact' : 'index';
+  const values: unknown[] = [
+    toVectorLiteral(params.embedding),
+    params.orgId,
+    params.sessionId ?? null,
+    params.from ?? null,
+    params.to ?? null,
+    1 - minSimilarity,
+    limit + 1,
+    offset,
+  ];
+  const candidates = semanticSearchCandidates(limit, offset);
+  if (mode === 'index') values.push(candidates);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN READ ONLY');
-    await client.query(`SET LOCAL hnsw.ef_search = ${efSearch}`);
-    const result = await client.query<HitRow>(semanticSearchSql(), [
-      toVectorLiteral(params.embedding),
-      params.orgId,
-      params.sessionId ?? null,
-      params.from ?? null,
-      params.to ?? null,
-      1 - minSimilarity,
-      limit + 1,
-      offset,
-    ]);
+    if (mode === 'index') await client.query(`SET LOCAL hnsw.ef_search = ${candidates}`);
+    const result = await client.query<HitRow>(semanticSearchSql(mode), values);
     await client.query('COMMIT');
     const rows = result.rows;
     return { hits: rows.slice(0, limit).map(toHit), hasMore: rows.length > limit };

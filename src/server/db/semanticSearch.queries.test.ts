@@ -18,6 +18,7 @@ import {
   redactionCompleteSql,
   searchRedactedMessages,
   semanticSearchSql,
+  semanticSearchCandidates,
   SEMANTIC_SEARCH_MAX_WINDOW,
 } from './semanticSearch.queries.js';
 
@@ -39,7 +40,7 @@ function dbRow(id: number, extra: Record<string, unknown> = {}) {
 }
 
 function searchCall(): [string, unknown[]] {
-  const call = clientQueryMock.mock.calls.find(([sql]) => String(sql).includes('FROM messages m'));
+  const call = clientQueryMock.mock.calls.find(([sql]) => String(sql).includes('redacted_text'));
   if (!call) throw new Error('search query not issued');
   return call as [string, unknown[]];
 }
@@ -49,13 +50,19 @@ beforeEach(() => {
   releaseMock.mockReset();
   connectMock.mockClear();
   clientQueryMock.mockImplementation(async (sql: string) =>
-    String(sql).includes('FROM messages m') ? { rows: [dbRow(1), dbRow(2)] } : { rows: [] },
+    String(sql).includes('redacted_text') ? { rows: [dbRow(1), dbRow(2)] } : { rows: [] },
   );
 });
 
-describe('semanticSearchSql (structural)', () => {
-  const SEMANTIC_SEARCH_SQL = semanticSearchSql();
-  const selectList = SEMANTIC_SEARCH_SQL.slice(0, SEMANTIC_SEARCH_SQL.indexOf('FROM messages m'));
+describe.each(['index', 'exact'] as const)('semanticSearchSql(%s) (structural)', (mode) => {
+  const SEMANTIC_SEARCH_SQL = semanticSearchSql(mode);
+  const outerSelect = SEMANTIC_SEARCH_SQL.indexOf('SELECT m.message_id');
+  const selectList = SEMANTIC_SEARCH_SQL.slice(outerSelect, SEMANTIC_SEARCH_SQL.indexOf('FROM', outerSelect));
+
+  it('has exactly one outer SELECT that reads messages columns', () => {
+    expect(outerSelect).toBeGreaterThan(-1);
+    expect(SEMANTIC_SEARCH_SQL.match(/SELECT m\./g)).toHaveLength(1);
+  });
 
   it('never references the raw content column anywhere in the query', () => {
     // \bcontent\b does not match content_redacted (underscore is a word char).
@@ -83,9 +90,34 @@ describe('semanticSearchSql (structural)', () => {
     expect(SEMANTIC_SEARCH_SQL).toMatch(/ts\.user_id IS NULL AND \$2::int = \(SELECT org_id FROM organizations/);
   });
 
-  it('orders by the cosine operator the HNSW index was built for, repeating its partial predicate', () => {
+  it('pages by cosine distance with the cutoff applied', () => {
     expect(SEMANTIC_SEARCH_SQL).toMatch(/m\.embedding IS NOT NULL/);
-    expect(SEMANTIC_SEARCH_SQL).toMatch(/ORDER BY m\.embedding <=> \$1::vector\s+LIMIT \$7 OFFSET \$8/);
+    expect(SEMANTIC_SEARCH_SQL).toMatch(/<= \$6::float8\s+ORDER BY \S+.*\s+LIMIT \$7 OFFSET \$8/);
+  });
+});
+
+describe('semanticSearchSql plan shapes', () => {
+  it('index mode: a materialized candidate pool ordered only by the cosine operator, under the partial index predicate', () => {
+    const sql = semanticSearchSql('index');
+    expect(sql).toMatch(
+      /WITH candidates AS MATERIALIZED \(\s+SELECT c\.message_id, c\.embedding <=> \$1::vector AS distance\s+FROM messages c\s+WHERE c\.embedding IS NOT NULL\s+ORDER BY c\.embedding <=> \$1::vector\s+LIMIT \$9\s+\)/,
+    );
+    expect(sql).toMatch(/ORDER BY cand\.distance\s+LIMIT \$7 OFFSET \$8/);
+  });
+
+  it('exact mode: ranks the filtered rows directly, with no pool bound', () => {
+    const sql = semanticSearchSql('exact');
+    expect(sql).not.toMatch(/candidates|\$9/);
+    expect(sql).toMatch(/ORDER BY \(m\.embedding <=> \$1::vector\)\s+LIMIT \$7 OFFSET \$8/);
+  });
+});
+
+describe('semanticSearchCandidates', () => {
+  it('is 4x the page window, at least 200 and at most 1000', () => {
+    expect(semanticSearchCandidates(25, 0)).toBe(200);
+    expect(semanticSearchCandidates(50, 50)).toBe(404);
+    expect(semanticSearchCandidates(50, 150)).toBe(804);
+    expect(semanticSearchCandidates(500, 0)).toBe(1000);
   });
 });
 
@@ -110,21 +142,19 @@ describe('redactionCompleteSql', () => {
 });
 
 describe('searchRedactedMessages', () => {
-  it('runs in a read-only transaction with a raised hnsw.ef_search and releases the client', async () => {
-    await searchRedactedMessages(BASE);
+  it('study-wide: index mode in a read-only transaction with ef_search matching the pool', async () => {
+    await searchRedactedMessages({ ...BASE, limit: 50, offset: 150 });
     const sqls = clientQueryMock.mock.calls.map(([s]) => String(s).trim().split('\n')[0].trim());
     expect(sqls[0]).toBe('BEGIN READ ONLY');
-    expect(sqls[1]).toBe('SET LOCAL hnsw.ef_search = 100');
+    expect(sqls[1]).toBe('SET LOCAL hnsw.ef_search = 804');
+    expect(sqls[2]).toMatch(/^WITH candidates AS MATERIALIZED/);
     expect(sqls[3]).toBe('COMMIT');
+    const [, params] = searchCall();
+    expect(params).toEqual(['[0.5,-0.25]', 1, null, null, null, 0.7, 51, 150, 804]);
     expect(releaseMock).toHaveBeenCalledTimes(1);
   });
 
-  it('scales ef_search with the page window, capped at 1000', async () => {
-    await searchRedactedMessages({ ...BASE, limit: 50, offset: 150 });
-    expect(String(clientQueryMock.mock.calls[1][0])).toBe('SET LOCAL hnsw.ef_search = 804');
-  });
-
-  it('binds vector, org, filters, distance cutoff and limit+1', async () => {
+  it('one session: exact mode binds vector, org, filters, distance cutoff and limit+1, no ef_search', async () => {
     await searchRedactedMessages({
       ...BASE,
       sessionId: 'sess-1',
@@ -144,11 +174,14 @@ describe('searchRedactedMessages', () => {
       3,
       4,
     ]);
+    const sqls = clientQueryMock.mock.calls.map(([s]) => String(s));
+    expect(sqls.some((s) => s.includes('ef_search'))).toBe(false);
+    expect(sqls.some((s) => s.includes('candidates'))).toBe(false);
   });
 
   it('reports hasMore from the extra row and trims it', async () => {
     clientQueryMock.mockImplementation(async (sql: string) =>
-      String(sql).includes('FROM messages m') ? { rows: [dbRow(1), dbRow(2), dbRow(3)] } : { rows: [] },
+      String(sql).includes('redacted_text') ? { rows: [dbRow(1), dbRow(2), dbRow(3)] } : { rows: [] },
     );
     const page = await searchRedactedMessages(BASE);
     expect(page.hasMore).toBe(true);
@@ -157,7 +190,7 @@ describe('searchRedactedMessages', () => {
 
   it('projects explicit fields only: raw content or metadata on a row can never leave', async () => {
     clientQueryMock.mockImplementation(async (sql: string) =>
-      String(sql).includes('FROM messages m')
+      String(sql).includes('redacted_text')
         ? {
             rows: [
               dbRow(1, {
@@ -197,7 +230,7 @@ describe('searchRedactedMessages', () => {
 
   it('rolls back and releases on a query error', async () => {
     clientQueryMock.mockImplementation(async (sql: string) => {
-      if (String(sql).includes('FROM messages m')) throw new Error('boom');
+      if (String(sql).includes('redacted_text')) throw new Error('boom');
       return { rows: [] };
     });
     await expect(searchRedactedMessages(BASE)).rejects.toThrow('boom');
