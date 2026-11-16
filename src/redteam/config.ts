@@ -51,6 +51,22 @@ export interface RedteamConfig {
   /** Voice suite (Grok): sever the server's xAI socket after the first
    *  persona beat so the proxy re-dials with xAI's conversation cache. */
   voiceDropUpstreamMidway: boolean;
+  /** `--generated-variants <n>` (ai-therapist-109): run up to n LLM-generated
+   *  mutations of the selected safety scenarios after the scripted ones. 0 =
+   *  off (the default); clamped to MAX_GENERATED_VARIANTS. Adds model spend,
+   *  so it is never enabled in a CI workflow. */
+  generatedVariants: number;
+  /** `--generated-operators a,b`: restrict the mutation operators used. */
+  generatedOperators?: string[];
+  /** `--variant-cache <dir>`: where generated variant scripts are cached and
+   *  replayed from. */
+  variantCacheDir: string;
+  /** `--gate-generated`: generated-variant failures fail the run. Off by
+   *  default: a variant failure is a lead to investigate, not a regression in
+   *  a scripted gate. */
+  gateGenerated: boolean;
+  /** LLM that writes generated variants (the theme guard uses classifierModel). */
+  generatorModel: string;
 }
 
 export const DEFAULTS = {
@@ -68,6 +84,10 @@ export const DEFAULTS = {
   voiceTextTurns: false,
   voiceDropClientMidway: false,
   voiceDropUpstreamMidway: false,
+  generatedVariants: 0,
+  variantCacheDir: 'redteam-variant-cache',
+  gateGenerated: false,
+  generatorModel: 'gpt-4o-mini',
 };
 
 /** The chat therapy reply model (chatTherapy.service.ts) — used only for cost

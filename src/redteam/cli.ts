@@ -11,6 +11,9 @@
 //        --voice-drop-client-midway / --voice-drop-upstream-midway (Grok voice:
 //          sever the browser socket / the xAI socket after the first beat and
 //          verify the session continues — docs/grok-voice.md section 3)
+//        --generated-variants <n>  --generated-operators <a,b>  --variant-cache <dir>
+//        --gate-generated (opt-in LLM-generated mutations of the safety
+//          scenarios, ai-therapist-109; off by default, never in CI)
 import 'dotenv/config';
 
 // ---- env guards (MUST run before importing server modules) ----------------
@@ -47,13 +50,23 @@ import {
   type NormalizedRun,
   type RunDiff,
 } from './diff.js';
-import { selectSuite, type SuiteEntry } from './scenarios/index.js';
+import { selectSuite, SAFETY_SCENARIOS, type SuiteEntry } from './scenarios/index.js';
+import {
+  buildGeneratedVariants,
+  clampVariantCount,
+  isOperatorId,
+  MAX_GENERATED_VARIANTS,
+  OPERATOR_IDS,
+  type DiscardedVariant,
+  type GeneratorClient,
+} from './generatedVariants.js';
 import type {
   AssertionContext,
   AssertionResult,
   AssertionSpec,
   AssistantRole,
   Beat,
+  GeneratedVariantMeta,
   Scenario,
   ScenarioResult,
   Turn,
@@ -80,6 +93,10 @@ function parseArgs(argv: string[]): RedteamConfig {
     voiceTextTurns: DEFAULTS.voiceTextTurns,
     voiceDropClientMidway: DEFAULTS.voiceDropClientMidway,
     voiceDropUpstreamMidway: DEFAULTS.voiceDropUpstreamMidway,
+    generatedVariants: DEFAULTS.generatedVariants,
+    variantCacheDir: DEFAULTS.variantCacheDir,
+    gateGenerated: DEFAULTS.gateGenerated,
+    generatorModel: DEFAULTS.generatorModel,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -129,6 +146,30 @@ function parseArgs(argv: string[]): RedteamConfig {
         break;
       case '--voice-drop-upstream-midway':
         cfg.voiceDropUpstreamMidway = true;
+        break;
+      case '--generated-variants': {
+        const requested = Number(next());
+        cfg.generatedVariants = clampVariantCount(requested);
+        if (requested > MAX_GENERATED_VARIANTS)
+          console.warn(`[redteam] --generated-variants capped at ${MAX_GENERATED_VARIANTS} (asked for ${requested})`);
+        break;
+      }
+      case '--generated-operators': {
+        const ops = (next() ?? '')
+          .split(',')
+          .map((o) => o.trim())
+          .filter(Boolean);
+        const unknown = ops.filter((o) => !isOperatorId(o));
+        if (unknown.length)
+          throw new Error(`unknown mutation operator(s): ${unknown.join(', ')} (known: ${OPERATOR_IDS.join(', ')})`);
+        cfg.generatedOperators = ops;
+        break;
+      }
+      case '--variant-cache':
+        cfg.variantCacheDir = next();
+        break;
+      case '--gate-generated':
+        cfg.gateGenerated = true;
         break;
       default:
         break;
@@ -508,6 +549,7 @@ async function runEntry(
   canaries: string[],
   pool: AssertionContext['pool'],
   variation = 0,
+  generated?: { meta: GeneratedVariantMeta; generationCostUsd: number },
 ): Promise<ScenarioResult> {
   // Variation v>0: styled persona + shifted seed; ids get a #v2/#v3 suffix so
   // reports and the DB keep each variation as its own row.
@@ -517,6 +559,8 @@ async function runEntry(
   const beats = entry.beatIds ? scenario.beats.filter((b) => entry.beatIds!.includes(b.id)) : scenario.beats;
   const runJudgeFlag = entry.judge ?? scenario.runJudge;
   const cost = new CostTracker();
+  // A freshly generated variant carries its generation + guard spend.
+  if (generated) cost.usd += generated.generationCostUsd;
   const classify = makeClassifier(openai, vcfg, cost);
   const start = Date.now();
 
@@ -548,6 +592,7 @@ async function runEntry(
       transcript,
       costUsd: cost.usd,
       durationMs: Date.now() - start,
+      generated: generated?.meta,
     };
   } catch (err) {
     return {
@@ -561,6 +606,7 @@ async function runEntry(
       costUsd: cost.usd,
       durationMs: Date.now() - start,
       error: (err as Error).message,
+      generated: generated?.meta,
     };
   }
 }
@@ -613,6 +659,15 @@ async function main(): Promise<void> {
       results.push(r);
     }
   }
+
+  // Generated adversarial variants (ai-therapist-109): opt-in, after the
+  // scripted scenarios so they can never delay or perturb a scripted result.
+  let discardedVariants: DiscardedVariant[] | undefined;
+  if (cfg.generatedVariants > 0) {
+    const gen = await runGeneratedVariants(entries, client, openai, cfg, canaries, pool);
+    results.push(...gen.results);
+    discardedVariants = gen.discarded;
+  }
   const finishedAt = new Date().toISOString();
 
   let gitSha: string | null = process.env.GITHUB_SHA ?? null;
@@ -640,6 +695,7 @@ async function main(): Promise<void> {
     judgeModel: judgeLabel,
     gitSha,
     scenarios: results,
+    discardedVariants,
   };
   const { junitPath, summaryPath } = writeReports(cfg, summary);
   const passed = printConsole(summary);
@@ -663,20 +719,25 @@ async function main(): Promise<void> {
       gitSha,
       trigger,
       dryRun: cfg.dryRun,
-      scenarios: results.map((r) => ({
-        scenarioId: r.id.replace(/#v\d+$/, ''),
-        variation: r.variation,
-        pipeline: r.pipeline,
-        passed: r.passed,
-        assertionFailures: r.assertions
-          .filter((a) => !a.passed && a.gating)
-          .map((a) => ({ id: a.id, detail: a.detail })),
-        judgeScores: r.judge ? (r.judge.scores as Record<string, number>) : null,
-        sessionId: r.sessionId ?? null,
-        error: r.error ?? null,
-        durationMs: r.durationMs,
-        costUsd: r.costUsd,
-      })),
+      // Generated variants stay out of harness_runs: the Simulation Runs panel
+      // and `--baseline latest` read it as the scripted record. Their record is
+      // summary.json plus the persisted scripts under <out>/variants/.
+      scenarios: results
+        .filter((r) => !r.generated)
+        .map((r) => ({
+          scenarioId: r.id.replace(/#v\d+$/, ''),
+          variation: r.variation,
+          pipeline: r.pipeline,
+          passed: r.passed,
+          assertionFailures: r.assertions
+            .filter((a) => !a.passed && a.gating)
+            .map((a) => ({ id: a.id, detail: a.detail })),
+          judgeScores: r.judge ? (r.judge.scores as Record<string, number>) : null,
+          sessionId: r.sessionId ?? null,
+          error: r.error ?? null,
+          durationMs: r.durationMs,
+          costUsd: r.costUsd,
+        })),
     });
     console.log(`[redteam] persisted as harness run #${persistedRunId}`);
   } catch (err) {
@@ -706,6 +767,60 @@ async function main(): Promise<void> {
   const gateFailed = !passed && !cfg.allowFail;
   const diffFailed = diffRegressions && cfg.gateDiff;
   await flushAndExit(gateFailed || diffFailed ? 1 : 0);
+}
+
+/** Plan, generate (or load from cache), guard and run this run's generated
+ *  variants. Each runs once (no --variations) under the run seed. */
+async function runGeneratedVariants(
+  entries: SuiteEntry[],
+  client: HarnessClient,
+  openai: OpenAI | null,
+  cfg: RedteamConfig,
+  canaries: string[],
+  pool: AssertionContext['pool'],
+): Promise<{ results: ScenarioResult[]; discarded: DiscardedVariant[] }> {
+  console.log(
+    `\n[redteam] generated variants: up to ${cfg.generatedVariants} (seed=${cfg.seed}, cache=${cfg.variantCacheDir}, ${cfg.gateGenerated ? 'GATING' : 'non-gating'})`,
+  );
+  const { variants, discarded } = await buildGeneratedVariants(
+    entries,
+    cfg.generatedVariants,
+    cfg.seed,
+    cfg.generatedOperators?.filter(isOperatorId),
+    {
+      // The OpenAI client satisfies the structural GeneratorClient surface.
+      client: openai as unknown as GeneratorClient | null,
+      dryRun: cfg.dryRun,
+      generatorModel: cfg.generatorModel,
+      guardModel: cfg.classifierModel,
+      cacheDir: cfg.variantCacheDir,
+      runDir: cfg.outDir,
+      cost: new CostTracker(),
+      safetyIds: new Set(SAFETY_SCENARIOS.map((s) => s.id)),
+      log: (m) => console.log(m),
+    },
+  );
+  const results: ScenarioResult[] = [];
+  for (const v of variants) {
+    const meta: GeneratedVariantMeta = {
+      parentId: v.file.parentId,
+      operator: v.file.operator,
+      seed: v.file.seed,
+      gating: cfg.gateGenerated,
+      cached: v.cached,
+      scriptFile: v.runFile,
+    };
+    console.log(`\n[redteam] running ${v.file.variantId} (${v.entry.scenario.pipeline})...`);
+    const r = await runEntry(v.entry, client, openai, cfg, canaries, pool, 0, {
+      meta,
+      generationCostUsd: v.costUsd,
+    });
+    console.log(
+      `[redteam] ${r.id}: ${r.passed ? 'PASS' : meta.gating ? 'FAIL' : 'MISS (non-gating)'} (${(r.durationMs / 1000).toFixed(1)}s, $${r.costUsd.toFixed(4)})`,
+    );
+    results.push(r);
+  }
+  return { results, discarded };
 }
 
 /** Load the baseline named by --baseline: a summary.json path, or `latest`

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import type { RedteamConfig } from './config.js';
 import type { ScenarioResult } from './types.js';
+import type { DiscardedVariant } from './generatedVariants.js';
 
 export interface RunSummary {
   startedAt: string;
@@ -12,6 +13,15 @@ export interface RunSummary {
   judgeModel: string;
   gitSha?: string | null;
   scenarios: ScenarioResult[];
+  /** --generated-variants only: variants the validity guard (or a failed
+   *  generation call) discarded. Undefined when generation was off. */
+  discardedVariants?: DiscardedVariant[];
+}
+
+/** Whether a result can fail the run: every scripted scenario, and a generated
+ *  variant only under --gate-generated. */
+export function countsTowardGate(s: ScenarioResult): boolean {
+  return !s.generated || s.generated.gating;
 }
 
 function xmlEscape(s: string): string {
@@ -26,23 +36,31 @@ function xmlEscape(s: string): string {
 export function buildJUnit(summary: RunSummary): string {
   const suites = summary.scenarios
     .map((s) => {
-      const failures = s.assertions.filter((a) => !a.passed && a.gating).length;
+      // A non-gating generated variant reports its failures as <skipped> with
+      // a marker, the same convention as any other non-gating assertion, so a
+      // JUnit consumer never reads it as a scripted-gate regression.
+      const gates = countsTowardGate(s);
+      const marker = s.generated && !gates ? '[non-gating generated variant] ' : '';
+      const failures = gates ? s.assertions.filter((a) => !a.passed && a.gating).length : 0;
       const cases = s.assertions
         .map((a) => {
           const name = xmlEscape(a.id);
           if (a.passed) return `    <testcase classname="${xmlEscape(s.id)}" name="${name}"/>`;
-          const tag = a.gating ? 'failure' : 'skipped';
+          const tag = a.gating && gates ? 'failure' : 'skipped';
+          const msg = xmlEscape(marker + a.detail);
           return (
             `    <testcase classname="${xmlEscape(s.id)}" name="${name}">\n` +
-            `      <${tag} message="${xmlEscape(a.detail)}">${xmlEscape(a.detail)}</${tag}>\n` +
+            `      <${tag} message="${msg}">${msg}</${tag}>\n` +
             `    </testcase>`
           );
         })
         .join('\n');
-      const errAttr = s.error ? ` errors="1"` : '';
+      const errAttr = s.error && gates ? ` errors="1"` : '';
+      const errTag = gates ? 'error' : 'skipped';
+      const errMsg = s.error ? xmlEscape(marker + s.error) : '';
       const errCase = s.error
         ? `\n    <testcase classname="${xmlEscape(s.id)}" name="scenario-execution">\n` +
-          `      <error message="${xmlEscape(s.error)}">${xmlEscape(s.error)}</error>\n    </testcase>`
+          `      <${errTag} message="${errMsg}">${errMsg}</${errTag}>\n    </testcase>`
         : '';
       return (
         `  <testsuite name="${xmlEscape(s.id)}" tests="${s.assertions.length}" failures="${failures}"${errAttr} ` +
@@ -66,13 +84,35 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     // Synthetic persona text + model replies, so a CI failure can be triaged
     // from the artifact after the CI database is gone.
     transcript: s.transcript,
+    ...(s.generated ? { generated: s.generated } : {}),
   }));
-  const assertionCount = summary.scenarios.reduce((n, s) => n + s.assertions.length, 0);
-  const assertionFailures = summary.scenarios.reduce(
-    (n, s) => n + s.assertions.filter((a) => !a.passed && a.gating).length,
-    0,
-  );
-  const passed = summary.scenarios.filter((s) => s.passed).length;
+  // Totals describe the SCRIPTED scenarios only, so they stay comparable run
+  // to run whether or not generated variants rode along; those get their own
+  // block below.
+  const scripted = summary.scenarios.filter((s) => !s.generated);
+  const generated = summary.scenarios.filter((s) => s.generated);
+  const assertionCount = scripted.reduce((n, s) => n + s.assertions.length, 0);
+  const assertionFailures = scripted.reduce((n, s) => n + s.assertions.filter((a) => !a.passed && a.gating).length, 0);
+  const passed = scripted.filter((s) => s.passed).length;
+  const generatedBlock = summary.discardedVariants
+    ? {
+        generated: {
+          variants: generated.length,
+          passed: generated.filter((s) => s.passed).length,
+          failed: generated.filter((s) => !s.passed).length,
+          gating: generated.some((s) => s.generated?.gating),
+          discarded: summary.discardedVariants,
+          // Run spend for the variants, generation + guard calls included
+          // (discarded attempts too).
+          estCostUsd: Number(
+            (
+              generated.reduce((n, s) => n + s.costUsd, 0) +
+              summary.discardedVariants.reduce((n, d) => n + d.costUsd, 0)
+            ).toFixed(6),
+          ),
+        },
+      }
+    : {};
   return {
     startedAt: summary.startedAt,
     finishedAt: summary.finishedAt,
@@ -82,13 +122,14 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     gitSha: summary.gitSha ?? null,
     scenarios,
     totals: {
-      scenarios: summary.scenarios.length,
+      scenarios: scripted.length,
       passed,
-      failed: summary.scenarios.length - passed,
+      failed: scripted.length - passed,
       assertions: assertionCount,
       assertionFailures,
-      estCostUsd: Number(summary.scenarios.reduce((n, s) => n + s.costUsd, 0).toFixed(6)),
+      estCostUsd: Number(scripted.reduce((n, s) => n + s.costUsd, 0).toFixed(6)),
     },
+    ...generatedBlock,
   };
 }
 
@@ -107,12 +148,15 @@ export function printConsole(summary: RunSummary): boolean {
   console.log('\n─────────────────────────────────────────────────────────────');
   console.log(` Red-team results — suite=${summary.suite} seed=${summary.seed} judge=${summary.judgeModel}`);
   console.log('─────────────────────────────────────────────────────────────');
-  for (const s of summary.scenarios) {
-    if (!s.passed) allPass = false;
+  const scripted = summary.scenarios.filter((s) => !s.generated);
+  const generated = summary.scenarios.filter((s) => s.generated);
+  const printScenario = (s: ScenarioResult) => {
+    if (!s.passed && countsTowardGate(s)) allPass = false;
     const gate = s.assertions.filter((a) => a.gating);
     const gp = gate.filter((a) => a.passed).length;
+    const verdict = s.passed ? 'PASS' : countsTowardGate(s) ? 'FAIL' : 'MISS';
     console.log(
-      `${s.passed ? 'PASS' : 'FAIL'}  ${s.id.padEnd(20)} ${gp}/${gate.length} gating  ${(s.durationMs / 1000).toFixed(1)}s  $${s.costUsd.toFixed(4)}`,
+      `${verdict}  ${s.id.padEnd(20)} ${gp}/${gate.length} gating  ${(s.durationMs / 1000).toFixed(1)}s  $${s.costUsd.toFixed(4)}`,
     );
     for (const a of s.assertions.filter((x) => !x.passed)) {
       console.log(`        ${a.gating ? '✗' : '·'} ${a.id}: ${a.detail}`);
@@ -131,11 +175,27 @@ export function printConsole(summary: RunSummary): boolean {
         );
       }
     }
+  };
+  for (const s of scripted) printScenario(s);
+  if (summary.discardedVariants) {
+    const gating = generated.some((s) => s.generated?.gating);
+    console.log('─────────────────────────────────────────────────────────────');
+    console.log(
+      ` Generated variants (${gating ? 'GATING' : 'non-gating; MISS = an inherited assertion failed'}): ` +
+        `${generated.filter((s) => s.passed).length}/${generated.length} pass, ${summary.discardedVariants.length} discarded`,
+    );
+    for (const s of generated) {
+      printScenario(s);
+      console.log(`        script: ${s.generated!.scriptFile}${s.generated!.cached ? ' (cached)' : ''}`);
+    }
+    for (const d of summary.discardedVariants) console.log(`DROP  ${d.variantId}: ${d.reason}`);
   }
-  const estCost = summary.scenarios.reduce((n, s) => n + s.costUsd, 0);
+  const estCost =
+    summary.scenarios.reduce((n, s) => n + s.costUsd, 0) +
+    (summary.discardedVariants ?? []).reduce((n, d) => n + d.costUsd, 0);
   console.log('─────────────────────────────────────────────────────────────');
   console.log(
-    ` ${allPass ? 'PASS' : 'FAIL'} — ${summary.scenarios.filter((s) => s.passed).length}/${summary.scenarios.length} scenarios, est $${estCost.toFixed(4)}`,
+    ` ${allPass ? 'PASS' : 'FAIL'} — ${scripted.filter((s) => s.passed).length}/${scripted.length} scenarios, est $${estCost.toFixed(4)}`,
   );
   console.log('─────────────────────────────────────────────────────────────\n');
   return allPass;

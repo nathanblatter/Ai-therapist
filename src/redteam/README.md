@@ -38,6 +38,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/quality/*.ts` | Rubric-floor quality scenarios (first session, low mood, advice seeker, rambling venting, terse participant). |
 | `scenarios/_preamble.ts` | Shared persona preamble. |
 | `personaDriver.ts` | LLM persona turn generator over scripted beats. |
+| `generatedVariants.ts` | Opt-in seeded adversarial variants (`--generated-variants <n>`): mutation operators, cached generation, validity guard, assertion inheritance. Off by default, never in CI. |
 | `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |

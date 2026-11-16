@@ -43,12 +43,22 @@ export interface SummaryJsonLike {
     assertions?: Array<{ id: string; passed: boolean; gating: boolean; detail?: string }>;
     judge?: { scores?: Record<string, number> } | null;
     error?: string | null;
+    generated?: unknown;
   }>;
+}
+
+/** Generated adversarial variants (ai-therapist-109) carry a `gen:` id and a
+ *  `generated` block; the diff compares scripted scenarios only, so a variant
+ *  failure (or a different set of variants tonight) never reads as a
+ *  regression in a scripted gate. */
+function isGeneratedScenario(s: { id: string; generated?: unknown }): boolean {
+  return s.id.startsWith('gen:') || !!s.generated;
 }
 
 export function normalizeSummary(summary: SummaryJsonLike, source: string): NormalizedRun {
   const scenarios: Record<string, NormalizedScenario> = {};
   for (const s of summary.scenarios ?? []) {
+    if (isGeneratedScenario(s)) continue;
     const assertions: NormalizedScenario['assertions'] = {};
     for (const a of s.assertions ?? []) {
       assertions[a.id] = { passed: a.passed, gating: a.gating !== false, detail: a.detail ?? '' };
@@ -79,6 +89,7 @@ export function scenarioLabel(scenarioId: string, variation: number): string {
 export function normalizeHarnessRun(run: HarnessRunRow, results: HarnessScenarioResultRow[]): NormalizedRun {
   const scenarios: Record<string, NormalizedScenario> = {};
   for (const r of results) {
+    if (isGeneratedScenario({ id: r.scenario_id })) continue;
     const id = scenarioLabel(r.scenario_id, r.variation);
     const assertions: NormalizedScenario['assertions'] = {};
     for (const f of r.assertion_failures ?? []) assertions[f.id] = { passed: false, gating: true, detail: f.detail };
