@@ -4,6 +4,7 @@
 // used to make pg throw a cast error and 500 every anonymous chat start.
 // Also covers the per-IP limiter backstop on /api/chat/message.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createServer } from 'node:http';
 import express from 'express';
 import request from 'supertest';
 
@@ -226,17 +227,27 @@ describe('POST /api/chat/start opening line', () => {
 
 describe('POST /api/chat/message rate limiting', () => {
   it('backstops the endpoint at 30 requests per IP per minute', async () => {
-    const app = makeApp();
-    let lastStatus = 0;
-    for (let i = 0; i < 31; i++) {
-      // Missing body -> 400 before any db/model work; still counts for the limiter.
-      const res = await request(app).post('/api/chat/message').send({});
-      lastStatus = res.status;
+    // One server for the whole burst instead of 31 (request(app) starts a
+    // fresh one per call), sent concurrently: the limiter counts arrivals, so
+    // exactly 30 requests pass and exactly one is limited (ai-therapist-279).
+    const server = createServer(makeApp());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const statuses = await Promise.all(
+        // Missing body -> 400 before any db/model work; still counts for the limiter.
+        Array.from({ length: 31 }, () =>
+          request(server)
+            .post('/api/chat/message')
+            .send({})
+            .then((res) => res.status),
+        ),
+      );
+      expect(statuses.filter((s) => s === 400)).toHaveLength(30);
+      expect(statuses.filter((s) => s === 429)).toHaveLength(1);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
     }
-    expect(lastStatus).toBe(429);
-    // 31 sequential supertest round-trips can exceed the 5 s default when the
-    // whole suite runs in parallel (ai-therapist-279).
-  }, 30_000);
+  });
 });
 
 // ai-therapist-222: a restart that leaves the session unrehydratable is a
