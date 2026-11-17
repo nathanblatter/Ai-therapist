@@ -68,8 +68,13 @@ const { WS_OPEN, fakeWs } = vi.hoisted(() => {
   };
 });
 
+// The manager does `new WebSocket(...)`: since Vitest 4 a mock invoked with
+// `new` constructs, so implementations must be `function`s (an arrow function
+// is not a constructor). Returning an object from it makes `new` yield that.
 vi.mock('ws', () => {
-  const ctor = vi.fn(() => fakeWs());
+  const ctor = vi.fn(function () {
+    return fakeWs();
+  });
   (ctor as unknown as { OPEN: number }).OPEN = WS_OPEN;
   return { default: ctor };
 });
@@ -887,7 +892,7 @@ describe('opening attach', () => {
 
   beforeEach(() => {
     sockets = [];
-    wsCtor.mockImplementation(() => {
+    wsCtor.mockImplementation(function () {
       const s = controllableWs();
       sockets.push(s);
       return s;
@@ -895,7 +900,9 @@ describe('opening attach', () => {
   });
 
   afterEach(() => {
-    wsCtor.mockImplementation(() => fakeWs());
+    wsCtor.mockImplementation(function () {
+      return fakeWs();
+    });
   });
 
   function startAttach(sessionId: string) {
