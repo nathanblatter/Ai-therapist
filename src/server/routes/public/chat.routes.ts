@@ -25,6 +25,7 @@ import {
   getSystemConfig,
   resolveProactiveOffering,
   resolvePsychoeducationCue,
+  resolveLeadConversation,
 } from '../../utils/sessionHelpers.js';
 import { buildChatOpeningLine, OPENING_LINE_MESSAGE_TYPE, OPENING_LINE_METADATA } from '../../utils/openingLine.js';
 import {
@@ -32,6 +33,7 @@ import {
   buildCheckinBlock,
   buildMemoryBlock,
   buildToolGuidanceBlock,
+  buildLeadConversationBlock,
 } from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -152,9 +154,13 @@ export default function chatRoutes(): Router {
             { psychoeducationCue: true },
           );
         }
+        // Lead-conversation steering (features.lead_conversation_enabled,
+        // default off). Same block and position as the voice routes.
+        const leadConversation = await resolveLeadConversation();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'chat', proactiveOffering)) +
           psychoeducationGuidance +
+          buildLeadConversationBlock(leadConversation) +
           memoryBlock +
           buildCheckinBlock(checkin);
 
@@ -249,7 +255,9 @@ export default function chatRoutes(): Router {
         if (!continuedFrom) {
           try {
             const cfg = await getSystemConfig();
-            opening = buildChatOpeningLine(cfg.crisis_contact as Parameters<typeof buildChatOpeningLine>[0]);
+            opening = buildChatOpeningLine(cfg.crisis_contact as Parameters<typeof buildChatOpeningLine>[0], {
+              leadConversation,
+            });
             const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
             seedAssistantOpening(sessionId, opening);
             // Session steering, same mechanism as the continuation recap below

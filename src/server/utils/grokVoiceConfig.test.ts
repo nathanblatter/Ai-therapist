@@ -151,6 +151,20 @@ describe('buildGrokOpeningPrompt', () => {
     expect(text).toContain('before the participant speaks');
   });
 
+  it('flag off ends the opening exactly as before; flag on adds the focus invitation', () => {
+    const off = buildGrokOpeningPrompt('en', { enabled: false });
+    expect(off.endsWith("' Say it immediately, before the participant speaks, then pause and listen.")).toBe(true);
+    expect(buildGrokOpeningPrompt('en', { enabled: false }, { leadConversation: false })).toBe(off);
+    const on = buildGrokOpeningPrompt('en', { enabled: false }, { leadConversation: true });
+    expect(
+      on.endsWith(
+        "' Say it immediately, before the participant speaks. Then, in the same turn, ask one short, open question inviting them to share what they would like to focus on today, and listen.",
+      ),
+    ).toBe(true);
+    // The disclosure itself is untouched.
+    expect(on.slice(0, on.lastIndexOf("'"))).toBe(off.slice(0, off.lastIndexOf("'")));
+  });
+
   it('falls back to 988/911 when crisis contact is disabled and names the language', () => {
     const text = buildGrokOpeningPrompt('pt-BR', { enabled: false });
     expect(text).toContain('Brazilian Portuguese');

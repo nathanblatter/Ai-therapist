@@ -43,6 +43,7 @@ import {
   getSystemConfig,
   resolveProactiveOffering,
   resolvePsychoeducationCue,
+  resolveLeadConversation,
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -51,6 +52,7 @@ import {
   buildCheckinBlock,
   buildMemoryBlock,
   buildToolGuidanceBlock,
+  buildLeadConversationBlock,
 } from '../../utils/promptContext.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
@@ -229,9 +231,13 @@ export default function liveSessionRoutes(): Router {
           { psychoeducationCue: psychoeducationCue === true },
         );
         const proactiveOffering = await resolveProactiveOffering();
+        // Lead-conversation steering (features.lead_conversation_enabled,
+        // default off). A recovery start keeps its own narrow crisis prompt.
+        const leadConversation = isRecovery ? false : await resolveLeadConversation();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) +
           toolGuidance +
+          buildLeadConversationBlock(leadConversation) +
           memoryBlock +
           buildCheckinBlock(checkin);
         const activeModality = await getActiveModality();
@@ -286,6 +292,7 @@ export default function liveSessionRoutes(): Router {
           storable: isDemoSession,
           recovery: isRecovery ? { crisisLine } : undefined,
           psychoeducationCue: psychoeducationCue === true,
+          leadConversation,
         });
 
         const apiKey = await getOpenAIKey();
@@ -512,6 +519,9 @@ export default function liveSessionRoutes(): Router {
           voice: userVoice,
           language: userLanguage,
           session_limits: limitCheck.allowed ? limitCheck.limits || null : null,
+          // The browser delivers the GPT-Live opening, so it needs to know how
+          // the opening should end (shared/openingPrompt.ts).
+          lead_conversation: leadConversation,
         });
       } catch (error) {
         log.error({ err: error }, 'Session creation error');

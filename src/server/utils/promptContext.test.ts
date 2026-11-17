@@ -75,6 +75,8 @@ const {
   buildRiskHistoryBlock,
   buildToolGuidanceBlock,
   PSYCHOEDUCATION_CUE_LINE,
+  buildLeadConversationBlock,
+  LEAD_CONVERSATION_BLOCK,
   buildPracticeBlock,
   buildScreenerCadenceBlock,
 } = await import('./promptContext.js');
@@ -472,5 +474,29 @@ describe('buildMemoryBlock composition', () => {
   it('never throws — a DB failure yields an empty block so the session can still start', async () => {
     getUserMemoryEnabledMock.mockRejectedValue(new Error('db down'));
     await expect(buildMemoryBlock(42)).resolves.toBe('');
+  });
+});
+
+describe('buildLeadConversationBlock (features.lead_conversation_enabled)', () => {
+  it('is empty when the flag is off, so the assembled prompt is unchanged', () => {
+    expect(buildLeadConversationBlock(false)).toBe('');
+  });
+
+  it('is the named block when the flag is on', () => {
+    const block = buildLeadConversationBlock(true);
+    expect(block).toBe(LEAD_CONVERSATION_BLOCK);
+    expect(block.startsWith('\n\n## Leading the conversation\n')).toBe(true);
+  });
+
+  it('defers to the safety sections and to the proactive_offering arm', () => {
+    // Safety takes precedence over leading.
+    expect(LEAD_CONVERSATION_BLOCK).toContain('the Crisis Protocol and the safety sections take precedence');
+    expect(LEAD_CONVERSATION_BLOCK).toContain(
+      'Leading never means giving advice beyond what this prompt already allows.',
+    );
+    // Exercise offering stays with the research arm: the block names no tool
+    // and points back at the exercise-offering section instead.
+    expect(LEAD_CONVERSATION_BLOCK).toContain('decided by the section on offering exercises; follow it');
+    expect(LEAD_CONVERSATION_BLOCK).not.toMatch(/start_|find_worksheet|suggest_modality_technique/);
   });
 });

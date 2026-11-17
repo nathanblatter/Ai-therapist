@@ -10,6 +10,7 @@ import {
   resolveProactiveOffering,
   resolvePsychoeducationCue,
   resetPsychoeducationCueColumnCache,
+  resolveLeadConversation,
   getSystemPrompt,
 } from './sessionHelpers.js';
 
@@ -211,5 +212,38 @@ describe('resolvePsychoeducationCue', () => {
       return Promise.resolve({ rows: [] });
     });
     expect(typeof (await resolvePsychoeducationCue())).toBe('boolean');
+  });
+});
+
+// ---------- lead-conversation flag (owner feedback 2026-11-16) ----------
+
+describe('resolveLeadConversation', () => {
+  it('is off by default when the flag is unset', async () => {
+    setupCue({});
+    expect(await resolveLeadConversation()).toBe(false);
+  });
+
+  it('is off unless the flag is exactly true', async () => {
+    setupCue({ lead_conversation_enabled: 'true' });
+    expect(await resolveLeadConversation()).toBe(false);
+    setupCue({ lead_conversation_enabled: 1 });
+    expect(await resolveLeadConversation()).toBe(false);
+  });
+
+  it('is on for every session when the flag is true (no random assignment)', async () => {
+    setupCue({ lead_conversation_enabled: true });
+    const spy = vi.spyOn(Math, 'random');
+    expect(await resolveLeadConversation()).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('does not change the base prompt either way', async () => {
+    setupCue({ lead_conversation_enabled: true });
+    const on = await getSystemPrompt('en', 'realtime', false);
+    setupCue({});
+    const off = await getSystemPrompt('en', 'realtime', false);
+    expect(on).toBe(off);
+    expect(on).not.toContain('Leading the conversation');
   });
 });
