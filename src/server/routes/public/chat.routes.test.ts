@@ -33,6 +33,10 @@ const helperMocks = vi.hoisted(() => ({
   getSystemPrompt: vi.fn(),
   getSystemConfig: vi.fn(),
   resolveProactiveOffering: vi.fn(),
+  resolvePsychoeducationCue: vi.fn(),
+}));
+const registryMocks = vi.hoisted(() => ({
+  getEnabledToolDefinitions: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => dbMocks);
@@ -41,6 +45,11 @@ vi.mock('../../utils/promptContext.js', () => ({
   sanitizeCheckin: () => null,
   buildCheckinBlock: () => '',
   buildMemoryBlock: async () => '',
+  buildToolGuidanceBlock: (names: string[], opts: { psychoeducationCue?: boolean }) =>
+    opts.psychoeducationCue && names.includes('retrieve_psychoeducation') ? '\n\nCUE:retrieve_psychoeducation' : '',
+}));
+vi.mock('../../services/toolRegistry.service.js', () => ({
+  toolRegistry: registryMocks,
 }));
 vi.mock('../../middleware/consent.js', () => ({
   requireConsent: (_req: unknown, _res: unknown, next: () => void) => next(),
@@ -106,6 +115,11 @@ beforeEach(() => {
   dbMocks.setSessionCheckin.mockResolvedValue(undefined);
   dbMocks.upsertSessionConfig.mockResolvedValue({});
   helperMocks.resolveProactiveOffering.mockResolvedValue(true);
+  helperMocks.resolvePsychoeducationCue.mockResolvedValue(null);
+  registryMocks.getEnabledToolDefinitions.mockResolvedValue([
+    { name: 'retrieve_psychoeducation' },
+    { name: 'log_mood' },
+  ]);
   (globalThis as { io?: unknown }).io = { to: () => ({ emit: () => {} }) };
 });
 
@@ -145,6 +159,51 @@ describe('POST /api/chat/start', () => {
     );
   });
 
+  describe('psychoeducation cue experiment (ai-therapist-202)', () => {
+    it('experiment off (null): no cue in the prompt, arm stored as null', async () => {
+      const res = await request(makeApp()).post('/api/chat/start').send({});
+      expect(res.status).toBe(200);
+      expect(helperMocks.resolvePsychoeducationCue).toHaveBeenCalledTimes(1);
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+      expect(registryMocks.getEnabledToolDefinitions).not.toHaveBeenCalled();
+      expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
+        res.body.sessionId,
+        expect.objectContaining({ psychoeducation_cue: null }),
+      );
+    });
+
+    it('control arm (false): no cue in the prompt, arm stored as false', async () => {
+      helperMocks.resolvePsychoeducationCue.mockResolvedValue(false);
+      const res = await request(makeApp()).post('/api/chat/start').send({});
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+      expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
+        res.body.sessionId,
+        expect.objectContaining({ psychoeducation_cue: false }),
+      );
+    });
+
+    it('cue arm (true): appends only the retrieve_psychoeducation guidance and stores true', async () => {
+      helperMocks.resolvePsychoeducationCue.mockResolvedValue(true);
+      const res = await request(makeApp()).post('/api/chat/start').send({});
+      expect(registryMocks.getEnabledToolDefinitions).toHaveBeenCalledWith({ channel: 'chat' });
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(
+        res.body.sessionId,
+        'prompt\n\nCUE:retrieve_psychoeducation',
+      );
+      expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
+        res.body.sessionId,
+        expect.objectContaining({ psychoeducation_cue: true }),
+      );
+    });
+
+    it('cue arm without the tool enabled for chat adds nothing', async () => {
+      helperMocks.resolvePsychoeducationCue.mockResolvedValue(true);
+      registryMocks.getEnabledToolDefinitions.mockResolvedValue([{ name: 'log_mood' }]);
+      const res = await request(makeApp()).post('/api/chat/start').send({});
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+    });
+  });
+
   it('does not re-roll the condition when an active session already exists', async () => {
     dbMocks.getActiveSessionForUser.mockResolvedValue({ session_id: 'chat_existing' });
     const res = await request(makeApp({ userId: 12, userRole: 'participant' }))
@@ -153,6 +212,7 @@ describe('POST /api/chat/start', () => {
     expect(res.status).toBe(200);
     expect(res.body.alreadyActive).toBe(true);
     expect(helperMocks.resolveProactiveOffering).not.toHaveBeenCalled();
+    expect(helperMocks.resolvePsychoeducationCue).not.toHaveBeenCalled();
     expect(dbMocks.upsertSessionConfig).not.toHaveBeenCalled();
   });
 

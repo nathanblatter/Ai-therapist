@@ -53,6 +53,11 @@ export function buildCheckinBlock(checkin: SessionCheckin | null): string {
   return `\n\n## Today's check-in (provided by the participant just now)\n${lines.join('\n')}\nOpen the conversation by gently acknowledging this — don't interrogate them about it, just show you've heard it.`;
 }
 
+/** ai-therapist-202 cue-arm guidance line for retrieve_psychoeducation. Wording
+ *  mirrors the tool's own description. */
+export const PSYCHOEDUCATION_CUE_LINE =
+  '- When they ask what a condition is, why they might feel a certain way, or how a coping technique or therapy works, CALL retrieve_psychoeducation and ground your explanation in the passages it returns.';
+
 /**
  * Prompt block teaching the model when to actually CALL its client-side tools.
  * The base prompt predates tool calling — its privacy section even reads as
@@ -61,8 +66,15 @@ export function buildCheckinBlock(checkin: SessionCheckin | null): string {
  * instead of invoking the matching tool (observed live: thought record asked
  * for twice and never opened, mood rating never logged, "end the session now"
  * ignored). Lines are emitted only for tools enabled for this session.
+ *
+ * `psychoeducationCue` is the ai-therapist-202 research condition: the
+ * retrieve_psychoeducation line is emitted only for sessions assigned to the
+ * cue arm (see resolvePsychoeducationCue), never by default.
  */
-export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
+export function buildToolGuidanceBlock(
+  enabledToolNames: string[],
+  opts: { psychoeducationCue?: boolean } = {},
+): string {
   const has = (name: string) => enabledToolNames.includes(name);
   const lines: string[] = [];
   if (has('start_thought_record')) {
@@ -122,6 +134,9 @@ export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
     lines.push(
       '- When a written exercise would help, CALL find_worksheet to pick the fitting one, then call the render tool it returns (start_thought_record / show_journaling_prompt).',
     );
+  }
+  if (opts.psychoeducationCue === true && has('retrieve_psychoeducation')) {
+    lines.push(PSYCHOEDUCATION_CUE_LINE);
   }
   if (has('review_practice')) {
     lines.push(
