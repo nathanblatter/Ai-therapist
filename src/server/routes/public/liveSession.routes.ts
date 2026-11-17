@@ -42,6 +42,7 @@ import {
   getActiveModality,
   getSystemConfig,
   resolveProactiveOffering,
+  resolvePsychoeducationCue,
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -218,7 +219,15 @@ export default function liveSessionRoutes(): Router {
         const toolDefs = await toolRegistry.getEnabledToolDefinitions();
         const checkin = sanitizeCheckin(req.body?.checkin);
         const memoryBlock = await buildMemoryBlock(userId);
-        const toolGuidance = buildToolGuidanceBlock(toolDefs.map((t) => t.name));
+        // Psychoeducation retrieval cue (ai-therapist-202): resolved once per
+        // session and persisted below, like proactive_offering. A crisis
+        // recovery start is never enrolled: it runs with delegation off and
+        // its own narrow prompt, so it is recorded as not in the experiment.
+        const psychoeducationCue = isRecovery ? null : await resolvePsychoeducationCue();
+        const toolGuidance = buildToolGuidanceBlock(
+          toolDefs.map((t) => t.name),
+          { psychoeducationCue: psychoeducationCue === true },
+        );
         const proactiveOffering = await resolveProactiveOffering();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) +
@@ -276,6 +285,7 @@ export default function liveSessionRoutes(): Router {
           backendModel,
           storable: isDemoSession,
           recovery: isRecovery ? { crisisLine } : undefined,
+          psychoeducationCue: psychoeducationCue === true,
         });
 
         const apiKey = await getOpenAIKey();
@@ -381,6 +391,7 @@ export default function liveSessionRoutes(): Router {
             live_backend_model: backendModel,
             transcription_model: null, // GPT-Live transcribes internally.
             proactive_offering: proactiveOffering,
+            psychoeducation_cue: psychoeducationCue,
           });
         } catch (dbError) {
           log.error({ err: dbError }, 'Failed to create session in database');

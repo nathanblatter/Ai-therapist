@@ -74,6 +74,7 @@ const {
   buildClinicianNoteBlock,
   buildRiskHistoryBlock,
   buildToolGuidanceBlock,
+  PSYCHOEDUCATION_CUE_LINE,
   buildPracticeBlock,
   buildScreenerCadenceBlock,
 } = await import('./promptContext.js');
@@ -234,6 +235,33 @@ describe('buildToolGuidanceBlock — wave 3 tools', () => {
     expect(all).toContain('review_practice');
     expect(all).toContain('compare_screener_trend');
     expect(all).toContain('retrieve_safety_plan');
+  });
+});
+
+describe('buildToolGuidanceBlock — psychoeducation cue (ai-therapist-202)', () => {
+  const tools = ['retrieve_psychoeducation', 'find_worksheet'];
+
+  it('never mentions retrieve_psychoeducation by default (control / experiment off)', () => {
+    expect(buildToolGuidanceBlock(tools)).not.toContain('retrieve_psychoeducation');
+    expect(buildToolGuidanceBlock(tools, { psychoeducationCue: false })).not.toContain('retrieve_psychoeducation');
+  });
+
+  it('leaves the rest of the block byte-identical when the cue is off', () => {
+    expect(buildToolGuidanceBlock(tools, { psychoeducationCue: false })).toBe(
+      buildToolGuidanceBlock(['find_worksheet']),
+    );
+  });
+
+  it('emits exactly the cue line in the cue arm', () => {
+    const block = buildToolGuidanceBlock(tools, { psychoeducationCue: true });
+    expect(block).toContain(PSYCHOEDUCATION_CUE_LINE);
+    expect(block.split('\n').filter((l) => l.includes('retrieve_psychoeducation'))).toEqual([PSYCHOEDUCATION_CUE_LINE]);
+  });
+
+  it('emits no cue when the tool is not enabled for the session', () => {
+    expect(buildToolGuidanceBlock(['find_worksheet'], { psychoeducationCue: true })).not.toContain(
+      'retrieve_psychoeducation',
+    );
   });
 });
 

@@ -211,6 +211,38 @@ describe('buildLiveSessionConfig', () => {
   });
 });
 
+describe('buildLiveSessionConfig psychoeducation cue (ai-therapist-202)', () => {
+  const withRag: ToolDefinition[] = [
+    ...TOOL_DEFS,
+    {
+      name: 'retrieve_psychoeducation',
+      description: 'Retrieve passages',
+      parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    } as unknown as ToolDefinition,
+  ];
+
+  it('voice-layer instructions are unchanged when the cue is off', () => {
+    const off = build({ toolDefs: withRag }).instructions as string;
+    expect(off).toBe(build({ toolDefs: withRag, psychoeducationCue: false }).instructions);
+    expect(off).not.toMatch(/Psychoeducation/);
+    expect(off).not.toMatch(/what a condition is/);
+  });
+
+  it('cue arm adds one capability line and one delegate line', () => {
+    const on = build({ toolDefs: withRag, psychoeducationCue: true }).instructions as string;
+    expect(on).toContain(
+      '- Psychoeducation: look up vetted explanations of a condition, a feeling, or how a technique or therapy works.',
+    );
+    expect(on).toContain(
+      '- The participant asks what a condition is, why they might feel a certain way, or how a technique or therapy works.\n- A correction changes work already in progress.',
+    );
+  });
+
+  it('cue arm adds nothing when the tool is not enabled', () => {
+    expect(build({ psychoeducationCue: true }).instructions).toBe(build().instructions);
+  });
+});
+
 describe('toLiveDelegationTools', () => {
   it('never forwards registry-only metadata that would 400 session creation', () => {
     const defs = [

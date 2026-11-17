@@ -359,8 +359,14 @@ export const LIVE_DEFAULT_BACKEND_MODEL = 'gpt-5.6-terra';
  * rather than going quiet. The actual crisis handling still runs server-side
  * through runCrisisPipeline and arrives as session.instructions.append.
  */
-export function buildLiveInstructions(opts: { languageName?: string | null; toolNames: string[] }): string {
+export function buildLiveInstructions(opts: {
+  languageName?: string | null;
+  toolNames: string[];
+  /** ai-therapist-202 cue arm: tell the voice model psychoeducation lookups exist. */
+  psychoeducationCue?: boolean;
+}): string {
   const { languageName, toolNames } = opts;
+  const psychoeducationCue = opts.psychoeducationCue === true && toolNames.includes('retrieve_psychoeducation');
 
   const languageLine = languageName ? `Speak ${languageName} unless the participant asks you to switch.\n` : '';
 
@@ -373,6 +379,11 @@ export function buildLiveInstructions(opts: { languageName?: string | null; tool
   if (toolNames.includes('find_worksheet')) {
     capabilities.push(
       '- Worksheets and exercises: find and present a structured exercise that fits what the participant is working on.',
+    );
+  }
+  if (psychoeducationCue) {
+    capabilities.push(
+      '- Psychoeducation: look up vetted explanations of a condition, a feeling, or how a technique or therapy works.',
     );
   }
   if (toolNames.some((n) => n.startsWith('administer_scale') || n.includes('scale'))) {
@@ -402,7 +413,7 @@ ${capabilities.join('\n')}
 Delegate to the backend when:
 - The participant describes something they are working through and needs a substantive therapeutic response.
 - The participant asks for an exercise, a worksheet, a summary, or to end the session.
-- A correction changes work already in progress.
+${psychoeducationCue ? '- The participant asks what a condition is, why they might feel a certain way, or how a technique or therapy works.\n' : ''}- A correction changes work already in progress.
 
 Do not delegate to the backend when:
 - The participant greets you, makes small talk, or asks you to repeat something you just said.
@@ -530,6 +541,8 @@ export interface LiveSessionConfigInput {
    * the most likely way to be terminated again.
    */
   recovery?: { crisisLine: string };
+  /** ai-therapist-202 research condition; see buildLiveInstructions. */
+  psychoeducationCue?: boolean;
 }
 
 /**
@@ -565,7 +578,18 @@ const MAX_HISTORY_CHARS = 24_000; // ~8k tokens at the usual 3 chars/token heuri
  * is no audio.input.transcription block to configure.
  */
 export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<string, unknown> {
-  const { model, voice, languageName, systemPrompt, toolDefs, backendModel, history, storable, recovery } = input;
+  const {
+    model,
+    voice,
+    languageName,
+    systemPrompt,
+    toolDefs,
+    backendModel,
+    history,
+    storable,
+    recovery,
+    psychoeducationCue,
+  } = input;
 
   const session: Record<string, unknown> = {
     model,
@@ -574,6 +598,7 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
       : buildLiveInstructions({
           languageName,
           toolNames: toolDefs.map((t) => t.name),
+          psychoeducationCue,
         }),
     audio: {
       output: { voice: resolveLiveVoice(voice) },
