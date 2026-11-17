@@ -34,6 +34,7 @@ const helperMocks = vi.hoisted(() => ({
   getSystemConfig: vi.fn(),
   resolveProactiveOffering: vi.fn(),
   resolvePsychoeducationCue: vi.fn(),
+  resolveLeadConversation: vi.fn(),
 }));
 const registryMocks = vi.hoisted(() => ({
   getEnabledToolDefinitions: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock('../../utils/promptContext.js', () => ({
   buildMemoryBlock: async () => '',
   buildToolGuidanceBlock: (names: string[], opts: { psychoeducationCue?: boolean }) =>
     opts.psychoeducationCue && names.includes('retrieve_psychoeducation') ? '\n\nCUE:retrieve_psychoeducation' : '',
+  buildLeadConversationBlock: (enabled: boolean) => (enabled ? '\n\nLEAD' : ''),
 }));
 vi.mock('../../services/toolRegistry.service.js', () => ({
   toolRegistry: registryMocks,
@@ -116,6 +118,7 @@ beforeEach(() => {
   dbMocks.upsertSessionConfig.mockResolvedValue({});
   helperMocks.resolveProactiveOffering.mockResolvedValue(true);
   helperMocks.resolvePsychoeducationCue.mockResolvedValue(null);
+  helperMocks.resolveLeadConversation.mockResolvedValue(false);
   registryMocks.getEnabledToolDefinitions.mockResolvedValue([
     { name: 'retrieve_psychoeducation' },
     { name: 'log_mood' },
@@ -201,6 +204,31 @@ describe('POST /api/chat/start', () => {
       registryMocks.getEnabledToolDefinitions.mockResolvedValue([{ name: 'log_mood' }]);
       const res = await request(makeApp()).post('/api/chat/start').send({});
       expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+    });
+  });
+
+  describe('lead-conversation flag (features.lead_conversation_enabled)', () => {
+    it('flag off: prompt and opening exactly as before', async () => {
+      const res = await request(makeApp()).post('/api/chat/start').send({});
+      expect(res.status).toBe(200);
+      expect(helperMocks.resolveLeadConversation).toHaveBeenCalledTimes(1);
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+      expect(res.body.opening).toMatch(/I'm glad you're here with me today\.$/);
+    });
+
+    it('flag on: block after the tool guidance, opening ends with an invitation', async () => {
+      helperMocks.resolveLeadConversation.mockResolvedValue(true);
+      helperMocks.resolvePsychoeducationCue.mockResolvedValue(true);
+      const res = await request(makeApp()).post('/api/chat/start').send({});
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(
+        res.body.sessionId,
+        'prompt\n\nCUE:retrieve_psychoeducation\n\nLEAD',
+      );
+      expect(res.body.opening).toMatch(/I'm glad you're here with me today\. What would you like to focus on today\?$/);
+      expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
+        res.body.sessionId,
+        expect.objectContaining({ instructions: 'prompt\n\nCUE:retrieve_psychoeducation\n\nLEAD' }),
+      );
     });
   });
 

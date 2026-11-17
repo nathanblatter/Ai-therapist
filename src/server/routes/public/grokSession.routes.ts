@@ -38,6 +38,7 @@ import {
   getSystemConfig,
   resolveProactiveOffering,
   resolvePsychoeducationCue,
+  resolveLeadConversation,
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -46,6 +47,7 @@ import {
   buildCheckinBlock,
   buildMemoryBlock,
   buildToolGuidanceBlock,
+  buildLeadConversationBlock,
 } from '../../utils/promptContext.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
@@ -174,9 +176,12 @@ export default function grokSessionRoutes(): Router {
           { psychoeducationCue: psychoeducationCue === true },
         );
         const proactiveOffering = await resolveProactiveOffering();
+        // Lead-conversation steering (features.lead_conversation_enabled, default off).
+        const leadConversation = await resolveLeadConversation();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) +
           toolGuidance +
+          buildLeadConversationBlock(leadConversation) +
           memoryBlock +
           buildCheckinBlock(checkin);
         const activeModality = await getActiveModality();
@@ -278,6 +283,7 @@ export default function grokSessionRoutes(): Router {
           openingPrompt: buildGrokOpeningPrompt(
             userLanguage,
             systemConfig.crisis_contact as CrisisContactLike | undefined,
+            { leadConversation },
           ),
           refusalGuard,
           recoveryLine: buildGrokRefusalRecoveryLine(

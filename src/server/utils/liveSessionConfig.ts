@@ -364,11 +364,25 @@ export function buildLiveInstructions(opts: {
   toolNames: string[];
   /** ai-therapist-202 cue arm: tell the voice model psychoeducation lookups exist. */
   psychoeducationCue?: boolean;
+  /** features.lead_conversation_enabled: the voice model also guides, not only acknowledges. */
+  leadConversation?: boolean;
 }): string {
   const { languageName, toolNames } = opts;
   const psychoeducationCue = opts.psychoeducationCue === true && toolNames.includes('retrieve_psychoeducation');
 
   const languageLine = languageName ? `Speak ${languageName} unless the participant asks you to switch.\n` : '';
+  // Lead-conversation steering (features.lead_conversation_enabled). Without
+  // it the voice model answers greetings and short replies itself, without the
+  // clinical prompt, and the conversation stalls on acknowledgements. Two
+  // lines: one for how it speaks, one so stalls reach the backend, which holds
+  // the check-in, memory, and the lead-conversation block.
+  const lead = opts.leadConversation === true;
+  const leadLine = lead
+    ? 'Guide the conversation: after greetings, help the participant name what they want to focus on today, and keep it moving with one specific follow-up at a time rather than only acknowledging. If they are upset or raise anything about their safety, follow them instead.\n'
+    : '';
+  const leadDelegateLine = lead
+    ? '- The participant gives a short or stalled reply ("I don\'t know", "not much") and the conversation needs a next step.\n'
+    : '';
 
   // Describe backend CAPABILITIES, not tool call syntax — the guide is explicit
   // that these lines tell the live model what help is available, and are not
@@ -401,7 +415,7 @@ export function buildLiveInstructions(opts: {
   return `You are a warm, attentive voice companion in a research study on AI support for mental health.
 Speak calmly and unhurriedly, in plain language. Be genuine and grounded, not chirpy or clinical.
 Leave room for silence. If the participant is upset, acknowledge it plainly before anything else.
-${languageLine}
+${leadLine}${languageLine}
 Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the participant.
 
 Interruption policy: Stop speaking the moment the participant interrupts, and listen. Never talk over them.
@@ -413,7 +427,7 @@ ${capabilities.join('\n')}
 Delegate to the backend when:
 - The participant describes something they are working through and needs a substantive therapeutic response.
 - The participant asks for an exercise, a worksheet, a summary, or to end the session.
-${psychoeducationCue ? '- The participant asks what a condition is, why they might feel a certain way, or how a technique or therapy works.\n' : ''}- A correction changes work already in progress.
+${psychoeducationCue ? '- The participant asks what a condition is, why they might feel a certain way, or how a technique or therapy works.\n' : ''}${leadDelegateLine}- A correction changes work already in progress.
 
 Do not delegate to the backend when:
 - The participant greets you, makes small talk, or asks you to repeat something you just said.
@@ -543,6 +557,8 @@ export interface LiveSessionConfigInput {
   recovery?: { crisisLine: string };
   /** ai-therapist-202 research condition; see buildLiveInstructions. */
   psychoeducationCue?: boolean;
+  /** features.lead_conversation_enabled; see buildLiveInstructions. Ignored in recovery. */
+  leadConversation?: boolean;
 }
 
 /**
@@ -589,6 +605,7 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
     storable,
     recovery,
     psychoeducationCue,
+    leadConversation,
   } = input;
 
   const session: Record<string, unknown> = {
@@ -599,6 +616,7 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
           languageName,
           toolNames: toolDefs.map((t) => t.name),
           psychoeducationCue,
+          leadConversation,
         }),
     audio: {
       output: { voice: resolveLiveVoice(voice) },

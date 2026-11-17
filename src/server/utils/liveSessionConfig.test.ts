@@ -243,6 +243,41 @@ describe('buildLiveSessionConfig psychoeducation cue (ai-therapist-202)', () => 
   });
 });
 
+describe('buildLiveSessionConfig lead conversation (features.lead_conversation_enabled)', () => {
+  const backendOf = (s: Record<string, unknown>) =>
+    ((s.delegation as Record<string, unknown>).responses as Record<string, unknown>).instructions;
+
+  it('flag off: voice layer and backend identical to omitting the option', () => {
+    const off = build({ leadConversation: false });
+    expect(off.instructions).toBe(build().instructions);
+    expect(backendOf(off)).toBe(backendOf(build()));
+    expect(off.instructions as string).not.toMatch(/Guide the conversation/);
+    expect(off.instructions as string).not.toMatch(/stalled reply/);
+  });
+
+  it('flag on: adds one speaking line and one delegate line, nothing else', () => {
+    const on = build({ leadConversation: true }).instructions as string;
+    const off = build().instructions as string;
+    expect(on).toContain(
+      'acknowledge it plainly before anything else.\nGuide the conversation: after greetings, help the participant name what they want to focus on today, and keep it moving with one specific follow-up at a time rather than only acknowledging. If they are upset or raise anything about their safety, follow them instead.\n',
+    );
+    expect(on).toContain(
+      '- The participant gives a short or stalled reply ("I don\'t know", "not much") and the conversation needs a next step.\n- A correction changes work already in progress.',
+    );
+    const removed = on
+      .replace(/Guide the conversation:[^\n]*\n/, '')
+      .replace(/- The participant gives a short or stalled reply[^\n]*\n/, '');
+    expect(removed).toBe(off);
+    // The suicide/self-harm instruction is still the last paragraph, untouched.
+    expect(on.endsWith('minimize it, and do not change the subject.')).toBe(true);
+  });
+
+  it('recovery ignores the flag', () => {
+    const recovery = { crisisLine: '988' };
+    expect(build({ recovery, leadConversation: true }).instructions).toBe(build({ recovery }).instructions);
+  });
+});
+
 describe('toLiveDelegationTools', () => {
   it('never forwards registry-only metadata that would 400 session creation', () => {
     const defs = [

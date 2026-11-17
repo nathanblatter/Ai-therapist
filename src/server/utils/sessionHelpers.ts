@@ -562,6 +562,30 @@ export async function resolvePsychoeducationCue(): Promise<boolean | null> {
   return Math.random() < 0.5;
 }
 
+// ============================================
+// LEADING THE CONVERSATION
+// ============================================
+// Owner feedback from a production test session (2026-11-16): "ai needs to
+// drive the conversation more". When features.lead_conversation_enabled is
+// exactly true, every new session gets the lead-conversation prompt block
+// (promptContext.ts buildLeadConversationBlock), a matching line in the
+// GPT-Live voice layer, and an invitation at the end of the opening. Off by
+// default, and NOT a per-session experiment: switching it on changes every
+// arm of every running experiment equally, and the assembled prompt stored in
+// session_configurations.instructions shows which sessions had it.
+
+/** Whether new sessions should get the lead-conversation steering. False on any error. */
+export async function resolveLeadConversation(): Promise<boolean> {
+  try {
+    const config = await getSystemConfig();
+    const features = (config.features ?? {}) as { lead_conversation_enabled?: unknown };
+    return features.lead_conversation_enabled === true;
+  } catch (err) {
+    log.error({ err }, 'lead_conversation flag read failed; starting session without it');
+    return false;
+  }
+}
+
 /**
  * The voice vendor's hard session ceiling in minutes (session_limits
  * .vendor_ceiling_minutes, default 60 = GPT-Live). A crisis lifts our own

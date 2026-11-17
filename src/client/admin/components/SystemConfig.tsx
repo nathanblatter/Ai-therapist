@@ -46,6 +46,8 @@ interface Features {
   telemetry_admin_usage?: boolean;
   /** Periodic role re-grounding over the sideband (sidebandManager.service). */
   regrounding_enabled?: boolean;
+  /** Lead-conversation steering for new sessions (sessionHelpers resolveLeadConversation). Default off. */
+  lead_conversation_enabled?: boolean;
   /** Participant-facing reflections view (ai-therapist-204). Default off;
    *  changes what participants see, so enable only with IRB sign-off. */
   participant_reflections_enabled?: boolean;
@@ -1344,6 +1346,23 @@ export default function SystemConfig() {
               type="checkbox"
               checked={features.regrounding_enabled === true}
               onChange={(e) => updateFeatures('regrounding_enabled', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">AI leads the conversation</p>
+              <p className="text-xs text-gray-600">
+                New sessions get guidance to open with a focus, ask one specific follow-up at a time, move the
+                conversation forward when it stalls, and close with a summary. Applies to every session (voice and chat)
+                once on; crisis and safety instructions are unchanged and take precedence.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.lead_conversation_enabled === true}
+              onChange={(e) => updateFeatures('lead_conversation_enabled', e.target.checked)}
               className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
           </div>
