@@ -127,6 +127,36 @@ export class TranscriptAssembler {
   }
 }
 
+/**
+ * How a GPT-Live session hands work to a backend (see buildLiveSessionConfig).
+ * 'responses' is every ordinary session: a Responses backend owns the clinical
+ * prompt and the tools. 'client' is a crisis RECOVERY session, which runs with
+ * no backend and no tools by design, so it has no `session.delegation.responses`
+ * to update.
+ */
+export type LiveDelegationMode = 'responses' | 'client';
+
+/**
+ * Thrown instead of sending a `session.delegation.responses` update to a
+ * client-delegated (recovery) session. The Live API rejects that update with
+ * "Missing required parameter: session.delegation.type" (ai-therapist-282), and
+ * the rejection arrives asynchronously as a data-channel error the caller never
+ * sees, so refusing up front is the only way to report it honestly.
+ */
+export class LiveDelegationUnsupportedError extends Error {
+  readonly code = 'live_delegation_unsupported' as const;
+  constructor(
+    readonly sessionId: string,
+    readonly operation: string,
+  ) {
+    super(
+      `${operation} is unavailable on a crisis recovery session: it runs without a backend or tools by design. ` +
+        'Use End Session to end it.',
+    );
+    this.name = 'LiveDelegationUnsupportedError';
+  }
+}
+
 /** Per-session mutable state for a Live sideband. */
 interface LiveSessionState {
   ws: WebSocket;
@@ -134,6 +164,8 @@ interface LiveSessionState {
   apiKey: string;
   model: string;
   backendModel: string;
+  /** Fixed at session creation; carried across reconnects. */
+  delegationMode: LiveDelegationMode;
   userTranscript: TranscriptAssembler;
   assistantTranscript: TranscriptAssembler;
   /**
@@ -326,7 +358,7 @@ export class SidebandManager {
     sessionId: string,
     liveSessionId: string,
     apiKey: string,
-    opts: { model: string; backendModel: string; initialAttach?: boolean },
+    opts: { model: string; backendModel: string; delegationMode?: LiveDelegationMode; initialAttach?: boolean },
   ): Promise<WebSocket> {
     const initialAttach = opts.initialAttach === true;
     if (this.endedSessions.has(sessionId)) {
@@ -362,6 +394,7 @@ export class SidebandManager {
       apiKey,
       model: opts.model,
       backendModel: opts.backendModel,
+      delegationMode: opts.delegationMode ?? 'responses',
       userTranscript: new TranscriptAssembler(this.turnGapMs, (text, startMs, endMs) =>
         this.onUserTurn(sessionId, text, startMs, endMs),
       ),
@@ -462,7 +495,13 @@ export class SidebandManager {
     sessionId: string,
     liveSessionId: string,
     apiKey: string,
-    opts: { model: string; backendModel: string; timeoutMs?: number; attempts?: number },
+    opts: {
+      model: string;
+      backendModel: string;
+      delegationMode?: LiveDelegationMode;
+      timeoutMs?: number;
+      attempts?: number;
+    },
   ): Promise<void> {
     const budgetMs = opts.timeoutMs ?? this.attachBudgetMs;
     const maxAttempts = Math.max(1, opts.attempts ?? this.attachAttempts);
@@ -477,7 +516,7 @@ export class SidebandManager {
           sessionId,
           liveSessionId,
           apiKey,
-          { model: opts.model, backendModel: opts.backendModel },
+          { model: opts.model, backendModel: opts.backendModel, delegationMode: opts.delegationMode },
           Math.min(this.attachAttemptMs, remaining),
         );
         return;
@@ -524,7 +563,7 @@ export class SidebandManager {
     sessionId: string,
     liveSessionId: string,
     apiKey: string,
-    opts: { model: string; backendModel: string },
+    opts: { model: string; backendModel: string; delegationMode?: LiveDelegationMode },
     timeoutMs: number,
   ): Promise<void> {
     const ws = await this.connect(sessionId, liveSessionId, apiKey, { ...opts, initialAttach: true });
@@ -781,6 +820,7 @@ export class SidebandManager {
             callId: liveSessionId,
             channel: 'live',
             connectedAt: new Date(),
+            delegationMode: opened?.delegationMode ?? 'responses',
           },
           sessionId,
         );
@@ -1413,8 +1453,20 @@ export class SidebandManager {
     }
   }
 
-  /** Update the delegated backend mid-session (model, instructions, tools…). */
-  async updateDelegation(sessionId: string, responses: Record<string, unknown>): Promise<void> {
+  /**
+   * Update the delegated backend mid-session (model, instructions, tools…).
+   *
+   * @throws LiveDelegationUnsupportedError on a client-delegated (recovery)
+   *   session, which has no backend config to update.
+   */
+  async updateDelegation(
+    sessionId: string,
+    responses: Record<string, unknown>,
+    operation = 'Updating the backend configuration',
+  ): Promise<void> {
+    if (this.sessions.get(sessionId)?.delegationMode === 'client') {
+      throw new LiveDelegationUnsupportedError(sessionId, operation);
+    }
     this.sendEvent(sessionId, {
       type: 'session.update',
       event_id: `update_${Date.now()}`,
@@ -1516,7 +1568,9 @@ export class SidebandManager {
   async triggerTool(sessionId: string, toolName: string, args?: Record<string, unknown>): Promise<void> {
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.triggerTool(sessionId, toolName, args);
-    await this.updateDelegation(sessionId, { tool_choice: { type: 'function', name: toolName } });
+    // Throws on a recovery session BEFORE anything is sent, so no nudge
+    // reaches a model that has no tool to call.
+    await this.updateDelegation(sessionId, { tool_choice: { type: 'function', name: toolName } }, 'Triggering a tool');
 
     const argsContext =
       args && Object.keys(args).length > 0 ? ` Use this context for the tool arguments: ${JSON.stringify(args)}.` : '';
@@ -1838,6 +1892,7 @@ export class SidebandManager {
         this.connect(sessionId, state.liveSessionId, state.apiKey, {
           model: state.model,
           backendModel: state.backendModel,
+          delegationMode: state.delegationMode,
         })
           .then(() => {
             const next = this.sessions.get(sessionId);
@@ -1931,8 +1986,18 @@ export class SidebandManager {
       openai_live_session_id: string;
       ai_model: string | null;
       live_backend_model: string | null;
+      recovery?: boolean | null;
     }>(
-      `SELECT ts.session_id, ts.openai_live_session_id, sc.ai_model, sc.live_backend_model
+      // A recovery session's only durable marker is the crisis_events row
+      // markSessionCrisisContinuation writes (risk factor recovery_continuation).
+      // Without it a re-attached recovery session would be treated as
+      // responses-delegated and send updates the Live API rejects.
+      `SELECT ts.session_id, ts.openai_live_session_id, sc.ai_model, sc.live_backend_model,
+              EXISTS (
+                SELECT 1 FROM crisis_events ce
+                 WHERE ce.session_id = ts.session_id
+                   AND ce.risk_factors @> '["recovery_continuation"]'::jsonb
+              ) AS recovery
          FROM therapy_sessions ts
          LEFT JOIN session_configurations sc ON sc.session_id = ts.session_id
         WHERE ts.status = 'active'
@@ -1951,6 +2016,7 @@ export class SidebandManager {
           // Re-attaching with today's default would mis-attribute delegated
           // token usage and run re-grounding on a model the session never used.
           backendModel: row.live_backend_model ?? LIVE_DEFAULT_BACKEND_MODEL,
+          delegationMode: row.recovery === true ? 'client' : 'responses',
         });
       } catch (err) {
         console.error(
@@ -1995,6 +2061,15 @@ export class SidebandManager {
       .filter(([, state]) => state.ws.readyState === WebSocket.OPEN)
       .map(([sessionId]) => sessionId);
     return own.concat(...this.delegates.map((d) => d.getActiveConnections()));
+  }
+
+  /**
+   * The delegation mode of a GPT-Live session this manager owns, or null when
+   * it is not attached here (including sessions owned by another backend).
+   */
+  getDelegationMode(sessionId: string): LiveDelegationMode | null {
+    if (this.delegateFor(sessionId)) return null;
+    return this.sessions.get(sessionId)?.delegationMode ?? null;
   }
 
   isConnected(sessionId: string): boolean {

@@ -123,7 +123,9 @@ export async function getSessionMessageCount(sessionId: string): Promise<number>
 
 /**
  * Update a message's content or content_redacted. A therapist edit (field
- * 'content') also re-runs redaction to refresh content_redacted.
+ * 'content') also re-runs redaction to refresh content_redacted. Either way
+ * the stored embedding (085) described the old redacted text, so it is
+ * cleared and the background sweep re-embeds the new text.
  */
 export async function updateMessage(
   messageId: number | string,
@@ -149,6 +151,7 @@ export async function updateMessage(
         `UPDATE messages
          SET content = $1,
              content_redacted = $2,
+             embedding = NULL,
              metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
          WHERE message_id = $4
          RETURNING *`,
@@ -159,6 +162,7 @@ export async function updateMessage(
       result = await client.query<MessageRow>(
         `UPDATE messages
          SET content_redacted = $1,
+             embedding = NULL,
              metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb
          WHERE message_id = $3
          RETURNING *`,

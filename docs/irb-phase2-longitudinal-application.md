@@ -14,6 +14,17 @@ page 1 was replaced with the September 2026 review in `docs/irb-phase2-literatur
 edits applied in OneAegis the same day, including the Utah H.B. 452 alignment paragraph and
 four launch-gated commitments). The Subject Enrollment and Risks text below is now superseded
 by the OneAegis form text; treat the form as the source of truth for those sections.**
+**2026-11-18 alignment revision (agent-drafted for Nathan and Dr. Gaskin).** (1) The two
+launch-gated instrument commitments now exist: a psychosis-risk screen (PQ-B, 21 items, plus a
+diagnosis-history item) in the eligibility screener, and emotional-dependence (ADS-9 Craving,
+adapted) and problematic-use (BSMAS, adapted) items in the weekly survey, with decision rules;
+thresholds are marked as the PI's decisions. (2) The red-team attachment is now generated from a
+real nightly results file (`npm run irb:redteam`) and states the voice crisis ladder's real
+status. (3) A new "System as built" subsection under Data Collection describes the voice, chat,
+crisis, tool, memory and per-session-condition behaviour verified against the code, with a dated
+model table. `docs/irb-phase2-submission-checklist.md` lists where each change goes in OneAegis
+and Qualtrics. Because the OneAegis form text is not in the repo, the Subject Enrollment and
+Risks additions below are written as text to merge into the form, not as a replacement for it.
 Mirrors the OneAegis xForm section order of the approved Phase 1 application (2025-519-BYU,
 scraped in full to `docs/irb-phase1-application.md`). Items marked **[DECISION]** have a
 corresponding entry in `docs/irb-phase2-questions-for-nathan.md`. Text in plain paragraphs is
@@ -105,8 +116,12 @@ Phase 1 text, which no longer matches the deployed system):**
 
 The AI support agent app ("AI Therapist Assistant"), developed and operated by the research
 team, is a web application accessible from participants' own devices. It supports typed chat
-and voice conversation (realtime speech-to-speech via OpenAI's Realtime API under [BAA/ZDR
-status — DECISION Q8, MUST be resolved truthfully before submission]).
+and voice conversation. Voice runs on OpenAI's GPT-Live service, in which a voice model
+handles listening and speaking and passes the substance of each reply to a separate reasoning
+model that holds the full clinical instructions; typed chat runs on an OpenAI text model. The
+research team has no business associate agreement and no zero-data-retention agreement with
+OpenAI (verified 2026-09-09, disclosed to the IRB 2026-09-10; DECISION Q8). The section
+"System as built" below describes each component and the data it creates.
 
 Data collection is deliberately comprehensive on the behavioral layer — each stream below
 maps to a named aim in the analysis plan — while remaining strictly minimal on the identity
@@ -178,6 +193,158 @@ interface events participants deliberately submit while using the app, and every
 transcript-derived research measure downstream of the redaction pipeline is computed from
 redacted text only.
 
+### System as built (verified against the application code on main, 2026-11-18)
+
+Each item below was checked against the code; file references are for the research team and
+the paragraph text is proposed form text. "Data" says what the feature creates and where the
+existing Data Collection and Confidentiality text already covers it, or what has to be added.
+
+1. **Voice: OpenAI GPT-Live with a delegated reasoning model** (`docs/gpt-live.md`,
+   `src/server/utils/liveSessionConfig.ts`). The voice model (`gpt-live-1`) listens and speaks
+   and holds only tone, turn-taking and one safety instruction. The clinical instructions, the
+   participant's memory note and every tool run on a separate reasoning model to which the
+   voice model delegates (`system_config.live_backend_model`, code default `gpt-5.6-terra`).
+   The voice model transcribes both sides itself; there is no separate transcription model.
+   Our server receives the transcript in fragments over a server-side connection
+   ("sideband"), reassembles turns, stores them and runs crisis detection on them. OpenAI
+   session storage is switched off (`store: false`). *Data:* transcripts, session audio
+   (Q5), per-session record of which voice and reasoning models were used, voice-minute usage.
+   Covered by Data Collection and Confidentiality once the model paragraph below replaces the
+   stale "Realtime API / gpt-transcribe" text.
+2. **A second voice backend, xAI Grok Voice, is present in the code** (`docs/grok-voice.md`).
+   A single configuration value (`system_config.ai_model`) selects GPT-Live or Grok for every
+   new session; with Grok, audio passes through our server to xAI. **It is not used in this
+   study.** GPT-Live is the study's voice condition (owner decision 2026-11-01, Flightdeck
+   ai-therapist-268). The consent form names only OpenAI, so routing a participant to Grok would
+   require an amendment first. Launch check: confirm `ai_model` is a `gpt-live-*` value in the
+   production configuration before the first participant, and log any change.
+   [QUESTION Q-SYS1 for the PI: state in the form that Grok will not be used, or ask for both.]
+3. **Typed chat** (`src/server/services/chatTherapy.service.ts`). Replies come from an OpenAI
+   text model through the Responses API, with OpenAI's moderation screen on each request. Chat
+   has a text-safe subset of the tools in item 6 (no narrated breathing, grounding, body-scan,
+   values or fear-ladder exercises, no language switch). The opening line, including the AI
+   disclosure, is written by the server, not the model. *Data:* as for voice, without audio.
+   Covered.
+4. **Crisis detection** (`docs/crisis.md`). Unchanged from the Risks description: keyword screen,
+   then an LLM context assessment, a periodic sweep every 8 participant messages, OpenAI's
+   moderation score as a supplementary signal, and a trajectory bonus; keyword-only fallback if
+   OpenAI is unavailable (the on-call SOP section 6 describes the spend-limit case). Two
+   additions the form should state:
+   - On a high flag, the agent may not end the session itself (an end request from the model
+     is refused and logged), and our own session time limit is lifted to the voice vendor's
+     60-minute ceiling so a participant in crisis is not cut off by our timer.
+   - **Vendor content filter and the crisis recovery prompt.** OpenAI's GPT-Live service runs its
+     own content filter, which can end a voice session outright, and it does so most often at a
+     disclosure of suicidal intent (incident 2026-09-11; red-team runs 2026-10-22 and
+     2026-11-01). In some cases the session ends before the transcript of the disclosure reaches
+     our server, so our detector never scores it. The app then shows a screen with crisis
+     numbers, pages the on-call researcher, and starts a new voice session on a short crisis
+     prompt with no conversation history (`buildLiveRecoveryInstructions`): stay present,
+     encourage calling or texting 988, ask who could be with them, 911 for immediate danger,
+     never discuss methods. After two failed reconnections it falls back to typed chat. The
+     recovery prompt tells the model "You were just talking with this person and the connection
+     dropped for a moment." That is a simplification of why the call ended. Phase 1 answered No
+     to deception. [DECISION Q-SYS2, PI: either (a) disclose the behaviour in consent (the
+     revised consent2.html does: "If a voice conversation is cut off") and keep the wording, or
+     (b) change the prompt to say the call was ended by the service's safety filter. Recommend
+     (a) plus the consent text, because naming a "filter" to a person mid-disclosure may read as
+     being refused.] *Data:* an `intervention_actions` record for each vendor termination and
+     reconnection, crisis-continuation flags on the new session. Covered by "crisis-event
+     records"; add the vendor-termination rate to the safety-system performance metrics.
+5. **Session limits.** Seeded defaults are 30 minutes per session, 3 sessions per day and a
+   30-minute cooldown (`migrations/007`); the production values are an admin setting and were
+   not checked. The consent form says participants may use the app "however much you wish".
+   [Q-SYS3: confirm production limits and either state them in consent and the tutorial or
+   remove them for study participants.]
+6. **Tools the agent can use** (`src/server/services/toolRegistry.service.ts`). Beyond
+   conversation, the agent can: build a safety plan with the participant ("stored for the
+   clinical team and shown to the participant as a card"); assign a small between-session
+   practice and review it next time; run guided breathing, grounding, body-scan, values-sort and
+   fear-ladder exercises (voice); open a thought record or journaling prompt; find a vetted
+   worksheet and generate a personalised version of it within the template's structure;
+   administer PHQ-2/GAD-2 (server-enforced at most once every 7 days each); retrieve passages
+   from the vetted psychoeducation library; store a fact the participant explicitly asks it to
+   remember; silently bookmark a moment for the research team (`flag_notable_moment`); and
+   alert the monitoring team (`escalate_to_human`, which it is told not to announce unless the
+   participant asked for a person). *Data:* safety plans, practice assignments and completions,
+   worksheet and thought-record responses, scale responses, remembered facts, bookmarks and
+   escalations, all keyed to the study ID. **Not yet covered:** the consent and form describe
+   "structured safety questions and summaries" but not safety plans, practice, worksheets, or
+   silent bookmarks and escalations. The revised consent2.html adds a "Things you make with the
+   agent" paragraph; the form's Data Collection text needs the same list (this item can be
+   pasted).
+7. **Case-profile memory across sessions** (`src/server/utils/promptContext.ts`,
+   `src/server/services/sessionInsights.service.ts`). At the end of every session an OpenAI
+   model writes a structured session summary and a SOAP-style note. For participants who turn on
+   session memory (off by default), it also updates a rolling "clinical case profile" (presenting
+   concerns, recurring themes, stressors, support system, coping repertoire ranked by
+   helpfulness, values, screener trend), and the next session's instructions carry a memory note
+   with recent summaries, remembered facts, the case profile, recent PHQ-2/GAD-2 scores and mood
+   points, safety-plan warning signs, the last thought record and open practice. *Data:* session
+   summaries and notes (all sessions), case profiles (memory on). **Discrepancies to resolve:**
+   (i) the summaries and notes are generated from the original conversation text while it still
+   exists, not from the redacted text as Data Collection and the consent form said; (ii) the
+   nightly 24-hour wipe acts on the conversation messages table only, so the summaries, notes,
+   case profile, remembered facts, safety plans and worksheet responses are not wiped by it, and
+   whether they contain identifiers was not established. The revised consent and the settings
+   guide now describe what the memory note contains and drop "based on the de-identified
+   transcript". [DECISION Q-SYS4, PI with the engineering team: either redact these derived
+   records on the same schedule, or state in Confidentiality that they are kept, with their
+   retention, and are excluded from de-identified exports until reviewed.]
+   The same memory note can include a private note from a participant's therapist and prior
+   risk history "when a therapist has enabled sharing this". These are clinical-pilot features.
+   [Q-SYS5: confirm no research-study participant can have a therapist note or risk-history
+   sharing enabled; if that cannot be guaranteed by configuration, describe it.]
+8. **`proactive_offering`, a per-session condition** (`resolveProactiveOffering` in
+   `src/server/utils/sessionHelpers.ts`). In the default mode each new session is assigned at
+   random, 50/50, to the proactive appendix (the agent may suggest exercises and check-ins) or
+   the reactive appendix (it waits to be asked), and the assignment is stored with the session.
+   This is the exploratory condition Q13 kept under the single-arm design. *Data:* the per-session
+   arm. Not previously disclosed to participants; the revised consent adds "Small differences
+   between conversations".
+9. **Psychoeducation retrieval cue, a second per-session A/B, currently switched off** (PR #30,
+   `features.psychoeducation_cue_ab_enabled`, migration 123). When switched on, each new session
+   is assigned 50/50 to receive or not receive one line in the tool guidance telling the model
+   to call the psychoeducation retrieval tool and ground explanations in the returned passages.
+   The arm is stored in `session_configurations.psychoeducation_cue`. Off for everyone until the
+   owner turns it on. *Data:* the per-session arm. [DECISION Q-SYS6, PI: either describe it now
+   as a second exploratory per-session condition, or commit to leaving it off for the study
+   and submit an amendment before switching it on. The consent text "some details ... are
+   assigned at random" covers either.]
+10. **"Leading the conversation" block, currently switched off** (PR #32,
+    `features.lead_conversation_enabled`). When switched on, every new session (not a random
+    subset) gets a prompt block telling the agent to take a guiding role (help choose a focus,
+    reflect then advance with one question, offer a specific direction when the participant
+    stalls, summarise at the close, and step back to follow the participant whenever there is
+    distress or risk), a matching line for the voice model, and the opening question "What would
+    you like to focus on today?". *Data:* none new; the assembled prompt stored per session shows
+    which sessions had it. [DECISION Q-SYS7, PI: switching it on mid-study changes every session
+    from that date; decide before launch, and if it is switched on later, log the date as a
+    protocol change.] Neither item 9 nor item 10 appears in the verbatim-prompts attachment until
+    PR #24 is merged and regenerated.
+
+**Models in use (dated table).** Model versions may be updated during the study. Each change is
+recorded with its date in the system configuration audit log, and the model that served each
+session is stored with the session (`docs/model-pinning.md`), so analyses can account for it.
+Changes that alter the prompts or the safety pipeline are reported to the IRB as amendments;
+model version updates are logged and summarised at continuing review.
+[DECISION Q-SYS8, PI: confirm this reporting line with the IRB.]
+
+| Function | Provider | Model id as of 2026-11-18 (code default) | Planned change |
+|---|---|---|---|
+| Voice conversation: listening and speaking | OpenAI GPT-Live | `gpt-live-1` | none |
+| Voice conversation: reasoning (holds the clinical prompt and tools) | OpenAI | `gpt-5.6-terra` | `gpt-6.1-terra`, approved by the owner 2026-11-18 pending evaluation |
+| Typed chat conversation | OpenAI | `gpt-5.2` | `gpt-6.1-terra`, approved by the owner 2026-11-18 pending evaluation |
+| Crisis risk assessment (selectable in configuration), minor-disclosure confirmation, session naming | OpenAI | `gpt-4o-mini` | none |
+| Moderation screen (supplementary crisis signal) | OpenAI | `omni-moderation-latest` | none |
+| Transcript redaction (two passes) | OpenAI | `gpt-5` | none |
+| Session summaries, notes and case profile | OpenAI | `gpt-4o-mini` | none |
+| Text embeddings (memory retrieval; redacted text only) | OpenAI | `text-embedding-3-small` | none |
+| Voice, alternative backend (not used in the study; item 2) | xAI | `grok-voice-3.0` | n/a |
+
+Production can override the voice and reasoning models in its stored configuration; check the
+production values on the day of submission and update this table if they differ.
+
 **Instruments list (cards):**
 1. PHQ-2 (Kroenke, Spitzer & Williams) — public-domain validated 2-item depression screener,
    administered in-app; screeners not diagnoses. Validation: extensively validated; cite
@@ -193,7 +360,7 @@ redacted text only.
    displayed at the end of the measure. Validation: WAI-SR psychometrics cite Hatcher &
    Gillaspy 2006 (Psychother Res 16:12-25) and Munder et al. 2010 (Clin Psychol Psychother
    17:231-9); item wording adapted only to name the AI support agent in place of the
-   therapist.
+   therapist. The weekly survey also carries the two monitoring measures in items 9 and 10.
 4. Baseline survey (adapted from Phase 1 "Part 1" survey): demographics, therapy history,
    AI attitudes, and a contact email (required; used only to schedule onboarding and send
    survey reminder emails through BYU's Qualtrics platform — stored with the survey
@@ -210,6 +377,40 @@ redacted text only.
 8. Week-12 follow-up survey (adapted from the exit survey's core measures, Qualtrics,
    ~10 min): persistence of effects four weeks after access ends. **[DECIDED Q12 — included;
    survey built and committed to in consent.]**
+9. **Emotional dependence (weekly, new 2026-11-18):** Craving subscale of the Affective
+   Dependence Scale (ADS-9; Sirvent-Ruiz, Moral-Jiménez, Herrero, Miranda-Roves & Rodríguez
+   Díaz, 2022, Psychol Res Behav Manag 15:3875-88, doi:10.2147/PRBM.S385807), 5 items, adapted
+   to refer to the AI support agent with a past-week frame. This is the emotional-dependence
+   measure used in the MIT Media Lab / OpenAI longitudinal chatbot study (Fang et al., 2025,
+   arXiv:2503.17473), whose adapted wording is unpublished, so the wording here is the team's
+   and is printed in `weekly.html` with every change from the original stated. Licence: CC
+   BY-NC 3.0 (non-commercial use permitted with attribution; a later commercial product would
+   need permission from the publisher). Validation of the original: ordinal alpha .83-.89
+   across clinical, comparison and general-population samples (N = 762 Spanish adults), scalar
+   invariance across groups. The chatbot adaptation is not separately validated; internal
+   consistency will be reported from study data. Scoring: mean of 5 items (1-5); no published
+   cut-off. Burden: under 1 minute.
+10. **Problematic use (weekly, new 2026-11-18):** Bergen Social Media Addiction Scale (BSMAS;
+    Andreassen et al., 2016, Psychol Addict Behav 30:252-62, doi:10.1037/adb0000160), 6 items,
+    "social media" replaced by the AI support agent (the approach Hu, Mao & Kim, 2023, Comput
+    Human Behav 145:107760, took for conversational AI) and "the last year" by "the past week".
+    Licence: no licence or permission requirement was found; the items are printed in the
+    article and the scale is widely used in research without a fee. Alpha .88 in the original
+    online sample (N = 23,533). Scoring: sum of 6 items (6-30); the cut-off of 19 (Bányai et
+    al., 2017, PLOS ONE 12:e0169839) is used only as a review trigger because the time frame is
+    changed. Burden: about 1 minute. This replaces the Problematic ChatGPT Use Scale used by Fang
+    et al., which is closed-access and could not be verified.
+11. **Psychosis-risk screen (eligibility screener, new 2026-11-18):** Prodromal
+    Questionnaire, Brief Version (PQ-B; Loewy & Cannon, 2010, University of California;
+    validation Loewy, Pearson, Vinogradov, Bearden & Cannon, 2011, Schizophr Res 129:42-6,
+    doi:10.1016/j.schres.2011.03.029), 21 yes/no items about the past month, each "yes" followed
+    by a 5-point distress rating; items verbatim from the authors' 2010 form. Permission: the
+    authors distribute the form with a request to cite it as above; no licence fee or licence
+    form exists. Scoring (authors' rules): Total = number of "yes" answers (0-21); Distress = sum
+    of the distress ratings, 1-5 per "yes" and 0 per "no" (0-105). Burden: about 3-5 minutes
+    (team estimate; no published completion time). The screener also adds one eligibility
+    history item (diagnosed psychotic or bipolar disorder), a standard eligibility question,
+    not a scale.
 
 ## Research Procedures
 
@@ -226,8 +427,10 @@ All participants complete online eligibility screening and electronic informed c
    devices as often as they wish. We suggest (but do not require) at least two **[DECIDED Q4]**
    brief interactions per week. In-app, the agent periodically administers PHQ-2/GAD-2
    (no more than once per week each) and offers optional mood check-ins.
-3. **Weekly:** a ~5-minute Qualtrics check-in survey (engagement reflection, alliance items,
-   any adverse experiences).
+3. **Weekly:** a ~7-minute Qualtrics check-in survey (engagement reflection, alliance items,
+   emotional-dependence and problematic-use items, any adverse experiences). Dependence and
+   problematic-use answers are reviewed within one business day under the decision rule in
+   Risks.
 4. **Week 8 (exit):** exit survey (~20 min); a subsample invited to a ~30-minute Zoom exit
    interview.
 5. **Week 12 (follow-up):** a single follow-up survey (~10 min) to measure persistence of
@@ -249,7 +452,7 @@ self-help conversation only. Participants are told this at consent, at onboardin
 agent itself at session starts.
 
 **Time commitment:** baseline = ~15-min survey + 30–45-min onboarding session; weekly surveys
-8 × 5 min; suggested app usage ~2 × 15 min/week (participant-controlled); exit ~20-50 min;
+8 × 7 min; suggested app usage ~2 × 15 min/week (participant-controlled); exit ~20-50 min;
 Week-12 follow-up ~10 min. Total structured time ≈ 2.5–3.5 hours over 12 weeks, plus
 voluntary app use.
 
@@ -321,13 +524,37 @@ a modern browser and internet access, willing to use the app over 8 weeks.
   [6 months]. These individuals receive a warm referral card (CAPS, 988) instead of
   enrollment. Phase 1 excluded "individuals currently in crisis" narratively; Phase 2 should
   operationalize it. Need Erekson's input on the exact screener and threshold.
+- **Psychosis risk (new 2026-11-18; launch-gated commitment):** (a) a PQ-B Distress score of
+  46 or more on the eligibility screener, or (b) "Yes" to "Has a doctor or other health
+  professional ever told you that you have a psychotic disorder ... or bipolar disorder?"
+  Screened-out respondents get the same referral end screen as the other clinical exclusions,
+  which does not say which answer caused it.
+  **[DECISION Q-PSY1, PI: threshold.]** Recommendation and reasoning: the PQ-B's published
+  cut-offs (Total 3 or more, or Distress 6 or more; Loewy et al., 2011) were set to decide who
+  gets a clinical interview in help-seeking clinics, not who is excluded, and they flag many
+  students (13% of healthy controls in the validation paper; Wu et al., 2021, BMC Psychiatry
+  21:253, report that commonly used cut-offs would flag most of 23,063 Chinese university
+  students). This study has no interview stage, so the screen is the decision. Distress 46 or
+  more is the cut-off derived against clinical interview in that large university sample
+  (sensitivity 90.3%, specificity 81.2%); in that sample roughly one respondent in five would
+  screen out, and the rate in this population is unknown. Alternatives: Total 6 or more
+  (Loewy's maximum-specificity rule: 100% specificity, 31% sensitivity in help-seekers);
+  Distress 22 or Total 7 (Preti et al., 2018, Italian students, no interview reference). The
+  recommendation accepts some false exclusions for sensitivity, which fits unsupervised use of
+  an AI agent given the delusion-reinforcement literature (Olsen 2026; Morrin 2026). Planned
+  check: if more than 25% of the first 40 screened respondents screen out on the PQ-B, the PI
+  reviews the threshold, and any change goes to the IRB as an amendment.
+  **[DECISION Q-PSY2 (was Q-LIT2), PI: diagnosed psychotic or bipolar disorder: exclusion
+  (drafted) or monitored subgroup.]**
 - Unable to give informed consent.
 
 **Screening:** eligibility screener in Qualtrics before consent. In-app enforcement: if a
 participant discloses being under 18 during a conversation, the system's two-stage detection
 automatically terminates the session in-conversation and presents youth crisis resources;
 US-only access is enforced by IP geolocation blocking at the application layer (not by the
-agent). Attach screening survey.
+agent). Attach screening survey. The screener now includes the PQ-B and one history item
+(Exclusion, above); responses are scored automatically in Qualtrics and used only for
+eligibility, and responses of ineligible respondents are deleted when recruitment closes.
 
 **Special permission:** CAPS collaboration letter (updated for Phase 2's on-call/referral
 role — DECISION Q17: confirm CAPS agrees to be the named clinical resource for REMOTE
@@ -386,7 +613,20 @@ emotional topics repeatedly and unsupervised. Proposed risk table entries:
   foster overreliance on a non-clinical tool. Mitigations: agent discourages dependency and
   encourages professional help (system prompt), usage is participant-controlled with no
   gamified engagement mechanics, weekly surveys monitor for it, and the consent form states
-  the tool is not a substitute for care.
+  the tool is not a substitute for care. Monitoring (new 2026-11-18): the weekly survey carries
+  the ADS-9 Craving subscale and the BSMAS, both adapted to the AI support agent (Instruments 9
+  and 10). Decision rule **[DECISION Q-DEP1, PI: thresholds]**: a participant is flagged when
+  the ADS Craving mean is 4.0 or more (average answer "agree"; the 90th percentile of the
+  original general-population norms), or rises by 1.0 or more from their first weekly survey,
+  or the BSMAS total is 19 or more. A flag is reviewed within one business day together with the
+  weekly-survey adverse-experience review; the researcher sends one in-app check-in message
+  (the tool's limits, CAPS and 988, the option to pause); a second consecutive flag goes to the
+  PI, who decides whether to offer a pause or a call. A flag is not a crisis page; free text
+  describing risk follows the on-call triage ladder (`docs/on-call-sop.md` sections 4 and 5).
+  Flag counts are reported at continuing review and analysed as a safety outcome. None of these
+  cut-offs is validated for a chatbot; they are review triggers, not diagnoses. Related: the
+  home screen shows a "progress card" of how often the participant has talked in recent weeks;
+  whether that counts as an engagement mechanic is a PI judgement (Q-SYS9).
 
 **Crisis / safety monitoring plan (proposed — this is the section to get right):**
 
@@ -414,6 +654,16 @@ mandatory-reporting language mirrors the Phase 1-stipulated consent text]. All c
 system actions, and researcher responses are logged (crisis_events, intervention tables) and
 reviewed weekly; any serious adverse event is reported to the IRB per adverse-event policy
 using the system's adverse-event reporting module.
+
+**Known failure mode on the voice path (new 2026-11-18; see "System as built" item 4).** The
+voice vendor's own content filter can end a voice session at a disclosure of suicidal intent,
+sometimes before the disclosure reaches our detector. This happened in a stage session on
+2026-09-11 and in every recorded run of the voice crisis-ladder red-team scenario on GPT-Live
+(3 of 3 on 2026-10-22; again on 2026-11-01). Mitigation: the app shows crisis numbers at once,
+pages the on-call researcher, and reconnects the participant to a voice agent on a narrow crisis
+prompt, with typed chat as the fallback; each termination is logged, and the rate is a reported
+safety metric. The red-team attachment states that the voice crisis ladder is not passing on
+GPT-Live.
 
 **[DECISION Q19 — monitoring staffing]:** Phase 1 promised "at least two RAs actively
 monitoring at all times when participants use the system" — feasible for scheduled lab
@@ -471,19 +721,24 @@ Reuse Phase 1's structure with these updates (accuracy fixes — see questions d
   within 48 hours of the session); messages that fail automated redaction are retained until
   redaction succeeds and are then wiped. De-identified data retained indefinitely for
   future use (same as Phase 1, disclosed in consent).
-- Commercial AI models: state the CURRENT stack truthfully — voice conversation via OpenAI's
-  Realtime API (gpt-realtime-2.1-mini; transcription via gpt-transcribe as of 2026-09-09,
-  with a crisis-vocabulary keyword list and context prompt supplied to improve transcription
-  fidelity on safety-relevant terms; model pinning per `docs/model-pinning.md`, with the
-  per-session resolved model stamped in the database); typed chat via gpt-5.2 (Responses
-  API); redaction via gpt-5 (dual pass); auxiliary safety/analysis calls via gpt-4o-mini
-  (crisis risk assessment, minor-disclosure confirmation, session naming, session insights,
-  worksheet ranking, eval judging); OpenAI's free moderation model (omni-moderation-latest)
-  scores every participant message for self-harm signals as a supplementary crisis-detection
-  tier; and message embeddings via text-embedding-3-small (computed from redacted text only;
-  vectors retained, never exported). Third-party processing under
-  [BAA / zero-data-retention — Q8]; include the current system prompt, redaction prompt, and
-  session-name prompt as Phase 1 did (pull from src at submission time so they're current).
+- Commercial AI models (revised 2026-11-18; the earlier Realtime API / gpt-transcribe text is
+  obsolete since the GPT-Live cutover): all model processing is by OpenAI, with the models
+  listed in the dated table under "System as built". Describe them generically in the form
+  ("OpenAI voice and text models; current versions are listed in the attached table; versions
+  may be updated, and each change is logged with its date and recorded per session") and attach
+  the table. The voice model transcribes speech itself; there is no separate transcription
+  model. OpenAI's moderation model scores participant messages as a supplementary crisis
+  signal; embeddings are computed from redacted text only. Third-party processing is without a
+  BAA or zero-data-retention agreement (Q8); OpenAI-side storage is switched off on each call
+  (`store: false`), data sharing with OpenAI is disabled, and OpenAI's standard abuse-monitoring
+  retention (up to 30 days) applies. The consent form previously said "zero data retention
+  enabled"; consent2.html is corrected. Include the verbatim prompts attachment (regenerated by
+  `npm run irb:prompts` once PR #24 merges).
+- Derived records (new 2026-11-18; "System as built" items 6 and 7): session summaries and
+  notes, case profiles, remembered facts, safety plans, practice assignments and worksheet
+  responses are stored in the study database keyed to the study ID. They are not covered by the
+  24-hour wipe of original message text, and summaries are generated from the original text
+  (Q-SYS4).
 - Automated safety processing: crisis risk assessment sends recent unredacted conversation
   excerpts to OpenAI (gpt-4o-mini) for scoring, and at elevated risk the system injects
   hidden de-escalation guidance into the AI model's context to steer its responses; the
@@ -521,8 +776,12 @@ escalation path (on-call researcher → Erekson/CAPS → authorities where requi
 
 - Crisis notification example, admin dashboard example (refresh screenshots from current UI).
 - Redaction test evidence (rerun the Safe Harbor test suite and export fresh logs).
-- Red-team evaluation summary (NEW, strong addition Phase 1 didn't have: the nightly
-  red-team suite + crisis-ladder results demonstrate systematic safety testing).
+- Red-team evaluation summary: `docs/irb-phase2-instruments/redteam.html`, generated by
+  `npm run irb:redteam -- --from <summary.json>` from the latest nightly "Red-team (full)"
+  results file. The 2026-11-18 version is generated from run 44351920021 at commit 906af42
+  (17 of 19 scenarios passed); it states that the voice crisis ladder is not passing on
+  GPT-Live and that prompt or model edits made in the admin screens do not yet trigger a run.
+  Regenerate from the newest nightly run on the day of upload.
 - CAPS updated support letter (Q17), SONA approval, updated external-investigator form for
   de Vreede if continuing.
 

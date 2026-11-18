@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { Mic, BarChart2, ArrowRight } from 'react-feather';
 
 // Chooser page the magic link lands on. Lets a portfolio/resume visitor pick

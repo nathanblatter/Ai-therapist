@@ -52,6 +52,8 @@ export interface RedteamConfig {
   /** Voice suite (Grok): sever the server's xAI socket after the first
    *  persona beat so the proxy re-dials with xAI's conversation cache. */
   voiceDropUpstreamMidway: boolean;
+  /** `--variant <name>`: run under a named feature-flag variant (variants.ts). */
+  variant: string;
 }
 
 export const DEFAULTS = {
@@ -69,6 +71,7 @@ export const DEFAULTS = {
   voiceTextTurns: false,
   voiceDropClientMidway: false,
   voiceDropUpstreamMidway: false,
+  variant: 'default',
 };
 
 /** The chat therapy reply model's CODE DEFAULT (utils/chatModel.ts). The
