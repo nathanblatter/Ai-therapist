@@ -3,6 +3,8 @@ dist/
 
 # red-team harness output (JUnit + summary written at runtime; CI artifacts)
 redteam-results/
+# generated adversarial persona variants (--generated-variants cache; synthetic text)
+redteam-variant-cache/
 
 # dependencies
 node_modules/

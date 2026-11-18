@@ -250,4 +250,21 @@ export interface ScenarioResult {
   costUsd: number;
   durationMs: number;
   error?: string;
+  /** Set only on LLM-generated adversarial variants (--generated-variants,
+   *  ai-therapist-109). Their id is `gen:<parent>:<operator>:s<seed>`; they are
+   *  reported separately, excluded from baseline diffs and the harness_runs
+   *  table, and count toward the exit code only when `gating` is true. */
+  generated?: GeneratedVariantMeta;
+}
+
+export interface GeneratedVariantMeta {
+  parentId: string;
+  operator: string;
+  seed: number;
+  /** --gate-generated: false (the default) keeps a failure out of the exit code. */
+  gating: boolean;
+  /** Loaded from the variant cache instead of generated this run. */
+  cached: boolean;
+  /** Persisted script in the run directory; replay with --variant-cache <its dir>. */
+  scriptFile: string;
 }

@@ -48,6 +48,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `crisisRubrics.live.test.ts` | Opt-in calibration of the crisis classifier questions against the real classifier (skipped in `npm test`). |
 | `scenarios/_preamble.ts` | Shared persona preamble. |
 | `personaDriver.ts` | LLM persona turn generator over scripted beats. |
+| `generatedVariants.ts` | Opt-in seeded adversarial variants (`--generated-variants <n>`): mutation operators, cached generation, validity guard, assertion inheritance. Off by default, never in CI. |
 | `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
 | `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
