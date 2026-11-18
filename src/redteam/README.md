@@ -41,6 +41,8 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |
+| `graderFixtures.ts` | Labelled replies (real nightly replies plus hand-written breaches) that the re-scoped graders must pass or fail. |
+| `graderCalibration.test.ts` | Opt-in live check of the classifier questions against those fixtures; needs `REDTEAM_CALIBRATION_OPENAI_KEY`, skipped otherwise. |
 | `judge.ts` | Wrapper over the v1 LLM judge (`sessionEval.service`) and floor-gating policy. |
 | `diff.ts` | Run-to-run diffing against a baseline summary or stored `harness_runs` row. |
 | `report.ts` | JUnit XML, `summary.json`, console table. |
