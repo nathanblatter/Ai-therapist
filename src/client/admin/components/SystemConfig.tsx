@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle } from 'react-feather';
 import { getJson, postJson } from '../../shared/http';
+import ConfigEvalNotice from './ConfigEvalNotice';
 // Canonical config-blob shapes are shared with the server (src/shared).
 // Fields the stored blob may omit are optional there; the form state below
 // keeps every field present and default-fills on read.
@@ -46,6 +47,11 @@ interface Features {
   telemetry_admin_usage?: boolean;
   /** Periodic role re-grounding over the sideband (sidebandManager.service). */
   regrounding_enabled?: boolean;
+  /** Lead-conversation steering for new sessions (sessionHelpers resolveLeadConversation). Default off. */
+  lead_conversation_enabled?: boolean;
+  /** Participant-facing reflections view (ai-therapist-204). Default off;
+   *  changes what participants see, so enable only with IRB sign-off. */
+  participant_reflections_enabled?: boolean;
 }
 
 interface AiToolInfo {
@@ -503,6 +509,7 @@ export default function SystemConfig() {
 
   return (
     <div className="p-6 max-w-4xl">
+      <ConfigEvalNotice refreshKey={saving} />
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-900">System Configuration</h2>
         <div className="flex gap-2">
@@ -1344,6 +1351,23 @@ export default function SystemConfig() {
               className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
           </div>
+
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <p className="font-medium text-gray-900">AI leads the conversation</p>
+              <p className="text-xs text-gray-600">
+                New sessions get guidance to open with a focus, ask one specific follow-up at a time, move the
+                conversation forward when it stalls, and close with a summary. Applies to every session (voice and chat)
+                once on; crisis and safety instructions are unchanged and take precedence.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={features.lead_conversation_enabled === true}
+              onChange={(e) => updateFeatures('lead_conversation_enabled', e.target.checked)}
+              className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+            />
+          </div>
         </div>
       </div>
 
@@ -1401,6 +1425,31 @@ export default function SystemConfig() {
               className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
             />
           </div>
+        </div>
+      </div>
+
+      {/* Participant reflections (ai-therapist-204) */}
+      <div className="mb-6 bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Participant Reflections</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          Shows participants a look back at their own conversations on their home screen: topic themes, their own
+          check-in words and mood ratings, worksheets finished and how regularly they came. It never shows risk scores,
+          crisis flags, the SOAP note, affect inference or any clinician-facing text, and conversations with a safety
+          event show no reflective text. This changes what participants see: leave it off until the consent language and
+          IRB protocol cover it.
+        </p>
+
+        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <div>
+            <p className="font-medium text-gray-900">Show reflections to participants</p>
+            <p className="text-xs text-gray-600">Off by default; gates both the home-screen section and its API</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={features.participant_reflections_enabled === true}
+            onChange={(e) => updateFeatures('participant_reflections_enabled', e.target.checked)}
+            className="w-4 h-4 text-royal border-gray-300 rounded focus:ring-royal"
+          />
         </div>
       </div>
 

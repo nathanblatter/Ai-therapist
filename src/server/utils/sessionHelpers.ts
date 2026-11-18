@@ -197,7 +197,26 @@ let systemConfigCache: SystemConfig | null = null;
 let configCacheTime: number | null = null;
 const CONFIG_CACHE_TTL = 600000; // 10 minutes
 
+// In-process feature-flag overrides for the red-team harness's named variants
+// (src/redteam/variants.ts, `--variant`). They change only what THIS process
+// sees from getSystemConfig().features; nothing is written to system_config.
+// That matters because the in-app harness runner spawns the CLI against the
+// live database, where writing a flag would switch it on for real participants.
+// Null (the default, and always in the server) means no override.
+let featureOverrides: Record<string, unknown> | null = null;
+
+/** Harness hook: overlay these keys on system_config.features in this process. */
+export function setFeatureOverrides(overrides: Record<string, unknown> | null): void {
+  featureOverrides = overrides && Object.keys(overrides).length > 0 ? { ...overrides } : null;
+}
+
 export async function getSystemConfig(): Promise<SystemConfig> {
+  const config = await loadSystemConfig();
+  if (!featureOverrides) return config;
+  return { ...config, features: { ...(config.features ?? {}), ...featureOverrides } };
+}
+
+async function loadSystemConfig(): Promise<SystemConfig> {
   const now = Date.now();
 
   // Return cached config if still valid
@@ -499,6 +518,103 @@ export async function resolveProactiveOffering(): Promise<boolean> {
   if (mode === 'always') return true;
   if (mode === 'never') return false;
   return Math.random() < 0.5;
+}
+
+// ============================================
+// PSYCHOEDUCATION RETRIEVAL CUE (ai-therapist-202)
+// ============================================
+// Research condition: whether the session's tool guidance tells the model
+// when to call retrieve_psychoeducation. Off for everyone unless
+// features.psychoeducation_cue_ab_enabled is exactly true; when on, each
+// session is randomly assigned 50/50 (same approach as proactive_offering)
+// and the arm is recorded on session_configurations.psychoeducation_cue
+// (migration 123). Migrations are applied by hand, so until that column
+// exists every session runs as control and nothing is recorded.
+
+let psychoeducationCueColumnPresent = false;
+
+async function hasPsychoeducationCueColumn(): Promise<boolean> {
+  // Only a positive result is cached: a column added by hand while the server
+  // runs is picked up on the next session start without a restart.
+  if (psychoeducationCueColumnPresent) return true;
+  try {
+    const result = await pool.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_schema = current_schema()
+         AND table_name = 'session_configurations'
+         AND column_name = 'psychoeducation_cue'`,
+    );
+    psychoeducationCueColumnPresent = result.rows.length > 0;
+  } catch (err) {
+    log.error({ err }, 'psychoeducation_cue column check failed; running session as control');
+    return false;
+  }
+  return psychoeducationCueColumnPresent;
+}
+
+/** Test hook: forget the cached column check. */
+export function resetPsychoeducationCueColumnCache(): void {
+  psychoeducationCueColumnPresent = false;
+}
+
+// Harness hook (src/redteam/variants.ts): pin the arm instead of rolling it, so
+// an eval of the cue arm is deterministic. Only consulted after the flag and
+// column checks pass, so it can never put a session into the experiment on its
+// own. Null (the default, and always in the server) means a 50/50 roll.
+let psychoeducationCueArmOverride: boolean | null = null;
+
+/** Harness hook: force the psychoeducation-cue arm (true/false), or null to roll. */
+export function setPsychoeducationCueArmOverride(arm: boolean | null): void {
+  psychoeducationCueArmOverride = arm;
+}
+
+/**
+ * Resolve this session's psychoeducation-cue research condition. Call once per
+ * session and persist the result. TRUE = cue arm, FALSE = control arm, NULL =
+ * not in the experiment (flag off, or the column is not migrated yet); NULL
+ * sessions get no cue, exactly like control.
+ */
+export async function resolvePsychoeducationCue(): Promise<boolean | null> {
+  try {
+    const config = await getSystemConfig();
+    const features = (config.features ?? {}) as { psychoeducation_cue_ab_enabled?: unknown };
+    if (features.psychoeducation_cue_ab_enabled !== true) return null;
+  } catch (err) {
+    log.error({ err }, 'psychoeducation cue flag read failed; running session as control');
+    return null;
+  }
+  if (!(await hasPsychoeducationCueColumn())) {
+    log.warn(
+      'features.psychoeducation_cue_ab_enabled is on but session_configurations.psychoeducation_cue is missing (migration 123 not applied); running session as control',
+    );
+    return null;
+  }
+  if (psychoeducationCueArmOverride !== null) return psychoeducationCueArmOverride;
+  return Math.random() < 0.5;
+}
+
+// ============================================
+// LEADING THE CONVERSATION
+// ============================================
+// Owner feedback from a production test session (2026-11-16): "ai needs to
+// drive the conversation more". When features.lead_conversation_enabled is
+// exactly true, every new session gets the lead-conversation prompt block
+// (promptContext.ts buildLeadConversationBlock), a matching line in the
+// GPT-Live voice layer, and an invitation at the end of the opening. Off by
+// default, and NOT a per-session experiment: switching it on changes every
+// arm of every running experiment equally, and the assembled prompt stored in
+// session_configurations.instructions shows which sessions had it.
+
+/** Whether new sessions should get the lead-conversation steering. False on any error. */
+export async function resolveLeadConversation(): Promise<boolean> {
+  try {
+    const config = await getSystemConfig();
+    const features = (config.features ?? {}) as { lead_conversation_enabled?: unknown };
+    return features.lead_conversation_enabled === true;
+  } catch (err) {
+    log.error({ err }, 'lead_conversation flag read failed; starting session without it');
+    return false;
+  }
 }
 
 /**

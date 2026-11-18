@@ -39,7 +39,7 @@ section at the end is the part most likely to go stale.
 | `transcription_model` | `{model: string, description?: string}` | 030 (gpt-4o-mini-transcribe), 097, 099 | nothing on the server (see anomalies) | UI (Model tab) |
 | `transcription_context` | `{prompt?, keywords?: string[], languages?: string[]}`; `{}` = code defaults | 097 (also touched by 099) | nothing (see anomalies) | generic PUT only |
 | `system_prompts` | `{realtime: {prompt, last_modified?}, chat: {...}, modality_presets?: {...}, active_modality?: string\|null}` | 019; rewritten by 062, 093, 094 | `sessionHelpers.getSystemPrompt` / `getActiveModality`; `studyOps.queries` | UI (Prompts tab, modality defaults) |
-| `features` | flag object: `voice_enabled`, `chat_enabled`, `file_upload_enabled`, `session_recording_enabled`, `disabled_tools: string[]`, `phase_guidance_enabled`, `regrounding_enabled`, `regrounding_interval_minutes`, `proactive_offering: {mode: always\|never\|ab_test}`, `telemetry_acoustic_features`, `telemetry_interaction_timing`, `telemetry_engagement_events`, `telemetry_admin_usage` | 007; flags added by 009, 095, 096 | `config.routes` (public), `sessions.routes`, `chat.routes`, `liveSession.routes`, `grokSession.routes`, `consent.routes`, `engagementEvents.routes`, `telemetry.routes`, `adminUsage.routes`, `sessionHelpers`, `phaseGuidance`, `toolRegistry`, `sidebandManager`, `acousticFeatures.service`; `studyOps.queries` | UI (Features tab) |
+| `features` | flag object: `voice_enabled`, `chat_enabled`, `file_upload_enabled`, `session_recording_enabled`, `disabled_tools: string[]`, `phase_guidance_enabled`, `regrounding_enabled`, `regrounding_interval_minutes`, `proactive_offering: {mode: always\|never\|ab_test}`, `psychoeducation_cue_ab_enabled` (default off; per-session A/B, migration 123), `lead_conversation_enabled` (default off, no seed: absent means off; adds the lead-conversation prompt block, a GPT-Live voice-layer line and an opening invitation to every new session; not an experiment arm), `telemetry_acoustic_features`, `telemetry_interaction_timing`, `telemetry_engagement_events`, `telemetry_admin_usage`, `participant_reflections_enabled` (default off, no seed: absent means off; gates `GET /api/me/reflections` and the Home card; needs IRB sign-off) | 007; flags added by 009, 095, 096 | `config.routes` (public), `sessions.routes`, `chat.routes`, `liveSession.routes`, `grokSession.routes`, `consent.routes`, `progress.routes`, `engagementEvents.routes`, `telemetry.routes`, `adminUsage.routes`, `sessionHelpers`, `phaseGuidance`, `toolRegistry`, `sidebandManager`, `acousticFeatures.service`; `studyOps.queries` | UI (Features tab) |
 | `session_limits` | `{enabled, max_duration_minutes, max_sessions_per_day, cooldown_minutes, vendor_ceiling_minutes?}` (`vendor_ceiling_minutes` defaults to 60: the voice vendor's own cap, which a crisis lifts `max_duration_minutes` to; `sessionHelpers.resolveVendorCeilingMinutes`) | 007 | `sessionHelpers.checkSessionLimits`, `rateLimits.routes` (public + admin), `phaseGuidance`, `toolRegistry`; `studyOps.queries` | UI (Limits tab) |
 | `crisis_contact` | `{hotline, phone, text, enabled}` | 007; corrected by 090 | `config.routes` (public), `chat.routes`, `liveSession.routes`, `grokSession.routes`, `sessionHelpers` | UI (Crisis tab) |
 | `crisis_alert` | `{enabled: boolean, phone: string\|null, note?}`; null phone falls back to `CRISIS_ALERT_PHONE`. Read-only in this audit: do not change its semantics without the on-call SOP. | 044; forced `enabled=false` by `scripts/redteam-seed.sql` in CI | `crisisAlert.service.resolveAlertTarget` | UI (Crisis tab) |
@@ -68,6 +68,14 @@ section at the end is the part most likely to go stale.
 Migration numbers refer to `src/database/migrations/NNN_*.sql`. `studyOps.queries`
 also lists `ai_model`, `system_prompts`, `session_limits` and `features` rows whose
 `updated_at` falls inside the study window as protocol-deviation flags.
+
+## Red-team evaluated configuration
+
+The keys (and fields) that change what the AI says or which model says it are
+fingerprinted by `src/server/utils/evaluatedConfig.ts`; a fingerprint without a
+passing red-team run raises the drift notice on the System Config and System
+Prompts screens (`docs/redteam.md`, "Config drift gate"). When a new key changes
+prompts, tools or model choice, add it there and bump `EVALUATED_CONFIG_VERSION`.
 
 ## Anomalies
 

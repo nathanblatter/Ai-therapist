@@ -51,6 +51,12 @@ import {
 import type { ChatMessage } from './ChatLog';
 // Canonical crisis-contact blob shape is shared with the server (src/shared).
 import type { CrisisContact } from '../../../shared/systemConfig';
+import {
+  LIVE_RECOVERY_NUDGE_LOG,
+  LIVE_RECOVERY_SPEAK_FIRST_NUDGE,
+  liveOpeningInstruction,
+  openingPreamble,
+} from '../../../shared/openingPrompt';
 
 interface Features {
   output_modalities: string[];
@@ -225,6 +231,9 @@ export default function App() {
   // liveFinalized  — `session.closed` seen. Only this confirms finalization and
   //                  final usage; a transport close on its own does not.
   const liveSessionIdRef = useRef<string | null>(null);
+  // features.lead_conversation_enabled as resolved by POST /api/live/session:
+  // decides how the opening ends (shared/openingPrompt.ts).
+  const leadConversationRef = useRef(false);
   const liveStartedRef = useRef(false);
   // The server locked this session's data channel (data_channel_locked in the
   // POST /api/live/session response): the API refuses instruction appends from
@@ -1555,6 +1564,20 @@ export default function App() {
               );
             }
             break;
+          // Our voice provider could not start a session (spend ceiling, rate
+          // limit, overload, timeout). Not the participant's connection and
+          // nothing they can fix, so say that plainly. Silent during a
+          // content-filter takeover: the crisis screen owns the message there
+          // and moves straight on to its next fallback.
+          case 'provider_unavailable':
+            console.warn('Voice provider unavailable:', errorData);
+            if (!moderationTakeoverRef.current) {
+              toast.error(
+                (errorData?.message as string | undefined) ||
+                  'Voice sessions are temporarily unavailable. This is a problem on our side, not with your connection. Please try again a little later.',
+              );
+            }
+            break;
           default:
             break;
         }
@@ -1593,6 +1616,7 @@ export default function App() {
 
     liveSessionIdRef.current = newSessionId;
     liveChannelLockedRef.current = data.data_channel_locked === true;
+    leadConversationRef.current = data.lead_conversation === true;
     setSessionId(newSessionId);
     setSessionType('realtime');
     pendingStartSessionRef.current = { id: newSessionId, kind: 'realtime' };
@@ -2766,17 +2790,11 @@ export default function App() {
       // Timing only, none of the previous conversation: restating the
       // disclosure that tripped the filter is the most likely way to trip it
       // again.
-      sendInvisiblePrompt(
-        'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.',
-        'Recovery session: speak-first nudge',
-      );
+      sendInvisiblePrompt(LIVE_RECOVERY_SPEAK_FIRST_NUDGE, LIVE_RECOVERY_NUDGE_LOG);
       return;
     }
-    const initialPrompt = getInitialPromptForLanguage(sessionSettings.language);
-    sendInvisiblePrompt(
-      `${initialPrompt} Say it immediately, before the participant speaks, then pause and listen.`,
-      `Initial prompt: ${initialPrompt}`,
-    );
+    const opening = liveOpeningInstruction(sessionSettings.language, crisisContact, leadConversationRef.current);
+    sendInvisiblePrompt(opening.text, opening.logMessage);
   }
 
   // Report a participant-side tool outcome (exercise finished, worksheet
@@ -2806,47 +2824,10 @@ export default function App() {
     sendInvisiblePrompt(summary);
   }
 
-  function getPreambleForLanguage(language: string, includeVoiceInstructions = true) {
-    const crisisText = crisisContact.enabled
-      ? `call the ${crisisContact.hotline} crisis line at ${crisisContact.phone}${crisisContact.text ? ' or text ' + crisisContact.text : ''}`
-      : 'call or text 988 (Suicide and Crisis Lifeline), or call 911 for immediate danger';
-
-    const voiceNote = includeVoiceInstructions
-      ? ` Also, please note that your microphone is off by default. If you'd like to talk using voice, you'll need to press the red mic toggle button to turn it on.`
-      : '';
-
-    const basePrompt = `Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. Please remember, if you're in crisis, you should ${crisisText}.${voiceNote} Thanks again for being willing to talk, I'm glad you're here with me today.`;
-
-    return basePrompt;
-  }
-
-  function getInitialPromptForLanguage(language: string) {
-    const basePrompt = getPreambleForLanguage(language, true);
-
-    const languageNames: Record<string, string> = {
-      en: 'English',
-      'es-ES': 'Spanish from Spain (Español de España)',
-      'es-419': 'Latin American Spanish (Español Latinoamericano)',
-      'fr-FR': 'French from France (Français de France)',
-      'fr-CA': 'Québécois French (Français Québécois)',
-      'pt-BR': 'Brazilian Portuguese (Português Brasileiro)',
-      'pt-PT': 'European Portuguese (Português Europeu)',
-      de: 'German',
-      it: 'Italian',
-      zh: 'Chinese',
-      ja: 'Japanese',
-      ko: 'Korean',
-      ar: 'Arabic',
-      hi: 'Hindi',
-      ru: 'Russian',
-    };
-
-    if (language === 'en') {
-      return `Say this phrase exactly: '${basePrompt}'`;
-    } else {
-      const langName = languageNames[language] || language;
-      return `Say this phrase exactly in ${langName}: '${basePrompt}'`;
-    }
+  // The disclosure text lives in shared/openingPrompt.ts so the server-side
+  // GPT-Live opening and this copy can never drift.
+  function getPreambleForLanguage(_language: string, includeVoiceInstructions = true) {
+    return openingPreamble(crisisContact, includeVoiceInstructions);
   }
 
   // Client-side reactions to AI tool calls, dispatched from the WebRTC data

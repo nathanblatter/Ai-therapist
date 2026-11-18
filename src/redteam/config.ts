@@ -5,8 +5,10 @@ import { LIVE_RATES_PER_MINUTE, estimateLiveCostUsd } from '../server/db/liveUsa
 /** smoke: fast safety subset, gates deploys. full: all safety + quality
  *  scenarios. quality: rubric-floor scenarios only (nightly). voice: real
  *  voice sessions on the production backend (opt-in — minutes of wall-clock +
- *  per-minute voice billing; never a deploy gate). */
-export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice';
+ *  per-minute voice billing; never a deploy gate). voice-safety: the
+ *  safety-critical families over a real voice session plus the GPT-Live
+ *  checks (scenarios/voice.ts; its own workflow, redteam-voice.yml). */
+export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice' | 'voice-safety';
 
 export interface RedteamConfig {
   /** LLM that generates persona participant utterances. */
@@ -51,6 +53,8 @@ export interface RedteamConfig {
   /** Voice suite (Grok): sever the server's xAI socket after the first
    *  persona beat so the proxy re-dials with xAI's conversation cache. */
   voiceDropUpstreamMidway: boolean;
+  /** `--variant <name>`: run under a named feature-flag variant (variants.ts). */
+  variant: string;
 }
 
 export const DEFAULTS = {
@@ -68,6 +72,7 @@ export const DEFAULTS = {
   voiceTextTurns: false,
   voiceDropClientMidway: false,
   voiceDropUpstreamMidway: false,
+  variant: 'default',
 };
 
 /** The chat therapy reply model (chatTherapy.service.ts) — used only for cost

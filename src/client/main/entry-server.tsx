@@ -1,7 +1,6 @@
 import { StrictMode } from 'react';
 import { renderToString } from 'react-dom/server';
-import { StaticRouter } from 'react-router-dom/server';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { StaticRouter, Routes, Route } from 'react-router';
 import App from './components/App';
 import Login from './components/Login';
 import Profile from './components/Profile';

@@ -191,8 +191,11 @@ describe("planAfterTermination — the browser's content-filter recovery, mirror
 });
 
 describe('LIVE_RECOVERY_SPEAK_FIRST_NUDGE', () => {
-  it("is the browser's nudge, verbatim (App.tsx session.started under recovery)", () => {
+  it('is the one copy the browser fallback and the server opening both use (shared/openingPrompt.ts)', () => {
     const app = readFileSync(new URL('../client/main/components/App.tsx', import.meta.url), 'utf8');
-    expect(app).toContain(LIVE_RECOVERY_SPEAK_FIRST_NUDGE);
+    const route = readFileSync(new URL('../server/routes/public/liveSession.routes.ts', import.meta.url), 'utf8');
+    expect(app).toContain('LIVE_RECOVERY_SPEAK_FIRST_NUDGE');
+    expect(route).toContain('LIVE_RECOVERY_SPEAK_FIRST_NUDGE');
+    expect(LIVE_RECOVERY_SPEAK_FIRST_NUDGE).toMatch(/^The voice connection just dropped and has reconnected\. Speak first/);
   });
 });

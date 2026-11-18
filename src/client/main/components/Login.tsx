@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { Shield, Key, Lock, User } from 'react-feather';
 import { decodeAssertionOptions, encodeAssertion, isCancelled, passkeysSupported } from '../../shared/lib/webauthn';
 
@@ -196,7 +196,7 @@ export default function Login() {
       } else {
         setError(data.error || 'Login failed');
       }
-    } catch (err) {
+    } catch {
       setError('An error occurred. Please try again.');
     } finally {
       setLoading(false);
@@ -234,7 +234,7 @@ export default function Login() {
       } else {
         setError(data.error || 'Invalid verification code');
       }
-    } catch (err) {
+    } catch {
       setError('An error occurred. Please try again.');
     } finally {
       setLoading(false);

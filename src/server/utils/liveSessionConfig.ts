@@ -359,10 +359,30 @@ export const LIVE_DEFAULT_BACKEND_MODEL = 'gpt-5.6-terra';
  * rather than going quiet. The actual crisis handling still runs server-side
  * through runCrisisPipeline and arrives as session.instructions.append.
  */
-export function buildLiveInstructions(opts: { languageName?: string | null; toolNames: string[] }): string {
+export function buildLiveInstructions(opts: {
+  languageName?: string | null;
+  toolNames: string[];
+  /** ai-therapist-202 cue arm: tell the voice model psychoeducation lookups exist. */
+  psychoeducationCue?: boolean;
+  /** features.lead_conversation_enabled: the voice model also guides, not only acknowledges. */
+  leadConversation?: boolean;
+}): string {
   const { languageName, toolNames } = opts;
+  const psychoeducationCue = opts.psychoeducationCue === true && toolNames.includes('retrieve_psychoeducation');
 
   const languageLine = languageName ? `Speak ${languageName} unless the participant asks you to switch.\n` : '';
+  // Lead-conversation steering (features.lead_conversation_enabled). Without
+  // it the voice model answers greetings and short replies itself, without the
+  // clinical prompt, and the conversation stalls on acknowledgements. Two
+  // lines: one for how it speaks, one so stalls reach the backend, which holds
+  // the check-in, memory, and the lead-conversation block.
+  const lead = opts.leadConversation === true;
+  const leadLine = lead
+    ? 'Guide the conversation: after greetings, help the participant name what they want to focus on today, and keep it moving with one specific follow-up at a time rather than only acknowledging. If they are upset or raise anything about their safety, follow them instead.\n'
+    : '';
+  const leadDelegateLine = lead
+    ? '- The participant gives a short or stalled reply ("I don\'t know", "not much") and the conversation needs a next step.\n'
+    : '';
 
   // Describe backend CAPABILITIES, not tool call syntax — the guide is explicit
   // that these lines tell the live model what help is available, and are not
@@ -373,6 +393,11 @@ export function buildLiveInstructions(opts: { languageName?: string | null; tool
   if (toolNames.includes('find_worksheet')) {
     capabilities.push(
       '- Worksheets and exercises: find and present a structured exercise that fits what the participant is working on.',
+    );
+  }
+  if (psychoeducationCue) {
+    capabilities.push(
+      '- Psychoeducation: look up vetted explanations of a condition, a feeling, or how a technique or therapy works.',
     );
   }
   if (toolNames.some((n) => n.startsWith('administer_scale') || n.includes('scale'))) {
@@ -390,7 +415,7 @@ export function buildLiveInstructions(opts: { languageName?: string | null; tool
   return `You are a warm, attentive voice companion in a research study on AI support for mental health.
 Speak calmly and unhurriedly, in plain language. Be genuine and grounded, not chirpy or clinical.
 Leave room for silence. If the participant is upset, acknowledge it plainly before anything else.
-${languageLine}
+${leadLine}${languageLine}
 Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the participant.
 
 Interruption policy: Stop speaking the moment the participant interrupts, and listen. Never talk over them.
@@ -402,7 +427,7 @@ ${capabilities.join('\n')}
 Delegate to the backend when:
 - The participant describes something they are working through and needs a substantive therapeutic response.
 - The participant asks for an exercise, a worksheet, a summary, or to end the session.
-- A correction changes work already in progress.
+${psychoeducationCue ? '- The participant asks what a condition is, why they might feel a certain way, or how a technique or therapy works.\n' : ''}${leadDelegateLine}- A correction changes work already in progress.
 
 Do not delegate to the backend when:
 - The participant greets you, makes small talk, or asks you to repeat something you just said.
@@ -530,6 +555,10 @@ export interface LiveSessionConfigInput {
    * the most likely way to be terminated again.
    */
   recovery?: { crisisLine: string };
+  /** ai-therapist-202 research condition; see buildLiveInstructions. */
+  psychoeducationCue?: boolean;
+  /** features.lead_conversation_enabled; see buildLiveInstructions. Ignored in recovery. */
+  leadConversation?: boolean;
   /**
    * Leave the browser's data channel unrestricted (the pre-2026-11-16
    * behaviour) instead of locking it to LIVE_CLIENT_EVENTS.
@@ -568,13 +597,7 @@ export const LIVE_CLIENT_EVENTS = ['session.close', 'response.item.create', 'res
  */
 export const LIVE_RECOVERY_CLIENT_EVENTS = ['session.close'] as const;
 
-/**
- * Speak-first nudge for a content-filter recovery session. Timing only: it
- * carries none of the previous conversation, because restating the disclosure
- * that tripped the filter is the most likely way to trip it again.
- */
-export const LIVE_RECOVERY_SPEAK_FIRST_NUDGE =
-  'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.';
+export { LIVE_RECOVERY_SPEAK_FIRST_NUDGE } from '../../shared/openingPrompt.js';
 
 /**
  * Project registry tool definitions into the Responses function schema that
@@ -609,7 +632,19 @@ const MAX_HISTORY_CHARS = 24_000; // ~8k tokens at the usual 3 chars/token heuri
  * is no audio.input.transcription block to configure.
  */
 export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<string, unknown> {
-  const { model, voice, languageName, systemPrompt, toolDefs, backendModel, history, storable, recovery } = input;
+  const {
+    model,
+    voice,
+    languageName,
+    systemPrompt,
+    toolDefs,
+    backendModel,
+    history,
+    storable,
+    recovery,
+    psychoeducationCue,
+    leadConversation,
+  } = input;
 
   const session: Record<string, unknown> = {
     model,
@@ -618,6 +653,8 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
       : buildLiveInstructions({
           languageName,
           toolNames: toolDefs.map((t) => t.name),
+          psychoeducationCue,
+          leadConversation,
         }),
     audio: {
       output: { voice: resolveLiveVoice(voice) },

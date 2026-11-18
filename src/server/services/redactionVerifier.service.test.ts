@@ -2,8 +2,8 @@
 // Decisions API adapter, the Responses fallback, and the per-row persistence.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { postMock, createMock, queryMock, getSystemConfigByKeyMock, recordLlmUsageMock } = vi.hoisted(() => ({
-  postMock: vi.fn(),
+const { decisionsCreateMock, createMock, queryMock, getSystemConfigByKeyMock, recordLlmUsageMock } = vi.hoisted(() => ({
+  decisionsCreateMock: vi.fn(),
   createMock: vi.fn(),
   queryMock: vi.fn(),
   getSystemConfigByKeyMock: vi.fn(),
@@ -12,7 +12,7 @@ const { postMock, createMock, queryMock, getSystemConfigByKeyMock, recordLlmUsag
 
 vi.mock('openai', () => ({
   default: class MockOpenAI {
-    post = postMock;
+    decisions = { create: decisionsCreateMock };
     responses = { create: createMock };
   },
 }));
@@ -37,7 +37,7 @@ import {
 const CFG = { ...DEFAULT_VERIFIER_CONFIG };
 
 beforeEach(() => {
-  postMock.mockReset();
+  decisionsCreateMock.mockReset();
   createMock.mockReset();
   queryMock.mockReset();
   queryMock.mockResolvedValue({ rows: [], rowCount: 1 });
@@ -48,34 +48,67 @@ beforeEach(() => {
   _resetVerifierStateForTests();
 });
 
+/** A Decisions API response in the documented GA shape. */
+function decision(probability: number, usage?: { input_tokens: number; output_tokens: number }) {
+  return {
+    model: 'gpt-6-luna',
+    answers: [{ type: 'predicate', name: 'phi_leak', probability }],
+    ...(usage ? { usage } : {}),
+  };
+}
+
 describe('Decisions API adapter', () => {
-  it('sends one bounded yes/no question with store:false and never the raw transcript', () => {
+  // ai-therapist-284: the GA API requires `questions` (array). The preview-era
+  // `question` object 400s every request. This pins the exact wire body.
+  it('sends the documented request shape: questions[] with one named predicate', () => {
     const body = buildDecisionsBody('I talked to [REDACTED: NAME] yesterday');
-    expect(body.model).toBe('gpt-6-luna');
-    expect(body.input).toBe('I talked to [REDACTED: NAME] yesterday');
-    expect(body.store).toBe(false);
-    expect((body.question as { answers: string[] }).answers).toEqual(['yes', 'no']);
-  });
-
-  it('reads p(yes) from a per-answer probability map', () => {
-    expect(parseDecisionsResponse({ probabilities: { yes: 0.83, no: 0.17 } }).pLeak).toBeCloseTo(0.83);
-  });
-
-  it('derives p(leak) from a choice + confidence pair in either direction', () => {
-    expect(parseDecisionsResponse({ choice: 'yes', confidence: 0.9 }).pLeak).toBeCloseTo(0.9);
-    expect(parseDecisionsResponse({ choice: 'no', confidence: 0.9 }).pLeak).toBeCloseTo(0.1);
-  });
-
-  it('unwraps a nested decisions[] / output[] envelope and carries usage', () => {
-    const r = parseDecisionsResponse({
-      output: [{ answer: 'yes', probability: 0.7 }],
-      usage: { input_tokens: 40, output_tokens: 1 },
+    expect(body).toEqual({
+      model: 'gpt-6-luna',
+      input: 'I talked to [REDACTED: NAME] yesterday',
+      questions: [{ type: 'predicate', name: 'phi_leak', instructions: expect.stringMatching(/HIPAA Safe Harbor/) }],
     });
-    expect(r).toEqual({ pLeak: 0.7, tokensIn: 40, tokensOut: 1 });
+    expect(body).not.toHaveProperty('question');
+    // Not a Decisions parameter; an unknown field risks another 400.
+    expect(body).not.toHaveProperty('store');
+  });
+
+  it('reads the predicate probability from answers[] and carries usage', () => {
+    expect(parseDecisionsResponse(decision(0.83, { input_tokens: 40, output_tokens: 0 }))).toEqual({
+      pLeak: 0.83,
+      tokensIn: 40,
+      tokensOut: 0,
+    });
+  });
+
+  it('picks the answer by question name, not by position', () => {
+    const r = parseDecisionsResponse({
+      answers: [
+        { type: 'predicate', name: 'something_else', probability: 0.01 },
+        { type: 'predicate', name: 'phi_leak', probability: 0.7 },
+      ],
+    });
+    expect(r.pLeak).toBeCloseTo(0.7);
+  });
+
+  it('clamps an out-of-range probability', () => {
+    expect(parseDecisionsResponse(decision(1.2)).pLeak).toBe(1);
+    expect(parseDecisionsResponse(decision(-0.1)).pLeak).toBe(0);
+  });
+
+  it('throws on a refusal instead of treating it as clean', () => {
+    expect(() => parseDecisionsResponse({ answers: [{ type: 'refusal', name: 'phi_leak' }] })).toThrow(/refused/);
   });
 
   it('throws on an unrecognizable shape instead of inventing a probability', () => {
-    expect(() => parseDecisionsResponse({ something: 'else' })).toThrow(/no recognizable/);
+    expect(() => parseDecisionsResponse({ something: 'else' })).toThrow(/no answers/);
+    expect(() => parseDecisionsResponse({ answers: [] })).toThrow(/no answers/);
+    expect(() => parseDecisionsResponse(null)).toThrow(/no answers/);
+    expect(() =>
+      parseDecisionsResponse({ answers: [{ type: 'choice', name: 'phi_leak', choice: 'yes', confidence: 0.9 }] }),
+    ).toThrow(/no predicate probability/);
+    expect(() =>
+      parseDecisionsResponse({ answers: [{ type: 'predicate', name: 'phi_leak', probability: 'high' }] }),
+    ).toThrow(/no predicate probability/);
   });
 
   it('recognizes the preview-gating error', () => {
@@ -87,16 +120,16 @@ describe('Decisions API adapter', () => {
 
 describe('askLeakCheck backend selection', () => {
   it('auto: uses the Decisions API when it answers', async () => {
-    postMock.mockResolvedValue({ choice: 'no', confidence: 0.95 });
+    decisionsCreateMock.mockResolvedValue(decision(0.05));
     const a = await askLeakCheck('clean text', CFG);
     expect(a.backend).toBe('decisions');
     expect(a.pLeak).toBeCloseTo(0.05);
-    expect(postMock).toHaveBeenCalledWith('/decisions', expect.objectContaining({ body: expect.any(Object) }));
+    expect(decisionsCreateMock).toHaveBeenCalledWith(buildDecisionsBody('clean text'));
     expect(createMock).not.toHaveBeenCalled();
   });
 
   it('auto: falls back to Responses when the preview is not enabled, and stays there', async () => {
-    postMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
+    decisionsCreateMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
     createMock.mockResolvedValue({
       output_text: JSON.stringify({ leaks: true, probability: 0.8 }),
       usage: { input_tokens: 50, output_tokens: 10 },
@@ -107,18 +140,18 @@ describe('askLeakCheck backend selection', () => {
     expect(first.pLeak).toBeCloseTo(0.8);
 
     await askLeakCheck('second message', CFG);
-    expect(postMock).toHaveBeenCalledTimes(1); // not re-probed per message
+    expect(decisionsCreateMock).toHaveBeenCalledTimes(1); // not re-probed per message
     expect(createMock).toHaveBeenCalledTimes(2);
   });
 
   it('auto: a non-gating Decisions error propagates (no silent fallback that hides an outage)', async () => {
-    postMock.mockRejectedValue(new Error('rate limit exceeded'));
+    decisionsCreateMock.mockRejectedValue(new Error('rate limit exceeded'));
     await expect(askLeakCheck('x', CFG)).rejects.toThrow(/rate limit/);
     expect(createMock).not.toHaveBeenCalled();
   });
 
   it('backend=decisions never falls back', async () => {
-    postMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
+    decisionsCreateMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
     await expect(askLeakCheck('x', { ...CFG, backend: 'decisions' })).rejects.toThrow(/not enabled/);
     expect(createMock).not.toHaveBeenCalled();
   });
@@ -131,15 +164,15 @@ describe('askLeakCheck backend selection', () => {
     expect(req.text.format.strict).toBe(true);
     expect(req.input).not.toMatch(/ignore previous/i);
     expect(a.pLeak).toBe(0.5); // leaks=true but p=0.2 -> at least 0.5
-    expect(postMock).not.toHaveBeenCalled();
+    expect(decisionsCreateMock).not.toHaveBeenCalled();
   });
 });
 
 describe('verifyRedactedMessages', () => {
   it('persists a redaction_check verdict per row and records usage', async () => {
-    postMock
-      .mockResolvedValueOnce({ choice: 'yes', confidence: 0.9, usage: { input_tokens: 30, output_tokens: 1 } })
-      .mockResolvedValueOnce({ choice: 'no', confidence: 0.99 });
+    decisionsCreateMock
+      .mockResolvedValueOnce(decision(0.9, { input_tokens: 30, output_tokens: 1 }))
+      .mockResolvedValueOnce(decision(0.01));
 
     const summary = await verifyRedactedMessages('sess_1', [
       { id: 11, text: 'I saw Marie at the clinic' },
@@ -160,26 +193,40 @@ describe('verifyRedactedMessages', () => {
     getSystemConfigByKeyMock.mockResolvedValue({
       config_value: { enabled: true, backend: 'decisions', threshold: 0.95 },
     });
-    postMock.mockResolvedValue({ choice: 'yes', confidence: 0.9 });
+    decisionsCreateMock.mockResolvedValue(decision(0.9));
     expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 1, flagged: 0 });
 
     getSystemConfigByKeyMock.mockResolvedValue({ config_value: { enabled: false } });
-    postMock.mockClear();
+    decisionsCreateMock.mockClear();
     expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 0, flagged: 0 });
-    expect(postMock).not.toHaveBeenCalled();
+    expect(decisionsCreateMock).not.toHaveBeenCalled();
   });
 
   it('records a per-row error and never throws when the model call fails', async () => {
-    postMock.mockRejectedValue(new Error('boom'));
+    decisionsCreateMock.mockRejectedValue(new Error('boom'));
     const summary = await verifyRedactedMessages('s', [{ id: 7, text: 'x' }]);
     expect(summary).toEqual({ checked: 0, flagged: 0 });
     const [, params] = queryMock.mock.calls.find(([sql]) => /redaction_check/.test(sql as string))!;
     expect(JSON.parse(params![0] as string)).toMatchObject({ flagged: false, error: 'boom' });
   });
 
+  // The 2026-11-01 incident: the API 400'd every request. Pin what that does
+  // so the fail policy is a tested fact: the row is recorded as errored and
+  // unflagged, nothing is counted as checked, and no fallback is attempted.
+  it('a 400 from the Decisions API leaves the row errored and unverified (fail-soft)', async () => {
+    decisionsCreateMock.mockRejectedValue(
+      Object.assign(new Error('400 Missing required parameter: questions.'), { status: 400 }),
+    );
+    const summary = await verifyRedactedMessages('s', [{ id: 9, text: 'I saw Marie' }]);
+    expect(summary).toEqual({ checked: 0, flagged: 0 });
+    expect(createMock).not.toHaveBeenCalled();
+    const [, params] = queryMock.mock.calls.find(([sql]) => /redaction_check/.test(sql as string))!;
+    expect(JSON.parse(params![0] as string)).toMatchObject({ p_leak: -1, flagged: false, model: 'n/a' });
+  });
+
   it('skips empty redacted text without a model call', async () => {
     expect(await verifyRedactedMessages('s', [{ id: 1, text: '   ' }])).toEqual({ checked: 0, flagged: 0 });
-    expect(postMock).not.toHaveBeenCalled();
+    expect(decisionsCreateMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
   });
 });

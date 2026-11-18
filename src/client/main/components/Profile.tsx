@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { ArrowLeft, AlertCircle } from 'react-feather';
 import UserSessionDetail from './UserSessionDetail';
 import { toast } from '../../shared/components/Toast';
@@ -79,7 +79,7 @@ export default function Profile() {
           setUser(data.user as UserData);
         }
       }
-    } catch (err: unknown) {
+    } catch {
       setError('Failed to fetch user data');
     }
   };

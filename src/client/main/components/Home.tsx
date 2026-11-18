@@ -22,6 +22,9 @@ import {
   X,
 } from 'react-feather';
 import { Shell, SafetyPlanCard, type SafetyPlanData, type CustomWorksheetSection } from './ToolOverlays';
+import { TrendRow, shortDate } from './TrendRow';
+import ReflectionsCard, { reflectionsShowMood } from './Reflections';
+import { REFLECTIONS_FEATURE_FLAG, type ParticipantReflections } from '../../../shared/reflections';
 
 // ---------- server payload shapes (dates arrive as ISO strings) ----------
 
@@ -84,71 +87,6 @@ function friendlyDay(iso: string): string {
   if (dayDiff === 1) return 'yesterday';
   if (dayDiff < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-// ---------- sparkline (inline SVG, one labeled row per measure) ----------
-
-function Sparkline({ values, min, max }: { values: number[]; min: number; max: number }) {
-  // Wide viewBox so the stretch factor under preserveAspectRatio="none" stays
-  // near 1 at typical card widths (keeps the endpoint dot close to circular).
-  const W = 300;
-  const H = 36;
-  const PAD = 6; // keeps the 2px stroke and endpoint dot inside the viewBox
-  const span = max - min || 1;
-  const x = (i: number) => (values.length === 1 ? W / 2 : PAD + (i * (W - 2 * PAD)) / (values.length - 1));
-  const y = (v: number) => H - PAD - ((v - min) / span) * (H - 2 * PAD);
-  const points = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const lastX = x(values.length - 1);
-  const lastY = y(values[values.length - 1]);
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-9" aria-hidden="true" preserveAspectRatio="none">
-      <polyline
-        points={points}
-        fill="none"
-        stroke="#2563eb"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
-      />
-      <circle cx={lastX} cy={lastY} r="4" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
-    </svg>
-  );
-}
-
-/** One labeled trend row: name + sparkline + latest value (text stays in ink
- *  tokens; the mark alone carries the series). Values are oldest -> newest. */
-function TrendRow({
-  label,
-  values,
-  min,
-  max,
-  latestLabel,
-  dateRange,
-}: {
-  label: string;
-  values: number[];
-  min: number;
-  max: number;
-  latestLabel: string;
-  dateRange: string;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="w-24 flex-shrink-0">
-        <p className="text-sm font-medium text-gray-700">{label}</p>
-        <p className="text-xs text-gray-400">{dateRange}</p>
-      </div>
-      <div className="flex-1 min-w-0">
-        <Sparkline values={values} min={min} max={max} />
-      </div>
-      <p className="w-14 flex-shrink-0 text-right text-sm text-gray-600 tabular-nums">{latestLabel}</p>
-    </div>
-  );
 }
 
 // ---------- practice assignments card ----------
@@ -345,6 +283,9 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
   const [worksheets, setWorksheets] = useState<WorksheetItem[] | null>(null);
   const [assignments, setAssignments] = useState<AssignmentItem[] | null>(null);
   const [safetyPlan, setSafetyPlan] = useState<SafetyPlanData | null>(null);
+  // Reflections (ai-therapist-204): stays null unless the study team has
+  // turned the feature flag on AND the endpoint answers.
+  const [reflections, setReflections] = useState<ParticipantReflections | null>(null);
   const [openWorksheet, setOpenWorksheet] = useState<WorksheetItem | null>(null);
   const [showSafetyPlan, setShowSafetyPlan] = useState(false);
   const [dueSurveys, setDueSurveys] = useState<DueSurvey[]>([]);
@@ -369,6 +310,22 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
           .then((res) => (res.ok ? res.json() : null))
           .then((p: OwnProgress | null) => {
             if (!cancelled && p) setProgress(p);
+          })
+          .catch(() => {
+            /* card stays hidden */
+          });
+
+        // Reflections are flag-gated (default off). The client only asks for
+        // them when the public features config says so; the endpoint enforces
+        // the same flag and 404s otherwise.
+        fetch('/api/config/features')
+          .then((res) => (res.ok ? res.json() : null))
+          .then((features: Record<string, unknown> | null) => {
+            if (features?.[REFLECTIONS_FEATURE_FLAG] !== true) return null;
+            return fetch('/api/me/reflections', { credentials: 'include' }).then((res) => (res.ok ? res.json() : null));
+          })
+          .then((r: ParticipantReflections | null) => {
+            if (!cancelled && r && Array.isArray(r.sessions) && Array.isArray(r.mood)) setReflections(r);
           })
           .catch(() => {
             /* card stays hidden */
@@ -456,7 +413,10 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
         .reverse()
     : [];
   const mood = progress ? progress.mood_trajectory.slice().reverse() : [];
-  const hasTrends = phq.length >= 2 || gad.length >= 2 || mood.length >= 2;
+  // The reflections card, when it is on, carries the self-rated mood line;
+  // do not draw the same line twice.
+  const showMood = mood.length >= 2 && !reflectionsShowMood(reflections);
+  const hasTrends = phq.length >= 2 || gad.length >= 2 || showMood;
   const isFirstTime = progress !== null && progress.session_count === 0;
   const recentWeeks = progress ? progress.weekly_sessions.slice(-8) : [];
   const maxWeekly = Math.max(1, ...recentWeeks.map((w) => w.sessions));
@@ -593,7 +553,7 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
                 dateRange={rangeLabel(gad[0].created_at, gad[gad.length - 1].created_at)}
               />
             )}
-            {mood.length >= 2 && (
+            {showMood && (
               <TrendRow
                 label="How you felt"
                 values={mood.map((p) => p.mood)}
@@ -627,6 +587,9 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
           <p className="text-xs text-gray-400 mt-4">These are brief check-ins over time, not a diagnosis or a grade.</p>
         </div>
       )}
+
+      {/* Your reflections (flag-gated, default off) */}
+      {reflections && <ReflectionsCard data={reflections} />}
 
       {/* Your practice (between-session assignments) */}
       {assignments !== null && (

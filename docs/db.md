@@ -156,7 +156,9 @@ session actually ran on — see `docs/model-pinning.md`.
 
 Schema changes are plain SQL files in `src/database/migrations/`, numbered
 `NNN_<name>.sql` with a matching `NNN_<name>_rollback.sql`. **Current head:
-113** (`113_worksheet_review.sql`). There is no migrations table
+124** (`124_prompt_sections_2026_09_22.sql`); numbers are reserved per branch
+and can land out of order (121 merged after 123 and 124), so list the
+directory rather than trusting this line. There is no migrations table
 and nothing applies them automatically: both stage and prod are migrated **by
 hand**, and the record of what has been applied is the Flightdeck log plus the
 backup file names below. Author-side conventions live in
@@ -341,9 +343,15 @@ the row:
   Redaction Verification tool; flagged-and-unreviewed rows are listed first
   there and counted in its header.
 - Backend `auto` (default) uses the OpenAI Decisions API (`POST /v1/decisions`,
-  limited preview, no published schema yet) and falls back to the Responses API
-  with a strict json_schema until the org is enabled. Only redacted text is
-  sent, `store:false`, usage is recorded under purpose `redaction`.
+  one `predicate` question in `questions[]`; `p_leak` is the returned
+  `probability`) and falls back to the Responses API with a strict json_schema
+  only when the endpoint is not enabled for the org (404 / "not enabled"). Only
+  redacted text is sent; the Responses fallback sets `store:false` (Decisions
+  has no such parameter); usage is recorded under purpose `redaction`.
+- Fail-soft: any other verifier error (a 400, a refusal, a timeout) writes
+  `{"p_leak": -1, "flagged": false, "error": "..."}` and does not block
+  redaction. Such a row is unverified and is not prioritised for review; find
+  them with `metadata->'redaction_check' ? 'error'`.
 - Config row: `system_config.redaction_verifier` =
   `{"enabled": true, "backend": "auto"|"decisions"|"responses", "threshold": 0.5}`;
   absent row = defaults. No migration needed.

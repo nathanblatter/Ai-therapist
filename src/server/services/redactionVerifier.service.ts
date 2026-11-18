@@ -17,12 +17,11 @@
 // PHI flow beyond what redaction itself already does.
 //
 // Backends (system_config.redaction_verifier.backend):
-//   decisions  OpenAI Decisions API (POST /v1/decisions, GPT-6 Luna): typed
-//              answer + probability, ~150ms. In limited preview as of
-//              2026-10-02 with NO published schema and not enabled for this
-//              org yet, so the request/response shape lives in exactly two
-//              functions below (buildDecisionsBody / parseDecisionsResponse)
-//              and nothing else depends on it.
+//   decisions  OpenAI Decisions API (POST /v1/decisions, GPT-6 Luna): one
+//              `predicate` question, answered with a calibrated probability,
+//              ~150ms. The wire shape lives in exactly two functions below
+//              (buildDecisionsBody / parseDecisionsResponse), written against
+//              the published GA reference, and nothing else depends on it.
 //   responses  Responses API with a strict json_schema. Works today. The
 //              probability is model-stated, not calibrated, which is why
 //              'auto' prefers the decisions backend as soon as it answers.
@@ -30,7 +29,9 @@
 //              for the rest of the process lifetime (re-probed on restart).
 //
 // Fail-soft everywhere: a verifier failure is logged on the row
-// (redaction_check.error) and never blocks redaction, naming, or the wipe.
+// (redaction_check.error, flagged=false, p_leak=-1) and never blocks
+// redaction, naming, or the wipe. The cost of that policy: a row whose check
+// errored is NOT verified and NOT prioritised in the review queue.
 
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
@@ -67,8 +68,6 @@ const QUESTION =
   'number, URL, or any other number or string that identifies a specific person? Placeholders such as ' +
   '[REDACTED: NAME] are NOT identifiers. Generic references ("my mom", "my therapist", "the university") ' +
   'are NOT identifiers.';
-
-const ANSWERS = ['yes', 'no'] as const;
 
 export interface DecisionAnswer {
   /** Probability that the text still leaks an identifier, 0..1. */
@@ -113,58 +112,69 @@ export async function getVerifierConfig(): Promise<VerifierConfig> {
 }
 
 // ---- Decisions API adapter -------------------------------------------------
-// The ONLY two places that know the wire shape. When OpenAI publishes the
-// contract, fix these two functions and the contract test; nothing else moves.
+// The ONLY two places that know the wire shape. Contract (GA reference,
+// https://developers.openai.com/api/reference/resources/decisions/methods/create,
+// read 2026-11-16):
+//
+//   request   { model, input, questions: [{ type, name, instructions, ... }] }
+//   response  { model, answers: [{ type, name, probability | ... }], usage }
+//
+// The preview-era body sent a single `question` object; the GA API rejects it
+// with "400 Missing required parameter: questions" (ai-therapist-284).
 
-type DecisionsClient = { post: <R>(path: string, opts: { body: Record<string, unknown> }) => Promise<R> };
+// The request is typed by the SDK (openai >= 7 ships `client.decisions`), so a
+// future change to the request contract fails typecheck on the SDK bump
+// instead of failing in production. The response is still parsed defensively
+// from `unknown`: types do not stop the API returning something else.
 
-/** Conceptual shape: state + one typed question with a finite answer set. */
-export function buildDecisionsBody(text: string): Record<string, unknown> {
+type DecisionsClient = { decisions: { create: (body: OpenAI.DecisionCreateParams) => Promise<unknown> } };
+
+/** Name echoed back on the answer, so the parser never trusts position alone. */
+export const LEAK_QUESTION_NAME = 'phi_leak';
+
+/**
+ * One `predicate` question: the API answers with the probability that the
+ * statement is true, which is exactly p(leak).
+ *
+ * No `store` field: the Decisions API has no such parameter (retention is
+ * governed by the org's data controls, not per request), and an unknown
+ * parameter risks the same 400 this adapter was fixed for.
+ */
+export function buildDecisionsBody(text: string): OpenAI.DecisionCreateParams {
   return {
     model: DECISIONS_MODEL,
     input: text,
-    question: {
-      name: 'phi_leak',
-      prompt: QUESTION,
-      answers: [...ANSWERS],
-    },
-    // Participant content: never retained on OpenAI's side.
-    store: false,
+    questions: [
+      {
+        type: 'predicate',
+        name: LEAK_QUESTION_NAME,
+        instructions: QUESTION,
+      },
+    ],
   };
 }
 
 /**
- * Pull p(yes) out of whatever the preview returns. Accepts the shapes seen in
- * early coverage ({choice, confidence}, {answer, probabilities}, and a nested
- * decisions[]/output[] wrapper). Throws on anything it cannot read so a
- * contract drift surfaces as an error on the row, not as a silent 0.
+ * Read p(leak) from the documented `answers` array. Throws on a refusal or on
+ * anything else it cannot read, so a contract drift surfaces as an error on
+ * the row, not as a silent 0.
  */
 export function parseDecisionsResponse(raw: unknown): {
   pLeak: number;
   tokensIn: number | null;
   tokensOut: number | null;
 } {
-  const root = raw as Record<string, unknown>;
-  const candidates: unknown[] = [root];
-  for (const key of ['decision', 'decisions', 'output', 'answers']) {
-    const v = root?.[key];
-    if (Array.isArray(v)) candidates.push(...v);
-    else if (v && typeof v === 'object') candidates.push(v);
+  const root = (raw ?? {}) as Record<string, unknown>;
+  const answers = Array.isArray(root.answers) ? (root.answers as Array<Record<string, unknown> | null>) : [];
+  // Answers come back in question order and echo the question name. Prefer the
+  // name; with a single question the first answer is the same thing.
+  const answer = answers.find((a) => a?.name === LEAK_QUESTION_NAME) ?? answers[0];
+  if (!answer) throw new Error('Decisions API response had no answers');
+  if (answer.type === 'refusal') throw new Error('Decisions API refused the leak-check question');
+  if (answer.type !== 'predicate' || typeof answer.probability !== 'number' || !Number.isFinite(answer.probability)) {
+    throw new Error(`Decisions API answer had no predicate probability (type: ${String(answer.type)})`);
   }
-  for (const c of candidates) {
-    const d = c as Record<string, unknown>;
-    const probs = (d.probabilities ?? d.scores) as Record<string, unknown> | undefined;
-    if (probs && typeof probs.yes === 'number') {
-      return { pLeak: clamp01(probs.yes), ...usageOf(root) };
-    }
-    const choice = (d.choice ?? d.answer ?? d.selected) as unknown;
-    const confidence = (d.confidence ?? d.probability) as unknown;
-    if (typeof choice === 'string' && typeof confidence === 'number') {
-      const p = clamp01(confidence);
-      return { pLeak: choice.toLowerCase() === 'yes' ? p : 1 - p, ...usageOf(root) };
-    }
-  }
-  throw new Error('Decisions API response had no recognizable choice/probability');
+  return { pLeak: clamp01(answer.probability), ...usageOf(root) };
 }
 
 function usageOf(root: Record<string, unknown>): { tokensIn: number | null; tokensOut: number | null } {
@@ -176,7 +186,7 @@ function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
 }
 
-/** "Decision API is not enabled for this user." / 404 => no preview access. */
+/** "Decision API is not enabled for this user." / 404 => no access to the endpoint. */
 export function isDecisionsUnavailableError(err: unknown): boolean {
   const e = err as { status?: number; message?: string } | undefined;
   if (e?.status === 404) return true;
@@ -185,7 +195,7 @@ export function isDecisionsUnavailableError(err: unknown): boolean {
 }
 
 async function askDecisions(client: DecisionsClient, text: string): Promise<DecisionAnswer> {
-  const raw = await client.post<unknown>('/decisions', { body: buildDecisionsBody(text) });
+  const raw = await client.decisions.create(buildDecisionsBody(text));
   const parsed = parseDecisionsResponse(raw);
   return { ...parsed, backend: 'decisions', model: DECISIONS_MODEL };
 }
@@ -259,7 +269,7 @@ export async function askLeakCheck(text: string, cfg: VerifierConfig, client?: O
   const wantDecisions = cfg.backend === 'decisions' || (cfg.backend === 'auto' && !decisionsUnavailableUntilRestart);
   if (wantDecisions) {
     try {
-      return await askDecisions(c as unknown as DecisionsClient, text);
+      return await askDecisions(c, text);
     } catch (err) {
       if (cfg.backend === 'decisions' || !isDecisionsUnavailableError(err)) throw err;
       if (!decisionsUnavailableUntilRestart) {

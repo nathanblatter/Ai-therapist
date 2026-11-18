@@ -30,6 +30,7 @@ import {
   ExternalLink,
   Eye,
   Mail,
+  Search,
 } from 'react-feather';
 import AdminHeader from './AdminHeader';
 import SandboxBanner from './SandboxBanner';
@@ -81,6 +82,7 @@ const QualtricsSync = lazy(() => import('./QualtricsSync'));
 const SurveyData = lazy(() => import('./SurveyData'));
 const Assistant = lazy(() => import('./Assistant'));
 const DataAccessAudit = lazy(() => import('./DataAccessAudit'));
+const SemanticSearch = lazy(() => import('./SemanticSearch'));
 
 // The subset of the users-table row the profile page needs up front.
 export interface ProfileUserSummary {
@@ -357,6 +359,9 @@ export default function AdminApp() {
         { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, researcherOnly: true },
         { id: 'evals', label: 'Evals', icon: CheckSquare, researcherOnly: true },
         { id: 'redaction', label: 'Redaction Review', icon: EyeOff, researcherOnly: true },
+        // Semantic search over redacted transcripts (ai-therapist-177); the
+        // server gate is researcher-only and org-scoped.
+        { id: 'transcript-search', label: 'Transcript Search', icon: Search, researcherOnly: true },
         // Audit-trail reads (ai-therapist-197): who has seen participant data.
         { id: 'data-access', label: 'Data Access', icon: Eye, researcherOnly: true },
         { id: 'consent', label: 'Consent Versions', icon: Clipboard, researcherOnly: true, researchOnly: true },
@@ -567,6 +572,7 @@ export default function AdminApp() {
               {currentView === 'assistant' && <Assistant role={userRole} />}
               {currentView === 'evals' && <EvalsView onViewSession={handleViewSession} />}
               {currentView === 'redaction' && <RedactionReview />}
+              {currentView === 'transcript-search' && <SemanticSearch onViewSession={handleViewSession} />}
               {currentView === 'data-access' && <DataAccessAudit onViewSession={handleViewSession} />}
               {currentView === 'retention' && <DataRetention />}
               {currentView === 'costs' && <CostDashboard />}

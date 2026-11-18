@@ -72,8 +72,11 @@ export async function updateRedactedContent(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // The embedding (085) was computed from the pre-correction text, which is
+    // exactly what the reviewer judged to leak; clear it so the sweep
+    // re-embeds the corrected text and semantic search never ranks on it.
     const result = await client.query(
-      'UPDATE messages SET content_redacted = $1 WHERE message_id = $2 RETURNING message_id',
+      'UPDATE messages SET content_redacted = $1, embedding = NULL WHERE message_id = $2 RETURNING message_id',
       [contentRedacted, messageId],
     );
     if ((result.rowCount ?? 0) === 0) {
