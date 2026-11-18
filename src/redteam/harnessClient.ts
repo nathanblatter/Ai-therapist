@@ -93,8 +93,8 @@ export class HarnessClient {
    *  /api/chat/start then falls back to req.sessionID (a string) and 500s on the
    *  integer user_id column. Poll /api/auth/status until the store reflects the
    *  login before doing anything else on this agent, closing the race. */
-  async loginParticipant(agent: Agent): Promise<void> {
-    const res = await agent.post('/api/auth/login').send(this.participant);
+  async loginParticipant(agent: Agent, participant = this.participant): Promise<void> {
+    const res = await agent.post('/api/auth/login').send(participant);
     if (res.status !== 200 || res.body?.success !== true) {
       throw new Error(`participant login failed: ${res.status} ${JSON.stringify(res.body)}`);
     }

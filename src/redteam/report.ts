@@ -3,11 +3,15 @@ import fs from 'fs';
 import path from 'path';
 import type { RedteamConfig } from './config.js';
 import type { ScenarioResult } from './types.js';
+import { aggregateProgression } from './progression.js';
+import type { VariantLabel } from './variants.js';
 
 export interface RunSummary {
   startedAt: string;
   finishedAt: string;
   suite: string;
+  /** Named feature-flag variant the run used (absent in older summaries = default). */
+  variant?: VariantLabel;
   seed: number;
   judgeModel: string;
   gitSha?: string | null;
@@ -53,6 +57,28 @@ export function buildJUnit(summary: RunSummary): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="redteam" >\n${suites}\n</testsuites>\n`;
 }
 
+/** Per-dimension mean and minimum of the consensus judge scores across the
+ *  scenarios that were judged. Pure; also used by the CI job summary. */
+export function judgeStats(
+  scenarios: Array<{ judge?: { scores?: Record<string, number | undefined> } | null }>,
+): Record<string, { mean: number; min: number; n: number }> {
+  const acc: Record<string, number[]> = {};
+  for (const s of scenarios) {
+    for (const [dim, v] of Object.entries(s.judge?.scores ?? {})) {
+      if (typeof v === 'number') (acc[dim] ??= []).push(v);
+    }
+  }
+  const out: Record<string, { mean: number; min: number; n: number }> = {};
+  for (const [dim, xs] of Object.entries(acc)) {
+    out[dim] = {
+      mean: Number((xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(2)),
+      min: Math.min(...xs),
+      n: xs.length,
+    };
+  }
+  return out;
+}
+
 export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
   const scenarios = summary.scenarios.map((s) => ({
     id: s.id,
@@ -63,6 +89,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     costUsd: Number(s.costUsd.toFixed(6)),
     durationMs: s.durationMs,
     error: s.error,
+    // Report-only "does the assistant move the session forward" metrics.
+    progression: s.progression ?? null,
     // Synthetic persona text + model replies, so a CI failure can be triaged
     // from the artifact after the CI database is gone.
     transcript: s.transcript,
@@ -77,6 +105,7 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     startedAt: summary.startedAt,
     finishedAt: summary.finishedAt,
     suite: summary.suite,
+    variant: summary.variant ?? null,
     seed: summary.seed,
     judgeModel: summary.judgeModel,
     gitSha: summary.gitSha ?? null,
@@ -85,9 +114,12 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
       scenarios: summary.scenarios.length,
       passed,
       failed: summary.scenarios.length - passed,
+      errored: summary.scenarios.filter((s) => !!s.error).length,
       assertions: assertionCount,
       assertionFailures,
       estCostUsd: Number(summary.scenarios.reduce((n, s) => n + s.costUsd, 0).toFixed(6)),
+      judge: judgeStats(summary.scenarios),
+      progression: aggregateProgression(summary.scenarios.map((s) => s.progression)),
     },
   };
 }
@@ -105,7 +137,9 @@ export function writeReports(cfg: RedteamConfig, summary: RunSummary): { junitPa
 export function printConsole(summary: RunSummary): boolean {
   let allPass = true;
   console.log('\n─────────────────────────────────────────────────────────────');
-  console.log(` Red-team results — suite=${summary.suite} seed=${summary.seed} judge=${summary.judgeModel}`);
+  console.log(
+    ` Red-team results — suite=${summary.suite} variant=${summary.variant?.name ?? 'default'} seed=${summary.seed} judge=${summary.judgeModel}`,
+  );
   console.log('─────────────────────────────────────────────────────────────');
   for (const s of summary.scenarios) {
     if (!s.passed) allPass = false;
@@ -130,6 +164,15 @@ export function printConsole(summary: RunSummary): boolean {
             .join(' ')}`,
         );
       }
+    }
+    if (s.progression) {
+      const p = s.progression;
+      console.log(
+        `        progression: questions ${Math.round(p.questionTurnShare * 100)}% of ${p.assistantTurns} turns` +
+          `, opening invites=${p.openingInvites ?? 'n/a'}` +
+          `, short-turn replies advanced=${p.shortTurnAdvanced === null ? 'n/a' : `${p.shortTurnAdvanced}/${p.shortTurns}`}` +
+          `, closing summary=${p.closingSummary ?? 'n/a (no close)'}`,
+      );
     }
   }
   const estCost = summary.scenarios.reduce((n, s) => n + s.costUsd, 0);

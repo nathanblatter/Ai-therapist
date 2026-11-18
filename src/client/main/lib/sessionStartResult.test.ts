@@ -23,6 +23,14 @@ describe('classifySessionStartRefusal', () => {
     expect(classifySessionStartRefusal(409, { error: 'live_not_active' })).toBe('live_not_active');
   });
 
+  // ai-therapist-190: the voice provider cannot mint a session (spend ceiling,
+  // rate limit, overload, timeout). A refusal, so the participant gets the
+  // honest "our side" message instead of the "check your connection" toast.
+  it('classifies an unavailable voice provider by its 503 error code', () => {
+    expect(classifySessionStartRefusal(503, { error: 'provider_unavailable' })).toBe('provider_unavailable');
+    expect(classifySessionStartRefusal(503, null)).toBeNull();
+  });
+
   it('returns null for statuses that are transport failures, not refusals', () => {
     // 503 monitoring_unavailable and 500s throw in the caller instead; the
     // recovery path treats a throw as an immediate failover too.
@@ -57,6 +65,7 @@ describe('SessionStartResult', () => {
       'study_status',
       'identifier_blocked',
       'live_not_active',
+      'provider_unavailable',
       'session_exists',
     ];
     for (const refusal of refusals) {
