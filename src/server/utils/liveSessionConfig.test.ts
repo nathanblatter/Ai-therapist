@@ -15,6 +15,7 @@ import {
   LIVE_VOICES,
   LIVE_UNDER_18_HOLD_LINE,
   buildLiveRecoveryInstructions,
+  resolveBackendReasoningEffort,
 } from './liveSessionConfig.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 
@@ -279,6 +280,64 @@ describe('buildLiveSessionConfig lead conversation (features.lead_conversation_e
   it('recovery ignores the flag', () => {
     const recovery = { crisisLine: '988' };
     expect(build({ recovery, leadConversation: true }).instructions).toBe(build({ recovery }).instructions);
+  });
+});
+
+describe('backend reasoning effort (system_config.live_backend_reasoning_effort)', () => {
+  type Delegation = { responses: Record<string, unknown> };
+
+  it('sends no reasoning block when unset, so merge-time sessions are unchanged', () => {
+    const responses = (build().delegation as Delegation).responses;
+    expect(responses).not.toHaveProperty('reasoning');
+  });
+
+  it('forwards a configured effort to the delegated backend', () => {
+    const responses = (build({ backendModel: 'gpt-6.1-terra', backendReasoningEffort: 'low' }).delegation as Delegation)
+      .responses;
+    expect(responses.reasoning).toEqual({ effort: 'low' });
+    expect(responses.model).toBe('gpt-6.1-terra');
+  });
+
+  it('never adds reasoning to a recovery session (client delegation)', () => {
+    const config = build({ backendReasoningEffort: 'low', recovery: { crisisLine: '988' } });
+    expect(config.delegation).toEqual({ type: 'client' });
+  });
+
+  it('resolves only recognised efforts, case-insensitively', () => {
+    expect(resolveBackendReasoningEffort(undefined, 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort('', 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort('fast', 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort({ effort: 'low' }, 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort(' Low ', 'gpt-6.1-terra')).toBe('low');
+  });
+
+  it("keeps 'none' where the model supports it and raises it to 'low' where it does not", () => {
+    expect(resolveBackendReasoningEffort('none', 'gpt-6.1-terra')).toBe('none');
+    expect(resolveBackendReasoningEffort('none', 'gpt-5.6-terra')).toBe('none');
+    // GPT-6 guide, Limitations: Astra and 6.1 Sol reject `none`.
+    expect(resolveBackendReasoningEffort('none', 'gpt-6.1-sol')).toBe('low');
+    expect(resolveBackendReasoningEffort('none', 'gpt-6-astra')).toBe('low');
+  });
+
+  it('sends nothing to a backend the registry marks as non-reasoning, and says so', () => {
+    // A reasoning block on gpt-4.1 is rejected by GPT-Live asynchronously
+    // (responses_validation_failed), i.e. every delegation of the session
+    // fails while session start looks healthy.
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort('low', 'gpt-4.1')).toBeNull();
+    expect(resolveBackendReasoningEffort('low', 'gpt-4o-mini')).toBeNull();
+    expect(logMock.warn).toHaveBeenCalled();
+  });
+
+  it('logs an unrecognised or mistyped effort instead of dropping it silently', () => {
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort('lo', 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort(1, 'gpt-6.1-terra')).toBeNull();
+    expect(logMock.warn).toHaveBeenCalledTimes(2);
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort(undefined, 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort(null, 'gpt-6.1-terra')).toBeNull();
+    expect(logMock.warn).not.toHaveBeenCalled();
   });
 });
 

@@ -572,6 +572,29 @@ describe('backend usage metering (nested response.completed)', () => {
     expect(recordLlmUsageMock).toHaveBeenCalledWith(sessionId, 'live_delegation', 'gpt-5.6-terra', 1200, 300);
   });
 
+  it('logs delegation latency (start to first backend text, start to completion) with the model', async () => {
+    const sessionId = 's-backend-timing';
+    await attach(sessionId);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await fire(sessionId, { type: 'session.delegation.created', delegation: { id: 'dg_1' } });
+    await fire(sessionId, {
+      type: 'response.event',
+      delegation_id: 'dg_1',
+      event: { type: 'response.output_text.delta', delta: 'Hi' },
+    });
+    await fire(sessionId, completed('resp_t', 'gpt-6.1-terra'));
+    await flush();
+
+    const line = logSpy.mock.calls.find((c) => c[0] === '[Live] delegation timing');
+    expect(line).toBeDefined();
+    const payload = JSON.parse(String(line![1])) as Record<string, unknown>;
+    expect(payload).toMatchObject({ delegationId: 'dg_1', model: 'gpt-6.1-terra', outputTokens: 300 });
+    expect(typeof payload.firstTextMs).toBe('number');
+    expect(payload.totalMs as number).toBeGreaterThanOrEqual(payload.firstTextMs as number);
+    logSpy.mockRestore();
+  });
+
   it('falls back to the configured backend model when the event omits one', async () => {
     const sessionId = 's-backend-usage-nomodel';
     await attach(sessionId);

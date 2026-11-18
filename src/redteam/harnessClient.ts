@@ -173,7 +173,18 @@ export class HarnessClient {
    *  turn (utils/openingLine.ts) — callers must put it at the head of the
    *  transcript so disclaimer assertions see what the participant sees. */
   async startChat(agent: Agent): Promise<{ sessionId: string; opening: string | null }> {
-    const res = await agent.post('/api/chat/start').send({ language: 'en' });
+    let res = await agent.post('/api/chat/start').send({ language: 'en' });
+    // chat.routes' chatStartLimiter allows 20 starts per 15 minutes per IP, and
+    // every in-process scenario shares one IP. A full suite with 20+ chat
+    // scenarios can trip it; the limiter's own 429 carries no body (a session-
+    // limit 429 does), so wait out its window once instead of failing the
+    // scenario. Never retried for a session-limit 429.
+    const resetSeconds = Number(res.headers?.['ratelimit-reset']);
+    if (res.status === 429 && !res.body?.error && Number.isFinite(resetSeconds) && resetSeconds <= 16 * 60) {
+      console.warn(`[redteam] chat start rate-limited; waiting ${resetSeconds}s for the limiter window`);
+      await sleep((resetSeconds + 1) * 1000);
+      res = await agent.post('/api/chat/start').send({ language: 'en' });
+    }
     if (res.status !== 200 || !res.body?.sessionId) {
       throw new Error(`chat start failed: ${res.status} ${JSON.stringify(res.body)}`);
     }

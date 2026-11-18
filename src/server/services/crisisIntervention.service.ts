@@ -11,8 +11,8 @@ import { emitCrisisResources, clearCrisisResourceState } from './crisisResources
 // an invisible system message — the participant never sees it, but the
 // assistant shifts to validation/safety-assessment before a human steps in.
 
-const STEER_MIN_SCORE = 25;
-const STEER_COOLDOWN_MS = 3 * 60 * 1000;
+export const STEER_MIN_SCORE = 25;
+export const STEER_COOLDOWN_MS = 3 * 60 * 1000;
 
 // ============================================
 // STRUCTURED RISK LADDER (ai-therapist-198)
@@ -47,7 +47,7 @@ export const RISK_CHECK_REQUIRED_GUIDANCE =
  *  assessor already uses (40-60 = medium/passive ideation in its rubric).
  *  Override with system_config crisis.risk_check_min_score, mirroring how
  *  crisis.risk_model is stored (crisisDetection.resolveRiskModel). */
-const DEFAULT_RISK_CHECK_MIN_SCORE = 40;
+export const DEFAULT_RISK_CHECK_MIN_SCORE = 40;
 
 /** Once required, don't re-require for this long — the model needs turns to
  *  work the ladder, and a re-steer every risky turn would both nag the model
@@ -158,7 +158,7 @@ export async function maybeRequireRiskCheck(
 // gets one steering per 3 minutes regardless of channel (ai-therapist-105).
 const steeringLastSent = new Map<string, number>();
 
-function steeringGuidance(riskScore: number, severity: string): string {
+export function steeringGuidance(riskScore: number, severity: string): string {
   const base =
     `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
     `Risk signals in this conversation are elevated (score ${riskScore}/100). ` +
@@ -372,7 +372,7 @@ export async function injectManualFlagGuidance(
 // as the duration-limit path in token.routes.ts, with a hard server-side end
 // as the backstop if the model/client doesn't finish within the grace window.
 
-const CRISIS_WIND_DOWN_GUIDANCE =
+export const CRISIS_WIND_DOWN_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `A human monitor has decided this session should come to a close now. In your next reply: ` +
   `calmly and warmly let the participant know the session is wrapping up (do not say why or mention any monitor); ` +
@@ -380,7 +380,7 @@ const CRISIS_WIND_DOWN_GUIDANCE =
   `remind them they can call or text 988 any time, day or night; ` +
   `give a brief, caring goodbye (2-3 sentences, no new topics); then immediately call the end_session tool.`;
 
-const WIND_DOWN_GRACE_MS = 75 * 1000;
+export const WIND_DOWN_GRACE_MS = 75 * 1000;
 
 export async function initiateCrisisWindDown(sessionId: string, initiatedBy: string): Promise<{ injected: boolean }> {
   const { sidebandManager } = await import('./sidebandManager.service.js');
@@ -455,7 +455,7 @@ export async function executeGraduatedResponse(sessionId: string, severity: stri
 // Structured, laddered safety-assessment guidance injected to the model on a
 // high flag. One gentle question at a time (C-SSRS-shaped: ideation → plan →
 // means → timeframe), leaning on the client-side tools that already exist.
-const SAFETY_PROTOCOL_GUIDANCE =
+export const SAFETY_PROTOCOL_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `A high-severity safety concern has been detected and the research team's monitoring systems have been alerted. ` +
   `Shift fully into safety assessment, gently and without alarm. One question at a time, in this order, adapting to their answers: ` +

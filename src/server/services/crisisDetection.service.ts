@@ -228,7 +228,7 @@ export function detectCrisisKeywords(content: string): KeywordAnalysis {
 // STAGE 2: LLM RISK ASSESSMENT
 // ============================================
 
-const DEFAULT_RISK_MODEL = 'gpt-4o-mini';
+export const DEFAULT_RISK_MODEL = 'gpt-4o-mini';
 
 /** Admin-configurable assessor model (system_config crisis.risk_model,
  *  mirroring evals.judge_model) so a candidate model can be A/B'd without a
@@ -252,7 +252,7 @@ async function getClient(): Promise<OpenAI> {
   return openaiClient;
 }
 
-const RISK_ASSESSMENT_PROMPT = `You are a clinical risk-assessment assistant for an AI-assisted therapy research platform. A keyword screen flagged possible crisis language in a support conversation. Read the recent transcript and assess the PARTICIPANT's current suicide/self-harm risk.
+export const RISK_ASSESSMENT_PROMPT = `You are a clinical risk-assessment assistant for an AI-assisted therapy research platform. A keyword screen flagged possible crisis language in a support conversation. Read the recent transcript and assess the PARTICIPANT's current suicide/self-harm risk.
 
 Return STRICT JSON only:
 {
@@ -272,6 +272,11 @@ Context judgment matters more than keywords:
 - "genuine" active ideation without plan → 60-75, high.
 - "genuine" ideation with plan, means, or timeframe → 80-100, high.
 Weigh protective factors (future plans, reasons for living, engaged help-seeking) downward. Base the score on the participant's CURRENT state in this conversation, not history alone.`;
+
+/** User message that accompanies RISK_ASSESSMENT_PROMPT. */
+export function buildRiskAssessmentUserMessage(transcript: string, latestContent: string): string {
+  return `Recent transcript:\n${transcript}\n\nLatest participant message (the one that tripped the screen):\n"${latestContent}"`;
+}
 
 const SEVERITY_RANK_ORDER = { none: 0, low: 1, medium: 2, high: 3 } as const;
 
@@ -370,7 +375,7 @@ function isSchemaUnsupportedError(err: unknown): boolean {
 // SWEEP_EVERY participant messages without an LLM assessment, run one anyway
 // over the recent conversation. The counter resets whenever the LLM runs for
 // any reason. Cost: at most one extra call per 8 user turns per session.
-const SWEEP_EVERY = 8;
+export const SWEEP_EVERY = 8;
 const sweepCounters = new Map<string, number>();
 
 function sweepDue(sessionId: string): boolean {
@@ -491,7 +496,7 @@ async function assessRiskWithLLM(
         { role: 'system', content: RISK_ASSESSMENT_PROMPT },
         {
           role: 'user',
-          content: `Recent transcript:\n${transcript}\n\nLatest participant message (the one that tripped the screen):\n"${latestContent}"`,
+          content: buildRiskAssessmentUserMessage(transcript, latestContent),
         },
       ],
     } satisfies Parameters<typeof client.chat.completions.create>[0];

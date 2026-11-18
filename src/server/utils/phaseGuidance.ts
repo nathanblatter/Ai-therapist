@@ -8,7 +8,7 @@
 // caller: this module returns what to say and when, and never sends anything.
 
 import { pool } from '../config/db.js';
-import { getSystemConfig, getActiveModality } from './sessionHelpers.js';
+import { getSystemConfig, getActiveModality, type ModalityPhase } from './sessionHelpers.js';
 
 export interface PhaseNudge {
   /** Fraction of the session's maximum duration, 0–1. */
@@ -16,6 +16,37 @@ export interface PhaseNudge {
   text: string;
   /** Milliseconds from NOW until the nudge is due. Never negative. */
   delayMs: number;
+}
+
+/**
+ * The phase texts, in `at` order, before any scheduling: the active modality's
+ * script (with a minutes-remaining sentence on closing phases), or the default
+ * two-step script when no modality is active. `minutesLeftAt` maps a fraction
+ * of the session to whole minutes remaining.
+ */
+export function buildPhaseTexts(
+  modalityPhases: ModalityPhase[] | undefined,
+  minutesLeftAt: (fraction: number) => number | string,
+): Array<{ at: number; text: string }> {
+  const phases: Array<{ at: number; text: string }> =
+    modalityPhases && modalityPhases.length > 0
+      ? modalityPhases.map((p) => ({
+          at: p.at,
+          text:
+            p.guidance +
+            (p.at >= 0.8 ? ` About ${minutesLeftAt(p.at)} minutes remain — close warmly as this phase finishes.` : ''),
+        }))
+      : [
+          {
+            at: 0.6,
+            text: 'The session is past its halfway point. Begin gently consolidating: reflect the main themes so far rather than opening new topics.',
+          },
+          {
+            at: 0.85,
+            text: `About ${minutesLeftAt(0.85)} minutes remain. Begin winding down: summarize what was discussed, invite final thoughts, and close warmly.`,
+          },
+        ];
+  return phases;
 }
 
 /**
@@ -43,26 +74,7 @@ export async function buildPhaseNudgeSchedule(sessionId: string): Promise<PhaseN
   const minutesLeftAt = (fraction: number) => Math.max(1, Math.round((totalMs * (1 - fraction)) / 60000));
 
   const modality = await getActiveModality();
-  const modalityPhases = modality?.preset.phases;
-
-  const phases: Array<{ at: number; text: string }> =
-    modalityPhases && modalityPhases.length > 0
-      ? modalityPhases.map((p) => ({
-          at: p.at,
-          text:
-            p.guidance +
-            (p.at >= 0.8 ? ` About ${minutesLeftAt(p.at)} minutes remain — close warmly as this phase finishes.` : ''),
-        }))
-      : [
-          {
-            at: 0.6,
-            text: 'The session is past its halfway point. Begin gently consolidating: reflect the main themes so far rather than opening new topics.',
-          },
-          {
-            at: 0.85,
-            text: `About ${minutesLeftAt(0.85)} minutes remain. Begin winding down: summarize what was discussed, invite final thoughts, and close warmly.`,
-          },
-        ];
+  const phases = buildPhaseTexts(modality?.preset.phases, minutesLeftAt);
   phases.sort((a, b) => a.at - b.at);
 
   const schedule: PhaseNudge[] = [];

@@ -59,28 +59,28 @@ export interface AutoTerminateOptions {
 
 export { DEFAULT_VENDOR_CEILING_MINUTES };
 
-const WRAP_UP_NUDGE =
+export const WRAP_UP_NUDGE =
   '[About one minute remains in this session. Begin wrapping up naturally — consolidate one takeaway, ' +
   'no new topics. If it fits, call display_session_recap now.]';
 
-const TIME_LIMIT_STEER =
+export const TIME_LIMIT_STEER =
   'TIME LIMIT REACHED: this session has hit its maximum duration. In your next reply, give a brief, warm ' +
   'closing (2-3 sentences, no new topics), then immediately call the end_session tool.';
 
 /** Minutes-before-limit at which the model is told the time, in normal mode. */
-const TIME_NOTICE_MINUTES = [10, 5];
+export const TIME_NOTICE_MINUTES = [10, 5];
 
 /** Minutes-before-ceiling at which a crisis session is told the time. */
-const CRISIS_NOTICE_MINUTES = [10, 5, 2];
+export const CRISIS_NOTICE_MINUTES = [10, 5, 2];
 
-function timeNotice(elapsedMinutes: number, remainingMinutes: number): string {
+export function timeNotice(elapsedMinutes: number, remainingMinutes: number): string {
   return (
     `[Session time: about ${elapsedMinutes} minutes used, ${remainingMinutes} remaining. ` +
     `Do not announce this unless it helps them; pace the conversation so it can land naturally.]`
   );
 }
 
-function crisisTimeNotice(remainingMinutes: number): string {
+export function crisisTimeNotice(remainingMinutes: number): string {
   return (
     `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
     `The platform's maximum connection time is about ${remainingMinutes} minutes away; the session timer was ` +
@@ -90,20 +90,20 @@ function crisisTimeNotice(remainingMinutes: number): string {
   );
 }
 
-const CRISIS_CEILING_LIVE =
+export const CRISIS_CEILING_LIVE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `The connection is about to reset in roughly a minute; that is the platform, not you, and you will be ` +
   `reconnected with them automatically. In your next reply, calmly tell them the line may drop for a moment ` +
   `and that you will be right back with them; remind them they can call or text 988 at any time. ` +
   `Do not say goodbye as if the conversation is over, and do NOT call end_session.`;
 
-const CRISIS_DISREGARD_WRAP_UP =
+export const CRISIS_DISREGARD_WRAP_UP =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `Disregard the earlier instruction to wrap up or end the session: the session timer has been lifted because of ` +
   `what the participant just shared. Do not say goodbye and do not call end_session. Stay with them, keep replies ` +
   `short and warm, and follow your crisis protocol.`;
 
-const CRISIS_CEILING_WRAP_UP =
+export const CRISIS_CEILING_WRAP_UP =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `The platform's maximum connection time has been reached and the session must close now. In your next reply, ` +
   `warmly tell them this conversation has to end here, make sure they have 988 (call or text) and, if they are ` +

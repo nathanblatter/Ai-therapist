@@ -13,6 +13,7 @@
 // never break the underlying feature.
 import { pool } from '../config/db.js';
 import { estimateLiveCostUsd } from './liveUsage.queries.js';
+import { getBackendModel } from '../utils/backendModels.js';
 
 export type LlmUsagePurpose =
   | 'insights'
@@ -33,9 +34,22 @@ const TOKEN_RATES_PER_MILLION: Record<string, { input: number; output: number }>
   'gpt-4o': { input: 2.5, output: 10 },
   'gpt-5-mini': { input: 0.25, output: 2 },
   'gpt-5': { input: 1.25, output: 10 },
-  'gpt-5.2': { input: 1.25, output: 10 }, // chat pipeline (ai-therapist-118); estimate mirrors gpt-5
+  'gpt-5.2': { input: 1.75, output: 14 }, // chat pipeline (ai-therapist-118); Standard rate, pricing page 2026-11-18
 };
-const DEFAULT_RATE = { input: 0.5, output: 1.5 }; // fallback for unlisted models
+// Fallback for models in neither table. Models in the backend-model registry
+// (utils/backendModels.ts: every GPT-Live delegation candidate, including the
+// GPT-6 series) are priced from there first, so a change to live_backend_model
+// or chat_model does not silently drop to this placeholder rate.
+const DEFAULT_RATE = { input: 0.5, output: 1.5 };
+
+function rateFor(model: string | null): { input: number; output: number } {
+  if (!model) return DEFAULT_RATE;
+  const direct = TOKEN_RATES_PER_MILLION[model];
+  if (direct) return direct;
+  const registered = getBackendModel(model);
+  if (registered) return { input: registered.inputPerMillion, output: registered.outputPerMillion };
+  return DEFAULT_RATE;
+}
 
 // gpt-realtime $/1M-token rates (OpenAI published pricing as of 2026-08).
 // Realtime bills text and audio tokens at different rates, with a flat
@@ -112,7 +126,7 @@ export function estimateCostUsd(model: string | null, tokensIn: number | null, t
   // research record only: xAI bills the voice session per audio minute, and
   // that cost lives in live_usage. Pricing the tokens too would double count.
   if (model?.startsWith('grok-voice')) return 0;
-  const rate = (model && TOKEN_RATES_PER_MILLION[model]) || DEFAULT_RATE;
+  const rate = rateFor(model);
   const inCost = ((tokensIn ?? 0) / 1_000_000) * rate.input;
   const outCost = ((tokensOut ?? 0) / 1_000_000) * rate.output;
   return Math.round((inCost + outCost) * 1_000_000) / 1_000_000;

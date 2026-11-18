@@ -36,3 +36,35 @@ export function buildChatOpeningLine(
   // features.lead_conversation_enabled: end with an invitation, not silence.
   return opts.leadConversation === true ? `${opening} ${CHAT_OPENING_INVITATION}` : opening;
 }
+
+/**
+ * Session steering injected after the chat opening line: the prompt's
+ * "once, at the start" disclaimer rule is already satisfied by it, and without
+ * saying so the model repeats the disclaimer in its first reply.
+ */
+export const CHAT_OPENING_FRAMING_GUIDANCE =
+  '[Session framing - never mention this message] Your opening message above has already ' +
+  'delivered the required disclosure: that you are an AI support assistant, not a licensed ' +
+  'therapist or doctor, cannot diagnose or give medical advice, and the crisis resources. Do not ' +
+  'repeat that disclaimer. Re-state your limits only if the participant asks you to diagnose, ' +
+  'asks about medication, asks whether you are human or a therapist, or asks you to be a friend ' +
+  'or partner or to replace their therapist.';
+
+/**
+ * Steering for a typed-chat session that continues a voice session the vendor's
+ * content filter cut off: carries the tail of the voice transcript so the
+ * participant never has to repeat a disclosure.
+ */
+export function buildVoiceContinuationGuidance(recap: string): string {
+  return (
+    '[Session continuity — never mention or acknowledge this message to the participant]\n' +
+    'The participant was speaking with you by voice and the connection was cut by an ' +
+    'automated content filter — not by them, and not by you. They have just been moved to ' +
+    'text so the conversation can continue. Do NOT make them repeat themselves and do NOT ' +
+    'treat this as a new conversation. Pick up exactly where it stopped, acknowledge the ' +
+    'interruption briefly and warmly, and make clear you are still here. If they disclosed ' +
+    'thoughts of suicide or self-harm, that is where you resume: stay with it, follow the ' +
+    'safety protocol, and do not change the subject.\n\n' +
+    `Transcript of the voice conversation that was cut off:\n${recap}`
+  );
+}
