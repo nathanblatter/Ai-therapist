@@ -666,6 +666,91 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam 
 - Neither job sets `IMESSAGE_API_KEY` / `CRISIS_ALERT_PHONE`: **CI must never page
   the on-call.**
 
+## Config drift gate
+
+The IRB red-team attachment promises the suite is re-run on any prompt or model
+change. Prompts and model settings live in `system_config` and are edited in the
+admin UI with no deploy, and the CI eval database is built from the migrations,
+so neither the deploy smoke gate nor the nightly ever saw a hand-edited value.
+The config drift gate closes that gap.
+
+**Evaluated configuration.** `src/server/utils/evaluatedConfig.ts` defines the
+subset of `system_config` that changes what the AI says or which model says it,
+and hashes it (sha256 of canonical JSON, versioned) into a fingerprint:
+
+| Key | Part used |
+|---|---|
+| `system_prompts` | everything except the per-save `last_modified` stamps (prompt text, modality presets, active modality) |
+| `ai_model` | `model` (the description is cosmetic) |
+| `live_backend_model`, `crisis`, `crisis_contact`, `languages`, `coping_strategies`, `grok_voice`, `grok_refusal_guard` | whole value |
+| `features` | `disabled_tools` (sorted), `phase_guidance_enabled`, `regrounding_enabled`, `regrounding_interval_minutes`, `proactive_offering`, `psychoeducation_cue_ab_enabled`, `lead_conversation_enabled` |
+| `session_limits` | `enabled`, `max_duration_minutes`, `vendor_ceiling_minutes` (phase-guidance timing, crisis duration lift) |
+
+An absent row counts as `null` (the code default). Not included: telemetry and
+participant-facing toggles, quotas, retention, `evals` (judge settings change the
+evaluation, not the AI), `crisis_alert` (on-call paging is never copied off an
+environment), and runtime-written internals. The chat reply model is still a
+code constant (`CHAT_THERAPY_MODEL`), covered by the deploy gate; when it moves
+into `system_config`, add its key here and bump `EVALUATED_CONFIG_VERSION`.
+
+**Record.** `config_evaluations` (migration 126) stores fingerprint, suite, git
+sha, started/finished, scenario totals, known gaps (non-gating assertion
+failures), cost, result URL, who or what triggered it, and who last changed the
+configuration (from `system_config.updated_by`).
+
+**Notice.** `GET /admin/api/config-evaluation/status` (therapist, researcher)
+feeds `ConfigEvalNotice` at the top of System Config and System Prompts. Whenever
+the current fingerprint has no `passed` row it shows, non-dismissably: "The AI
+configuration was changed on <date> by <user> and has not been through the
+safety evaluation", what happens next (running / failed / waiting to settle /
+daily cap), the last evaluated result with a link, and the fingerprint. It
+clears on its own when a run of the current fingerprint passes. **It never
+blocks a save or a session**: a researcher fixing a bad prompt in a hurry must
+not be locked out, so the trade-off is a window (settle time plus a run, about
+20-40 minutes) in which an unevaluated configuration is live and flagged.
+
+**Snapshot and harness.** `npm run config:snapshot -- --out snap.json` (CLI) or
+`GET /admin/api/config-evaluation/snapshot` (researcher) exports the evaluated
+configuration only. `npm run redteam:full -- --config-snapshot snap.json` loads
+it into the disposable eval database before the run (`src/redteam/configSnapshot.ts`),
+re-checks that the database now has the same fingerprint, keeps the harness's own
+seeds (chat on, paging off, no session quotas), and writes
+`redteam-results/config-snapshot.json`. It refuses a database holding anyone
+else's sessions and refuses under the in-app runner (`REDTEAM_TRIGGER`). Unlike
+`--variant` (an in-process feature overlay) it writes `system_config`; combined,
+the snapshot is the base and the variant overlays it. The snapshot holds the full
+prompts: keep it off public CI artifacts and out of git.
+
+**Workflow.** `.github/workflows/redteam-config.yml` runs every 30 minutes and on
+`workflow_dispatch` (inputs: environment, force). For each environment it calls
+the app's own HTTPS URL with a dedicated token
+(`src/server/routes/redteamConfigEval.routes.ts`: status, claim, finish; nothing
+else), and if the fingerprint needs a run it claims it (receiving the snapshot),
+builds the eval database, runs the full suite against the snapshot with the code
+that environment runs (stage: `main`, prod: the `prod` branch), and records the
+totals back. The harness output stays out of the public log; the artifact is a
+redacted summary. Policy, enforced server-side at claim time: one run per
+fingerprint, never two at once, no automatic re-run of a failed fingerprint
+(forced dispatch only), a 10-minute settle window after the last edit
+(`REDTEAM_CONFIG_EVAL_SETTLE_MINUTES`), and at most 4 claims per rolling 24 h per
+environment (`REDTEAM_CONFIG_EVAL_DAILY_CAP`). Ceiling: 4 runs x 2 environments x
+31 days x ~$0.25 = **$62/month**; normal use is one run per real edit.
+
+**Owner setup, per environment** (until done, that environment is skipped with a
+notice): generate a token (`openssl rand -hex 32`); add
+`REDTEAM_CONFIG_EVAL_TOKEN=<token>` to the deploy `.env` (stage
+`/Users/nathanblatter/deploy/Ai-therapist/.env`, prod `/opt/ai-therapist/.env`) and
+redeploy; add the same value as the repository secret `REDTEAM_CONFIG_TOKEN_STAGE`
+or `REDTEAM_CONFIG_TOKEN_PROD`; apply migration 126. Without the variable the
+endpoints answer 404. Optional repository variables `REDTEAM_STAGE_URL` /
+`REDTEAM_PROD_URL` override the default base URLs.
+
+**Coverage limit.** The full suite drives the chat and realtime-text pipelines;
+the realtime-text pipeline posts stub assistant turns, so the voice model, the
+realtime prompt and the Grok settings are fingerprinted (a change raises the
+notice and triggers a run) but only `redteam:voice` exercises them, and that
+suite stays opt-in.
+
 ## Cost & duration
 
 Per model call (transcripts are short, <1k in / <1k out):
