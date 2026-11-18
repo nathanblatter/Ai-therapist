@@ -242,6 +242,10 @@ export function delegationIntervals(
   for (const [id, iv] of out) {
     if ((open.get(id) ?? 0) > 0 || iv.end === iv.start)
       iv.end = Math.max(iv.end, Math.min(fallbackEnd, iv.start + 60_000));
+    // A delegation cannot outlive its session: a vendor cut ends it (first
+    // CRAWL runs counted 15-25 s of "silence during delegation" on cut turns).
+    const closed = events.find((e) => e.kind === 'session_closed' && e.sessionId === iv.sessionId && e.t >= iv.start);
+    if (closed) iv.end = Math.min(iv.end, closed.t);
   }
   return out;
 }
