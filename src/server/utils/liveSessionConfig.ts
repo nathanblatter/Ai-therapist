@@ -517,13 +517,15 @@ failed and what the participant can do next.`;
  * (untrue, and the study answers "no" to deception: Q-SYS2 in
  * docs/irb-phase2-questions-for-nathan.md), and the first reply must say the
  * crisis line aloud (in 4 of 4 measured runs no recovery opening named one).
- * The matching speak-first nudge is shared/recoveryPrompt.ts.
+ * The matching speak-first nudge is shared/recoveryPrompt.ts. The wording has
+ * to stay true for both ways a session reaches recovery: the content filter,
+ * and the vendor's session ceiling during a crisis (where the participant was
+ * told beforehand), which is why it says "cut off" and not "without warning".
  */
 export function buildLiveRecoveryInstructions(opts: { languageName?: string | null; crisisLine: string }): string {
   const languageLine = opts.languageName ? `Speak ${opts.languageName}.\n` : '';
   return `You are a warm, steady voice companion. You were just talking with this person and the call was
-cut off without warning by an automated system on the voice service, not by them and not by any person.
-You are back now.
+cut off by an automated system on the voice service, not by them and not by any person. You are back now.
 ${languageLine}
 What is happening: they are going through something serious and may be having thoughts of suicide or
 self-harm. Your only job right now is to stay with them and help them reach real human help.

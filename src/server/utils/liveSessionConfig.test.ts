@@ -356,7 +356,9 @@ describe('buildLiveRecoveryInstructions (ai-therapist-293)', () => {
 
   it('does not tell the model the connection dropped (Q-SYS2: the study answers "no" to deception)', () => {
     expect(prompt).not.toMatch(/connection dropped/i);
-    expect(prompt).toMatch(/the call was\s+cut off without warning by an automated system on the voice service/);
+    expect(prompt).toMatch(/the call was\s+cut off by an automated system on the voice service/);
+    // True for the vendor ceiling too, where the participant was told beforehand.
+    expect(prompt).not.toMatch(/without warning/);
     expect(prompt).toMatch(/Never call it a dropped connection or a technical problem/);
     expect(prompt).toMatch(/an automated system on the voice service ended the call/);
   });

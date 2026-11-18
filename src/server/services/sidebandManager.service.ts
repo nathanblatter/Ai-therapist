@@ -198,6 +198,14 @@ interface LiveSessionState {
   phaseTimers: NodeJS.Timeout[];
   /** True once any assistant speech has been transcribed on this attach. */
   assistantSpoke: boolean;
+  /**
+   * This state was built by the route's opening attach (connectAndWait), not
+   * by a reconnect or a post-deploy reattach. Unlike `initialAttach` it is
+   * never cleared. The recovery speak-first watchdog arms only on it: a
+   * sideband that rejoins a recovery conversation already in progress must
+   * never tell the model to announce "I'm back" in the middle of it.
+   */
+  openingAttach: boolean;
   /** Recovery sessions only: pending "you have not spoken yet" re-nudges. */
   speakFirstTimers: NodeJS.Timeout[];
   /** Mid-session re-grounding interval (config-gated, off by default). */
@@ -382,6 +390,7 @@ export class SidebandManager {
       keepalive: null,
       phaseTimers: [],
       assistantSpoke: false,
+      openingAttach: initialAttach,
       speakFirstTimers: [],
       regrounding: null,
       toolChoiceReset: null,
@@ -798,11 +807,15 @@ export class SidebandManager {
    * already spoken (the timers do nothing).
    *
    * Recovery sessions only (client delegation): an ordinary session's opening
-   * is the disclosure preamble, which is not this module's to resend.
+   * is the disclosure preamble, which is not this module's to resend. And only
+   * on the opening attach: a reconnect or a post-deploy reattach joins a
+   * conversation already under way.
    */
   private armRecoverySpeakWatchdog(sessionId: string): void {
     const state = this.sessions.get(sessionId);
-    if (!state || state.delegationMode !== 'client' || state.speakFirstTimers.length > 0) return;
+    if (!state || !state.openingAttach || state.delegationMode !== 'client' || state.speakFirstTimers.length > 0) {
+      return;
+    }
     RECOVERY_SPEAK_RETRY_MS.forEach((delayMs, index) => {
       const timer = setTimeout(() => {
         void this.resendRecoverySpeakFirst(sessionId, index + 1, delayMs);

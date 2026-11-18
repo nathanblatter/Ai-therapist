@@ -1225,6 +1225,16 @@ describe('recovery session (client delegation)', () => {
   // an instructions re-send did not reliably make a silent session speak).
   describe('speak-first watchdog (ai-therapist-293)', () => {
     const appends = (ws: FakeSocket) => sentEvents(ws).filter((e) => e.type === 'session.commentary.append');
+    /** The route's opening attach of a recovery session (connectAndWait marks it). */
+    async function attachOpeningRecovery(sessionId: string): Promise<FakeSocket> {
+      const ws = await sidebandManager.connect(sessionId, `live_${sessionId}`, 'sk-test', {
+        model: MODEL,
+        backendModel: BACKEND_MODEL,
+        delegationMode: 'client',
+        initialAttach: true,
+      });
+      return ws as unknown as FakeSocket;
+    }
 
     beforeEach(() => {
       getSystemConfigMock.mockResolvedValue({
@@ -1240,7 +1250,7 @@ describe('recovery session (client delegation)', () => {
 
     it('re-sends the speak-first instruction at 4 s and 8 s when the session has not spoken', async () => {
       const sessionId = 's-rec-silent';
-      const ws = await attachRecovery(sessionId);
+      const ws = await attachOpeningRecovery(sessionId);
       ws.send.mockClear();
       await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
 
@@ -1275,7 +1285,7 @@ describe('recovery session (client delegation)', () => {
 
     it('sends nothing once the assistant has spoken', async () => {
       const sessionId = 's-rec-spoke';
-      const ws = await attachRecovery(sessionId);
+      const ws = await attachOpeningRecovery(sessionId);
       ws.send.mockClear();
       await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
       await vi.advanceTimersByTimeAsync(1_800);
@@ -1288,7 +1298,7 @@ describe('recovery session (client delegation)', () => {
 
     it('stops after the first re-send works', async () => {
       const sessionId = 's-rec-late';
-      const ws = await attachRecovery(sessionId);
+      const ws = await attachOpeningRecovery(sessionId);
       ws.send.mockClear();
       await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
       await vi.advanceTimersByTimeAsync(4_100);
@@ -1303,7 +1313,7 @@ describe('recovery session (client delegation)', () => {
 
     it('still re-sends, with the national lines, when the crisis contact cannot be read', async () => {
       const sessionId = 's-rec-noconfig';
-      const ws = await attachRecovery(sessionId);
+      const ws = await attachOpeningRecovery(sessionId);
       getSystemConfigMock.mockRejectedValue(new Error('db down'));
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
       ws.send.mockClear();
@@ -1317,7 +1327,7 @@ describe('recovery session (client delegation)', () => {
 
     it('does nothing after the session has closed', async () => {
       const sessionId = 's-rec-closed';
-      const ws = await attachRecovery(sessionId);
+      const ws = await attachOpeningRecovery(sessionId);
       await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
       await fire(sessionId, { type: 'session.closed', reason: 'close_requested', usage: { seconds: 2 } });
       ws.send.mockClear();
@@ -1326,9 +1336,23 @@ describe('recovery session (client delegation)', () => {
       expect(appends(ws)).toHaveLength(0);
     });
 
+    it('never fires on a reconnect or reattach, which joins a conversation already under way', async () => {
+      const sessionId = 's-rec-reattach';
+      const ws = await attachRecovery(sessionId); // not the opening attach
+      ws.send.mockClear();
+      await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flush();
+      expect(appends(ws)).toHaveLength(0);
+    });
+
     it('never touches an ordinary session, whose opening is the disclosure preamble', async () => {
       const sessionId = 's-ordinary-opening';
-      const ws = await attach(sessionId);
+      const ws = (await sidebandManager.connect(sessionId, `live_${sessionId}`, 'sk-test', {
+        model: MODEL,
+        backendModel: BACKEND_MODEL,
+        initialAttach: true,
+      })) as unknown as FakeSocket;
       ws.send.mockClear();
       await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
       await vi.advanceTimersByTimeAsync(30_000);

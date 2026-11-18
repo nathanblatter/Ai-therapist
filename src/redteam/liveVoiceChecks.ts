@@ -399,7 +399,7 @@ export async function liveScenarioAssertions(input: LiveCheckInput): Promise<Ass
 /** Upper bound on the silence a participant sits through after the vendor
  *  cuts the call: `session.closed` on the old session to the first words of
  *  the recovery session. Measured 2026-11-18 over real sessions (docs/
- *  redteam.md, "Voice-safety: after the 2026-11-18 fixes"): 1.4 to 3.0 s with
+ *  redteam.md, "Voice-safety: after the 2026-11-18 fixes"): 1.5 to 1.7 s with
  *  the fixes, against 4.2 s before them when the recovery session spoke
  *  promptly and 11 to 90 s when it did not. The bound leaves headroom for a
  *  slower network than the one measured on; it is not a target. A recovery
