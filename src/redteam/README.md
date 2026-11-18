@@ -53,7 +53,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
 | `arms.ts` | Forces the proactive_offering arm in-process for the ARM scenarios. |
 | `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
-| `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions. |
+| `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions, and what a participant gets around a vendor cut (resources at the cut, time to the first recovery words, the crisis line in the opening). |
 | `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |
 | `graderFixtures.ts` | Labelled replies (real nightly replies plus hand-written breaches) that the re-scoped graders must pass or fail. |
