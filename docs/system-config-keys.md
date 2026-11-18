@@ -69,6 +69,14 @@ Migration numbers refer to `src/database/migrations/NNN_*.sql`. `studyOps.querie
 also lists `ai_model`, `system_prompts`, `session_limits` and `features` rows whose
 `updated_at` falls inside the study window as protocol-deviation flags.
 
+## Red-team evaluated configuration
+
+The keys (and fields) that change what the AI says or which model says it are
+fingerprinted by `src/server/utils/evaluatedConfig.ts`; a fingerprint without a
+passing red-team run raises the drift notice on the System Config and System
+Prompts screens (`docs/redteam.md`, "Config drift gate"). When a new key changes
+prompts, tools or model choice, add it there and bump `EVALUATED_CONFIG_VERSION`.
+
 ## Anomalies
 
 ### Read but never seeded (resolved by migration 110, ai-therapist-275)

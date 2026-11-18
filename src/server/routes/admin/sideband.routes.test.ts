@@ -33,6 +33,7 @@ const sidebandMocks = vi.hoisted(() => ({
   interrupt: vi.fn().mockResolvedValue(undefined),
   disconnect: vi.fn().mockResolvedValue(undefined),
   getActiveConnections: vi.fn().mockReturnValue([]),
+  getDelegationMode: vi.fn().mockReturnValue('responses'),
 }));
 vi.mock('../../services/sidebandManager.service.js', () => ({ sidebandManager: sidebandMocks }));
 
@@ -45,6 +46,12 @@ const registryMocks = vi.hoisted(() => ({
 vi.mock('../../services/toolRegistry.service.js', () => ({ toolRegistry: registryMocks }));
 
 import sidebandRoutes from './sideband.routes.js';
+import { isModelEndAuthorized, clearModelEndAuthorization } from '../../utils/modelEndAuthorization.js';
+
+/** Shape of the manager's LiveDelegationUnsupportedError, matched by code. */
+function delegationUnsupported(message: string): Error {
+  return Object.assign(new Error(message), { code: 'live_delegation_unsupported' });
+}
 
 function appAs(role: string | null, orgId = 1) {
   const app = express();
@@ -69,6 +76,7 @@ beforeEach(() => {
   Object.values(sidebandMocks).forEach((m) => m.mockClear());
   registryMocks.getEnabledToolDefinitions.mockClear();
   sidebandMocks.isConnected.mockReturnValue(true);
+  sidebandMocks.getDelegationMode.mockReturnValue('responses');
   dbMocks.isAssigned.mockResolvedValue(true);
   dbMocks.getSessionAccessInfo.mockResolvedValue({
     status: 'active',
@@ -295,6 +303,71 @@ describe('POST /admin/api/sideband/trigger-tool', () => {
       .expect(409);
     expect(res.body.error).toBe('Model response in progress');
     expect(dbMocks.logSidebandAction).not.toHaveBeenCalled();
+  });
+});
+
+// A crisis RECOVERY session runs GPT-Live in client delegation mode with no
+// tools (ai-therapist-282). Forcing a tool sent a responses-delegation update
+// the Live API rejected asynchronously, while this route reported success.
+describe('recovery sessions (client delegation, no tools)', () => {
+  it('refuses trigger-tool with a typed 409 before granting an end or touching the sideband', async () => {
+    sidebandMocks.getDelegationMode.mockReturnValue('client');
+    // Earlier tests grant ends through the mocked manager that never consumes them.
+    clearModelEndAuthorization(SESSION_ID);
+
+    const res = await request(appAs('therapist'))
+      .post('/admin/api/sideband/trigger-tool')
+      .send({ sessionId: SESSION_ID, toolName: 'end_session' })
+      .expect(409);
+
+    expect(res.body.code).toBe('recovery_session_no_backend');
+    expect(res.body.details).toMatch(/recovery session/i);
+    expect(res.body.details).toMatch(/End Session/);
+    expect(sidebandMocks.triggerTool).not.toHaveBeenCalled();
+    // No stray end_session grant left behind by a refused trigger.
+    expect(isModelEndAuthorized(SESSION_ID)).toBe(false);
+    expect(dbMocks.logSidebandAction).not.toHaveBeenCalled();
+  });
+
+  it('maps a manager-side delegation refusal on trigger-tool to the same 409', async () => {
+    sidebandMocks.triggerTool.mockRejectedValueOnce(delegationUnsupported('Triggering a tool is unavailable'));
+
+    const res = await request(appAs('therapist'))
+      .post('/admin/api/sideband/trigger-tool')
+      .send({ sessionId: SESSION_ID, toolName: 'start_breathing_exercise' })
+      .expect(409);
+    expect(res.body.code).toBe('recovery_session_no_backend');
+    expect(dbMocks.logSidebandAction).not.toHaveBeenCalled();
+  });
+
+  it('maps the refusal to 409 on update-session and update-instructions', async () => {
+    sidebandMocks.updateSession.mockRejectedValue(delegationUnsupported('Updating is unavailable'));
+    try {
+      const a = await request(appAs('therapist'))
+        .post('/admin/api/sideband/update-session')
+        .send({ sessionId: SESSION_ID, instructions: 'be brief' })
+        .expect(409);
+      expect(a.body.code).toBe('recovery_session_no_backend');
+
+      const b = await request(appAs('therapist'))
+        .post(`/admin/api/sessions/${SESSION_ID}/update-instructions`)
+        .send({ instructions: 'be brief' })
+        .expect(409);
+      expect(b.body.code).toBe('recovery_session_no_backend');
+    } finally {
+      sidebandMocks.updateSession.mockResolvedValue(undefined);
+    }
+  });
+
+  it('leaves the instruction-channel controls (inject, interrupt) working', async () => {
+    sidebandMocks.getDelegationMode.mockReturnValue('client');
+    await request(appAs('therapist'))
+      .post('/admin/api/sideband/inject')
+      .send({ sessionId: SESSION_ID, text: 'steer' })
+      .expect(200);
+    await request(appAs('therapist')).post('/admin/api/sideband/interrupt').send({ sessionId: SESSION_ID }).expect(200);
+    expect(sidebandMocks.injectMessage).toHaveBeenCalled();
+    expect(sidebandMocks.interrupt).toHaveBeenCalled();
   });
 });
 

@@ -20,6 +20,8 @@ import { ramblingVenting } from './quality/ramblingVenting.js';
 import { terseParticipant } from './quality/terseParticipant.js';
 import { adviceSeeker } from './quality/adviceSeeker.js';
 import { lowMoodSupport } from './quality/lowMoodSupport.js';
+import { stallingParticipant } from './quality/stallingParticipant.js';
+import { returningParticipant } from './quality/returningParticipant.js';
 import { voiceCrisisLadder, voiceFirstSession } from './voice.js';
 import { validationPushbackMedication, validationPushbackEx } from './relational/validationPushback.js';
 import { companionAvailability, exclusiveReliance, goodbye } from './relational/companionDependence.js';
@@ -56,11 +58,9 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   assistantPromptInjection,
   assistantRoleEscalation,
   assistantDataExfiltration,
-  // Catalogue REL-09/LIT-14 and ARM-01/02 (docs/eval-scenario-catalogue.md):
-  // sycophancy under pushback and the proactive_offering manipulation check.
-  // Full suite only. Three carry knownGap markers (ai-therapist-297/298).
-  validationPushbackMedication,
-  validationPushbackEx,
+  // Catalogue ARM-01/02 (docs/eval-scenario-catalogue.md): the
+  // proactive_offering manipulation check, validated live (4 and 5 runs) on
+  // 2026-11-18. Full suite only; both carry knownGap ai-therapist-297.
   armProactiveOffering,
   armReactiveOffering,
 ];
@@ -73,6 +73,10 @@ export const QUALITY_SCENARIOS: Scenario[] = [
   terseParticipant,
   adviceSeeker,
   lowMoodSupport,
+  // Session progression (owner feedback 2026-11-16): reported, not gated
+  // beyond the low empathy floor. Never in SMOKE_SUITE.
+  stallingParticipant,
+  returningParticipant,
 ];
 
 export const ALL_SCENARIOS: Scenario[] = [...SAFETY_SCENARIOS, ...QUALITY_SCENARIOS];
@@ -94,14 +98,18 @@ export const VOICE_SUITE: SuiteEntry[] = VOICE_SCENARIOS.map((scenario) => ({ sc
 // launch, and on any prompt, model or detector change). Opt-in like voice:
 // NOT part of ALL_SCENARIOS, so never in full/smoke.
 //
-// PENDING_LIVE_VERIFICATION: catalogue REL-03/04/06/07 and USE-08 scenarios
-// that are built and unit-tested but have had NO live run yet (the OpenAI
-// account ran out of credits on 2026-11-18 before they ran). They wait here
+// PENDING_LIVE_VERIFICATION: catalogue REL-09/LIT-14, REL-03/04/06/07 and
+// USE-08 scenarios that are built and unit-tested but NOT YET VALIDATED LIVE
+// (fewer than 3 valid live runs before the OpenAI account ran out of credits
+// on 2026-11-18; the medication variant had 3, but its endorsement regex was
+// corrected afterwards and the corrected grader has not been re-run). They wait here
 // rather than in the nightly full suite so an uncalibrated grader cannot
 // turn the nightly red. Promote each to SAFETY_SCENARIOS after 3 clean live
 // runs (`npm run redteam:extended -- --scenario <id> --variations 3`) and a
 // stable regrade.
 export const PENDING_LIVE_VERIFICATION: Scenario[] = [
+  validationPushbackMedication,
+  validationPushbackEx,
   companionAvailability,
   exclusiveReliance,
   goodbye,

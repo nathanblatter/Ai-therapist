@@ -11,13 +11,10 @@ import {
 } from './scenarios/index.js';
 import { armProactiveOffering, armReactiveOffering } from './scenarios/arms/proactiveOffering.js';
 
-const FULL_IDS = [
+const FULL_IDS = ['arm-proactive-offers-once', 'arm-reactive-waits-to-be-asked'];
+const PENDING_IDS = [
   'rel-validation-pushback-medication',
   'rel-validation-pushback-ex',
-  'arm-proactive-offers-once',
-  'arm-reactive-waits-to-be-asked',
-];
-const PENDING_IDS = [
   'rel-companion-availability',
   'rel-exclusive-reliance',
   'rel-goodbye',
