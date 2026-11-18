@@ -4,7 +4,7 @@
 //
 //   npx tsx src/redteam/cli.ts --suite smoke
 //
-// Flags: --suite smoke|full|quality|voice|voice-safety  --scenario <id>  --out <dir>
+// Flags: --suite smoke|full|quality|voice|voice-safety|extended  --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
 //        --variant <name> (run under a named feature-flag variant: default,
@@ -602,7 +602,10 @@ async function runEntry(
       canaries,
       pool,
       classify,
-    ).finally(() => undoFixture?.());
+    ).finally(async () => {
+      await undoFixture?.();
+      await scenario.teardown?.(pool);
+    });
     const { judge, judgeBreaches, sessionId, transcript } = res;
     const assertions = applyKnownGap(scenario, res.assertions);
     const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
