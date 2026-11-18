@@ -32,9 +32,22 @@ describe('generateMFASecret / generateQRCode', () => {
     const { secret, otpauthUrl } = generateMFASecret('dr.jones');
     expect(secret).toMatch(/^[A-Z2-7]+=*$/);
     expect(secret.length).toBeGreaterThanOrEqual(32);
-    expect(otpauthUrl).toContain('otpauth://totp/');
-    expect(decodeURIComponent(otpauthUrl ?? '')).toContain('AI Therapy (dr.jones)');
-    expect(decodeURIComponent(otpauthUrl ?? '')).toContain('issuer=AI Therapy Platform');
+    // Parse rather than substring-match the decoded string, so the issuer has to
+    // be a real query parameter (authenticator apps read it from there) and not
+    // just text that happens to appear somewhere in the URL.
+    const url = new URL(otpauthUrl ?? '');
+    expect(url.protocol).toBe('otpauth:');
+    expect(url.host).toBe('totp');
+    expect(decodeURIComponent(url.pathname)).toBe('/AI Therapy (dr.jones)');
+    expect(url.searchParams.get('issuer')).toBe('AI Therapy Platform');
+  });
+
+  it('encodes the same secret in the QR URL that the server later verifies against', () => {
+    // The URL is built from secret.ascii while the returned (stored) secret is
+    // base32; if those ever diverged, every new enrolment would scan fine and
+    // then fail verification.
+    const { secret, otpauthUrl } = generateMFASecret('dr.jones');
+    expect(new URL(otpauthUrl ?? '').searchParams.get('secret')).toBe(secret.replace(/=+$/, ''));
   });
 
   it('never returns the same secret twice', () => {

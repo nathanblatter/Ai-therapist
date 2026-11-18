@@ -79,7 +79,7 @@ export default function Profile() {
           setUser(data.user as UserData);
         }
       }
-    } catch (err: unknown) {
+    } catch {
       setError('Failed to fetch user data');
     }
   };

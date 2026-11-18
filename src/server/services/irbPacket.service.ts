@@ -11,7 +11,7 @@
 //     ids are never selected, and free-text lines are scrubbed defensively;
 //   - the "incidents" section is empty by default and must be written by hand
 //     (data-security incidents are not something the database can enumerate).
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import type { Writable } from 'node:stream';
 import { gitSha } from '../utils/gitSha.js';
 import { toCsv, type DatasetColumn } from './datasetExport.service.js';
@@ -406,7 +406,7 @@ export function buildIrbPacketFiles(p: IrbPacket): IrbPacketFile[] {
 
 /** Stream the packet zip to `out`; resolves once fully written. */
 export function streamIrbPacketZip(p: IrbPacket, out: Writable): Promise<void> {
-  const archive = archiver('zip', { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   const date = new Date(p.meta.generated_at);
   const done = new Promise<void>((resolve, reject) => {
     archive.on('error', reject);
@@ -417,7 +417,9 @@ export function streamIrbPacketZip(p: IrbPacket, out: Writable): Promise<void> {
   for (const f of buildIrbPacketFiles(p)) {
     archive.append(f.content, { name: f.name, date: Number.isNaN(date.getTime()) ? new Date(0) : date });
   }
-  archive.finalize();
+  // finalize() also rejects on failure; the same error reaches the 'error'
+  // listener above, so swallow it here rather than leave it unhandled.
+  archive.finalize().catch(() => undefined);
   return done;
 }
 

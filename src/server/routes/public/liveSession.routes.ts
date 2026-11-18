@@ -42,6 +42,8 @@ import {
   getActiveModality,
   getSystemConfig,
   resolveProactiveOffering,
+  resolvePsychoeducationCue,
+  resolveLeadConversation,
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -50,6 +52,7 @@ import {
   buildCheckinBlock,
   buildMemoryBlock,
   buildToolGuidanceBlock,
+  buildLeadConversationBlock,
 } from '../../utils/promptContext.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
@@ -65,8 +68,27 @@ import {
 import { sidebandManager } from '../../services/sidebandManager.service.js';
 
 import { createLogger } from '../../utils/logger.js';
+import { classifyOpenAIError, classifyOpenAIResponse } from '../../utils/openaiErrors.js';
 
 const log = createLogger('liveSessionRoutes');
+
+// Upper bound on the OpenAI session mint. A healthy mint is an SDP exchange
+// that returns in a couple of seconds; 20s is generous for a slow one while
+// still ending the participant's "Connecting..." state in bounded time (the
+// client does not time this request out itself).
+const LIVE_MINT_TIMEOUT_MS = 20_000;
+
+/**
+ * What the participant is told when the voice provider cannot start a session
+ * (billing ceiling, rate limit, overload, timeout). Honest that it is our
+ * side, deliberately free of provider/billing detail, and not alarming.
+ */
+export const PROVIDER_UNAVAILABLE_BODY = {
+  error: 'provider_unavailable',
+  message:
+    'Voice sessions are temporarily unavailable. This is a problem on our side, not with your connection. ' +
+    'Please try again a little later.',
+} as const;
 
 const PARTICIPANT_COOKIE = 'att_pid';
 const PARTICIPANT_COOKIE_MAX_AGE_MS = 400 * 24 * 60 * 60 * 1000;
@@ -218,11 +240,23 @@ export default function liveSessionRoutes(): Router {
         const toolDefs = await toolRegistry.getEnabledToolDefinitions();
         const checkin = sanitizeCheckin(req.body?.checkin);
         const memoryBlock = await buildMemoryBlock(userId);
-        const toolGuidance = buildToolGuidanceBlock(toolDefs.map((t) => t.name));
+        // Psychoeducation retrieval cue (ai-therapist-202): resolved once per
+        // session and persisted below, like proactive_offering. A crisis
+        // recovery start is never enrolled: it runs with delegation off and
+        // its own narrow prompt, so it is recorded as not in the experiment.
+        const psychoeducationCue = isRecovery ? null : await resolvePsychoeducationCue();
+        const toolGuidance = buildToolGuidanceBlock(
+          toolDefs.map((t) => t.name),
+          { psychoeducationCue: psychoeducationCue === true },
+        );
         const proactiveOffering = await resolveProactiveOffering();
+        // Lead-conversation steering (features.lead_conversation_enabled,
+        // default off). A recovery start keeps its own narrow crisis prompt.
+        const leadConversation = isRecovery ? false : await resolveLeadConversation();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) +
           toolGuidance +
+          buildLeadConversationBlock(leadConversation) +
           memoryBlock +
           buildCheckinBlock(checkin);
         const activeModality = await getActiveModality();
@@ -276,23 +310,37 @@ export default function liveSessionRoutes(): Router {
           backendModel,
           storable: isDemoSession,
           recovery: isRecovery ? { crisisLine } : undefined,
+          psychoeducationCue: psychoeducationCue === true,
+          leadConversation,
         });
 
         const apiKey = await getOpenAIKey();
         const safetyIdentifier = getSafetyIdentifier(req, res, userId);
 
-        const response = await fetch('https://api.openai.com/v1/live/sessions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'OpenAI-Safety-Identifier': safetyIdentifier,
-          },
-          body: JSON.stringify({
-            session: sessionConfig,
-            transport: { type: 'webrtc', sdp: sdpOffer },
-          }),
-        });
+        // Bounded, and never retried here: a mint that stalls (or that OpenAI
+        // rejects for capacity or billing reasons) must come back to the
+        // participant as a plain "not available right now", not as a spinner.
+        // Without the timeout a stalled upstream held this request open for
+        // the platform's default five minutes.
+        let response: globalThis.Response;
+        try {
+          response = await fetch('https://api.openai.com/v1/live/sessions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+              'OpenAI-Safety-Identifier': safetyIdentifier,
+            },
+            body: JSON.stringify({
+              session: sessionConfig,
+              transport: { type: 'webrtc', sdp: sdpOffer },
+            }),
+            signal: AbortSignal.timeout(LIVE_MINT_TIMEOUT_MS),
+          });
+        } catch (err) {
+          log.error({ err, kind: classifyOpenAIError(err).kind }, 'OpenAI session creation did not complete');
+          return res.status(503).json(PROVIDER_UNAVAILABLE_BODY);
+        }
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -305,6 +353,21 @@ export default function liveSessionRoutes(): Router {
                 'participant cannot start sessions; study team must re-enroll or contact OpenAI.',
             );
             return res.status(403).json({ error: 'identifier_blocked' });
+          }
+
+          // Upstream is refusing for a reason the participant can do nothing
+          // about: a billing/spend ceiling (ai-therapist-190), a rate limit,
+          // or an overloaded/erroring provider. Say so honestly instead of
+          // the generic 500 that the client renders as "check your
+          // connection". A spend-limit rejection also pages the on-call: it
+          // means every OpenAI call is failing, crisis assessor included.
+          const failure = classifyOpenAIResponse(response.status, errorText, response.headers);
+          if (failure.kind === 'quota') {
+            const { reportOpenAIQuotaExhausted } = await import('../../services/crisisAlert.service.js');
+            void reportOpenAIQuotaExhausted('voice_session_mint', failure.code);
+          }
+          if (failure.kind !== 'other') {
+            return res.status(503).json(PROVIDER_UNAVAILABLE_BODY);
           }
           throw new Error(`OpenAI Live API error: ${response.status} ${errorText}`);
         }
@@ -381,6 +444,7 @@ export default function liveSessionRoutes(): Router {
             live_backend_model: backendModel,
             transcription_model: null, // GPT-Live transcribes internally.
             proactive_offering: proactiveOffering,
+            psychoeducation_cue: psychoeducationCue,
           });
         } catch (dbError) {
           log.error({ err: dbError }, 'Failed to create session in database');
@@ -501,6 +565,9 @@ export default function liveSessionRoutes(): Router {
           voice: userVoice,
           language: userLanguage,
           session_limits: limitCheck.allowed ? limitCheck.limits || null : null,
+          // The browser delivers the GPT-Live opening, so it needs to know how
+          // the opening should end (shared/openingPrompt.ts).
+          lead_conversation: leadConversation,
         });
       } catch (error) {
         log.error({ err: error }, 'Session creation error');

@@ -244,6 +244,32 @@ describe('sendMailFrom (staff mail, ai-therapist-283 phase 2)', () => {
     expect(out).toEqual({ status: 'queued', gatewayId: 'gw-7' });
   });
 
+  it('a TransportMessage renders through the real nodemailer into the expected envelope and headers', async () => {
+    // Contract check against the installed nodemailer (SMTP fallback path):
+    // a major bump that changes how it reads from/to/cc/replyTo/headers fails
+    // here instead of on stage. streamTransport builds the MIME message
+    // without opening a socket.
+    const nodemailer = await import('nodemailer');
+    const transport = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: 'unix' });
+    const info = await transport.sendMail({
+      from: 'AI Therapist <alerts@byuisresearch.com>',
+      to: ['a@b.co'],
+      cc: ['c@d.io'],
+      replyTo: 'jane@byuisresearch.com',
+      subject: 'Re: hello',
+      text: 'body',
+      headers: { 'In-Reply-To': '<m@x>' },
+    });
+    expect(info.envelope).toEqual({ from: 'alerts@byuisresearch.com', to: ['a@b.co', 'c@d.io'] });
+    const head = (info.message as Buffer).toString().split('\n\n')[0];
+    expect(head).toContain('From: AI Therapist <alerts@byuisresearch.com>');
+    expect(head).toContain('To: a@b.co');
+    expect(head).toContain('Cc: c@d.io');
+    expect(head).toContain('Reply-To: jane@byuisresearch.com');
+    expect(head).toContain('In-Reply-To: <m@x>');
+    expect(head).toContain('Subject: Re: hello');
+  });
+
   it('reports a transport throw as failed with the message', async () => {
     process.env.EMAIL_FROM = 'AI Therapist <alerts@byuisresearch.com>';
     process.env.EMAIL_API_URL = 'http://gateway';
