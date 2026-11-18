@@ -1610,7 +1610,7 @@ export class SidebandManager {
       throw new LiveDelegationUnsupportedError(sessionId, operation);
     }
     // `delegation.type` is required on an update as well as at creation: the
-    // API reference's session.update examples both carry it ("The delegation
+    // API reference's session.update example carries it ("The delegation
     // type must match the current session"), and without it the live API
     // answers "Missing required parameter: 'session.delegation.type'" and
     // applies nothing. Until 2026-11-18 it was omitted here, so every

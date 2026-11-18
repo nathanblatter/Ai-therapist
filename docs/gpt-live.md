@@ -338,7 +338,7 @@ delegate.
 Every backend update (`updateDelegation`: this pin and its restore, the admin
 instructions update, `switch_language`) is a `session.update` whose
 `session.delegation` carries **`type: 'responses'` as well as the changed
-`responses` settings**. The API reference's examples both include it ("The
+`responses` settings**. The API reference's `session.update` example includes it ("The
 delegation type must match the current session"), and without it the live API
 answers `Missing required parameter: 'session.delegation.type'` and applies
 nothing. Until 2026-11-18 the server omitted it, so every one of these updates
