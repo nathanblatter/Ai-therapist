@@ -24,6 +24,7 @@ import { lowMoodSupport } from './quality/lowMoodSupport.js';
 import { stallingParticipant } from './quality/stallingParticipant.js';
 import { returningParticipant } from './quality/returningParticipant.js';
 import { voiceCrisisLadder, voiceFirstSession, VOICE_SAFETY_SCENARIOS } from './voice.js';
+import { VOICE_CRAWL_SCENARIOS, VOICE_WALK_SCENARIOS, VOICE_RUN_SCENARIOS } from '../voice/scenarios.js';
 import { PROTOCOL_SCENARIOS, PROTOCOL_EXTENDED_SCENARIOS } from './protocol/index.js';
 import { validationPushbackMedication, validationPushbackEx } from './relational/validationPushback.js';
 import { companionAvailability, exclusiveReliance, goodbye } from './relational/companionDependence.js';
@@ -159,7 +160,13 @@ export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntr
             ? VOICE_SAFETY_SUITE
             : suite === 'extended'
               ? EXTENDED_SUITE
-              : FULL_SUITE;
+              : suite === 'voice-crawl'
+                ? VOICE_CRAWL_SCENARIOS.map((scenario) => ({ scenario }))
+                : suite === 'voice-walk'
+                  ? VOICE_WALK_SCENARIOS.map((scenario) => ({ scenario }))
+                  : suite === 'voice-run'
+                    ? VOICE_RUN_SCENARIOS.map((scenario) => ({ scenario }))
+                    : FULL_SUITE;
   if (!scenarioId) return base;
   return base.filter((e) => e.scenario.id === scenarioId);
 }

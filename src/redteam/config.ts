@@ -9,7 +9,35 @@ import { getBackendModel } from '../server/utils/backendModels.js';
  *  per-minute voice billing; never a deploy gate). voice-safety: the
  *  safety-critical families over a real voice session plus the GPT-Live
  *  checks (scenarios/voice.ts; its own workflow, redteam-voice.yml). */
-export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice' | 'voice-safety' | 'extended';
+export type RedteamSuite =
+  | 'smoke'
+  | 'full'
+  | 'quality'
+  | 'voice'
+  | 'voice-safety'
+  | 'extended'
+  // GPT-Live evaluation guide modes (src/redteam/voice, docs/redteam.md):
+  // single-turn spoken requests at critical points, the same under acoustic
+  // conditions, and a simulated participant in one full-duplex session.
+  | 'voice-crawl'
+  | 'voice-walk'
+  | 'voice-run';
+
+const SUITES: RedteamSuite[] = [
+  'smoke',
+  'full',
+  'quality',
+  'voice',
+  'voice-safety',
+  'extended',
+  'voice-crawl',
+  'voice-walk',
+  'voice-run',
+];
+
+export function isRedteamSuite(v: string | undefined): v is RedteamSuite {
+  return SUITES.includes(v as RedteamSuite);
+}
 
 export interface RedteamConfig {
   /** LLM that generates persona participant utterances. */

@@ -2,6 +2,8 @@
 import type { EvalDimensionId } from '../server/services/sessionEval.service.js';
 import type { KnownGap } from './knownGap.js';
 import type { ProgressionMetrics } from './progression.js';
+import type { VoiceEvalSpec } from './voice/scenarioTypes.js';
+import type { RunMetrics } from './voice/metrics.js';
 
 export type { EvalDimensionId };
 
@@ -163,6 +165,11 @@ export interface Beat {
    *  `Scenario.assistantRole` (each role keeps its own login + history). */
   assistantRole?: AssistantRole;
   assertAfter?: AssertionSpec[];
+  /** GPT-Live voice evaluation (src/redteam/voice): what this turn should do
+   *  at the voice/backend boundary. `delegate` follows the guide's
+   *  required | forbidden | optional; `crisis` marks a crisis turn for the
+   *  latency and silence-during-delegation breakdown. */
+  voice?: { delegate?: 'required' | 'forbidden' | 'optional'; crisis?: boolean };
 }
 
 export interface Scenario {
@@ -211,6 +218,9 @@ export interface Scenario {
   setup?: (pool: DbLike) => Promise<void>;
   /** Undo `setup` after the scenario, pass or fail. */
   teardown?: (pool: DbLike) => Promise<void>;
+  /** GPT-Live voice evaluation mode (src/redteam/voice, docs/redteam.md
+   *  "GPT-Live evaluation guide"). Absent = an ordinary voice scenario. */
+  voiceEval?: VoiceEvalSpec;
 }
 
 export interface JudgeScores {
@@ -250,4 +260,7 @@ export interface ScenarioResult {
   costUsd: number;
   durationMs: number;
   error?: string;
+  /** GPT-Live runs: the guide's audio, delegation and consumption metrics
+   *  (src/redteam/voice/metrics.ts). */
+  voiceMetrics?: RunMetrics;
 }
