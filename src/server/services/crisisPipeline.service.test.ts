@@ -168,7 +168,7 @@ describe('runCrisisPipeline — steering delivery per channel', () => {
   it('realtime delegates to maybeSteerSession and returns null guidance', async () => {
     risk(40, 'medium');
     const r = await runCrisisPipeline(TURN, 'realtime');
-    expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 40, 'medium');
+    expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 40, 'medium', false);
     expect(r.steeringGuidance).toBeNull();
   });
 
@@ -330,5 +330,131 @@ describe('runCrisisPipeline — resilience', () => {
     analyzeMessageRiskMock.mockRejectedValue(new Error('LLM down'));
     const r = await runCrisisPipeline(TURN, 'chat');
     expect(r).toEqual({ riskScore: 0, severity: 'none', factors: [], flagged: false, steeringGuidance: null });
+  });
+});
+
+// ai-therapist-299: a keyword-free turn that the assessor reads as high because
+// of what the session already holds. The pipeline must escalate it exactly like
+// a keyword turn the first time, and must not turn every later short answer in
+// that session into another forced safety-protocol steer or another page.
+describe('runCrisisPipeline — context-wake turns (ai-therapist-299)', () => {
+  const contextRisk = (riskScore: number, severity: string) =>
+    analyzeMessageRiskMock.mockResolvedValue({
+      riskScore,
+      severity,
+      factors: ['stated intent'],
+      breakdown: {},
+      method: 'llm_context',
+      contextWake: true,
+    });
+  const flaggedAt = (severity: string, score: number) =>
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: severity,
+      crisis_risk_score: score,
+    });
+
+  it('medium-flagged session, statement of intent scored high: flags high and runs the high response (realtime)', async () => {
+    flaggedAt('medium', 55);
+    contextRisk(92, 'high');
+
+    const r = await runCrisisPipeline(TURN, 'realtime');
+
+    expect(r.flagged).toBe(true);
+    expect(r.severity).toBe('high');
+    expect(flagSessionCrisisMock).toHaveBeenCalledWith(
+      'chat_1',
+      'high',
+      92,
+      'system',
+      'auto',
+      expect.anything(),
+      ['stated intent'],
+      expect.any(String),
+    );
+    // executeGraduatedResponse is what logs high_risk_emergency, pages the
+    // on-call and emits session:crisis-emergency.
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 92);
+    // An escalation forces the steer past the cooldown, as a keyword turn does.
+    expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 92, 'high', true);
+  });
+
+  it('the same on chat: safety-protocol guidance for this very reply, forced past the cooldown', async () => {
+    flaggedAt('medium', 55);
+    contextRisk(92, 'high');
+
+    const r = await runCrisisPipeline(TURN, 'chat');
+
+    expect(shouldSteerMock).toHaveBeenCalledWith('chat_1', 92, true);
+    expect(r.steeringGuidance).toBe('CHAT_HIGH_GUIDANCE');
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 92);
+  });
+
+  it('already flagged high: a later context-wake high turn does not page again or force the protocol again', async () => {
+    flaggedAt('high', 92);
+    contextRisk(90, 'high');
+    shouldSteerMock.mockReturnValue(false); // inside the ordinary cooldown
+
+    const r = await runCrisisPipeline(TURN, 'chat');
+
+    expect(shouldSteerMock).toHaveBeenCalledWith('chat_1', 90, false);
+    expect(r.steeringGuidance).toBeNull();
+    expect(r.flagged).toBe(false);
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+    expect(executeGraduatedResponseMock).not.toHaveBeenCalled();
+  });
+
+  it('already flagged high, realtime: the steer follows the ordinary cooldown too', async () => {
+    flaggedAt('high', 92);
+    contextRisk(90, 'high');
+
+    await runCrisisPipeline(TURN, 'realtime');
+
+    expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 90, 'high', false);
+    expect(executeGraduatedResponseMock).not.toHaveBeenCalled();
+  });
+
+  it('a KEYWORD high turn in an already-high session still forces, exactly as before', async () => {
+    flaggedAt('high', 92);
+    risk(90, 'high');
+
+    await runCrisisPipeline(TURN, 'chat');
+
+    expect(shouldSteerMock).toHaveBeenCalledWith('chat_1', 90, true);
+  });
+
+  it('a retraction read as low by the assessor changes nothing: no flag, no response, flag untouched', async () => {
+    flaggedAt('high', 85);
+    contextRisk(30, 'low');
+
+    const r = await runCrisisPipeline(TURN, 'chat');
+
+    expect(r.flagged).toBe(false);
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+    expect(executeGraduatedResponseMock).not.toHaveBeenCalled();
+  });
+
+  it('a context turn scored 0 does nothing at all', async () => {
+    flaggedAt('medium', 55);
+    contextRisk(0, 'none');
+
+    const r = await runCrisisPipeline(TURN, 'chat');
+
+    expect(r).toMatchObject({ riskScore: 0, flagged: false, steeringGuidance: null });
+    expect(shouldSteerMock).not.toHaveBeenCalled();
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('runCrisisPipeline — reading the flag state must not cost the turn its steer', () => {
+  it('still steers a high turn when the state read fails, then fails the flagging step as before', async () => {
+    getSessionCrisisStateMock.mockRejectedValue(new Error('db down'));
+    risk(90, 'high');
+
+    const r = await runCrisisPipeline(TURN, 'realtime');
+
+    expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 90, 'high', true);
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ riskScore: 0, flagged: false });
   });
 });

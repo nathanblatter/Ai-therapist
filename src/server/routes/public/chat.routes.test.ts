@@ -78,6 +78,7 @@ vi.mock('../../services/minorSafeguard.service.js', () => ({
 }));
 vi.mock('../../services/crisisDetection.service.js', () => ({
   detectCrisisKeywords: () => ({ keywordScore: 0 }),
+  needsContextAssessment: async () => false,
 }));
 vi.mock('../../services/crisisPipeline.service.js', () => ({
   runCrisisPipeline: vi.fn().mockResolvedValue({ steeringGuidance: null }),

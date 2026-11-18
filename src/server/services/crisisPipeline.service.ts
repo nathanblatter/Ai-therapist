@@ -88,6 +88,30 @@ export async function runCrisisPipeline(
     let flagged = false;
 
     if (risk.riskScore > 0) {
+      // Flag state BEFORE this turn's own flagging: read once, used by both
+      // the steering decision and the flagging decision below.
+      // A failed read must not cost this turn its steer (the read used to come
+      // after steering): steer on the default rule, then let the flagging step
+      // fail exactly as it did before.
+      let state: Awaited<ReturnType<typeof getSessionCrisisState>> = null;
+      let stateError: unknown = null;
+      try {
+        state = await getSessionCrisisState(turn.sessionId);
+      } catch (err) {
+        stateError = err;
+      }
+      // High severity normally forces the safety-protocol steer past the
+      // cooldown. The one exception is a context-wake turn (no keyword; scored
+      // high only because of what the session already holds) in a session that
+      // is ALREADY flagged high: there the protocol has been delivered, and in
+      // such a session every short answer ("yes", "tonight") is context-
+      // assessed, so forcing would re-inject "start the assessment at question
+      // one" on every turn. Those turns steer on the ordinary cooldown. A
+      // context-wake turn that ESCALATES the session (anything below high ->
+      // high) still forces, as does every keyword-hit turn, exactly as before.
+      const alreadyHigh = state?.crisis_flagged === true && state?.crisis_severity === 'high';
+      const forceSteer = severity === 'high' && !(risk.contextWake === true && alreadyHigh);
+
       // Summary-tier live signal (caseworker portal spec section 5): score +
       // severity only — caseworker sockets get risk trends without any
       // transcript content. Fire-and-forget; never blocks the pipeline.
@@ -109,8 +133,8 @@ export async function runCrisisPipeline(
       // ---- Steering ----
       if (channel === 'realtime') {
         // Sideband injection happens inside; realtime ignores the return value.
-        await maybeSteerSession(turn.sessionId, risk.riskScore, severity);
-      } else if (shouldSteer(turn.sessionId, risk.riskScore, severity === 'high')) {
+        await maybeSteerSession(turn.sessionId, risk.riskScore, severity, forceSteer);
+      } else if (shouldSteer(turn.sessionId, risk.riskScore, forceSteer)) {
         // Chat: same shared cooldown, but the guidance is returned for the
         // caller to inject into this turn's model call. High severity swaps the
         // base copy for the full safety-assessment protocol and mirrors the
@@ -157,7 +181,7 @@ export async function runCrisisPipeline(
       }
 
       // ---- Flagging ---- (identical to the original realtime logic)
-      const state = await getSessionCrisisState(turn.sessionId);
+      if (stateError) throw stateError;
       const currentScore = state?.crisis_risk_score || 0;
       const shouldFlag =
         (severity === 'high' || severity === 'medium') &&
