@@ -17,6 +17,7 @@ export const DATA_ACCESS_ACTION_LABELS: Record<string, string> = {
   dataset_export: 'Dataset export',
   audit_log_view: 'Access history viewed',
   worksheet_review: 'Worksheet reviewed',
+  semantic_search: 'Semantic search hit',
 };
 
 /** Label for one row; the chart bundle (ai-therapist-199) shares the

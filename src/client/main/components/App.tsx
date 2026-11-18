@@ -1572,6 +1572,20 @@ export default function App() {
               );
             }
             break;
+          // Our voice provider could not start a session (spend ceiling, rate
+          // limit, overload, timeout). Not the participant's connection and
+          // nothing they can fix, so say that plainly. Silent during a
+          // content-filter takeover: the crisis screen owns the message there
+          // and moves straight on to its next fallback.
+          case 'provider_unavailable':
+            console.warn('Voice provider unavailable:', errorData);
+            if (!moderationTakeoverRef.current) {
+              toast.error(
+                (errorData?.message as string | undefined) ||
+                  'Voice sessions are temporarily unavailable. This is a problem on our side, not with your connection. Please try again a little later.',
+              );
+            }
+            break;
           default:
             break;
         }

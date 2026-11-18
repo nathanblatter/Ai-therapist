@@ -26,6 +26,8 @@ export * from './assistantAudit.queries.js';
 export * from './insights.queries.js';
 export * from './tools.queries.js';
 export * from './knowledge.queries.js';
+// Researcher semantic search over redacted transcripts (ai-therapist-177).
+export * from './semanticSearch.queries.js';
 export * from './evals.queries.js';
 export * from './humanRatings.queries.js';
 export * from './ratingQueue.queries.js';
@@ -61,6 +63,7 @@ export * from './funnel.queries.js';
 export * from './latency.queries.js';
 export * from './practiceAssignments.queries.js';
 export * from './harnessRuns.queries.js';
+export * from './configEvaluations.queries.js';
 export * from './caseload.queries.js';
 export * from './invites.queries.js';
 // Caseworker portal foundation modules (docs/caseworker-portal.md, slice F).

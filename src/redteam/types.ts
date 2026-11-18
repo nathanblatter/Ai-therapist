@@ -1,7 +1,14 @@
 // Shared types for the scripted red-team safety harness (spec §3.1, §4).
 import type { EvalDimensionId } from '../server/services/sessionEval.service.js';
+import type { ProgressionMetrics } from './progression.js';
 
 export type { EvalDimensionId };
+
+/** Every dimension a red-team judge result can carry: the v1 rubric plus the
+ *  harness-only, report-only session_progression (progressionJudge.ts).
+ *  judgeMinScores stays typed to EvalDimensionId, so no scenario can put a
+ *  gating floor on session_progression. */
+export type JudgeDimensionId = EvalDimensionId | 'session_progression';
 
 /** Which pipeline a scenario drives. `chat` → /api/chat/*; `realtime-text` →
  *  POST participant turns to /logs/batch (the only HTTP path with real crisis
@@ -175,24 +182,33 @@ export interface Scenario {
   /** Voice pipeline on GPT-Live only: after the last beat, send the data-channel
    *  client events a participant's browser must not be able to use (a backend
    *  prompt rewrite, a forged tool result, a response override) and assert the
-   *  API refuses each one. See liveVoiceAssertions.ts. */
+   *  API refuses each one. See liveVoiceChecks.ts. */
   liveClientProbes?: boolean;
   /** A known, filed product gap this scenario is expected to fail on. The
    *  scenario stays in its suite and its assertions stay gating (a known gap
    *  is not a pass); reports name the gap so a new failure stands out. */
   knownGap?: { reason: string; ref: string };
+  /** Chat pipeline: log in as this participant instead of the shared
+   *  redteam_participant (e.g. a returning participant with seeded history,
+   *  so per-user memory never leaks into other scenarios). */
+  participant?: { username: string; password: string };
+  /** Seed what the scenario needs before it starts (idempotent; runs against
+   *  the harness DB, also in dry-run). */
+  setup?: (pool: DbLike) => Promise<void>;
 }
 
 export interface JudgeScores {
   /** Consensus (median) scores — what floors and diffs are evaluated on. */
-  scores: Partial<Record<EvalDimensionId, number>>;
+  scores: Partial<Record<JudgeDimensionId, number>>;
   overall: string | null;
   /** Judge label stored on the session_evals row (model id or ensemble(...)). */
   judgeModel?: string;
   /** Raw per-judge scores behind the consensus, keyed `model` or `model#run`. */
-  perJudge?: Record<string, Partial<Record<EvalDimensionId, number>>>;
+  perJudge?: Record<string, Partial<Record<JudgeDimensionId, number>>>;
   /** Per-dimension max-min across judge runs (null/absent for one judge). */
   spread?: Record<string, number> | null;
+  /** session_progression rationale from the first judge run that scored it. */
+  progressionRationale?: string;
 }
 
 export interface ScenarioResult {
@@ -213,6 +229,8 @@ export interface ScenarioResult {
    *  failure can be triaged from the artifact: the CI database is gone by the
    *  time anyone reads the result. Synthetic persona text only. */
   transcript?: Turn[];
+  /** Deterministic session-progression metrics (chat pipeline only; report-only). */
+  progression?: ProgressionMetrics | null;
   costUsd: number;
   durationMs: number;
   error?: string;

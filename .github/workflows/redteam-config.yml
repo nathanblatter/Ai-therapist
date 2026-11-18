@@ -1,0 +1,193 @@
+name: Red-team (config drift)
+# Re-runs the full red-team suite whenever an environment's prompt or model
+# configuration (system_config, edited in the admin UI with no deploy) has no
+# passing evaluation on record. See docs/redteam.md "Config drift gate".
+#
+# How it reaches each environment: an authenticated HTTPS call to the app's
+# own public URL (the same host and port participants use; no database
+# access, no SSH, no new network path), with one dedicated token per
+# environment that can only read the fingerprint, claim it (receiving the
+# configuration snapshot) and record the result
+# (src/server/routes/redteamConfigEval.routes.ts).
+#
+# Owner setup, per environment (until done, that environment is skipped with a
+# notice and the run stays green):
+#   1. Generate a token:            openssl rand -hex 32
+#   2. App side:  add REDTEAM_CONFIG_EVAL_TOKEN=<token> to the deploy .env
+#                 (stage: /Users/nathanblatter/deploy/Ai-therapist/.env;
+#                  prod: /opt/ai-therapist/.env) and redeploy so the app picks it up.
+#   3. GitHub side: repository secret REDTEAM_CONFIG_TOKEN_STAGE or
+#                 REDTEAM_CONFIG_TOKEN_PROD with the same value.
+#   4. Apply migration 126 (config_evaluations) on that database.
+#   Optional repository variables REDTEAM_STAGE_URL / REDTEAM_PROD_URL override
+#   the default base URLs below.
+#
+# Cost: a full run is ~$0.25. The server allows at most
+# REDTEAM_CONFIG_EVAL_DAILY_CAP (default 4) claims per rolling 24 h per
+# environment, so the ceiling is 4 x 2 environments x 31 days x $0.25 = $62 a
+# month; in practice it is one run per distinct configuration.
+#
+# Workflow logs on this repository are public: nothing here prints the
+# snapshot, the harness transcripts or staff usernames; the uploaded artifact
+# is a redacted summary (verdicts, assertion ids, judge scores).
+on:
+  schedule:
+    - cron: '7,37 * * * *' # every 30 minutes, off the top of the hour
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which environment to check
+        type: choice
+        options: [both, stage, prod]
+        default: both
+      force:
+        description: Re-run even if this configuration already passed or failed (still subject to the daily cap)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  STAGE_URL: ${{ vars.REDTEAM_STAGE_URL || 'https://ai-therapist.nathanblatter.com' }}
+  PROD_URL: ${{ vars.REDTEAM_PROD_URL || 'https://ai.byuisresearch.com' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/redteam/configEvalClient.ts
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Stage status
+        id: stage
+        if: github.event_name == 'schedule' || inputs.environment != 'prod'
+        env:
+          REDTEAM_ENVIRONMENT: stage
+          REDTEAM_CONFIG_EVAL_URL: ${{ env.STAGE_URL }}
+          REDTEAM_CONFIG_EVAL_TOKEN: ${{ secrets.REDTEAM_CONFIG_TOKEN_STAGE }}
+        run: node src/redteam/configEvalClient.ts status
+      - name: Prod status
+        id: prod
+        if: github.event_name == 'schedule' || inputs.environment != 'stage'
+        env:
+          REDTEAM_ENVIRONMENT: prod
+          REDTEAM_CONFIG_EVAL_URL: ${{ env.PROD_URL }}
+          REDTEAM_CONFIG_EVAL_TOKEN: ${{ secrets.REDTEAM_CONFIG_TOKEN_PROD }}
+        run: node src/redteam/configEvalClient.ts status
+      - name: Plan
+        id: plan
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+          STAGE_CONFIGURED: ${{ steps.stage.outputs.configured }}
+          STAGE_SHOULD_RUN: ${{ steps.stage.outputs.should_run }}
+          PROD_CONFIGURED: ${{ steps.prod.outputs.configured }}
+          PROD_SHOULD_RUN: ${{ steps.prod.outputs.should_run }}
+        run: |
+          envs=()
+          # A forced dispatch skips the "already evaluated" check; the server's
+          # claim still enforces the in-progress lock and the daily cap.
+          if [ "$STAGE_SHOULD_RUN" = "true" ] || { [ "$FORCE" = "true" ] && [ "$STAGE_CONFIGURED" = "true" ]; }; then envs+=('"stage"'); fi
+          if [ "$PROD_SHOULD_RUN" = "true" ] || { [ "$FORCE" = "true" ] && [ "$PROD_CONFIGURED" = "true" ]; }; then envs+=('"prod"'); fi
+          matrix="[$(IFS=,; echo "${envs[*]}")]"
+          echo "environments to evaluate: $matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  evaluate:
+    needs: check
+    if: needs.check.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        environment: ${{ fromJSON(needs.check.outputs.matrix) }}
+    concurrency:
+      group: redteam-config-${{ matrix.environment }}
+      cancel-in-progress: false
+    # services + env mirror redteam-nightly.yml (composite actions cannot declare services).
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_therapist_redteam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam
+      DATABASE_SSL: 'false'
+      SESSION_SECRET: ci-redteam-secret
+      NODE_ENV: test
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
+      REDTEAM_ENVIRONMENT: ${{ matrix.environment }}
+      REDTEAM_CONFIG_EVAL_URL: ${{ matrix.environment == 'prod' && (vars.REDTEAM_PROD_URL || 'https://ai.byuisresearch.com') || (vars.REDTEAM_STAGE_URL || 'https://ai-therapist.nathanblatter.com') }}
+      # Spelled out per environment so a missing prod secret can never fall
+      # through to the stage token (or the reverse): it becomes '' instead.
+      REDTEAM_CONFIG_EVAL_TOKEN: ${{ matrix.environment == 'prod' && secrets.REDTEAM_CONFIG_TOKEN_PROD || matrix.environment == 'stage' && secrets.REDTEAM_CONFIG_TOKEN_STAGE || '' }}
+    steps:
+      # Evaluate the code each environment runs: stage deploys main, prod
+      # deploys the `prod` branch (deploy-prod.yml). Checked out, never pushed.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.environment == 'prod' && 'prod' || github.sha }}
+      - name: Resolve evaluated commit
+        run: |
+          echo "REDTEAM_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          # Outside the workspace, so no upload step can ever pick it up.
+          echo "SNAPSHOT=$RUNNER_TEMP/config-snapshot.json" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Claim the current configuration
+        id: claim
+        run: node src/redteam/configEvalClient.ts claim --snapshot-out "$SNAPSHOT" ${{ github.event_name == 'workflow_dispatch' && inputs.force && '--force' || '' }}
+      - uses: ./.github/actions/redteam-db-setup
+        if: steps.claim.outputs.claimed == 'true'
+      - name: Red-team full suite against the snapshot
+        id: harness
+        if: steps.claim.outputs.claimed == 'true'
+        # Output goes to a file, not the public log: failing-assertion details
+        # and transcripts can quote the environment's prompt. --allow-fail so
+        # a scenario failure is recorded as 'failed' rather than 'error'.
+        run: |
+          set -o pipefail
+          npm run redteam:full -- --allow-fail --config-snapshot "$SNAPSHOT" > "$RUNNER_TEMP/harness.log" 2>&1
+          grep -E '^\[redteam\] (suite=|config snapshot|wrote)' "$RUNNER_TEMP/harness.log" || true
+      - name: Record the result on the environment
+        if: always() && steps.claim.outputs.claimed == 'true'
+        env:
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          EVALUATION_ID: ${{ steps.claim.outputs.evaluation_id }}
+          FINGERPRINT: ${{ steps.claim.outputs.fingerprint }}
+        run: |
+          if [ "$HARNESS_OUTCOME" = "success" ]; then
+            node src/redteam/configEvalClient.ts finish --id "$EVALUATION_ID" --fingerprint "$FINGERPRINT"
+          else
+            node src/redteam/configEvalClient.ts finish --id "$EVALUATION_ID" --fingerprint "$FINGERPRINT" \
+              --error "harness step ended: $HARNESS_OUTCOME"
+          fi
+      - name: Redacted summary
+        if: always() && steps.claim.outputs.claimed == 'true'
+        run: node src/redteam/configEvalClient.ts redact --results redteam-results --out redteam-config-results/summary.json
+      - name: Remove the snapshot and raw results
+        if: always()
+        run: rm -rf "$SNAPSHOT" "$RUNNER_TEMP/harness.log" redteam-results
+      - name: Upload redacted results
+        if: always() && steps.claim.outputs.claimed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteam-config-${{ matrix.environment }}-results
+          path: redteam-config-results/
+          if-no-files-found: ignore
