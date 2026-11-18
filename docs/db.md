@@ -156,7 +156,9 @@ session actually ran on — see `docs/model-pinning.md`.
 
 Schema changes are plain SQL files in `src/database/migrations/`, numbered
 `NNN_<name>.sql` with a matching `NNN_<name>_rollback.sql`. **Current head:
-113** (`113_worksheet_review.sql`). There is no migrations table
+124** (`124_prompt_sections_2026_09_22.sql`); numbers are reserved per branch
+and can land out of order (121 merged after 123 and 124), so list the
+directory rather than trusting this line. There is no migrations table
 and nothing applies them automatically: both stage and prod are migrated **by
 hand**, and the record of what has been applied is the Flightdeck log plus the
 backup file names below. Author-side conventions live in
