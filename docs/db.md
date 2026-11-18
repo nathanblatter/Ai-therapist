@@ -341,9 +341,15 @@ the row:
   Redaction Verification tool; flagged-and-unreviewed rows are listed first
   there and counted in its header.
 - Backend `auto` (default) uses the OpenAI Decisions API (`POST /v1/decisions`,
-  limited preview, no published schema yet) and falls back to the Responses API
-  with a strict json_schema until the org is enabled. Only redacted text is
-  sent, `store:false`, usage is recorded under purpose `redaction`.
+  one `predicate` question in `questions[]`; `p_leak` is the returned
+  `probability`) and falls back to the Responses API with a strict json_schema
+  only when the endpoint is not enabled for the org (404 / "not enabled"). Only
+  redacted text is sent; the Responses fallback sets `store:false` (Decisions
+  has no such parameter); usage is recorded under purpose `redaction`.
+- Fail-soft: any other verifier error (a 400, a refusal, a timeout) writes
+  `{"p_leak": -1, "flagged": false, "error": "..."}` and does not block
+  redaction. Such a row is unverified and is not prioritised for review; find
+  them with `metadata->'redaction_check' ? 'error'`.
 - Config row: `system_config.redaction_verifier` =
   `{"enabled": true, "backend": "auto"|"decisions"|"responses", "threshold": 0.5}`;
   absent row = defaults. No migration needed.

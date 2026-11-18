@@ -225,6 +225,9 @@ export async function getSessionsExport(asOf: string): Promise<DatasetRow[]> {
        sess.session_type AS session_type,
        sc.modality AS modality_condition,
        CASE WHEN sc.proactive_offering IS NULL THEN '' ELSE sc.proactive_offering::text END AS proactive_offering,
+       -- Read through to_jsonb so the export still works before migration 123
+       -- adds the column (ai-therapist-202); missing and NULL both export ''.
+       COALESCE(to_jsonb(sc)->>'psychoeducation_cue', '') AS psychoeducation_cue,
        sc.theme AS theme,
        sc.language AS language,
        sc.voice AS voice,

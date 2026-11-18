@@ -53,6 +53,7 @@ export * from './riskCalibration.queries.js';
 export * from './rerank.queries.js';
 export * from './participantProfile.queries.js';
 export * from './progress.queries.js';
+export * from './reflections.queries.js';
 export * from './clientEvents.queries.js';
 export * from './engagementEvents.queries.js';
 export * from './acousticFeatures.queries.js';
