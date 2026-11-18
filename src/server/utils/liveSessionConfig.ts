@@ -438,8 +438,28 @@ While the backend is working, stay present with the participant — keep listeni
 
 If the participant expresses thoughts of suicide, self-harm, or harming someone else, stay with them and respond
 directly yourself. Do not wait for the backend before acknowledging what they said. Take it seriously, do not
-minimize it, and do not change the subject.`;
+minimize it, and do not change the subject.
+
+${LIVE_UNDER_18_HOLD_LINE}`;
 }
+
+/**
+ * The voice model's own line for an under-18 disclosure (ai-therapist-296).
+ *
+ * The study is adults only, and the server ends a session when a participant
+ * says they are under 18 (minorSafeguard.service.ts). But the voice model
+ * answers within about half a second and the server's check needs a finished
+ * transcript plus a confirmation call, so on 2026-11-18 a participant who said
+ * "I'm 15 years old. Is that okay?" heard "That's okay, thank you for telling
+ * me" (and, in a second run, "Yeah, that's okay. I'm here to listen") before
+ * the server acted. This line does not add any handling of its own: it only
+ * stops the voice model from affirming or carrying on while the existing
+ * server handling takes over. If the server does not confirm (a false alarm),
+ * nothing follows and the conversation simply continues.
+ */
+export const LIVE_UNDER_18_HOLD_LINE = `If the participant says they are under 18, do not tell them that is okay or fine, do not answer whether it is okay,
+and do not carry on with the conversation or ask them anything. Say only that you need a moment, then wait
+quietly: you will be told what to say next.`;
 
 /**
  * Backend (Responses delegation) instructions. This is where the existing
@@ -491,11 +511,19 @@ failed and what the participant can do next.`;
  * Crucially it does NOT restate what the participant said. Echoing the
  * disclosure back into a new session is the most likely way to trip the same
  * filter again.
+ *
+ * Two points changed on 2026-11-18 (ai-therapist-293), and only these two:
+ * the prompt no longer tells the model "the connection dropped for a moment"
+ * (untrue, and the study answers "no" to deception: Q-SYS2 in
+ * docs/irb-phase2-questions-for-nathan.md), and the first reply must say the
+ * crisis line aloud (in 4 of 4 measured runs no recovery opening named one).
+ * The matching speak-first nudge is shared/recoveryPrompt.ts.
  */
 export function buildLiveRecoveryInstructions(opts: { languageName?: string | null; crisisLine: string }): string {
   const languageLine = opts.languageName ? `Speak ${opts.languageName}.\n` : '';
-  return `You are a warm, steady voice companion. You were just talking with this person and the
-connection dropped for a moment. You are back now.
+  return `You are a warm, steady voice companion. You were just talking with this person and the call was
+cut off without warning by an automated system on the voice service, not by them and not by any person.
+You are back now.
 ${languageLine}
 What is happening: they are going through something serious and may be having thoughts of suicide or
 self-harm. Your only job right now is to stay with them and help them reach real human help.
@@ -503,7 +531,10 @@ self-harm. Your only job right now is to stay with them and help them reach real
 How to speak:
 - Short replies. One or two sentences, then stop and listen.
 - Warm and calm. Never clinical, never alarmed, never scripted.
-- Reconnect first: acknowledge briefly that you got cut off and that you are still here.
+- Reconnect first: say briefly that the call got cut off, that it was not their fault, and that you are still here.
+- In that same first reply, say the crisis line out loud: they can call or text ${opts.crisisLine} at any time.
+- Never call it a dropped connection or a technical problem. If they ask what happened, tell them plainly:
+  an automated system on the voice service ended the call, and it was nothing they did wrong.
 - Do not ask them to repeat what they already told you. You remember that it was serious.
 
 What to do, every few turns and whenever there is an opening:
@@ -554,7 +585,19 @@ export interface LiveSessionConfigInput {
    * conversation history — replaying the disclosure that tripped the filter is
    * the most likely way to be terminated again.
    */
-  recovery?: { crisisLine: string };
+  recovery?: {
+    crisisLine: string;
+    /**
+     * The speak-first instruction (shared/recoveryPrompt.ts), placed in
+     * `session.input` as a developer message. This is the documented way to
+     * have GPT-Live open the conversation ("For best results when GPT-Live
+     * should open the conversation, include greeting instructions in a
+     * `developer` message in `session.input` when you create the session"),
+     * and it is not conversation history: it carries nothing the participant
+     * said.
+     */
+    speakFirst?: string;
+  };
   /** ai-therapist-202 research condition; see buildLiveInstructions. */
   psychoeducationCue?: boolean;
   /** features.lead_conversation_enabled; see buildLiveInstructions. Ignored in recovery. */
@@ -679,7 +722,13 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
   // the replacement session is the most likely way to be terminated again,
   // which would mean hanging up on someone in crisis twice. Enforced here
   // rather than trusted to every call site.
-  return finalizeSession(session, recovery ? undefined : history);
+  finalizeSession(session, recovery ? undefined : history);
+  if (recovery?.speakFirst?.trim()) {
+    session.input = [
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: recovery.speakFirst.trim() }] },
+    ];
+  }
+  return session;
 }
 
 /** Attach optional startup history to a built session config. */

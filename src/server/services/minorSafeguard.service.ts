@@ -194,6 +194,18 @@ export const REALTIME_MINOR_GUIDANCE =
   `In your very next reply, warmly and without alarm: thank them for their honesty, explain the study is only for adults 18 and older so the session has to end, make clear they did nothing wrong, encourage them to talk to a parent, school counselor, or trusted adult, ` +
   `and give them the 988 Suicide & Crisis Lifeline (call or text 988) and the Crisis Text Line (text HOME to 741741). Keep it brief and kind, then say goodbye. Do not continue the conversation after that.`;
 
+/**
+ * Appended to REALTIME_MINOR_GUIDANCE when it is delivered to a live voice
+ * model (ai-therapist-296). The guidance asks for the goodbye "in your very
+ * next reply"; a full-duplex model that has just been interrupted by the
+ * instruction has no next reply until the participant speaks again, and in a
+ * measured GPT-Live run it simply went quiet: the server ended the session
+ * correctly and the participant never heard why. Delivery only; the goodbye
+ * itself is unchanged.
+ */
+export const REALTIME_MINOR_SPEAK_NOW =
+  'Say it now, without waiting for the participant to speak again, and do not finish whatever you were saying before.';
+
 // Grace window: give the realtime model one turn to deliver the goodbye before
 // we force the session status to 'ended'.
 const REALTIME_END_GRACE_MS = 60 * 1000;

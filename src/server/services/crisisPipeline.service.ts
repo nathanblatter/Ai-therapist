@@ -28,6 +28,8 @@ import { getRecentSessionMessages, getSessionAccessInfo, getSessionCrisisState }
 import { sessionSuppressesSafetyPipeline } from './suppression.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { enqueueWorkItem } from './workQueue.service.js';
+import { emitCrisisResources, hasEmittedHighRiskResources } from './crisisResources.js';
+import type { MinorVerdict } from './minorSafeguard.service.js';
 
 export interface ParticipantTurn {
   sessionId: string;
@@ -78,6 +80,15 @@ export async function runCrisisPipeline(
 
     const history = await getRecentSessionMessages(turn.sessionId, 10);
 
+    // Age-eligibility confirmation starts NOW, alongside risk scoring, and is
+    // acted on after the crisis block below (ai-therapist-296). On voice the
+    // model answers within about half a second, so every second the verdict
+    // waits behind the risk assessor is a second the voice model is talking to
+    // someone the study cannot include. Only the LLM confirmation is moved
+    // forward; the ordering of the ACTIONS (crisis first, then eligibility) is
+    // unchanged.
+    const minorVerdict = channel === 'realtime' ? startRealtimeMinorConfirmation(turn, history) : null;
+
     const risk = await analyzeMessageRisk(
       { content: turn.content, session_id: turn.sessionId, message_id: turn.messageId ?? undefined },
       history,
@@ -86,6 +97,15 @@ export async function runCrisisPipeline(
     const severity = risk.severity as CrisisSeverity;
     let steeringGuidance: string | null = null;
     let flagged = false;
+
+    // Crisis resources the moment a turn scores high, before steering, the
+    // flag write and the intervention logs (ai-therapist-293). Once per
+    // session from here: a later escalation re-emits from
+    // executeHighRiskResponse exactly as before, so a participant who closed
+    // the card is not shown it again on every high turn.
+    if (severity === 'high' && !hasEmittedHighRiskResources(turn.sessionId)) {
+      emitCrisisResources(turn.sessionId, { reason: 'high_risk', severity: 'high', riskScore: risk.riskScore });
+    }
 
     if (risk.riskScore > 0) {
       // Summary-tier live signal (caseworker portal spec section 5): score +
@@ -257,12 +277,13 @@ export async function runCrisisPipeline(
 
     // ---- Minor / age-eligibility safeguard (ai-therapist-106) ----
     // Realtime only: the chat route runs this gate itself (before its model
-    // call) so it can return a server-authored goodbye. Runs AFTER the crisis
-    // block so, when a turn is both high-crisis and minor-confirmed, the page
-    // has already gone out and both AE drafts exist; the goodbye copy carries
-    // the hotlines. Independent of risk score (e.g. "I'm 15" scores 0).
-    if (channel === 'realtime') {
-      await runRealtimeMinorSafeguard(turn);
+    // call) so it can return a server-authored goodbye. ACTED ON after the
+    // crisis block so, when a turn is both high-crisis and minor-confirmed, the
+    // page has already gone out and both AE drafts exist; the goodbye copy
+    // carries the hotlines. Independent of risk score (e.g. "I'm 15" scores 0).
+    // The confirmation itself was started before risk scoring (above).
+    if (minorVerdict) {
+      await applyRealtimeMinorVerdict(turn, await minorVerdict);
     }
 
     return { riskScore: risk.riskScore, severity, factors: risk.factors, flagged, steeringGuidance };
@@ -272,25 +293,90 @@ export async function runCrisisPipeline(
   }
 }
 
+/** How many times the stage-2 confirmation is attempted before failing open. */
+const MINOR_CONFIRM_ATTEMPTS = 2;
+
 /**
- * Realtime minor safeguard: pattern screen → LLM confirm → on confirmation,
- * inject the goodbye guidance to the live model over the sideband and run the
- * shared teardown (60s grace before force-end). Fail-open and never throws.
+ * Realtime minor safeguard, part 1: pattern screen, then the LLM confirmation.
+ * Resolves to the verdict, or null when the screen did not match or the
+ * confirmation could not be obtained. Never rejects, so it can run alongside
+ * risk scoring without an unhandled rejection.
+ *
+ * Fail-open is unchanged: no verdict means the session continues (this gate
+ * ENDS sessions, so it must not fire on a guess). What changed is that one
+ * transient API error no longer decides that: the call is tried twice.
  */
-async function runRealtimeMinorSafeguard(turn: ParticipantTurn): Promise<void> {
+async function startRealtimeMinorConfirmation(
+  turn: ParticipantTurn,
+  history: Awaited<ReturnType<typeof getRecentSessionMessages>>,
+): Promise<MinorVerdict | null> {
   try {
-    const { detectMinorDisclosurePatterns, confirmMinorDisclosure, handleConfirmedMinor, REALTIME_MINOR_GUIDANCE } =
-      await import('./minorSafeguard.service.js');
+    const { detectMinorDisclosurePatterns, confirmMinorDisclosure } = await import('./minorSafeguard.service.js');
+    if (!detectMinorDisclosurePatterns(turn.content).matched) return null;
 
-    if (!detectMinorDisclosurePatterns(turn.content).matched) return;
+    const short = turn.sessionId.substring(0, 12);
+    for (let attempt = 1; attempt <= MINOR_CONFIRM_ATTEMPTS; attempt++) {
+      try {
+        const verdict = await confirmMinorDisclosure(turn.content, history, turn.sessionId);
+        // The verdict decides whether a session ends; before this line it was
+        // invisible on the voice path, so a miss could not be told apart from
+        // a wiring gap (ai-therapist-296). No transcript text, only the verdict.
+        console.log(
+          `[MinorSafeguard] realtime stage-2 verdict for ${short}...: ` +
+            `is_minor=${verdict.isMinor} confidence=${verdict.confidence} stated_age=${verdict.statedAge ?? 'null'}` +
+            (attempt > 1 ? ` (attempt ${attempt})` : ''),
+        );
+        return verdict;
+      } catch (err) {
+        console.error(
+          `[MinorSafeguard] realtime stage-2 confirmation failed for ${short}... ` +
+            `(attempt ${attempt}/${MINOR_CONFIRM_ATTEMPTS})` +
+            (attempt === MINOR_CONFIRM_ATTEMPTS ? '; failing open, the session continues' : ''),
+          err,
+        );
+      }
+    }
+    return null;
+  } catch (err) {
+    // Fail-open: an eligibility confirmation error must never end a session.
+    console.error('[MinorSafeguard] realtime safeguard failed (fail-open):', err);
+    return null;
+  }
+}
 
-    const history = await getRecentSessionMessages(turn.sessionId, 10);
-    const verdict = await confirmMinorDisclosure(turn.content, history, turn.sessionId);
-
+/**
+ * Realtime minor safeguard, part 2: on a confirmed verdict, tell the live model
+ * to say the goodbye and run the shared teardown (the browser is told to end,
+ * and the server force-ends after a grace). Never throws.
+ *
+ * The steer and the teardown are independent on purpose. Before, a failed
+ * steer (a sideband that had just dropped) threw past handleConfirmedMinor,
+ * so a confirmed under-18 disclosure ended nothing and logged nothing.
+ */
+async function applyRealtimeMinorVerdict(turn: ParticipantTurn, verdict: MinorVerdict | null): Promise<void> {
+  if (!verdict) return;
+  try {
     if (verdict.isMinor && verdict.confidence !== 'low') {
-      const { sidebandManager } = await import('./sidebandManager.service.js');
-      if (sidebandManager.getActiveConnections().includes(turn.sessionId)) {
-        await sidebandManager.injectMessage(turn.sessionId, 'system', REALTIME_MINOR_GUIDANCE, false);
+      const { handleConfirmedMinor, REALTIME_MINOR_GUIDANCE, REALTIME_MINOR_SPEAK_NOW } = await import(
+        './minorSafeguard.service.js'
+      );
+      try {
+        const { sidebandManager } = await import('./sidebandManager.service.js');
+        if (sidebandManager.getActiveConnections().includes(turn.sessionId)) {
+          await sidebandManager.injectMessage(
+            turn.sessionId,
+            'system',
+            `${REALTIME_MINOR_GUIDANCE} ${REALTIME_MINOR_SPEAK_NOW}`,
+            false,
+          );
+        } else {
+          console.error(
+            `[MinorSafeguard] no live sideband for ${turn.sessionId.substring(0, 12)}...: ` +
+              'the goodbye guidance was not delivered; ending the session anyway',
+          );
+        }
+      } catch (err) {
+        console.error('[MinorSafeguard] goodbye guidance could not be delivered; ending the session anyway:', err);
       }
       await handleConfirmedMinor({
         sessionId: turn.sessionId,
@@ -313,7 +399,7 @@ async function runRealtimeMinorSafeguard(turn: ParticipantTurn): Promise<void> {
       );
     }
   } catch (err) {
-    // Fail-open: an eligibility confirmation error must never end a session.
+    // Fail-open: an eligibility handling error must never break the pipeline.
     console.error('[MinorSafeguard] realtime safeguard failed (fail-open):', err);
   }
 }

@@ -43,6 +43,12 @@ each default is marked in the documents with its Q-number.
 - **Q-SYS2 — the crisis recovery prompt says "the connection dropped for a moment".** Phase 1
   answered No to deception. Drafted: keep the wording and disclose the behaviour in consent (done
   in consent2.html). Alternative: change the prompt (a prompt change, research-sensitive).
+  **Update 2026-11-18 (ai-therapist-293):** the owner chose the alternative for this point.
+  The recovery prompt, the recovery speak-first instruction and the on-screen message now say
+  the call "was cut off" (by an automated system on the voice service, if the participant
+  asks) and no longer say the connection dropped; the first recovery reply also names the
+  crisis line aloud. Exact before/after text is in the pull request. Once merged, the consent
+  sentence that discloses the old wording can be revisited.
 - **Q-SYS3 — session limits.** Seeded defaults 30 min, 3 a day, 30-min cooldown; consent says
   "however much you wish". Check prod values; state them or lift them for participants.
 - **Q-SYS4 — derived records and the 24-hour wipe.** Session summaries and notes are generated

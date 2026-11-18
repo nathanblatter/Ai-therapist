@@ -136,7 +136,14 @@ Responses are tiered by severity/score:
 - **High severity**: emit `session:crisis-emergency` to the session room and to
   `admin-broadcast` (all monitoring researchers), set monitoring frequency to `critical`,
   page the on-call researcher by SMS (when paging is configured), and inject the safety
-  protocol steering (below).
+  protocol steering (below). The session-room copy (which opens the participant's crisis
+  resource card) goes out FIRST, from the pipeline the moment the turn scores high and
+  again at the top of `executeHighRiskResponse` (deduplicated), before any log, page or
+  steer: on GPT-Live the vendor's filter can close the voice session half a second into
+  the crisis reply, and the card must not depend on the session surviving
+  (`crisisResources.ts`, ai-therapist-293). The same event is also sent when the vendor
+  stops or cuts a reply, with `severity: null` and a `reason`; see `docs/gpt-live.md`
+  section 7.
 - **Medium severity**: real-time dashboard alert plus a work-queue item for the study team.
   No SMS page.
 - **Risk score >= 25 (low and up)**: the system injects hidden de-escalation steering

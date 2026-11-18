@@ -66,6 +66,7 @@ import {
   LIVE_DEFAULT_BACKEND_MODEL,
 } from '../../utils/liveSessionConfig.js';
 import { sidebandManager } from '../../services/sidebandManager.service.js';
+import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
 
 import { createLogger } from '../../utils/logger.js';
 import { classifyOpenAIError, classifyOpenAIResponse } from '../../utils/openaiErrors.js';
@@ -309,7 +310,9 @@ export default function liveSessionRoutes(): Router {
           toolDefs,
           backendModel,
           storable: isDemoSession,
-          recovery: isRecovery ? { crisisLine } : undefined,
+          recovery: isRecovery
+            ? { crisisLine, speakFirst: buildRecoverySpeakFirstNudge(crisisContact as RecoveryCrisisContact) }
+            : undefined,
           psychoeducationCue: psychoeducationCue === true,
           leadConversation,
         });

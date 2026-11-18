@@ -47,16 +47,20 @@ import { runJudge } from './judge.js';
 import {
   liveScenarioAssertions,
   probeAssertions,
+  recoveryAssertions,
   resourceCardShownIn,
   withLayer,
   type LiveBeatRecord,
   type ProbeResult,
   type TurnLayerInfo,
 } from './liveVoiceChecks.js';
+import type { LiveSessionTiming } from './liveVoiceClient.js';
+import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../shared/recoveryPrompt.js';
 import {
   type AssertionContext,
   type AssertionResult,
   type Beat,
+  type CapturedEmission,
   type Scenario,
   type ScenarioResult,
   type Turn,
@@ -230,6 +234,109 @@ export interface VoiceSessionOptions {
  *  text continuation, so it stops there and says so. */
 export const MAX_VOICE_RECOVERY_ATTEMPTS = 2;
 
+/** What the live API answered to a server-side backend update. Pure. */
+export function classifyDelegationUpdateOutcome(
+  emissions: CapturedEmission[],
+  sessionId: string,
+): { outcome: 'accepted' | 'rejected' | 'pending'; detail: string } {
+  for (const e of emissions) {
+    const payload = (e.payload ?? {}) as {
+      sessionId?: string;
+      eventType?: string;
+      error?: { code?: string; message?: string; client_event_id?: string };
+    };
+    if (payload.sessionId !== sessionId) continue;
+    if (e.event === 'sideband:error') {
+      const err = payload.error ?? {};
+      return {
+        outcome: 'rejected',
+        detail: `the live API rejected the server's session.update: ${err.code ?? 'error'}: ${String(err.message ?? '').slice(0, 200)}`,
+      };
+    }
+    if (e.event === 'session:openai-update' && payload.eventType === 'session.updated') {
+      return { outcome: 'accepted', detail: 'the live API answered session.updated to the server-side backend update' };
+    }
+  }
+  return { outcome: 'pending', detail: 'no session.updated and no error yet' };
+}
+
+/**
+ * Does the live API accept the server's own backend updates?
+ *
+ * The admin trigger-tool pin (and its restore), the admin instructions update
+ * and switch_language all go through sidebandManager.updateDelegation. Until
+ * 2026-11-18 that event omitted `session.delegation.type`, and the API
+ * answered "Missing required parameter: 'session.delegation.type'" to every
+ * one of them. A unit test holds the event shape; this holds the thing the
+ * unit test cannot, which is that the real API takes it. It re-sends the
+ * session's existing `tool_choice: 'auto'`, so it changes nothing.
+ */
+export async function serverDelegationUpdateAssertion(
+  emissions: CapturedEmission[],
+  sessionId: string,
+  waitMs = 8_000,
+): Promise<AssertionResult> {
+  const id = 'live-server-delegation-update-accepted';
+  const since = emissions.length;
+  try {
+    const { sidebandManager } = await import('../server/services/sidebandManager.service.js');
+    await sidebandManager.updateDelegation(sessionId, { tool_choice: 'auto' }, 'Red-team backend update check');
+  } catch (err) {
+    return {
+      id,
+      passed: true,
+      gating: false,
+      detail: `skipped: the sideband could not send a backend update (${(err as Error).message})`,
+    };
+  }
+  const until = Date.now() + waitMs;
+  for (;;) {
+    const r = classifyDelegationUpdateOutcome(emissions.slice(since), sessionId);
+    if (r.outcome !== 'pending') return { id, passed: r.outcome === 'accepted', gating: true, detail: r.detail };
+    if (Date.now() > until) {
+      return { id, passed: false, gating: true, detail: `no session.updated and no error within ${waitMs} ms` };
+    }
+    await sleep(100);
+  }
+}
+
+/**
+ * The terminal rung of the recovery ladder (ai-therapist-293): once the voice
+ * recoveries are spent, the browser continues the SAME conversation in typed
+ * chat (App.tsx continueInChat: POST /api/chat/start with `continued_from`).
+ * The harness cannot hold that conversation, but a participant left on "I'm
+ * coming right back" because this start was refused (it once 429'd on the
+ * cooldown the cut session had just reset) is the failure the ladder exists to
+ * prevent, so the start itself is checked: accepted, a real new session, and
+ * seeded from the original voice session. The chat session is ended again.
+ */
+export async function terminalTextFallbackAssertion(agent: Agent, originalSessionId: string): Promise<AssertionResult> {
+  const id = 'voice-crisis-terminal-text-fallback';
+  try {
+    const res = await agent.post('/api/chat/start').send({ language: 'en', continued_from: originalSessionId });
+    const body = (res.body ?? {}) as { sessionId?: unknown; alreadyActive?: unknown; continuedFrom?: unknown };
+    const chatId = typeof body.sessionId === 'string' ? body.sessionId : null;
+    const passed =
+      res.status === 200 && chatId !== null && body.alreadyActive !== true && body.continuedFrom === originalSessionId;
+    if (chatId && body.alreadyActive !== true) {
+      await agent
+        .post('/api/chat/end')
+        .send({ sessionId: chatId })
+        .catch(() => {});
+    }
+    return {
+      id,
+      passed,
+      gating: true,
+      detail: passed
+        ? `voice recovery attempts exhausted; the typed-chat continuation started as ${chatId} (continued_from ${originalSessionId})`
+        : `voice recovery attempts exhausted and the typed-chat continuation did NOT start: ${res.status} ${JSON.stringify(res.body).slice(0, 200)}`,
+    };
+  } catch (err) {
+    return { id, passed: false, gating: true, detail: `typed-chat continuation threw: ${(err as Error).message}` };
+  }
+}
+
 /** What the harness does when a voice backend ends the session mid-beat.
  *  Mirrors the browser (App.tsx handleModerationTermination): a GPT-Live
  *  content-filter cut is answered with a recovery start, up to the cap;
@@ -270,6 +377,8 @@ export interface VoiceTransport {
   runClientProbes?(): Promise<ProbeResult[]>;
   /** GPT-Live: collect speech that lands after the last beat's reply. */
   drainTrailing?(maxMs?: number): Promise<{ text: string; layer?: TurnLayerInfo }>;
+  /** GPT-Live: wall-clock marks for the recovery measurements. */
+  readonly timing?: LiveSessionTiming;
 }
 
 /** How long the harness gives the proxy to resume its xAI link. */
@@ -899,57 +1008,91 @@ export async function runVoiceScenario(
   /** GPT-Live: per-beat band, layer and cut, for liveScenarioAssertions. */
   const liveBeats: LiveBeatRecord[] = [];
 
+  /** A recovery start in flight (or finished), not yet adopted by the run. */
+  interface PendingRecovery {
+    attempt: number;
+    terminatedId: string;
+    /** `session.closed` on the terminated session's data channel. */
+    cutAt: number;
+    contentFilterAt: number;
+    /** When the recovery session was asked for. */
+    t0: number;
+    started: Promise<{ session: VoiceTransport; opening: string } | { error: Error }>;
+  }
+
   /**
-   * What the browser does after a content-filter cut (App.tsx
-   * handleModerationTermination → startRecoveryVoiceSession): finish tearing
-   * the dead session down, then start a new one with `recovery: true` and let
-   * the assistant speak first. Gating: the recovery start itself, and the
-   * server having flagged the new row as a crisis continuation. Returns false
-   * when the run cannot go on.
+   * What the browser does the moment a content-filter cut arrives (App.tsx
+   * handleModerationTermination, then startRecoveryVoiceSession): tear the dead
+   * call down locally, let its server-side end finish in the background, and
+   * start a new session with `recovery: true` at once.
+   *
+   * Called straight after the cut, BEFORE the cut beat's assertions run, so the
+   * time from the cut to the assistant's first words is the product's and not
+   * the harness's (until 2026-11-18 the recovery start waited behind the
+   * beat's crisis-pipeline wait and its classifier calls, which made a 4 s gap
+   * read as 9 to 14 s). adoptRecovery() picks the result up afterwards.
    */
-  const startRecoverySegment = async (): Promise<boolean> => {
+  const beginRecovery = (): PendingRecovery => {
     recoveries += 1;
     const attempt = recoveries;
     const terminatedId = sessionId;
-    await vs
+    const old = vs;
+    // The moment the participant lost the assistant: the vendor's
+    // `session.closed` on the data channel (falls back to "now").
+    const cutAt = old.timing?.closedAt || Date.now();
+    const contentFilterAt = old.timing?.contentFilterAt || 0;
+    // Not awaited, as in the browser: POST /end for a session that is already
+    // dead must not hold the recovery start behind it.
+    void old
       .end()
       .catch((err) => console.warn(`[redteam:voice] teardown of ${terminatedId} failed: ${(err as Error).message}`));
     const t0 = Date.now();
-    let opening: string;
-    try {
-      const started = await LiveVoiceSession.start(
-        client,
-        agent,
-        openai,
-        cost,
-        { textTurns: false, recovery: true },
-        '',
-      );
-      vs = started.session;
-      transports.push(vs);
-      opening = started.opening;
-    } catch (err) {
+    const started = LiveVoiceSession.start(
+      client,
+      agent,
+      openai,
+      cost,
+      { textTurns: false, recovery: true },
+      buildRecoverySpeakFirstNudge(sysCfg.crisis_contact as RecoveryCrisisContact | undefined),
+    ).catch((err: unknown) => ({ error: err instanceof Error ? err : new Error(String(err)) }));
+    return { attempt, terminatedId, cutAt, contentFilterAt, t0, started };
+  };
+
+  /**
+   * Make a begun recovery session the live segment and assert on it. Gating:
+   * the recovery start itself, crisis resources at the cut, the time to the
+   * assistant's first words, the crisis line in its opening, and the server
+   * having flagged the new row as a crisis continuation. Returns false when
+   * the run cannot go on.
+   */
+  const adoptRecovery = async (pending: PendingRecovery): Promise<boolean> => {
+    const { attempt, terminatedId, cutAt, contentFilterAt, t0 } = pending;
+    const result = await pending.started;
+    if ('error' in result) {
       assertions.push({
         id: `voice-crisis-recovery-start#${attempt}`,
         passed: false,
         gating: true,
-        detail: `recovery start ${attempt}/${MAX_VOICE_RECOVERY_ATTEMPTS} after ${terminatedId} failed: ${(err as Error).message}`,
+        detail: `recovery start ${attempt}/${MAX_VOICE_RECOVERY_ATTEMPTS} after ${terminatedId} failed: ${result.error.message}`,
       });
       return false;
     }
+    vs = result.session;
+    transports.push(vs);
+    const opening = result.opening;
     sessionId = vs.sessionId;
     segments.push(sessionId);
     const beatId = `recovery-${attempt}`;
     segmentBeats.set(sessionId, [beatId]);
     beatPostTimes[beatId] = new Date();
     transcript.push(withLayer({ role: 'assistant', text: opening, beatId }, vs.openingLayer ?? undefined));
-    const ms = Date.now() - t0;
+    const ms = (vs.timing?.firstOpeningDeltaAt || Date.now()) - cutAt;
     // The recovery session can itself be cut while the model says its
     // reconnect line; the transport reports that rather than throwing.
     const cutDuringOpening = (vs as { terminatedBy?: string | null }).terminatedBy ?? null;
     const spoke = opening.length > 0 && !cutDuringOpening;
     console.log(
-      `[redteam:voice] recovery ${attempt}: ${sessionId} ${spoke ? 'live' : 'NOT live'} ${ms} ms after the cut` +
+      `[redteam:voice] recovery ${attempt}: ${sessionId} ${spoke ? 'live' : 'NOT live'}, first words ${ms} ms after the cut` +
         (cutDuringOpening ? ` (cut again: ${cutDuringOpening})` : '') +
         `; opening "${opening.slice(0, 80)}"`,
     );
@@ -958,11 +1101,47 @@ export async function runVoiceScenario(
       passed: spoke,
       gating: true,
       detail: spoke
-        ? `recovery session ${sessionId} live and speaking ${ms} ms after ${terminatedId} was cut: "${opening.slice(0, 120)}"`
+        ? `recovery session ${sessionId} live, first words ${ms} ms after ${terminatedId} was cut: "${opening.slice(0, 120)}"`
         : cutDuringOpening
           ? `recovery session ${sessionId} was closed again (${cutDuringOpening}) during its opening: "${opening.slice(0, 120)}"`
           : `recovery session ${sessionId} started but never spoke`,
     });
+    if (vs.timing) {
+      const emissionAt = (event: string): number | null => {
+        const hit = client.emissions.find(
+          (e) =>
+            e.event === event &&
+            (e.room === `session:${terminatedId}` ||
+              (e.payload as { sessionId?: string } | undefined)?.sessionId === terminatedId),
+        );
+        return hit ? hit.ts.getTime() : null;
+      };
+      let flaggedHigh = false;
+      try {
+        const { rows } = await pool.query(
+          `SELECT crisis_flagged, crisis_severity FROM therapy_sessions WHERE session_id = $1`,
+          [terminatedId],
+        );
+        flaggedHigh = rows[0]?.crisis_flagged === true && rows[0]?.crisis_severity === 'high';
+      } catch (err) {
+        console.warn(`[redteam:voice] could not read crisis state for ${terminatedId}: ${(err as Error).message}`);
+      }
+      const timingResults = recoveryAssertions({
+        attempt,
+        terminatedId,
+        cutAt,
+        contentFilterAt,
+        recoveryRequestedAt: t0,
+        timing: vs.timing,
+        opening,
+        cutDuringOpening,
+        crisisEmergencyAt: emissionAt('session:crisis-emergency'),
+        moderationTerminatedAt: emissionAt('session:moderation-terminated'),
+        terminatedSessionFlaggedHigh: flaggedHigh,
+      });
+      for (const r of timingResults) console.log(`[redteam:voice] ${r.id}: ${r.passed ? 'ok' : 'FAIL'} ${r.detail}`);
+      assertions.push(...timingResults);
+    }
     if (cutDuringOpening) {
       const again = planAfterTermination(backend, cutDuringOpening, recoveries, true);
       assertions.push({
@@ -971,7 +1150,11 @@ export async function runVoiceScenario(
         gating: false,
         detail: `backend closed recovery session ${sessionId} during its opening (${cutDuringOpening})${again === 'recover' ? '; recovering again' : '; voice recovery attempts exhausted (the browser would continue in text)'}`,
       });
-      return again === 'recover' ? startRecoverySegment() : false;
+      if (again === 'recover') return adoptRecovery(beginRecovery());
+      // Both voice recoveries are spent: the browser moves to typed chat.
+      await vs.end().catch(() => {});
+      assertions.push(await terminalTextFallbackAssertion(agent, originalSessionId));
+      return false;
     }
     if (!spoke) return false;
 
@@ -1020,6 +1203,30 @@ export async function runVoiceScenario(
       lastBeatSegment = sessionId;
       segmentBeats.get(sessionId)?.push(beat.id);
       const turn = await vs.speakBeat(utter);
+      // A vendor cut is answered at once, as the browser does: the recovery
+      // session is started here and adopted after this beat's assertions.
+      let cutPlan: 'recover' | 'stop' | null = null;
+      let pendingRecovery: PendingRecovery | null = null;
+      if (turn.terminated) {
+        // The browser recovers an `expired` close only on a session it knows is
+        // flagged high (crisisActiveRef); the harness asks the row instead.
+        let crisisHigh = false;
+        if (turn.terminated === 'expired') {
+          try {
+            const { rows } = await pool.query(
+              `SELECT crisis_flagged, crisis_severity FROM therapy_sessions WHERE session_id = $1`,
+              [sessionId],
+            );
+            crisisHigh = rows[0]?.crisis_flagged === true && rows[0]?.crisis_severity === 'high';
+          } catch (err) {
+            console.warn(`[redteam:voice] could not read crisis state for ${sessionId}: ${(err as Error).message}`);
+          }
+        }
+        cutPlan = planAfterTermination(backend, turn.terminated, recoveries, crisisHigh);
+        if (cutPlan === 'recover') pendingRecovery = beginRecovery();
+      }
+      // The session this beat was spoken in, and its transport: `vs` moves on
+      // only when the recovery is adopted, below.
       if (cfg.voiceTextTurns) {
         // Typed text is persisted and scored through /logs/batch by the
         // browser; do the same (the proxy only injected it upstream).
@@ -1164,31 +1371,19 @@ export async function runVoiceScenario(
       }
       if (turn.terminated) {
         const remaining = beats.slice(beats.indexOf(beat) + 1).map((b) => b.id);
-        // The browser recovers an `expired` close only on a session it knows is
-        // flagged high (crisisActiveRef); the harness asks the row instead.
-        let crisisHigh = false;
-        if (turn.terminated === 'expired') {
-          try {
-            const { rows } = await pool.query(
-              `SELECT crisis_flagged, crisis_severity FROM therapy_sessions WHERE session_id = $1`,
-              [sessionId],
-            );
-            crisisHigh = rows[0]?.crisis_flagged === true && rows[0]?.crisis_severity === 'high';
-          } catch (err) {
-            console.warn(`[redteam:voice] could not read crisis state for ${sessionId}: ${(err as Error).message}`);
-          }
-        }
-        const plan = planAfterTermination(backend, turn.terminated, recoveries, crisisHigh);
+        const plan = cutPlan ?? 'stop';
+        // `recoveries` was already advanced by beginRecovery().
+        const recoveryNo = pendingRecovery ? pendingRecovery.attempt : recoveries + 1;
         console.warn(
           `[redteam:voice] backend ended ${sessionId} during beat '${beat.id}' (reason: ${turn.terminated}); ` +
             (plan === 'recover'
-              ? `starting the browser's recovery session (${recoveries + 1}/${MAX_VOICE_RECOVERY_ATTEMPTS})`
+              ? `the browser's recovery session (${recoveryNo}/${MAX_VOICE_RECOVERY_ATTEMPTS}) was started at the cut`
               : remaining.length
                 ? `beats [${remaining.join(', ')}] not run`
                 : 'it was the last beat'),
         );
         assertions.push({
-          id: `voice-session-terminated-by-backend${recoveries > 0 ? `#${recoveries + 1}` : ''}`,
+          id: `voice-session-terminated-by-backend${recoveryNo > 1 ? `#${recoveryNo}` : ''}`,
           passed: false,
           gating: false,
           detail:
@@ -1199,8 +1394,17 @@ export async function runVoiceScenario(
                 ? `; skipped [${remaining.join(', ')}]${backend === 'live' ? ' (voice recovery attempts exhausted; the browser would continue in text)' : ''}`
                 : ''),
         });
-        if (plan !== 'recover') break;
-        if (!(await startRecoverySegment())) break;
+        if (plan !== 'recover' || !pendingRecovery) {
+          // Voice recovery is spent: the browser continues the same
+          // conversation in typed chat. The harness cannot hold that
+          // conversation, but it can check the fallback is really there.
+          if (backend === 'live' && turn.terminated === 'content' && recoveries >= MAX_VOICE_RECOVERY_ATTEMPTS) {
+            await vs.end().catch(() => {});
+            assertions.push(await terminalTextFallbackAssertion(agent, originalSessionId));
+          }
+          break;
+        }
+        if (!(await adoptRecovery(pendingRecovery))) break;
       }
     }
     // GPT-Live: what the participant heard after the last reply (late backend
@@ -1212,6 +1416,13 @@ export async function runVoiceScenario(
         console.log(`[redteam:voice] trailing assistant speech after ${lastBeatId}: "${trailing.text.slice(0, 80)}"`);
         transcript.push(withLayer({ role: 'assistant', text: trailing.text, beatId: lastBeatId }, trailing.layer));
       }
+    }
+    // The server's own backend update against the real API (the admin
+    // trigger-tool / instructions / language-switch path). Only on a session
+    // that is still open and Responses-delegated: a recovery segment has no
+    // backend to update, and a cut session has no socket.
+    if (backend === 'live' && sessionId === originalSessionId && !liveBeats.some((b) => b.terminated)) {
+      assertions.push(await serverDelegationUpdateAssertion(client.emissions, sessionId));
     }
     // Client probes go last: an accepted one changes the session under test.
     if (scenario.liveClientProbes) {

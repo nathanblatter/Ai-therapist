@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   reportQuota: vi.fn(),
   connectAndWait: vi.fn(),
   upstreamFetch: vi.fn(),
+  buildConfig: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => dbMocks);
@@ -54,7 +55,10 @@ vi.mock('../../middleware/studyStatus.js', () => ({ requireActiveStudyStatus: pa
 vi.mock('../../utils/adminBroadcast.js', () => ({ broadcastAdminEvent: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../utils/sessionAutoTerminate.js', () => ({ scheduleAutoTermination: vi.fn() }));
 vi.mock('../../utils/liveSessionConfig.js', () => ({
-  buildLiveSessionConfig: () => ({ model: 'gpt-live-test' }),
+  buildLiveSessionConfig: (input: unknown) => {
+    mocks.buildConfig(input);
+    return { model: 'gpt-live-test' };
+  },
   isLiveModel: () => true,
   resolveLiveVoice: () => 'voice',
   LIVE_DEFAULT_BACKEND_MODEL: 'backend-test',
@@ -93,6 +97,7 @@ beforeEach(() => {
   dbMocks.getAiModel.mockResolvedValue('gpt-live-test');
   mocks.reportQuota.mockReset().mockResolvedValue(undefined);
   mocks.connectAndWait.mockReset().mockResolvedValue(undefined);
+  mocks.buildConfig.mockReset();
   mocks.upstreamFetch.mockReset();
   // supertest talks to the app over a real socket; only the upstream fetch is stubbed.
   vi.stubGlobal('fetch', mocks.upstreamFetch);
@@ -198,6 +203,27 @@ describe('POST /api/live/session sideband delegation mode', () => {
     mocks.upstreamFetch.mockResolvedValue(healthy());
     await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: true }).expect(201);
     expect(mocks.connectAndWait.mock.calls[0][3]).toMatchObject({ delegationMode: 'client' });
+  });
+
+  // The recovery session's speak-first instruction is authored server-side and
+  // placed in the session's startup input (the documented greeting recipe), so
+  // the assistant comes back talking even before the browser's own nudge
+  // (ai-therapist-293).
+  it('gives a recovery session its speak-first instruction, naming the crisis line and not a dropped connection', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: true }).expect(201);
+    const input = mocks.buildConfig.mock.calls[0][0] as { recovery?: { crisisLine: string; speakFirst?: string } };
+    expect(input.recovery?.crisisLine).toContain('988');
+    expect(input.recovery?.speakFirst).toMatch(/Speak first, immediately/);
+    expect(input.recovery?.speakFirst).toContain('988');
+    expect(input.recovery?.speakFirst).toContain('741741');
+    expect(input.recovery?.speakFirst).not.toMatch(/connection (just )?dropped|technical drop/i);
+  });
+
+  it('an ordinary session gets no recovery block at all', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    expect((mocks.buildConfig.mock.calls[0][0] as { recovery?: unknown }).recovery).toBeUndefined();
   });
 
   it('only the literal boolean marks a recovery start', async () => {

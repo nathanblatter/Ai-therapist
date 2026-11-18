@@ -53,12 +53,6 @@ const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript') as typeof import('opusscript');
 
-/** Verbatim mirror of the browser's recovery nudge (App.tsx, session.started
- *  branch under `recovery`). Keep the two in step: the harness measures the
- *  product path, so it must say exactly what the browser says. */
-export const LIVE_RECOVERY_SPEAK_FIRST_NUDGE =
-  'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.';
-
 const TTS_MODEL = 'gpt-4o-mini-tts';
 const TTS_VOICE = 'alloy';
 const BEAT_TIMEOUT_MS = 90_000;
@@ -120,6 +114,36 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Wall-clock marks one GPT-Live session leaves behind (0 = not reached). */
+export interface LiveSessionTiming {
+  /** `error` with code content_filter (the vendor stopped a generation). */
+  contentFilterAt: number;
+  /** `session.closed` on the data channel. */
+  closedAt: number;
+  /** POST /api/live/session sent / answered. */
+  postSentAt: number;
+  postDoneAt: number;
+  /** `session.started` on the data channel. */
+  startedAt: number;
+  /** First assistant transcript fragment of the session. */
+  firstOpeningDeltaAt: number;
+  /** First audible assistant audio frame of the session. */
+  firstOpeningAudioAt: number;
+}
+
+/** True when a PCM16 frame carries speech-level energy rather than the
+ *  silence / comfort noise the track sends while the model is quiet. */
+export function isAudiblePcm(pcm: Buffer, threshold = 500): boolean {
+  const samples = Math.floor(pcm.length / 2);
+  if (samples === 0) return false;
+  let sum = 0;
+  for (let i = 0; i < samples; i++) {
+    const v = pcm.readInt16LE(i * 2);
+    sum += v * v;
+  }
+  return Math.sqrt(sum / samples) >= threshold;
+}
+
 /** Close reasons the browser answers with a recovery start rather than an
  *  error: the content filter, and the vendor ceiling on a crisis session (the
  *  runner checks the crisis part; the transport just reports the reason). */
@@ -176,6 +200,18 @@ export class LiveVoiceSession implements VoiceTransport {
   private firstAssistantDeltaAt = 0;
   /** Which layer spoke the opening line. */
   openingLayer: TurnLayerInfo | null = null;
+  /** Wall-clock marks (ms since epoch; 0 = not reached) for the recovery
+   *  measurements: when the vendor's filter fired and closed this session, and
+   *  how long this session took from the browser's POST to its first words. */
+  readonly timing: LiveSessionTiming = {
+    contentFilterAt: 0,
+    closedAt: 0,
+    postSentAt: 0,
+    postDoneAt: 0,
+    startedAt: 0,
+    firstOpeningDeltaAt: 0,
+    firstOpeningAudioAt: 0,
+  };
 
   private constructor(
     private readonly agent: Agent,
@@ -229,9 +265,11 @@ export class LiveVoiceSession implements VoiceTransport {
     // A recovery start is the browser's answer to a content-filter cut
     // (App.tsx startRecoveryVoiceSession): same route, `recovery: true`, and
     // the server swaps in the narrow crisis prompt with no history.
+    vs.timing.postSentAt = Date.now();
     const res = await agent
       .post('/api/live/session')
       .send(opts.recovery ? { sdp, language: 'en', recovery: true } : { sdp, language: 'en' });
+    vs.timing.postDoneAt = Date.now();
     if (res.status !== 201 || typeof res.body?.session_id !== 'string' || typeof res.body?.sdp !== 'string') {
       await pc.close().catch(() => {});
       throw new Error(`POST /api/live/session failed: ${res.status} ${JSON.stringify(res.body).slice(0, 300)}`);
@@ -260,7 +298,12 @@ export class LiveVoiceSession implements VoiceTransport {
       // only, none of the previous conversation.
       vs.windowStart = Date.now();
       vs.firstAssistantDeltaAt = 0;
-      vs.sendAppend(opts.recovery ? LIVE_RECOVERY_SPEAK_FIRST_NUDGE : openingPrompt);
+      // Either way the text comes from the caller: the opening preamble, or
+      // the browser's recovery nudge (shared/recoveryPrompt.ts, the same
+      // function App.tsx calls, so the harness says exactly what the browser
+      // says). The browser sends the recovery nudge as commentary (the
+      // documented greeting mechanism) and so does the harness.
+      vs.sendAppend(openingPrompt, opts.recovery ? 'commentary' : 'instructions');
       const opening = await vs.awaitAssistantTurn(Date.now() + BEAT_TIMEOUT_MS);
       vs.openingLayer = vs.takeLayer();
       return { session: vs, opening };
@@ -295,7 +338,13 @@ export class LiveVoiceSession implements VoiceTransport {
       e.track.onReceiveRtp.subscribe((rtp) => {
         try {
           const pcm = this.decoder.decode(rtp.payload);
-          if (pcm && pcm.length > 0) this.assistantPcm.push(Buffer.from(pcm));
+          if (pcm && pcm.length > 0) {
+            const buf = Buffer.from(pcm);
+            this.assistantPcm.push(buf);
+            // First AUDIBLE assistant frame of the session (the track carries
+            // silence before the model speaks): what the participant hears.
+            if (!this.timing.firstOpeningAudioAt && isAudiblePcm(buf)) this.timing.firstOpeningAudioAt = Date.now();
+          }
         } catch {
           /* DTX / comfort noise / undecodable frame */
         }
@@ -322,6 +371,7 @@ export class LiveVoiceSession implements VoiceTransport {
     switch (type) {
       case 'session.started':
         this.started = true;
+        this.timing.startedAt = Date.now();
         break;
       case 'session.input_transcript.delta':
         this.userFrags.push({ text: String(ev.delta ?? ''), startMs: Number(ev.start_ms ?? 0) });
@@ -331,6 +381,7 @@ export class LiveVoiceSession implements VoiceTransport {
         this.assistantFrags.push({ text: String(ev.delta ?? ''), startMs: Number(ev.start_ms ?? 0) });
         this.lastAssistantDeltaAt = Date.now();
         if (!this.firstAssistantDeltaAt) this.firstAssistantDeltaAt = this.lastAssistantDeltaAt;
+        if (!this.timing.firstOpeningDeltaAt) this.timing.firstOpeningDeltaAt = this.lastAssistantDeltaAt;
         break;
       case 'session.delegation.created': {
         const d = ev.delegation as { id?: unknown } | undefined;
@@ -363,6 +414,7 @@ export class LiveVoiceSession implements VoiceTransport {
       case 'session.closed':
         this.closed = true;
         this.closeReason = typeof ev.reason === 'string' ? ev.reason : 'session.closed';
+        if (!this.timing.closedAt) this.timing.closedAt = Date.now();
         break;
       case 'error': {
         const err = ev.error as { message?: string; code?: string; client_event_id?: string } | undefined;
@@ -371,7 +423,10 @@ export class LiveVoiceSession implements VoiceTransport {
         this.errors.push({ clientEventId, code: String(err?.code ?? ''), message });
         // OpenAI's moderation stopping a generation mid-speech: the session may
         // live on (or close with reason=content right after).
-        if (err?.code === 'content_filter') this.moderationStops += 1;
+        if (err?.code === 'content_filter') {
+          this.moderationStops += 1;
+          this.timing.contentFilterAt = Date.now();
+        }
         // A refused probe is the expected answer, not a session problem.
         if (clientEventId?.startsWith('redteam_probe_')) break;
         this.lastError = message;
@@ -576,11 +631,16 @@ export class LiveVoiceSession implements VoiceTransport {
     return results;
   }
 
-  private sendAppend(text: string): void {
-    // Same shape as the browser's sendInvisiblePrompt; the API caps appends at
-    // 500 tokens, enforced as 1600 chars client-side.
+  private sendAppend(text: string, kind: 'instructions' | 'commentary' = 'instructions'): void {
+    // Same shape as the browser's sendInvisiblePrompt (instructions) and its
+    // recovery speak-first (commentary); the API caps appends at 500 tokens,
+    // enforced as 1600 chars client-side.
     this.dc.send(
-      JSON.stringify({ type: 'session.instructions.append', delegation_id: null, content: text.slice(0, 1600) }),
+      JSON.stringify({
+        type: kind === 'commentary' ? 'session.commentary.append' : 'session.instructions.append',
+        delegation_id: null,
+        content: text.slice(0, 1600),
+      }),
     );
   }
 

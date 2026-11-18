@@ -22,7 +22,8 @@ import {
   MAX_VOICE_RECOVERY_ATTEMPTS,
 } from './voiceClient.js';
 import type { CapturedEmission } from './types.js';
-import { joinFragments, LIVE_RECOVERY_SPEAK_FIRST_NUDGE } from './liveVoiceClient.js';
+import { joinFragments, isAudiblePcm } from './liveVoiceClient.js';
+import { classifyDelegationUpdateOutcome } from './voiceClient.js';
 
 describe('detectVoiceBackend — follows system_config.ai_model like production', () => {
   it('routes grok-voice-* to the proxy and gpt-live-* to GPT-Live', () => {
@@ -190,9 +191,95 @@ describe("planAfterTermination — the browser's content-filter recovery, mirror
   });
 });
 
-describe('LIVE_RECOVERY_SPEAK_FIRST_NUDGE', () => {
-  it("is the browser's nudge, verbatim (App.tsx session.started under recovery)", () => {
+describe('recovery speak-first nudge', () => {
+  it('the browser and the harness call the same builder, so they cannot say different things', () => {
     const app = readFileSync(new URL('../client/main/components/App.tsx', import.meta.url), 'utf8');
-    expect(app).toContain(LIVE_RECOVERY_SPEAK_FIRST_NUDGE);
+    const harness = readFileSync(new URL('./voiceClient.ts', import.meta.url), 'utf8');
+    expect(app).toContain('content: truncateForAppend(buildRecoverySpeakFirstNudge(crisisContact))');
+    expect(harness).toContain('buildRecoverySpeakFirstNudge(sysCfg.crisis_contact');
+    // The old wording is gone from the browser, not left behind as a fallback.
+    expect(app).not.toMatch(/The voice connection just dropped/);
+    expect(app).not.toMatch(/technical drop/);
+  });
+
+  it('both deliver it the same way: as commentary, the documented greeting mechanism', () => {
+    const app = readFileSync(new URL('../client/main/components/App.tsx', import.meta.url), 'utf8');
+    const transport = readFileSync(new URL('./liveVoiceClient.ts', import.meta.url), 'utf8');
+    // Browser: the event that carries the builder's text is a commentary append.
+    expect(app).toMatch(
+      /type: 'session\.commentary\.append',\s+delegation_id: null,\s+content: truncateForAppend\(buildRecoverySpeakFirstNudge\(crisisContact\)\)/,
+    );
+    // Harness: a recovery start sends its opening as commentary; an ordinary
+    // start still sends the disclosure preamble as an instructions append.
+    expect(transport).toContain("vs.sendAppend(openingPrompt, opts.recovery ? 'commentary' : 'instructions')");
+  });
+});
+
+describe('isAudiblePcm: first audible recovery audio, not the silence before it', () => {
+  function pcm(amplitude: number, samples = 480): Buffer {
+    const buf = Buffer.alloc(samples * 2);
+    for (let i = 0; i < samples; i++) buf.writeInt16LE(i % 2 === 0 ? amplitude : -amplitude, i * 2);
+    return buf;
+  }
+
+  it('silence and low-level comfort noise are not speech', () => {
+    expect(isAudiblePcm(pcm(0))).toBe(false);
+    expect(isAudiblePcm(pcm(40))).toBe(false);
+  });
+
+  it('speech-level audio is', () => {
+    expect(isAudiblePcm(pcm(4000))).toBe(true);
+  });
+
+  it('an empty frame is not', () => {
+    expect(isAudiblePcm(Buffer.alloc(0))).toBe(false);
+  });
+});
+
+describe('classifyDelegationUpdateOutcome: did the live API take the server-side backend update', () => {
+  const at = new Date();
+  const emission = (event: string, payload: unknown): CapturedEmission => ({
+    room: 'admin-broadcast',
+    event,
+    payload,
+    ts: at,
+  });
+
+  it('session.updated for this session means accepted', () => {
+    const r = classifyDelegationUpdateOutcome(
+      [emission('session:openai-update', { sessionId: 'live_1', eventType: 'session.updated' })],
+      'live_1',
+    );
+    expect(r.outcome).toBe('accepted');
+  });
+
+  it('an API error for this session means rejected, with the API message', () => {
+    const r = classifyDelegationUpdateOutcome(
+      [
+        emission('sideband:error', {
+          sessionId: 'live_1',
+          error: {
+            code: 'missing_required_parameter',
+            message: "Missing required parameter: 'session.delegation.type'.",
+          },
+        }),
+      ],
+      'live_1',
+    );
+    expect(r.outcome).toBe('rejected');
+    expect(r.detail).toContain("Missing required parameter: 'session.delegation.type'");
+  });
+
+  it("another session's events, session.started and unrelated emissions decide nothing", () => {
+    const r = classifyDelegationUpdateOutcome(
+      [
+        emission('session:openai-update', { sessionId: 'live_2', eventType: 'session.updated' }),
+        emission('session:openai-update', { sessionId: 'live_1', eventType: 'session.started' }),
+        emission('sideband:error', { sessionId: 'live_2', error: { message: 'x' } }),
+        emission('session:risk-score-updated', { sessionId: 'live_1' }),
+      ],
+      'live_1',
+    );
+    expect(r.outcome).toBe('pending');
   });
 });

@@ -1120,6 +1120,7 @@ describe('admin control surface', () => {
 
     const events = sentEvents(ws);
     expect(events.map((e) => e.type)).toEqual(['session.update', 'session.instructions.append']);
+    expect(events[0].session.delegation.type).toBe('responses');
     expect(events[0].session.delegation.responses.tool_choice).toEqual({
       type: 'function',
       name: 'start_breathing_exercise',
@@ -1134,6 +1135,7 @@ describe('admin control surface', () => {
     await flush();
 
     const reset = sentEvents(ws).find((e) => e.type === 'session.update');
+    expect(reset!.session.delegation.type).toBe('responses');
     expect(reset!.session.delegation.responses.tool_choice).toBe('auto');
     expect(sb.sessions.get(sessionId).toolChoiceReset).toBeNull();
   });
@@ -1167,8 +1169,11 @@ describe('admin control surface', () => {
 
     const events = sentEvents(ws);
     expect(events[0].type).toBe('session.update');
+    // `type` is required by the live API on an update as well as at creation:
+    // without it the API answers "Missing required parameter:
+    // 'session.delegation.type'" and applies nothing.
     expect(events[0].session).toEqual({
-      delegation: { responses: { instructions: 'new clinical prompt' } },
+      delegation: { type: 'responses', responses: { instructions: 'new clinical prompt' } },
     });
   });
 
@@ -1214,6 +1219,123 @@ describe('recovery session (client delegation)', () => {
     });
     return ws as unknown as FakeSocket;
   }
+
+  // A recovery session that stays silent after its speak-first instruction:
+  // the server re-sends it, as commentary (the documented greeting mechanism;
+  // an instructions re-send did not reliably make a silent session speak).
+  describe('speak-first watchdog (ai-therapist-293)', () => {
+    const appends = (ws: FakeSocket) => sentEvents(ws).filter((e) => e.type === 'session.commentary.append');
+
+    beforeEach(() => {
+      getSystemConfigMock.mockResolvedValue({
+        features: {},
+        crisis_contact: {
+          hotline: '988 Suicide & Crisis Lifeline',
+          phone: '988',
+          text: 'HOME to 741741',
+          enabled: true,
+        },
+      });
+    });
+
+    it('re-sends the speak-first instruction at 4 s and 8 s when the session has not spoken', async () => {
+      const sessionId = 's-rec-silent';
+      const ws = await attachRecovery(sessionId);
+      ws.send.mockClear();
+      await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+
+      await vi.advanceTimersByTimeAsync(3_900);
+      expect(appends(ws)).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(200);
+      await flush();
+      expect(appends(ws)).toHaveLength(1);
+      const nudge = appends(ws)[0].content as string;
+      expect(nudge).toMatch(/Speak first, immediately/);
+      expect(nudge).toContain('988');
+      expect(nudge).toContain('HOME to 741741');
+      expect(nudge).not.toMatch(/connection (just )?dropped|technical drop/i);
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      await flush();
+      expect(appends(ws)).toHaveLength(2);
+
+      // Two re-sends, then it stops: the browser's own cap moves the
+      // participant on from a session that still will not speak.
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flush();
+      expect(appends(ws)).toHaveLength(2);
+      expect(broadcastMock).toHaveBeenCalledWith(
+        expect.anything(),
+        'live:recovery-silent',
+        expect.objectContaining({ sessionId, attempt: 1 }),
+        sessionId,
+      );
+    });
+
+    it('sends nothing once the assistant has spoken', async () => {
+      const sessionId = 's-rec-spoke';
+      const ws = await attachRecovery(sessionId);
+      ws.send.mockClear();
+      await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+      await vi.advanceTimersByTimeAsync(1_800);
+      await fire(sessionId, { type: 'session.output_transcript.delta', delta: "I'm back.", start_ms: 0, end_ms: 400 });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flush();
+      expect(appends(ws)).toHaveLength(0);
+    });
+
+    it('stops after the first re-send works', async () => {
+      const sessionId = 's-rec-late';
+      const ws = await attachRecovery(sessionId);
+      ws.send.mockClear();
+      await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+      await vi.advanceTimersByTimeAsync(4_100);
+      await flush();
+      expect(appends(ws)).toHaveLength(1);
+      await fire(sessionId, { type: 'session.output_transcript.delta', delta: "I'm back.", start_ms: 0, end_ms: 400 });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flush();
+      expect(appends(ws)).toHaveLength(1);
+    });
+
+    it('still re-sends, with the national lines, when the crisis contact cannot be read', async () => {
+      const sessionId = 's-rec-noconfig';
+      const ws = await attachRecovery(sessionId);
+      getSystemConfigMock.mockRejectedValue(new Error('db down'));
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      ws.send.mockClear();
+      await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+      await vi.advanceTimersByTimeAsync(4_100);
+      await flush();
+      spy.mockRestore();
+      expect(appends(ws)).toHaveLength(1);
+      expect(appends(ws)[0].content as string).toContain('988');
+    });
+
+    it('does nothing after the session has closed', async () => {
+      const sessionId = 's-rec-closed';
+      const ws = await attachRecovery(sessionId);
+      await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+      await fire(sessionId, { type: 'session.closed', reason: 'close_requested', usage: { seconds: 2 } });
+      ws.send.mockClear();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flush();
+      expect(appends(ws)).toHaveLength(0);
+    });
+
+    it('never touches an ordinary session, whose opening is the disclosure preamble', async () => {
+      const sessionId = 's-ordinary-opening';
+      const ws = await attach(sessionId);
+      ws.send.mockClear();
+      await fire(sessionId, { type: 'session.started', session: { id: `live_${sessionId}` } });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flush();
+      expect(appends(ws).filter((e) => /Speak first, immediately/.test(String(e.content)))).toHaveLength(0);
+    });
+  });
 
   it('reports its delegation mode; ordinary sessions default to responses', async () => {
     await attachRecovery('s-rec-mode');
@@ -1334,6 +1456,175 @@ describe('error handling', () => {
     await vi.advanceTimersByTimeAsync(TURN_GAP_MS);
     await flush();
     expect(runCrisisPipelineMock).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Server-side backend updates carry delegation.type
+// ---------------------------------------------------------------------------
+
+describe('updateDelegation event shape', () => {
+  it('every backend update names the delegation type the live API requires', async () => {
+    const sessionId = 's-delegation-type';
+    const ws = await attach(sessionId);
+
+    await sidebandManager.updateDelegation(sessionId, { tool_choice: 'auto' });
+    await sidebandManager.updateDelegation(sessionId, { instructions: 'x', tools: [] });
+
+    const updates = sentEvents(ws).filter((e) => e.type === 'session.update');
+    expect(updates).toHaveLength(2);
+    for (const u of updates) {
+      expect(u.session.delegation.type).toBe('responses');
+      expect(typeof u.event_id).toBe('string');
+    }
+    expect(updates[0].session).toEqual({ delegation: { type: 'responses', responses: { tool_choice: 'auto' } } });
+    expect(updates[1].session).toEqual({
+      delegation: { type: 'responses', responses: { instructions: 'x', tools: [] } },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vendor moderation: crisis resources first (ai-therapist-293)
+// ---------------------------------------------------------------------------
+
+describe('vendor moderation and crisis resources', () => {
+  const CONTENT_FILTER = {
+    type: 'error',
+    error: { type: 'content_filter', code: 'content_filter', message: 'The generation was stopped due to moderation.' },
+  };
+
+  /** A session-room emitter that records, in order, what went out and when the DB was read. */
+  function recordingIo(order: string[]) {
+    const emit = vi.fn((event: string) => {
+      order.push(`emit:${event}`);
+    });
+    (global as { io?: unknown }).io = { to: vi.fn(() => ({ emit })) };
+    return emit;
+  }
+
+  beforeEach(async () => {
+    const { clearCrisisResourceState } = await import('./crisisResources.js');
+    clearCrisisResourceState();
+  });
+
+  it('a content_filter error sends the resource card at once, before the session closes or anything is logged', async () => {
+    const sessionId = 's-moderation-stop';
+    await attach(sessionId);
+    const order: string[] = [];
+    queryMock.mockImplementation(async (sql: string) => {
+      order.push(`db:${String(sql).trim().slice(0, 24)}`);
+      return { rows: [], rowCount: 0 };
+    });
+    const emit = recordingIo(order);
+
+    await fire(sessionId, CONTENT_FILTER);
+
+    expect(emit).toHaveBeenCalledWith(
+      'session:crisis-emergency',
+      expect.objectContaining({ sessionId, reason: 'vendor_moderation_stop', severity: null }),
+    );
+    // First thing that happened: no DB write got in ahead of it.
+    expect(order[0]).toBe('emit:session:crisis-emergency');
+    // The session has NOT closed: this is the outcome where only the reply is cut.
+    expect(emit).not.toHaveBeenCalledWith('session:moderation-terminated', expect.anything());
+  });
+
+  it('an ordinary API error sends no resource card', async () => {
+    const sessionId = 's-ordinary-error';
+    await attach(sessionId);
+    const emit = recordingIo([]);
+
+    await fire(sessionId, { type: 'error', error: { code: 'invalid_event', message: 'bad event' } });
+    await flush();
+
+    expect(emit).not.toHaveBeenCalledWith('session:crisis-emergency', expect.anything());
+  });
+
+  it('a content close with no prior error and no risk signal still sends the card, before the crisis state is read', async () => {
+    const sessionId = 's-content-close';
+    await attach(sessionId);
+    const order: string[] = [];
+    queryMock.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes('crisis_flagged')) {
+        order.push('db:crisis-state');
+        return { rows: [{ crisis_flagged: false, crisis_severity: null }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const emit = recordingIo(order);
+
+    await fire(sessionId, { type: 'session.closed', reason: 'content', usage: { seconds: 42 } });
+    await flush();
+
+    const terminated = order.indexOf('emit:session:moderation-terminated');
+    const card = order.indexOf('emit:session:crisis-emergency');
+    const crisisRead = order.indexOf('db:crisis-state');
+    expect(terminated).toBeGreaterThan(-1);
+    expect(card).toBeGreaterThan(-1);
+    expect(crisisRead).toBeGreaterThan(-1);
+    expect(card).toBeLessThan(crisisRead);
+    expect(terminated).toBeLessThan(crisisRead);
+    expect(emit).toHaveBeenCalledWith(
+      'session:crisis-emergency',
+      expect.objectContaining({ sessionId, reason: 'vendor_cut' }),
+    );
+  });
+
+  it('the usual sequence (error, then close half a second later) sends the card once, at the error', async () => {
+    const sessionId = 's-error-then-close';
+    await attach(sessionId);
+    const order: string[] = [];
+    const emit = recordingIo(order);
+
+    await fire(sessionId, CONTENT_FILTER);
+    await vi.advanceTimersByTimeAsync(600);
+    await fire(sessionId, { type: 'session.closed', reason: 'content', usage: { seconds: 42 } });
+    await flush();
+
+    const cards = emit.mock.calls.filter((c: unknown[]) => c[0] === 'session:crisis-emergency');
+    expect(cards).toHaveLength(1);
+    expect(order.indexOf('emit:session:crisis-emergency')).toBeLessThan(
+      order.indexOf('emit:session:moderation-terminated'),
+    );
+  });
+
+  it('the vendor ceiling on a session flagged high sends the card with the reconnect announcement', async () => {
+    const sessionId = 's-ceiling-card';
+    await attach(sessionId);
+    queryMock.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes('crisis_flagged')) {
+        return { rows: [{ crisis_flagged: true, crisis_severity: 'high' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const emit = recordingIo([]);
+
+    await fire(sessionId, { type: 'session.closed', reason: 'expired', usage: { seconds: 3600 } });
+    await flush();
+
+    expect(emit).toHaveBeenCalledWith(
+      'session:crisis-emergency',
+      expect.objectContaining({ sessionId, reason: 'vendor_ceiling' }),
+    );
+  });
+
+  it('an ordinary expiry sends neither', async () => {
+    const sessionId = 's-ceiling-calm';
+    await attach(sessionId);
+    queryMock.mockImplementation(async (sql: string) => {
+      if (typeof sql === 'string' && sql.includes('crisis_flagged')) {
+        return { rows: [{ crisis_flagged: false, crisis_severity: null }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const emit = recordingIo([]);
+
+    await fire(sessionId, { type: 'session.closed', reason: 'expired', usage: { seconds: 1800 } });
+    await flush();
+
+    expect(emit).not.toHaveBeenCalledWith('session:crisis-emergency', expect.anything());
+    expect(emit).not.toHaveBeenCalledWith('session:moderation-terminated', expect.anything());
   });
 });
 
