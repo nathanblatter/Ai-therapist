@@ -17,6 +17,13 @@ export type Agent = ReturnType<typeof request.agent>;
 
 export class HarnessClient {
   readonly emissions: CapturedEmission[] = [];
+  /** Every therapy session id this run created, in order (chat starts and
+   *  realtime-text ids via noteSession). The cost pass reads usage by these. */
+  readonly sessionsStarted: string[] = [];
+  /** Sessions a scenario found already active and had to end first. */
+  readonly staleSessionsEnded: string[] = [];
+  /** Chat sessions started and not yet ended, with the agent that owns them. */
+  private readonly openChats = new Map<string, Agent>();
   private patched = false;
   /** Set by listen(): the real server's origin, for paths supertest cannot
    *  drive (the Grok voice WebSocket upgrade). Null for HTTP-only suites. */
@@ -171,7 +178,15 @@ export class HarnessClient {
 
   /** Start a chat session. `opening` is the server-authored first assistant
    *  turn (utils/openingLine.ts) — callers must put it at the head of the
-   *  transcript so disclaimer assertions see what the participant sees. */
+   *  transcript so disclaimer assertions see what the participant sees.
+   *
+   *  Every chat scenario logs in as the same participant, and /api/chat/start
+   *  answers an account that already has an active session with that session
+   *  (`alreadyActive: true`). Accepting it ran the next scenario inside the
+   *  previous one's session, inheriting its risk history and crisis flag
+   *  (ai-therapist-307), so a pre-existing session is an error here, as is a
+   *  session id this client has handed out before. Scenarios start through
+   *  startFreshChat, which clears a leaked session first. */
   async startChat(agent: Agent): Promise<{ sessionId: string; opening: string | null }> {
     let res = await agent.post('/api/chat/start').send({ language: 'en' });
     // chat.routes' chatStartLimiter allows 20 starts per 15 minutes per IP, and
@@ -188,10 +203,72 @@ export class HarnessClient {
     if (res.status !== 200 || !res.body?.sessionId) {
       throw new Error(`chat start failed: ${res.status} ${JSON.stringify(res.body)}`);
     }
+    const sessionId = res.body.sessionId as string;
+    if (res.body.alreadyActive === true) throw new StaleChatSessionError(sessionId);
+    if (this.sessionsStarted.includes(sessionId)) {
+      throw new Error(`chat start returned ${sessionId}, a session an earlier scenario already used`);
+    }
+    this.sessionsStarted.push(sessionId);
+    this.openChats.set(sessionId, agent);
     return {
-      sessionId: res.body.sessionId as string,
+      sessionId,
       opening: typeof res.body.opening === 'string' && res.body.opening ? (res.body.opening as string) : null,
     };
+  }
+
+  /** Start a chat session that is guaranteed new. A session the participant
+   *  still has open (a previous scenario that never reached its teardown) is
+   *  ended through the normal /api/chat/end route and reported loudly, then the
+   *  start is retried once; a second pre-existing session throws. */
+  async startFreshChat(agent: Agent): Promise<{ sessionId: string; opening: string | null }> {
+    try {
+      return await this.startChat(agent);
+    } catch (err) {
+      if (!(err instanceof StaleChatSessionError)) throw err;
+      console.error(
+        `[redteam] HARNESS LEAK: the participant already had active chat session ${err.sessionId}; ` +
+          'ending it before this scenario starts (an earlier scenario skipped its teardown)',
+      );
+      this.staleSessionsEnded.push(err.sessionId);
+      await this.endChat(agent, err.sessionId);
+      return this.startChat(agent);
+    }
+  }
+
+  /**
+   * Run a scenario's turns inside `sessionId` and always end the session
+   * afterwards, including when a turn throws (ai-therapist-307). On success a
+   * failed end is an error; after a failure the end is best-effort and the
+   * turn's own error is the one rethrown.
+   */
+  async driveChatSession<T>(agent: Agent, sessionId: string, turns: () => Promise<T>): Promise<T> {
+    let out: T;
+    try {
+      out = await turns();
+    } catch (err) {
+      await this.endChat(agent, sessionId).catch((endErr: Error) =>
+        console.error(`[redteam] could not end chat session ${sessionId} after a failure: ${endErr.message}`),
+      );
+      throw err;
+    }
+    await this.endChat(agent, sessionId);
+    return out;
+  }
+
+  /** End every chat session this client started and has not seen end. Runs in
+   *  each scenario's teardown as a backstop; returns the ids it had to end. */
+  async endOpenChats(): Promise<string[]> {
+    const ended: string[] = [];
+    for (const [sessionId, agent] of [...this.openChats]) {
+      try {
+        await this.endChat(agent, sessionId);
+        ended.push(sessionId);
+      } catch (err) {
+        this.openChats.delete(sessionId);
+        console.error(`[redteam] could not end leftover chat session ${sessionId}: ${(err as Error).message}`);
+      }
+    }
+    return ended;
   }
 
   /** Send a chat turn and surface the reply plus the new `sessionEnded` flag
@@ -222,11 +299,23 @@ export class HarnessClient {
     return { status: res.status, body: res.body };
   }
 
+  /** End a chat session (idempotent on the server: an already-ended session
+   *  answers 200). Throws on anything else, so a session that could not be
+   *  ended is never mistaken for a clean teardown. */
   async endChat(agent: Agent, sessionId: string): Promise<void> {
-    await agent.post('/api/chat/end').send({ sessionId });
+    const res = await agent.post('/api/chat/end').send({ sessionId });
+    if (res.status !== 200)
+      throw new Error(`chat end failed for ${sessionId}: ${res.status} ${JSON.stringify(res.body)}`);
+    this.openChats.delete(sessionId);
   }
 
   // ---- realtime-text pipeline (/logs/batch) ----
+
+  /** Record a session id the harness made up itself (realtime-text), so the
+   *  cost pass can find its usage rows. */
+  noteSession(sessionId: string): void {
+    if (!this.sessionsStarted.includes(sessionId)) this.sessionsStarted.push(sessionId);
+  }
 
   async postParticipantTurn(agent: Agent, sessionId: string, text: string): Promise<void> {
     await this.postBatch(agent, sessionId, 'user', text);
@@ -285,6 +374,17 @@ export class HarnessClient {
       return p?.sessionId === sessionId;
     }
     return e.room === `session:${sessionId}` || e.room.includes(sessionId);
+  }
+}
+
+/** /api/chat/start handed back a session the participant already had open. */
+export class StaleChatSessionError extends Error {
+  constructor(readonly sessionId: string) {
+    super(
+      `chat start returned the participant's pre-existing active session ${sessionId} (alreadyActive); ` +
+        'refusing to run a scenario inside the session of another scenario',
+    );
+    this.name = 'StaleChatSessionError';
   }
 }
 

@@ -49,7 +49,8 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/_preamble.ts` | Shared persona preamble. |
 | `personaDriver.ts` | LLM persona turn generator over scripted beats. |
 | `generatedVariants.ts` | Opt-in seeded adversarial variants (`--generated-variants <n>`): mutation operators, cached generation, validity guard, assertion inheritance. Off by default, never in CI. |
-| `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |
+| `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. Chat sessions start through `startFreshChat` and run inside `driveChatSession`, so every scenario gets a new session that is ended even when a turn throws (ai-therapist-307). |
+| `sessionCost.ts` | App-side cost of each session from `session_llm_usage` (chat replies, crisis assessor, redaction, insights), estimates where no counts exist, and the cost caveats in `summary.json` (docs/redteam.md "How run cost is counted"). |
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
 | `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
 | `arms.ts` | Forces the proactive_offering arm in-process for the ARM scenarios. |

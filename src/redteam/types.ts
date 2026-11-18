@@ -2,6 +2,7 @@
 import type { EvalDimensionId } from '../server/services/sessionEval.service.js';
 import type { KnownGap } from './knownGap.js';
 import type { ProgressionMetrics } from './progression.js';
+import type { CostBreakdown } from './config.js';
 
 export type { EvalDimensionId };
 
@@ -247,7 +248,10 @@ export interface ScenarioResult {
   transcript?: Turn[];
   /** Deterministic session-progression metrics (chat pipeline only; report-only). */
   progression?: ProgressionMetrics | null;
+  /** Total spend attributed to the scenario (= cost.totalUsd when present). */
   costUsd: number;
+  /** Where costUsd came from: per category, recorded vs estimated. */
+  cost?: CostBreakdown;
   durationMs: number;
   error?: string;
   /** Set only on LLM-generated adversarial variants (--generated-variants,

@@ -6,6 +6,8 @@ import type { ScenarioResult } from './types.js';
 import { aggregateProgression } from './progression.js';
 import type { VariantLabel } from './variants.js';
 import type { DiscardedVariant } from './generatedVariants.js';
+import { mergeBreakdowns } from './config.js';
+import type { RunCostNotes } from './sessionCost.js';
 
 export interface RunSummary {
   startedAt: string;
@@ -20,6 +22,9 @@ export interface RunSummary {
   /** --generated-variants only: variants the validity guard (or a failed
    *  generation call) discarded. Undefined when generation was off. */
   discardedVariants?: DiscardedVariant[];
+  /** Cost provenance for the run (sessionCost.ts): what is estimated and what
+   *  is excluded. Absent in older summaries. */
+  costNotes?: RunCostNotes;
 }
 
 /** Whether a result can fail the run: every scripted scenario, and a generated
@@ -105,6 +110,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     assertions: s.assertions,
     judge: s.judge,
     costUsd: Number(s.costUsd.toFixed(6)),
+    // Per category, recorded vs estimated (config.ts CostBreakdown).
+    cost: s.cost ?? null,
     durationMs: s.durationMs,
     error: s.error,
     // Report-only "does the assistant move the session forward" metrics.
@@ -157,7 +164,13 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
       errored: scripted.filter((s) => !!s.error).length,
       assertions: assertionCount,
       assertionFailures,
+      // Kept under its historical name; since 2026-11-18 it is the total of
+      // recorded and estimated spend broken down in `cost`.
       estCostUsd: Number(scripted.reduce((n, s) => n + s.costUsd, 0).toFixed(6)),
+      cost: {
+        ...mergeBreakdowns(scripted.map((s) => s.cost)),
+        ...(summary.costNotes ?? {}),
+      },
       judge: judgeStats(scripted),
       progression: aggregateProgression(scripted.map((s) => s.progression)),
     },
@@ -236,10 +249,22 @@ export function printConsole(summary: RunSummary): boolean {
   const estCost =
     summary.scenarios.reduce((n, s) => n + s.costUsd, 0) +
     (summary.discardedVariants ?? []).reduce((n, d) => n + d.costUsd, 0);
+  const split = mergeBreakdowns(summary.scenarios.map((s) => s.cost));
   console.log('─────────────────────────────────────────────────────────────');
   console.log(
-    ` ${allPass ? 'PASS' : 'FAIL'} — ${scripted.filter((s) => s.passed).length}/${scripted.length} scenarios, est $${estCost.toFixed(4)}`,
+    ` ${allPass ? 'PASS' : 'FAIL'} — ${scripted.filter((s) => s.passed).length}/${scripted.length} scenarios, cost $${estCost.toFixed(4)}` +
+      ` (recorded $${split.recordedUsd.toFixed(4)}, estimated $${split.estimatedUsd.toFixed(4)})`,
   );
+  for (const line of costNoteLines(summary.costNotes)) console.log(`   ${line}`);
   console.log('─────────────────────────────────────────────────────────────\n');
   return allPass;
+}
+
+/** The run's cost caveats as plain lines (console and job summary). */
+export function costNoteLines(notes: Pick<RunCostNotes, 'estimated' | 'excluded'> | undefined | null): string[] {
+  if (!notes) return [];
+  return [
+    ...(notes.estimated ?? []).map((n) => `Estimated: ${n}`),
+    ...(notes.excluded ?? []).map((n) => `Not included: ${n}`),
+  ];
 }

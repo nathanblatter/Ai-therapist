@@ -554,7 +554,7 @@ async function callJson(
       { role: 'user', content: user },
     ],
   });
-  cost.add(model, resp.usage ?? undefined);
+  cost.add(model, resp.usage ?? undefined, 'generation');
   tally.usd += cost.usd - before;
   return resp.choices[0]?.message?.content ?? '';
 }

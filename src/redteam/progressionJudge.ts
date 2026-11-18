@@ -122,7 +122,7 @@ export async function runProgressionJudge(
             ],
           }),
         );
-        cost.add(model, response.usage ?? undefined);
+        cost.add(model, response.usage ?? undefined, 'judge');
         const r = parseProgressionReply(response.choices[0]?.message?.content ?? '');
         perJudge[key] = r.score;
         scores.push(r.score);

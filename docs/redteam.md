@@ -948,14 +948,20 @@ npm run redteam -- --suite smoke --dry-run --generated-variants 4     # offline:
   if real, a candidate for a new scripted beat), not a regression in a
   scripted gate. `--gate-generated` makes variant failures fail the run.
 
-Cost (same `CostTracker` accounting as the rest of the harness; estimates, see
-R5): generation is one `gpt-4o-mini` call (~1.2k in / ~0.5k out, ~$0.0005)
-plus one theme-guard call (~0.9k in / ~60 out, ~$0.0002) per variant, paid
-once and then served from the cache. Running a variant costs what its parent
-costs: ~$0.015-0.02 for a chat scenario, ~$0.004 more per persistence
-follow-up beat (assumed `gpt-5.2` reply rate), near $0 tracked for the
-realtime-text crisis ladder. Expect **~$0.10-0.20 and ~4-8 min for
-`--generated-variants 8`**, and at most **~$0.60** at the cap of 20.
+Cost (same `CostTracker` accounting as the rest of the harness, see "How run
+cost is counted"): generation is one `gpt-4o-mini` call (~1.2k in / ~0.5k
+out, ~$0.0005) plus one theme-guard call (~0.9k in / ~60 out, ~$0.0002) per
+variant, recorded from the API usage, paid once and then served from the
+cache. Running a variant costs what its parent costs. The figures first
+written here (~$0.015-0.02 per chat scenario, ~$0.10-0.20 for 8 variants)
+used the old 700-token reply assumption and left out the app-side spend.
+Re-modelled on the corrected accounting (not yet measured live): about
+$0.016 per chat reply at ~7k input tokens, the same again per persistence
+follow-up beat, plus the post-session redaction and insights jobs of each
+chat session (a few cents, `gpt-5` redaction dominating); a realtime-text
+variant costs its crisis-assessor calls. Expect **roughly $0.6-1.2 and ~4-8
+min for `--generated-variants 8`**, and **roughly $1.5-3** at the cap of 20.
+Check `summary.json` `generated.estCostUsd` after the first live run.
 
 ### Ephemeral DB (CI + local)
 
@@ -1100,7 +1106,53 @@ Per model call (transcripts are short, <1k in / <1k out):
   `gpt-5-mini` on flex), times `self_consistency_runs` (default 1); full and
   quality suites only. Roughly $0.003-0.005 per judged scenario.
 
-Observed (seed 42, live end-to-end run against an ephemeral Postgres):
+### How run cost is counted (since 2026-11-18)
+
+Until 2026-11-18 the harness priced every chat reply at an assumed 700 input
+and 260 output tokens and did not count anything the app spends around a
+session. Real chat calls carry about 5,500 to 7,400 input tokens (the assembled
+system prompt is about 11.6k characters and the chat tool definitions another
+15.7k), and every chat session also runs the crisis assessor during the
+session and redaction (`gpt-5`) plus insights after `/api/chat/end`. Chat cost
+was under-reported several times over, so **the observed figures in the table
+below that predate this change are too low.**
+
+Now (`src/redteam/sessionCost.ts`, `CostTracker` in `config.ts`):
+
+- **Recorded:** the app logs every call it makes for a session in
+  `session_llm_usage` with the token counts from the API response (purposes
+  `chat`, `crisis`, `eligibility`, `rerank`, `redaction`, `insights`). After the
+  last scenario the harness waits up to 90 s for the post-session jobs to log,
+  then books those rows into each scenario: `chat-reply`, `in-session` and
+  `post-session` categories. Persona, classifier, progression-judge and
+  generated-variant calls use the `usage` their API response returns; the
+  admin assistant uses its audit row; voice uses `live_usage` seconds.
+- **Estimated, and labelled so:** the session judge (`evaluateSession`
+  returns no usage; each call is priced from the judge system prompt plus the
+  session transcript it was sent, with 400 output tokens); a chat reply with
+  no usage row (priced from the session's stored assembled prompt plus the tool
+  definitions plus the conversation so far, so a floor); a usage row with NULL
+  token counts (priced from the transcript length); persona speech (per
+  minute of audio).
+- **Excluded, and listed:** session naming after redaction (the app records no
+  usage for it); moderation calls (free); any post-session job whose usage had
+  not landed when the wait ended (named per session in `summary.json`).
+
+`summary.json` keeps `costUsd` per scenario and `totals.estCostUsd` (the same
+total as before, now corrected), and adds `cost` per scenario and
+`totals.cost`: `{ totalUsd, recordedUsd, estimatedUsd, byCategory, estimated,
+excluded }`. The console's last line and the GitHub job summary ("Cost"
+section, written by `ciSummary.ts`) show the total with the recorded /
+estimated split, a per-category table and the caveats. All figures are priced
+from `MODEL_PRICING` and the backend-model registry: estimates of the bill,
+never the invoice.
+
+The per-scenario line printed while a run is going shows only the harness's
+own calls; the app-side spend is added once, at the end of the run.
+
+Observed (seed 42, live end-to-end run against an ephemeral Postgres; rows
+dated before 2026-11-18 used the 700-token assumption and exclude the
+app-side spend):
 
 | suite | scenarios | result | est cost | wall time |
 |---|---|---|---|---|
@@ -1139,10 +1191,9 @@ scenarios are dominated by sequential `gpt-5.2` reply latency (~7-10 s/turn).
 > turns with whatever the scratch database resolves to. `gpt-5.2` now uses the
 > published Standard rate ($1.75 / $14 per 1M, checked 2026-11-18), and models
 > missing from `MODEL_PRICING` (the GPT-6 series) are priced from
-> `src/server/utils/backendModels.ts`. The `estCostUsd` in `summary.json` is
-> still an estimate: the chat-reply token counts are assumed (700 in / 260 out
-> per turn). For real chat-model token usage, read `session_llm_usage` where
-> `purpose = 'chat'` in the run's scratch database.
+> `src/server/utils/backendModels.ts`. Since 2026-11-18 chat-reply tokens are
+> read from `session_llm_usage` instead of assumed; see "How run cost is
+> counted" below.
 >
 > **Testing another chat or voice-backend model:** set the key in the scratch
 > database before the run, e.g.

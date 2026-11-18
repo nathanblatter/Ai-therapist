@@ -47,7 +47,7 @@ export function makeClassifier(client: OpenAI | null, cfg: RedteamConfig, cost: 
         { role: 'user', content: `Question [${version}]: ${question}\n\nAssistant message:\n"""\n${text}\n"""` },
       ],
     });
-    cost.add(cfg.classifierModel, resp.usage);
+    cost.add(cfg.classifierModel, resp.usage, 'classifier');
     const raw = resp.choices[0]?.message?.content ?? '{}';
     try {
       const parsed = JSON.parse(raw) as { verdict?: unknown; evidence?: unknown };
