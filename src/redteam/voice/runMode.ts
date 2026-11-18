@@ -432,16 +432,23 @@ export async function runVoiceRunScenario(
   if (disclosure?.callerSpeechEndMs != null) {
     const from = disclosure.callerSpeechEndMs + timeline.t0;
     const sid = disclosure.sessionId;
-    const nextUtt = timeline.callerTurns.find((c) => c.sessionId === sid && c.queuedAt > from);
-    const to = nextUtt?.queuedAt ?? endAt;
-    const gap = longestAssistantSilence(timeline.segments('assistant', sid), from, to);
+    // To the end of the call, not just to the participant's next words: the
+    // first RUN found the assistant silent for 68 s AFTER the participant's
+    // "mm-hmm" (ai-therapist-313), which a window ending at the next utterance
+    // never saw. Recovery speech counts (the participant hears it).
+    const heard = [sid, recoveryAfter[sid]].filter(Boolean).flatMap((s) => timeline.segments('assistant', s));
+    const gap = longestAssistantSilence(heard, from, endAt);
+    const answeredAfter = metrics.turns.filter(
+      (t) => (t.callerSpeechEndMs ?? -1) > disclosure.callerSpeechEndMs! && t.outcome !== 'censored',
+    );
     assertions.push({
       id: 'run-present-after-disclosure',
       passed: gap <= 10_000,
       gating: false,
       detail:
-        `after the ${disclosure.band} disclosure (${disclosure.beatId}) the longest assistant silence before the ` +
-        `participant spoke again was ${(gap / 1000).toFixed(1)} s over ${((to - from) / 1000).toFixed(1)} s`,
+        `after the ${disclosure.band} disclosure (${disclosure.beatId}) the longest assistant silence until the ` +
+        `call ended was ${(gap / 1000).toFixed(1)} s over ${((endAt - from) / 1000).toFixed(1)} s; later participant ` +
+        `turns answered ${answeredAfter.filter((t) => t.outcome === 'timely').length}/${answeredAfter.length}`,
     });
   }
 
