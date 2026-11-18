@@ -7,7 +7,27 @@ permissions:
   contents: read
   actions: read # gh run download: previous nightly's artifact is the diff baseline
 jobs:
+  plan:
+    # Which variant legs run. The default leg runs every night. The
+    # lead-conversation leg runs on Sundays (UTC) and on manual dispatch only:
+    # recorded token usage (2026-11-18) puts a full leg at roughly $3 to $5,
+    # several times the earlier estimate, and the flag it tests is off.
+    name: plan variant legs
+    runs-on: ubuntu-latest
+    outputs:
+      variants: ${{ steps.pick.outputs.variants }}
+    steps:
+      - id: pick
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$(date -u +%u)" = "7" ]; then
+            echo 'variants=["default","lead-conversation"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'variants=["default"]' >> "$GITHUB_OUTPUT"
+          fi
   redteam-full:
+    needs: plan
     # One leg per feature-flag variant (src/redteam/variants.ts). `default` is
     # the migrated config; `lead-conversation` turns on
     # features.lead_conversation_enabled in the harness process only (never in
@@ -17,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [default, lead-conversation]
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
     runs-on: ubuntu-latest
     # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
     # and redteam-nightly.yml (composite actions cannot declare services). The
