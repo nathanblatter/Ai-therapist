@@ -364,8 +364,10 @@ const CONTEXT_SIGNAL_PATTERNS: Array<{ kind: ContextSignalKind; label: string; s
     kind: 'means_question',
     label: 'asks for a painless or quick way',
     strong: true,
+    // "way to go" in the sense of dying, not "the easiest way to go about it"
+    // or "the fastest way to go home".
     pattern:
-      /\b(?:painless|least painful|quickest|fastest|easiest|surest) way to (?:die|go|do it|end (?:it|things|my life))\b/,
+      /\b(?:painless|least painful|quickest|fastest|easiest|surest) way to (?:die|go(?!\s+(?:about|to|into|through|back|home|from|for|with|on|there|forward|ahead)\b)|do it|end (?:it|things|my life))\b/,
   },
 ];
 
@@ -395,22 +397,41 @@ export function detectContextSignals(content: string): ContextSignal[] {
   return matchContextSignals(normalizeForScreen(content)).map(({ kind, label, strong }) => ({ kind, label, strong }));
 }
 
-// Only consulted by the degraded fallback, where no assessor is available to
-// read the sentence. A negation inside the signal ("I'm NOT going to do it",
-// "I was never going to do it"), one leading into it in the same clause ("I
-// don't think I'm going to do it"), or a retraction anywhere in the message
-// ("jk", "instead") must not be over-read into a page. A negation in an
-// earlier clause ("I can't do this anymore, I'm going to do it tonight") does
-// not cancel the signal, hence no comma or full stop in the lead-in.
+// Consulted by the degraded fallback (no assessor to read the sentence) and by
+// the context-signal floor. A negation inside the signal ("I'm NOT going to do
+// it", "I was never going to do it"), a negated verb of thinking or saying that
+// governs it ("I don't think I'm going to do it", "I'm not sure I'll do it",
+// "I never said I'm going to do it"), or a retraction ("jk", "changed my mind",
+// "... but I called my mom instead") must not be over-read into a page.
+//
+// Each of these is deliberately narrow, because every one of them SUPPRESSES a
+// page and the words involved are also the words of insisting:
+//  - a negation that merely stands before the signal does not cancel it ("I
+//    don't care anymore I'm going to do it tonight", "I can't do this anymore,
+//    I'm going to do it tonight"); it has to govern the signal;
+//  - a negated retraction word is the opposite of a retraction ("I'm not
+//    kidding", "this isn't a joke", "I haven't changed my mind");
+//  - "instead" retracts only after the signal and never as "instead of ..."
+//    ("instead of waiting I'm going to do it tonight" is an escalation).
 const NEGATION_INSIDE_SIGNAL = /\b(?:not|never|no longer)\b|n't\b/;
-const NEGATION_LEADING_IN = /\b(?:not|never|no longer|wasn't|isn't|aren't|won't|wouldn't|don't|didn't)\b[\w\s']{0,25}$/;
-const RETRACTION_ANYWHERE = /\b(?:jk|j\/k|kidding|joking|a joke|instead|changed my mind)\b/;
+const NEGATION_GOVERNING_SIGNAL =
+  /(?:\b(?:not|never|no longer)|n't)\s+(?:(?:really|actually|even|quite|totally|so)\s+)*(?:think(?:ing)?|believe|know|mean|meant|say|saying|said|guess|suppose|feel|sure|certain|convinced|like|as if)(?:\s+(?:that|if|whether|like|for sure))?\s*$/;
+const RETRACTION_WORDS = /\b(?:jk|j\/k|kidding|joking|a joke|changed my mind)\b/g;
+const NEGATION_BEFORE_RETRACTION = /(?:\b(?:not|never|no)\b|n't)[\w\s']{0,12}$/;
+const INSTEAD_AS_RETRACTION = /\binstead\b(?!\s+of\b)/;
 
 function signalIsNegated(normalized: string, match: ContextSignalMatch): boolean {
   return (
     NEGATION_INSIDE_SIGNAL.test(match.text) ||
-    NEGATION_LEADING_IN.test(normalized.slice(Math.max(0, match.index - 30), match.index))
+    NEGATION_GOVERNING_SIGNAL.test(normalized.slice(Math.max(0, match.index - 40), match.index))
   );
+}
+
+function signalIsRetracted(normalized: string, match: ContextSignalMatch): boolean {
+  for (const word of normalized.matchAll(RETRACTION_WORDS)) {
+    if (!NEGATION_BEFORE_RETRACTION.test(normalized.slice(Math.max(0, word.index - 20), word.index))) return true;
+  }
+  return INSTEAD_AS_RETRACTION.test(normalized.slice(match.index + match.text.length));
 }
 
 // ============================================
@@ -601,8 +622,9 @@ function describeSessionRiskContext(ctx: SessionRiskContext): string | null {
 function strongContextSignalScore(content: string, ctx: SessionRiskContext): number {
   if (!contextIsMediumOrAbove(ctx)) return 0;
   const text = normalizeForScreen(content);
-  if (RETRACTION_ANYWHERE.test(text)) return 0;
-  const standing = matchContextSignals(text).some((s) => s.strong && !signalIsNegated(text, s));
+  const standing = matchContextSignals(text).some(
+    (s) => s.strong && !signalIsNegated(text, s) && !signalIsRetracted(text, s),
+  );
   return standing ? CRISIS_KEYWORDS.high.score : 0;
 }
 
@@ -1525,7 +1547,19 @@ export async function analyzeMessageRisk(
     // each inflated score becomes the next turn's run-up (observed live on the
     // slow-drift scenario: assessor 30 / 50 / 65 / 80 recorded as 50 / 65 / 80
     // / 95, a page raised by the bonus alone).
-    const trajectoryApplies = riskScore > 0 && trajectory.trajectoryScore > 0 && !isContextWake;
+    //
+    // For the same reason it is not applied to a periodic sweep in a session
+    // that is already risk-bearing. That turn is chosen by a counter, not by
+    // its content; the assessor is given the same session risk context; and
+    // the run-up it would be compared with is the context-wake rows before it.
+    // When the assessor simply repeats the level the session already holds,
+    // those rows are a flat line, which the trajectory reads as "deteriorating"
+    // (+15): 15 more than the stored score is always a re-flag, and from 60 or
+    // above it is a high flag and a page, for a turn that said nothing new. A
+    // sweep in a calm session keeps the bonus, as before.
+    const sweepWithSessionContext = isSweep && sessionContext.elevated;
+    const trajectoryApplies =
+      riskScore > 0 && trajectory.trajectoryScore > 0 && !isContextWake && !sweepWithSessionContext;
     if (trajectoryApplies) {
       riskScore = Math.min(100, riskScore + trajectory.trajectoryScore);
       factors = [...factors, `trajectory: ${trajectory.trend}`];
@@ -1558,7 +1592,7 @@ export async function analyzeMessageRisk(
                   trajectory_score: trajectory.trajectoryScore,
                   trajectory_trend: trajectory.trend,
                   // Computed but deliberately not added (context wake).
-                  ...(isContextWake ? { trajectory_applied: false } : {}),
+                  ...(isContextWake || sweepWithSessionContext ? { trajectory_applied: false } : {}),
                 }
               : {}),
             ...(moderation

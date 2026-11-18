@@ -127,7 +127,14 @@ Three guards keep "assess every turn" from inflating a session:
   and a per-turn bonus compounds (each inflated score becomes the next turn's run-up).
   Observed before this guard, on the slow-drift script: assessor scores 30 / 50 / 65 / 80
   recorded as 50 / 65 / 80 / 95. The bonus is still computed and logged
-  (`trajectory_applied: false`), and still applies to keyword, sweep and moderation turns.
+  (`trajectory_applied: false`), and still applies to keyword and moderation turns and to a
+  sweep in a calm session. A periodic sweep in a session that is already risk-bearing gets no
+  bonus either: that turn is picked by a counter, the assessor has the same session context,
+  and its run-up is the context-wake rows before it. An assessor that merely repeats the level
+  the session holds produces a flat line, which the trajectory reads as "deteriorating" (+15);
+  15 above the stored score is always a re-flag, and from 60 it is a high flag and a page for
+  a turn that said nothing new (found in review, pinned in
+  `crisisDetection.contextClass.test.ts`).
 - **Context-signal floor** (`context_signal_floor`). The assessor is not stable at the band
   edge: "This is the last time we'll talk" after a passive-ideation turn came back 80 on one
   live run and 65 on the next. The score cannot land below 75 when three things agree: the
@@ -184,7 +191,12 @@ signal (first-person "going to do it", "tonight's the night", "this is the last 
 talk", a lethal-dose question, ...), neither negated nor retracted, in a session that already
 holds medium-or-higher risk, scores 75 (high: flag and page) from the screen alone, recorded
 as `context_fallback`. Weak signals ("I've decided", "I won't be here"), calm sessions,
-"I'm not going to do it" and "jk" stay at 0. Retry budget: the patient policy
+"I'm not going to do it" and "jk" stay at 0. What may cancel a strong signal is deliberately
+narrow, because the words of retracting are also the words of insisting: a negation has to
+sit inside the signal or govern it through a verb of thinking or saying ("I don't think I'm
+going to do it"), so "I don't care anymore I'm going to do it tonight" stands; a negated
+retraction word is not a retraction ("I'm not kidding", "this isn't a joke", "I haven't
+changed my mind"); and "instead" retracts only after the signal and never as "instead of ...". Retry budget: the patient policy
 (`CRISIS_PATIENT_RETRY_POLICY`) like every other keyword-free call, dropping to the short one
 (`CRISIS_RETRY_POLICY`) for context wakes while an assessor incident is open (see "Fallback
 behavior"), so a flagged session does not queue 30 seconds of retries on every turn of an
