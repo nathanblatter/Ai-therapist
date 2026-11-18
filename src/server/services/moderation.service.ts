@@ -33,7 +33,7 @@ import {
 
 const log = createLogger('moderation');
 
-const MODERATION_MODEL = 'omni-moderation-latest';
+export const MODERATION_MODEL = 'omni-moderation-latest';
 const TIMEOUT_MS = 5000;
 
 let client: OpenAI | null = null;

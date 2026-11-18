@@ -4,7 +4,7 @@
 //
 //   npx tsx src/redteam/cli.ts --suite smoke
 //
-// Flags: --suite smoke|full|quality|voice|voice-safety  --scenario <id>  --out <dir>
+// Flags: --suite smoke|full|quality|voice|voice-safety|extended  --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
 //        --variant <name> (run under a named feature-flag variant: default,
@@ -38,6 +38,7 @@ import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, type RedteamConfig } from '.
 import { makeClassifier } from './assertions.js';
 import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
+import { participantIdentityProblem } from './participantIdentity.js';
 import { runProgressionJudge, SESSION_PROGRESSION, type ProgressionJudgeResult } from './progressionJudge.js';
 import { computeProgression } from './progression.js';
 import {
@@ -60,6 +61,7 @@ import {
   type RunDiff,
 } from './diff.js';
 import { selectSuite, type SuiteEntry } from './scenarios/index.js';
+import { applyKnownGap, reportKnownGaps } from './knownGap.js';
 import type {
   AssertionContext,
   AssertionResult,
@@ -70,6 +72,15 @@ import type {
   ScenarioResult,
   Turn,
 } from './types.js';
+
+/** The chat model this run exercises: system_config.chat_model in the scratch
+ *  database, resolved by the same helper /api/chat/start uses, so the harness
+ *  always tests (and prices) what chat actually runs. Set a candidate with
+ *  `UPDATE system_config ... chat_model` before the run; never via code. */
+async function chatModelUnderTest(): Promise<string> {
+  const { resolveChatModel } = await import('../server/utils/chatModel.js');
+  return resolveChatModel().catch(() => CHAT_THERAPY_MODEL);
+}
 
 const SAFE_ASSISTANT_STUB =
   "I hear you, and I'm really glad you told me. That sounds incredibly heavy to carry. " +
@@ -100,7 +111,8 @@ function parseArgs(argv: string[]): RedteamConfig {
     switch (a) {
       case '--suite': {
         const v = next();
-        cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' || v === 'voice-safety' ? v : 'full';
+        cfg.suite =
+          v === 'smoke' || v === 'quality' || v === 'voice' || v === 'voice-safety' || v === 'extended' ? v : 'full';
         break;
       }
       case '--scenario':
@@ -276,7 +288,7 @@ async function runChatScenario(
       reply = res.response;
       sessionEnded = res.sessionEnded;
       extra = { chatSessionEnded: sessionEnded };
-      cost.estimate(CHAT_THERAPY_MODEL, 700, 260);
+      cost.estimate(await chatModelUnderTest(), 700, 260);
       transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
     }
 
@@ -566,6 +578,10 @@ async function runEntry(
   const start = Date.now();
 
   try {
+    if (scenario.requiresReservedParticipant && !cfg.dryRun) {
+      const problem = await participantIdentityProblem(pool);
+      if (problem) throw new Error(problem);
+    }
     // Voice needs a live OpenAI client (persona TTS) and a real voice backend;
     // in dry-run it falls back to the realtime-text flow so the offline
     // pipeline completes.
@@ -577,8 +593,26 @@ async function runEntry(
           : scenario.pipeline === 'voice' && !cfg.dryRun
             ? (await import('./voiceClient.js')).runVoiceScenario
             : runRealtimeScenario;
-    const res = await runner(scenario, beats, runJudgeFlag, client, openai, vcfg, cost, canaries, pool, classify);
-    const { assertions, judge, judgeBreaches, sessionId, transcript } = res;
+    // Scenario fixture (test-only fault injection): installed around the run
+    // and always undone, so a failed scenario cannot leak its fault into the next.
+    const undoFixture = await scenario.fixture?.({ pool, dryRun: cfg.dryRun });
+    const res = await runner(
+      scenario,
+      beats,
+      runJudgeFlag,
+      client,
+      openai,
+      vcfg,
+      cost,
+      canaries,
+      pool,
+      classify,
+    ).finally(async () => {
+      await undoFixture?.();
+      await scenario.teardown?.(pool);
+    });
+    const { judge, judgeBreaches, sessionId, transcript } = res;
+    const assertions = applyKnownGap(scenario, res.assertions);
     const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
     return {
       id: label,
@@ -715,6 +749,7 @@ async function main(): Promise<void> {
   for (const stale of ['diff.json', 'diff.md'])
     (await import('node:fs')).rmSync(`${cfg.outDir}/${stale}`, { force: true });
   const passed = printConsole(summary);
+  reportKnownGaps(results);
   console.log(`[redteam] wrote ${junitPath} and ${summaryPath}`);
 
   // Persist the run for the admin Simulation Runs panel (phase 3). Best-effort:

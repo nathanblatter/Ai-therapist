@@ -34,6 +34,8 @@ vi.mock('./toolRegistry.service.js', () => ({
 vi.mock('./toolExecution.helpers.js', () => ({
   executeLoggedToolCall: executeLoggedToolCallMock,
 }));
+const { resolveChatModelMock } = vi.hoisted(() => ({ resolveChatModelMock: vi.fn() }));
+vi.mock('../utils/chatModel.js', () => ({ resolveChatModel: resolveChatModelMock }));
 const getActiveSessionIdsAmongMock = vi.fn();
 vi.mock('../db/index.js', () => ({
   recordLlmUsage: recordLlmUsageMock,
@@ -73,6 +75,50 @@ beforeEach(() => {
   getSessionAccessInfoMock.mockResolvedValue({ status: 'active', user_id: 7, session_type: 'chat' });
   getSessionConfigMock.mockResolvedValue({ instructions: 'STORED PROMPT' });
   getSessionMessagesMock.mockResolvedValue([]);
+  resolveChatModelMock.mockResolvedValue('gpt-5.2');
+});
+
+describe('chat model selection (system_config.chat_model)', () => {
+  it('runs every turn on the model the session started with and meters it under that model', async () => {
+    const sid = 'chat_model_pinned';
+    initializeChatSession(sid, 'P', 'gpt-6.1-terra');
+    // An admin flipping chat_model mid-session must not move this session.
+    resolveChatModelMock.mockResolvedValue('gpt-5.2');
+    createMock.mockResolvedValue({ output_text: 'ok', output: [], usage: { input_tokens: 10, output_tokens: 4 } });
+    await sendMessage(sid, 'hi');
+    await sendMessage(sid, 'again');
+
+    for (const call of createMock.mock.calls) expect(call[0].model).toBe('gpt-6.1-terra');
+    await vi.waitFor(() => expect(recordLlmUsageMock).toHaveBeenCalledWith(sid, 'chat', 'gpt-6.1-terra', 10, 4));
+    endChatSession(sid);
+  });
+
+  it('sends no parameter the GPT-6 migration guide says to remove', async () => {
+    const sid = 'chat_model_params';
+    initializeChatSession(sid, 'P', 'gpt-6.1-terra');
+    await sendMessage(sid, 'hi');
+    const params = createMock.mock.calls[0][0] as Record<string, unknown>;
+    for (const key of ['temperature', 'top_p', 'top_logprobs', 'logprobs', 'reasoning', 'max_tokens']) {
+      expect(params, key).not.toHaveProperty(key);
+    }
+    endChatSession(sid);
+  });
+
+  it('after a restart, uses the model stamped on the session record, not the current config', async () => {
+    getSessionConfigMock.mockResolvedValue({ instructions: 'STORED PROMPT', ai_model: 'gpt-6.1-terra' });
+    resolveChatModelMock.mockResolvedValue('gpt-5.2');
+    await sendMessage('chat_model_rehydrated', 'hello');
+    expect(createMock.mock.calls[0][0].model).toBe('gpt-6.1-terra');
+    endChatSession('chat_model_rehydrated');
+  });
+
+  it('falls back to the configured model for a session with no stamp (pre-chat_model sessions)', async () => {
+    getSessionConfigMock.mockResolvedValue({ instructions: 'STORED PROMPT', ai_model: null });
+    resolveChatModelMock.mockResolvedValue('gpt-5.2');
+    await sendMessage('chat_model_unstamped', 'hello');
+    expect(createMock.mock.calls[0][0].model).toBe('gpt-5.2');
+    endChatSession('chat_model_unstamped');
+  });
 });
 
 describe('injectGuidance', () => {

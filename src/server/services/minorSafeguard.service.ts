@@ -24,7 +24,7 @@ import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 
 const log = createLogger('minorSafeguard');
 
-const CONFIRM_MODEL = 'gpt-4o-mini';
+export const CONFIRM_MODEL = 'gpt-4o-mini';
 
 let openaiClient: OpenAI | null = null;
 async function getClient(): Promise<OpenAI> {
@@ -66,10 +66,15 @@ export function detectMinorDisclosurePatterns(content: string): { matched: boole
 // STAGE 2: LLM CONFIRMATION
 // ============================================
 
-const MINOR_CONFIRM_PROMPT =
+export const MINOR_CONFIRM_PROMPT =
   `You verify age-eligibility for an adults-only (18+) research study. A pattern screen flagged possible self-disclosure that the PARTICIPANT is under 18. Read the transcript and the flagged message and decide whether the participant is stating that THEY, themselves, are currently under 18.\n` +
   `Return STRICT JSON only: {"is_minor": <true|false>, "stated_age": <number|null>, "confidence": "low"|"medium"|"high", "reasoning": "<one sentence>"}\n` +
   `NOT minor self-disclosure (is_minor=false): talking about their own children, students, or siblings ("my 15-year-old", "my son is 16"); an academic minor ("my minor in college"); past tense ("when I was 15"); hypotheticals, jokes, quotes, song/movie references; ages that are measurements or counts ("I'm 15 minutes away"). Genuine current self-disclosure ("I'm 15", "I'm in 8th grade", "I turn 16 next month") → is_minor=true. Set confidence to "high" only when the statement is unambiguous.`;
+
+/** User message that accompanies MINOR_CONFIRM_PROMPT. */
+export function buildMinorConfirmUserMessage(transcript: string, latestContent: string): string {
+  return `Recent transcript:\n${transcript}\n\nFlagged participant message:\n"${latestContent}"`;
+}
 
 export interface HistoryMessage {
   role: string;
@@ -133,7 +138,7 @@ export async function confirmMinorDisclosure(
       { role: 'system', content: MINOR_CONFIRM_PROMPT },
       {
         role: 'user',
-        content: `Recent transcript:\n${transcript}\n\nFlagged participant message:\n"${latestContent}"`,
+        content: buildMinorConfirmUserMessage(transcript, latestContent),
       },
     ],
   });

@@ -178,6 +178,14 @@ interface LiveSessionState {
   pendingCalls: Map<string, { name: string; args: string; delegationId: string | null }>;
   /** Backend response ids already metered, so a replayed event can't double-bill. */
   meteredResponses: Set<string>;
+  /**
+   * Delegation timing, keyed by delegation id: when GPT-Live handed the turn to
+   * the backend and when the backend's first text arrived. In voice the
+   * participant waits on exactly this interval, so it is what a backend model
+   * change has to be judged on. Logged per backend response; see
+   * logDelegationTiming.
+   */
+  delegationTimings: Map<string, { startedAt: number; firstTextAt: number | null }>;
   /** Latest cumulative voice seconds from session.usage.updated. */
   lastUsageSeconds: number;
   peakContextRatio: number;
@@ -238,6 +246,40 @@ export interface VoiceSidebandDelegate {
   triggerTool(sessionId: string, toolName: string, args?: Record<string, unknown>): Promise<void>;
   disconnect(sessionId: string, opts?: { graceMs?: number }): Promise<void>;
   shutdown(): Promise<void>;
+}
+
+/**
+ * One structured line per completed backend response inside a delegation:
+ * `firstTextMs` is delegation start to the backend's first output text (what
+ * the participant waits on before the voice model can speak the answer),
+ * `totalMs` is start to completion. A delegation that calls tools completes
+ * more than one response; each logs its own line against the same start.
+ * Grep `[Live] delegation timing` to compare backend models on real sessions.
+ * `firstTextMs` is null on a response that only called tools; the text
+ * arrives on the continuation response, which logs its own line.
+ */
+function logDelegationTiming(
+  sessionId: string,
+  delegationId: string | null,
+  state: { delegationTimings: Map<string, { startedAt: number; firstTextAt: number | null }> },
+  model: string,
+  usage: { input_tokens?: number; output_tokens?: number } | undefined,
+): void {
+  if (!delegationId) return;
+  const timing = state.delegationTimings.get(delegationId);
+  if (!timing) return;
+  const now = Date.now();
+  console.log(
+    '[Live] delegation timing',
+    JSON.stringify({
+      session: sessionId.substring(0, 12),
+      delegationId,
+      model,
+      firstTextMs: timing.firstTextAt === null ? null : timing.firstTextAt - timing.startedAt,
+      totalMs: now - timing.startedAt,
+      outputTokens: usage?.output_tokens ?? null,
+    }),
+  );
 }
 
 export class SidebandManager {
@@ -361,6 +403,7 @@ export class SidebandManager {
       ),
       pendingCalls: new Map(),
       meteredResponses: new Set(),
+      delegationTimings: new Map(),
       lastUsageSeconds: 0,
       peakContextRatio: 0,
       finalized: false,
@@ -889,7 +932,12 @@ export class SidebandManager {
       }
 
       // --- Delegation ------------------------------------------------------
-      case 'session.delegation.created':
+      case 'session.delegation.created': {
+        const created = event.delegation as { id?: string } | undefined;
+        const timingState = this.sessions.get(sessionId);
+        if (timingState && created?.id) {
+          timingState.delegationTimings.set(created.id, { startedAt: Date.now(), firstTextAt: null });
+        }
         if (global.io) {
           const delegation = event.delegation as { id?: string; target?: string } | undefined;
           void broadcastAdminEventForSession(
@@ -906,6 +954,7 @@ export class SidebandManager {
           );
         }
         break;
+      }
 
       // Nested Responses events arrive wrapped. Dispatch on the INNER type and
       // preserve the outer delegation_id — the guide warns specifically against
@@ -1028,6 +1077,11 @@ export class SidebandManager {
     const state = this.sessions.get(sessionId);
     if (!state) return;
 
+    if (delegationId && inner.type === 'response.output_text.delta') {
+      const timing = state.delegationTimings.get(delegationId);
+      if (timing && timing.firstTextAt === null) timing.firstTextAt = Date.now();
+    }
+
     switch (inner.type) {
       case 'response.output_item.done': {
         const item = inner.item as { type?: string; name?: string; call_id?: string; arguments?: string } | undefined;
@@ -1050,6 +1104,7 @@ export class SidebandManager {
         const responseId = response?.id;
         if (!responseId || state.meteredResponses.has(responseId)) return;
         state.meteredResponses.add(responseId);
+        logDelegationTiming(sessionId, delegationId, state, response?.model ?? state.backendModel, response?.usage);
         const { recordLlmUsage } = await import('../db/index.js');
         await recordLlmUsage(
           sessionId,

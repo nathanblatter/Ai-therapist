@@ -12,6 +12,7 @@
 // also means the therapy content keeps running on a model we pin ourselves
 // (system_config.live_backend_model) independently of the voice model.
 
+import { getBackendModel } from './backendModels.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 
 import { createLogger } from './logger.js';
@@ -345,6 +346,49 @@ export function liveVoicesForLanguage(languageCode: string | null | undefined): 
 /** Default backend reasoning model for Responses delegation. */
 export const LIVE_DEFAULT_BACKEND_MODEL = 'gpt-5.6-terra';
 
+const REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/**
+ * Resolve system_config.live_backend_reasoning_effort for the configured
+ * backend. Returns null (send nothing, so the model's own default applies,
+ * which is `medium` for every current GPT-5.6 / GPT-6 backend) when the key is
+ * unset; also, with a warning, when it is not a recognised effort or the
+ * registry marks the backend as taking no effort at all.
+ *
+ * Exists because effort drives delegation latency: measured 2026-11-18,
+ * gpt-6.1-terra at its default `medium` spent ~5x the reasoning tokens of
+ * gpt-5.6-terra and the participant waited ~2.4 s longer per delegation; at
+ * `low` it was within ~0.4 s. GPT-6 Astra and GPT-6.1 Sol reject `none`
+ * (GPT-6 guide, Limitations), so `none` is raised to `low` for models the
+ * registry marks as not supporting it rather than letting GPT-Live reject the
+ * setting asynchronously (responses_validation_failed) mid-session.
+ */
+export function resolveBackendReasoningEffort(raw: unknown, backendModel: string): ReasoningEffort | null {
+  if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) return null;
+  const effort = typeof raw === 'string' ? raw.trim().toLowerCase() : null;
+  if (effort === null || !(REASONING_EFFORTS as readonly string[]).includes(effort)) {
+    log.warn(
+      { live_backend_reasoning_effort: raw },
+      `system_config.live_backend_reasoning_effort is not one of ${REASONING_EFFORTS.join('|')}; sending no effort`,
+    );
+    return null;
+  }
+  const registered = getBackendModel(backendModel);
+  // A non-reasoning backend rejects the block, and GPT-Live reports that
+  // asynchronously (responses_validation_failed) on every delegation, after
+  // session start has already succeeded. Leave it out instead.
+  if (registered && !registered.supportsReasoningEffort) {
+    log.warn(
+      { backendModel, live_backend_reasoning_effort: effort },
+      'live_backend_reasoning_effort is set but the backend model takes no reasoning effort; sending none',
+    );
+    return null;
+  }
+  if (effort === 'none' && registered?.supportsNoneEffort === false) return 'low';
+  return effort as ReasoningEffort;
+}
+
 /**
  * Conversation-layer instructions for the live voice model.
  *
@@ -532,6 +576,8 @@ export interface LiveSessionConfigInput {
   /** Enabled tool definitions from the registry. */
   toolDefs: ToolDefinition[];
   backendModel: string;
+  /** delegation.responses.reasoning.effort; null/omitted sends nothing. See resolveBackendReasoningEffort. */
+  backendReasoningEffort?: ReasoningEffort | null;
   /** Prior conversation to seed, oldest first. Trimmed to the API's limits. */
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   /**
@@ -640,6 +686,7 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
     systemPrompt,
     toolDefs,
     backendModel,
+    backendReasoningEffort,
     history,
     storable,
     recovery,
@@ -680,6 +727,9 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
             // request an end_session alongside work that assumes the session is
             // still open.
             parallel_tool_calls: false,
+            // Only when configured: omitting it keeps the model default, which
+            // is what every session ran on before this setting existed.
+            ...(backendReasoningEffort ? { reasoning: { effort: backendReasoningEffort } } : {}),
           },
         },
     // Storage means OpenAI retains this session's audio for 30 days, and is
