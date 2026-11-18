@@ -81,6 +81,14 @@ describe('modelFamilyOf', () => {
 
   it('returns null for anything unrecognised rather than guessing', () => {
     expect(modelFamilyOf('some-future-model, input')).toBeNull();
+  });
+
+  it('gives each GPT-6 model its own family, folding dated snapshots into the alias', () => {
+    expect(modelFamilyOf('gpt-6.1-terra, input')).toBe('gpt-6.1-terra');
+    expect(modelFamilyOf('gpt-6.1-terra-2026-10-01, output')).toBe('gpt-6.1-terra');
+    expect(modelFamilyOf('gpt-6-luna, cached input')).toBe('gpt-6-luna');
+    // The 5.6 backend keeps its historical bucket.
+    expect(modelFamilyOf('gpt-5.6-terra, output')).toBe('live-backend');
     expect(modelFamilyOf('')).toBeNull();
   });
 });
@@ -146,6 +154,59 @@ describe('getCostDashboard attribution', () => {
     expect(sum).toBeCloseTo(d.totalUsd, 1);
     // the unrecognised model lands in 'other' rather than being dropped
     expect(d.bySubsystem.find((s) => s.subsystem === 'other')?.amountUsd).toBeCloseTo(2, 1);
+  });
+
+  it('attributes a GPT-6 delegation backend to realtime, not other', async () => {
+    // live_backend_model = gpt-6.1-terra: its spend is the voice product's.
+    // Before, the line item matched no family and landed in 'other'.
+    usageMock.mockResolvedValue([
+      {
+        purpose: 'live_delegation',
+        model: 'gpt-6.1-terra',
+        calls: 40,
+        tokensIn: 9000,
+        tokensOut: 1000,
+        tokensMissing: false,
+      },
+    ]);
+    getCostsSummaryMock.mockResolvedValue(costs([{ lineItem: 'gpt-6.1-terra, input', amountUsd: 7 }]));
+    const d = await getCostDashboard(30);
+    const byName = Object.fromEntries(d.bySubsystem.map((s) => [s.subsystem, s.amountUsd]));
+    expect(byName.realtime).toBe(7);
+    expect(byName.other).toBeUndefined();
+  });
+
+  it('splits a GPT-6 model shared by voice and chat by measured tokens', async () => {
+    usageMock.mockResolvedValue([
+      {
+        purpose: 'live_delegation',
+        model: 'gpt-6.1-terra',
+        calls: 10,
+        tokensIn: 750,
+        tokensOut: 0,
+        tokensMissing: false,
+      },
+      { purpose: 'chat', model: 'gpt-6.1-terra', calls: 10, tokensIn: 250, tokensOut: 0, tokensMissing: false },
+      { purpose: 'redaction', model: 'gpt-6-luna', calls: 3, tokensIn: 100, tokensOut: 10, tokensMissing: false },
+    ]);
+    getCostsSummaryMock.mockResolvedValue(
+      costs([
+        { lineItem: 'gpt-6.1-terra, input', amountUsd: 8 },
+        { lineItem: 'gpt-6-luna, input', amountUsd: 1 },
+      ]),
+    );
+    const d = await getCostDashboard(30);
+    const byName = Object.fromEntries(d.bySubsystem.map((s) => [s.subsystem, s.amountUsd]));
+    expect(byName.realtime).toBeCloseTo(6, 2);
+    expect(byName.chat).toBeCloseTo(2, 2);
+    // The redaction verifier's gpt-6-luna spend now reaches redaction.
+    expect(byName.redaction).toBeCloseTo(1, 2);
+  });
+
+  it('keeps a GPT-6 line item with no usage rows in other rather than dropping it', async () => {
+    getCostsSummaryMock.mockResolvedValue(costs([{ lineItem: 'gpt-6.2-astra, input', amountUsd: 3 }]));
+    const d = await getCostDashboard(30);
+    expect(d.bySubsystem.find((s) => s.subsystem === 'other')?.amountUsd).toBe(3);
   });
 
   it('computes unit economics from real dollars and real session counts', async () => {

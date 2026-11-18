@@ -73,6 +73,15 @@ import type {
   Turn,
 } from './types.js';
 
+/** The chat model this run exercises: system_config.chat_model in the scratch
+ *  database, resolved by the same helper /api/chat/start uses, so the harness
+ *  always tests (and prices) what chat actually runs. Set a candidate with
+ *  `UPDATE system_config ... chat_model` before the run; never via code. */
+async function chatModelUnderTest(): Promise<string> {
+  const { resolveChatModel } = await import('../server/utils/chatModel.js');
+  return resolveChatModel().catch(() => CHAT_THERAPY_MODEL);
+}
+
 const SAFE_ASSISTANT_STUB =
   "I hear you, and I'm really glad you told me. That sounds incredibly heavy to carry. " +
   "You are not alone in this. If you're in crisis, please reach the 988 Suicide & Crisis Lifeline (call or text 988). " +
@@ -279,7 +288,7 @@ async function runChatScenario(
       reply = res.response;
       sessionEnded = res.sessionEnded;
       extra = { chatSessionEnded: sessionEnded };
-      cost.estimate(CHAT_THERAPY_MODEL, 700, 260);
+      cost.estimate(await chatModelUnderTest(), 700, 260);
       transcript.push({ role: 'assistant', text: reply, beatId: beat.id });
     }
 

@@ -1,6 +1,7 @@
 /**
  * Chat-Only Therapy Service
- * Uses OpenAI API (GPT-5.2) for text-only therapy sessions
+ * Uses the OpenAI Responses API for text-only therapy sessions, on the model
+ * named by system_config.chat_model (default gpt-5.2, utils/chatModel.ts).
  * This service is used when voice is disabled in system configuration
  */
 
@@ -50,7 +51,43 @@ const CLIENT_RENDERED_TOOLS = new Set([
 // Cap on tool-execution rounds per turn; the final round forces a text reply.
 const MAX_TOOL_ROUNDS = 5;
 
-export const CHAT_MODEL = 'gpt-5.2';
+// The model each in-memory session runs on, fixed at session start
+// (system_config.chat_model, stamped into session_configurations.ai_model by
+// /api/chat/start). Held per session rather than re-read per turn so an admin
+// changing chat_model mid-session cannot switch a live conversation to a
+// different model partway through, which would make the session's recorded
+// model wrong for its later turns.
+const sessionModels = new Map<string, string>();
+
+/**
+ * The model this session's turns run on: the one it started with, else the
+ * stamp in session_configurations.ai_model (after a restart), else the
+ * currently configured chat model (sessions started before chat_model
+ * existed have no stamp and ran on the default).
+ */
+async function modelForSession(sessionId: string): Promise<string> {
+  const held = sessionModels.get(sessionId);
+  if (held) return held;
+  let model: string | null = null;
+  try {
+    const { getSessionConfig } = await import('../db/index.js');
+    const stamped = (await getSessionConfig(sessionId))?.ai_model;
+    if (typeof stamped === 'string' && stamped.trim()) model = stamped.trim();
+  } catch {
+    /* fall through to the configured model */
+  }
+  if (!model) {
+    const { resolveChatModel } = await import('../utils/chatModel.js');
+    model = await resolveChatModel();
+  }
+  sessionModels.set(sessionId, model);
+  return model;
+}
+
+/** The model a session is (or would be) running on. Exposed for tests and diagnostics. */
+export async function getChatSessionModel(sessionId: string): Promise<string> {
+  return modelForSession(sessionId);
+}
 
 // Minimal structural view of the Responses API surface we use (the SDK's own
 // types are much wider; this keeps the existing cast-based call style).
@@ -168,7 +205,8 @@ export async function rehydrateChatSession(sessionId: string): Promise<ChatHisto
  * @param {string} sessionId - Unique session identifier
  * @param {string} systemPrompt - System instructions for the AI
  */
-export function initializeChatSession(sessionId: string, systemPrompt: string): void {
+export function initializeChatSession(sessionId: string, systemPrompt: string, model?: string): void {
+  if (model) sessionModels.set(sessionId, model);
   conversationHistory.set(sessionId, [
     {
       role: 'system',
@@ -235,10 +273,10 @@ function checkOutputModeration(sessionId: string, response: ResponsesResult): vo
 }
 
 /** Fire-and-forget cost tracking for one Responses call (telemetry audit). */
-function recordChatUsage(sessionId: string, usage: ResponsesResult['usage']): void {
+function recordChatUsage(sessionId: string, model: string, usage: ResponsesResult['usage']): void {
   import('../db/index.js')
     .then(({ recordLlmUsage }) =>
-      recordLlmUsage(sessionId, 'chat', CHAT_MODEL, usage?.input_tokens ?? null, usage?.output_tokens ?? null),
+      recordLlmUsage(sessionId, 'chat', model, usage?.input_tokens ?? null, usage?.output_tokens ?? null),
     )
     .catch((err) => console.error('[ChatTherapy] Failed to record LLM usage (non-fatal):', err));
 }
@@ -322,9 +360,14 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
       /* proceed without */
     }
 
+    // Request shape is GPT-6 safe as it stands: Responses API (GPT-6 tool
+    // calling requires it), and no temperature / top_p / logprobs /
+    // reasoning.effort / max-token params, which is what the GPT-6 migration
+    // guide says to remove.
+    const chatModel = await modelForSession(sessionId);
     const callModel = async (toolChoice: 'auto' | 'none') => {
       const baseParams = {
-        model: CHAT_MODEL,
+        model: chatModel,
         input,
         store: false,
         ...(safetyIdentifier ? { safety_identifier: safetyIdentifier } : {}),
@@ -358,7 +401,7 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
     const turnItems: ChatHistoryItem[] = []; // raw output + tool-output items to persist in history
     let toolCallCount = 0;
     let response = await callModel('auto');
-    recordChatUsage(sessionId, response.usage);
+    recordChatUsage(sessionId, chatModel, response.usage);
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const calls = (response.output ?? []).filter((o) => o.type === 'function_call' && o.name && o.call_id);
@@ -398,7 +441,7 @@ export async function sendMessage(sessionId: string, userMessage: string): Promi
       }
 
       response = await callModel(round + 1 >= MAX_TOOL_ROUNDS ? 'none' : 'auto');
-      recordChatUsage(sessionId, response.usage);
+      recordChatUsage(sessionId, chatModel, response.usage);
     }
 
     // Extract assistant message from response
@@ -475,6 +518,7 @@ export function getConversationHistory(sessionId: string): ChatHistoryItem[] {
 export function endChatSession(sessionId: string): void {
   const hadSession = conversationHistory.has(sessionId);
   conversationHistory.delete(sessionId);
+  sessionModels.delete(sessionId);
 
   if (hadSession) {
     console.log(`[ChatTherapy] Session ${sessionId.substring(0, 12)}... ended and cleaned up`);
@@ -498,6 +542,7 @@ export async function evictEndedChatSessions(): Promise<number> {
   for (const id of ids) {
     if (!active.has(id)) {
       conversationHistory.delete(id);
+      sessionModels.delete(id);
       evicted++;
     }
   }

@@ -6,9 +6,12 @@
 // would a different model have said?
 //
 // This registry is the candidate set for that comparison. Rates are the
-// published $/1M-token figures as of 2026-09 and are a hand-maintained ESTIMATE
-// for relative comparison, matching the convention in costTracking.queries.ts —
-// invoices remain the source of truth.
+// published Standard-tier $/1M-token figures (short context, <=272K input) and
+// are a hand-maintained ESTIMATE for relative comparison, matching the
+// convention in costTracking.queries.ts — invoices remain the source of truth.
+// GPT-6 rates re-checked against developers.openai.com/api/docs/pricing on
+// 2026-11-18. costTracking.queries.ts falls back to this table, so a model
+// listed here is priced correctly in the per-session cost panel too.
 //
 // Not every model here is necessarily accepted as a GPT-Live delegation
 // backend; the docs recommend Terra and Luna but publish no allowlist. The
@@ -24,6 +27,13 @@ export interface BackendModel {
   outputPerMillion: number;
   /** Reasoning models accept a `reasoning.effort` setting. */
   supportsReasoningEffort: boolean;
+  /**
+   * False for models that reject `reasoning.effort: 'none'` (GPT-6 Astra and
+   * GPT-6.1 Sol, per the GPT-6 guide's Limitations section). Nothing sends
+   * `none` today; this exists so a future caller that does can check first.
+   * Omitted means "accepts none" for reasoning models.
+   */
+  supportsNoneEffort?: boolean;
   /**
    * In the default sweep. Kept small on purpose: a full sweep multiplies cost
    * by the number of candidates, and most of the signal comes from spanning the
@@ -41,8 +51,64 @@ export const BACKEND_MODELS: BackendModel[] = [
     inputPerMillion: 10,
     outputPerMillion: 50,
     supportsReasoningEffort: true,
+    supportsNoneEffort: false,
     inDefaultSweep: true,
     notes: 'Flagship; the quality ceiling for this comparison.',
+  },
+  {
+    id: 'gpt-6.2-astra',
+    family: 'gpt-6',
+    inputPerMillion: 8,
+    outputPerMillion: 40,
+    supportsReasoningEffort: true,
+    supportsNoneEffort: false,
+    inDefaultSweep: false,
+    notes: 'Not flex-eligible (pricing page lists no Flex rate).',
+  },
+  {
+    id: 'gpt-6.2-sol',
+    family: 'gpt-6',
+    inputPerMillion: 2,
+    outputPerMillion: 10,
+    supportsReasoningEffort: true,
+    supportsNoneEffort: false,
+    inDefaultSweep: false,
+    notes: 'Not flex-eligible (pricing page lists no Flex rate).',
+  },
+  {
+    id: 'gpt-6.1-sol',
+    family: 'gpt-6',
+    inputPerMillion: 2,
+    outputPerMillion: 10,
+    supportsReasoningEffort: true,
+    supportsNoneEffort: false,
+    inDefaultSweep: false,
+  },
+  {
+    id: 'gpt-6-sol',
+    family: 'gpt-6',
+    inputPerMillion: 2,
+    outputPerMillion: 10,
+    supportsReasoningEffort: true,
+    inDefaultSweep: false,
+  },
+  {
+    id: 'gpt-6.1-terra',
+    family: 'gpt-6',
+    inputPerMillion: 1,
+    outputPerMillion: 5,
+    supportsReasoningEffort: true,
+    inDefaultSweep: true,
+    notes: 'Successor to gpt-5.6-terra at half the input and under half the output price.',
+  },
+  {
+    id: 'gpt-6-luna',
+    family: 'gpt-6',
+    inputPerMillion: 0.1,
+    outputPerMillion: 0.5,
+    supportsReasoningEffort: true,
+    inDefaultSweep: true,
+    notes: 'The GPT-Live delegation guide example backend; also our redaction verifier (Decisions API).',
   },
 
   // --- GPT-5.6 (the generation GPT-Live delegation was designed around) ---
@@ -61,7 +127,7 @@ export const BACKEND_MODELS: BackendModel[] = [
     outputPerMillion: 12,
     supportsReasoningEffort: true,
     inDefaultSweep: true,
-    notes: "OpenAI's recommended starting backend; our current default.",
+    notes: 'Our current GPT-Live delegation default (LIVE_DEFAULT_BACKEND_MODEL).',
   },
   {
     id: 'gpt-5.6-luna',
@@ -188,8 +254,13 @@ export const BACKEND_MODELS: BackendModel[] = [
 
 const INDEX = new Map(BACKEND_MODELS.map((m) => [m.id, m]));
 
+/**
+ * Look a model up by id. A dated snapshot id ("gpt-6.1-terra-2026-10-01") or
+ * the id OpenAI echoes back on a response resolves to its base entry, so a
+ * pinned snapshot is priced the same as its alias.
+ */
 export function getBackendModel(id: string): BackendModel | null {
-  return INDEX.get(id) ?? null;
+  return INDEX.get(id) ?? INDEX.get(id.replace(/-\d{4}-\d{2}-\d{2}$/, '')) ?? null;
 }
 
 /** The default sweep: spans the quality/price range without running everything. */

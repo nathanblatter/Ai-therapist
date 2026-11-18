@@ -1,6 +1,7 @@
 // Harness configuration + a small cost tracker (spec §8, §11).
 
 import { LIVE_RATES_PER_MINUTE, estimateLiveCostUsd } from '../server/db/liveUsage.queries.js';
+import { getBackendModel } from '../server/utils/backendModels.js';
 
 /** smoke: fast safety subset, gates deploys. full: all safety + quality
  *  scenarios. quality: rubric-floor scenarios only (nightly). voice: real
@@ -75,19 +76,30 @@ export const DEFAULTS = {
   variant: 'default',
 };
 
-/** The chat therapy reply model (chatTherapy.service.ts) — used only for cost
- *  estimation. NOT independently verified pricing; see docs/redteam.md R5. */
+/** The chat therapy reply model's CODE DEFAULT (utils/chatModel.ts). The
+ *  model a run actually exercises is system_config.chat_model in the scratch
+ *  database, which the in-process server reads exactly as production does;
+ *  cli.ts prices chat turns with that resolved value. */
 export const CHAT_THERAPY_MODEL = 'gpt-5.2';
 
-// USD per 1M tokens. gpt-4o-mini is public pricing; gpt-5.2 is an ASSUMED
-// placeholder (the repo's configured prod chat model — pricing unverified,
-// flagged in docs/redteam.md §R5). Cost figures are estimates, not billing.
+// USD per 1M tokens, Standard tier (pricing page re-checked 2026-11-18).
+// Models not listed here are priced from the backend-model registry
+// (server/utils/backendModels.ts), which covers the GPT-6 series. Cost figures
+// are estimates, not billing.
 export const MODEL_PRICING: Record<string, { inPerM: number; outPerM: number }> = {
   'gpt-4o-mini': { inPerM: 0.15, outPerM: 0.6 },
   'gpt-5-mini': { inPerM: 0.25, outPerM: 2.0 }, // second ensemble judge (backendModels.ts)
-  'gpt-5.2': { inPerM: 1.25, outPerM: 10.0 }, // assumed; see R5
+  'gpt-5.2': { inPerM: 1.75, outPerM: 14.0 },
   default: { inPerM: 0.5, outPerM: 1.5 },
 };
+
+function priceFor(model: string): { inPerM: number; outPerM: number } {
+  const listed = MODEL_PRICING[model];
+  if (listed) return listed;
+  const registered = getBackendModel(model);
+  if (registered) return { inPerM: registered.inputPerMillion, outPerM: registered.outputPerMillion };
+  return MODEL_PRICING.default;
+}
 
 /** Voice backends bill per minute of session audio, not per token. These are
  *  the same figures the admin cost dashboard uses (liveUsage.queries.ts):
@@ -114,7 +126,7 @@ export class CostTracker {
   calls = 0;
 
   add(model: string, usage?: Usage): void {
-    const price = MODEL_PRICING[model] ?? MODEL_PRICING.default;
+    const price = priceFor(model);
     const inTok = usage?.prompt_tokens ?? 0;
     const outTok = usage?.completion_tokens ?? 0;
     this.usd += (inTok / 1e6) * price.inPerM + (outTok / 1e6) * price.outPerM;
@@ -123,7 +135,7 @@ export class CostTracker {
 
   /** Add an estimated call when real token usage is unavailable. */
   estimate(model: string, inTok: number, outTok: number): void {
-    const price = MODEL_PRICING[model] ?? MODEL_PRICING.default;
+    const price = priceFor(model);
     this.usd += (inTok / 1e6) * price.inPerM + (outTok / 1e6) * price.outPerM;
     this.calls += 1;
   }

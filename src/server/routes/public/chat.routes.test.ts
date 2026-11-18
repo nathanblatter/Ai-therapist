@@ -162,12 +162,35 @@ describe('POST /api/chat/start', () => {
     );
   });
 
+  describe('chat model (system_config.chat_model)', () => {
+    it('defaults to gpt-5.2 and stamps it on the session record', async () => {
+      const res = await request(makeApp()).post('/api/chat/start').send({});
+      expect(res.status).toBe(200);
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt', 'gpt-5.2');
+      expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
+        res.body.sessionId,
+        expect.objectContaining({ ai_model: 'gpt-5.2' }),
+      );
+    });
+
+    it('starts the session on the configured model and records that model', async () => {
+      helperMocks.getSystemConfig.mockResolvedValue({ features: {}, chat_model: 'gpt-6.1-terra' });
+      const res = await request(makeApp()).post('/api/chat/start').send({});
+      expect(res.status).toBe(200);
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt', 'gpt-6.1-terra');
+      expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
+        res.body.sessionId,
+        expect.objectContaining({ ai_model: 'gpt-6.1-terra' }),
+      );
+    });
+  });
+
   describe('psychoeducation cue experiment (ai-therapist-202)', () => {
     it('experiment off (null): no cue in the prompt, arm stored as null', async () => {
       const res = await request(makeApp()).post('/api/chat/start').send({});
       expect(res.status).toBe(200);
       expect(helperMocks.resolvePsychoeducationCue).toHaveBeenCalledTimes(1);
-      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt', 'gpt-5.2');
       expect(registryMocks.getEnabledToolDefinitions).not.toHaveBeenCalled();
       expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
         res.body.sessionId,
@@ -178,7 +201,7 @@ describe('POST /api/chat/start', () => {
     it('control arm (false): no cue in the prompt, arm stored as false', async () => {
       helperMocks.resolvePsychoeducationCue.mockResolvedValue(false);
       const res = await request(makeApp()).post('/api/chat/start').send({});
-      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt', 'gpt-5.2');
       expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
         res.body.sessionId,
         expect.objectContaining({ psychoeducation_cue: false }),
@@ -192,6 +215,7 @@ describe('POST /api/chat/start', () => {
       expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(
         res.body.sessionId,
         'prompt\n\nCUE:retrieve_psychoeducation',
+        'gpt-5.2',
       );
       expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(
         res.body.sessionId,
@@ -203,7 +227,7 @@ describe('POST /api/chat/start', () => {
       helperMocks.resolvePsychoeducationCue.mockResolvedValue(true);
       registryMocks.getEnabledToolDefinitions.mockResolvedValue([{ name: 'log_mood' }]);
       const res = await request(makeApp()).post('/api/chat/start').send({});
-      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt', 'gpt-5.2');
     });
   });
 
@@ -212,7 +236,7 @@ describe('POST /api/chat/start', () => {
       const res = await request(makeApp()).post('/api/chat/start').send({});
       expect(res.status).toBe(200);
       expect(helperMocks.resolveLeadConversation).toHaveBeenCalledTimes(1);
-      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt');
+      expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(res.body.sessionId, 'prompt', 'gpt-5.2');
       expect(res.body.opening).toMatch(/I'm glad you're here with me today\.$/);
     });
 
@@ -223,6 +247,7 @@ describe('POST /api/chat/start', () => {
       expect(chatMocks.initializeChatSession).toHaveBeenCalledWith(
         res.body.sessionId,
         'prompt\n\nCUE:retrieve_psychoeducation\n\nLEAD',
+        'gpt-5.2',
       );
       expect(res.body.opening).toMatch(/I'm glad you're here with me today\. What would you like to focus on today\?$/);
       expect(dbMocks.upsertSessionConfig).toHaveBeenCalledWith(

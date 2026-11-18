@@ -170,8 +170,13 @@ export default function chatRoutes(): Router {
           memoryBlock +
           buildCheckinBlock(checkin);
 
+        // system_config.chat_model, resolved once here and held for the whole
+        // session; stamped into session_configurations.ai_model below so the
+        // analysis record says which model produced this session's replies.
+        const { resolveChatModel } = await import('../../utils/chatModel.js');
+        const chatModel = await resolveChatModel();
         const { initializeChatSession } = await import('../../services/chatTherapy.service.js');
-        initializeChatSession(sessionId, systemPrompt);
+        initializeChatSession(sessionId, systemPrompt, chatModel);
 
         const username = req.session?.username || null;
         const { isNonStudyUser } = await import('../../utils/harness.js');
@@ -194,6 +199,7 @@ export default function chatRoutes(): Router {
         // clobber; the resume path (alreadyActive, earlier) never re-rolls.
         await upsertSessionConfig(sessionId, {
           modalities: ['text'],
+          ai_model: chatModel,
           instructions: systemPrompt,
           language: userLanguage,
           proactive_offering: proactiveOffering,

@@ -102,7 +102,7 @@ import {
   SESSION_NAME_SYSTEM_PROMPT,
   buildSessionNameUserMessage,
 } from '../services/sessionName.service.js';
-import { CHAT_MODEL } from '../services/chatTherapy.service.js';
+import { CHAT_DEFAULT_MODEL } from '../utils/chatModel.js';
 import { EMBEDDING_MODEL } from '../services/embeddings.service.js';
 import { MODERATION_MODEL } from '../services/moderation.service.js';
 
@@ -827,7 +827,7 @@ function buildItems(): Item[] {
       ['Voice conversation, GPT-Live backend (speaks and transcribes)', sessionConfigDefault.session.model],
       ['Voice conversation, GPT-Live backend (reasoning; receives the clinical prompt)', LIVE_DEFAULT_BACKEND_MODEL],
       ['Voice conversation, Grok Voice backend (speaks and transcribes)', GROK_CURRENT_MODEL],
-      ['Typed chat conversation', CHAT_MODEL],
+      ['Typed chat conversation', CHAT_DEFAULT_MODEL],
       ['Transcript redaction (dual-pass)', REDACTION_MODEL],
       [
         'Auxiliary safety and analysis (crisis risk assessment, minor-eligibility confirmation, session naming)',

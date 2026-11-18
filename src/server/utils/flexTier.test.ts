@@ -8,6 +8,10 @@ describe('isFlexEligible', () => {
   it('accepts the documented eligible families', () => {
     for (const model of [
       'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6.1-sol',
+      'gpt-6.1-terra',
+      'gpt-6-luna',
       'gpt-5.6-luna',
       'gpt-5.6-sol',
       'gpt-5.5',
@@ -33,6 +37,9 @@ describe('isFlexEligible', () => {
       'o3-mini',
       'gpt-5-pro',
       'gpt-5.2-pro',
+      // No Flex rate on the pricing page for the 6.2 generation.
+      'gpt-6.2-astra',
+      'gpt-6.2-sol',
       'omni-moderation-latest',
       'text-embedding-3-small',
       'gpt-realtime-2.1-mini',

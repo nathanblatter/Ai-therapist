@@ -1041,12 +1041,22 @@ server-side and isn't billed to the harness tracker; judge off in smoke). The
 crisis scenario is fast (~3 s) because it drives `/logs/batch` directly; the chat
 scenarios are dominated by sequential `gpt-5.2` reply latency (~7-10 s/turn).
 
-> **R5 — pricing caveat:** `gpt-5.2` (the configured prod chat model in
-> `chatTherapy.service.ts`) has **no verified public price**; the cost table in
-> `src/redteam/config.ts` uses an *assumed* placeholder for it. All non-chat calls
-> are `gpt-4o-mini` (public pricing). The `estCostUsd` in `summary.json` is an
-> estimate, not a billing figure — the chat-reply token counts are themselves
-> estimated because the Responses API wrapper doesn't return usage.
+> **R5 — pricing caveat:** the chat model is `system_config.chat_model` (code
+> default `gpt-5.2`, `src/server/utils/chatModel.ts`); the harness prices chat
+> turns with whatever the scratch database resolves to. `gpt-5.2` now uses the
+> published Standard rate ($1.75 / $14 per 1M, checked 2026-11-18), and models
+> missing from `MODEL_PRICING` (the GPT-6 series) are priced from
+> `src/server/utils/backendModels.ts`. The `estCostUsd` in `summary.json` is
+> still an estimate: the chat-reply token counts are assumed (700 in / 260 out
+> per turn). For real chat-model token usage, read `session_llm_usage` where
+> `purpose = 'chat'` in the run's scratch database.
+>
+> **Testing another chat or voice-backend model:** set the key in the scratch
+> database before the run, e.g.
+> `UPDATE system_config SET config_value = '"gpt-6.1-terra"' WHERE config_key = 'live_backend_model';`
+> and insert or update `chat_model` the same way. The in-process server reads
+> them exactly as production does, so the run tests what a deployment with
+> that config would run. Never change the code defaults to run an eval.
 
 ## Known limitations (from the spec's risk register)
 

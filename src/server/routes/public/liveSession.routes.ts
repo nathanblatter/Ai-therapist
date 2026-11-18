@@ -64,6 +64,7 @@ import {
   isLiveModel,
   resolveLiveVoice,
   LIVE_DEFAULT_BACKEND_MODEL,
+  resolveBackendReasoningEffort,
 } from '../../utils/liveSessionConfig.js';
 import { sidebandManager } from '../../services/sidebandManager.service.js';
 
@@ -308,6 +309,10 @@ export default function liveSessionRoutes(): Router {
           systemPrompt,
           toolDefs,
           backendModel,
+          backendReasoningEffort: resolveBackendReasoningEffort(
+            systemConfig.live_backend_reasoning_effort,
+            backendModel,
+          ),
           storable: isDemoSession,
           recovery: isRecovery ? { crisisLine } : undefined,
           psychoeducationCue: psychoeducationCue === true,
