@@ -48,6 +48,7 @@ import {
   type RunDiff,
 } from './diff.js';
 import { selectSuite, type SuiteEntry } from './scenarios/index.js';
+import { applyKnownGap, reportKnownGaps } from './knownGap.js';
 import type {
   AssertionContext,
   AssertionResult,
@@ -87,7 +88,7 @@ function parseArgs(argv: string[]): RedteamConfig {
     switch (a) {
       case '--suite': {
         const v = next();
-        cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' ? v : 'full';
+        cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' || v === 'extended' ? v : 'full';
         break;
       }
       case '--scenario':
@@ -532,8 +533,23 @@ async function runEntry(
           : scenario.pipeline === 'voice' && !cfg.dryRun
             ? (await import('./voiceClient.js')).runVoiceScenario
             : runRealtimeScenario;
-    const res = await runner(scenario, beats, runJudgeFlag, client, openai, vcfg, cost, canaries, pool, classify);
-    const { assertions, judge, judgeBreaches, sessionId, transcript } = res;
+    // Scenario fixture (test-only fault injection): installed around the run
+    // and always undone, so a failed scenario cannot leak its fault into the next.
+    const undoFixture = await scenario.fixture?.({ pool, dryRun: cfg.dryRun });
+    const res = await runner(
+      scenario,
+      beats,
+      runJudgeFlag,
+      client,
+      openai,
+      vcfg,
+      cost,
+      canaries,
+      pool,
+      classify,
+    ).finally(() => undoFixture?.());
+    const { judge, judgeBreaches, sessionId, transcript } = res;
+    const assertions = applyKnownGap(scenario, res.assertions);
     const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
     return {
       id: label,
@@ -643,6 +659,7 @@ async function main(): Promise<void> {
   };
   const { junitPath, summaryPath } = writeReports(cfg, summary);
   const passed = printConsole(summary);
+  reportKnownGaps(results);
   console.log(`[redteam] wrote ${junitPath} and ${summaryPath}`);
 
   // Persist the run for the admin Simulation Runs panel (phase 3). Best-effort:

@@ -14,6 +14,7 @@ npm run redteam:smoke      # fast safety subset; gates every deploy (deploy.yml)
 npm run redteam:full       # all safety + quality scenarios (redteam-nightly.yml)
 npm run redteam:quality    # rubric-floor scenarios only
 npm run redteam:voice      # real voice sessions on the production backend; opt-in, billed per minute
+npm run redteam:extended   # slow or expensive scenarios (long chat conversations); opt-in, not scheduled
 npm run redteam:replay     # re-drive redacted real sessions and diff judge scores
 ```
 
@@ -36,6 +37,11 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/index.ts` | Scenario registry: `SAFETY_SCENARIOS`, `QUALITY_SCENARIOS`, suite composition. |
 | `scenarios/*.ts` | One safety scenario per file (crisis ladders, passive ideation, eating disorder, substance use, minor age, medication, diagnosis seeking, delusional content, prompt injection, boundary testing, voice). |
 | `scenarios/quality/*.ts` | Rubric-floor quality scenarios (first session, low mood, advice seeker, rambling venting, terse participant). |
+| `scenarios/crisis/*.ts` | The crisis group from `docs/eval-scenario-catalogue.md` (CRI-03, 04, 06, 08, 09, 10, 12, 17, 24), one catalogue entry per file. Design, measured pass rates and known gaps: `docs/redteam-crisis-scenarios.md`. |
+| `crisisAssertions.ts` | Assertions for the crisis group: pipeline state, reply regexes, one classifier question per Crisis Protocol promise. |
+| `crisisFixtures.ts` | Test-only fixtures and probes for the crisis group: assessor made unreachable, `end_session` guard probe, session-timer probe. |
+| `knownGap.ts` | Known product gaps: listed assertions report loudly on every run and do not gate until the filed bug is fixed. |
+| `crisisRubrics.live.test.ts` | Opt-in calibration of the crisis classifier questions against the real classifier (skipped in `npm test`). |
 | `scenarios/_preamble.ts` | Shared persona preamble. |
 | `personaDriver.ts` | LLM persona turn generator over scripted beats. |
 | `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |

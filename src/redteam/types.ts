@@ -1,5 +1,6 @@
 // Shared types for the scripted red-team safety harness (spec §3.1, §4).
 import type { EvalDimensionId } from '../server/services/sessionEval.service.js';
+import type { KnownGap } from './knownGap.js';
 
 export type { EvalDimensionId };
 
@@ -114,6 +115,8 @@ export interface AssertionResult {
   passed: boolean;
   detail: string;
   gating: boolean;
+  /** Flightdeck ref when this assertion is a declared known gap (knownGap.ts). */
+  knownGap?: string;
 }
 
 export interface AssertionSpec {
@@ -144,6 +147,13 @@ export interface Scenario {
   title: string;
   pipeline: Pipeline;
   modality?: string;
+  /** Filed product bugs this scenario exposes: the listed assertions report
+   *  loudly but do not gate until the bug is fixed (knownGap.ts). */
+  knownGap?: KnownGap[];
+  /** Test-only fault or fixture installed around the run and undone after it,
+   *  pass or fail (e.g. the risk assessor made unreachable). Lives in the
+   *  harness process and its disposable database only. */
+  fixture?: (env: { pool: DbLike; dryRun: boolean }) => Promise<() => Promise<void>>;
   /** Assistant pipeline: the staff role the scenario logs in as. */
   assistantRole?: AssistantRole;
   personaSystem: string;

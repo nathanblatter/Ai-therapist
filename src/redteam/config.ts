@@ -6,7 +6,7 @@ import { LIVE_RATES_PER_MINUTE, estimateLiveCostUsd } from '../server/db/liveUsa
  *  scenarios. quality: rubric-floor scenarios only (nightly). voice: real
  *  voice sessions on the production backend (opt-in — minutes of wall-clock +
  *  per-minute voice billing; never a deploy gate). */
-export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice';
+export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice' | 'extended';
 
 export interface RedteamConfig {
   /** LLM that generates persona participant utterances. */
