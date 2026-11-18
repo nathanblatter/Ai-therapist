@@ -13,6 +13,7 @@ import {
   LIVE_DEFAULT_VOICE,
   LIVE_DEFAULT_BACKEND_MODEL,
   LIVE_VOICES,
+  LIVE_CLIENT_EVENTS,
   resolveBackendReasoningEffort,
 } from './liveSessionConfig.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
@@ -208,6 +209,65 @@ describe('buildLiveSessionConfig', () => {
     );
     expect(build({ languageName: null }).instructions as string).not.toMatch(
       /unless the participant asks you to switch/,
+    );
+  });
+});
+
+// ai-therapist-214. The shape asserted here is the documented one, verbatim:
+// session.client.data_channel.allowed_client_events ("all" or array of client
+// event type strings). An undocumented key 400s the whole voice handshake, so
+// these tests pin the exact keys as well as the values.
+describe('buildLiveSessionConfig data-channel permissions', () => {
+  type ClientBlock = { data_channel: { allowed_client_events: string[] } };
+
+  it('locks the browser data channel to an explicit allowlist with only the documented keys', () => {
+    const session = build();
+    const client = session.client as ClientBlock;
+
+    expect(Object.keys(client)).toEqual(['data_channel']);
+    expect(Object.keys(client.data_channel)).toEqual(['allowed_client_events']);
+    expect(client.data_channel.allowed_client_events).toEqual(['session.close']);
+  });
+
+  it('never lets the browser steer, queue backend items, mute input or touch decisions', () => {
+    for (const session of [build(), build({ recovery: { crisisLine: '988' } })]) {
+      const allowed = (session.client as ClientBlock).data_channel.allowed_client_events;
+      expect(allowed).not.toContain('session.instructions.append');
+      expect(allowed).not.toContain('session.thinking.append');
+      expect(allowed).not.toContain('session.commentary.append');
+      expect(allowed).not.toContain('session.update');
+      expect(allowed).not.toContain('response.item.create');
+      expect(allowed).not.toContain('response.create');
+      expect(allowed).not.toContain('session.input_audio.mute');
+      expect(allowed).not.toContain('decision.item.create');
+      expect(allowed).not.toContain('all');
+    }
+  });
+
+  it('always leaves the browser able to hang up', () => {
+    expect(LIVE_CLIENT_EVENTS).toContain('session.close');
+  });
+
+  it('locks a recovery session the same way', () => {
+    const session = build({ recovery: { crisisLine: '988' } });
+    expect((session.delegation as { type: string }).type).toBe('client');
+    expect((session.client as ClientBlock).data_channel.allowed_client_events).toEqual(['session.close']);
+  });
+
+  it('does not restrict server events (omission keeps allow-all, which the captions depend on)', () => {
+    expect((build().client as ClientBlock).data_channel).not.toHaveProperty('allowed_server_events');
+  });
+
+  it('omits the block entirely when the session has no sideband to steer from', () => {
+    expect(build({ allowClientSteering: true })).not.toHaveProperty('client');
+    expect(build({ allowClientSteering: true, recovery: { crisisLine: '988' } })).not.toHaveProperty('client');
+  });
+
+  it('hands each session its own array, so one request cannot widen the next', () => {
+    const first = (build().client as ClientBlock).data_channel.allowed_client_events;
+    first.push('session.instructions.append');
+    expect((build().client as ClientBlock).data_channel.allowed_client_events).not.toContain(
+      'session.instructions.append',
     );
   });
 });

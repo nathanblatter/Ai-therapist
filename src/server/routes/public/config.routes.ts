@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { getSystemConfig } from '../../utils/sessionHelpers.js';
 import { getQuietHoursStatus } from '../../utils/quietHours.js';
 import { getAiModel, type VoicesConfig, type LanguagesConfig } from '../../db/index.js';
+import { DEFAULT_CRISIS_CONTACT } from '../../../shared/openingPrompt.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -15,12 +16,8 @@ export default function configRoutes(): Router {
   router.get('/api/config/crisis', async (_req, res) => {
     try {
       const config = await getSystemConfig();
-      const crisisContact = config.crisis_contact || {
-        hotline: '988 Suicide & Crisis Lifeline',
-        phone: '988',
-        text: 'Text HOME to 741741',
-        enabled: true,
-      };
+      // Same default the server-side GPT-Live opening falls back to.
+      const crisisContact = config.crisis_contact || DEFAULT_CRISIS_CONTACT;
       res.json(crisisContact);
     } catch (err) {
       log.error({ err }, 'Failed to fetch crisis contact');

@@ -47,17 +47,16 @@ import {
   type VoiceTransport,
   type VoiceSessionOptions,
 } from './voiceClient.js';
+import { LIVE_RECOVERY_SPEAK_FIRST_NUDGE } from '../shared/openingPrompt.js';
 
 // opusscript is CommonJS with `export =`; load it the CJS way under ESM.
 const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript') as typeof import('opusscript');
 
-/** Verbatim mirror of the browser's recovery nudge (App.tsx, session.started
- *  branch under `recovery`). Keep the two in step: the harness measures the
- *  product path, so it must say exactly what the browser says. */
-export const LIVE_RECOVERY_SPEAK_FIRST_NUDGE =
-  'The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.';
+/** The recovery nudge, from the one copy the server and the browser share.
+ *  Used here only on an unlocked data channel (the server sends it otherwise). */
+export { LIVE_RECOVERY_SPEAK_FIRST_NUDGE };
 
 const TTS_MODEL = 'gpt-4o-mini-tts';
 const TTS_VOICE = 'alloy';
@@ -168,6 +167,10 @@ export class LiveVoiceSession implements VoiceTransport {
   /** Every error event, with the client event id it names (if any). */
   private errors: Array<{ clientEventId: string | null; code: string; message: string }> = [];
   private sessionUpdatedCount = 0;
+  /** Non-error server events that name a client event id (session.updated,
+   *  session.instructions.appended, session.input_audio.muted, ...): the API
+   *  acknowledging a client event, which for a probe means it was accepted. */
+  private acks: Array<{ type: string; clientEventId: string }> = [];
   /** `error` events with code content_filter seen so far. */
   moderationStops = 0;
   /** Start of the current turn window (wall clock). */
@@ -254,13 +257,24 @@ export class LiveVoiceSession implements VoiceTransport {
         if (Date.now() > startedBy) throw new Error('timeout waiting for session.started on the data channel');
         await sleep(50);
       }
-      // Opening preamble: GPT-Live never speaks unprompted, so the browser sends
-      // a trusted instructions append telling the model to speak first. A
-      // recovery session gets the browser's speak-first nudge instead: timing
-      // only, none of the previous conversation.
+      // Opening preamble: GPT-Live never speaks unprompted, so it needs an
+      // instructions append telling it to speak first (on a recovery session,
+      // the speak-first nudge: timing only, none of the previous conversation).
+      // The server authors and delivers that over the sideband; like the
+      // browser (App.tsx requestLiveOpening), the harness only says when the
+      // call is up. The data-channel append is the fallback for a session the
+      // server did not lock (ai-therapist-214); on a locked one it is refused.
       vs.windowStart = Date.now();
       vs.firstAssistantDeltaAt = 0;
-      vs.sendAppend(opts.recovery ? LIVE_RECOVERY_SPEAK_FIRST_NUDGE : openingPrompt);
+      const openingRes = await agent.post(`/api/sessions/${vs.sessionId}/opening`).send({});
+      if (openingRes.status !== 200 || openingRes.body?.delivered !== true) {
+        if (res.body?.data_channel_locked === true) {
+          throw new Error(
+            `server did not deliver the live opening: ${openingRes.status} ${JSON.stringify(openingRes.body).slice(0, 200)}`,
+          );
+        }
+        vs.sendAppend(opts.recovery ? LIVE_RECOVERY_SPEAK_FIRST_NUDGE : openingPrompt);
+      }
       const opening = await vs.awaitAssistantTurn(Date.now() + BEAT_TIMEOUT_MS);
       vs.openingLayer = vs.takeLayer();
       return { session: vs, opening };
@@ -319,6 +333,8 @@ export class LiveVoiceSession implements VoiceTransport {
     ) {
       console.log(`[voice:live] ${JSON.stringify(ev).slice(0, 200)}`);
     }
+    const ackId = (ev as { client_event_id?: unknown }).client_event_id;
+    if (type !== 'error' && typeof ackId === 'string') this.acks.push({ type, clientEventId: ackId });
     switch (type) {
       case 'session.started':
         this.started = true;
@@ -540,6 +556,12 @@ export class LiveVoiceSession implements VoiceTransport {
           // Keep listening: the follow-up shows whether the rewrite took effect.
           verdict = 'accepted';
           evidence = 'session.updated arrived after the client session.update';
+        }
+        const ack = this.acks.find((a) => a.clientEventId === eventId);
+        if (verdict === 'no-response' && ack) {
+          // Keep listening for the canary too: it says what the event did.
+          verdict = 'accepted';
+          evidence = `${ack.type} acknowledged the probe`;
         }
         // A bare follow-up response.create legitimately starts backend work,
         // so new work is evidence only for a probe that IS the override.

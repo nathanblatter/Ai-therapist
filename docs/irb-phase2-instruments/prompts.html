@@ -280,7 +280,7 @@ or mention them to the participant.</pre>
 <h3>A.12 Opening line</h3>
 <p>Every session opens with a fixed AI-disclosure greeting. The crisis phrase is filled from the configured crisis contacts; with the contacts seeded by migration 090 it reads &quot;call the 988 Suicide &amp; Crisis Lifeline crisis line at 988 or text HOME to 741741&quot;, and when the configuration is disabled it reads &quot;call or text 988 (Suicide and Crisis Lifeline), or call 911 for immediate danger&quot;. For sessions in a language other than English, the voice instruction reads &quot;Say this phrase exactly in &lt;language name&gt;:&quot; instead.</p>
 <h4>Voice sessions — instruction to the voice model</h4>
-<p>Identical on both voice backends: under GPT-Live the participant&#x27;s browser sends it, under Grok Voice the server injects it.</p>
+<p>Identical on both voice backends, and sent by the server on both: under GPT-Live over its monitoring connection once the participant&#x27;s audio is connected, under Grok Voice as the first instruction it injects.</p>
 <pre>Say this phrase exactly: &#x27;Hello! I&#x27;m an AI mental health support assistant here to listen and provide encouragement and coping ideas. I am not a licensed therapist or doctor, so I can&#x27;t diagnose conditions or provide medical advice. Please remember, if you&#x27;re in crisis, you should call the &lt;hotline name&gt; crisis line at &lt;phone&gt; or text &lt;text line&gt;. Also, please note that your microphone is off by default. If you&#x27;d like to talk using voice, you&#x27;ll need to press the red mic toggle button to turn it on. Thanks again for being willing to talk, I&#x27;m glad you&#x27;re here with me today.&#x27; Say it immediately, before the participant speaks, then pause and listen.</pre>
 <p class="note">Conditional, feature flag &quot;leading the conversation&quot;: sent only while the study configuration flag features.lead_conversation_enabled is on, and then to every new session (it is not a randomized condition; crisis-recovery voice sessions never receive it). The flag is off by default; while it is off, none of this text is sent.</p>
 <p>While the flag is on, the instruction to the voice model reads instead, verbatim:</p>
@@ -325,7 +325,7 @@ What NOT to do:
 
 Delegation policy: do not delegate. Answer directly and immediately. Nothing matters more right now
 than staying present in this conversation.</pre>
-<p class="note">As the session starts, the participant&#x27;s browser sends this instruction so the model speaks first:</p>
+<p class="note">As the session starts, the server sends this instruction so the model speaks first:</p>
 <pre>The voice connection just dropped and has reconnected. Speak first, immediately, before the participant says anything: reconnect warmly in one or two sentences, make clear it was a technical drop and not their fault, and stay with them.</pre>
 <h4>Typed-chat continuation — guidance attached for the chat model</h4>
 <p>The chat session receives the normal clinical prompt (A.1) without the opening line, plus this guidance. The transcript is the last turns of the voice conversation (up to 20, at most 6,000 characters), one per line, prefixed &quot;Participant:&quot; or &quot;You:&quot;.</p>
