@@ -24,9 +24,17 @@ import {
   getSystemPrompt,
   getSystemConfig,
   resolveProactiveOffering,
+  resolvePsychoeducationCue,
+  resolveLeadConversation,
 } from '../../utils/sessionHelpers.js';
 import { buildChatOpeningLine, OPENING_LINE_MESSAGE_TYPE, OPENING_LINE_METADATA } from '../../utils/openingLine.js';
-import { sanitizeCheckin, buildCheckinBlock, buildMemoryBlock } from '../../utils/promptContext.js';
+import {
+  sanitizeCheckin,
+  buildCheckinBlock,
+  buildMemoryBlock,
+  buildToolGuidanceBlock,
+  buildLeadConversationBlock,
+} from '../../utils/promptContext.js';
 import { generateSessionNameAsync } from '../../services/sessionName.service.js';
 import { canAccessSession, recordSessionOwnership } from '../../utils/sessionOwnership.js';
 import { requireConsent } from '../../middleware/consent.js';
@@ -132,8 +140,29 @@ export default function chatRoutes(): Router {
         const checkin = sanitizeCheckin(req.body?.checkin);
         const memoryBlock = await buildMemoryBlock(numericUserId);
         const proactiveOffering = await resolveProactiveOffering();
+        // Psychoeducation retrieval cue (ai-therapist-202): resolved once and
+        // persisted like proactive_offering. Typed chat has no general tool
+        // guidance block, so the cue arm gets only the retrieve_psychoeducation
+        // line; NULL (experiment off) and FALSE (control) get nothing.
+        const psychoeducationCue = await resolvePsychoeducationCue();
+        let psychoeducationGuidance = '';
+        if (psychoeducationCue === true) {
+          const { toolRegistry } = await import('../../services/toolRegistry.service.js');
+          const chatToolNames = (await toolRegistry.getEnabledToolDefinitions({ channel: 'chat' })).map((t) => t.name);
+          psychoeducationGuidance = buildToolGuidanceBlock(
+            chatToolNames.filter((name) => name === 'retrieve_psychoeducation'),
+            { psychoeducationCue: true },
+          );
+        }
+        // Lead-conversation steering (features.lead_conversation_enabled,
+        // default off). Same block and position as the voice routes.
+        const leadConversation = await resolveLeadConversation();
         const systemPrompt =
-          (await getSystemPrompt(userLanguage, 'chat', proactiveOffering)) + memoryBlock + buildCheckinBlock(checkin);
+          (await getSystemPrompt(userLanguage, 'chat', proactiveOffering)) +
+          psychoeducationGuidance +
+          buildLeadConversationBlock(leadConversation) +
+          memoryBlock +
+          buildCheckinBlock(checkin);
 
         const { initializeChatSession } = await import('../../services/chatTherapy.service.js');
         initializeChatSession(sessionId, systemPrompt);
@@ -162,6 +191,7 @@ export default function chatRoutes(): Router {
           instructions: systemPrompt,
           language: userLanguage,
           proactive_offering: proactiveOffering,
+          psychoeducation_cue: psychoeducationCue,
         });
 
         if (checkin) {
@@ -225,7 +255,9 @@ export default function chatRoutes(): Router {
         if (!continuedFrom) {
           try {
             const cfg = await getSystemConfig();
-            opening = buildChatOpeningLine(cfg.crisis_contact as Parameters<typeof buildChatOpeningLine>[0]);
+            opening = buildChatOpeningLine(cfg.crisis_contact as Parameters<typeof buildChatOpeningLine>[0], {
+              leadConversation,
+            });
             const { seedAssistantOpening, injectGuidance } = await import('../../services/chatTherapy.service.js');
             seedAssistantOpening(sessionId, opening);
             // Session steering, same mechanism as the continuation recap below
