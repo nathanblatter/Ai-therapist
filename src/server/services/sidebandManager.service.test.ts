@@ -624,6 +624,40 @@ describe('backend usage metering (nested response.completed)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// sendParticipantText (ai-therapist-214: typed text moved off the browser's
+// locked data channel)
+// ---------------------------------------------------------------------------
+
+describe('sendParticipantText', () => {
+  it('queues a user-role message for the backend and continues it', async () => {
+    const sessionId = 's-typed';
+    const ws = await attach(sessionId);
+
+    expect(sidebandManager.sendParticipantText(sessionId, 'hello there')).toBe(true);
+
+    const events = sentEvents(ws);
+    expect(events.map((e) => e.type)).toEqual(['response.item.create', 'response.create']);
+    expect(events[0].item).toEqual({
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: 'hello there' }],
+    });
+    expect(Object.keys(events[1]).sort()).toEqual(['event_id', 'type']);
+  });
+
+  it('returns false with no sideband, and sends nothing on a recovery session', async () => {
+    expect(sidebandManager.sendParticipantText('s-typed-none', 'x')).toBe(false);
+    const ws = (await sidebandManager.connect('s-typed-rec', 'live_s-typed-rec', 'sk-test', {
+      model: MODEL,
+      backendModel: BACKEND_MODEL,
+      delegationMode: 'client',
+    })) as unknown as FakeSocket;
+    expect(sidebandManager.sendParticipantText('s-typed-rec', 'x')).toBe(false);
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // tryInject
 // ---------------------------------------------------------------------------
 

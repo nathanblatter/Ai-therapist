@@ -16,6 +16,9 @@ npm run redteam:quality    # rubric-floor scenarios only
 npm run redteam:voice      # real voice sessions on the production backend; opt-in, billed per minute
 npm run redteam:voice-safety  # safety families over real voice + GPT-Live checks (redteam-voice.yml)
 npm run redteam:extended   # slow or expensive scenarios (long chat conversations); opt-in, not scheduled
+npm run redteam:voice-crawl   # GPT-Live guide CRAWL: one spoken turn at a critical point, seeded history
+npm run redteam:voice-walk    # CRAWL turns under acoustic conditions (synthetic fallback)
+npm run redteam:voice-run     # simulated participant in one full-duplex call
 npm run redteam:replay     # re-drive redacted real sessions and diff judge scores
 ```
 
@@ -55,6 +58,7 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
 | `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions, and what a participant gets around a vendor cut (resources at the cut, time to the first recovery words, the crisis line in the opening). |
 | `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
+| `voice/` | OpenAI's GPT-Live evaluation guide, our implementation: `timeline.ts` (one clock for audio and events), `metrics.ts` / `aggregate.ts` (latency, response rate, interruptions, silence during delegation, delegation accuracy, consumption, vendor-cut timing; P50/P90), `scenarios.ts` (CRAWL / WALK / RUN suites), `sessionInput.ts` (seeded history), `acoustics.ts` (WALK conditions), `callerPeer.ts` + `runMode.ts` (RUN simulated participant). See docs/redteam.md "GPT-Live evaluation guide". |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |
 | `graderFixtures.ts` | Labelled replies (real nightly replies plus hand-written breaches) that the re-scoped graders must pass or fail. |
 | `graderCalibration.test.ts` | Opt-in live check of the classifier questions against those fixtures; needs `REDTEAM_CALIBRATION_OPENAI_KEY`, skipped otherwise. |

@@ -44,6 +44,11 @@ import type { CostTracker, RedteamConfig } from './config.js';
 import type { Agent, HarnessClient } from './harnessClient.js';
 import { generatePersonaTurn } from './personaDriver.js';
 import { runJudge } from './judge.js';
+import { Timeline } from './voice/timeline.js';
+import type { RunMetrics, TurnFacts } from './voice/metrics.js';
+import { applyCondition } from './voice/acoustics.js';
+import { voiceExpectation } from './voice/scenarios.js';
+import type { HistoryTurn } from './voice/sessionInput.js';
 import {
   liveScenarioAssertions,
   mentionsCrisisResource,
@@ -228,6 +233,18 @@ export interface VoiceSessionOptions {
    *  (`recovery: true`) after a content-filter termination — narrow crisis
    *  prompt, no history, speak-first nudge instead of the opening preamble. */
   recovery?: boolean;
+  /** GPT-Live evaluation (src/redteam/voice): the run's shared timeline. */
+  timeline?: Timeline;
+  /** GPT-Live CRAWL/WALK: prior turns seeded as text in session.input; the
+   *  opening line is skipped (the conversation is already under way). */
+  history?: HistoryTurn[];
+  /** GPT-Live WALK: transform applied to each synthesized utterance. */
+  audioTransform?: (pcm: Buffer) => Buffer;
+  /** GPT-Live RUN: every decoded assistant frame, for the simulated caller. */
+  onAssistantPcm?: (pcm: Buffer) => void;
+  /** GPT-Live RUN: pulled every 20 ms when no utterance is queued; a 20 ms
+   *  PCM frame of simulated-caller audio, or undefined for silence. */
+  micSource?: () => Buffer | undefined;
 }
 
 /** The browser gives up on voice after this many recovery sessions and
@@ -364,7 +381,7 @@ export interface VoiceTransport {
   readonly model: string;
   /** Lower bound on participant turns the server has scored so far. */
   readonly userTurns: number;
-  speakBeat(text: string): Promise<BeatTurn>;
+  speakBeat(text: string, beatId?: string): Promise<BeatTurn>;
   end(): Promise<void>;
   /** Sever the browser-side socket and reconnect it (Grok only). */
   dropClientAndReconnect?(gapMs: number): Promise<void>;
@@ -935,8 +952,15 @@ export async function runVoiceScenario(
   judgeBreaches: boolean;
   sessionId: string;
   transcript: Turn[];
+  voiceMetrics?: RunMetrics;
 }> {
   if (!openai) throw new Error('voice pipeline requires a live OpenAI client (no dry-run path)');
+  // RUN mode (OpenAI's GPT-Live evaluation guide): a simulated participant in
+  // one continuous full-duplex session instead of scripted beats.
+  if (scenario.voiceEval?.mode === 'run') {
+    const { runVoiceRunScenario } = await import('./voice/runMode.js');
+    return runVoiceRunScenario(scenario, client, openai, cfg, cost, pool, classify);
+  }
 
   const { getAiModel } = await import('../server/db/index.js');
   const aiModel = await getAiModel();
@@ -963,6 +987,9 @@ export async function runVoiceScenario(
   }
 
   const { LiveVoiceSession } = await import('./liveVoiceClient.js');
+  // GPT-Live evaluation (voice/): one timeline across every segment, the
+  // CRAWL/WALK history seam, and the WALK acoustic condition.
+  const evalOpts = liveEvalOptions(scenario, cfg.seed);
   let vs: VoiceTransport;
   let opening: string;
   if (backend === 'grok') {
@@ -982,7 +1009,7 @@ export async function runVoiceScenario(
       agent,
       openai,
       cost,
-      { textTurns: cfg.voiceTextTurns },
+      { textTurns: cfg.voiceTextTurns, ...evalOpts.start },
       openingPrompt,
     ));
   }
@@ -1008,6 +1035,9 @@ export async function runVoiceScenario(
   const transports: VoiceTransport[] = [vs];
   /** GPT-Live: per-beat band, layer and cut, for liveScenarioAssertions. */
   const liveBeats: LiveBeatRecord[] = [];
+  /** GPT-Live evaluation: per-turn facts for voice/metrics.ts. */
+  const turnFacts: TurnFacts[] = [];
+  const recoveryAfter: Record<string, string> = {};
 
   /** A recovery start in flight (or finished), not yet adopted by the run. */
   interface PendingRecovery {
@@ -1053,7 +1083,7 @@ export async function runVoiceScenario(
       agent,
       openai,
       cost,
-      { textTurns: false, recovery: true },
+      { textTurns: false, recovery: true, timeline: evalOpts.timeline },
       buildRecoverySpeakFirstNudge(sysCfg.crisis_contact as RecoveryCrisisContact | undefined),
     ).catch((err: unknown) => ({ error: err instanceof Error ? err : new Error(String(err)) }));
     return { attempt, terminatedId, cutAt, contentFilterAt, t0, started };
@@ -1078,6 +1108,7 @@ export async function runVoiceScenario(
       });
       return false;
     }
+    recoveryAfter[terminatedId] = result.session.sessionId;
     vs = result.session;
     transports.push(vs);
     const opening = result.opening;
@@ -1194,7 +1225,9 @@ export async function runVoiceScenario(
   };
   // The server-authored opening line is a real assistant turn the participant
   // hears first; the disclaimer assertions key on it.
-  transcript.push(withLayer({ role: 'assistant', text: opening, beatId: 'opening' }, vs.openingLayer ?? undefined));
+  // (A CRAWL/WALK session resumes mid-conversation and has no opening.)
+  if (opening || !scenario.voiceEval)
+    transcript.push(withLayer({ role: 'assistant', text: opening, beatId: 'opening' }, vs.openingLayer ?? undefined));
 
   try {
     for (const beat of beats) {
@@ -1203,7 +1236,7 @@ export async function runVoiceScenario(
       beatPostTimes[beat.id] = new Date();
       lastBeatSegment = sessionId;
       segmentBeats.get(sessionId)?.push(beat.id);
-      const turn = await vs.speakBeat(utter);
+      const turn = await vs.speakBeat(utter, beat.id);
       // A vendor cut is answered at once, as the browser does: the recovery
       // session is started here and adopted after this beat's assertions.
       let cutPlan: 'recover' | 'stop' | null = null;
@@ -1228,6 +1261,15 @@ export async function runVoiceScenario(
       }
       // The session this beat was spoken in, and its transport: `vs` moves on
       // only when the recovery is adopted, below.
+      if (backend === 'live' && scenario.voiceEval && !turn.terminated && vs.drainTrailing) {
+        // CRAWL/WALK: observe a fixed window after the reply before grading,
+        // as the guide's collector waits for delegated work and a quiet tail:
+        // a server steer can stop the voice model mid-sentence, and whether it
+        // comes back (and how long the participant waits) is the evidence.
+        await sleep(EVAL_OBSERVE_MS);
+        const more = await vs.drainTrailing();
+        if (more.text) mergeTrailing(turn, more);
+      }
       if (cfg.voiceTextTurns) {
         // Typed text is persisted and scored through /logs/batch by the
         // browser; do the same (the proxy only injected it upstream).
@@ -1272,6 +1314,17 @@ export async function runVoiceScenario(
           moderationStopped: turn.moderationStopped === true,
           layer: turn.layer?.layer ?? null,
           reply: turn.assistantText,
+        });
+        turnFacts.push({
+          beatId: beat.id,
+          sessionId,
+          band,
+          crisis: (beat.voice ?? voiceExpectation(scenario.id, beat.id))?.crisis,
+          delegate: (beat.voice ?? voiceExpectation(scenario.id, beat.id))?.delegate,
+          delegationIds: turn.layer?.delegationIds ?? [],
+          tools: turn.layer?.tools ?? [],
+          voiceSpokeFirst: turn.layer ? turn.layer.layer === 'voice' || turn.layer.voiceSpokeFirst : undefined,
+          layer: turn.layer?.layer ?? null,
         });
         console.log(
           `[redteam:voice] ${beat.id}: answered by the ${turn.layer?.layer ?? 'unknown'} layer` +
@@ -1513,6 +1566,24 @@ export async function runVoiceScenario(
     );
   }
 
+  // GPT-Live evaluation metrics (voice/metrics.ts) and the delegation / tool
+  // expectations declared on the scenario.
+  let voiceMetrics: RunMetrics | undefined;
+  if (backend === 'live' && evalOpts.timeline) {
+    const { finishLiveEval } = await import('./voice/runnerHooks.js');
+    const done = await finishLiveEval({
+      scenario,
+      timeline: evalOpts.timeline,
+      turns: turnFacts,
+      segments,
+      recoveryAfter,
+      pool,
+      transcript,
+    });
+    voiceMetrics = done.metrics;
+    assertions.push(...done.assertions);
+  }
+
   // Did the recovery do its one job — keep the crisis line in front of them?
   // The recovery prompt asks for it "every few turns"; non-gating because a
   // short segment may legitimately not get there.
@@ -1619,5 +1690,47 @@ export async function runVoiceScenario(
       judgeBreaches = judgeBreaches || floors.some((a) => !a.passed && a.gating);
     }
   }
-  return { assertions, judge, judgeBreaches, sessionId: originalSessionId, transcript };
+  return { assertions, judge, judgeBreaches, sessionId: originalSessionId, transcript, voiceMetrics };
+}
+
+/** GPT-Live evaluation options for a scenario (voice/): a fresh timeline for
+ *  every GPT-Live run, the CRAWL/WALK history and the WALK condition. */
+function liveEvalOptions(
+  scenario: Scenario,
+  seed: number,
+): { timeline: Timeline; start: Partial<VoiceSessionOptions> } {
+  const timeline = new Timeline();
+  const spec = scenario.voiceEval;
+  const condition = spec?.acoustic;
+  return {
+    timeline,
+    start: {
+      timeline,
+      ...(spec?.history?.length ? { history: spec.history } : {}),
+      ...(condition && condition !== 'clean'
+        ? { audioTransform: (pcm: Buffer) => applyCondition(pcm, condition, seed) }
+        : {}),
+    },
+  };
+}
+
+/** CRAWL/WALK: how long to keep listening after the reply's first quiet gap. */
+const EVAL_OBSERVE_MS = 10_000;
+
+/** Fold speech that arrived during the observation window into the beat's
+ *  reply (pure). */
+export function mergeTrailing(turn: BeatTurn, more: { text: string; layer?: TurnLayerInfo }): void {
+  turn.assistantText = `${turn.assistantText} ${more.text}`.trim();
+  if (!more.layer) return;
+  const base = turn.layer;
+  turn.layer = base
+    ? {
+        layer: base.layer === 'delegated' || more.layer.layer === 'delegated' ? 'delegated' : 'voice',
+        delegationIds: [...base.delegationIds, ...more.layer.delegationIds],
+        backendText: [base.backendText, more.layer.backendText].filter(Boolean).join(' '),
+        tools: [...base.tools, ...more.layer.tools],
+        voiceSpokeFirst: base.layer === 'voice' ? true : base.voiceSpokeFirst,
+      }
+    : more.layer;
+  turn.toolCalls = turn.layer.tools;
 }

@@ -192,26 +192,23 @@ describe("planAfterTermination — the browser's content-filter recovery, mirror
 });
 
 describe('recovery speak-first nudge', () => {
-  it('the browser and the harness call the same builder, so they cannot say different things', () => {
+  it('has one source: the server, the browser fallback and the harness all call the shared builder', () => {
     const app = readFileSync(new URL('../client/main/components/App.tsx', import.meta.url), 'utf8');
+    const route = readFileSync(new URL('../server/routes/public/liveSession.routes.ts', import.meta.url), 'utf8');
     const harness = readFileSync(new URL('./voiceClient.ts', import.meta.url), 'utf8');
-    expect(app).toContain('content: truncateForAppend(buildRecoverySpeakFirstNudge(crisisContact))');
+    expect(route).toContain('text: buildRecoverySpeakFirstNudge(crisisContact as RecoveryCrisisContact)');
+    expect(app).toContain('sendInvisiblePrompt(buildRecoverySpeakFirstNudge(crisisContact), LIVE_RECOVERY_NUDGE_LOG)');
     expect(harness).toContain('buildRecoverySpeakFirstNudge(sysCfg.crisis_contact');
-    // The old wording is gone from the browser, not left behind as a fallback.
-    expect(app).not.toMatch(/The voice connection just dropped/);
-    expect(app).not.toMatch(/technical drop/);
+    // The old wording is gone everywhere, not left behind as a fallback.
+    for (const source of [app, route]) {
+      expect(source).not.toMatch(/The voice connection just dropped/);
+      expect(source).not.toMatch(/technical drop/);
+    }
   });
 
-  it('both deliver it the same way: as commentary, the documented greeting mechanism', () => {
-    const app = readFileSync(new URL('../client/main/components/App.tsx', import.meta.url), 'utf8');
-    const transport = readFileSync(new URL('./liveVoiceClient.ts', import.meta.url), 'utf8');
-    // Browser: the event that carries the builder's text is a commentary append.
-    expect(app).toMatch(
-      /type: 'session\.commentary\.append',\s+delegation_id: null,\s+content: truncateForAppend\(buildRecoverySpeakFirstNudge\(crisisContact\)\)/,
-    );
-    // Harness: a recovery start sends its opening as commentary; an ordinary
-    // start still sends the disclosure preamble as an instructions append.
-    expect(transport).toContain("vs.sendAppend(openingPrompt, opts.recovery ? 'commentary' : 'instructions')");
+  it('the server delivers it as commentary, the documented greeting mechanism', () => {
+    const route = readFileSync(new URL('../server/routes/public/liveSession.routes.ts', import.meta.url), 'utf8');
+    expect(route).toMatch(/logMessage: LIVE_RECOVERY_NUDGE_LOG,\s+via: 'commentary' as const/);
   });
 });
 

@@ -4,7 +4,8 @@
 //
 //   npx tsx src/redteam/cli.ts --suite smoke
 //
-// Flags: --suite smoke|full|quality|voice|voice-safety|extended  --scenario <id>  --out <dir>
+// Flags: --suite smoke|full|quality|voice|voice-safety|extended|voice-crawl|voice-walk|voice-run
+//        --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
 //        --variant <name> (run under a named feature-flag variant: default,
@@ -34,7 +35,7 @@ process.env.NODE_ENV = 'test';
 process.env.ASSISTANT_ENABLED = 'true';
 
 import type OpenAI from 'openai';
-import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, type RedteamConfig } from './config.js';
+import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, isRedteamSuite, type RedteamConfig } from './config.js';
 import { makeClassifier } from './assertions.js';
 import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
@@ -50,6 +51,7 @@ import {
   DEFAULT_VARIANT,
 } from './variants.js';
 import { HarnessClient, type Agent } from './harnessClient.js';
+import type { RunMetrics } from './voice/metrics.js';
 import { writeReports, printConsole, buildSummaryJson, type RunSummary } from './report.js';
 import {
   diffRuns,
@@ -111,8 +113,7 @@ function parseArgs(argv: string[]): RedteamConfig {
     switch (a) {
       case '--suite': {
         const v = next();
-        cfg.suite =
-          v === 'smoke' || v === 'quality' || v === 'voice' || v === 'voice-safety' || v === 'extended' ? v : 'full';
+        cfg.suite = isRedteamSuite(v) ? v : 'full';
         break;
       }
       case '--scenario':
@@ -613,6 +614,7 @@ async function runEntry(
     });
     const { judge, judgeBreaches, sessionId, transcript } = res;
     const assertions = applyKnownGap(scenario, res.assertions);
+    const voiceMetrics = (res as { voiceMetrics?: RunMetrics }).voiceMetrics;
     const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
     return {
       id: label,
@@ -628,6 +630,7 @@ async function runEntry(
       progression: computeProgression(scenario.pipeline, transcript),
       costUsd: cost.usd,
       durationMs: Date.now() - start,
+      ...(voiceMetrics ? { voiceMetrics } : {}),
     };
   } catch (err) {
     return {

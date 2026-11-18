@@ -66,8 +66,15 @@ import {
   LIVE_DEFAULT_BACKEND_MODEL,
   resolveBackendReasoningEffort,
 } from '../../utils/liveSessionConfig.js';
+import {
+  DEFAULT_CRISIS_CONTACT,
+  LIVE_RECOVERY_NUDGE_LOG,
+  liveOpeningInstruction,
+  type OpeningCrisisContact,
+} from '../../../shared/openingPrompt.js';
 import { sidebandManager } from '../../services/sidebandManager.service.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../../shared/recoveryPrompt.js';
+import { registerLiveOpening, scheduleLiveOpeningFallback } from '../../services/liveOpening.service.js';
 
 import { createLogger } from '../../utils/logger.js';
 import { classifyOpenAIError, classifyOpenAIResponse } from '../../utils/openaiErrors.js';
@@ -303,6 +310,13 @@ export default function liveSessionRoutes(): Router {
           );
         }
 
+        // Decided before the OpenAI call because the data-channel permission
+        // block is a creation-time field: with a sideband the browser's channel
+        // is locked and the server does all steering; with the kill switch
+        // thrown there is no server-side channel, so the browser keeps its old
+        // allow-all channel or the opening disclosure could not be spoken.
+        const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
+
         const sessionConfig = buildLiveSessionConfig({
           model: aiModel,
           voice: userVoice,
@@ -320,6 +334,7 @@ export default function liveSessionRoutes(): Router {
             : undefined,
           psychoeducationCue: psychoeducationCue === true,
           leadConversation,
+          allowClientSteering: !sidebandEnabled,
         });
 
         const apiKey = await getOpenAIKey();
@@ -475,7 +490,6 @@ export default function liveSessionRoutes(): Router {
         //
         // So: await the open, and on failure hang up the OpenAI session and
         // surface an error rather than handing back a live, unmonitored one.
-        const sidebandEnabled = process.env.SIDEBAND_ENABLED !== 'false';
         if (!sidebandEnabled) {
           // Explicitly loud. This kill switch now disables crisis detection on
           // the voice path, which it did not under Realtime.
@@ -522,6 +536,33 @@ export default function liveSessionRoutes(): Router {
               message: 'We could not start your session right now. Please try again in a moment.',
             });
           }
+
+          // The opening is authored here and held until the browser reports
+          // `session.started` (POST /api/sessions/:id/opening). The browser's
+          // data channel can no longer append instructions, so this is the only
+          // way the disclosure preamble, or the recovery speak-first nudge, is
+          // ever spoken. See liveOpening.service.ts for why it waits.
+          // Same text the browser authored before the lock, from the same
+          // builder: both opening variants (lead_conversation off and on) and
+          // the crisis contact GET /api/config/crisis serves the browser.
+          registerLiveOpening(
+            sessionId,
+            isRecovery
+              ? {
+                  // The same text is already in the session's startup input
+                  // (recovery.speakFirst); delivered as commentary, the
+                  // documented way to have GPT-Live open a conversation.
+                  text: buildRecoverySpeakFirstNudge(crisisContact as RecoveryCrisisContact),
+                  logMessage: LIVE_RECOVERY_NUDGE_LOG,
+                  via: 'commentary' as const,
+                }
+              : liveOpeningInstruction(
+                  userLanguage,
+                  (systemConfig.crisis_contact as OpeningCrisisContact | undefined) || DEFAULT_CRISIS_CONTACT,
+                  leadConversation,
+                ),
+          );
+          scheduleLiveOpeningFallback(sessionId);
         }
 
         // `limitCheck.allowed` narrows the union: the denied variants carry no
@@ -576,8 +617,12 @@ export default function liveSessionRoutes(): Router {
           voice: userVoice,
           language: userLanguage,
           session_limits: limitCheck.allowed ? limitCheck.limits || null : null,
-          // The browser delivers the GPT-Live opening, so it needs to know how
-          // the opening should end (shared/openingPrompt.ts).
+          // True when the browser's data channel is restricted to
+          // LIVE_CLIENT_EVENTS: it must ask the server for the opening and must
+          // not attempt an instructions append of its own.
+          data_channel_locked: sidebandEnabled,
+          // How the opening ends (shared/openingPrompt.ts). The server delivers
+          // it; the browser needs this only for the unlocked fallback.
           lead_conversation: leadConversation,
         });
       } catch (error) {

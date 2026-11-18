@@ -8,10 +8,26 @@ name: Red-team (voice, GPT-Live)
 # Separate from redteam-nightly.yml on purpose: each scenario is minutes of
 # wall clock and bills per voice minute. Cost and schedule: see docs/redteam.md
 # "Voice suite in CI". Never a deploy gate.
+#
+# GPT-Live evaluation guide modes (docs/redteam.md "GPT-Live evaluation
+# guide"): the weekly run adds CRAWL (single spoken turns at critical points,
+# three repeats for P50/P90). WALK (acoustic conditions) and RUN (simulated
+# participant, full duplex) run on demand only: pick them with `mode`.
 on:
   schedule:
     - cron: '0 9 * * 0' # weekly, Sunday 09:00 UTC (03:00 America/Denver)
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'weekly (voice-safety + crawl), safety, crawl, walk, run, or all'
+        required: false
+        default: weekly
+        type: choice
+        options: [weekly, safety, crawl, walk, run, all]
+      repeats:
+        description: 'Repeats per crawl / walk / run scenario (P50/P90 need at least 3)'
+        required: false
+        default: '3'
 permissions:
   contents: read
 concurrency:
@@ -20,7 +36,7 @@ concurrency:
 jobs:
   redteam-voice:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 120
     # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
     # and redteam-nightly.yml (composite actions cannot declare services). The
     # setup-node -> npm ci -> migrate+seed sequence lives in
@@ -57,17 +73,45 @@ jobs:
             gpt-live-*) ;;
             *) echo "::error::ai_model is '${model}', not a gpt-live-* model; this workflow only covers GPT-Live"; exit 1 ;;
           esac
-      - name: Red-team voice suite
+      - name: Red-team voice suites
         id: voice
         # Exit code 1 on any gating failure. Held until the results are
-        # uploaded and summarised, then re-raised by the last step.
+        # uploaded and summarised, then re-raised by the last step. Each suite
+        # writes its own results directory, and every suite runs even when an
+        # earlier one failed.
         continue-on-error: true
         env:
           REDTEAM_TRIGGER: ci-voice
-        run: npm run redteam:voice-safety
+          MODE: ${{ inputs.mode || 'weekly' }}
+          REPEATS: ${{ inputs.repeats || '3' }}
+        run: |
+          case "$MODE" in
+            weekly) suites="voice-safety voice-crawl" ;;
+            safety) suites="voice-safety" ;;
+            crawl) suites="voice-crawl" ;;
+            walk) suites="voice-walk" ;;
+            run) suites="voice-run" ;;
+            all) suites="voice-safety voice-crawl voice-walk voice-run" ;;
+            *) echo "::error::unknown mode $MODE"; exit 2 ;;
+          esac
+          case "$REPEATS" in ''|*[!0-9]*) echo "::error::repeats must be a number"; exit 2 ;; esac
+          rc=0
+          for suite in $suites; do
+            reps="$REPEATS"
+            [ "$suite" = "voice-safety" ] && reps=1
+            npx tsx src/redteam/cli.ts --suite "$suite" --variations "$reps" --out "redteam-results/$suite" || rc=1
+          done
+          exit $rc
       - name: Job summary
         if: always()
-        run: npx tsx src/redteam/voiceSummary.ts redteam-results/summary.json
+        run: |
+          found=0
+          for f in redteam-results/*/summary.json; do
+            [ -f "$f" ] || continue
+            found=1
+            npx tsx src/redteam/voiceSummary.ts "$f"
+          done
+          [ "$found" = 1 ] || npx tsx src/redteam/voiceSummary.ts redteam-results/summary.json
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4

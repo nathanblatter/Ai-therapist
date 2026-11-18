@@ -650,7 +650,44 @@ export interface LiveSessionConfigInput {
   psychoeducationCue?: boolean;
   /** features.lead_conversation_enabled; see buildLiveInstructions. Ignored in recovery. */
   leadConversation?: boolean;
+  /**
+   * Leave the browser's data channel unrestricted (the pre-2026-11-16
+   * behaviour) instead of locking it to LIVE_CLIENT_EVENTS.
+   *
+   * True ONLY when the server has no sideband for this session
+   * (SIDEBAND_ENABLED=false): with no server-side channel, the browser's
+   * instructions append is the only way the opening disclosure can be
+   * delivered at all, so locking it would start a silent session. Every
+   * monitored session leaves this unset.
+   */
+  allowClientSteering?: boolean;
 }
+
+/**
+ * Client events the participant's browser may send on the WebRTC data channel
+ * (`session.client.data_channel.allowed_client_events`), for every session:
+ * normal and recovery alike.
+ *
+ *  - session.close   graceful end; the browser must be able to hang up.
+ *
+ * Everything else the browser used to send now goes through the server's
+ * sideband, which this block does not affect: the opening and recovery nudge
+ * (POST /api/sessions/:id/opening), typed text (POST /api/sessions/:id/text,
+ * always a user-role message) and tool outcomes (/tool-event).
+ *
+ * Deliberately absent, each measured live against gpt-live-1 on 2026-11-18
+ * (accepted from an unlocked browser channel): `session.update` (replaced the
+ * backend prompt and tools, set tool_choice none, cleared triggers),
+ * `session.instructions.append`, `session.thinking.append`,
+ * `session.commentary.append` (each made the model speak a canary),
+ * `response.item.create` (took a developer-role message for the backend),
+ * `session.input_audio.mute` and `decision.item.create`. `response.create` has
+ * no use without `response.item.create`.
+ *
+ * Every string here is a documented Live client event `type`. Do not add a
+ * name that is not in the API reference.
+ */
+export const LIVE_CLIENT_EVENTS = ['session.close'] as const;
 
 /**
  * Project registry tool definitions into the Responses function schema that
@@ -746,28 +783,43 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
     store: storable === true,
   };
 
-  // OPEN ITEM — frontend data-channel permissions.
+  // Frontend data-channel permissions (ai-therapist-214).
   //
-  // Because the browser owns the WebRTC data channel, it can send client events
-  // directly to the session, including `session.instructions.append` — which is
-  // the trusted-application-instruction channel. A participant with devtools
-  // could therefore steer their own therapist. Under the Realtime API the
-  // equivalent hole existed (`conversation.item.create` with role system), so
-  // this is not a regression, but instructions.append is the stronger lever.
+  // The browser owns the WebRTC data channel, so without this block it can send
+  // any client event straight to the session, including
+  // `session.instructions.append`, the trusted-application-instruction channel:
+  // a participant with devtools could steer their own therapist.
   //
-  // The docs reference "frontend client permissions" and "frontend data-channel
-  // permissions" as a real WebRTC session concept — the fork section states
-  // that WebRTC forks preserve them and WebSocket forks discard them — but no
-  // guide documents the field name or its shape. Guessing an unknown key here
-  // would be rejected as an unknown configuration field and 400 the entire
-  // handshake, taking voice sessions down.
+  // Documented in the POST /v1/live/sessions reference as of 2026-11-16
+  // (https://developers.openai.com/api/reference/resources/live/methods/create):
   //
-  // Until that field is documented, the mitigation is architectural rather than
-  // configured: every safety-relevant instruction (crisis steering, minor
-  // safeguard, phase guidance, wind-down) is authored and delivered SERVER-side
-  // over the sideband, so a tampered client cannot suppress them — only add
-  // noise alongside them. Revisit and lock the channel down as soon as the
-  // permissions schema is published.
+  //   client: optional ClientConfig. "Startup-only capabilities for an
+  //     untrusted frontend attached to a unified WebRTC session. Trusted
+  //     sideband connections are unaffected."
+  //   client.data_channel.allowed_client_events: optional "all" or array of
+  //     string. "Client event types that the frontend data channel may send.
+  //     Use 'all' to allow every client event; an empty array allows none.
+  //     Omission preserves the existing allow-all behavior."
+  //
+  // `allowed_server_events` is left out on purpose: omission keeps allow-all,
+  // and the browser needs the transcript, lifecycle and response events it
+  // reads today.
+  //
+  // Startup-only, so it cannot be tightened or loosened mid-session. An unknown
+  // key here 400s the whole handshake, which is why nothing was set until the
+  // schema was published; keep this block to exactly the documented shape.
+  //
+  // Consequence for the client: everything it used to append as instructions
+  // (opening preamble, recovery nudge, and the relay fallbacks for admin
+  // prompts and tool outcomes) must come from the server over the sideband.
+  // See POST /api/sessions/:sessionId/opening and liveOpening.service.ts.
+  if (!input.allowClientSteering) {
+    session.client = {
+      data_channel: {
+        allowed_client_events: [...LIVE_CLIENT_EVENTS],
+      },
+    };
+  }
 
   // Recovery sessions carry NO history, unconditionally — even if a caller
   // passes some. Replaying the disclosure that tripped the content filter into

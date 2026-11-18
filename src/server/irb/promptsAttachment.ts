@@ -16,8 +16,6 @@
 // Only the explanatory prose below is hand-written. Bump PREPARED when the
 // prompt text changes and the attachment is re-submitted.
 
-import { readFileSync } from 'node:fs';
-
 import {
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_MODALITY_PRESETS,
@@ -70,7 +68,7 @@ import {
 } from '../utils/sessionAutoTerminate.js';
 import { SCALE_MIN_INTERVAL_DAYS } from '../utils/scales.js';
 import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
-import { openingDeliveryInstruction } from '../../shared/openingPrompt.js';
+import { liveOpeningInstruction } from '../../shared/openingPrompt.js';
 import {
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
   CRISIS_WIND_DOWN_GUIDANCE,
@@ -116,9 +114,6 @@ export const ATTACHMENT_PATH = 'docs/irb-phase2-instruments/prompts.html';
 
 /** Absolute URL of the committed attachment. */
 export const ATTACHMENT_URL = new URL('../../../docs/irb-phase2-instruments/prompts.html', import.meta.url);
-
-/** Browser source that authors the GPT-Live opening line (checked, not imported). */
-const CLIENT_APP_URL = new URL('../../client/main/components/App.tsx', import.meta.url);
 
 /**
  * The crisis contact migration 090 writes to system_config.crisis_contact,
@@ -220,58 +215,17 @@ function toolGuidanceToolNames(): string[] {
 }
 
 /**
- * Under GPT-Live the opening instruction is sent by the participant's browser
- * (App.tsx), not by the server. It shares its wording with the server-built
- * Grok opening, so the client source is checked for every fixed fragment of
- * it. The recovery speak-first instruction is built by one shared function
- * (shared/recoveryPrompt.ts) that the server and the browser both call; the
- * client source is checked for that call. Either way a client-side edit fails
- * the check instead of drifting.
+ * Under GPT-Live the server sends the opening instruction and the recovery
+ * speak-first nudge over its sideband (ai-therapist-214: the browser's data
+ * channel is locked), built by shared/openingPrompt.ts. The Grok opening is
+ * built separately in grokVoiceConfig.ts, so the two are checked for equality
+ * here: an edit to one fails the attachment build instead of drifting.
  */
-function readClientApp(): string {
-  return readFileSync(CLIENT_APP_URL, 'utf8');
-}
-
-function verifyClientOpening(opening: string, leadConversation: boolean): void {
-  const prefix = "Say this phrase exactly: '";
-  const parts = opening.slice(prefix.length).split(buildGrokCrisisPhrase(PLACEHOLDER_CRISIS_CONTACT));
-  if (!opening.startsWith(prefix) || parts.length !== 2) {
-    throw new Error('irb prompts attachment: opening line shape changed');
+function verifyLiveOpening(opening: string, leadConversation: boolean): void {
+  const live = liveOpeningInstruction('en', PLACEHOLDER_CRISIS_CONTACT, leadConversation).text;
+  if (live !== opening) {
+    throw new Error('irb prompts attachment: the GPT-Live opening no longer matches the Grok opening');
   }
-  const [before, after] = parts;
-  const quote = after.lastIndexOf("'");
-  const [voiceNote, thanks] = after.slice(1, quote).split(' Thanks again');
-  // The delivery instruction after the quoted phrase comes from
-  // shared/openingPrompt.ts, which the browser imports too.
-  if (after.slice(quote + 1) !== ' ' + openingDeliveryInstruction(leadConversation)) {
-    throw new Error('irb prompts attachment: opening delivery instruction changed shape');
-  }
-  const fragments = [
-    "Say this phrase exactly: '${basePrompt}'",
-    before,
-    voiceNote,
-    ' Thanks again' + thanks,
-    '`${initialPrompt} ${openingDeliveryInstruction(leadConversationRef.current)}`',
-  ];
-  const client = readClientApp();
-  for (const fragment of fragments) {
-    if (!fragment || thanks === undefined || !client.includes(fragment)) {
-      throw new Error(`irb prompts attachment: App.tsx no longer contains ${JSON.stringify(fragment)}`);
-    }
-  }
-}
-
-function recoverySpeakFirst(): string {
-  const client = readClientApp();
-  // The browser must send exactly what the shared builder returns, as
-  // commentary, and must not carry a second copy of the wording.
-  if (!client.includes('content: truncateForAppend(buildRecoverySpeakFirstNudge(crisisContact))')) {
-    throw new Error('irb prompts attachment: App.tsx no longer sends buildRecoverySpeakFirstNudge(crisisContact)');
-  }
-  if (!client.includes('RECOVERY_INTERIM_SPOKEN_LINE')) {
-    throw new Error('irb prompts attachment: App.tsx no longer speaks RECOVERY_INTERIM_SPOKEN_LINE');
-  }
-  return buildRecoverySpeakFirstNudge({ enabled: true, phone: '<phone>', text: '<text line>' });
 }
 
 function buildItems(): Item[] {
@@ -598,14 +552,14 @@ function buildItems(): Item[] {
       '<language name>:" instead.',
   );
   const voiceOpening = buildGrokOpeningPrompt('en', PLACEHOLDER_CRISIS_CONTACT);
-  verifyClientOpening(voiceOpening, false);
+  verifyLiveOpening(voiceOpening, false);
   const voiceOpeningLead = buildGrokOpeningPrompt('en', PLACEHOLDER_CRISIS_CONTACT, { leadConversation: true });
-  verifyClientOpening(voiceOpeningLead, true);
+  verifyLiveOpening(voiceOpeningLead, true);
   add('h3', 'Voice sessions — instruction to the voice model');
   add(
     'p',
-    "Identical on both voice backends: under GPT-Live the participant's browser sends it, under Grok Voice the " +
-      'server injects it.',
+    'Identical on both voice backends, and sent by the server on both: under GPT-Live over its monitoring ' +
+      "connection once the participant's audio is connected, under Grok Voice as the first instruction it injects.",
   );
   add('pre', voiceOpening);
   add('note', CONDITIONAL_LEAD_CONVERSATION);
@@ -638,11 +592,11 @@ function buildItems(): Item[] {
   add(
     'note',
     'So that the model speaks first, this instruction is placed in the replacement session when it is created and ' +
-      "sent again by the participant's browser as the session starts; the server re-sends it if the model has not " +
-      'spoken after 4 and 8 seconds. <phone> and <text line> are the configured crisis contact (988 and HOME to ' +
-      '741741 when none is configured):',
+      'sent again by the server as the session starts; the server re-sends it if the model has not spoken after 4 ' +
+      'and 8 seconds. <phone> and <text line> are the configured crisis contact (988 and HOME to 741741 when none ' +
+      'is configured):',
   );
-  add('pre', recoverySpeakFirst());
+  add('pre', buildRecoverySpeakFirstNudge({ enabled: true, phone: '<phone>', text: '<text line>' }));
   add('h3', 'Voice recovery — what the participant hears and sees while reconnecting');
   add(
     'p',
