@@ -18,15 +18,17 @@ function ok(body: unknown): Response {
     headers: new Headers(),
   } as unknown as Response;
 }
-function status(code: number, retryAfter?: string): Response {
+function status(code: number, retryAfter?: string, body?: unknown): Response {
   const headers = new Headers(retryAfter ? { 'retry-after': retryAfter } : {});
-  return {
+  const res = {
     ok: false,
     status: code,
-    json: async () => ({}),
-    text: async () => `status ${code}`,
+    json: async () => body ?? {},
+    text: async () => (body ? JSON.stringify(body) : `status ${code}`),
     headers,
-  } as unknown as Response;
+    clone: () => res,
+  };
+  return res as unknown as Response;
 }
 
 beforeEach(() => {
@@ -60,6 +62,21 @@ describe('embedText', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(await p).toEqual([1]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // ai-therapist-190: a billing/spend-limit 429 cannot succeed on retry.
+  it('does not retry a spend-limit 429, and surfaces it', async () => {
+    fetchMock.mockResolvedValue(
+      status(429, '1', { error: { code: 'organization_spend_limit_exceeded', type: 'insufficient_quota' } }),
+    );
+    await expect(embedText('x')).rejects.toThrow('organization_spend_limit_exceeded');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry when Retry-After is longer than the 30s per-wait cap', async () => {
+    fetchMock.mockResolvedValue(status(429, '120'));
+    await expect(embedText('x')).rejects.toThrow('429');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('gives up after three retryable failures', async () => {

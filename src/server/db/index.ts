@@ -26,6 +26,8 @@ export * from './assistantAudit.queries.js';
 export * from './insights.queries.js';
 export * from './tools.queries.js';
 export * from './knowledge.queries.js';
+// Researcher semantic search over redacted transcripts (ai-therapist-177).
+export * from './semanticSearch.queries.js';
 export * from './evals.queries.js';
 export * from './humanRatings.queries.js';
 export * from './ratingQueue.queries.js';
