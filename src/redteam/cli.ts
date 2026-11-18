@@ -7,6 +7,8 @@
 // Flags: --suite smoke|full|quality|voice  --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
+//        --variant <name> (run under a named feature-flag variant: default,
+//          lead-conversation, psychoeducation-cue; see variants.ts)
 //        --voice-text-turns (voice suite: typed-text turns instead of TTS audio)
 //        --voice-drop-client-midway / --voice-drop-upstream-midway (Grok voice:
 //          sever the browser socket / the xAI socket after the first beat and
@@ -36,6 +38,16 @@ import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, type RedteamConfig } from '.
 import { makeClassifier } from './assertions.js';
 import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
+import { runProgressionJudge, SESSION_PROGRESSION, type ProgressionJudgeResult } from './progressionJudge.js';
+import { computeProgression } from './progression.js';
+import {
+  applyVariant,
+  checkVariantApplied,
+  getVariant,
+  persistedSuiteLabel,
+  variantLabel,
+  DEFAULT_VARIANT,
+} from './variants.js';
 import { HarnessClient, type Agent } from './harnessClient.js';
 import { writeReports, printConsole, buildSummaryJson, type RunSummary } from './report.js';
 import {
@@ -80,6 +92,7 @@ function parseArgs(argv: string[]): RedteamConfig {
     voiceTextTurns: DEFAULTS.voiceTextTurns,
     voiceDropClientMidway: DEFAULTS.voiceDropClientMidway,
     voiceDropUpstreamMidway: DEFAULTS.voiceDropUpstreamMidway,
+    variant: DEFAULTS.variant,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -129,6 +142,9 @@ function parseArgs(argv: string[]): RedteamConfig {
         break;
       case '--voice-drop-upstream-midway':
         cfg.voiceDropUpstreamMidway = true;
+        break;
+      case '--variant':
+        cfg.variant = next();
         break;
       default:
         break;
@@ -223,8 +239,9 @@ async function runChatScenario(
   sessionId: string;
   transcript?: Turn[];
 }> {
+  if (scenario.setup) await scenario.setup(pool);
   const agent: Agent = client.newAgent();
-  await client.loginParticipant(agent);
+  await client.loginParticipant(agent, scenario.participant);
   await client.acceptConsent(agent);
   const { sessionId, opening } = await client.startChat(agent);
   const transcript: Turn[] = [];
@@ -296,6 +313,12 @@ async function runChatScenario(
   );
   assertions.push(...(await runAssertions(scenario.assertFinal, finalCtx)));
 
+  // Under a named variant, prove the session actually ran with it (assembled
+  // prompt + recorded arm in session_configurations); otherwise the variant's
+  // results would silently be default results with a different label.
+  const applied = await checkVariantApplied(getVariant(cfg.variant), pool, sessionId);
+  if (applied) assertions.push({ id: 'variant-applied', passed: applied.passed, detail: applied.detail, gating: true });
+
   let judge: ScenarioResult['judge'] = null;
   let judgeBreaches = false;
   if (runJudgeFlag) {
@@ -305,8 +328,30 @@ async function runChatScenario(
       assertions.push(...outcome.floorAssertions);
       judgeBreaches = outcome.floorAssertions.some((a) => !a.passed && a.gating);
     }
+    // Report-only session_progression (progressionJudge.ts): never a floor.
+    judge = withProgression(judge, await runProgressionJudge(sessionId, cfg, cost));
   }
   return { assertions, judge, judgeBreaches, sessionId, transcript };
+}
+
+/** Fold the session_progression score into the scenario's judge result. */
+function withProgression(judge: ScenarioResult['judge'], prog: ProgressionJudgeResult | null): ScenarioResult['judge'] {
+  if (!prog) return judge;
+  const base = judge ?? { scores: {}, overall: null };
+  const perJudge = { ...(base.perJudge ?? {}) };
+  for (const [key, score] of Object.entries(prog.perJudge)) {
+    perJudge[key] = { ...(perJudge[key] ?? {}), [SESSION_PROGRESSION]: score };
+  }
+  return {
+    ...base,
+    scores: { ...base.scores, [SESSION_PROGRESSION]: prog.score },
+    perJudge,
+    spread:
+      base.spread || prog.spread !== null
+        ? { ...(base.spread ?? {}), [SESSION_PROGRESSION]: prog.spread ?? 0 }
+        : base.spread,
+    progressionRationale: prog.rationale,
+  };
 }
 
 async function runRealtimeScenario(
@@ -546,6 +591,7 @@ async function runEntry(
       // The assistant pipeline drives no therapy session.
       sessionId: sessionId || undefined,
       transcript,
+      progression: computeProgression(scenario.pipeline, transcript),
       costUsd: cost.usd,
       durationMs: Date.now() - start,
     };
@@ -567,6 +613,13 @@ async function runEntry(
 
 async function main(): Promise<void> {
   const cfg = parseArgs(process.argv.slice(2));
+  let variant: ReturnType<typeof getVariant>;
+  try {
+    variant = getVariant(cfg.variant);
+  } catch (err) {
+    console.error(`[redteam] ${(err as Error).message}`);
+    process.exit(2);
+  }
   const entries = selectSuite(cfg.suite, cfg.scenarioId);
   if (entries.length === 0) {
     console.error(`No scenarios matched (suite=${cfg.suite}, scenario=${cfg.scenarioId ?? 'all'})`);
@@ -574,13 +627,17 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `[redteam] suite=${cfg.suite} scenarios=[${entries.map((e) => e.scenario.id).join(', ')}] seed=${cfg.seed} dryRun=${cfg.dryRun}`,
+    `[redteam] suite=${cfg.suite} variant=${variant.name} scenarios=[${entries.map((e) => e.scenario.id).join(', ')}] seed=${cfg.seed} dryRun=${cfg.dryRun}`,
   );
 
   // Boot the real server in-process (registers routes + sets global.io).
   const { app, io, httpServer } = await import('../server/index.js');
   const { pool } = await import('../server/config/db.js');
   const { CURRENT_CONSENT_VERSION } = await import('../server/utils/consent.js');
+
+  // Variant flags are overlaid in this process only (never written to the DB).
+  await applyVariant(variant);
+  if (variant.name !== DEFAULT_VARIANT) console.log(`[redteam] variant ${variant.name}: ${variant.description}`);
 
   const client = new HarnessClient(app, io, CURRENT_CONSENT_VERSION);
   client.patchEmissions();
@@ -636,12 +693,17 @@ async function main(): Promise<void> {
     startedAt,
     finishedAt,
     suite: cfg.suite,
+    variant: variantLabel(variant),
     seed: cfg.seed,
     judgeModel: judgeLabel,
     gitSha,
     scenarios: results,
   };
   const { junitPath, summaryPath } = writeReports(cfg, summary);
+  // A diff from an earlier run in the same --out dir must never be mistaken
+  // for this run's (ciSummary.ts renders whatever diff.json is there).
+  for (const stale of ['diff.json', 'diff.md'])
+    (await import('node:fs')).rmSync(`${cfg.outDir}/${stale}`, { force: true });
   const passed = printConsole(summary);
   console.log(`[redteam] wrote ${junitPath} and ${summaryPath}`);
 
@@ -656,7 +718,8 @@ async function main(): Promise<void> {
     persistedRunId = await insertHarnessRun({
       startedAt,
       finishedAt,
-      suite: cfg.suite,
+      // `full:lead-conversation` etc., so `--baseline latest` stays per-variant.
+      suite: persistedSuiteLabel(cfg.suite, variant.name),
       seed: cfg.seed,
       variations: cfg.variations,
       judgeModel: judgeLabel,
@@ -715,7 +778,7 @@ async function loadBaseline(cfg: RedteamConfig, persistedRunId: number | null): 
   if (cfg.baseline === 'latest') {
     try {
       const { getLatestHarnessRunForSuite } = await import('../server/db/index.js');
-      const latest = await getLatestHarnessRunForSuite(cfg.suite, persistedRunId);
+      const latest = await getLatestHarnessRunForSuite(persistedSuiteLabel(cfg.suite, cfg.variant), persistedRunId);
       if (!latest) {
         console.warn(`[redteam] no previous ${cfg.suite} run persisted in this DB — skipping diff`);
         return null;
@@ -747,6 +810,15 @@ async function runBaselineDiff(
   const baseline = await loadBaseline(cfg, persistedRunId);
   if (!baseline) return null;
   const current = normalizeSummary(buildSummaryJson(summary) as Parameters<typeof normalizeSummary>[0], 'this run');
+  // A variant only diffs against a baseline of the same variant: comparing a
+  // lead-conversation run to a default baseline would report the flag's
+  // effect as regressions.
+  if (baseline.variant !== current.variant) {
+    console.warn(
+      `[redteam] baseline ${baseline.source} is variant "${baseline.variant}", this run is "${current.variant}" — skipping diff`,
+    );
+    return null;
+  }
   const diff = diffRuns(baseline, current);
 
   const fs = await import('node:fs');
@@ -758,13 +830,8 @@ async function runBaselineDiff(
   fs.writeFileSync(diffMdPath, md + '\n');
   console.log('\n' + formatDiffConsole(diff));
   console.log(`[redteam] wrote ${diffJsonPath} and ${diffMdPath}`);
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    try {
-      fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n');
-    } catch {
-      /* best-effort */
-    }
-  }
+  // The GitHub job summary (totals, failures, judge means, this diff) is
+  // written by ciSummary.ts from the files above, after the run.
   return diff;
 }
 

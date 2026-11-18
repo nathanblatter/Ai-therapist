@@ -23,6 +23,8 @@ export interface NormalizedScenario {
 export interface NormalizedRun {
   source: string; // human-readable: file path or "harness run #N (started …)"
   suite: string;
+  /** Feature-flag variant (variants.ts); 'default' for older runs without one. */
+  variant: string;
   startedAt: string | null;
   gitSha: string | null;
   /** True when only failed gating assertions are known (DB baseline): an
@@ -35,6 +37,7 @@ export interface NormalizedRun {
 /** The subset of summary.json the diff reads (see report.ts buildSummaryJson). */
 export interface SummaryJsonLike {
   suite?: string;
+  variant?: { name?: string } | null;
   startedAt?: string;
   gitSha?: string | null;
   scenarios?: Array<{
@@ -64,6 +67,7 @@ export function normalizeSummary(summary: SummaryJsonLike, source: string): Norm
   return {
     source,
     suite: summary.suite ?? 'unknown',
+    variant: summary.variant?.name ?? 'default',
     startedAt: summary.startedAt ?? null,
     gitSha: summary.gitSha ?? null,
     failuresOnly: false,
@@ -91,9 +95,12 @@ export function normalizeHarnessRun(run: HarnessRunRow, results: HarnessScenario
     };
   }
   const started = run.started_at instanceof Date ? run.started_at.toISOString() : String(run.started_at);
+  // Variant runs persist their suite as `<suite>:<variant>` (variants.ts).
+  const [suite, variant = 'default'] = run.suite.split(':');
   return {
     source: `harness run #${run.id} (${run.suite}, started ${started}${run.git_sha ? `, ${run.git_sha.slice(0, 7)}` : ''})`,
-    suite: run.suite,
+    suite,
+    variant,
     startedAt: started,
     gitSha: run.git_sha,
     failuresOnly: true,
@@ -116,8 +123,8 @@ export interface JudgeChange {
 }
 
 export interface RunDiff {
-  baseline: { source: string; suite: string; startedAt: string | null; gitSha: string | null };
-  current: { suite: string; startedAt: string | null; gitSha: string | null };
+  baseline: { source: string; suite: string; variant: string; startedAt: string | null; gitSha: string | null };
+  current: { suite: string; variant: string; startedAt: string | null; gitSha: string | null };
   /** Baseline and current suites differ — the diff is still computed but flagged. */
   suiteMismatch: boolean;
   newlyFailing: AssertionChange[];
@@ -184,10 +191,11 @@ export function diffRuns(
     baseline: {
       source: baseline.source,
       suite: baseline.suite,
+      variant: baseline.variant,
       startedAt: baseline.startedAt,
       gitSha: baseline.gitSha,
     },
-    current: { suite: current.suite, startedAt: current.startedAt, gitSha: current.gitSha },
+    current: { suite: current.suite, variant: current.variant, startedAt: current.startedAt, gitSha: current.gitSha },
     suiteMismatch: baseline.suite !== current.suite,
     newlyFailing,
     newlyPassing,
@@ -208,7 +216,7 @@ export function formatDiffMarkdown(diff: RunDiff): string {
   lines.push(`## Red-team diff vs baseline`);
   lines.push('');
   lines.push(
-    `Baseline: ${diff.baseline.source}${diff.suiteMismatch ? ` (WARNING: baseline suite \`${diff.baseline.suite}\` differs from current \`${diff.current.suite}\`)` : ''}`,
+    `Baseline: ${diff.baseline.source}${diff.baseline.variant && diff.baseline.variant !== 'default' ? ` (variant \`${diff.baseline.variant}\`)` : ''}${diff.suiteMismatch ? ` (WARNING: baseline suite \`${diff.baseline.suite}\` differs from current \`${diff.current.suite}\`)` : ''}`,
   );
   lines.push('');
   lines.push(diff.hasRegressions ? `**REGRESSIONS DETECTED**` : `No regressions.`);

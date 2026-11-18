@@ -197,7 +197,26 @@ let systemConfigCache: SystemConfig | null = null;
 let configCacheTime: number | null = null;
 const CONFIG_CACHE_TTL = 600000; // 10 minutes
 
+// In-process feature-flag overrides for the red-team harness's named variants
+// (src/redteam/variants.ts, `--variant`). They change only what THIS process
+// sees from getSystemConfig().features; nothing is written to system_config.
+// That matters because the in-app harness runner spawns the CLI against the
+// live database, where writing a flag would switch it on for real participants.
+// Null (the default, and always in the server) means no override.
+let featureOverrides: Record<string, unknown> | null = null;
+
+/** Harness hook: overlay these keys on system_config.features in this process. */
+export function setFeatureOverrides(overrides: Record<string, unknown> | null): void {
+  featureOverrides = overrides && Object.keys(overrides).length > 0 ? { ...overrides } : null;
+}
+
 export async function getSystemConfig(): Promise<SystemConfig> {
+  const config = await loadSystemConfig();
+  if (!featureOverrides) return config;
+  return { ...config, features: { ...(config.features ?? {}), ...featureOverrides } };
+}
+
+async function loadSystemConfig(): Promise<SystemConfig> {
   const now = Date.now();
 
   // Return cached config if still valid
@@ -538,6 +557,17 @@ export function resetPsychoeducationCueColumnCache(): void {
   psychoeducationCueColumnPresent = false;
 }
 
+// Harness hook (src/redteam/variants.ts): pin the arm instead of rolling it, so
+// an eval of the cue arm is deterministic. Only consulted after the flag and
+// column checks pass, so it can never put a session into the experiment on its
+// own. Null (the default, and always in the server) means a 50/50 roll.
+let psychoeducationCueArmOverride: boolean | null = null;
+
+/** Harness hook: force the psychoeducation-cue arm (true/false), or null to roll. */
+export function setPsychoeducationCueArmOverride(arm: boolean | null): void {
+  psychoeducationCueArmOverride = arm;
+}
+
 /**
  * Resolve this session's psychoeducation-cue research condition. Call once per
  * session and persist the result. TRUE = cue arm, FALSE = control arm, NULL =
@@ -559,6 +589,7 @@ export async function resolvePsychoeducationCue(): Promise<boolean | null> {
     );
     return null;
   }
+  if (psychoeducationCueArmOverride !== null) return psychoeducationCueArmOverride;
   return Math.random() < 0.5;
 }
 
