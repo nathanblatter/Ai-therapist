@@ -14,6 +14,8 @@ import { AudioStreamPlayer } from '../lib/audioStreamPlayer';
 const sidebandErrorText = (err: HttpError) =>
   (typeof err.body?.details === 'string' && err.body.details) || err.message;
 
+const RECOVERY_NO_TOOLS_HINT = 'Crisis recovery session: it runs without tools by design. Use End Session to end it.';
+
 interface LiveSession {
   session_id: string;
   user_id: string;
@@ -41,6 +43,11 @@ interface SidebandConnection {
   closeReason?: string;
   error?: string;
   lastUpdate?: string;
+  /**
+   * 'client' marks a GPT-Live crisis RECOVERY session: no backend, no tools
+   * (ai-therapist-282). Absent for older servers and other voice backends.
+   */
+  delegationMode?: 'responses' | 'client' | null;
 }
 
 interface SidebandEvent {
@@ -120,6 +127,13 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   const [availableTools, setAvailableTools] = useState<{ name: string; description: string }[]>([]);
   const [selectedTool, setSelectedTool] = useState('');
   const [triggerPending, setTriggerPending] = useState(false);
+  // A crisis recovery session has no tools by design; the server refuses
+  // trigger-tool on it (409), so the control is disabled up front. Read from
+  // the live connections list so a mode that arrives after selection applies.
+  const selectedIsRecovery =
+    selectedSidebandSession !== null &&
+    (sidebandConnections.find((c) => c.sessionId === selectedSidebandSession.sessionId)?.delegationMode ??
+      selectedSidebandSession.delegationMode) === 'client';
 
   // Initial fetch. After that the list is driven LIVE by socket/sideband
   // events (session:created / session:ended / session:activity); the endpoint
@@ -570,7 +584,12 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   };
 
   // Sideband event handlers
-  const handleSidebandConnected = (data: { sessionId: string; callId: string; connectedAt: string }) => {
+  const handleSidebandConnected = (data: {
+    sessionId: string;
+    callId: string;
+    connectedAt: string;
+    delegationMode?: 'responses' | 'client';
+  }) => {
     console.log('[LiveMonitoring] Sideband connected:', data);
     setSidebandConnections((prev) => {
       const exists = prev.find((c) => c.sessionId === data.sessionId);
@@ -582,6 +601,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
           callId: data.callId,
           connectedAt: data.connectedAt,
           status: 'connected',
+          delegationMode: data.delegationMode,
         },
       ];
     });
@@ -771,7 +791,7 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
   // refuses only unknown/disabled tools; end_session gets a confirm here since
   // it terminates the participant's session.
   const handleTriggerTool = async () => {
-    if (!selectedSidebandSession || !selectedTool || triggerPending) return;
+    if (!selectedSidebandSession || !selectedTool || triggerPending || selectedIsRecovery) return;
     if (
       selectedTool === 'end_session' &&
       !window.confirm('Force the AI to end this session? The AI will wrap up and the session will close shortly after.')
@@ -1285,12 +1305,15 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                         <select
                           value={selectedTool}
                           onChange={(e) => setSelectedTool(e.target.value)}
+                          disabled={selectedIsRecovery}
                           aria-label="Tool to trigger"
                           title={
-                            availableTools.find((t) => t.name === selectedTool)?.description ||
-                            'Pick a tool to force the AI to call'
+                            selectedIsRecovery
+                              ? RECOVERY_NO_TOOLS_HINT
+                              : availableTools.find((t) => t.name === selectedTool)?.description ||
+                                'Pick a tool to force the AI to call'
                           }
-                          className="border border-gray-300 rounded px-2 py-1.5 text-sm min-h-[44px] max-w-[180px] bg-white text-gray-900"
+                          className="disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed border border-gray-300 rounded px-2 py-1.5 text-sm min-h-[44px] max-w-[180px] bg-white text-gray-900"
                         >
                           <option value="">Trigger tool…</option>
                           {availableTools.map((t) => (
@@ -1301,10 +1324,12 @@ export default function LiveMonitoring({ onViewSession }: LiveMonitoringProps) {
                         </select>
                         <button
                           onClick={handleTriggerTool}
-                          disabled={!selectedTool || triggerPending}
-                          title="Force the AI to call the selected tool now"
+                          disabled={!selectedTool || triggerPending || selectedIsRecovery}
+                          title={
+                            selectedIsRecovery ? RECOVERY_NO_TOOLS_HINT : 'Force the AI to call the selected tool now'
+                          }
                           className={`px-3 py-1.5 rounded transition text-sm min-h-[44px] flex items-center gap-1 ${
-                            selectedTool && !triggerPending
+                            selectedTool && !triggerPending && !selectedIsRecovery
                               ? 'bg-purple-600 text-white hover:bg-purple-700'
                               : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                           }`}
