@@ -321,7 +321,18 @@ export class LiveVoiceSession implements VoiceTransport {
       });
       // A CRAWL/WALK session resumes a conversation already under way (seeded
       // history): no opening line, the caller's request comes first.
-      if (opts.history?.length && !opts.recovery) return { session: vs, opening: '' };
+      if (opts.history?.length && !opts.recovery) {
+        // ...so the server's opening must not arrive either. Since the data
+        // channel lock the route registers an opening for every session and
+        // speaks it by itself after 10 s if the browser never asks; a seeded
+        // session never asks, and the disclosure preamble then landed in the
+        // middle of the reply under test ("It sounds frightening Hello! I'm an
+        // AI mental health support assistant..."). A real browser always asks,
+        // so this is harness bookkeeping, done in-process.
+        const { clearLiveOpening } = await import('../server/services/liveOpening.service.js');
+        clearLiveOpening(vs.sessionId);
+        return { session: vs, opening: '' };
+      }
       const openingRes = await agent.post(`/api/sessions/${vs.sessionId}/opening`).send({});
       if (openingRes.status !== 200 || openingRes.body?.delivered !== true) {
         if (res.body?.data_channel_locked === true) {

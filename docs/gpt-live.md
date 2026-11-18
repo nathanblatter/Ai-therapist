@@ -95,6 +95,16 @@ call, so without this line the participant heard "That's okay, thank you for
 telling me" first. The line adds no handling of its own: the goodbye, its
 reason and its crisis lines stay server-authored.
 
+A third (2026-11-18, ai-therapist-314) is `LIVE_CONFIDENTIALITY_DELEGATE_LINE`
+in the "Delegate to the backend when" list: questions about who can see or hear
+the conversation, whether it is private or recorded, and requests to promise
+secrecy go to the backend, and the voice model must not answer or promise
+itself. It has none of the study facts; the clinical prompt does. Before, it
+answered "promise it stays between us" on its own in 4 of 4 runs and never
+said the study team can see conversations; after, 4 of 4 were delegated and
+the spoken answer said it could not promise and that the study team may review
+conversations.
+
 The delegation policy describes backend **capabilities**, not tool-call syntax.
 Those lines tell the voice model what help is available; they are not
 instructions for it to invoke anything itself. Only the backend calls tools.
@@ -515,7 +525,7 @@ participant is not left alone with silence:
 | `session.closed` `content` | browser | recovery screen with 988 / the text line / 911 at once (`closeDisposition`); speaks one short line aloud through the browser's own speech synthesis ("The call was cut off. That was not your fault. Reconnecting now."); tears the dead call down locally and starts a recovery session without waiting for the old session's `POST /end` |
 | `session.closed` `content` | server sideband | `session:moderation-terminated` plus `session:crisis-emergency` (reason `vendor_cut`) on the same tick, before the crisis-state read; then the on-call page and the intervention record |
 | recovery session created | server | the speak-first instruction (`shared/recoveryPrompt.ts`) goes into the session's startup `input` as a `developer` message (`recovery.speakFirst`); it carries nothing the participant said |
-| recovery `session.started` | browser | the same instruction as `session.commentary.append`: the first words name the crisis line and say the call was cut off |
+| recovery `session.started` | browser, then server | the browser asks for the opening (`POST /api/sessions/:id/opening`; its data channel is locked) and the server sends the same instruction as `session.commentary.append`: the first words name the crisis line and say the call was cut off |
 | 4 s and 8 s after that, if no assistant speech has been transcribed | server sideband | re-sends it as commentary (`RECOVERY_SPEAK_RETRY_MS`), logs `RECOVERY SESSION SILENT`, broadcasts `live:recovery-silent` to admins |
 | the assistant's first words (or 12 s) | browser | recovery screen comes down (`recoveryScreenMayClose`), the resource card goes up and stays |
 | a second and third cut | browser | one more voice recovery, then the same conversation continues in typed chat (`POST /api/chat/start` with `continued_from`) with the resource card open; with typed chat disabled or failing, the crisis screen stays up with the numbers and a retry (`nextRecoveryStep`) |
@@ -565,6 +575,52 @@ Errors are surfaced three ways: `therapy_sessions.sideband_error`, the
 `sideband:error` / `sideband:status-update` admin broadcasts, and server logs.
 An HTTP upgrade rejection is captured with its status code and body, because a
 bare "upgrade failed" is undiagnosable.
+
+### A steer must not leave the participant in silence (ai-therapist-313)
+
+`session.instructions.append` "can interrupt speech in progress and apply a new
+instruction" (voice-server-controls, "Redirect the conversation"). Our crisis
+steers land about a second after a disclosure, exactly while the voice model is
+answering it, and nothing in them told the model to go on. Measured
+2026-11-18 by the evaluation-guide harness: the reply stopped mid-sentence in
+about 7 of 8 voice-layer answers to a passive disclosure, and in continuous
+calls the participant then sat through 68 to 105 s of silence. There is no
+`response.cancel` and no delegation update involved; the append itself is the
+interruption.
+
+Two layers, both in `sidebandManager.service.ts`:
+
+- Every clinical steer (anything beginning `[Clinical guidance`: the risk
+  steer, the risk-check requirement, the safety protocol, the wind-down, the
+  under-18 guidance) is delivered with `LIVE_STEER_KEEP_SPEAKING` appended:
+  "This guidance does not end your turn. If you were speaking when it arrived,
+  or the participant is waiting for your reply, speak again now and follow it;
+  do not go silent." Other appends (the opening, tool outcomes, time notices)
+  are sent exactly as written.
+- A watch: if a reply was owed when the steer landed (the assistant or the
+  participant had spoken in the previous 6 s) and no assistant speech has
+  arrived 3 s later, beyond the 1.2 s tail of the interrupted sentence, and the
+  participant is not talking, the server sends `LIVE_STEER_RESUME_COMMENTARY`
+  as commentary; once more at 7 s. Logged as `SILENT AFTER STEER`, broadcast to
+  admins as `live:steer-silent`.
+
+After (same harness, merged code): 6 of 6 voice-layer answers to the passive
+disclosure went on to a complete reply, with at most 3.3 s of silence (the
+watch fired in 4 of them); in four continuous calls the longest assistant
+silence after the disclosure was 8.4 to 10.7 s.
+
+### A sentence that arrives as two turns (found 2026-11-18)
+
+The 900 ms turn gap can split one spoken sentence: "I have been thinking about
+how I would kill" and " myself" were persisted as two participant turns 948 ms
+apart in 2 of 4 runs, each scored 0 (the keyword screen saw neither half), so
+an explicit statement of intent was not flagged, steered or paged by us at
+all. The pipeline now scores a voice turn together with the participant
+turn(s) persisted immediately before it (no assistant turn between, within
+`SPLIT_TURN_WINDOW_MS` = 4 s, up to three parts): `stitchSplitTurn` in
+`crisisPipeline.service.ts`. The age check reads the same joined text. After:
+8 of 8 explicit-intent and attempt disclosures scored high. The 900 ms gap
+itself is unchanged.
 
 ---
 

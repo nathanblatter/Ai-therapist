@@ -96,6 +96,7 @@ import {
   buildMinorConfirmUserMessage,
 } from '../services/minorSafeguard.service.js';
 import { RECOVERY_INTERIM_SPOKEN_LINE, buildRecoverySpeakFirstNudge } from '../../shared/recoveryPrompt.js';
+import { LIVE_STEER_KEEP_SPEAKING, LIVE_STEER_RESUME_COMMENTARY } from '../services/sidebandManager.service.js';
 import { REDACTION_BATCH_INSTRUCTIONS, REDACTION_MODEL, REDACTION_PROMPT } from '../services/redaction.service.js';
 import {
   SESSION_NAME_MODEL,
@@ -637,6 +638,20 @@ function buildItems(): Item[] {
       'mention or acknowledge them. In typed chat, guidance is attached to the next model call. The trigger ' +
       'conditions are stated with each text.',
   );
+
+  add(
+    'note',
+    'Delivery in GPT-Live voice sessions. Guidance in B.1 to B.5 reaches the voice model as an instruction that can ' +
+      'interrupt what it is saying. So that the participant is not left in silence, this sentence is appended to ' +
+      'each such instruction when it is delivered:',
+  );
+  add('pre', LIVE_STEER_KEEP_SPEAKING);
+  add(
+    'note',
+    'If the model has still said nothing 3 seconds (and again 7 seconds) after such an instruction, while a reply ' +
+      'was owed and the participant is not speaking, the server sends this:',
+  );
+  add('pre', LIVE_STEER_RESUME_COMMENTARY);
 
   add('h2', 'B.1 Risk-adaptive de-escalation steering');
   add(

@@ -14,6 +14,7 @@ import {
   LIVE_DEFAULT_BACKEND_MODEL,
   LIVE_VOICES,
   LIVE_UNDER_18_HOLD_LINE,
+  LIVE_CONFIDENTIALITY_DELEGATE_LINE,
   buildLiveRecoveryInstructions,
   LIVE_CLIENT_EVENTS,
   resolveBackendReasoningEffort,
@@ -500,5 +501,27 @@ describe('buildLiveRecoveryInstructions (ai-therapist-293)', () => {
     ]) {
       expect(prompt).toContain(kept);
     }
+  });
+});
+
+describe('voice-layer confidentiality line (ai-therapist-314)', () => {
+  it('hands confidentiality questions to the backend, in every ordinary session', () => {
+    for (const session of [build(), build({ leadConversation: true }), build({ psychoeducationCue: true })]) {
+      const instructions = session.instructions as string;
+      expect(instructions).toContain(LIVE_CONFIDENTIALITY_DELEGATE_LINE);
+      // It sits in the "Delegate to the backend when:" list, not the "do not" list.
+      const delegate = instructions.indexOf('Delegate to the backend when:');
+      const doNot = instructions.indexOf('Do not delegate to the backend when:');
+      const line = instructions.indexOf(LIVE_CONFIDENTIALITY_DELEGATE_LINE);
+      expect(line).toBeGreaterThan(delegate);
+      expect(line).toBeLessThan(doNot);
+    }
+  });
+
+  it('forbids the voice model from answering or promising, and states no study fact itself', () => {
+    expect(LIVE_CONFIDENTIALITY_DELEGATE_LINE).toMatch(/who can see, hear or read what they say/);
+    expect(LIVE_CONFIDENTIALITY_DELEGATE_LINE).toMatch(/promise to keep something between the two of you/);
+    expect(LIVE_CONFIDENTIALITY_DELEGATE_LINE).toMatch(/Never answer that yourself or promise anything/);
+    expect(LIVE_CONFIDENTIALITY_DELEGATE_LINE).not.toMatch(/confidential\b|study team can|researchers can/i);
   });
 });

@@ -214,6 +214,7 @@ Backend tools:
 Delegate to the backend when:
 - The participant describes something they are working through and needs a substantive therapeutic response.
 - The participant asks for an exercise, a worksheet, a summary, or to end the session.
+- The participant asks who can see, hear or read what they say, whether it is private, recorded or kept secret, or asks you to promise to keep something between the two of you. Never answer that yourself or promise anything: the backend has the facts about this study.
 - A correction changes work already in progress.
 
 Do not delegate to the backend when:
@@ -237,7 +238,7 @@ quietly: you will be told what to say next.</pre>
 <p>Added text, verbatim:</p>
 <pre>- Psychoeducation: look up vetted explanations of a condition, a feeling, or how a technique or therapy works.</pre>
 <p>Inserted immediately after the line:</p>
-<pre>- The participant asks for an exercise, a worksheet, a summary, or to end the session.</pre>
+<pre>- The participant asks who can see, hear or read what they say, whether it is private, recorded or kept secret, or asks you to promise to keep something between the two of you. Never answer that yourself or promise anything: the backend has the facts about this study.</pre>
 <p>Added text, verbatim:</p>
 <pre>- The participant asks what a condition is, why they might feel a certain way, or how a technique or therapy works.</pre>
 <p class="note">Conditional, feature flag &quot;leading the conversation&quot;: sent only while the study configuration flag features.lead_conversation_enabled is on, and then to every new session (it is not a randomized condition; crisis-recovery voice sessions never receive it). The flag is off by default; while it is off, none of this text is sent.</p>
@@ -246,7 +247,7 @@ quietly: you will be told what to say next.</pre>
 <p>Added text, verbatim:</p>
 <pre>Guide the conversation: after greetings, help the participant name what they want to focus on today, and keep it moving with one specific follow-up at a time rather than only acknowledging. If they are upset or raise anything about their safety, follow them instead.</pre>
 <p>Inserted immediately after the line:</p>
-<pre>- The participant asks for an exercise, a worksheet, a summary, or to end the session.</pre>
+<pre>- The participant asks who can see, hear or read what they say, whether it is private, recorded or kept secret, or asks you to promise to keep something between the two of you. Never answer that yourself or promise anything: the backend has the facts about this study.</pre>
 <p>Added text, verbatim:</p>
 <pre>- The participant gives a short or stalled reply (&quot;I don&#x27;t know&quot;, &quot;not much&quot;) and the conversation needs a next step.</pre>
 <h3>A.10 GPT-Live reasoning backend: clinical prompt wrapper</h3>
@@ -358,6 +359,10 @@ Take an active, guiding role in this conversation instead of waiting for the par
 - When to follow instead of lead: if the participant is in distress, expresses any risk, or discloses abuse, the Crisis Protocol and the safety sections take precedence: slow down, stay with what they said, and set the focus, structure, and time aside. If they decline a question or want to talk about something else, follow them and let them decide how much to share. Leading never means giving advice beyond what this prompt already allows.</pre>
 <h2>Part B. System-side guidance injected during a live session</h2>
 <p>During a session, the platform can inject additional system-role guidance to the model. These messages are never shown to the participant; the clinical ones begin with an instruction telling the model never to mention or acknowledge them. In typed chat, guidance is attached to the next model call. The trigger conditions are stated with each text.</p>
+<p class="note">Delivery in GPT-Live voice sessions. Guidance in B.1 to B.5 reaches the voice model as an instruction that can interrupt what it is saying. So that the participant is not left in silence, this sentence is appended to each such instruction when it is delivered:</p>
+<pre>This guidance does not end your turn. If you were speaking when it arrived, or the participant is waiting for your reply, speak again now and follow it; do not go silent.</pre>
+<p class="note">If the model has still said nothing 3 seconds (and again 7 seconds) after such an instruction, while a reply was owed and the participant is not speaking, the server sends this:</p>
+<pre>The participant is waiting and you have stopped speaking. Speak now: respond to what they just said, following the guidance you were given. Do not stay silent.</pre>
 <h3>B.1 Risk-adaptive de-escalation steering</h3>
 <p>Trigger: the crisis-detection pipeline (Part C.1) scores a participant message at 25/100 or higher. Injected at most once per 3 minutes per session, shared across the voice and chat channels (a high-severity score skips this wait). The voice texts are also injected when a member of the research team manually flags a voice session. &lt;risk score&gt; is the numeric score.</p>
 <h4>Voice sessions — severity below high</h4>

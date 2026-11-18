@@ -75,7 +75,7 @@ vi.mock('./sidebandManager.service.js', () => ({
   sidebandManager: { injectMessage: injectMessageMock, getActiveConnections: getActiveConnectionsMock },
 }));
 
-const { runCrisisPipeline } = await import('./crisisPipeline.service.js');
+const { runCrisisPipeline, stitchSplitTurn, SPLIT_TURN_WINDOW_MS } = await import('./crisisPipeline.service.js');
 const { clearCrisisResourceState } = await import('./crisisResources.js');
 
 const participantEmit = vi.fn((event: string) => {
@@ -256,5 +256,85 @@ describe('realtime under-18 safeguard (ai-therapist-296)', () => {
     await runCrisisPipeline(TURN, 'chat');
     expect(detectMinorMock).not.toHaveBeenCalled();
     expect(handleConfirmedMinorMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('a sentence split across two voice turns is scored whole', () => {
+  const T0 = Date.parse('2026-11-18T23:27:16.963Z');
+  const row = (id: number, role: string, content: string, offsetMs: number) => ({
+    message_id: id,
+    role,
+    content,
+    content_redacted: null,
+    created_at: new Date(T0 + offsetMs),
+  });
+  // The two rows measured on 2026-11-18 (948 ms apart), each scored 0 alone.
+  const FIRST = row(1, 'user', ' I have been thinking about how I would kill', 0);
+  const SECOND = row(2, 'user', ' myself', 948);
+  const turn = { sessionId: 'live_1', messageId: 2, content: ' myself' };
+
+  it('joins the fragment to the participant turn that ended just before it', () => {
+    expect(stitchSplitTurn(turn, [FIRST, SECOND])).toBe(' I have been thinking about how I would kill myself');
+  });
+
+  it('joins up to three earlier parts, oldest first', () => {
+    const rows = [
+      row(1, 'user', ' I have', 0),
+      row(2, 'user', ' been thinking', 900),
+      row(3, 'user', ' about it', 1900),
+    ];
+    expect(stitchSplitTurn({ sessionId: 's', messageId: 3, content: ' about it' }, rows)).toBe(
+      ' I have been thinking about it',
+    );
+  });
+
+  it('does not join across an assistant turn, an old turn, or when this row cannot be found', () => {
+    const assistant = row(9, 'assistant', 'Okay.', 500);
+    expect(stitchSplitTurn(turn, [FIRST, assistant, SECOND])).toBe(' myself');
+    const old = row(1, 'user', ' earlier thought', -(SPLIT_TURN_WINDOW_MS + 1));
+    expect(stitchSplitTurn(turn, [old, { ...SECOND, created_at: new Date(T0) }])).toBe(' myself');
+    expect(stitchSplitTurn({ ...turn, messageId: 77 }, [FIRST, SECOND])).toBe(' myself');
+    expect(stitchSplitTurn({ ...turn, messageId: null }, [FIRST, SECOND])).toBe(' myself');
+    expect(stitchSplitTurn({ sessionId: 's', messageId: 1, content: FIRST.content }, [FIRST])).toBe(FIRST.content);
+  });
+
+  it('the risk assessor is given the whole sentence, attributed to the turn that completed it', async () => {
+    getRecentSessionMessagesMock.mockResolvedValue([FIRST, SECOND]);
+    risk(85, 'high');
+    await runCrisisPipeline(turn, 'realtime');
+    expect(analyzeMessageRiskMock).toHaveBeenCalledWith(
+      {
+        content: ' I have been thinking about how I would kill myself',
+        session_id: 'live_1',
+        message_id: 2,
+      },
+      [FIRST, SECOND],
+    );
+    expect(participantEmit).toHaveBeenCalledWith(
+      'session:crisis-emergency',
+      expect.objectContaining({ severity: 'high' }),
+    );
+  });
+
+  it('the under-18 check reads the whole sentence too', async () => {
+    const a = row(1, 'user', " Just so you know, I'm", 0);
+    const b = row(2, 'user', ' fifteen years old.', 950);
+    getRecentSessionMessagesMock.mockResolvedValue([a, b]);
+    risk(0, 'none');
+    detectMinorMock.mockImplementation((text: string) => ({ matched: /i'm fifteen/i.test(text), pattern: 'x' }));
+    confirmMinorMock.mockResolvedValue({ isMinor: true, statedAge: 15, confidence: 'high', reasoning: '' });
+    await runCrisisPipeline({ sessionId: 'live_1', messageId: 2, content: ' fifteen years old.' }, 'realtime');
+    expect(confirmMinorMock).toHaveBeenCalledWith(" Just so you know, I'm fifteen years old.", [a, b], 'live_1');
+    expect(handleConfirmedMinorMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('typed chat is scored as written (a chat message is never a fragment)', async () => {
+    getRecentSessionMessagesMock.mockResolvedValue([FIRST, SECOND]);
+    risk(0, 'none');
+    await runCrisisPipeline(turn, 'chat');
+    expect(analyzeMessageRiskMock).toHaveBeenCalledWith(expect.objectContaining({ content: ' myself' }), [
+      FIRST,
+      SECOND,
+    ]);
   });
 });

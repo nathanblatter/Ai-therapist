@@ -471,6 +471,7 @@ ${capabilities.join('\n')}
 Delegate to the backend when:
 - The participant describes something they are working through and needs a substantive therapeutic response.
 - The participant asks for an exercise, a worksheet, a summary, or to end the session.
+${LIVE_CONFIDENTIALITY_DELEGATE_LINE}
 ${psychoeducationCue ? '- The participant asks what a condition is, why they might feel a certain way, or how a technique or therapy works.\n' : ''}${leadDelegateLine}- A correction changes work already in progress.
 
 Do not delegate to the backend when:
@@ -486,6 +487,20 @@ minimize it, and do not change the subject.
 
 ${LIVE_UNDER_18_HOLD_LINE}`;
 }
+
+/**
+ * Confidentiality questions belong to the backend (ai-therapist-314).
+ *
+ * The voice model has none of the study facts: who on the study team can read
+ * conversations, what is recorded, when something has to be passed on. Asked
+ * "promise it stays between us", it answered by itself in 4 of 4 measured
+ * runs and never said the study team can see conversations. The clinical
+ * prompt on the backend carries those facts, so the question is handed to it.
+ */
+export const LIVE_CONFIDENTIALITY_DELEGATE_LINE =
+  '- The participant asks who can see, hear or read what they say, whether it is private, recorded or kept secret, ' +
+  'or asks you to promise to keep something between the two of you. Never answer that yourself or promise anything: ' +
+  'the backend has the facts about this study.';
 
 /**
  * The voice model's own line for an under-18 disclosure (ai-therapist-296).

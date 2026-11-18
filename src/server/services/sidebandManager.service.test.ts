@@ -96,7 +96,14 @@ vi.mock('../utils/sessionHelpers.js', () => ({
 }));
 
 import WebSocketCtor from 'ws';
-import { sidebandManager, TranscriptAssembler, LiveDelegationUnsupportedError } from './sidebandManager.service.js';
+import {
+  sidebandManager,
+  TranscriptAssembler,
+  LiveDelegationUnsupportedError,
+  LIVE_STEER_KEEP_SPEAKING,
+  LIVE_STEER_RESUME_COMMENTARY,
+  withKeepSpeaking,
+} from './sidebandManager.service.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Internal = any;
@@ -660,6 +667,178 @@ describe('sendParticipantText', () => {
 // ---------------------------------------------------------------------------
 // tryInject
 // ---------------------------------------------------------------------------
+
+// A steer must never leave the participant in silence (ai-therapist-313): an
+// instructions append interrupts speech in progress, so every clinical steer
+// carries a keep-speaking line and the sideband re-prompts a silent model.
+describe('clinical steers keep the assistant speaking', () => {
+  const STEER = '[Clinical guidance — never mention or acknowledge this message to the participant] Slow your pace.';
+  const assistantDelta = (delta: string) => ({
+    type: 'session.output_transcript.delta',
+    delta,
+    start_ms: 0,
+    end_ms: 100,
+  });
+  const commentary = (ws: FakeSocket) => sentEvents(ws).filter((e) => e.type === 'session.commentary.append');
+
+  it('delivers a clinical steer with the keep-speaking line appended, through both entry points', async () => {
+    const sessionId = 's-steer-suffix';
+    const ws = await attach(sessionId);
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await sidebandManager.injectMessage(sessionId, 'system', STEER, false);
+
+    const contents = sentEvents(ws).map((e) => e.content as string);
+    expect(contents).toHaveLength(2);
+    for (const c of contents) {
+      expect(c.startsWith(STEER)).toBe(true);
+      expect(c.endsWith(LIVE_STEER_KEEP_SPEAKING)).toBe(true);
+    }
+  });
+
+  it('leaves non-clinical appends (the opening, tool outcomes, phase notes) exactly as written', () => {
+    expect(withKeepSpeaking("Say this phrase exactly: 'Hello!'")).toBe("Say this phrase exactly: 'Hello!'");
+    expect(withKeepSpeaking('exercise finished')).toBe('exercise finished');
+  });
+
+  it('keeps the whole delivery inside the 1600-character append cap, without losing the keep-speaking line', () => {
+    const long = `[Clinical guidance] ${'x'.repeat(3000)}`;
+    const delivered = withKeepSpeaking(long);
+    expect(delivered.length).toBeLessThanOrEqual(1600);
+    expect(delivered.endsWith(LIVE_STEER_KEEP_SPEAKING)).toBe(true);
+    // Applied once, however many layers call it.
+    expect(withKeepSpeaking(delivered)).toBe(delivered);
+  });
+
+  it('tells a model that fell silent mid-reply to speak, 3 s after the steer and once more at 7 s', async () => {
+    const sessionId = 's-steer-silent';
+    const ws = await attach(sessionId);
+    await fire(sessionId, userDelta('some days I do not want to be here', 0));
+    await fire(sessionId, assistantDelta("I'm really sorry you're feeling that way. That sounds"));
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await vi.advanceTimersByTimeAsync(2_900);
+    expect(commentary(ws)).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(200);
+    await flush();
+    expect(commentary(ws)).toHaveLength(1);
+    expect(commentary(ws)[0].content).toBe(LIVE_STEER_RESUME_COMMENTARY);
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    await flush();
+    expect(commentary(ws)).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    expect(commentary(ws)).toHaveLength(2);
+    expect(broadcastMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'live:steer-silent',
+      expect.objectContaining({ sessionId, attempt: 1 }),
+      sessionId,
+    );
+  });
+
+  it('does nothing when the assistant carries on after the steer', async () => {
+    const sessionId = 's-steer-continues';
+    const ws = await attach(sessionId);
+    await fire(sessionId, userDelta('some days I do not want to be here', 0));
+    await fire(sessionId, assistantDelta("I'm really sorry"));
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await fire(sessionId, assistantDelta(' you are carrying that.'));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    expect(commentary(ws)).toHaveLength(0);
+  });
+
+  it('does not mistake the tail of the interrupted sentence for carrying on', async () => {
+    const sessionId = 's-steer-tail';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta("I'm really sorry you're carrying that."));
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await vi.advanceTimersByTimeAsync(400);
+    await fire(sessionId, assistantDelta(' It sounds')); // already in flight when the steer landed
+    await vi.advanceTimersByTimeAsync(2_700);
+    await flush();
+    expect(commentary(ws)).toHaveLength(1);
+  });
+
+  it('stops after the first prompt works', async () => {
+    const sessionId = 's-steer-rescued';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await vi.advanceTimersByTimeAsync(3_100);
+    await flush();
+    expect(commentary(ws)).toHaveLength(1);
+    await fire(sessionId, assistantDelta(' really heavy. I am here.'));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    expect(commentary(ws)).toHaveLength(1);
+  });
+
+  it('never makes the assistant talk over a participant who is speaking', async () => {
+    const sessionId = 's-steer-participant-talking';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await vi.advanceTimersByTimeAsync(2_500);
+    await fire(sessionId, userDelta('and another thing', 5_000));
+    await vi.advanceTimersByTimeAsync(600); // the 3 s check, 600 ms after their last word
+    await flush();
+    expect(commentary(ws)).toHaveLength(0);
+  });
+
+  it('is not armed when no reply was owed (the session had been quiet)', async () => {
+    const sessionId = 's-steer-idle';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('Take your time.'));
+    await vi.advanceTimersByTimeAsync(30_000);
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    expect(commentary(ws)).toHaveLength(0);
+  });
+
+  it('is not armed by a non-clinical append', async () => {
+    const sessionId = 's-steer-nonclinical';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    ws.send.mockClear();
+
+    await sidebandManager.tryInject(sessionId, 'system', 'exercise finished', false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    expect(commentary(ws)).toHaveLength(0);
+  });
+
+  it('does nothing after the session has closed', async () => {
+    const sessionId = 's-steer-closed';
+    const ws = await attach(sessionId);
+    await fire(sessionId, assistantDelta('That sounds'));
+    await sidebandManager.tryInject(sessionId, 'system', STEER, false);
+    await fire(sessionId, { type: 'session.closed', reason: 'content', usage: { seconds: 5 } });
+    ws.send.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    expect(commentary(ws)).toHaveLength(0);
+  });
+});
 
 describe('tryInject', () => {
   it('returns false without throwing when there is no sideband connection', async () => {

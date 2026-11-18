@@ -87,10 +87,21 @@ export async function runCrisisPipeline(
     // someone the study cannot include. Only the LLM confirmation is moved
     // forward; the ordering of the ACTIONS (crisis first, then eligibility) is
     // unchanged.
-    const minorVerdict = channel === 'realtime' ? startRealtimeMinorConfirmation(turn, history) : null;
+    // A spoken sentence can reach us as two turns. GPT-Live sends transcript
+    // fragments, and the assembler closes a turn after 900 ms without one; a
+    // late final fragment then becomes a turn of its own. Measured 2026-11-18:
+    // "I have been thinking about how I would kill" + " myself" arrived as two
+    // rows in 2 of 4 runs, each scored 0 (the keyword screen saw neither
+    // half), so an explicit statement of intent was never flagged or paged.
+    // Scoring and the age check therefore read the sentence as it was spoken:
+    // this turn joined to the participant turn(s) that ended moments before it.
+    const spoken = channel === 'realtime' ? stitchSplitTurn(turn, history) : turn.content;
+    const scoredTurn = spoken === turn.content ? turn : { ...turn, content: spoken };
+
+    const minorVerdict = channel === 'realtime' ? startRealtimeMinorConfirmation(scoredTurn, history) : null;
 
     const risk = await analyzeMessageRisk(
-      { content: turn.content, session_id: turn.sessionId, message_id: turn.messageId ?? undefined },
+      { content: scoredTurn.content, session_id: turn.sessionId, message_id: turn.messageId ?? undefined },
       history,
     );
 
@@ -291,6 +302,44 @@ export async function runCrisisPipeline(
     console.error('[CrisisPipeline] pipeline failed (non-fatal):', err);
     return NONE_RESULT;
   }
+}
+
+/** A participant turn that ended this recently before the next one began is
+ *  treated as the first part of the same spoken sentence. */
+export const SPLIT_TURN_WINDOW_MS = 4_000;
+
+/**
+ * The text to score for a voice turn: the turn itself, prefixed with any
+ * participant turn(s) persisted immediately before it (no assistant turn in
+ * between) and within SPLIT_TURN_WINDOW_MS of each other. Fragments carry
+ * their own spacing, so the parts are concatenated exactly as received.
+ *
+ * `history` is oldest-first and normally ends with this turn's own row (it is
+ * persisted before the pipeline runs). When the row cannot be found (the
+ * insert failed), nothing is stitched. Pure; exported for tests.
+ */
+export function stitchSplitTurn(
+  turn: ParticipantTurn,
+  history: Array<{ role: string; content?: string | null; message_id?: unknown; created_at?: unknown }>,
+): string {
+  if (turn.messageId == null) return turn.content;
+  const at = history.findIndex((m) => m.message_id != null && String(m.message_id) === String(turn.messageId));
+  if (at <= 0) return turn.content;
+  const time = (m: { created_at?: unknown }): number | null => {
+    const t = m.created_at instanceof Date ? m.created_at.getTime() : Date.parse(String(m.created_at ?? ''));
+    return Number.isFinite(t) ? t : null;
+  };
+  let text = turn.content;
+  let laterAt = time(history[at]);
+  for (let i = at - 1; i >= 0 && at - i <= 3; i--) {
+    const prev = history[i];
+    const prevAt = time(prev);
+    if (prev.role !== 'user' || !prev.content || laterAt == null || prevAt == null) break;
+    if (laterAt - prevAt > SPLIT_TURN_WINDOW_MS || laterAt < prevAt) break;
+    text = prev.content + text;
+    laterAt = prevAt;
+  }
+  return text;
 }
 
 /** How many times the stage-2 confirmation is attempted before failing open. */

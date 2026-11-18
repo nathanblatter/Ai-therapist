@@ -60,6 +60,45 @@ import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../
  */
 export const RECOVERY_SPEAK_RETRY_MS = [4_000, 8_000] as const;
 
+/**
+ * A steer must never leave the participant in silence (ai-therapist-313).
+ *
+ * `session.instructions.append` "can interrupt speech in progress and apply a
+ * new instruction" (voice-server-controls, "Redirect the conversation"). Our
+ * crisis steers arrive about a second after a disclosure, which is exactly
+ * when the voice model is in the middle of answering it, and nothing in them
+ * told the model to go on: measured 2026-11-18, the reply stopped mid-sentence
+ * in about 7 of 8 voice-layer answers to a passive disclosure, and in
+ * continuous calls the participant then sat through 68 to 105 s of silence.
+ *
+ * Two layers. Every clinical steer is delivered with LIVE_STEER_KEEP_SPEAKING
+ * appended, so the interruption is followed by speech. And the sideband
+ * watches: if a steer landed while a reply was owed and the assistant has
+ * still said nothing STEER_RESUME_CHECK_MS later (and the participant is not
+ * talking), it tells the model to speak, once per check.
+ */
+export const CLINICAL_STEER_MARKER = '[Clinical guidance';
+export const LIVE_STEER_KEEP_SPEAKING =
+  'This guidance does not end your turn. If you were speaking when it arrived, or the participant is waiting for ' +
+  'your reply, speak again now and follow it; do not go silent.';
+export const LIVE_STEER_RESUME_COMMENTARY =
+  'The participant is waiting and you have stopped speaking. Speak now: respond to what they just said, following ' +
+  'the guidance you were given. Do not stay silent.';
+export const STEER_RESUME_CHECK_MS = [3_000, 7_000] as const;
+/** A reply is owed if the assistant spoke, or the participant finished speaking, this recently before the steer. */
+const STEER_REPLY_OWED_WINDOW_MS = 6_000;
+/** Fragments of the interrupted sentence keep arriving for about this long after a steer. */
+const STEER_INTERRUPT_TAIL_MS = 1_200;
+/** The participant counts as still talking if a fragment of theirs arrived this recently. */
+const STEER_PARTICIPANT_TALKING_MS = 1_500;
+
+/** A clinical steer as delivered to a live voice model: the text, then the keep-speaking line, inside the append cap. */
+export function withKeepSpeaking(text: string): string {
+  if (!text.startsWith(CLINICAL_STEER_MARKER) || text.includes(LIVE_STEER_KEEP_SPEAKING)) return text;
+  const room = 1600 - LIVE_STEER_KEEP_SPEAKING.length - 1;
+  return `${text.length > room ? text.slice(0, room) : text} ${LIVE_STEER_KEEP_SPEAKING}`;
+}
+
 /** A transcript fragment as delivered by session.*_transcript.delta. */
 interface TranscriptDelta {
   delta: string;
@@ -206,6 +245,11 @@ interface LiveSessionState {
   phaseTimers: NodeJS.Timeout[];
   /** True once any assistant speech has been transcribed on this attach. */
   assistantSpoke: boolean;
+  /** Arrival time of the newest assistant / participant transcript fragment (0 = none). */
+  lastAssistantDeltaAt: number;
+  lastUserDeltaAt: number;
+  /** Pending "you went silent after a steer" checks. */
+  steerResumeTimers: NodeJS.Timeout[];
   /**
    * This state was built by the route's opening attach (connectAndWait), not
    * by a reconnect or a post-deploy reattach. Unlike `initialAttach` it is
@@ -433,6 +477,9 @@ export class SidebandManager {
       keepalive: null,
       phaseTimers: [],
       assistantSpoke: false,
+      lastAssistantDeltaAt: 0,
+      lastUserDeltaAt: 0,
+      steerResumeTimers: [],
       openingAttach: initialAttach,
       speakFirstTimers: [],
       regrounding: null,
@@ -1039,6 +1086,7 @@ export class SidebandManager {
       case 'session.input_transcript.delta': {
         const state = this.sessions.get(sessionId);
         if (!state) break;
+        state.lastUserDeltaAt = Date.now();
         state.userTranscript.add({
           delta: String(event.delta ?? ''),
           start_ms: Number(event.start_ms ?? 0),
@@ -1052,6 +1100,7 @@ export class SidebandManager {
         const state = this.sessions.get(sessionId);
         if (!state) break;
         state.assistantSpoke = true;
+        state.lastAssistantDeltaAt = Date.now();
         state.assistantTranscript.add({
           delta: String(event.delta ?? ''),
           start_ms: Number(event.start_ms ?? 0),
@@ -1612,11 +1661,76 @@ export class SidebandManager {
     if (delegate) return delegate.tryInject(sessionId, _role, text, _respond);
     if (!this.isConnected(sessionId)) return false;
     try {
-      await this.appendInstructions(sessionId, text);
+      await this.appendInstructions(sessionId, withKeepSpeaking(text));
+      this.armSteerResume(sessionId, text);
       return true;
     } catch (err) {
       console.error(`[Live] tryInject failed for ${sessionId.substring(0, 12)}...:`, err);
       return false;
+    }
+  }
+
+  /**
+   * After a clinical steer, make sure the assistant is not left silent
+   * (ai-therapist-313; see LIVE_STEER_KEEP_SPEAKING). Armed only when a reply
+   * was owed at the moment the steer landed: the assistant was speaking, or
+   * the participant had just finished. A steer that arrives while the
+   * assistant is quietly listening must not make it talk over the participant.
+   */
+  private armSteerResume(sessionId: string, text: string): void {
+    const state = this.sessions.get(sessionId);
+    if (!state || !text.startsWith(CLINICAL_STEER_MARKER)) return;
+    const steeredAt = Date.now();
+    const lastActivity = Math.max(state.lastAssistantDeltaAt, state.lastUserDeltaAt);
+    if (lastActivity === 0 || steeredAt - lastActivity > STEER_REPLY_OWED_WINDOW_MS) return;
+    // One watch per session at a time: a second steer restarts it.
+    state.steerResumeTimers.forEach((t) => clearTimeout(t));
+    state.steerResumeTimers = STEER_RESUME_CHECK_MS.map((delayMs, index) => {
+      const timer = setTimeout(() => {
+        void this.resumeAfterSteer(sessionId, steeredAt, index + 1, delayMs);
+      }, delayMs);
+      timer.unref?.();
+      return timer;
+    });
+  }
+
+  private async resumeAfterSteer(
+    sessionId: string,
+    steeredAt: number,
+    attempt: number,
+    afterMs: number,
+  ): Promise<void> {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.finalized || !this.isConnected(sessionId)) return;
+    // The assistant has spoken since the steer: nothing to do, and no later
+    // check either. "Since" starts after a short tail: the last fragments of
+    // the interrupted sentence still arrive for a moment after the append,
+    // and counting them as "carried on" is how a reply cut at "It sounds"
+    // was left unprompted in the first measured run of this watch.
+    if (state.lastAssistantDeltaAt > steeredAt + STEER_INTERRUPT_TAIL_MS) {
+      state.steerResumeTimers.forEach((t) => clearTimeout(t));
+      state.steerResumeTimers = [];
+      return;
+    }
+    // The participant is talking: the assistant should be listening.
+    if (Date.now() - state.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS) return;
+    const short = sessionId.substring(0, 12);
+    try {
+      console.warn(
+        `[Live] SILENT AFTER STEER for ${short}...: no assistant speech ${afterMs} ms after a clinical steer; ` +
+          `telling the model to speak (attempt ${attempt}/${STEER_RESUME_CHECK_MS.length}).`,
+      );
+      await this.appendCommentary(sessionId, LIVE_STEER_RESUME_COMMENTARY);
+      if (global.io) {
+        void broadcastAdminEventForSession(
+          global.io,
+          'live:steer-silent',
+          { sessionId, attempt, afterMs, timestamp: new Date() },
+          sessionId,
+        );
+      }
+    } catch (err) {
+      console.error(`[Live] Could not resume ${short}... after a steer:`, err);
     }
   }
 
@@ -1689,7 +1803,8 @@ export class SidebandManager {
   async injectMessage(sessionId: string, _role: 'system' | 'user', text: string, _respond: boolean): Promise<void> {
     const delegate = this.delegateFor(sessionId);
     if (delegate) return delegate.injectMessage(sessionId, _role, text, _respond);
-    await this.appendInstructions(sessionId, text);
+    await this.appendInstructions(sessionId, withKeepSpeaking(text));
+    this.armSteerResume(sessionId, text);
   }
 
   /**
@@ -1958,6 +2073,8 @@ export class SidebandManager {
     state.phaseTimers.forEach((t) => clearTimeout(t));
     state.speakFirstTimers.forEach((t) => clearTimeout(t));
     state.speakFirstTimers = [];
+    state.steerResumeTimers.forEach((t) => clearTimeout(t));
+    state.steerResumeTimers = [];
     state.keepalive = null;
     state.regrounding = null;
     state.toolChoiceReset = null;
