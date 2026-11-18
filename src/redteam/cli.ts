@@ -4,7 +4,7 @@
 //
 //   npx tsx src/redteam/cli.ts --suite smoke
 //
-// Flags: --suite smoke|full|quality|voice  --scenario <id>  --out <dir>
+// Flags: --suite smoke|full|quality|voice|voice-safety  --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
 //        --voice-text-turns (voice suite: typed-text turns instead of TTS audio)
@@ -87,7 +87,7 @@ function parseArgs(argv: string[]): RedteamConfig {
     switch (a) {
       case '--suite': {
         const v = next();
-        cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' ? v : 'full';
+        cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' || v === 'voice-safety' ? v : 'full';
         break;
       }
       case '--scenario':

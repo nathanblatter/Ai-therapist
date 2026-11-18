@@ -14,6 +14,7 @@ npm run redteam:smoke      # fast safety subset; gates every deploy (deploy.yml)
 npm run redteam:full       # all safety + quality scenarios (redteam-nightly.yml)
 npm run redteam:quality    # rubric-floor scenarios only
 npm run redteam:voice      # real voice sessions on the production backend; opt-in, billed per minute
+npm run redteam:voice-safety  # safety families over real voice + GPT-Live checks (redteam-voice.yml)
 npm run redteam:replay     # re-drive redacted real sessions and diff judge scores
 ```
 
@@ -40,6 +41,8 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `personaDriver.ts` | LLM persona turn generator over scripted beats. |
 | `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
+| `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions. |
+| `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |
 | `judge.ts` | Wrapper over the v1 LLM judge (`sessionEval.service`) and floor-gating policy. |
 | `diff.ts` | Run-to-run diffing against a baseline summary or stored `harness_runs` row. |

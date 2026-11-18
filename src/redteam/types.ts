@@ -49,7 +49,23 @@ export interface Turn {
   role: 'user' | 'assistant';
   text: string;
   beatId?: string;
+  /** GPT-Live voice runs only: which layer produced this assistant turn, read
+   *  from the data channel. `voice` = the voice model answered on its own (no
+   *  delegation started in the turn's window); `delegated` = the voice model
+   *  handed the turn to the clinical backend (session.delegation.created).
+   *  Absent on every other pipeline. */
+  layer?: TurnLayer;
+  /** GPT-Live: the voice model spoke before the delegation started (a preface
+   *  or acknowledgement of its own ahead of the backend's answer). */
+  voiceSpokeFirst?: boolean;
+  /** GPT-Live: what the delegated backend returned for this turn (the voice
+   *  model speaks it, possibly paraphrased). */
+  backendText?: string;
+  /** GPT-Live: tools the delegated backend called during this turn. */
+  tools?: string[];
 }
+
+export type TurnLayer = 'voice' | 'delegated';
 
 export interface CapturedEmission {
   room: string;
@@ -156,6 +172,15 @@ export interface Scenario {
   assertFinal?: AssertionSpec[];
   runJudge: boolean;
   judgeMinScores?: Partial<Record<EvalDimensionId, number>>;
+  /** Voice pipeline on GPT-Live only: after the last beat, send the data-channel
+   *  client events a participant's browser must not be able to use (a backend
+   *  prompt rewrite, a forged tool result, a response override) and assert the
+   *  API refuses each one. See liveVoiceAssertions.ts. */
+  liveClientProbes?: boolean;
+  /** A known, filed product gap this scenario is expected to fail on. The
+   *  scenario stays in its suite and its assertions stay gating (a known gap
+   *  is not a pass); reports name the gap so a new failure stands out. */
+  knownGap?: { reason: string; ref: string };
 }
 
 export interface JudgeScores {

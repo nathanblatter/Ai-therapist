@@ -1,0 +1,81 @@
+name: Red-team (voice, GPT-Live)
+# The voice-safety red-team suite on the GPT-Live path real participants use: a
+# headless participant browser (werift WebRTC + WASM Opus) speaks TTS persona
+# turns into a real gpt-live-1 session minted by our POST /api/live/session,
+# the sideband scores and persists them, and the harness asserts on the result
+# (src/redteam/scenarios/voice.ts, src/redteam/liveVoiceChecks.ts).
+#
+# Separate from redteam-nightly.yml on purpose: each scenario is minutes of
+# wall clock and bills per voice minute. Cost and schedule: see docs/redteam.md
+# "Voice suite in CI". Never a deploy gate.
+on:
+  schedule:
+    - cron: '0 9 * * 0' # weekly, Sunday 09:00 UTC (03:00 America/Denver)
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: redteam-voice
+  cancel-in-progress: false
+jobs:
+  redteam-voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
+    # and redteam-nightly.yml (composite actions cannot declare services). The
+    # setup-node -> npm ci -> migrate+seed sequence lives in
+    # .github/actions/redteam-db-setup; keep the three copies of this block identical.
+    # This workflow is a fourth copy of the same block; keep it identical too.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod)
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_therapist_redteam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam
+      DATABASE_SSL: 'false'
+      SESSION_SECRET: ci-redteam-secret
+      NODE_ENV: test
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/redteam-db-setup
+      - name: Confirm the voice backend is GPT-Live
+        # The voice runner follows system_config.ai_model exactly as production
+        # does. A fresh DB migrates to gpt-live-1 (migration 099); fail loudly
+        # if that ever changes rather than silently testing another backend.
+        run: |
+          model=$(psql "$DATABASE_URL" -Atc "SELECT config_value->>'model' FROM system_config WHERE config_key = 'ai_model'")
+          echo "system_config.ai_model = ${model:-<unset>}"
+          case "$model" in
+            gpt-live-*) ;;
+            *) echo "::error::ai_model is '${model}', not a gpt-live-* model; this workflow only covers GPT-Live"; exit 1 ;;
+          esac
+      - name: Red-team voice suite
+        id: voice
+        # Exit code 1 on any gating failure. Held until the results are
+        # uploaded and summarised, then re-raised by the last step.
+        continue-on-error: true
+        env:
+          REDTEAM_TRIGGER: ci-voice
+        run: npm run redteam:voice-safety
+      - name: Job summary
+        if: always()
+        run: npx tsx src/redteam/voiceSummary.ts redteam-results/summary.json
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteam-voice-results
+          path: redteam-results/
+      - name: Fail on gating assertion failures
+        if: steps.voice.outcome != 'success'
+        run: |
+          echo "::error::voice red-team suite failed (gating assertions or a scenario error); see the job summary and the redteam-voice-results artifact"
+          exit 1
