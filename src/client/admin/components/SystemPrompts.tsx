@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle, Eye, Code } from 'react-feather';
 import { getJson, postJson } from '../../shared/http';
+import ConfigEvalNotice from './ConfigEvalNotice';
 // Canonical modality-preset shape lives in the server helpers (type-only
 // import, erased at build time).
 import type { ModalityPreset } from '../../../server/utils/sessionHelpers';
@@ -217,6 +218,7 @@ export default function SystemPrompts() {
 
   return (
     <div className="p-6 max-w-6xl">
+      <ConfigEvalNotice refreshKey={saving} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">System Prompts</h2>

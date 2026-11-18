@@ -80,6 +80,20 @@ On acknowledging a page:
 - **Weekly:** the research team reviews all crisis events, response times
   (page → acknowledgment), false-positive determinations, and any adverse
   experiences reported in the weekly survey (W7/W8). Owner: [rotating RA].
+- **Dependence and problematic-use flags (weekly survey W11/W12, added
+  2026-11-18; thresholds are the PI's decision, Q-DEP1):** reviewed in the
+  same one-business-day pass as W7/W8. A participant is flagged when any of:
+  W11 (ADS-9 Craving, adapted) mean of 4.0 or more; W11 mean up by 1.0 or
+  more from their first weekly survey; W12 (BSMAS, adapted) total of 19 or
+  more. A flag is not a crisis page. The reviewing researcher sends one
+  check-in message through the in-app messaging channel within one business
+  day: thanks them, restates that the agent is not a substitute for people or
+  professional care, lists CAPS (801-422-3035) and 988, and reminds them they
+  may pause. A second consecutive flag goes to the PI, who decides whether to
+  offer a pause or a call. If the same survey's free text (W8/W10) describes
+  risk, use the triage ladder in section 4 instead. Record each flag and
+  action in the weekly-review notes for that participant; flags are counted in the weekly
+  review and reported at continuing review.
 - **Serious adverse events** are filed through the in-app adverse-event
   reporting module and reported to the IRB per BYU HRPP policy timelines.
 - **Drift check:** if flag rates or false-positive rates move materially,
