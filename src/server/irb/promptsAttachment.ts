@@ -29,6 +29,7 @@ import {
 import {
   assembleMemoryBlock,
   buildCheckinBlock,
+  buildLeadConversationBlock,
   buildScreenerCadenceBlock,
   buildToolGuidanceBlock,
 } from '../utils/promptContext.js';
@@ -69,6 +70,7 @@ import {
 } from '../utils/sessionAutoTerminate.js';
 import { SCALE_MIN_INTERVAL_DAYS } from '../utils/scales.js';
 import { DEFAULT_VENDOR_CEILING_MINUTES } from '../../shared/systemConfig.js';
+import { openingDeliveryInstruction } from '../../shared/openingPrompt.js';
 import {
   CHAT_SAFETY_PROTOCOL_GUIDANCE,
   CRISIS_WIND_DOWN_GUIDANCE,
@@ -105,7 +107,7 @@ import { EMBEDDING_MODEL } from '../services/embeddings.service.js';
 import { MODERATION_MODEL } from '../services/moderation.service.js';
 
 /** Date shown on the attachment. Bump when the prompts change and it is re-submitted. */
-export const PREPARED = 'November 16, 2026 (supersedes the September 4, 2026 version)';
+export const PREPARED = 'November 18, 2026 (supersedes the September 4, 2026 version)';
 
 /** Repo-relative path of the committed attachment. */
 export const ATTACHMENT_PATH = 'docs/irb-phase2-instruments/prompts.html';
@@ -156,6 +158,52 @@ function replaceOnce(text: string, from: string, to: string): string {
   return text.replace(from, to);
 }
 
+/**
+ * Labels for text the model receives only under a research condition or a
+ * feature flag. Every conditional block in the attachment is introduced by one
+ * of these, so a reviewer can tell default text from switchable text.
+ */
+const CONDITIONAL_PSYCHOEDUCATION_CUE =
+  'Conditional, research condition "psychoeducation retrieval cue" (cue arm only): sent only when the study ' +
+  'configuration switch features.psychoeducation_cue_ab_enabled is on, in which case each new session is randomly ' +
+  'assigned 50/50 to the cue arm or the control arm and the arm is recorded per session. The switch is off by ' +
+  'default; while it is off, and in the control arm, none of this text is sent.';
+
+const CONDITIONAL_LEAD_CONVERSATION =
+  'Conditional, feature flag "leading the conversation": sent only while the study configuration flag ' +
+  'features.lead_conversation_enabled is on, and then to every new session (it is not a randomized condition; ' +
+  'crisis-recovery voice sessions never receive it). The flag is off by default; while it is off, none of this ' +
+  'text is sent.';
+
+/**
+ * The lines `variant` adds to `base`, grouped by the base line they follow.
+ * Throws unless `variant` is exactly `base` with lines inserted: a condition
+ * that rewrote or removed default text would need a different presentation.
+ */
+function insertedLines(base: string, variant: string): Array<{ after: string; lines: string[] }> {
+  const baseLines = base.split('\n');
+  const out: Array<{ after: string; lines: string[] }> = [];
+  let i = 0;
+  let current: { after: string; lines: string[] } | null = null;
+  for (const line of variant.split('\n')) {
+    if (i < baseLines.length && line === baseLines[i]) {
+      i++;
+      current = null;
+      continue;
+    }
+    if (i === 0) throw new Error('irb prompts attachment: conditional text inserted before the first line');
+    if (!current) {
+      current = { after: baseLines[i - 1], lines: [] };
+      out.push(current);
+    }
+    current.lines.push(line);
+  }
+  if (i !== baseLines.length || out.length === 0) {
+    throw new Error('irb prompts attachment: conditional variant is not the default text plus inserted lines');
+  }
+  return out;
+}
+
 /** Drop the leading blank lines appenders carry (they are separators, not content). */
 function block(text: string): string {
   return text.replace(/^\n+/, '');
@@ -180,7 +228,7 @@ function readClientApp(): string {
   return readFileSync(CLIENT_APP_URL, 'utf8');
 }
 
-function verifyClientOpening(opening: string): void {
+function verifyClientOpening(opening: string, leadConversation: boolean): void {
   const prefix = "Say this phrase exactly: '";
   const parts = opening.slice(prefix.length).split(buildGrokCrisisPhrase(PLACEHOLDER_CRISIS_CONTACT));
   if (!opening.startsWith(prefix) || parts.length !== 2) {
@@ -189,12 +237,17 @@ function verifyClientOpening(opening: string): void {
   const [before, after] = parts;
   const quote = after.lastIndexOf("'");
   const [voiceNote, thanks] = after.slice(1, quote).split(' Thanks again');
+  // The delivery instruction after the quoted phrase comes from
+  // shared/openingPrompt.ts, which the browser imports too.
+  if (after.slice(quote + 1) !== ' ' + openingDeliveryInstruction(leadConversation)) {
+    throw new Error('irb prompts attachment: opening delivery instruction changed shape');
+  }
   const fragments = [
     "Say this phrase exactly: '${basePrompt}'",
     before,
     voiceNote,
     ' Thanks again' + thanks,
-    '`${initialPrompt}' + after.slice(quote + 1) + '`',
+    '`${initialPrompt} ${openingDeliveryInstruction(leadConversationRef.current)}`',
   ];
   const client = readClientApp();
   for (const fragment of fragments) {
@@ -228,7 +281,8 @@ function buildItems(): Item[] {
           'src/server/utils/grokRefusalGuard.ts, src/server/utils/openingLine.ts, ' +
           'src/server/utils/sessionAutoTerminate.ts, src/server/services/crisisIntervention.service.ts, ' +
           'src/server/services/crisisDetection.service.ts, src/server/services/minorSafeguard.service.ts, ' +
-          'src/server/services/redaction.service.ts, src/server/services/sessionName.service.ts.',
+          'src/server/services/redaction.service.ts, src/server/services/sessionName.service.ts, ' +
+          'src/shared/openingPrompt.ts.',
       ],
     ],
   });
@@ -252,6 +306,12 @@ function buildItems(): Item[] {
       'admin interface that stores them in the system configuration database; stored overrides are not visible to ' +
       'the generator. The research team keeps the deployed configuration in sync with the IRB-approved text below.',
   );
+  add(
+    'p',
+    'Conditional text: some text below is sent only under a research condition or while a feature flag is on. ' +
+      'Each such block is introduced by a note beginning "Conditional" that names the condition enabling it and ' +
+      'states its default. Everything not so marked is sent under the default configuration.',
+  );
 
   // -------------------------------------------------------------------------
   add('h1', 'Part A. Per-session instruction set');
@@ -265,14 +325,16 @@ function buildItems(): Item[] {
       '(3) exactly one exercise-offering appendix — proactive or reactive — assigned per session as a research ' +
       'condition (A.4); ' +
       '(4) a language addition, only if one is configured for the session language (A.5); ' +
-      '(5) for voice sessions only, a tool-usage guidance block (A.6); ' +
-      '(6) for logged-in returning participants who opted in to session memory, a returning-participant context ' +
+      '(5) for voice sessions, a tool-usage guidance block (A.6); typed-chat sessions receive a one-line version of ' +
+      'it only in the psychoeducation-cue research arm (conditional, see A.6); ' +
+      '(6) the leading-the-conversation block, only while that feature flag is on (conditional, A.14); ' +
+      '(7) for logged-in returning participants who opted in to session memory, a returning-participant context ' +
       'block (A.7); and ' +
-      '(7) a pre-session check-in block, only if the participant filled in the optional check-in form (A.8).',
+      '(8) a pre-session check-in block, only if the participant filled in the optional check-in form (A.8).',
   );
   add(
     'p',
-    'Typed-chat sessions send this clinical prompt (without item 5) as the system message to the chat model. Voice ' +
+    'Typed-chat sessions send this clinical prompt as the system message to the chat model. Voice ' +
       'sessions run on one of two voice backends, selected by the study configuration: ' +
       'GPT-Live, where a voice model speaks with the participant using short conversation-layer instructions (A.9) ' +
       'and hands substantive therapeutic work to a separate reasoning model that receives the clinical prompt ' +
@@ -352,6 +414,28 @@ function buildItems(): Item[] {
     .filter((line) => line.startsWith('- '))
     .map((line) => toolNames.filter((name) => buildToolGuidanceBlock([name]).includes(line)).join(' or '));
   add('note', 'Gating tools, in order of the lines above: ' + gating.join('; ') + '.');
+  add('note', CONDITIONAL_PSYCHOEDUCATION_CUE);
+  const toolLines = toolBlock.split('\n').filter((line) => line.startsWith('- '));
+  for (const { after, lines } of insertedLines(
+    toolBlock,
+    block(buildToolGuidanceBlock(toolNames, { psychoeducationCue: true })),
+  )) {
+    const afterIndex = toolLines.indexOf(after);
+    if (afterIndex === -1) throw new Error('irb prompts attachment: cue line does not follow a tool line');
+    add(
+      'p',
+      'In voice sessions assigned to the cue arm, when retrieve_psychoeducation is enabled, this line is added to ' +
+        `the block above immediately after the line gated by ${gating[afterIndex]}, verbatim:`,
+    );
+    add('pre', lines.join('\n'));
+  }
+  add(
+    'p',
+    'Typed-chat sessions have no other tool-usage guidance. In typed-chat sessions assigned to the cue arm, when ' +
+      'retrieve_psychoeducation is enabled for typed chat, the clinical prompt receives this block in position (5), ' +
+      'verbatim:',
+  );
+  add('pre', block(buildToolGuidanceBlock(['retrieve_psychoeducation'], { psychoeducationCue: true })));
 
   add('h2', 'A.7 Returning-participant context block (opt-in session memory)');
   add(
@@ -446,12 +530,34 @@ function buildItems(): Item[] {
       '"Backend tools", the first line is always present and each further line appears only when the matching tool ' +
       '(find_worksheet, a scale-administration tool, display_session_recap, end_session) is enabled.',
   );
+  const liveToolNames = ['find_worksheet', 'administer_scale', 'display_session_recap', 'end_session'];
+  const liveInstructions = buildLiveInstructions({ languageName: '<language name>', toolNames: liveToolNames });
+  add('pre', liveInstructions);
   add(
-    'pre',
+    'p',
+    'The text above is the complete voice-layer instruction set under the default configuration. Two conditions ' +
+      'add lines to it; each added line is shown below with the line it follows, and nothing else changes.',
+  );
+  const liveConditional = (label: string, variant: string) => {
+    add('note', label);
+    for (const { after, lines } of insertedLines(liveInstructions, variant)) {
+      add('p', 'Inserted immediately after the line:');
+      add('pre', after);
+      add('p', 'Added text, verbatim:');
+      add('pre', lines.join('\n'));
+    }
+  };
+  liveConditional(
+    CONDITIONAL_PSYCHOEDUCATION_CUE + ' Applies when retrieve_psychoeducation is enabled for the session.',
     buildLiveInstructions({
       languageName: '<language name>',
-      toolNames: ['find_worksheet', 'administer_scale', 'display_session_recap', 'end_session'],
+      toolNames: [...liveToolNames, 'retrieve_psychoeducation'],
+      psychoeducationCue: true,
     }),
+  );
+  liveConditional(
+    CONDITIONAL_LEAD_CONVERSATION,
+    buildLiveInstructions({ languageName: '<language name>', toolNames: liveToolNames, leadConversation: true }),
   );
 
   add('h2', 'A.10 GPT-Live reasoning backend: clinical prompt wrapper');
@@ -481,7 +587,9 @@ function buildItems(): Item[] {
       '<language name>:" instead.',
   );
   const voiceOpening = buildGrokOpeningPrompt('en', PLACEHOLDER_CRISIS_CONTACT);
-  verifyClientOpening(voiceOpening);
+  verifyClientOpening(voiceOpening, false);
+  const voiceOpeningLead = buildGrokOpeningPrompt('en', PLACEHOLDER_CRISIS_CONTACT, { leadConversation: true });
+  verifyClientOpening(voiceOpeningLead, true);
   add('h3', 'Voice sessions — instruction to the voice model');
   add(
     'p',
@@ -489,9 +597,15 @@ function buildItems(): Item[] {
       'server injects it.',
   );
   add('pre', voiceOpening);
+  add('note', CONDITIONAL_LEAD_CONVERSATION);
+  add('p', 'While the flag is on, the instruction to the voice model reads instead, verbatim:');
+  add('pre', voiceOpeningLead);
   add('h3', 'Typed-chat sessions — fixed first message shown to the participant');
   add('p', 'Authored by the server and stored as the first assistant message; the model does not generate it.');
   add('pre', buildChatOpeningLine(PLACEHOLDER_CRISIS_CONTACT));
+  add('note', CONDITIONAL_LEAD_CONVERSATION);
+  add('p', 'While the flag is on, the first message reads instead, verbatim:');
+  add('pre', buildChatOpeningLine(PLACEHOLDER_CRISIS_CONTACT, { leadConversation: true }));
   add('note', 'Immediately after it, the following guidance is attached for the chat model, verbatim:');
   add('pre', CHAT_OPENING_FRAMING_GUIDANCE);
 
@@ -520,6 +634,19 @@ function buildItems(): Item[] {
       'line, prefixed "Participant:" or "You:".',
   );
   add('pre', buildVoiceContinuationGuidance('<transcript of the voice conversation>'));
+
+  add('h2', 'A.14 Leading-the-conversation block');
+  add('note', CONDITIONAL_LEAD_CONVERSATION);
+  add(
+    'p',
+    'While the flag is on, this block is added to the clinical prompt of every new voice and typed-chat session, ' +
+      'in position (6) of A.1: after the tool-usage guidance and before the returning-participant and check-in ' +
+      'blocks. Verbatim:',
+  );
+  if (buildLeadConversationBlock(false) !== '') {
+    throw new Error('irb prompts attachment: lead-conversation block is no longer empty when the flag is off');
+  }
+  add('pre', block(buildLeadConversationBlock(true)));
 
   // -------------------------------------------------------------------------
   add('h1', 'Part B. System-side guidance injected during a live session');
