@@ -162,25 +162,51 @@ after 10 seconds. A recovery session gets the speak-first nudge the same way.
 ### Data-channel permissions
 
 The browser owns the WebRTC data channel, so by default it can send any client
-event, including `session.instructions.append`. Session creation therefore sets
-`session.client.data_channel.allowed_client_events` (documented in the
-`POST /v1/live/sessions` reference) to an allowlist:
+event. Session creation therefore sets
+`session.client.data_channel.allowed_client_events` to `["session.close"]` for
+every session, normal and recovery. The field is documented in the
+`POST /v1/live/sessions` reference: "Client event types that the frontend data
+channel may send. Use 'all' to allow every client event; an empty array allows
+none. Omission preserves the existing allow-all behavior." The `client` block
+is "Startup-only capabilities for an untrusted frontend attached to a unified
+WebRTC session. Trusted sideband connections are unaffected."
+`allowed_server_events` is left out (allow-all), because the browser reads the
+transcript, lifecycle and `response.event` envelopes. With
+`SIDEBAND_ENABLED=false` the block is omitted, since there is no server-side
+channel to steer from.
 
-| Session | Browser may send |
+What the browser used to send itself now goes through the server:
+
+| Need | Path |
 |---|---|
-| Normal (Responses delegation) | `session.close`, `response.item.create`, `response.create` |
-| Recovery (client delegation) | `session.close` |
-| `SIDEBAND_ENABLED=false` | everything (block omitted; there is no server-side channel to steer from) |
+| Opening preamble, recovery nudge | `POST /api/sessions/:id/opening` (no text in the request) |
+| Typed participant text | `POST /api/sessions/:id/text`, queued over the sideband as a user-role `response.item.create` plus `response.create` |
+| Exercise and worksheet outcomes, screener results | `POST /api/sessions/:id/tool-event` |
+| Hang up | `session.close` on the data channel (the one allowed event), and `POST /api/sessions/:id/end` |
 
-The sideband is unaffected by this block. The session response tells the
-browser whether its channel is locked (`data_channel_locked`); on a locked
-session the browser never attempts an instructions append, and a steer that
-only the browser could have delivered is reported as a `data_channel_error`
-client event (`steer_undelivered_locked_channel`, `opening_undelivered`).
+Measured on gpt-live-1, 2026-11-18. On an unlocked channel the API accepted
+from the browser: `session.update` replacing the backend instructions and tools,
+setting `tool_choice: "none"`, changing `acknowledgement_delay_ms` and clearing
+`triggers`; `session.instructions.append`, `session.thinking.append` and
+`session.commentary.append` (each made the model speak a canary);
+`response.item.create` with a developer-role message (the backend repeated the
+canary); `decision.item.create`; and `session.input_audio.mute`, which deafens
+the model and the sideband's crisis pipeline. After the tampering, a request
+for a breathing exercise got no reply at all (2 of 2 runs). On the locked
+channel every one of these is refused with an `error` event, code
+`event_not_allowed`, "This event is not allowed on the frontend data channel.",
+naming the event's `client_event_id`, and the next delegated turn still runs
+the clinical prompt and tools. The red-team `voice-prompt-injection` scenario
+keeps that as a gate (`docs/redteam.md`, client probes).
 
-Two levers remain with the participant and are not closed by this block:
-`response.item.create` accepts developer-role items for the delegated backend,
-and `/tool-event` and `/worksheet-response` relay client-composed summaries as
+The session response tells the browser whether its channel is locked
+(`data_channel_locked`). On a locked session the browser never attempts an
+instructions append; a steer that only the browser could have delivered is
+reported as a `data_channel_error` client event
+(`steer_undelivered_locked_channel`, `opening_undelivered`).
+
+One lever remains with the participant and is not closed by this block:
+`/tool-event` and `/worksheet-response` relay client-composed summaries as
 instructions over the sideband.
 
 ---
