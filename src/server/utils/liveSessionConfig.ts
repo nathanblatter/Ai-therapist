@@ -353,7 +353,8 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
  * Resolve system_config.live_backend_reasoning_effort for the configured
  * backend. Returns null (send nothing, so the model's own default applies,
  * which is `medium` for every current GPT-5.6 / GPT-6 backend) when the key is
- * unset or not a recognised effort.
+ * unset; also, with a warning, when it is not a recognised effort or the
+ * registry marks the backend as taking no effort at all.
  *
  * Exists because effort drives delegation latency: measured 2026-11-18,
  * gpt-6.1-terra at its default `medium` spent ~5x the reasoning tokens of
@@ -364,10 +365,27 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
  * setting asynchronously (responses_validation_failed) mid-session.
  */
 export function resolveBackendReasoningEffort(raw: unknown, backendModel: string): ReasoningEffort | null {
-  if (typeof raw !== 'string') return null;
-  const effort = raw.trim().toLowerCase();
-  if (!(REASONING_EFFORTS as readonly string[]).includes(effort)) return null;
-  if (effort === 'none' && getBackendModel(backendModel)?.supportsNoneEffort === false) return 'low';
+  if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) return null;
+  const effort = typeof raw === 'string' ? raw.trim().toLowerCase() : null;
+  if (effort === null || !(REASONING_EFFORTS as readonly string[]).includes(effort)) {
+    log.warn(
+      { live_backend_reasoning_effort: raw },
+      `system_config.live_backend_reasoning_effort is not one of ${REASONING_EFFORTS.join('|')}; sending no effort`,
+    );
+    return null;
+  }
+  const registered = getBackendModel(backendModel);
+  // A non-reasoning backend rejects the block, and GPT-Live reports that
+  // asynchronously (responses_validation_failed) on every delegation, after
+  // session start has already succeeded. Leave it out instead.
+  if (registered && !registered.supportsReasoningEffort) {
+    log.warn(
+      { backendModel, live_backend_reasoning_effort: effort },
+      'live_backend_reasoning_effort is set but the backend model takes no reasoning effort; sending none',
+    );
+    return null;
+  }
+  if (effort === 'none' && registered?.supportsNoneEffort === false) return 'low';
   return effort as ReasoningEffort;
 }
 

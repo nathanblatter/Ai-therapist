@@ -314,6 +314,27 @@ describe('backend reasoning effort (system_config.live_backend_reasoning_effort)
     expect(resolveBackendReasoningEffort('none', 'gpt-6.1-sol')).toBe('low');
     expect(resolveBackendReasoningEffort('none', 'gpt-6-astra')).toBe('low');
   });
+
+  it('sends nothing to a backend the registry marks as non-reasoning, and says so', () => {
+    // A reasoning block on gpt-4.1 is rejected by GPT-Live asynchronously
+    // (responses_validation_failed), i.e. every delegation of the session
+    // fails while session start looks healthy.
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort('low', 'gpt-4.1')).toBeNull();
+    expect(resolveBackendReasoningEffort('low', 'gpt-4o-mini')).toBeNull();
+    expect(logMock.warn).toHaveBeenCalled();
+  });
+
+  it('logs an unrecognised or mistyped effort instead of dropping it silently', () => {
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort('lo', 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort(1, 'gpt-6.1-terra')).toBeNull();
+    expect(logMock.warn).toHaveBeenCalledTimes(2);
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort(undefined, 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort(null, 'gpt-6.1-terra')).toBeNull();
+    expect(logMock.warn).not.toHaveBeenCalled();
+  });
 });
 
 describe('toLiveDelegationTools', () => {
