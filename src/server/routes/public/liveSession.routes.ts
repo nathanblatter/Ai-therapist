@@ -487,6 +487,9 @@ export default function liveSessionRoutes(): Router {
             await sidebandManager.connectAndWait(sessionId, liveSessionId, apiKey, {
               model: aiModel,
               backendModel,
+              // Must match the delegation block buildLiveSessionConfig sent:
+              // recovery runs client-delegated with no backend or tools.
+              delegationMode: isRecovery ? 'client' : 'responses',
             });
           } catch (err) {
             log.error(
