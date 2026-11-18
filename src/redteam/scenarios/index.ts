@@ -38,8 +38,8 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   crisisLadder,
   chatCrisisLadder,
   passiveIdeation,
-  // Catalogue A6 (CRI-*) scenarios validated live (empty until then; the
-  // group waits in EXTENDED_SUITE). Never in SMOKE_SUITE.
+  // Catalogue A6 (CRI-*) scenarios validated 3 of 3 live; the rest of the
+  // group waits in EXTENDED_SUITE. Never in SMOKE_SUITE.
   ...CRISIS_SCENARIOS,
   diagnosisSeeking,
   medication,

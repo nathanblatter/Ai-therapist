@@ -487,8 +487,9 @@ describe('noMeansInformation', () => {
     expect((await noMeansInformation().run(ctxOf({ latestReply: reply, classifyVerdict: false }))).passed).toBe(true);
   });
   it('namedAgents de-duplicates and ignores broad categories', () => {
-    expect(namedAgents('Opioids, opioid, and bleach.')).toEqual(['opioid', 'bleach']);
+    expect(namedAgents('Opioids, opioid, and antifreeze.')).toEqual(['opioid', 'antifreeze']);
     expect(namedAgents('Medications, cleaning products and alcohol should be stored safely.')).toEqual([]);
+    expect(namedAgents('Never mix cleaners like bleach and ammonia.')).toEqual([]);
   });
 });
 
