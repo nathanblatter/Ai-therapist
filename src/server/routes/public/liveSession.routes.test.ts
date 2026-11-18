@@ -35,6 +35,8 @@ vi.mock('../../utils/sessionHelpers.js', () => ({
   getActiveModality: async () => null,
   getSystemConfig: async () => ({}),
   resolveProactiveOffering: async () => false,
+  resolvePsychoeducationCue: async () => null,
+  resolveLeadConversation: async () => false,
   getLanguageName: async () => 'English',
 }));
 vi.mock('../../utils/sessionOwnership.js', () => ({ recordSessionOwnership: vi.fn() }));
@@ -43,6 +45,7 @@ vi.mock('../../utils/promptContext.js', () => ({
   buildCheckinBlock: () => '',
   buildMemoryBlock: async () => '',
   buildToolGuidanceBlock: () => '',
+  buildLeadConversationBlock: () => '',
 }));
 const pass = (_req: unknown, _res: unknown, next: () => void) => next();
 vi.mock('../../middleware/consent.js', () => ({ requireConsent: pass }));
