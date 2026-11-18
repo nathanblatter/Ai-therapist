@@ -22,7 +22,7 @@ import { adviceSeeker } from './quality/adviceSeeker.js';
 import { lowMoodSupport } from './quality/lowMoodSupport.js';
 import { stallingParticipant } from './quality/stallingParticipant.js';
 import { returningParticipant } from './quality/returningParticipant.js';
-import { voiceCrisisLadder, voiceFirstSession } from './voice.js';
+import { voiceCrisisLadder, voiceFirstSession, VOICE_SAFETY_SCENARIOS } from './voice.js';
 
 /** One suite member: a scenario plus optional beat-subset / judge overrides. */
 export interface SuiteEntry {
@@ -77,12 +77,21 @@ export const FULL_SUITE: SuiteEntry[] = ALL_SCENARIOS.map((scenario) => ({ scena
 // QUALITY: rubric-floor scenarios only (nightly quality job).
 export const QUALITY_SUITE: SuiteEntry[] = QUALITY_SCENARIOS.map((scenario) => ({ scenario }));
 
-// VOICE: real Realtime audio scenarios. Deliberately its own opt-in suite —
-// each run is minutes of wall-clock and bills Realtime audio rates, so voice
-// never rides along with full/smoke. NOT part of ALL_SCENARIOS: the voice
-// variants reuse safety/quality scenario definitions with new ids.
+// VOICE: real voice-session scenarios on the backend system_config.ai_model
+// selects. Deliberately its own opt-in suite: each run is minutes of
+// wall-clock and bills per voice minute, so voice never rides along with
+// full/smoke. NOT part of ALL_SCENARIOS: the voice variants reuse the
+// safety/quality scenario definitions by reference under new ids. Kept at two
+// scenarios: it is the default suite of the in-app nightly runner
+// (harnessRunner.service.ts, 30-minute hard kill), so growing it would grow
+// that schedule's cost and wall clock without anyone deciding to.
 export const VOICE_SCENARIOS: Scenario[] = [voiceFirstSession, voiceCrisisLadder];
 export const VOICE_SUITE: SuiteEntry[] = VOICE_SCENARIOS.map((scenario) => ({ scenario }));
+
+// VOICE-SAFETY: the safety-critical families over a real voice session, with
+// the GPT-Live two-layer checks (liveVoiceChecks.ts). Scheduled on its own by
+// .github/workflows/redteam-voice.yml, which requires ai_model = gpt-live-*.
+export const VOICE_SAFETY_SUITE: SuiteEntry[] = VOICE_SAFETY_SCENARIOS.map((scenario) => ({ scenario }));
 
 // SMOKE: fast, gates every deploy. ~3 scenarios, no judge. crisisLadder runs
 // only the escalation beats (the medium→high step) to keep it cheap and robust.
@@ -101,7 +110,9 @@ export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntr
         ? QUALITY_SUITE
         : suite === 'voice'
           ? VOICE_SUITE
-          : FULL_SUITE;
+          : suite === 'voice-safety'
+            ? VOICE_SAFETY_SUITE
+            : FULL_SUITE;
   if (!scenarioId) return base;
   return base.filter((e) => e.scenario.id === scenarioId);
 }
