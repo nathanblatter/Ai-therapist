@@ -1,0 +1,55 @@
+// ai-therapist-202: the psychoeducation-cue arm is written by its own UPDATE
+// so a database without migration 123 (applied by hand) keeps working.
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
+vi.mock('../config/db.js', () => ({
+  pool: { query: queryMock, connect: vi.fn(), on: vi.fn() },
+}));
+
+import { upsertSessionConfig, setSessionPsychoeducationCue } from './sessions.queries.js';
+
+function undefinedColumn(): Error {
+  return Object.assign(new Error('column "psychoeducation_cue" does not exist'), { code: '42703' });
+}
+
+beforeEach(() => {
+  queryMock.mockReset();
+});
+
+describe('upsertSessionConfig psychoeducation_cue', () => {
+  it('does not touch the column when the arm is null or omitted', async () => {
+    queryMock.mockResolvedValue({ rows: [{ session_id: 's1' }] });
+    await upsertSessionConfig('s1', { psychoeducation_cue: null });
+    await upsertSessionConfig('s2', {});
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    for (const [sql] of queryMock.mock.calls) expect(String(sql)).not.toContain('psychoeducation_cue');
+  });
+
+  it('records a boolean arm with a separate UPDATE', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ session_id: 's1' }] }).mockResolvedValueOnce({ rowCount: 1 });
+    const row = await upsertSessionConfig('s1', { psychoeducation_cue: true });
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(String(queryMock.mock.calls[1][0])).toContain('SET psychoeducation_cue = $2');
+    expect(queryMock.mock.calls[1][1]).toEqual(['s1', true]);
+    expect(row.psychoeducation_cue).toBe(true);
+  });
+
+  it('still returns the row when the column is missing (migration 123 not applied)', async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ session_id: 's1' }] }).mockRejectedValueOnce(undefinedColumn());
+    const row = await upsertSessionConfig('s1', { psychoeducation_cue: false });
+    expect(row).toEqual({ session_id: 's1' });
+  });
+});
+
+describe('setSessionPsychoeducationCue', () => {
+  it('returns false instead of throwing on an undefined column', async () => {
+    queryMock.mockRejectedValueOnce(undefinedColumn());
+    await expect(setSessionPsychoeducationCue('s1', true)).resolves.toBe(false);
+  });
+
+  it('rethrows any other database error', async () => {
+    queryMock.mockRejectedValueOnce(new Error('connection refused'));
+    await expect(setSessionPsychoeducationCue('s1', true)).rejects.toThrow('connection refused');
+  });
+});

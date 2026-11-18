@@ -15,6 +15,7 @@
 // Wording is identical to the voice preamble (buildGrokOpeningPrompt / the
 // browser's getPreambleForLanguage) minus the microphone note, so the two
 // modalities stay clinically identical as study conditions.
+import { CHAT_OPENING_INVITATION } from '../../shared/openingPrompt.js';
 import { buildGrokCrisisPhrase, type CrisisContactLike } from './grokVoiceConfig.js';
 
 export const OPENING_LINE_MESSAGE_TYPE = 'text';
@@ -22,12 +23,16 @@ export const OPENING_LINE_MESSAGE_TYPE = 'text';
  *  opening apart from model output. */
 export const OPENING_LINE_METADATA = { opening_line: true } as const;
 
-export function buildChatOpeningLine(crisis: CrisisContactLike | undefined): string {
+export function buildChatOpeningLine(
+  crisis: CrisisContactLike | undefined,
+  opts: { leadConversation?: boolean } = {},
+): string {
   const crisisText = buildGrokCrisisPhrase(crisis);
-  return (
+  const opening =
     `Hello! I'm an AI mental health support assistant here to listen and provide encouragement and coping ideas. ` +
     `I am not a licensed therapist or doctor, so I can't diagnose conditions or provide medical advice. ` +
     `Please remember, if you're in crisis, you should ${crisisText}. ` +
-    `Thanks again for being willing to talk, I'm glad you're here with me today.`
-  );
+    `Thanks again for being willing to talk, I'm glad you're here with me today.`;
+  // features.lead_conversation_enabled: end with an invitation, not silence.
+  return opts.leadConversation === true ? `${opening} ${CHAT_OPENING_INVITATION}` : opening;
 }

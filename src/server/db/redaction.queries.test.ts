@@ -39,7 +39,7 @@ describe('updateRedactedContent', () => {
 
     const sqls = clientQueryMock.mock.calls.map((c) => String(c[0]).trim());
     expect(sqls[0]).toBe('BEGIN');
-    expect(sqls[1]).toMatch(/UPDATE messages SET content_redacted/);
+    expect(sqls[1]).toMatch(/UPDATE messages SET content_redacted = \$1, embedding = NULL/);
     expect(sqls[2]).toMatch(/INSERT INTO redaction_review_log/);
     expect(sqls[2]).toMatch(/'corrected'/);
     expect(clientQueryMock.mock.calls[2][1]).toEqual(['42', 7]);

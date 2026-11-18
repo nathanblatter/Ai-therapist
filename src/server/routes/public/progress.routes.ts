@@ -16,7 +16,10 @@ import {
   listUserAssignments,
   completeAssignment,
   getMessageHistoryForClient,
+  getOwnReflectionSource,
 } from '../../db/index.js';
+import { getSystemConfig } from '../../utils/sessionHelpers.js';
+import { isReflectionsEnabled, projectReflections } from '../../utils/participantReflections.js';
 
 import { createLogger } from '../../utils/logger.js';
 
@@ -69,6 +72,35 @@ export default function progressRoutes(): Router {
     } catch (error) {
       log.error({ err: error }, 'Error fetching own assignments');
       res.status(500).json({ error: 'Failed to fetch assignments' });
+    }
+  });
+
+  // GET /api/me/reflections - a reflective read of the participant's OWN
+  // conversations (ai-therapist-204): what they talked about, self-reported
+  // mood, worksheets completed, continuity.
+  //
+  // IRB gate: this changes what participants see, so it sits behind
+  // system_config.features.participant_reflections_enabled, default OFF and
+  // enforced HERE (the client gate is a courtesy). While the flag is off the
+  // route answers 404 and reads nothing, exactly as if it did not exist.
+  //
+  // The payload is an explicit allow-list (src/shared/reflections.ts) built
+  // by utils/participantReflections.ts: no risk scores, crisis flags, SOAP
+  // note, affect inference, acoustic measures or eval scores, and no
+  // clinician-voiced summary text. Self-scoped like the rest of /api/me/*:
+  // the user id only ever comes from the session. Like its siblings it writes
+  // no data_access_log row: that log records STAFF access to participant
+  // data, and a participant reading their own rows is not such an access.
+  router.get('/api/me/reflections', progressLimiter, requireAuth, async (req, res) => {
+    try {
+      if (!isReflectionsEnabled(await getSystemConfig())) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+      const source = await getOwnReflectionSource(req.session.userId!);
+      res.json(projectReflections(source));
+    } catch (error) {
+      log.error({ err: error }, 'Error fetching own reflections');
+      res.status(500).json({ error: 'Failed to fetch reflections' });
     }
   });
 

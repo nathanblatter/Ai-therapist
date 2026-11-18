@@ -8,6 +8,9 @@ import {
   checkSessionLimits,
   invalidateConfigCache,
   resolveProactiveOffering,
+  resolvePsychoeducationCue,
+  resetPsychoeducationCueColumnCache,
+  resolveLeadConversation,
   getSystemPrompt,
 } from './sessionHelpers.js';
 
@@ -139,5 +142,108 @@ describe('getSystemPrompt proactive-offering appendix', () => {
   it('resolves internally (does not throw) when no override is passed', async () => {
     const prompt = await getSystemPrompt('en', 'realtime');
     expect(prompt).toMatch(/research condition: (proactive|reactive)/);
+  });
+});
+
+// ---------- ai-therapist-202: psychoeducation retrieval cue experiment ----------
+
+function setupCue(features: Record<string, unknown>, column: 'present' | 'absent' | 'error' = 'present') {
+  queryMock.mockReset();
+  queryMock.mockImplementation((sql: string) => {
+    if (sql.includes('system_config')) {
+      return Promise.resolve({ rows: [{ config_key: 'features', config_value: features }] });
+    }
+    if (sql.includes('information_schema.columns')) {
+      if (column === 'error') return Promise.reject(new Error('db down'));
+      return Promise.resolve({ rows: column === 'present' ? [{ '?column?': 1 }] : [] });
+    }
+    return Promise.resolve({ rows: [] });
+  });
+  invalidateConfigCache();
+  resetPsychoeducationCueColumnCache();
+}
+
+describe('resolvePsychoeducationCue', () => {
+  it('is off (null, no cue) by default when the flag is unset', async () => {
+    setupCue({});
+    expect(await resolvePsychoeducationCue()).toBeNull();
+    // Flag off never even checks the schema.
+    expect(queryMock.mock.calls.some(([sql]) => String(sql).includes('information_schema'))).toBe(false);
+  });
+
+  it('is off unless the flag is exactly true', async () => {
+    setupCue({ psychoeducation_cue_ab_enabled: 'true' });
+    expect(await resolvePsychoeducationCue()).toBeNull();
+  });
+
+  it('splits sessions 50/50 when the flag is on and the column exists', async () => {
+    setupCue({ psychoeducation_cue_ab_enabled: true });
+    const spy = vi.spyOn(Math, 'random');
+    spy.mockReturnValueOnce(0.1);
+    expect(await resolvePsychoeducationCue()).toBe(true);
+    spy.mockReturnValueOnce(0.5);
+    expect(await resolvePsychoeducationCue()).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('runs as control (null) when migration 123 has not been applied', async () => {
+    setupCue({ psychoeducation_cue_ab_enabled: true }, 'absent');
+    const spy = vi.spyOn(Math, 'random');
+    expect(await resolvePsychoeducationCue()).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('runs as control (null) and does not throw when the column check fails', async () => {
+    setupCue({ psychoeducation_cue_ab_enabled: true }, 'error');
+    await expect(resolvePsychoeducationCue()).resolves.toBeNull();
+  });
+
+  it('re-checks a missing column so a hand-applied migration is picked up without a restart', async () => {
+    setupCue({ psychoeducation_cue_ab_enabled: true }, 'absent');
+    expect(await resolvePsychoeducationCue()).toBeNull();
+    queryMock.mockImplementation((sql: string) => {
+      if (sql.includes('system_config')) {
+        return Promise.resolve({
+          rows: [{ config_key: 'features', config_value: { psychoeducation_cue_ab_enabled: true } }],
+        });
+      }
+      if (sql.includes('information_schema.columns')) return Promise.resolve({ rows: [{ '?column?': 1 }] });
+      return Promise.resolve({ rows: [] });
+    });
+    expect(typeof (await resolvePsychoeducationCue())).toBe('boolean');
+  });
+});
+
+// ---------- lead-conversation flag (owner feedback 2026-11-16) ----------
+
+describe('resolveLeadConversation', () => {
+  it('is off by default when the flag is unset', async () => {
+    setupCue({});
+    expect(await resolveLeadConversation()).toBe(false);
+  });
+
+  it('is off unless the flag is exactly true', async () => {
+    setupCue({ lead_conversation_enabled: 'true' });
+    expect(await resolveLeadConversation()).toBe(false);
+    setupCue({ lead_conversation_enabled: 1 });
+    expect(await resolveLeadConversation()).toBe(false);
+  });
+
+  it('is on for every session when the flag is true (no random assignment)', async () => {
+    setupCue({ lead_conversation_enabled: true });
+    const spy = vi.spyOn(Math, 'random');
+    expect(await resolveLeadConversation()).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('does not change the base prompt either way', async () => {
+    setupCue({ lead_conversation_enabled: true });
+    const on = await getSystemPrompt('en', 'realtime', false);
+    setupCue({});
+    const off = await getSystemPrompt('en', 'realtime', false);
+    expect(on).toBe(off);
+    expect(on).not.toContain('Leading the conversation');
   });
 });

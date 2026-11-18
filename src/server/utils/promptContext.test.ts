@@ -74,6 +74,9 @@ const {
   buildClinicianNoteBlock,
   buildRiskHistoryBlock,
   buildToolGuidanceBlock,
+  PSYCHOEDUCATION_CUE_LINE,
+  buildLeadConversationBlock,
+  LEAD_CONVERSATION_BLOCK,
   buildPracticeBlock,
   buildScreenerCadenceBlock,
 } = await import('./promptContext.js');
@@ -234,6 +237,33 @@ describe('buildToolGuidanceBlock — wave 3 tools', () => {
     expect(all).toContain('review_practice');
     expect(all).toContain('compare_screener_trend');
     expect(all).toContain('retrieve_safety_plan');
+  });
+});
+
+describe('buildToolGuidanceBlock — psychoeducation cue (ai-therapist-202)', () => {
+  const tools = ['retrieve_psychoeducation', 'find_worksheet'];
+
+  it('never mentions retrieve_psychoeducation by default (control / experiment off)', () => {
+    expect(buildToolGuidanceBlock(tools)).not.toContain('retrieve_psychoeducation');
+    expect(buildToolGuidanceBlock(tools, { psychoeducationCue: false })).not.toContain('retrieve_psychoeducation');
+  });
+
+  it('leaves the rest of the block byte-identical when the cue is off', () => {
+    expect(buildToolGuidanceBlock(tools, { psychoeducationCue: false })).toBe(
+      buildToolGuidanceBlock(['find_worksheet']),
+    );
+  });
+
+  it('emits exactly the cue line in the cue arm', () => {
+    const block = buildToolGuidanceBlock(tools, { psychoeducationCue: true });
+    expect(block).toContain(PSYCHOEDUCATION_CUE_LINE);
+    expect(block.split('\n').filter((l) => l.includes('retrieve_psychoeducation'))).toEqual([PSYCHOEDUCATION_CUE_LINE]);
+  });
+
+  it('emits no cue when the tool is not enabled for the session', () => {
+    expect(buildToolGuidanceBlock(['find_worksheet'], { psychoeducationCue: true })).not.toContain(
+      'retrieve_psychoeducation',
+    );
   });
 });
 
@@ -444,5 +474,29 @@ describe('buildMemoryBlock composition', () => {
   it('never throws — a DB failure yields an empty block so the session can still start', async () => {
     getUserMemoryEnabledMock.mockRejectedValue(new Error('db down'));
     await expect(buildMemoryBlock(42)).resolves.toBe('');
+  });
+});
+
+describe('buildLeadConversationBlock (features.lead_conversation_enabled)', () => {
+  it('is empty when the flag is off, so the assembled prompt is unchanged', () => {
+    expect(buildLeadConversationBlock(false)).toBe('');
+  });
+
+  it('is the named block when the flag is on', () => {
+    const block = buildLeadConversationBlock(true);
+    expect(block).toBe(LEAD_CONVERSATION_BLOCK);
+    expect(block.startsWith('\n\n## Leading the conversation\n')).toBe(true);
+  });
+
+  it('defers to the safety sections and to the proactive_offering arm', () => {
+    // Safety takes precedence over leading.
+    expect(LEAD_CONVERSATION_BLOCK).toContain('the Crisis Protocol and the safety sections take precedence');
+    expect(LEAD_CONVERSATION_BLOCK).toContain(
+      'Leading never means giving advice beyond what this prompt already allows.',
+    );
+    // Exercise offering stays with the research arm: the block names no tool
+    // and points back at the exercise-offering section instead.
+    expect(LEAD_CONVERSATION_BLOCK).toContain('decided by the section on offering exercises; follow it');
+    expect(LEAD_CONVERSATION_BLOCK).not.toMatch(/start_|find_worksheet|suggest_modality_technique/);
   });
 });
