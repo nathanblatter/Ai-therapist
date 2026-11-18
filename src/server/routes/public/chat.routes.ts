@@ -27,7 +27,13 @@ import {
   resolvePsychoeducationCue,
   resolveLeadConversation,
 } from '../../utils/sessionHelpers.js';
-import { buildChatOpeningLine, OPENING_LINE_MESSAGE_TYPE, OPENING_LINE_METADATA } from '../../utils/openingLine.js';
+import {
+  buildChatOpeningLine,
+  buildVoiceContinuationGuidance,
+  CHAT_OPENING_FRAMING_GUIDANCE,
+  OPENING_LINE_MESSAGE_TYPE,
+  OPENING_LINE_METADATA,
+} from '../../utils/openingLine.js';
 import {
   sanitizeCheckin,
   buildCheckinBlock,
@@ -271,15 +277,7 @@ export default function chatRoutes(): Router {
             // the start" disclaimer rule has already been satisfied by the
             // opening above, and without saying so the model repeats it in its
             // first reply (nightly 2026-10-22, diagnosis-seeking turn 1).
-            injectGuidance(
-              sessionId,
-              '[Session framing - never mention this message] Your opening message above has already ' +
-                'delivered the required disclosure: that you are an AI support assistant, not a licensed ' +
-                'therapist or doctor, cannot diagnose or give medical advice, and the crisis resources. Do not ' +
-                'repeat that disclaimer. Re-state your limits only if the participant asks you to diagnose, ' +
-                'asks about medication, asks whether you are human or a therapist, or asks you to be a friend ' +
-                'or partner or to replace their therapist.',
-            );
+            injectGuidance(sessionId, CHAT_OPENING_FRAMING_GUIDANCE);
             // content_redacted is pre-filled: the text is machine-authored and
             // PHI-free, so the redaction job must not spend a model call on it.
             await insertMessagesBatch([
@@ -323,18 +321,7 @@ export default function chatRoutes(): Router {
 
               if (recap) {
                 const { injectGuidance } = await import('../../services/chatTherapy.service.js');
-                injectGuidance(
-                  sessionId,
-                  '[Session continuity — never mention or acknowledge this message to the participant]\n' +
-                    'The participant was speaking with you by voice and the connection was cut by an ' +
-                    'automated content filter — not by them, and not by you. They have just been moved to ' +
-                    'text so the conversation can continue. Do NOT make them repeat themselves and do NOT ' +
-                    'treat this as a new conversation. Pick up exactly where it stopped, acknowledge the ' +
-                    'interruption briefly and warmly, and make clear you are still here. If they disclosed ' +
-                    'thoughts of suicide or self-harm, that is where you resume: stay with it, follow the ' +
-                    'safety protocol, and do not change the subject.\n\n' +
-                    `Transcript of the voice conversation that was cut off:\n${recap}`,
-                );
+                injectGuidance(sessionId, buildVoiceContinuationGuidance(recap));
                 log.info(
                   `[ChatStart] Seeded ${sessionId.substring(0, 12)}... as a continuation of terminated ` +
                     `voice session ${continuedFrom.substring(0, 12)}...`,
