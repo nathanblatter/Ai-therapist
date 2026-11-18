@@ -25,6 +25,8 @@
     "redteam:ci-summary": "tsx src/redteam/ciSummary.ts",
     "counterfactual": "tsx src/database/scripts/runCounterfactual.ts",
     "irb:prompts": "tsx src/server/irb/buildPromptsAttachment.ts",
+    "config:snapshot": "tsx src/database/scripts/exportConfigSnapshot.ts",
+    "irb:redteam": "tsx src/server/irb/buildRedteamAttachment.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

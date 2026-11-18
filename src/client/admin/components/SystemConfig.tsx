@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save, RotateCcw, AlertCircle, CheckCircle } from 'react-feather';
 import { getJson, postJson } from '../../shared/http';
+import ConfigEvalNotice from './ConfigEvalNotice';
 // Canonical config-blob shapes are shared with the server (src/shared).
 // Fields the stored blob may omit are optional there; the form state below
 // keeps every field present and default-fills on read.
@@ -508,6 +509,7 @@ export default function SystemConfig() {
 
   return (
     <div className="p-6 max-w-4xl">
+      <ConfigEvalNotice refreshKey={saving} />
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-900">System Configuration</h2>
         <div className="flex gap-2">

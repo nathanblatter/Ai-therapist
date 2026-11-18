@@ -59,6 +59,383 @@ In the past month, have you had thoughts of killing yourself with a specific pla
 Yes
 No
 
+[[Question:MC:SingleAnswer:Vertical]]
+[[ID:SCR8]]
+Has a doctor or other health professional ever told you that you have a psychotic disorder (such as schizophrenia, schizoaffective disorder, or brief psychotic disorder) or bipolar disorder?
+[[Choices]]
+Yes
+No
+Not sure
+
+[[PageBreak]]
+
+[[Question:DB]]
+[[ID:PQBINTRO]]
+Please indicate whether you have had the following thoughts, feelings and experiences in the past month by checking "yes" or "no" for each item. Do not include experiences that occur only while under the influence of alcohol, drugs or medications that were not prescribed to you. If you answer "YES" to an item, also indicate how distressing that experience has been for you.
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB1]]
+1. Do familiar surroundings sometimes seem strange, confusing, threatening or unreal to you?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB1D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB2]]
+2. Have you heard unusual sounds like banging, clicking, hissing, clapping or ringing in your ears?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB2D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB3]]
+3. Do things that you see appear different from the way they usually do (brighter or duller, larger or smaller, or changed in some other way)?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB3D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB4]]
+4. Have you had experiences with telepathy, psychic forces, or fortune telling?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB4D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB5]]
+5. Have you felt that you are not in control of your own ideas or thoughts?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB5D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB6]]
+6. Do you have difficulty getting your point across, because you ramble or go off the track a lot when you talk?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB6D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB7]]
+7. Do you have strong feelings or beliefs about being unusually gifted or talented in some way?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB7D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB8]]
+8. Do you feel that other people are watching you or talking about you?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB8D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB9]]
+9. Do you sometimes get strange feelings on or just beneath your skin, like bugs crawling?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB9D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB10]]
+10. Do you sometimes feel suddenly distracted by distant sounds that you are not normally aware of?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB10D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB11]]
+11. Have you had the sense that some person or force is around you, although you couldn't see anyone?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB11D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB12]]
+12. Do you worry at times that something may be wrong with your mind?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB12D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB13]]
+13. Have you ever felt that you don't exist, the world does not exist, or that you are dead?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB13D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB14]]
+14. Have you been confused at times whether something you experienced was real or imaginary?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB14D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB15]]
+15. Do you hold beliefs that other people would find unusual or bizarre?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB15D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB16]]
+16. Do you feel that parts of your body have changed in some way, or that parts of your body are working differently?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB16D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB17]]
+17. Are your thoughts sometimes so strong that you can almost hear them?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB17D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB18]]
+18. Do you find yourself feeling mistrustful or suspicious of other people?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB18D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB19]]
+19. Have you seen unusual things like flashes, flames, blinding light, or geometric figures?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB19D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB20]]
+20. Have you seen things that other people can't see or don't seem to see?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB20D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB21]]
+21. Do people sometimes find it hard to understand what you are saying?
+[[Choices]]
+Yes
+No
+
+[[Question:MC:SingleAnswer:Horizontal]]
+[[ID:PQB21D]]
+If YES: When this happens, I feel frightened, concerned, or it causes problems for me:
+[[Choices]]
+Strongly disagree
+Disagree
+Neutral
+Agree
+Strongly agree
+
+[[Question:DB]]
+[[ID:PQBNOTE]]
+Prodromal Questionnaire, Brief Version (PQ-B). Loewy, R. L., & Cannon, T. D. (2010). University of California.
+
+[[PageBreak]]
+
 [[Question:DB]]
 [[ID:REFER]]
 If you are struggling right now, please reach out to people who can help: BYU Counseling and Psychological Services (801-422-3035; after-hours crisis support via BYU Police 801-422-2222), the 988 Suicide and Crisis Lifeline (call or text 988), or the Crisis Text Line (text HOME to 741741). If you are in immediate danger, call 911.
@@ -67,7 +444,7 @@ If you are struggling right now, please reach out to people who can help: BYU Co
 
 [[Question:DB]]
 [[ID:CONSENTTEXT]]
-<b>Consent to Be a Research Subject</b><br><br><b>Title:</b> Human + AI Therapy: Better For Everyone (Phase 2: Longitudinal Use)<br><b>Principal Investigator:</b> James Gaskin, PhD, Department of Information Systems, Brigham Young University<br><br><b>Introduction</b><br>This research study is being conducted by Professor James Gaskin and a research team at Brigham Young University to understand what it is like to use an AI mental health support agent over an extended period. You were invited to participate because you are a BYU student, at least 18 years old, located in the United States.<br><br><b>What is the AI support agent, and what is it not?</b><br>The AI support agent is a research tool that offers supportive, evidence-informed self-help conversation by voice or text. It is not a therapist, doctor, or crisis service, and this study is not therapy. It cannot diagnose or treat any condition and is not a substitute for professional mental health care.<br><br><b>Procedures</b><br>If you agree to participate: (1) complete this baseline survey (about 15 minutes); (2) attend a 30-45 minute onboarding session with a research assistant (SONA lab or Zoom); (3) use the AI support agent from your own device as much or as little as you wish for 8 weeks (we suggest about two short conversations per week); (4) complete a 5-minute weekly check-in survey; (5) complete an exit survey (about 20 minutes) at Week 8; and (6) complete one short follow-up survey at Week 12. Some participants will be invited to an optional 30-minute recorded exit interview. The app closes overnight (10:00 PM to 6:00 AM Mountain Time); crisis resources remain available at all times. In the app, the agent will occasionally ask two brief wellbeing questionnaires (PHQ-2 and GAD-2), no more than once per week each.<br><br><b>Recording and data collection</b><br>Your conversations with the agent (text, and transcriptions of voice conversations) are collected for research. Voice sessions are recorded as audio and stored encrypted for up to 12 months; recordings are used for safety review, transcription verification, and research analyses of non-identifying voice characteristics (such as pace, pauses, and tone of speech), and are then automatically deleted. Before any researcher can read your conversations, an automated system removes identifying information, and a trained research assistant double-checks the removal; researchers see only the de-identified version. Original unredacted text is automatically deleted within about 24 hours of each session. The app also records when and how long you use it.<br><br><b>Risks and discomforts</b><br>Talking or writing about your mood and personal difficulties may bring up uncomfortable feelings. Although unlikely, it is possible that the chatbot interactions may worsen your condition, or may trigger a crisis episode. There is a small risk of over-relying on a tool that is not a clinical service; the agent will remind you of its limits. As with any digital system, a breach of confidentiality is possible; extensive safeguards make this very unlikely.<br><br><b>Safety monitoring and mandatory reporting</b><br>The system automatically monitors conversations for signs of a mental health crisis. If it detects that you may be in danger, it will show you crisis resources immediately and alert a trained on-call researcher. If you share information regarding ongoing abuse, neglect, sexual exploitation, or risk of harm toward yourself or others, we are required to report this to legal authorities, along with information about your identity. This could result in the arrest and prosecution of the perpetrators.<br><br><b>Benefits</b><br>There are no guaranteed direct benefits to you. Society may benefit from evidence about whether AI support tools can safely complement human mental health care.<br><br><b>Confidentiality</b><br>Research data are stored encrypted in access-controlled systems available only to the approved research team. De-identified data will be kept for future research and may be shared for publication or meta-analysis; your identity will not be shared. Your NetID, if collected for SONA credit, is handled by the SONA lab separately from research data. Conversations are processed by our AI service provider under contractual privacy protections; no conversation data is used to train commercial AI models.<br><br><b>Compensation</b><br>Compensation is prorated by what you complete: $10 (or 1 SONA credit) for baseline and onboarding; $3 (or SONA equivalent) per weekly check-in; $15 for the exit survey; $10 for the optional exit interview; $5 for the Week 12 follow-up (maximum about $64). If you withdraw early, you keep everything already earned.<br><br><b>Participation</b><br>Participation is voluntary. You may skip questions, pause, or withdraw at any time without penalty and without any effect on your standing at BYU or in any course. To pause or withdraw, use the “Leaving the study or need a break?” link on your study account page, or notify the research team. You may also request deletion of your stored data; we will honor deletion requests wherever possible, though data already included in analyses cannot always be removed.<br><br><b>Questions about the Research</b><br>Contact Principal Investigator James Gaskin at james.gaskin@byu.edu or Nathan Blatter at nzb22@byu.edu.<br><br><b>Questions about Your Rights as a Research Participant</b><br>Contact the BYU Human Research Protection Program at (801) 422-1461 or BYU.HRPP@byu.edu.
+<b>Consent to Be a Research Subject</b><br><br><b>Title:</b> Human + AI Therapy: Better For Everyone (Phase 2: Longitudinal Use)<br><b>Principal Investigator:</b> James Gaskin, PhD, Department of Information Systems, Brigham Young University<br><br><b>Introduction</b><br>This research study is being conducted by Professor James Gaskin and a research team at Brigham Young University to understand what it is like to use an AI mental health support agent over an extended period. You were invited to participate because you are a BYU student, at least 18 years old, located in the United States.<br><br><b>What is the AI support agent, and what is it not?</b><br>The AI support agent is a research tool that offers supportive, evidence-informed self-help conversation by voice or text. It is not a therapist, doctor, or crisis service, and this study is not therapy. It cannot diagnose or treat any condition and is not a substitute for professional mental health care.<br><br><b>Procedures</b><br>If you agree to participate: (1) complete this baseline survey (about 15 minutes); (2) attend a 30-45 minute onboarding session with a research assistant (SONA lab or Zoom); (3) use the AI support agent from your own device as much or as little as you wish for 8 weeks (we suggest about two short conversations per week); (4) complete a 7-minute weekly check-in survey, which includes questions about how much you rely on the app (if your answers suggest heavy reliance, a research team member will send you a short check-in message with other sources of support); (5) complete an exit survey (about 20 minutes) at Week 8; and (6) complete one short follow-up survey at Week 12. Some participants will be invited to an optional 30-minute recorded exit interview. The app closes overnight (10:00 PM to 6:00 AM Mountain Time); crisis resources remain available at all times. In the app, the agent will occasionally ask two brief wellbeing questionnaires (PHQ-2 and GAD-2), no more than once per week each.<br><br><b>Recording and data collection</b><br>Your conversations with the agent (text, and transcriptions of voice conversations) are collected for research. Voice sessions are recorded as audio and stored encrypted for up to 12 months; recordings are used for safety review, transcription verification, and research analyses of non-identifying voice characteristics (such as pace, pauses, and tone of speech), and are then automatically deleted. Before any researcher can read your conversations, an automated system removes identifying information, and a trained research assistant double-checks the removal; researchers see only the de-identified version. Original unredacted text is automatically deleted within about 24 hours of each session. The app also records when and how long you use it.<br><br><b>Risks and discomforts</b><br>Talking or writing about your mood and personal difficulties may bring up uncomfortable feelings. Although unlikely, it is possible that the chatbot interactions may worsen your condition, or may trigger a crisis episode. There is a small risk of over-relying on a tool that is not a clinical service; the agent will remind you of its limits. As with any digital system, a breach of confidentiality is possible; extensive safeguards make this very unlikely.<br><br><b>Safety monitoring and mandatory reporting</b><br>The system automatically monitors conversations for signs of a mental health crisis. If it detects that you may be in danger, it will show you crisis resources immediately and alert a trained on-call researcher. If you share information regarding ongoing abuse, neglect, sexual exploitation, or risk of harm toward yourself or others, we are required to report this to legal authorities, along with information about your identity. This could result in the arrest and prosecution of the perpetrators.<br><br><b>Benefits</b><br>There are no guaranteed direct benefits to you. Society may benefit from evidence about whether AI support tools can safely complement human mental health care.<br><br><b>Confidentiality</b><br>Research data are stored encrypted in access-controlled systems available only to the approved research team. De-identified data will be kept for future research and may be shared for publication or meta-analysis; your identity will not be shared. Your NetID, if collected for SONA credit, is handled by the SONA lab separately from research data. Conversations are processed by our AI service provider, OpenAI, using AI models that may be updated to newer versions during the study. Your conversation data is not used to train commercial AI models. We do not have a zero-data-retention agreement with OpenAI; under its standard terms OpenAI may keep request data for up to 30 days to monitor for abuse. If you turn on the optional session memory, the agent uses a background note built from your earlier conversations. Some details of how the agent behaves are assigned at random for each conversation as part of the research. If the voice provider's safety filter cuts off a voice conversation, the app shows crisis resources, alerts the on-call researcher, and reconnects you to the agent.<br><br><b>Compensation</b><br>Compensation is prorated by what you complete: $10 (or 1 SONA credit) for baseline and onboarding; $3 (or SONA equivalent) per weekly check-in; $15 for the exit survey; $10 for the optional exit interview; $5 for the Week 12 follow-up (maximum about $64). If you withdraw early, you keep everything already earned.<br><br><b>Participation</b><br>Participation is voluntary. You may skip questions, pause, or withdraw at any time without penalty and without any effect on your standing at BYU or in any course. To pause or withdraw, use the “Leaving the study or need a break?” link on your study account page, or notify the research team. You may also request deletion of your stored data; we will honor deletion requests wherever possible, though data already included in analyses cannot always be removed.<br><br><b>Questions about the Research</b><br>Contact Principal Investigator James Gaskin at james.gaskin@byu.edu or Nathan Blatter at nzb22@byu.edu.<br><br><b>Questions about Your Rights as a Research Participant</b><br>Contact the BYU Human Research Protection Program at (801) 422-1461 or BYU.HRPP@byu.edu.
 
 [[PageBreak]]
 
