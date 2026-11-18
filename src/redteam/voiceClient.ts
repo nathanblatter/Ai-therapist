@@ -20,10 +20,10 @@
 //
 //   gpt-live-*    OpenAI GPT-Live. The browser owns a WebRTC session that the
 //                 server mints (POST /api/live/session) and observes through a
-//                 sideband attach. Driving that headlessly needs a WebRTC
-//                 stack with an Opus encoder on the Node side; NOT ported yet
-//                 (see docs/redteam.md "Voice suite") — the runner refuses
-//                 with a pointer rather than pretending.
+//                 sideband attach. liveVoiceClient.ts drives it headlessly
+//                 (werift WebRTC + WASM Opus, TTS audio in); on this backend
+//                 the runner also records which layer answered each turn and
+//                 adds the GPT-Live checks in liveVoiceChecks.ts.
 //
 // Turn-taking on Grok is the proxy's server VAD, so the harness behaves like
 // a microphone: TTS PCM16 at 24 kHz streamed as ~100 ms frames at real-time
@@ -44,6 +44,15 @@ import type { CostTracker, RedteamConfig } from './config.js';
 import type { Agent, HarnessClient } from './harnessClient.js';
 import { generatePersonaTurn } from './personaDriver.js';
 import { runJudge } from './judge.js';
+import {
+  liveScenarioAssertions,
+  probeAssertions,
+  resourceCardShownIn,
+  withLayer,
+  type LiveBeatRecord,
+  type ProbeResult,
+  type TurnLayerInfo,
+} from './liveVoiceChecks.js';
 import {
   type AssertionContext,
   type AssertionResult,
@@ -191,6 +200,14 @@ export interface BeatTurn {
    *  class the browser answers with a recovery start). The beat's assertions
    *  still run on what was said and scored; later beats cannot. */
   terminated?: string;
+  /** GPT-Live: which layer answered this beat (voice model or delegated
+   *  backend), read from the data channel. */
+  layer?: TurnLayerInfo;
+  /** GPT-Live: layer of the `unsolicited` turns (late backend work). */
+  unsolicitedLayer?: TurnLayerInfo;
+  /** GPT-Live: an `error` with code content_filter arrived during this beat
+   *  (OpenAI's moderation stopped a generation, possibly mid-sentence). */
+  moderationStopped?: boolean;
 }
 
 /** How long the assistant must have been silent (no audio, no transcript
@@ -245,6 +262,14 @@ export interface VoiceTransport {
   dropClientAndReconnect?(gapMs: number): Promise<void>;
   /** Sever the server's xAI socket and wait for the proxy to resume it (Grok only). */
   dropUpstreamAndAwaitResume?(): Promise<void>;
+  /** GPT-Live: which layer spoke the opening line. */
+  readonly openingLayer?: TurnLayerInfo | null;
+  /** GPT-Live: function calls that arrived with no delegation id. */
+  readonly undelegatedToolCalls?: string[];
+  /** GPT-Live: send the client events a participant's browser must not use. */
+  runClientProbes?(): Promise<ProbeResult[]>;
+  /** GPT-Live: collect speech that lands after the last beat's reply. */
+  drainTrailing?(maxMs?: number): Promise<{ text: string; layer?: TurnLayerInfo }>;
 }
 
 /** How long the harness gives the proxy to resume its xAI link. */
@@ -869,6 +894,10 @@ export async function runVoiceScenario(
   const transcript: Turn[] = [];
   const assertions: AssertionResult[] = [];
   const beatPostTimes: Record<string, Date> = {};
+  /** Every transport the conversation used (recovery segments add one each). */
+  const transports: VoiceTransport[] = [vs];
+  /** GPT-Live: per-beat band, layer and cut, for liveScenarioAssertions. */
+  const liveBeats: LiveBeatRecord[] = [];
 
   /**
    * What the browser does after a content-filter cut (App.tsx
@@ -897,6 +926,7 @@ export async function runVoiceScenario(
         '',
       );
       vs = started.session;
+      transports.push(vs);
       opening = started.opening;
     } catch (err) {
       assertions.push({
@@ -912,7 +942,7 @@ export async function runVoiceScenario(
     const beatId = `recovery-${attempt}`;
     segmentBeats.set(sessionId, [beatId]);
     beatPostTimes[beatId] = new Date();
-    transcript.push({ role: 'assistant', text: opening, beatId });
+    transcript.push(withLayer({ role: 'assistant', text: opening, beatId }, vs.openingLayer ?? undefined));
     const ms = Date.now() - t0;
     // The recovery session can itself be cut while the model says its
     // reconnect line; the transport reports that rather than throwing.
@@ -980,7 +1010,7 @@ export async function runVoiceScenario(
   };
   // The server-authored opening line is a real assistant turn the participant
   // hears first; the disclaimer assertions key on it.
-  transcript.push({ role: 'assistant', text: opening, beatId: 'opening' });
+  transcript.push(withLayer({ role: 'assistant', text: opening, beatId: 'opening' }, vs.openingLayer ?? undefined));
 
   try {
     for (const beat of beats) {
@@ -1010,6 +1040,37 @@ export async function runVoiceScenario(
         await waitForProxyCrisisPipeline(pool, client.emissions, sessionId, vs.userTurns, emissionsBefore);
       }
       if (turn.toolCalls.length > 0) console.log(`[redteam:voice] ${beat.id}: tools [${turn.toolCalls.join(', ')}]`);
+      if (backend === 'live') {
+        // The band the server scored THIS beat's participant turn(s) at (the
+        // assembler may split one utterance into several scored rows); null
+        // when nothing new was scored, e.g. a vendor cut before the transcript.
+        let band: LiveBeatRecord['band'] = null;
+        try {
+          const { rows } = await pool.query(
+            `SELECT MAX(risk_score)::float8 AS top FROM risk_score_history
+              WHERE session_id = $1 AND calculated_at >= $2`,
+            [sessionId, new Date(beatPostTimes[beat.id].getTime() - 1_000)],
+          );
+          const top = rows[0]?.top;
+          band = top == null ? null : scoreToBand(Number(top));
+        } catch (err) {
+          console.warn(`[redteam:voice] could not read the beat's risk band: ${(err as Error).message}`);
+        }
+        liveBeats.push({
+          beatId: beat.id,
+          sessionId,
+          band,
+          terminated: turn.terminated ?? null,
+          moderationStopped: turn.moderationStopped === true,
+          layer: turn.layer?.layer ?? null,
+          reply: turn.assistantText,
+        });
+        console.log(
+          `[redteam:voice] ${beat.id}: answered by the ${turn.layer?.layer ?? 'unknown'} layer` +
+            `${turn.layer?.voiceSpokeFirst && turn.layer.layer === 'delegated' ? ' (voice spoke first)' : ''}` +
+            `, band ${band ?? 'unscored'}`,
+        );
+      }
       if (beat === beats[0]) {
         // Reconnect drills (docs/grok-voice.md section 3): after the first
         // beat has a reply, sever one leg and expect the conversation to go
@@ -1061,10 +1122,10 @@ export async function runVoiceScenario(
       const prevBeatId = transcript.at(-1)?.beatId ?? 'opening';
       for (const text of turn.unsolicited) {
         console.log(`[redteam:voice] unsolicited assistant turn after ${prevBeatId}: "${text.slice(0, 80)}"`);
-        transcript.push({ role: 'assistant', text, beatId: prevBeatId });
+        transcript.push(withLayer({ role: 'assistant', text, beatId: prevBeatId }, turn.unsolicitedLayer));
       }
       transcript.push({ role: 'user', text: turn.userText, beatId: beat.id });
-      transcript.push({ role: 'assistant', text: turn.assistantText, beatId: beat.id });
+      transcript.push(withLayer({ role: 'assistant', text: turn.assistantText, beatId: beat.id }, turn.layer));
 
       const ctx: AssertionContext = {
         scenarioId: scenario.id,
@@ -1142,6 +1203,29 @@ export async function runVoiceScenario(
         if (!(await startRecoverySegment())) break;
       }
     }
+    // GPT-Live: what the participant heard after the last reply (late backend
+    // answers, the minor safeguard's goodbye) belongs to the last beat.
+    if (backend === 'live' && vs.drainTrailing) {
+      const trailing = await vs.drainTrailing();
+      if (trailing.text) {
+        const lastBeatId = transcript.at(-1)?.beatId ?? 'opening';
+        console.log(`[redteam:voice] trailing assistant speech after ${lastBeatId}: "${trailing.text.slice(0, 80)}"`);
+        transcript.push(withLayer({ role: 'assistant', text: trailing.text, beatId: lastBeatId }, trailing.layer));
+      }
+    }
+    // Client probes go last: an accepted one changes the session under test.
+    if (scenario.liveClientProbes) {
+      if (backend === 'live' && vs.runClientProbes) {
+        assertions.push(...probeAssertions(await vs.runClientProbes()));
+      } else {
+        assertions.push({
+          id: 'live-client-probes',
+          passed: true,
+          gating: false,
+          detail: `skipped: the client probes target GPT-Live's data channel and this run is on ${backend}`,
+        });
+      }
+    }
   } finally {
     if (backend === 'grok' && (cfg.voiceDropClientMidway || cfg.voiceDropUpstreamMidway)) {
       // Reconnect invariants (docs/grok-voice.md section 3): what the proxy
@@ -1195,6 +1279,26 @@ export async function runVoiceScenario(
         console.warn(`[redteam:voice] could not read live_usage for costing (${seg}): ${(err as Error).message}`);
       }
     }
+  }
+
+  // GPT-Live: what is specific to the two-layer voice path (liveVoiceChecks.ts).
+  if (backend === 'live') {
+    assertions.push(
+      ...(await liveScenarioAssertions({
+        beats: liveBeats,
+        transcript,
+        undelegatedToolCalls: transports.flatMap((t) => t.undelegatedToolCalls ?? []),
+        crisisEmergencyEmitted: (seg) =>
+          client.emissions.some(
+            (e) =>
+              e.event === 'session:crisis-emergency' &&
+              (e.room === `session:${seg}` || (e.payload as { sessionId?: string } | undefined)?.sessionId === seg),
+          ),
+        resourceCardShown: (seg) => resourceCardShownIn(pool, seg).catch(() => false),
+        classify,
+        dryRun: cfg.dryRun,
+      })),
+    );
   }
 
   // Did the recovery do its one job — keep the crisis line in front of them?
