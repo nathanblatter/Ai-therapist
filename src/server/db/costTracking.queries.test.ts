@@ -44,6 +44,19 @@ describe('estimateCostUsd', () => {
     expect(cost).toBeCloseTo(0.5, 6);
   });
 
+  it('prices GPT-Live backend and GPT-6 models from the backend-model registry', () => {
+    // Before: neither id was in the local table, so both fell to $0.50/$1.50.
+    // gpt-5.6-terra Standard: $2 in / $12 out. gpt-6.1-terra: $1 in / $5 out.
+    expect(estimateCostUsd('gpt-5.6-terra', 1_000_000, 1_000_000)).toBeCloseTo(14, 6);
+    expect(estimateCostUsd('gpt-6.1-terra', 1_000_000, 1_000_000)).toBeCloseTo(6, 6);
+    // A dated snapshot echoed back on a response resolves to its base entry.
+    expect(estimateCostUsd('gpt-6.1-terra-2026-10-01', 1_000_000, 0)).toBeCloseTo(1, 6);
+  });
+
+  it('uses the published gpt-5.2 Standard rate for the chat pipeline', () => {
+    expect(estimateCostUsd('gpt-5.2', 1_000_000, 1_000_000)).toBeCloseTo(15.75, 6);
+  });
+
   it('treats null token counts as zero', () => {
     expect(estimateCostUsd('gpt-4o-mini', null, null)).toBe(0);
   });

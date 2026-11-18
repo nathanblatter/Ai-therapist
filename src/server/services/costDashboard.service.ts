@@ -32,6 +32,13 @@ export function modelFamilyOf(lineItem: string): string | null {
   // generic text bucket — attributing it elsewhere would make voice look
   // cheaper than it is.
   if (model.startsWith('gpt-5.6')) return 'live-backend';
+  // GPT-6 models serve SEVERAL subsystems depending on configuration: the
+  // redaction verifier runs gpt-6-luna, and live_backend_model / chat_model
+  // may name any GPT-6 id. A static family-to-subsystem entry would mis-bucket
+  // whichever one moved, so each GPT-6 model is its own family (dated snapshot
+  // folded into its alias) and its subsystems come from measured usage rows in
+  // attribute() — see usageDerivedCandidates.
+  if (model.startsWith('gpt-6')) return model.replace(/-\d{4}-\d{2}-\d{2}$/, '');
   if (/^gpt-5(-|$)/.test(model)) return 'gpt-5';
   if (
     model.startsWith('gpt-4o-mini-transcribe') ||
@@ -66,6 +73,28 @@ const FAMILY_TO_SUBSYSTEMS: Record<string, Subsystem[]> = {
   moderation: ['crisis'],
   embeddings: ['other'],
 };
+
+/**
+ * Usage purposes whose names are not subsystem names. GPT-Live delegated
+ * backend calls (purpose 'live_delegation') are the voice product's reasoning,
+ * so they belong to 'realtime'; before this mapping they fell into 'other'.
+ */
+const PURPOSE_TO_SUBSYSTEM: Record<string, Subsystem> = {
+  live_delegation: 'realtime',
+  grok_voice: 'realtime',
+};
+
+function subsystemForPurpose(purpose: string): Subsystem {
+  if ((SUBSYSTEMS as readonly string[]).includes(purpose)) return purpose as Subsystem;
+  return PURPOSE_TO_SUBSYSTEM[purpose] ?? 'other';
+}
+
+/** Subsystems with measured usage on a family, for families with no static
+ *  entry in FAMILY_TO_SUBSYSTEMS (the per-model GPT-6 families). */
+function usageDerivedCandidates(familyWeights: Map<Subsystem, number> | undefined): Subsystem[] {
+  if (!familyWeights) return [];
+  return [...familyWeights.entries()].filter(([, w]) => w > 0).map(([sub]) => sub);
+}
 
 export interface SubsystemCost {
   subsystem: Subsystem;
@@ -133,7 +162,7 @@ function attribute(
   for (const row of usage) {
     const family = row.model ? modelFamilyOf(row.model) : null;
     if (!family) continue;
-    const sub = (SUBSYSTEMS as readonly string[]).includes(row.purpose) ? (row.purpose as Subsystem) : 'other';
+    const sub = subsystemForPurpose(row.purpose);
     if (row.tokensMissing) {
       // No token counts recorded — fall back to call count and say so.
       caveats.push(`${row.purpose}: token counts not recorded (${row.calls} calls); share estimated from call volume`);
@@ -155,8 +184,8 @@ function attribute(
 
   for (const item of costs.byLineItem) {
     const family = modelFamilyOf(item.lineItem);
-    const candidates = family ? FAMILY_TO_SUBSYSTEMS[family] : undefined;
     const familyWeights = family ? weights.get(family) : undefined;
+    const candidates = family ? (FAMILY_TO_SUBSYSTEMS[family] ?? usageDerivedCandidates(familyWeights)) : undefined;
 
     if (!candidates || candidates.length === 0) {
       unattributed += item.amountUsd;
