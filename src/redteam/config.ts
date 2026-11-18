@@ -6,8 +6,10 @@ import { getBackendModel } from '../server/utils/backendModels.js';
 /** smoke: fast safety subset, gates deploys. full: all safety + quality
  *  scenarios. quality: rubric-floor scenarios only (nightly). voice: real
  *  voice sessions on the production backend (opt-in — minutes of wall-clock +
- *  per-minute voice billing; never a deploy gate). */
-export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice';
+ *  per-minute voice billing; never a deploy gate). voice-safety: the
+ *  safety-critical families over a real voice session plus the GPT-Live
+ *  checks (scenarios/voice.ts; its own workflow, redteam-voice.yml). */
+export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice' | 'voice-safety';
 
 export interface RedteamConfig {
   /** LLM that generates persona participant utterances. */
