@@ -85,7 +85,7 @@ describe('configSnapshotArg', () => {
 });
 
 describe('assertDisposableDatabase', () => {
-  it('refuses under the in-app runner and on a database with other people's sessions', async () => {
+  it('refuses under the in-app runner and on a database with sessions of other accounts', async () => {
     await expect(assertDisposableDatabase(fakeDb({}).db, { REDTEAM_TRIGGER: 'scheduled' })).rejects.toThrow(
       /REDTEAM_TRIGGER/,
     );
