@@ -43,6 +43,7 @@ import irbPacketRoutes from './routes/admin/irbPacket.routes.js';
 import weeklyDigestRoutes from './routes/admin/weeklyDigest.routes.js';
 import riskCalibrationRoutes from './routes/admin/riskCalibration.routes.js';
 import exportRoutes from './routes/admin/export.routes.js';
+import semanticSearchRoutes from './routes/admin/semanticSearch.routes.js';
 import adminRateLimitsRoutes from './routes/admin/rateLimits.routes.js';
 import rateLimitsRoutes from './routes/public/rateLimits.routes.js';
 import adminSessionsRoutes from './routes/admin/sessions.routes.js';
@@ -775,6 +776,9 @@ app.use(riskCalibrationRoutes());
 
 // Research-data export (JSON/CSV) -> routes/admin/export.routes.ts.
 app.use(exportRoutes());
+
+// Researcher semantic search over redacted transcripts -> routes/admin/semanticSearch.routes.ts.
+app.use(semanticSearchRoutes());
 
 // ===================== System Configuration API Routes =====================
 // Public config + voice-preview endpoints are defined in routes/public/.

@@ -30,7 +30,7 @@
     "@anthropic-ai/sdk": "^0.71.2",
     "@aws-sdk/client-s3": "^3.1075.0",
     "@socket.io/postgres-adapter": "^0.5.0",
-    "archiver": "^7.0.1",
+    "archiver": "^8.0.0",
     "bcrypt": "^6.0.0",
     "busboy": "^1.6.0",
     "connect-pg-simple": "^10.0.0",
@@ -61,7 +61,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@types/archiver": "^6.0.4",
+    "@types/archiver": "^8.0.0",
     "@types/bcrypt": "^5.0.2",
     "@types/busboy": "^1.5.4",
     "@types/connect-pg-simple": "^7.0.3",
@@ -95,5 +95,10 @@
     "vite": "^6.4.0",
     "vitest": "^5.1.0",
     "werift": "^0.25.1"
+  },
+  "overrides": {
+    "archiver": {
+      "readdir-glob": "^4.0.0"
+    }
   }
 }

@@ -13,7 +13,7 @@
 //
 // The shaping helpers are pure and exported for unit tests; buildClientChart
 // fans out the reads through the db barrel.
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import type { Writable } from 'node:stream';
 import { toCsv, type BuiltFile, type DatasetColumn } from './datasetExport.service.js';
 import {
@@ -469,7 +469,7 @@ export function chartZipFilename(client: ChartClient, generatedAt: string): stri
 
 /** Stream the bundle as a zip to `out`; resolves once fully written. */
 export function streamChartZip(chart: ClientChart, out: Writable): Promise<void> {
-  const archive = archiver('zip', { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   const date = new Date(chart.generatedAt);
   const done = new Promise<void>((resolve, reject) => {
     archive.on('error', reject);
@@ -480,6 +480,8 @@ export function streamChartZip(chart: ClientChart, out: Writable): Promise<void>
   for (const f of chart.files) {
     archive.append(f.content, { name: f.name, date: isNaN(date.getTime()) ? new Date(0) : date });
   }
-  archive.finalize();
+  // finalize() also rejects on failure; the same error reaches the 'error'
+  // listener above, so swallow it here rather than leave it unhandled.
+  archive.finalize().catch(() => undefined);
   return done;
 }
