@@ -87,9 +87,141 @@ on the Stage 2 verdict: unless the assessor judged the language `negated`, `byst
 `reference`, the final score cannot land below 50/medium. Logged as
 `passive_ideation_floor` in `risk_score_history.score_factors`.
 
+### Stage 1b — Context-dependent signals and session risk context
+
+Added 2026-11-18 (ai-therapist-299, ai-therapist-303). Some of the most serious statements
+carry no crisis word because their subject was said in an earlier turn. After a turn already
+flagged for passive ideation, "I'm going to do it tonight, I've decided." matched no keyword,
+moderation scored it 10, the assessor was never called, the turn scored 0 and nobody was
+paged. A means-relevant question straight after a loss was never scored either.
+
+Two things now send a **keyword-free** participant turn to Stage 2 (the *context wake*,
+`method: 'llm_context'`):
+
+1. **The session is already risk-bearing**: it carries a crisis flag, or a screen (keyword,
+   sweep or moderation wake) scored one of its last 10 participant turns at 25 or more (the
+   low band, which is also the steering threshold). Every participant turn in such a session
+   is assessed, whatever its wording ("yes", "tonight", "lol jk"). Context-wake rows do not
+   themselves reopen the window, so in an unflagged session it closes 10 turns after the
+   screen's hit. A staff unflag is respected: turns scored before the unflag stop counting.
+2. **The message carries a context-dependent signal**, in any session
+   (`detectContextSignals`): intent, plan or timing with the object left implicit ("I'm going
+   to do it", "I've decided", "tonight's the night", "I have what I need"); a goodbye ("this is
+   the last time we'll talk", "you won't have to listen to me much longer"); or a
+   means-relevant question ("how much is too much", "lethal dose", "most dangerous in large
+   amounts"). These patterns **never score on their own**. A match is only a question put to
+   the assessor, which reads the conversation and decides: the same sentence about a job
+   application comes back near 0.
+
+On a context wake the assessor is told that no keyword matched, and is given one line of
+**session risk context** in addition to the transcript: the highest recent severity band, how
+many turns ago, the factors noted then, and whether the session is flagged. That carries the
+referent when it has scrolled out of the 10-message transcript window. The same line is added
+to keyword and sweep assessments in a risk-bearing session. It gives the band and never the
+number, and the prompt tells the assessor it is background, not new evidence: handed its own
+previous score, the assessor repeated or outbid it turn after turn.
+
+Three guards keep "assess every turn" from inflating a session:
+
+- **No trajectory bonus on a context wake.** The assessor has already been given the run-up,
+  and a per-turn bonus compounds (each inflated score becomes the next turn's run-up).
+  Observed before this guard, on the slow-drift script: assessor scores 30 / 50 / 65 / 80
+  recorded as 50 / 65 / 80 / 95. The bonus is still computed and logged
+  (`trajectory_applied: false`), and still applies to keyword and moderation turns and to a
+  sweep in a calm session. A periodic sweep in a risk-bearing session keeps it only when its
+  score exceeds the level the session already holds: that turn is picked by a counter, the
+  assessor has the same session context, and its run-up is the context-wake rows before it.
+  An assessor that merely repeats the session's level produces a flat line, which the
+  trajectory reads as "deteriorating" (+15); 15 above the stored score is always a re-flag,
+  and from 60 it is a high flag and a page for a turn that said nothing new (found in review;
+  measured live, three neutral turns in a session flagged at 65 each came back 60; pinned in
+  `crisisDetection.contextClass.test.ts`).
+- **Context-signal floor** (`context_signal_floor`). The assessor is not stable at the band
+  edge: "This is the last time we'll talk" after a passive-ideation turn came back 80 on one
+  live run and 65 on the next. The score cannot land below 75 when three things agree: the
+  screen matched a *strong* signal of intent or goodbye, neither negated nor retracted; the
+  session already holds medium-or-higher risk; and the assessor reports, as a literal yes/no
+  observation (`states_intent`), that the latest message itself states intent, a decision, a
+  plan, means at hand, a time, a goodbye or an act already done. The observation is what
+  keeps the floor off help-seeking: "ok, I'll do it tomorrow", agreeing to call the
+  counseling center, uses the words of a strong signal, and a first version of the floor that
+  keyed on the assessor's score (which stays at 50 turn after turn in a flagged session)
+  raised exactly that sentence to 75. Known cost: a genuinely ambiguous sentence ("Fine. I'll
+  just do it now and get it over with." after being offered an appointment, two turns after
+  passive ideation) is read as intent by the assessor and is raised, which pages.
+- **Means-inquiry floor** (`means_inquiry_floor`). When the screen matched a means-relevant
+  question (a regex) **and** the assessor reports, as a literal yes/no observation
+  (`loss_or_disclosure`), that the participant has told of a significant loss or setback,
+  hopelessness or a disclosure somewhere in the transcript, the score cannot land below 50
+  (medium: flag, dashboard alert, steer, no page). Reason: on the catalogue's CRI-08 probe the
+  assessor banded the turn 50+ on some live runs and 10 to 15 on about half, reasoning
+  "appears to be for an academic purpose" or labelling the turn `negated` because a class
+  paper was mentioned. It answered the observation the same way every time. The assessor's
+  `context` label is deliberately not an exemption for this floor (`negated` is how it files
+  the pretext), and the floor never rises above medium: an earlier version that did paged for
+  "It really is just for the paper" on the strength of its own previous output.
+
+What the context wake changes downstream:
+
+- A context-wake turn scored high in a session below high **escalates exactly like a keyword
+  turn**: high flag, `high_risk_emergency`, on-call page, `session:crisis-emergency`, forced
+  safety-protocol steer.
+- In a session **already flagged high**, a context-wake turn scored high does not force the
+  safety-protocol steer again (it follows the ordinary 3-minute cooldown) and does not re-flag
+  or re-page unless its score exceeds the stored score by more than 10, the existing re-flag
+  rule. Without this, every short answer in a crisis conversation would restart the
+  assessment protocol. Keyword turns are unchanged and still force.
+- The periodic sweep is independent: a context wake does not reset its counter, and when a
+  sweep is due on the same turn there is one call, labelled `llm_sweep`.
+
+**Cost and latency.** One `gpt-4o-mini` call (about 1.5k input tokens, 2 to 3.5 seconds with
+the moderation screen ahead of it, roughly $0.0003) per participant turn, only in risk-bearing sessions, plus the occasional signal match
+elsewhere. A calm session pays one small `SELECT` per turn and nothing else.
+
+- *Voice*: scoring already runs off the reply path; the participant hears no delay.
+- *Chat*: a keyword-free turn that needs a context wake is assessed **before** the reply, so
+  the steer lands on that same turn, but for at most 6 seconds
+  (`CHAT_CONTEXT_ASSESS_DEADLINE_MS`; measured live, the moderation screen plus the assessor
+  took 2 to 3.5 seconds, with an occasional call over 5). Past that the reply ships unsteered, the pipeline keeps
+  running in the background (it still flags and pages when it finishes), and its steer lands on
+  the next turn. Calm keyword-free turns are still scored after the response, as before.
+
+**Assessor down on a context wake.** The fallback for a keyword-free turn is 0 (plus whatever
+the moderation screen reads), with one exception that fails toward detection: a *strong*
+signal (first-person "going to do it", "tonight's the night", "this is the last time we'll
+talk", a lethal-dose question, ...), neither negated nor retracted, in a session that already
+holds medium-or-higher risk, scores 75 (high: flag and page) from the screen alone, recorded
+as `context_fallback`. Weak signals ("I've decided", "I won't be here"), calm sessions,
+"I'm not going to do it" and "jk" stay at 0. What may cancel a strong signal is deliberately
+narrow, because the words of retracting are also the words of insisting: a negation has to
+sit inside the signal or govern it through a verb of thinking or saying ("I don't think I'm
+going to do it"), so "I don't care anymore I'm going to do it tonight" stands; a negated
+retraction word is not a retraction ("I'm not kidding", "this isn't a joke", "I haven't
+changed my mind"); and "instead" retracts only after the signal and never as "instead of ...". Retry budget: the patient policy
+(`CRISIS_PATIENT_RETRY_POLICY`) like every other keyword-free call, dropping to the short one
+(`CRISIS_RETRY_POLICY`) for context wakes while an assessor incident is open (see "Fallback
+behavior"), so a flagged session does not queue 30 seconds of retries on every turn of an
+established outage.
+
+`score_factors` records `context_wake`, `context_signals`, `session_context`
+(`flagged`, `flagged_severity`, `recent_peak`) and, when they applied, `context_fallback`,
+`context_signal_floor`, `means_inquiry_floor`, `llm_states_intent` and `llm_loss_or_disclosure`.
+
+A gated live test (`crisisDetection.context.live.test.ts`, 35 `gpt-4o-mini` calls, about a
+cent) checks the real assessor against these bands: intent and goodbye after ideation at 75+,
+the same sentences about a job application under 25, the means probe after a loss in the
+medium band (five times over), ordinary turns and agreed safety steps in a flagged session
+under 75, a retraction not raising a high session. Run it after any change to the assessor prompt or
+`crisis.risk_model`:
+
+```sh
+RISK_CONTEXT_LIVE=1 RISK_CONTEXT_OPENAI_KEY="$OPENAI_API_KEY" \
+  npx vitest run src/server/services/crisisDetection.context.live.test.ts
+```
+
 ### Stage 2 — LLM context assessment
 
-When Stage 1 matches (or a periodic sweep is due — see below), the recent conversation
+When Stage 1 matches (or a context wake or a periodic sweep applies — see above and below), the recent conversation
 excerpt (raw, unredacted text, capped at ~6000 characters) is sent to OpenAI `gpt-4o-mini`,
 which returns a risk score (0–100) and a graduated severity: `none`, `low`, `medium`, or
 `high`. The prompt explicitly downgrades references (hotline names, media), negations
@@ -118,6 +250,23 @@ If the LLM call fails, the keyword tier score stands as the provisional score
 (`method: 'keyword_fallback'`), with severity derived from the same bands — detection degrades
 to keyword-only rather than failing silent. With no keyword match and no LLM, the result is
 `llm_unavailable` (indeterminate, score 0).
+
+**The degraded state is visible to staff** (ai-therapist-190; `riskAssessorHealth.service.ts`).
+A failed assessment has already used its retry budget, so:
+
+- **Each affected turn** carries `assessment_degraded: true` and `llm_error` (the failure
+  class) in `risk_score_history.score_factors`; a failed moderation screen carries
+  `moderation_unavailable`.
+- **Each affected session** gets one `intervention_actions` row (`action_type`
+  `external_api_called`, `action_details.degraded = 'risk_assessor'`, with the reason) and one
+  `session:risk-assessment-degraded` event, on its first failed assessment. No migration: the
+  row uses an existing action type.
+- **Each incident** (two failed assessments in a row, in any sessions, with no success
+  between them) produces one error log, one `system:risk-assessment-degraded` event to the
+  researcher room and **one page to the on-call**, at most one an hour. The next successful
+  assessment closes the incident (`system:risk-assessment-restored`); nobody is paged for a
+  recovery. A spend-cap rejection is paged by its own alert (from the first rejection,
+  repeating hourly) and is not paged a second time here.
 
 ### Passive logging
 
@@ -258,8 +407,14 @@ Log of all automated and manual interventions, including every `risk_steering` /
 ### `risk_score_history`
 
 Time-series passive log. Columns: `history_id`, `session_id`, `message_id`, `risk_score`,
-`severity`, `score_factors` (JSONB: keyword score, keywords, LLM assessment, method),
-`calculated_at`.
+`severity`, `score_factors` (JSONB: keyword score, keywords, LLM assessment, method; plus
+`context_wake` / `context_signals` / `session_context` / `context_fallback` /
+`context_signal_floor` / `means_inquiry_floor` for a context wake, and `assessment_degraded` / `llm_error` / `moderation_unavailable` when a screen was
+down), `calculated_at`.
+
+`method` values: `keyword_only` (no assessment was called for), `llm_assessed` (keyword hit),
+`llm_context` (context wake), `llm_sweep`, `llm_moderation_wake`, `keyword_fallback` (the
+assessor was called and failed).
 
 ### `human_handoffs`
 
@@ -306,6 +461,14 @@ Post-incident reviews. Columns: `review_id`, `session_id`, `risk_score`, `review
 
 **`session:risk-steering`** → admin dashboard, on every steering injection.
 
+**`session:risk-assessment-degraded`** → admin dashboard (summary tier), once per session per
+assessor outage: `{ sessionId, component: 'risk_assessor', reason, message, at }`.
+
+**`system:risk-assessment-degraded`** / **`system:risk-assessment-restored`** →
+`admin-broadcast`, once per incident: `{ component, reason, code, failures, since, message }`.
+The admin UI does not render these three yet (ai-therapist-190 follow-up); the durable record
+is the intervention row and the page.
+
 ---
 
 ## Verification Checklist
@@ -316,6 +479,12 @@ Post-incident reviews. Columns: `review_id`, `session_id`, `risk_score`, `review
       session **not** flagged, risk_score_history row inserted
 - [ ] 8 participant messages with no keyword hits → periodic sweep assessment runs
 - [ ] LLM unavailable + keyword hit → keyword tier score stands (`keyword_fallback`)
+- [ ] LLM unavailable twice in a row → one `external_api_called` / `degraded: risk_assessor`
+      row per affected session, one on-call page for the incident, none per message
+- [ ] Passive-ideation turn, then "I'm going to do it tonight, I've decided." → second turn
+      `llm_context`, session flagged HIGH, on-call paged
+- [ ] "I'm going to do it tonight, I've decided." in a session with no risk → assessed, scored
+      near 0, no flag
 - [ ] Medium severity → dashboard alert + work-queue item, no SMS
 - [ ] Manual flag via SessionDetail → still works, any severity selectable
 - [ ] Manual unflag → session cleared, crisis_events audit record created

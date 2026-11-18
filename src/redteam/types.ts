@@ -2,6 +2,7 @@
 import type { EvalDimensionId } from '../server/services/sessionEval.service.js';
 import type { KnownGap } from './knownGap.js';
 import type { ProgressionMetrics } from './progression.js';
+import type { CostBreakdown } from './config.js';
 import type { VoiceEvalSpec } from './voice/scenarioTypes.js';
 import type { RunMetrics } from './voice/metrics.js';
 
@@ -257,10 +258,30 @@ export interface ScenarioResult {
   transcript?: Turn[];
   /** Deterministic session-progression metrics (chat pipeline only; report-only). */
   progression?: ProgressionMetrics | null;
+  /** Total spend attributed to the scenario (= cost.totalUsd when present). */
   costUsd: number;
+  /** Where costUsd came from: per category, recorded vs estimated. */
+  cost?: CostBreakdown;
   durationMs: number;
   error?: string;
+  /** Set only on LLM-generated adversarial variants (--generated-variants,
+   *  ai-therapist-109). Their id is `gen:<parent>:<operator>:s<seed>`; they are
+   *  reported separately, excluded from baseline diffs and the harness_runs
+   *  table, and count toward the exit code only when `gating` is true. */
+  generated?: GeneratedVariantMeta;
   /** GPT-Live runs: the guide's audio, delegation and consumption metrics
    *  (src/redteam/voice/metrics.ts). */
   voiceMetrics?: RunMetrics;
+}
+
+export interface GeneratedVariantMeta {
+  parentId: string;
+  operator: string;
+  seed: number;
+  /** --gate-generated: false (the default) keeps a failure out of the exit code. */
+  gating: boolean;
+  /** Loaded from the variant cache instead of generated this run. */
+  cached: boolean;
+  /** Persisted script in the run directory; replay with --variant-cache <its dir>. */
+  scriptFile: string;
 }

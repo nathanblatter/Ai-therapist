@@ -163,3 +163,94 @@ describe('reportOpenAIQuotaExhausted', () => {
     await expect(reportOpenAIQuotaExhausted('risk_assessor', null)).resolves.toBeUndefined();
   });
 });
+
+// ai-therapist-190 residual: an assessor outage that is NOT the spend cap (a
+// mistyped crisis.risk_model, a revoked key, an OpenAI incident) reaches the
+// on-call too, once per outage.
+describe('reportRiskAssessorOutage', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    fetchMock.mockReset().mockResolvedValue({ ok: true });
+    getSystemConfigMock.mockReset().mockResolvedValue({});
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.IMESSAGE_API_KEY = 'test-key';
+    process.env.CRISIS_ALERT_PHONE = '+15550000000';
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    delete process.env.IMESSAGE_API_KEY;
+    delete process.env.CRISIS_ALERT_PHONE;
+  });
+
+  const sentMessages = () =>
+    fetchMock.mock.calls.map((c) => JSON.parse((c[1] as RequestInit).body as string).message as string);
+
+  it('pages with an operational message that names the cause and cannot be read as a participant crisis', async () => {
+    const { reportRiskAssessorOutage } = await import('./crisisAlert.service.js');
+    await expect(reportRiskAssessorOutage('other', 'model_not_found', 2)).resolves.toBe(true);
+
+    const [message] = sentMessages();
+    expect(message).toContain('risk assessor is failing');
+    expect(message).toContain('2 assessments in a row');
+    expect(message).toContain('model_not_found');
+    expect(message).toContain('not a participant crisis');
+    expect(message).toContain('keyword screen only');
+    expect(message).toContain('crisis.risk_model');
+    // Operational only: no session id, no link to a session.
+    expect(message).not.toMatch(/session|#/i);
+  });
+
+  it('delivers at most one page an hour, however often it is asked (a flapping assessor)', async () => {
+    const { reportRiskAssessorOutage } = await import('./crisisAlert.service.js');
+    await expect(reportRiskAssessorOutage('timeout', null, 2)).resolves.toBe(true);
+    for (let i = 0; i < 20; i++) await expect(reportRiskAssessorOutage('timeout', null, 2)).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    await expect(reportRiskAssessorOutage('timeout', null, 2)).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('concurrent failures send one page, not one each', async () => {
+    const { reportRiskAssessorOutage } = await import('./crisisAlert.service.js');
+    const results = await Promise.all([
+      reportRiskAssessorOutage('timeout', null, 2),
+      reportRiskAssessorOutage('timeout', null, 3),
+      reportRiskAssessorOutage('timeout', null, 4),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a page that was not delivered does not use up the hour', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 502 });
+    const { reportRiskAssessorOutage } = await import('./crisisAlert.service.js');
+    await expect(reportRiskAssessorOutage('timeout', null, 2)).resolves.toBe(false);
+    await expect(reportRiskAssessorOutage('timeout', null, 3)).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('has its own throttle: a spend-cap page does not silence a different outage, or the reverse', async () => {
+    const { reportRiskAssessorOutage, reportOpenAIQuotaExhausted } = await import('./crisisAlert.service.js');
+    await reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota');
+    await expect(reportRiskAssessorOutage('timeout', null, 2)).resolves.toBe(true);
+    await reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends nothing when paging is disabled, and says so', async () => {
+    getSystemConfigMock.mockResolvedValue({ crisis_alert: { enabled: false } });
+    const { reportRiskAssessorOutage } = await import('./crisisAlert.service.js');
+    await expect(reportRiskAssessorOutage('timeout', null, 2)).resolves.toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('never throws, even when the pager itself is down', async () => {
+    fetchMock.mockRejectedValue(new Error('pager down'));
+    const { reportRiskAssessorOutage } = await import('./crisisAlert.service.js');
+    await expect(reportRiskAssessorOutage('timeout', null, 2)).resolves.toBe(false);
+  });
+});

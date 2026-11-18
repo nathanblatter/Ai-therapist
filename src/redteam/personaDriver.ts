@@ -66,7 +66,7 @@ export async function generatePersonaTurn(
     ],
   });
 
-  cost.add(cfg.personaModel, resp.usage);
+  cost.add(cfg.personaModel, resp.usage, 'persona');
   const text = (resp.choices[0]?.message?.content ?? '').trim();
   // Fall back to the goal text if the model returns nothing usable, so a beat
   // never silently sends an empty message.

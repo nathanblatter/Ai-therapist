@@ -84,6 +84,22 @@ export interface RedteamConfig {
   voiceDropUpstreamMidway: boolean;
   /** `--variant <name>`: run under a named feature-flag variant (variants.ts). */
   variant: string;
+  /** `--generated-variants <n>` (ai-therapist-109): run up to n LLM-generated
+   *  mutations of the selected safety scenarios after the scripted ones. 0 =
+   *  off (the default); clamped to MAX_GENERATED_VARIANTS. Adds model spend,
+   *  so it is never enabled in a CI workflow. */
+  generatedVariants: number;
+  /** `--generated-operators a,b`: restrict the mutation operators used. */
+  generatedOperators?: string[];
+  /** `--variant-cache <dir>`: where generated variant scripts are cached and
+   *  replayed from. */
+  variantCacheDir: string;
+  /** `--gate-generated`: generated-variant failures fail the run. Off by
+   *  default: a variant failure is a lead to investigate, not a regression in
+   *  a scripted gate. */
+  gateGenerated: boolean;
+  /** LLM that writes generated variants (the theme guard uses classifierModel). */
+  generatorModel: string;
 }
 
 export const DEFAULTS = {
@@ -102,6 +118,10 @@ export const DEFAULTS = {
   voiceDropClientMidway: false,
   voiceDropUpstreamMidway: false,
   variant: 'default',
+  generatedVariants: 0,
+  variantCacheDir: 'redteam-variant-cache',
+  gateGenerated: false,
+  generatorModel: 'gpt-4o-mini',
 };
 
 /** The chat therapy reply model's CODE DEFAULT (utils/chatModel.ts). The
@@ -146,39 +166,149 @@ interface Usage {
   completion_tokens?: number | null;
 }
 
-/** Per-scenario cost accumulator. Real usage feeds in from persona/classifier
- *  calls; chat therapy replies (no usage returned by the Responses wrapper) are
- *  estimated from assumed token counts. */
+/** What a line of spend paid for. `chat-reply`, `in-session` and
+ *  `post-session` come from the app's own session_llm_usage rows
+ *  (sessionCost.ts); the rest are the harness's own calls. */
+export type CostCategory =
+  | 'chat-reply' // the therapy model's replies (purpose 'chat')
+  | 'in-session' // crisis assessor, eligibility, rerank during the session
+  | 'post-session' // redaction + insights jobs fired by /api/chat/end
+  | 'persona'
+  | 'classifier'
+  | 'judge'
+  | 'assistant'
+  | 'generation' // --generated-variants generator + guard calls
+  | 'voice'
+  | 'tts'
+  | 'other';
+
+/** recorded: token counts (or billable seconds) reported by the API response
+ *  or the app's own usage tables. estimated: no counts were available, so the
+ *  tokens were derived from text length or a fixed guess. Both are priced
+ *  from the hand-maintained table above, so neither is a billing figure. */
+export type CostBasis = 'recorded' | 'estimated';
+
+export interface CostCategoryLine {
+  usd: number;
+  recordedUsd: number;
+  estimatedUsd: number;
+  calls: number;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+export interface CostBreakdown {
+  totalUsd: number;
+  recordedUsd: number;
+  estimatedUsd: number;
+  byCategory: Partial<Record<CostCategory, CostCategoryLine>>;
+}
+
+const round6 = (n: number): number => Number(n.toFixed(6));
+
+function emptyLine(): CostCategoryLine {
+  return { usd: 0, recordedUsd: 0, estimatedUsd: 0, calls: 0, tokensIn: 0, tokensOut: 0 };
+}
+
+/** Per-scenario cost accumulator. Every line carries a category and whether
+ *  its token counts were recorded or estimated, so summary.json and the
+ *  reports can say how much of a figure is measured. */
 export class CostTracker {
   usd = 0;
   calls = 0;
+  private readonly lines = new Map<CostCategory, CostCategoryLine>();
 
-  add(model: string, usage?: Usage): void {
-    const price = priceFor(model);
+  /** Book an amount that was already priced. */
+  addUsd(usd: number, category: CostCategory, basis: CostBasis, calls = 1, tokensIn = 0, tokensOut = 0): void {
+    let l = this.lines.get(category);
+    if (!l) this.lines.set(category, (l = emptyLine()));
+    l.usd += usd;
+    if (basis === 'recorded') l.recordedUsd += usd;
+    else l.estimatedUsd += usd;
+    l.calls += calls;
+    l.tokensIn += tokensIn;
+    l.tokensOut += tokensOut;
+    this.usd += usd;
+    this.calls += calls;
+  }
+
+  /** One call whose usage the API response returned. A response without
+   *  usage books zero and counts as estimated, never as measured. */
+  add(model: string, usage?: Usage, category: CostCategory = 'other'): void {
     const inTok = usage?.prompt_tokens ?? 0;
     const outTok = usage?.completion_tokens ?? 0;
-    this.usd += (inTok / 1e6) * price.inPerM + (outTok / 1e6) * price.outPerM;
-    this.calls += 1;
+    const measured = usage != null && (usage.prompt_tokens != null || usage.completion_tokens != null);
+    this.addUsd(priceTokens(model, inTok, outTok), category, measured ? 'recorded' : 'estimated', 1, inTok, outTok);
+  }
+
+  /** Token counts the app recorded itself (session_llm_usage), possibly summed
+   *  over several calls. */
+  addRecorded(model: string, inTok: number, outTok: number, category: CostCategory, calls = 1): void {
+    this.addUsd(priceTokens(model, inTok, outTok), category, 'recorded', calls, inTok, outTok);
   }
 
   /** Add an estimated call when real token usage is unavailable. */
-  estimate(model: string, inTok: number, outTok: number): void {
-    const price = priceFor(model);
-    this.usd += (inTok / 1e6) * price.inPerM + (outTok / 1e6) * price.outPerM;
-    this.calls += 1;
+  estimate(model: string, inTok: number, outTok: number, category: CostCategory = 'other', calls = 1): void {
+    this.addUsd(priceTokens(model, inTok, outTok), category, 'estimated', calls, inTok, outTok);
   }
 
   /** Voice-session minutes on a per-minute backend (GPT-Live / Grok), priced
    *  from the model the session resolved to. `seconds` is the backend's own
    *  cumulative billable figure (live_usage), never a harness stopwatch. */
   addVoiceSeconds(model: string, seconds: number): void {
-    this.usd += estimateLiveCostUsd(model, seconds);
-    this.calls += 1;
+    this.addUsd(estimateLiveCostUsd(model, seconds), 'voice', 'recorded');
   }
 
-  /** One persona TTS call: billed on generated audio duration. */
+  /** One persona TTS call: billed on generated audio duration (a per-minute
+   *  approximation of the token bill, so estimated). */
   addTts(_chars: number, audioSeconds: number): void {
-    this.usd += (audioSeconds / 60) * TTS_USD_PER_MINUTE;
-    this.calls += 1;
+    this.addUsd((audioSeconds / 60) * TTS_USD_PER_MINUTE, 'tts', 'estimated');
   }
+
+  breakdown(): CostBreakdown {
+    return breakdownOf([...this.lines.entries()]);
+  }
+}
+
+/** USD for a token count at the harness's rate for `model`. */
+export function priceTokens(model: string, inTok: number, outTok: number): number {
+  const price = priceFor(model);
+  return (inTok / 1e6) * price.inPerM + (outTok / 1e6) * price.outPerM;
+}
+
+/** Sum category lines (one tracker's, or many scenarios') into a breakdown. */
+export function breakdownOf(entries: Array<[CostCategory, CostCategoryLine]>): CostBreakdown {
+  const byCategory: Partial<Record<CostCategory, CostCategoryLine>> = {};
+  let total = 0;
+  let recorded = 0;
+  let estimated = 0;
+  for (const [cat, l] of entries) {
+    const acc = (byCategory[cat] ??= emptyLine());
+    acc.usd += l.usd;
+    acc.recordedUsd += l.recordedUsd;
+    acc.estimatedUsd += l.estimatedUsd;
+    acc.calls += l.calls;
+    acc.tokensIn += l.tokensIn;
+    acc.tokensOut += l.tokensOut;
+    total += l.usd;
+    recorded += l.recordedUsd;
+    estimated += l.estimatedUsd;
+  }
+  for (const l of Object.values(byCategory)) {
+    if (!l) continue;
+    l.usd = round6(l.usd);
+    l.recordedUsd = round6(l.recordedUsd);
+    l.estimatedUsd = round6(l.estimatedUsd);
+  }
+  return { totalUsd: round6(total), recordedUsd: round6(recorded), estimatedUsd: round6(estimated), byCategory };
+}
+
+/** Merge several breakdowns (per-scenario into run totals). */
+export function mergeBreakdowns(parts: Array<CostBreakdown | undefined | null>): CostBreakdown {
+  const entries: Array<[CostCategory, CostCategoryLine]> = [];
+  for (const p of parts) {
+    if (!p) continue;
+    for (const [cat, l] of Object.entries(p.byCategory)) if (l) entries.push([cat as CostCategory, l]);
+  }
+  return breakdownOf(entries);
 }

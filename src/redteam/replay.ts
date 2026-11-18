@@ -146,12 +146,15 @@ async function main(): Promise<void> {
       const agent = client.newAgent();
       await client.loginParticipant(agent);
       await client.acceptConsent(agent);
-      const { sessionId: replaySessionId } = await client.startChat(agent);
-      for (const turn of turns) {
-        const res = await client.chatMessage(agent, replaySessionId, turn.content_redacted);
-        if (res.sessionEnded) break; // e.g. eligibility gate — stop replaying into a dead session
-      }
-      await client.endChat(agent, replaySessionId);
+      // Fresh session every time, ended even when a turn throws, so one failed
+      // replay cannot run the next inside its session (ai-therapist-307).
+      const { sessionId: replaySessionId } = await client.startFreshChat(agent);
+      await client.driveChatSession(agent, replaySessionId, async () => {
+        for (const turn of turns) {
+          const res = await client.chatMessage(agent, replaySessionId, turn.content_redacted);
+          if (res.sessionEnded) break; // e.g. eligibility gate — stop replaying into a dead session
+        }
+      });
 
       // Judge the regenerated transcript and diff against the stored rubric.
       const evalRow = await evaluateSession(replaySessionId, { force: true });
