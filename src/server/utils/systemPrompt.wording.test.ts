@@ -97,6 +97,11 @@ describe('DEFAULT_SYSTEM_PROMPT: stated behaviour for situations the protocol ma
     expect(section('Faith, values and identity')).toMatch(/Follow the participant's own values/);
   });
 
+  it('says nothing about the Honor Code and adds no behaviour for under-18 participants', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).not.toMatch(/honor code/i);
+    expect(DEFAULT_SYSTEM_PROMPT).not.toMatch(/under 18/i);
+  });
+
   it('puts no personal contact details in the prompt', () => {
     expect(DEFAULT_SYSTEM_PROMPT).not.toMatch(/@byu\.edu|@[a-z0-9-]+\.(com|edu|org)/i);
   });
