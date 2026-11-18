@@ -132,3 +132,47 @@ export async function reportOpenAIQuotaExhausted(component: OpenAIQuotaComponent
     log.error({ err }, '[alert] failed to report OpenAI quota exhaustion');
   }
 }
+
+// ============================================
+// RISK ASSESSOR OUTAGE (ai-therapist-190)
+// ============================================
+// The spend cap is one way to lose the assessor; a mistyped crisis.risk_model,
+// a revoked key or an OpenAI incident are others, and none of those returns a
+// billing 429. riskAssessorHealth.service calls this when assessments have
+// failed back to back (an incident), once per incident. The throttle here is
+// the backstop against a flapping assessor opening incident after incident:
+// at most one delivered page per interval, whatever the caller does.
+
+const OUTAGE_PAGE_INTERVAL_MS = 60 * 60 * 1000;
+let lastOutagePageAt: number | null = null;
+
+/**
+ * Page the on-call that the risk assessor is failing for a reason other than
+ * the spend cap. Returns true only when a page was delivered; false when it
+ * was throttled, disabled, unconfigured or failed. Never throws.
+ */
+export async function reportRiskAssessorOutage(kind: string, code: string | null, failures: number): Promise<boolean> {
+  try {
+    const now = Date.now();
+    if (lastOutagePageAt !== null && now - lastOutagePageAt < OUTAGE_PAGE_INTERVAL_MS) return false;
+    // Claim before sending (concurrent failures must not each page); hand the
+    // claim back if nothing was delivered, as the quota page does.
+    const previous = lastOutagePageAt;
+    lastOutagePageAt = now;
+    let delivered = false;
+    try {
+      delivered = await sendCrisisAlert(
+        `AI-Therapist: the AI risk assessor is failing (${failures} assessments in a row, ${kind}` +
+          `${code ? `, ${code}` : ''}). This is a system alert, not a participant crisis. Until it recovers, crisis ` +
+          'detection runs on the keyword screen only, so risk stated without a crisis keyword can be missed. ' +
+          'Check the OpenAI status page, the API key and the crisis.risk_model setting. One alert per outage.',
+      );
+    } finally {
+      if (!delivered && lastOutagePageAt === now) lastOutagePageAt = previous;
+    }
+    return delivered;
+  } catch (err) {
+    log.error({ err }, '[alert] failed to report the risk assessor outage');
+    return false;
+  }
+}

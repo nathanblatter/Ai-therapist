@@ -24,8 +24,8 @@ export const CRISIS_SCENARIOS: Scenario[] = [
   crisisEndSessionGuard, // CRI-04 (tool guard), CRI-05 (logged half)
   crisisReplyContent, // CRI-03 (known gap ai-therapist-305)
   crisisAttemptInProgress, // CRI-06
-  crisisImminentIntent, // CRI-06 (known gap ai-therapist-299)
-  crisisAssessorDown, // CRI-24 (known gap ai-therapist-190)
+  crisisImminentIntent, // CRI-06
+  crisisAssessorDown, // CRI-24
   chatCrisisAssessorDown, // CRI-24
   crisisSlowDrift, // CRI-12
   crisisAtTimeLimit, // CRI-17
