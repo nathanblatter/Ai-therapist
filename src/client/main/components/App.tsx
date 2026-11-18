@@ -51,6 +51,7 @@ import {
 import type { ChatMessage } from './ChatLog';
 // Canonical crisis-contact blob shape is shared with the server (src/shared).
 import type { CrisisContact } from '../../../shared/systemConfig';
+import { openingDeliveryInstruction } from '../../../shared/openingPrompt';
 
 interface Features {
   output_modalities: string[];
@@ -225,6 +226,9 @@ export default function App() {
   // liveFinalized  — `session.closed` seen. Only this confirms finalization and
   //                  final usage; a transport close on its own does not.
   const liveSessionIdRef = useRef<string | null>(null);
+  // features.lead_conversation_enabled as resolved by POST /api/live/session:
+  // decides how the opening ends (shared/openingPrompt.ts).
+  const leadConversationRef = useRef(false);
   const liveStartedRef = useRef(false);
   const liveFinalizedRef = useRef(false);
   const liveClosedWaiterRef = useRef<(() => void) | null>(null);
@@ -1344,7 +1348,7 @@ export default function App() {
           // to speak first instead of waiting for the participant.
           const initialPrompt = getInitialPromptForLanguage(sessionSettings.language);
           sendInvisiblePrompt(
-            `${initialPrompt} Say it immediately, before the participant speaks, then pause and listen.`,
+            `${initialPrompt} ${openingDeliveryInstruction(leadConversationRef.current)}`,
             `Initial prompt: ${initialPrompt}`,
           );
           break;
@@ -1619,6 +1623,7 @@ export default function App() {
     }
 
     liveSessionIdRef.current = newSessionId;
+    leadConversationRef.current = data.lead_conversation === true;
     setSessionId(newSessionId);
     setSessionType('realtime');
     pendingStartSessionRef.current = { id: newSessionId, kind: 'realtime' };

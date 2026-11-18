@@ -222,6 +222,14 @@ export const DATASET_FILES: DatasetFileSpec[] = [
         values: "true, false, '' (not evaluated)",
       },
       {
+        name: 'psychoeducation_cue',
+        type: 'string',
+        source: 'session_configurations.psychoeducation_cue',
+        values: "true (cue arm), false (control arm), '' (experiment off; no cue)",
+        notes:
+          'ai-therapist-202: whether tool guidance cued retrieve_psychoeducation. Join tool_invocations for call outcomes.',
+      },
+      {
         name: 'theme',
         type: 'string',
         source: 'session_configurations.theme',

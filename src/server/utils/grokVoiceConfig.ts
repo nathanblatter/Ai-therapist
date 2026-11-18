@@ -13,6 +13,7 @@
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 import { toRealtimeTools } from '../services/toolRegistry.service.js';
 import { GROK_SAMPLE_RATE } from '../../shared/grokVoiceProtocol.js';
+import { openingDeliveryInstruction } from '../../shared/openingPrompt.js';
 
 import { createLogger } from './logger.js';
 
@@ -333,7 +334,11 @@ export function buildGrokCrisisPhrase(crisis: CrisisContactLike | undefined): st
     : 'call or text 988 (Suicide and Crisis Lifeline), or call 911 for immediate danger';
 }
 
-export function buildGrokOpeningPrompt(language: string, crisis: CrisisContactLike | undefined): string {
+export function buildGrokOpeningPrompt(
+  language: string,
+  crisis: CrisisContactLike | undefined,
+  opts: { leadConversation?: boolean } = {},
+): string {
   const crisisText = buildGrokCrisisPhrase(crisis);
 
   const preamble =
@@ -347,5 +352,5 @@ export function buildGrokOpeningPrompt(language: string, crisis: CrisisContactLi
     language === 'en'
       ? `Say this phrase exactly: '${preamble}'`
       : `Say this phrase exactly in ${LANGUAGE_NAMES[language] ?? language}: '${preamble}'`;
-  return `${instruction} Say it immediately, before the participant speaks, then pause and listen.`;
+  return `${instruction} ${openingDeliveryInstruction(opts.leadConversation === true)}`;
 }

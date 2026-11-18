@@ -54,6 +54,39 @@ export function buildCheckinBlock(checkin: SessionCheckin | null): string {
 }
 
 /**
+ * Lead-conversation block (features.lead_conversation_enabled, default off).
+ * Owner feedback from a production test (2026-11-16): "ai needs to drive the
+ * conversation more". The base prompt only tells the model how to follow
+ * ("let users control how much they share", "Avoid pushing for details",
+ * "empower, don't direct") and nothing about opening, focusing, advancing, or
+ * closing a session, so on GPT-Live most assistant turns acknowledge and stop.
+ *
+ * Appended by every session route right after the tool guidance (before the
+ * memory and check-in blocks), never written into the stored prompt. It
+ * deliberately defers to the proactive_offering arm on exercises and to the
+ * crisis and safety sections on everything, so it changes neither.
+ */
+export const LEAD_CONVERSATION_BLOCK = `\n\n## Leading the conversation
+Take an active, guiding role in this conversation instead of waiting for the participant to set every direction. Leading means giving the conversation shape, not pressure: every other section of this prompt still applies, and safety always comes first.
+- Opening: after the opening disclosure, help the participant choose a focus for today with one open question. If this prompt includes today's check-in, a follow-up from a previous conversation, or open practice, use it to suggest a place to start ("Last time we talked about ...; would you like to start there, or is something else on your mind today?").
+- Reflect, then advance: in most replies, briefly reflect what they said, then move the conversation forward with one specific follow-up question or one clear next step. Ask about something concrete they just mentioned (a situation, a thought, a feeling, what happened next) rather than a generic question. Ask one question at a time, never several in one reply.
+- When they stall: if their answers get short, they say they do not know, or the conversation goes in circles, do not just acknowledge and wait. Offer a gentle, specific direction: narrow to one recent example, offer two or three things they could look at, or summarize what you have heard and suggest what to explore next. Whether you may suggest an exercise without being asked is decided by the section on offering exercises; follow it.
+- Keep the thread: connect what they say back to today's focus. When a topic feels finished, summarize it in a sentence and ask whether to go deeper or move to something else.
+- Returning participants: early in the conversation, briefly check in on what you talked about last time and on any practice they agreed to try.
+- Closing: when they say they want to finish, or the system tells you time is running down, summarize the one or two main things from today in plain language, mention any small next step they agreed to, and close warmly.
+- When to follow instead of lead: if the participant is in distress, expresses any risk, or discloses abuse, the Crisis Protocol and the safety sections take precedence: slow down, stay with what they said, and set the focus, structure, and time aside. If they decline a question or want to talk about something else, follow them and let them decide how much to share. Leading never means giving advice beyond what this prompt already allows.`;
+
+/** The lead-conversation block when the flag is on, otherwise empty. */
+export function buildLeadConversationBlock(enabled: boolean): string {
+  return enabled ? LEAD_CONVERSATION_BLOCK : '';
+}
+
+/** ai-therapist-202 cue-arm guidance line for retrieve_psychoeducation. Wording
+ *  mirrors the tool's own description. */
+export const PSYCHOEDUCATION_CUE_LINE =
+  '- When they ask what a condition is, why they might feel a certain way, or how a coping technique or therapy works, CALL retrieve_psychoeducation and ground your explanation in the passages it returns.';
+
+/**
  * Prompt block teaching the model when to actually CALL its client-side tools.
  * The base prompt predates tool calling — its privacy section even reads as
  * "never store anything", which made the model refuse remember_this — and
@@ -61,8 +94,15 @@ export function buildCheckinBlock(checkin: SessionCheckin | null): string {
  * instead of invoking the matching tool (observed live: thought record asked
  * for twice and never opened, mood rating never logged, "end the session now"
  * ignored). Lines are emitted only for tools enabled for this session.
+ *
+ * `psychoeducationCue` is the ai-therapist-202 research condition: the
+ * retrieve_psychoeducation line is emitted only for sessions assigned to the
+ * cue arm (see resolvePsychoeducationCue), never by default.
  */
-export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
+export function buildToolGuidanceBlock(
+  enabledToolNames: string[],
+  opts: { psychoeducationCue?: boolean } = {},
+): string {
   const has = (name: string) => enabledToolNames.includes(name);
   const lines: string[] = [];
   if (has('start_thought_record')) {
@@ -122,6 +162,9 @@ export function buildToolGuidanceBlock(enabledToolNames: string[]): string {
     lines.push(
       '- When a written exercise would help, CALL find_worksheet to pick the fitting one, then call the render tool it returns (start_thought_record / show_journaling_prompt).',
     );
+  }
+  if (opts.psychoeducationCue === true && has('retrieve_psychoeducation')) {
+    lines.push(PSYCHOEDUCATION_CUE_LINE);
   }
   if (has('review_practice')) {
     lines.push(
