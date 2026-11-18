@@ -1,4 +1,4 @@
--- Rollback for 121. screener_trend rows must go first or the narrowed CHECK
+-- Rollback for 122. screener_trend rows must go first or the narrowed CHECK
 -- fails; they are derived from scale_responses and the next sweep after a
 -- re-apply recreates any that are still current.
 BEGIN;

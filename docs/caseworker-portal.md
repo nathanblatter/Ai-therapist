@@ -620,7 +620,7 @@ anonymous/zero-thread users).
 | `note_awaiting_signature` | notes: seeded draft created / draft stale | authoring therapist | info |
 | `inactivity` | daily sweep (synthetic `source_id='inactivity:<clientId>:<date>'`; auto-expired on re-engagement) | pool | info |
 | `screener_worsening` | daily sweep | pool | warning |
-| `screener_trend` | daily sweep (migration 121; PHQ-2/GAD-2 cutoff crossing from below or three rising administrations; one live item per client+scale keyed on the latest `scale_responses.response_id`, expired when the latest score is back under the cutoff and not rising; rules and sources in `src/server/utils/screenerTrend.ts`; descriptive only, independent of crisis detection) | pool | warning |
+| `screener_trend` | daily sweep (migration 122; PHQ-2/GAD-2 cutoff crossing from below or three rising administrations; one live item per client+scale keyed on the latest `scale_responses.response_id`, expired when the latest score is back under the cutoff and not rising; rules and sources in `src/server/utils/screenerTrend.ts`; descriptive only, independent of crisis detection) | pool | warning |
 | `message_unread_stale` | daily sweep | thread clinician | info |
 
 ### Notification kinds (`notifications.kind`)

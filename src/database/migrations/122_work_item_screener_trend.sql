@@ -1,4 +1,4 @@
--- 121: screener_trend work-item kind (idea ai-therapist-87, heuristic first step).
+-- 122: screener_trend work-item kind (idea ai-therapist-87, heuristic first step).
 --
 -- The daily work-queue sweep files a pool item for a client's care team when
 -- the client's own PHQ-2 or GAD-2 answers cross the standard screening cutoff
