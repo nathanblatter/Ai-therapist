@@ -42,6 +42,8 @@ import {
   getActiveModality,
   getSystemConfig,
   resolveProactiveOffering,
+  resolvePsychoeducationCue,
+  resolveLeadConversation,
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -50,6 +52,7 @@ import {
   buildCheckinBlock,
   buildMemoryBlock,
   buildToolGuidanceBlock,
+  buildLeadConversationBlock,
 } from '../../utils/promptContext.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
@@ -218,11 +221,23 @@ export default function liveSessionRoutes(): Router {
         const toolDefs = await toolRegistry.getEnabledToolDefinitions();
         const checkin = sanitizeCheckin(req.body?.checkin);
         const memoryBlock = await buildMemoryBlock(userId);
-        const toolGuidance = buildToolGuidanceBlock(toolDefs.map((t) => t.name));
+        // Psychoeducation retrieval cue (ai-therapist-202): resolved once per
+        // session and persisted below, like proactive_offering. A crisis
+        // recovery start is never enrolled: it runs with delegation off and
+        // its own narrow prompt, so it is recorded as not in the experiment.
+        const psychoeducationCue = isRecovery ? null : await resolvePsychoeducationCue();
+        const toolGuidance = buildToolGuidanceBlock(
+          toolDefs.map((t) => t.name),
+          { psychoeducationCue: psychoeducationCue === true },
+        );
         const proactiveOffering = await resolveProactiveOffering();
+        // Lead-conversation steering (features.lead_conversation_enabled,
+        // default off). A recovery start keeps its own narrow crisis prompt.
+        const leadConversation = isRecovery ? false : await resolveLeadConversation();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) +
           toolGuidance +
+          buildLeadConversationBlock(leadConversation) +
           memoryBlock +
           buildCheckinBlock(checkin);
         const activeModality = await getActiveModality();
@@ -276,6 +291,8 @@ export default function liveSessionRoutes(): Router {
           backendModel,
           storable: isDemoSession,
           recovery: isRecovery ? { crisisLine } : undefined,
+          psychoeducationCue: psychoeducationCue === true,
+          leadConversation,
         });
 
         const apiKey = await getOpenAIKey();
@@ -381,6 +398,7 @@ export default function liveSessionRoutes(): Router {
             live_backend_model: backendModel,
             transcription_model: null, // GPT-Live transcribes internally.
             proactive_offering: proactiveOffering,
+            psychoeducation_cue: psychoeducationCue,
           });
         } catch (dbError) {
           log.error({ err: dbError }, 'Failed to create session in database');
@@ -504,6 +522,9 @@ export default function liveSessionRoutes(): Router {
           voice: userVoice,
           language: userLanguage,
           session_limits: limitCheck.allowed ? limitCheck.limits || null : null,
+          // The browser delivers the GPT-Live opening, so it needs to know how
+          // the opening should end (shared/openingPrompt.ts).
+          lead_conversation: leadConversation,
         });
       } catch (error) {
         log.error({ err: error }, 'Session creation error');

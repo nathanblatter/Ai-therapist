@@ -15,6 +15,15 @@ describe('buildChatOpeningLine', () => {
     expect(line).toContain('call the 988 Suicide & Crisis Lifeline crisis line at 988 or text Text HOME to 741741');
   });
 
+  it('lead-conversation flag appends one invitation and leaves the disclosure unchanged', () => {
+    const off = buildChatOpeningLine(undefined);
+    expect(off.endsWith("I'm glad you're here with me today.")).toBe(true);
+    expect(buildChatOpeningLine(undefined, { leadConversation: false })).toBe(off);
+    expect(buildChatOpeningLine(undefined, { leadConversation: true })).toBe(
+      `${off} What would you like to focus on today?`,
+    );
+  });
+
   it('falls back to 988/911 wording when the configured contact is disabled', () => {
     const line = buildChatOpeningLine({ enabled: false });
     expect(line).toContain('call or text 988');
