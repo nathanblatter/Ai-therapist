@@ -50,6 +50,8 @@ export interface SessionConfigRow {
   live_backend_model: string | null;
   theme: string | null;
   proactive_offering: boolean | null;
+  /** ai-therapist-202 arm; absent until migration 123 is applied. */
+  psychoeducation_cue?: boolean | null;
 }
 
 export interface UpsertSessionConfigInput {
@@ -72,6 +74,12 @@ export interface UpsertSessionConfigInput {
   theme?: string | null;
   /** ai-therapist-74 A/B condition resolved for this session; null = not evaluated. */
   proactive_offering?: boolean | null;
+  /**
+   * ai-therapist-202 psychoeducation-cue arm; null/omitted = not in the
+   * experiment. Written by a separate UPDATE (not the upsert column list) so
+   * a database without migration 123 keeps working.
+   */
+  psychoeducation_cue?: boolean | null;
 }
 
 export interface SessionAccessInfo {
@@ -291,7 +299,29 @@ export async function upsertSessionConfig(
       live_backend_model,
     ],
   );
-  return result.rows[0];
+  const row = result.rows[0];
+  if (typeof config.psychoeducation_cue === 'boolean') {
+    const stored = await setSessionPsychoeducationCue(sessionId, config.psychoeducation_cue);
+    if (stored && row) row.psychoeducation_cue = config.psychoeducation_cue;
+  }
+  return row;
+}
+
+/**
+ * Record a session's psychoeducation-cue arm (ai-therapist-202). Returns false,
+ * without throwing, when the column is missing (migration 123 not applied).
+ */
+export async function setSessionPsychoeducationCue(sessionId: string, cue: boolean): Promise<boolean> {
+  try {
+    await pool.query('UPDATE session_configurations SET psychoeducation_cue = $2 WHERE session_id = $1', [
+      sessionId,
+      cue,
+    ]);
+    return true;
+  } catch (err) {
+    if ((err as { code?: string }).code === '42703') return false; // undefined_column
+    throw err;
+  }
 }
 
 /** A session's realtime configuration, or null. */

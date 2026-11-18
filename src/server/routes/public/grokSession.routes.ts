@@ -37,6 +37,8 @@ import {
   getActiveModality,
   getSystemConfig,
   resolveProactiveOffering,
+  resolvePsychoeducationCue,
+  resolveLeadConversation,
   getLanguageName,
 } from '../../utils/sessionHelpers.js';
 import { recordSessionOwnership } from '../../utils/sessionOwnership.js';
@@ -45,6 +47,7 @@ import {
   buildCheckinBlock,
   buildMemoryBlock,
   buildToolGuidanceBlock,
+  buildLeadConversationBlock,
 } from '../../utils/promptContext.js';
 import { requireConsent } from '../../middleware/consent.js';
 import { requireOutsideQuietHours } from '../../middleware/quietHours.js';
@@ -165,11 +168,20 @@ export default function grokSessionRoutes(): Router {
         const toolDefs = await toolRegistry.getEnabledToolDefinitions();
         const checkin = sanitizeCheckin(req.body?.checkin);
         const memoryBlock = await buildMemoryBlock(userId);
-        const toolGuidance = buildToolGuidanceBlock(toolDefs.map((t) => t.name));
+        // Psychoeducation retrieval cue (ai-therapist-202): resolved once per
+        // session and persisted below, like proactive_offering.
+        const psychoeducationCue = await resolvePsychoeducationCue();
+        const toolGuidance = buildToolGuidanceBlock(
+          toolDefs.map((t) => t.name),
+          { psychoeducationCue: psychoeducationCue === true },
+        );
         const proactiveOffering = await resolveProactiveOffering();
+        // Lead-conversation steering (features.lead_conversation_enabled, default off).
+        const leadConversation = await resolveLeadConversation();
         const systemPrompt =
           (await getSystemPrompt(userLanguage, 'realtime', proactiveOffering)) +
           toolGuidance +
+          buildLeadConversationBlock(leadConversation) +
           memoryBlock +
           buildCheckinBlock(checkin);
         const activeModality = await getActiveModality();
@@ -255,6 +267,7 @@ export default function grokSessionRoutes(): Router {
             live_backend_model: null,
             transcription_model: null, // Grok transcribes internally.
             proactive_offering: proactiveOffering,
+            psychoeducation_cue: psychoeducationCue,
           });
         } catch (dbError) {
           // Unlike the GPT-Live route nothing is billing yet, so a DB failure
@@ -270,6 +283,7 @@ export default function grokSessionRoutes(): Router {
           openingPrompt: buildGrokOpeningPrompt(
             userLanguage,
             systemConfig.crisis_contact as CrisisContactLike | undefined,
+            { leadConversation },
           ),
           refusalGuard,
           recoveryLine: buildGrokRefusalRecoveryLine(
