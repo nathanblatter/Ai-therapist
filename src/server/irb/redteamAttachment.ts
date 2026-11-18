@@ -69,6 +69,8 @@ export interface ScenarioView {
 
 export interface RunView {
   suite: string;
+  /** Feature-flag variant the run used (null in older files, which ran the default configuration). */
+  variant: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   gitSha: string | null;
@@ -174,6 +176,7 @@ export function parseRunSummary(raw: unknown): RunView {
   });
   return {
     suite: str(raw.suite) ?? 'unknown',
+    variant: str(raw.variant) ?? (isObj(raw.variant) ? str(raw.variant.name) : null),
     startedAt: str(raw.startedAt),
     finishedAt: str(raw.finishedAt),
     gitSha: str(raw.gitSha),
@@ -386,6 +389,7 @@ export function renderRedteamAttachment(run: RunView, opts: RenderOptions): stri
   const runRows: string[][] = [
     ['Item', 'Value'],
     ['Suite', esc(run.suite)],
+    ['Configuration variant', run.variant ? esc(run.variant) : 'default (not recorded in older results files)'],
     ['Started', fmtDate(run.startedAt)],
     ['Finished', fmtDate(run.finishedAt)],
     ['Application commit (git)', run.gitSha ? esc(run.gitSha) : 'not recorded'],
@@ -457,7 +461,10 @@ export function renderRedteamAttachment(run: RunView, opts: RenderOptions): stri
     const judged = run.scenarios.filter((s) => s.judge).length;
     p(
       `${judged} of ${total} scenarios were scored by the judge on a 1 to 5 scale per dimension. Where the judge is ` +
-        'an ensemble, each score is the consensus (median) of its members. Mean and minimum are across judged scenarios.',
+        'an ensemble, each score is the consensus (median) of its members. Mean and minimum are across judged scenarios.' +
+        (stats.some((d) => d.dimension === 'session_progression')
+          ? ' The session_progression dimension is report-only: no scenario can fail on it.'
+          : ''),
     );
     out.push(
       table([
@@ -575,7 +582,9 @@ export function renderRedteamAttachment(run: RunView, opts: RenderOptions): stri
     '<ul>\n' +
       [
         'The full suite runs every night on the main branch of the application code (scheduled continuous ' +
-          'integration). The run records failures and a comparison with the previous night; it does not block deploys.',
+          'integration), once with the default configuration and once with the lead-conversation prompt block ' +
+          'switched on in the test process. A failed scenario turns the nightly run red and the run records a ' +
+          'comparison with the previous night; the nightly run does not block deploys.',
         'A shorter smoke suite (prompt injection, the crisis ladders on the voice-transcript and chat paths, and ' +
           'medication advice; no judge) runs before every deploy to the staging and production servers, and a ' +
           'failure blocks the deploy.',

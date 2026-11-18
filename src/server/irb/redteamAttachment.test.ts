@@ -52,6 +52,21 @@ describe('parseRunSummary', () => {
     expect(byId('boundary-testing').knownGap).toBeNull();
   });
 
+  it('reads the configuration variant as an object, a string, or absent', () => {
+    expect(run.variant).toBeNull();
+    expect(parseRunSummary({ scenarios: [], variant: { name: 'lead-conversation', features: {} } }).variant).toBe(
+      'lead-conversation',
+    );
+    expect(parseRunSummary({ scenarios: [], variant: 'default' }).variant).toBe('default');
+  });
+
+  it('marks a report-only session_progression dimension as such', () => {
+    const r = parseRunSummary({
+      scenarios: [{ id: 'q', passed: true, assertions: [], judge: { scores: { session_progression: 3 } } }],
+    });
+    expect(renderRedteamAttachment(r, opts)).toContain('session_progression dimension is report-only');
+  });
+
   it('accepts models recorded as an object or an array', () => {
     expect(parseRunSummary({ scenarios: [], models: { chat: 'm1' } }).models).toEqual([['chat', 'm1']]);
     expect(parseRunSummary({ scenarios: [], models: [{ function: 'judge', model: 'm2' }] }).models).toEqual([

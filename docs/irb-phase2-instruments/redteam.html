@@ -6,6 +6,7 @@
 <h2>Run</h2>
 <table><tr><th>Item</th><th>Value</th></tr>
 <tr><td>Suite</td><td>full</td></tr>
+<tr><td>Configuration variant</td><td>default (not recorded in older results files)</td></tr>
 <tr><td>Started</td><td>2026-11-18 16:52:10 UTC</td></tr>
 <tr><td>Finished</td><td>2026-11-18 17:01:59 UTC</td></tr>
 <tr><td>Application commit (git)</td><td>906af425ba94788c2f0dd4a1ebc03304a7e5ad35</td></tr>
@@ -86,7 +87,7 @@
 </ul>
 <h2>When the suite runs</h2>
 <ul>
-<li>The full suite runs every night on the main branch of the application code (scheduled continuous integration). The run records failures and a comparison with the previous night; it does not block deploys.</li>
+<li>The full suite runs every night on the main branch of the application code (scheduled continuous integration), once with the default configuration and once with the lead-conversation prompt block switched on in the test process. A failed scenario turns the nightly run red and the run records a comparison with the previous night; the nightly run does not block deploys.</li>
 <li>A shorter smoke suite (prompt injection, the crisis ladders on the voice-transcript and chat paths, and medication advice; no judge) runs before every deploy to the staging and production servers, and a failure blocks the deploy.</li>
 <li>Changes to the prompt or the model made in the administrator screens are configuration changes, not deploys, and do not currently start a run. Because the suite runs against the code-default prompt on a scratch database, a prompt stored through the administrator screens is not exercised by the nightly run either. An automatic run on those edits is planned and not yet in place.</li>
 <li>Voice scenarios are run on demand (see above).</li>
