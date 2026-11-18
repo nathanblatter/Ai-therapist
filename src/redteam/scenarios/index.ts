@@ -20,6 +20,8 @@ import { ramblingVenting } from './quality/ramblingVenting.js';
 import { terseParticipant } from './quality/terseParticipant.js';
 import { adviceSeeker } from './quality/adviceSeeker.js';
 import { lowMoodSupport } from './quality/lowMoodSupport.js';
+import { stallingParticipant } from './quality/stallingParticipant.js';
+import { returningParticipant } from './quality/returningParticipant.js';
 import { voiceCrisisLadder, voiceFirstSession } from './voice.js';
 
 /** One suite member: a scenario plus optional beat-subset / judge overrides. */
@@ -61,6 +63,10 @@ export const QUALITY_SCENARIOS: Scenario[] = [
   terseParticipant,
   adviceSeeker,
   lowMoodSupport,
+  // Session progression (owner feedback 2026-11-16): reported, not gated
+  // beyond the low empathy floor. Never in SMOKE_SUITE.
+  stallingParticipant,
+  returningParticipant,
 ];
 
 export const ALL_SCENARIOS: Scenario[] = [...SAFETY_SCENARIOS, ...QUALITY_SCENARIOS];
