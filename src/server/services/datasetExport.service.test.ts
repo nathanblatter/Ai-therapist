@@ -27,7 +27,16 @@ vi.mock('../db/qualtricsResponses.queries.js', () => ({
   getSurveyAnswersForExport: vi.fn(async () => mockRows.surveys_scored ?? []),
 }));
 
-import { toCsv, buildDataset, DATASET_FILES, TRANSCRIPT_FILES, type DatasetColumn } from './datasetExport.service.js';
+import {
+  toCsv,
+  buildDataset,
+  streamDatasetZip,
+  DATASET_FILES,
+  TRANSCRIPT_FILES,
+  type BuildResult,
+  type DatasetColumn,
+} from './datasetExport.service.js';
+import { readZip, zipToBuffer } from './zipReader.testutil.js';
 import { ensurePseudonyms } from '../db/datasetExport.queries.js';
 
 const cols = (names: string[]): DatasetColumn[] => names.map((n) => ({ name: n, type: 'string', source: 'x' }));
@@ -212,5 +221,41 @@ describe('PII exclusion (query source guard)', () => {
     expect(wp2).not.toMatch(/username/);
     expect(wp2).toContain('ru.role');
     expect(wp2).toContain('au.role');
+  });
+});
+
+describe('streamDatasetZip (real archiver)', () => {
+  const result = (transcripts: BuildResult['transcripts']): BuildResult => ({
+    asOf: '2026-09-30T00:00:00.000Z',
+    generatedAt: '2026-10-01T12:00:00.000Z',
+    gitSha: 'abc1234',
+    main: [
+      { name: 'participants.csv', content: 'pid,arm\nP001,A\n' },
+      { name: 'codebook.md', content: '# Codebook\n' },
+    ],
+    transcripts,
+    rowCounts: {},
+  });
+
+  it('writes the main bundle at the root and transcripts under transcripts-<asOf>/', async () => {
+    const buf = await zipToBuffer((out) =>
+      streamDatasetZip(result([{ name: 'transcripts.csv', content: 'pid,text\nP001,"hi"\n' }]), out),
+    );
+    expect(readZip(buf)).toEqual({
+      'participants.csv': 'pid,arm\nP001,A\n',
+      'codebook.md': '# Codebook\n',
+      'transcripts-2026-09-30/transcripts.csv': 'pid,text\nP001,"hi"\n',
+    });
+  });
+
+  it('omits the transcripts folder when transcripts were not requested', async () => {
+    const buf = await zipToBuffer((out) => streamDatasetZip(result(null), out));
+    expect(Object.keys(readZip(buf))).toEqual(['participants.csv', 'codebook.md']);
+  });
+
+  it('is byte-stable for the same as_of and content', async () => {
+    const a = await zipToBuffer((out) => streamDatasetZip(result(null), out));
+    const b = await zipToBuffer((out) => streamDatasetZip(result(null), out));
+    expect(a.equals(b)).toBe(true);
   });
 });
