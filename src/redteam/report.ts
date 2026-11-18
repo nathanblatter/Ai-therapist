@@ -4,6 +4,7 @@ import path from 'path';
 import type { RedteamConfig } from './config.js';
 import type { ScenarioResult } from './types.js';
 import { aggregateProgression } from './progression.js';
+import { aggregateVoice } from './voice/aggregate.js';
 import type { VariantLabel } from './variants.js';
 
 export interface RunSummary {
@@ -94,6 +95,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     // Synthetic persona text + model replies, so a CI failure can be triaged
     // from the artifact after the CI database is gone.
     transcript: s.transcript,
+    // GPT-Live runs: the voice evaluation metrics (voice/metrics.ts).
+    ...(s.voiceMetrics ? { voiceMetrics: s.voiceMetrics } : {}),
   }));
   const assertionCount = summary.scenarios.reduce((n, s) => n + s.assertions.length, 0);
   const assertionFailures = summary.scenarios.reduce(
@@ -120,6 +123,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
       estCostUsd: Number(summary.scenarios.reduce((n, s) => n + s.costUsd, 0).toFixed(6)),
       judge: judgeStats(summary.scenarios),
       progression: aggregateProgression(summary.scenarios.map((s) => s.progression)),
+      // P50/P90 across repeats, per risk band and for crisis turns (voice/aggregate.ts).
+      voice: aggregateVoice(summary.scenarios),
     },
   };
 }

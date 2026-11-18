@@ -47,6 +47,8 @@ import {
   type VoiceTransport,
   type VoiceSessionOptions,
 } from './voiceClient.js';
+import { frameRms, SPEECH_RMS_THRESHOLD } from './voice/timeline.js';
+import { withSeededHistory } from './voice/sessionInput.js';
 
 // opusscript is CommonJS with `export =`; load it the CJS way under ESM.
 const require = createRequire(import.meta.url);
@@ -151,8 +153,10 @@ export class LiveVoiceSession implements VoiceTransport {
   private lastUserDeltaAt = 0;
   private pendingPcm: Buffer[] = [];
   private assistantPcm: Buffer[] = [];
-  /** Microphone pump: PCM frames queued for the next ticks; silence when empty. */
-  private micQueue: Buffer[] = [];
+  /** Microphone pump: PCM frames queued for the next ticks; silence when empty.
+   *  `speech` is the frame's voice activity judged on the CLEAN source (WALK
+   *  noise would otherwise make every frame look like speech). */
+  private micQueue: Array<{ pcm: Buffer; speech?: boolean }> = [];
   private pumpTimer: NodeJS.Timeout | null = null;
   private lastFrameWasSilence = true;
   private readonly silenceFrame = Buffer.alloc(PCM_BYTES_PER_FRAME);
@@ -229,9 +233,14 @@ export class LiveVoiceSession implements VoiceTransport {
     // A recovery start is the browser's answer to a content-filter cut
     // (App.tsx startRecoveryVoiceSession): same route, `recovery: true`, and
     // the server swaps in the narrow crisis prompt with no history.
-    const res = await agent
-      .post('/api/live/session')
-      .send(opts.recovery ? { sdp, language: 'en', recovery: true } : { sdp, language: 'en' });
+    // CRAWL/WALK: prior turns ride in session.input (voice/sessionInput.ts).
+    const res = await withSeededHistory(
+      opts.recovery ? undefined : opts.history,
+      async () =>
+        await agent
+          .post('/api/live/session')
+          .send(opts.recovery ? { sdp, language: 'en', recovery: true } : { sdp, language: 'en' }),
+    );
     if (res.status !== 201 || typeof res.body?.session_id !== 'string' || typeof res.body?.sdp !== 'string') {
       await pc.close().catch(() => {});
       throw new Error(`POST /api/live/session failed: ${res.status} ${JSON.stringify(res.body).slice(0, 300)}`);
@@ -260,6 +269,14 @@ export class LiveVoiceSession implements VoiceTransport {
       // only, none of the previous conversation.
       vs.windowStart = Date.now();
       vs.firstAssistantDeltaAt = 0;
+      opts.timeline?.event({
+        kind: 'session_started',
+        sessionId: vs.sessionId,
+        detail: opts.recovery ? 'recovery' : '',
+      });
+      // A CRAWL/WALK session resumes a conversation already under way (seeded
+      // history): no opening line, the caller's request comes first.
+      if (opts.history?.length && !opts.recovery) return { session: vs, opening: '' };
       vs.sendAppend(opts.recovery ? LIVE_RECOVERY_SPEAK_FIRST_NUDGE : openingPrompt);
       const opening = await vs.awaitAssistantTurn(Date.now() + BEAT_TIMEOUT_MS);
       vs.openingLayer = vs.takeLayer();
@@ -295,7 +312,12 @@ export class LiveVoiceSession implements VoiceTransport {
       e.track.onReceiveRtp.subscribe((rtp) => {
         try {
           const pcm = this.decoder.decode(rtp.payload);
-          if (pcm && pcm.length > 0) this.assistantPcm.push(Buffer.from(pcm));
+          if (pcm && pcm.length > 0) {
+            const buf = Buffer.from(pcm);
+            this.assistantPcm.push(buf);
+            if (this.sessionId) this.opts.timeline?.assistantFrame(this.sessionId, Date.now(), buf, VOICE_SAMPLE_RATE);
+            this.opts.onAssistantPcm?.(buf);
+          }
         } catch {
           /* DTX / comfort noise / undecodable frame */
         }
@@ -319,6 +341,7 @@ export class LiveVoiceSession implements VoiceTransport {
     ) {
       console.log(`[voice:live] ${JSON.stringify(ev).slice(0, 200)}`);
     }
+    this.recordTimeline(type, ev);
     switch (type) {
       case 'session.started':
         this.started = true;
@@ -381,6 +404,74 @@ export class LiveVoiceSession implements VoiceTransport {
       default:
         break;
     }
+  }
+
+  /** Mirror the data channel onto the evaluation timeline (voice/timeline.ts). */
+  private recordTimeline(type: string, ev: LiveEvent): void {
+    const tl = this.opts.timeline;
+    if (!tl || !this.sessionId) return;
+    const sessionId = this.sessionId;
+    switch (type) {
+      case 'session.output_transcript.delta':
+        tl.event({ kind: 'assistant_transcript', sessionId, detail: String(ev.delta ?? '') });
+        break;
+      case 'session.input_transcript.delta':
+        tl.event({ kind: 'caller_transcript', sessionId, detail: String(ev.delta ?? '') });
+        break;
+      case 'session.delegation.created': {
+        const d = ev.delegation as { id?: unknown } | undefined;
+        if (typeof d?.id === 'string') tl.event({ kind: 'delegation_created', sessionId, delegationId: d.id });
+        break;
+      }
+      case 'response.event': {
+        const inner = ev.event as { type?: string; item?: { type?: string; name?: string } } | undefined;
+        const delegationId = typeof ev.delegation_id === 'string' ? ev.delegation_id : undefined;
+        if (inner?.type === 'response.created') tl.event({ kind: 'backend_response_created', sessionId, delegationId });
+        else if (
+          inner?.type === 'response.completed' ||
+          inner?.type === 'response.failed' ||
+          inner?.type === 'response.incomplete' ||
+          inner?.type === 'response.cancelled'
+        )
+          tl.event({ kind: 'backend_response_done', sessionId, delegationId, detail: inner.type });
+        else if (inner?.type === 'response.output_item.done' && inner.item?.type === 'function_call')
+          tl.event({ kind: 'tool_call', sessionId, delegationId, detail: inner.item.name ?? '' });
+        break;
+      }
+      case 'session.usage.updated': {
+        const usage = (ev as { usage?: { seconds?: unknown } }).usage;
+        if (typeof usage?.seconds === 'number') tl.event({ kind: 'usage', sessionId, value: usage.seconds });
+        break;
+      }
+      case 'session.closed': {
+        const usage = (ev as { usage?: { seconds?: unknown } }).usage;
+        if (typeof usage?.seconds === 'number') tl.event({ kind: 'usage', sessionId, value: usage.seconds });
+        tl.event({ kind: 'session_closed', sessionId, detail: typeof ev.reason === 'string' ? ev.reason : '' });
+        break;
+      }
+      case 'error': {
+        const err = ev.error as { code?: string } | undefined;
+        if (err?.code === 'content_filter') tl.event({ kind: 'content_filter', sessionId });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  /** RUN: queue one 20 ms frame of simulated-caller audio on the microphone. */
+  feedMic(pcm: Buffer): void {
+    if (this.closed) return;
+    this.micQueue.push({ pcm });
+  }
+
+  /** RUN: true once the transport has closed (vendor cut or end). */
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
+  get closedReason(): string | null {
+    return this.closeReason;
   }
 
   private onNestedResponseEvent(
@@ -634,10 +725,13 @@ export class LiveVoiceSession implements VoiceTransport {
     let next = Date.now();
     const tick = () => {
       if (this.closed || !this.pumpTimer) return;
-      const frame = this.micQueue.shift();
+      // RUN: the simulated caller's relayed audio is the microphone.
+      const relayed = this.micQueue.length === 0 ? this.opts.micSource?.() : undefined;
+      const frame = this.micQueue.shift() ?? (relayed ? { pcm: relayed } : undefined);
       if (frame) {
-        this.writeOpusFrame(frame, this.lastFrameWasSilence);
+        this.writeOpusFrame(frame.pcm, this.lastFrameWasSilence);
         this.lastFrameWasSilence = false;
+        this.opts.timeline?.callerFrame(this.sessionId, Date.now(), frame.pcm, frame.speech);
       } else {
         this.writeOpusFrame(this.silenceFrame, false);
         this.lastFrameWasSilence = true;
@@ -671,7 +765,7 @@ export class LiveVoiceSession implements VoiceTransport {
     this.track.writeRtp(new RtpPacket(header, Buffer.from(payload)));
   }
 
-  async speakBeat(text: string): Promise<BeatTurn> {
+  async speakBeat(text: string, beatId?: string): Promise<BeatTurn> {
     const deadline = Date.now() + BEAT_TIMEOUT_MS;
     await this.waitForQuiet();
     // Anything the assistant said since the last beat's reply closed (steers,
@@ -695,16 +789,22 @@ export class LiveVoiceSession implements VoiceTransport {
     });
     const spoken = Buffer.from(await speech.arrayBuffer());
     this.cost.addTts(text.length, pcmDurationMs(spoken) / 1000);
-    let pcm = Buffer.concat([spoken, silencePcm(TRAILING_SILENCE_MS)]);
-    const pad = pcm.length % PCM_BYTES_PER_FRAME;
-    if (pad) pcm = Buffer.concat([pcm, Buffer.alloc(PCM_BYTES_PER_FRAME - pad)]);
+    let clean = Buffer.concat([spoken, silencePcm(TRAILING_SILENCE_MS)]);
+    const pad = clean.length % PCM_BYTES_PER_FRAME;
+    if (pad) clean = Buffer.concat([clean, Buffer.alloc(PCM_BYTES_PER_FRAME - pad)]);
+    // WALK: the acoustic condition is applied to what the model hears; voice
+    // activity for the metrics is still judged on the clean source.
+    const pcm = this.opts.audioTransform ? this.opts.audioTransform(clean) : clean;
     this.pendingPcm.push(pcm);
 
     // Hand the utterance to the microphone pump and wait for it to play out
     // at real-time pace (the pump sends silence again once the queue drains).
     const frames = pcm.length / PCM_BYTES_PER_FRAME;
-    for (let i = 0; i < frames; i++)
-      this.micQueue.push(pcm.subarray(i * PCM_BYTES_PER_FRAME, (i + 1) * PCM_BYTES_PER_FRAME));
+    const queuedAt = Date.now();
+    for (let i = 0; i < frames; i++) {
+      const at = (x: Buffer) => x.subarray(i * PCM_BYTES_PER_FRAME, (i + 1) * PCM_BYTES_PER_FRAME);
+      this.micQueue.push({ pcm: at(pcm), speech: frameRms(at(clean)) >= SPEECH_RMS_THRESHOLD });
+    }
     const playoutBy = Date.now() + frames * FRAME_MS + 500;
     while (this.micQueue.length > 0 && Date.now() < playoutBy) {
       if (this.closed && isRecoverableClose(this.closeReason)) break;
@@ -713,6 +813,12 @@ export class LiveVoiceSession implements VoiceTransport {
       await sleep(FRAME_MS);
     }
     this.userTurns += 1;
+    this.opts.timeline?.callerTurn({
+      beatId: beatId ?? `turn-${this.userTurns}`,
+      sessionId: this.sessionId,
+      queuedAt,
+      playedOutAt: Date.now(),
+    });
 
     const assistantText = await this.awaitAssistantTurn(deadline);
     const layer = this.takeLayer();
