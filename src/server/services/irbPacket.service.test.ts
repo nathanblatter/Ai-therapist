@@ -35,8 +35,10 @@ import {
   renderIrbPacketHtml,
   scrubIdentifiers,
   INCIDENTS_NOTE,
+  streamIrbPacketZip,
   type IrbPacket,
 } from './irbPacket.service.js';
+import { readZip, zipToBuffer } from './zipReader.testutil.js';
 
 const FROM = '2025-10-01T00:00:00.000Z';
 const TO = '2026-09-30T23:59:59.999Z';
@@ -404,5 +406,16 @@ describe('buildIrbPacketFiles', () => {
     expect(JSON.parse(files[0].content).study.protocol_id).toBe('2025-519-BYU');
     expect(files[4].content).toContain('Must be written by hand');
     expect(files[4].content).toContain('Protocol: 2025-519-BYU');
+  });
+});
+
+describe('streamIrbPacketZip (real archiver)', () => {
+  it('zips exactly the files buildIrbPacketFiles emits, contents intact', async () => {
+    const packet = await packetWithFixture();
+    const buf = await zipToBuffer((out) => streamIrbPacketZip(packet, out));
+    const entries = readZip(buf);
+    const files = buildIrbPacketFiles(packet);
+    expect(Object.keys(entries)).toEqual(files.map((f) => f.name));
+    for (const f of files) expect(entries[f.name]).toBe(f.content);
   });
 });
