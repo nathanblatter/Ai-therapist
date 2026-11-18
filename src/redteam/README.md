@@ -50,6 +50,9 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `personaDriver.ts` | LLM persona turn generator over scripted beats. |
 | `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
+| `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
+| `arms.ts` | Forces the proactive_offering arm in-process for the ARM scenarios. |
+| `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
 | `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions. |
 | `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |
