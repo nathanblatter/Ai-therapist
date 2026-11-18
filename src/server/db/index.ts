@@ -63,6 +63,7 @@ export * from './funnel.queries.js';
 export * from './latency.queries.js';
 export * from './practiceAssignments.queries.js';
 export * from './harnessRuns.queries.js';
+export * from './configEvaluations.queries.js';
 export * from './caseload.queries.js';
 export * from './invites.queries.js';
 // Caseworker portal foundation modules (docs/caseworker-portal.md, slice F).

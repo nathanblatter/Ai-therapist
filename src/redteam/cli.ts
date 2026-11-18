@@ -644,6 +644,16 @@ async function main(): Promise<void> {
   const { pool } = await import('../server/config/db.js');
   const { CURRENT_CONSENT_VERSION } = await import('../server/utils/consent.js');
 
+  // --config-snapshot <file>: load an environment's evaluated configuration
+  // into this (disposable) database first. See configSnapshot.ts. A --variant
+  // below still overlays its feature flags on top of the snapshot.
+  try {
+    await (await import('./configSnapshot.js')).loadConfigSnapshotFromArgv(process.argv.slice(2), pool, cfg.outDir);
+  } catch (err) {
+    console.error(`[redteam] ${(err as Error).message}`);
+    process.exit(2);
+  }
+
   // Variant flags are overlaid in this process only (never written to the DB).
   await applyVariant(variant);
   if (variant.name !== DEFAULT_VARIANT) console.log(`[redteam] variant ${variant.name}: ${variant.description}`);
