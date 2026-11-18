@@ -19,6 +19,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // supertest servers bind 127.0.0.1 so no other process on the machine can
+    // answer a test's request (ai-therapist-279; see the file's header).
+    setupFiles: ['src/server/testing/supertestLoopback.ts'],
     // Set before any test module loads. OPENAI_API_KEY makes getOpenAIKey()
     // short-circuit before touching AWS Secrets Manager — several modules call
     // it at import time (e.g. redaction.service), so tests must never depend on
@@ -27,6 +30,12 @@ export default defineConfig({
       OPENAI_API_KEY: 'sk-test-key',
       SESSION_SECRET: 'test-session-secret',
       NODE_ENV: 'test',
+      // Tests that import the server entry (src/server/index.ts) would
+      // otherwise attach the socket.io Postgres adapter to the mocked pool,
+      // and its 5-second heartbeat (SELECT pg_notify) lands in whatever test
+      // is running at the time (ai-therapist-279). No test exercises
+      // cross-container fan-out, and index.ts already honours this switch.
+      SOCKET_PG_ADAPTER: 'off',
     },
   },
 });
