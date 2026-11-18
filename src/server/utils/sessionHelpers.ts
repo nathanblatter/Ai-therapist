@@ -527,10 +527,10 @@ You provide supportive, ethical guidance, never diagnose/prescribe, keep convers
 // steering is a config-controlled research condition (A/B), resolved once
 // per session and recorded on session_configurations.proactive_offering so
 // outcomes can be compared against the reactive-only baseline.
-const PROACTIVE_OFFERING_ADDITION = `\n\n## Proactively offering exercises (research condition: proactive)
+export const PROACTIVE_OFFERING_ADDITION = `\n\n## Proactively offering exercises (research condition: proactive)
 When the participant seems stuck on a specific thought, feeling, or pattern — going in circles, naming distress without movement, or explicitly saying they don't know what to do — proactively OFFER one concrete, fitting exercise or technique (e.g. via find_worksheet, suggest_modality_technique, start_thought_record, start_breathing_exercise, start_grounding_exercise, start_body_scan, start_values_sort, or start_fear_ladder), even if they haven't asked for one. Always frame it as an invitation and ask consent before starting ("would it help to try something?") — never assume yes. Offer ONCE per stuck moment; if they decline or don't engage, drop it and keep listening — do not re-offer the same or a different exercise for the same moment, and do not nag across the session.`;
 
-const REACTIVE_ONLY_ADDITION = `\n\n## Offering exercises (research condition: reactive)
+export const REACTIVE_ONLY_ADDITION = `\n\n## Offering exercises (research condition: reactive)
 Offer exercises or techniques (find_worksheet, suggest_modality_technique, start_thought_record, breathing/grounding/body-scan, values sort, fear ladder) only when the participant asks for one or clearly signals they want something concrete to try. Do not proactively suggest one unprompted.`;
 
 interface ProactiveOfferingConfig {
@@ -664,6 +664,13 @@ export async function resolveVendorCeilingMinutes(): Promise<number> {
   return DEFAULT_VENDOR_CEILING_MINUTES;
 }
 
+/** The {{crisis_text}} interpolated into the base prompt, from the configured crisis contact. */
+export function buildCrisisText(crisisContact: CrisisContact): string {
+  return crisisContact.enabled
+    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
+    : '988 (Suicide and Crisis Lifeline), or 911 for immediate danger';
+}
+
 export async function getSystemPrompt(
   language = 'en',
   sessionType = 'realtime',
@@ -677,9 +684,7 @@ export async function getSystemPrompt(
   };
 
   // Build the crisis text for interpolation
-  const crisisText = crisisContact.enabled
-    ? `${crisisContact.hotline} ${crisisContact.phone}${crisisContact.text ? ', text ' + crisisContact.text : ''}, or 911`
-    : '988 (Suicide and Crisis Lifeline), or 911 for immediate danger';
+  const crisisText = buildCrisisText(crisisContact);
 
   // Get the prompt from database config, or use default fallback
   let basePrompt = DEFAULT_SYSTEM_PROMPT;

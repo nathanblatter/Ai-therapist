@@ -6,8 +6,11 @@
 // - NEVER on the live participant path (chat turns, realtime, crisis
 //   assessment). Only post-session jobs: redaction, insights, SOAP, evals.
 // - Flex is beta with limited model availability, and gpt-4o-mini is NOT
-//   eligible. Eligible: gpt-6-astra, gpt-5.6-*, gpt-5.5, gpt-5.4 family,
-//   gpt-5.2, gpt-5.1, gpt-5/mini/nano, o3, o4-mini.
+//   eligible. Eligible: gpt-6-astra, gpt-6-sol, gpt-6.1-sol, gpt-6.1-terra,
+//   gpt-6-luna, gpt-5.6-*, gpt-5.5, gpt-5.4 family, gpt-5.2, gpt-5.1,
+//   gpt-5/mini/nano, o3, o4-mini. The 6.2 generation (gpt-6.2-astra,
+//   gpt-6.2-sol) has NO Flex rate on the pricing page (checked 2026-11-18),
+//   so it is excluded below even though it shares the gpt-6 prefix.
 // - Flex can return 429 "Resource Unavailable" when there is no spare
 //   capacity. That request is NOT billed; the correct response is to retry
 //   on the default tier rather than fail the job.
@@ -17,9 +20,9 @@
 const FLEX_ELIGIBLE = /^(gpt-6|gpt-5\.6|gpt-5\.5|gpt-5\.4|gpt-5\.2|gpt-5\.1|gpt-5(-|$)|o3(-|$)|o4-mini)/;
 
 // Explicitly ineligible despite matching a family prefix above: the -pro
-// variants, and o3-mini (o3 itself IS eligible — the hyphen makes it an easy
-// false positive).
-const FLEX_EXCLUDED = /-pro(-|$)|^o3-mini/;
+// variants, o3-mini (o3 itself IS eligible — the hyphen makes it an easy
+// false positive), and the GPT-6.2 generation.
+const FLEX_EXCLUDED = /-pro(-|$)|^o3-mini|^gpt-6\.2/;
 
 export function isFlexEligible(model: string): boolean {
   return FLEX_ELIGIBLE.test(model) && !FLEX_EXCLUDED.test(model);

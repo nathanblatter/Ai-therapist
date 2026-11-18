@@ -31,8 +31,15 @@ any study analysis.
 ## What the system records
 
 - **Per session** (`session_configurations`, migration 033):
-  - `ai_model` — the **voice** model string the session was created with
-    (`gpt-live-1`, or a `gpt-realtime-*` id for pre-migration sessions).
+  - `ai_model` — for a voice session, the **voice** model string the session
+    was created with (`gpt-live-1`, or a `gpt-realtime-*` id for pre-migration
+    sessions). For a **typed-chat** session, the chat model that produced the
+    replies (`system_config.chat_model`, default `gpt-5.2`), stamped at
+    `/api/chat/start` since 2026-11. Chat sessions from before that have
+    `ai_model` NULL and ran on `gpt-5.2`; `session_llm_usage.model` where
+    `purpose = 'chat'` confirms it per session.
+  - `live_backend_model` — the GPT-Live delegated backend the session was
+    created with (written by `/api/live/session`; NULL for Grok and chat).
   - `transcription_model` — **`NULL` for every GPT-Live voice session**, written
     explicitly rather than left to default, so an analyst is not misled into
     thinking a transcription model was in play. Populated for pre-migration
@@ -43,16 +50,30 @@ any study analysis.
     is sent to the **delegated backend** under GPT-Live, not to the voice model.
   - `NULL` on any of these can also mean unknown (row predates migration 033, or
     the session row was lazily created by `/logs/batch`).
-- **Not recorded per session: the backend model.** `live_backend_model` is read
-  from `system_config` at session creation and passed to OpenAI, but there is no
-  `session_configurations` column holding it. Until there is, the backend model
-  for a given session has to be reconstructed from
-  `session_llm_usage.model` where `purpose = 'live_delegation'`, which records
-  the model string OpenAI reported on each delegated response. That is a
-  reliable per-session record as long as the session made at least one delegated
-  call.
-- **Globally** (`system_config.ai_model`, `system_config.live_backend_model`):
-  whatever the admin selected — alias or pinned snapshot.
+- **Cross-check for the backend model:** `session_llm_usage.model` where
+  `purpose = 'live_delegation'` records the model string OpenAI reported on
+  each delegated response, which is what actually ran (the stamp records what
+  was requested).
+- **Globally** (`system_config.ai_model`, `system_config.live_backend_model`,
+  `system_config.chat_model`): whatever the admin selected — alias or pinned
+  snapshot.
+
+## Changing a model mid-enrollment
+
+Moving `live_backend_model` or `chat_model` (for example to `gpt-6.1-terra`)
+changes the intervention for every session started afterwards; sessions
+already running keep the model they started with. Before flipping either on a
+study deployment:
+
+1. Record the change date and the old and new ids in the study log, and log a
+   Flightdeck decision. The per-session stamps above make the boundary
+   verifiable, but the analysis plan has to know to look for it: either treat
+   the date as a pre/post covariate, or treat the two models as arms.
+2. Check whether the IRB materials name the model. If the protocol or consent
+   says "GPT-5.2" or "GPT-5.6", the change may need an amendment or at least a
+   note to the IRB before it applies to enrolled participants.
+3. Re-run the red-team suites on the new value (the harness reads the same
+   `system_config` keys, so set them in the scratch database).
 
 ## Recommendation
 
@@ -75,7 +96,13 @@ To group sessions by actual model:
 -- Voice model
 SELECT ai_model, COUNT(*) FROM session_configurations GROUP BY ai_model;
 
--- Delegated backend model, reconstructed from usage rows
+-- Chat model (ai_model is NULL for chat sessions before 2026-11)
+SELECT COALESCE(sc.ai_model, 'gpt-5.2 (unstamped)') AS chat_model, COUNT(*)
+  FROM session_configurations sc JOIN therapy_sessions ts USING (session_id)
+ WHERE ts.session_type = 'chat'
+ GROUP BY 1;
+
+-- Delegated backend model, as reported by OpenAI on each delegated response
 SELECT model, COUNT(DISTINCT session_id)
   FROM session_llm_usage
  WHERE purpose = 'live_delegation'
