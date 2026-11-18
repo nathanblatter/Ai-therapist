@@ -38,6 +38,22 @@ async function therapistMayAccessSession(req: Request, sessionId: string): Promi
   });
 }
 
+// A crisis RECOVERY session runs GPT-Live in client delegation mode with no
+// backend and no tools (buildLiveSessionConfig), so the backend-config controls
+// (trigger-tool, instruction/config updates) have nothing to act on. The
+// manager refuses them with LiveDelegationUnsupportedError; it is matched by
+// code rather than instanceof so the routes do not depend on the class
+// identity of a lazily imported (and, in tests, mocked) module.
+const RECOVERY_SESSION_ERROR = 'recovery_session_no_backend';
+
+function isDelegationUnsupported(error: unknown): error is Error {
+  return error instanceof Error && (error as Error & { code?: unknown }).code === 'live_delegation_unsupported';
+}
+
+function recoveryRefusal(details: string) {
+  return { error: 'Unavailable on a recovery session', code: RECOVERY_SESSION_ERROR, details };
+}
+
 export default function sidebandRoutes(): Router {
   const router = Router();
 
@@ -78,6 +94,9 @@ export default function sidebandRoutes(): Router {
 
         res.json({ success: true, message: 'Instructions updated successfully' });
       } catch (error: unknown) {
+        if (isDelegationUnsupported(error)) {
+          return res.status(409).json(recoveryRefusal(error.message));
+        }
         log.error({ err: error }, 'Failed to update instructions');
         res.status(500).json({
           error: 'Failed to update instructions',
@@ -177,6 +196,9 @@ export default function sidebandRoutes(): Router {
 
       res.json({ success: true, message: 'Session config updated successfully' });
     } catch (error: unknown) {
+      if (isDelegationUnsupported(error)) {
+        return res.status(409).json(recoveryRefusal(error.message));
+      }
       log.error({ err: error }, 'Failed to update session via sideband');
       res.status(500).json({
         error: 'Failed to update session',
@@ -290,8 +312,10 @@ export default function sidebandRoutes(): Router {
   // tool now (ai-therapist-103). Forces tool_choice to that function, injects
   // an invisible clinician nudge, triggers a response, and auto-resets
   // tool_choice back to 'auto' on the next response.done (30s fallback).
-  // Server-side we refuse only unknown/disabled tools; sensitive tools like
-  // end_session are confirm-gated client-side.
+  // Server-side we refuse unknown/disabled tools, and any tool on a crisis
+  // recovery session, which has no tools by design (ai-therapist-282); the
+  // plain End Session action (POST /admin/api/sessions/:id/end) is the way to
+  // end one. Sensitive tools like end_session are confirm-gated client-side.
   router.post('/admin/api/sideband/trigger-tool', requireRole('therapist', 'researcher'), async (req, res) => {
     try {
       const { sessionId, toolName, args } = req.body;
@@ -324,6 +348,18 @@ export default function sidebandRoutes(): Router {
           .json({ error: 'No active sideband connection', details: 'Session must have an active sideband connection' });
       }
 
+      // Refuse before granting an end_session authorization, so a refused
+      // trigger leaves no stray grant behind.
+      if (sidebandManager.getDelegationMode(sessionId) === 'client') {
+        return res
+          .status(409)
+          .json(
+            recoveryRefusal(
+              'This is a crisis recovery session, which runs without tools by design. ' + 'Use End Session to end it.',
+            ),
+          );
+      }
+
       // A forced end_session is a server-driven end: grant it, or the registry
       // refuses the model's call on a crisis-flagged session and this route
       // would report success while nothing ends.
@@ -343,6 +379,9 @@ export default function sidebandRoutes(): Router {
 
       res.json({ success: true, message: `Tool ${toolName} triggered` });
     } catch (error: unknown) {
+      if (isDelegationUnsupported(error)) {
+        return res.status(409).json(recoveryRefusal(error.message));
+      }
       const message = error instanceof Error ? error.message : String(error);
       // A response already in flight is a conflict, not a server fault: the
       // forced response.create would be rejected by OpenAI, so surface it

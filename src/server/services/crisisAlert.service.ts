@@ -49,16 +49,16 @@ async function resolveAlertTarget(): Promise<{ enabled: boolean; phone: string }
  * failure (config lookup, network, non-2xx) can never propagate up and break
  * the crisis-detection/session path that calls it.
  */
-export async function sendCrisisAlert(message: string): Promise<void> {
+export async function sendCrisisAlert(message: string): Promise<boolean> {
   try {
     const { enabled, phone } = await resolveAlertTarget();
     if (!enabled) {
       log.warn('[alert] crisis SMS disabled via admin config; skipping');
-      return;
+      return false;
     }
     if (!IMESSAGE_API_KEY || !phone) {
       log.warn('[alert] crisis SMS not configured (IMESSAGE_API_KEY / on-call phone); skipping');
-      return;
+      return false;
     }
     const res = await fetch(`${IMESSAGE_API_URL}/send`, {
       method: 'POST',
@@ -68,11 +68,67 @@ export async function sendCrisisAlert(message: string): Promise<void> {
     });
     if (!res.ok) {
       log.error(`[alert] crisis SMS failed: HTTP ${res.status}`);
-    } else {
-      log.info('[alert] crisis SMS sent');
+      return false;
     }
+    log.info('[alert] crisis SMS sent');
+    return true;
   } catch (err) {
     // Never let a paging failure bubble up into the crisis-detection flow.
     log.error({ err }, '[alert] crisis SMS failed');
+    return false;
+  }
+}
+
+// ============================================
+// OPENAI QUOTA EXHAUSTION (ai-therapist-190)
+// ============================================
+// The OpenAI org runs under a hard spend cap. Once it is hit every call is
+// rejected with a billing-class 429 - the risk assessor, the moderation
+// screen and the voice session mint alike - so crisis detection silently
+// drops to the keyword screen for EVERY session until a human raises the
+// limit. That is an operational failure of the safety infrastructure, the
+// same class as an unmonitored voice session or a filter-terminated one, and
+// it reaches a human the same way those do: the on-call page.
+//
+// Throttled in-process to one page per interval (the condition is global, not
+// per session, and every participant message re-detects it); the first
+// detection after a restart pages again, which is the safe direction.
+
+export type OpenAIQuotaComponent = 'risk_assessor' | 'moderation' | 'voice_session_mint';
+
+const QUOTA_PAGE_INTERVAL_MS = 60 * 60 * 1000;
+let lastQuotaPageAt: number | null = null;
+
+/**
+ * Record that OpenAI rejected a safety-relevant call because a billing, spend
+ * or usage ceiling was reached. Always logs at error level; pages the on-call
+ * at most once per hour. Never throws.
+ */
+export async function reportOpenAIQuotaExhausted(component: OpenAIQuotaComponent, code: string | null): Promise<void> {
+  try {
+    log.error(
+      { component, code },
+      '[alert] OpenAI quota/spend limit reached: crisis detection is degraded to the keyword screen',
+    );
+    const now = Date.now();
+    if (lastQuotaPageAt !== null && now - lastQuotaPageAt < QUOTA_PAGE_INTERVAL_MS) return;
+    // Claim the hour before sending so concurrent detections (every message
+    // re-detects the cap) cannot each page; hand it back if the page was not
+    // delivered, so a pager blip does not silence this alert for an hour.
+    const previous = lastQuotaPageAt;
+    lastQuotaPageAt = now;
+    let delivered = false;
+    try {
+      delivered = await sendCrisisAlert(
+        `AI-Therapist: OpenAI is rejecting requests because the account spend or usage limit has been reached` +
+          `${code ? ` (${code})` : ''}. This is a system alert, not a participant crisis. Until the limit is raised, ` +
+          'crisis detection runs on the keyword screen only (no AI risk assessment, no moderation screen) and new ' +
+          'voice sessions cannot start (chat replies fail too). Raise the limit in the OpenAI billing settings. Repeats hourly.',
+      );
+    } finally {
+      if (!delivered && lastQuotaPageAt === now) lastQuotaPageAt = previous;
+    }
+  } catch (err) {
+    log.error({ err }, '[alert] failed to report OpenAI quota exhaustion');
   }
 }
