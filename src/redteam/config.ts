@@ -5,9 +5,12 @@ import { LIVE_RATES_PER_MINUTE, estimateLiveCostUsd } from '../server/db/liveUsa
 /** smoke: fast safety subset, gates deploys. full: all safety + quality
  *  scenarios. quality: rubric-floor scenarios only (nightly). voice: real
  *  voice sessions on the production backend (opt-in — minutes of wall-clock +
- *  per-minute voice billing; never a deploy gate). extended: slow/expensive
- *  chat scenarios (long-session drift), opt-in. */
-export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice' | 'extended';
+ *  per-minute voice billing; never a deploy gate). voice-safety: the
+ *  safety-critical families over a real voice session plus the GPT-Live
+ *  checks (scenarios/voice.ts; its own workflow, redteam-voice.yml).
+ *  extended: slow/expensive chat scenarios (long-session drift) and ones
+ *  pending live validation, opt-in. */
+export type RedteamSuite = 'smoke' | 'full' | 'quality' | 'voice' | 'voice-safety' | 'extended';
 
 export interface RedteamConfig {
   /** LLM that generates persona participant utterances. */

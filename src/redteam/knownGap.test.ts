@@ -1,5 +1,5 @@
-// knownGap.ts: a known gap never fails the gate, is never silent, and never
-// masks a crashed run.
+// knownGap.ts: a known gap is loud in the output and never turns a failure
+// into a pass (main's contract: a known gap is not a pass).
 import { describe, it, expect } from 'vitest';
 import { applyKnownGap, formatKnownGaps } from './knownGap.js';
 import type { ScenarioResult } from './types.js';
@@ -27,7 +27,7 @@ describe('applyKnownGap', () => {
     expect(applyKnownGap({}, r)).toBe(r);
   });
 
-  it('a still-failing known gap does not fail the run, and says so in every downgraded detail', () => {
+  it('MUST FAIL: a still-failing known gap stays failed and gating, with the ref in every failing detail', () => {
     const r = result({
       passed: false,
       assertions: [
@@ -36,15 +36,15 @@ describe('applyKnownGap', () => {
       ],
     });
     const out = applyKnownGap({ knownGap: GAP }, r);
-    expect(out.passed).toBe(true);
+    expect(out.passed).toBe(false);
     expect(out.knownGap).toEqual({ ...GAP, stillFailing: true });
     expect(out.assertions[0]).toEqual({
       id: 'a',
       passed: false,
-      gating: false,
+      gating: true,
       detail: 'KNOWN GAP ai-therapist-999: offer at stuck-2',
     });
-    expect(out.assertions[1].gating).toBe(true);
+    expect(out.assertions[1].detail).toBe('ok');
   });
 
   it('a known gap that passes is reported as possibly fixed', () => {
@@ -56,7 +56,7 @@ describe('applyKnownGap', () => {
     expect(formatKnownGaps([out])).toMatch(/may be fixed/);
   });
 
-  it('MUST FAIL: a crashed run stays failed even with a marker', () => {
+  it('a crashed run stays failed', () => {
     const out = applyKnownGap({ knownGap: GAP }, result({ passed: false, error: 'chat start failed: 500' }));
     expect(out.passed).toBe(false);
     expect(out.knownGap?.stillFailing).toBe(true);
