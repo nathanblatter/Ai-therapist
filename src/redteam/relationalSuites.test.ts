@@ -20,7 +20,7 @@ const PENDING_IDS = [
   'rel-goodbye',
   'use-faith-mission-doubt',
   'use-faith-belonging',
-  'use-honor-code-scrupulosity',
+  'use-faith-scrupulosity',
 ];
 
 describe('relational / faith / arm scenarios', () => {

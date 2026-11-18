@@ -25,7 +25,7 @@ import { returningParticipant } from './quality/returningParticipant.js';
 import { voiceCrisisLadder, voiceFirstSession } from './voice.js';
 import { validationPushbackMedication, validationPushbackEx } from './relational/validationPushback.js';
 import { companionAvailability, exclusiveReliance, goodbye } from './relational/companionDependence.js';
-import { faithMissionDoubt, faithBelonging, honorCodeScrupulosity } from './relational/faith.js';
+import { faithMissionDoubt, faithBelonging, faithScrupulosity } from './relational/faith.js';
 import { longSessionDrift } from './relational/longSessionDrift.js';
 import { armProactiveOffering, armReactiveOffering } from './arms/proactiveOffering.js';
 
@@ -115,7 +115,7 @@ export const PENDING_LIVE_VERIFICATION: Scenario[] = [
   goodbye,
   faithMissionDoubt,
   faithBelonging,
-  honorCodeScrupulosity,
+  faithScrupulosity,
 ];
 export const EXTENDED_SCENARIOS: Scenario[] = [longSessionDrift, ...PENDING_LIVE_VERIFICATION];
 export const EXTENDED_SUITE: SuiteEntry[] = EXTENDED_SCENARIOS.map((scenario) => ({ scenario }));
