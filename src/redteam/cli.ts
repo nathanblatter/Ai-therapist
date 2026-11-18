@@ -4,7 +4,7 @@
 //
 //   npx tsx src/redteam/cli.ts --suite smoke
 //
-// Flags: --suite smoke|full|quality|voice  --scenario <id>  --out <dir>
+// Flags: --suite smoke|full|quality|voice|extended  --scenario <id>  --out <dir>
 //        --judge-model <m>  --seed <n>  --variations <k>  --allow-fail  --dry-run
 //        --baseline <path|latest>  --gate-diff  --gate-quality
 //        --voice-text-turns (voice suite: typed-text turns instead of TTS audio)
@@ -37,6 +37,7 @@ import { makeClassifier } from './assertions.js';
 import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
 import { HarnessClient, type Agent } from './harnessClient.js';
+import { applyKnownGap, formatKnownGaps } from './knownGap.js';
 import { writeReports, printConsole, buildSummaryJson, type RunSummary } from './report.js';
 import {
   diffRuns,
@@ -87,7 +88,7 @@ function parseArgs(argv: string[]): RedteamConfig {
     switch (a) {
       case '--suite': {
         const v = next();
-        cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' ? v : 'full';
+        cfg.suite = v === 'smoke' || v === 'quality' || v === 'voice' || v === 'extended' ? v : 'full';
         break;
       }
       case '--scenario':
@@ -223,6 +224,7 @@ async function runChatScenario(
   sessionId: string;
   transcript?: Turn[];
 }> {
+  if (scenario.setup) await scenario.setup(pool);
   const agent: Agent = client.newAgent();
   await client.loginParticipant(agent);
   await client.acceptConsent(agent);
@@ -532,10 +534,21 @@ async function runEntry(
           : scenario.pipeline === 'voice' && !cfg.dryRun
             ? (await import('./voiceClient.js')).runVoiceScenario
             : runRealtimeScenario;
-    const res = await runner(scenario, beats, runJudgeFlag, client, openai, vcfg, cost, canaries, pool, classify);
+    const res = await runner(
+      scenario,
+      beats,
+      runJudgeFlag,
+      client,
+      openai,
+      vcfg,
+      cost,
+      canaries,
+      pool,
+      classify,
+    ).finally(() => scenario.teardown?.(pool));
     const { assertions, judge, judgeBreaches, sessionId, transcript } = res;
     const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
-    return {
+    return applyKnownGap(scenario, {
       id: label,
       title: scenario.title,
       pipeline: scenario.pipeline,
@@ -548,9 +561,9 @@ async function runEntry(
       transcript,
       costUsd: cost.usd,
       durationMs: Date.now() - start,
-    };
+    });
   } catch (err) {
-    return {
+    return applyKnownGap(scenario, {
       id: label,
       title: scenario.title,
       pipeline: scenario.pipeline,
@@ -561,7 +574,7 @@ async function runEntry(
       costUsd: cost.usd,
       durationMs: Date.now() - start,
       error: (err as Error).message,
-    };
+    });
   }
 }
 
@@ -643,6 +656,8 @@ async function main(): Promise<void> {
   };
   const { junitPath, summaryPath } = writeReports(cfg, summary);
   const passed = printConsole(summary);
+  const gaps = formatKnownGaps(results);
+  if (gaps) console.log(gaps);
   console.log(`[redteam] wrote ${junitPath} and ${summaryPath}`);
 
   // Persist the run for the admin Simulation Runs panel (phase 3). Best-effort:

@@ -21,6 +21,11 @@ import { terseParticipant } from './quality/terseParticipant.js';
 import { adviceSeeker } from './quality/adviceSeeker.js';
 import { lowMoodSupport } from './quality/lowMoodSupport.js';
 import { voiceCrisisLadder, voiceFirstSession } from './voice.js';
+import { validationPushbackMedication, validationPushbackEx } from './relational/validationPushback.js';
+import { companionAvailability, exclusiveReliance, goodbye } from './relational/companionDependence.js';
+import { faithMissionDoubt, faithBelonging, honorCodeScrupulosity } from './relational/faith.js';
+import { longSessionDrift } from './relational/longSessionDrift.js';
+import { armProactiveOffering, armReactiveOffering } from './arms/proactiveOffering.js';
 
 /** One suite member: a scenario plus optional beat-subset / judge overrides. */
 export interface SuiteEntry {
@@ -51,6 +56,13 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   assistantPromptInjection,
   assistantRoleEscalation,
   assistantDataExfiltration,
+  // Catalogue REL-09/LIT-14 and ARM-01/02 (docs/eval-scenario-catalogue.md):
+  // sycophancy under pushback and the proactive_offering manipulation check.
+  // Full suite only. Three carry knownGap markers (ai-therapist-297/298).
+  validationPushbackMedication,
+  validationPushbackEx,
+  armProactiveOffering,
+  armReactiveOffering,
 ];
 
 // Quality scenarios (ai-therapist-124): ordinary-participant personas gated on
@@ -78,6 +90,28 @@ export const QUALITY_SUITE: SuiteEntry[] = QUALITY_SCENARIOS.map((scenario) => (
 export const VOICE_SCENARIOS: Scenario[] = [voiceFirstSession, voiceCrisisLadder];
 export const VOICE_SUITE: SuiteEntry[] = VOICE_SCENARIOS.map((scenario) => ({ scenario }));
 
+// EXTENDED: slow or expensive scenarios (catalogue Part C: weekly, before
+// launch, and on any prompt, model or detector change). Opt-in like voice:
+// NOT part of ALL_SCENARIOS, so never in full/smoke.
+//
+// PENDING_LIVE_VERIFICATION: catalogue REL-03/04/06/07 and USE-08 scenarios
+// that are built and unit-tested but have had NO live run yet (the OpenAI
+// account ran out of credits on 2026-11-18 before they ran). They wait here
+// rather than in the nightly full suite so an uncalibrated grader cannot
+// turn the nightly red. Promote each to SAFETY_SCENARIOS after 3 clean live
+// runs (`npm run redteam:extended -- --scenario <id> --variations 3`) and a
+// stable regrade.
+export const PENDING_LIVE_VERIFICATION: Scenario[] = [
+  companionAvailability,
+  exclusiveReliance,
+  goodbye,
+  faithMissionDoubt,
+  faithBelonging,
+  honorCodeScrupulosity,
+];
+export const EXTENDED_SCENARIOS: Scenario[] = [longSessionDrift, ...PENDING_LIVE_VERIFICATION];
+export const EXTENDED_SUITE: SuiteEntry[] = EXTENDED_SCENARIOS.map((scenario) => ({ scenario }));
+
 // SMOKE: fast, gates every deploy. ~3 scenarios, no judge. crisisLadder runs
 // only the escalation beats (the medium→high step) to keep it cheap and robust.
 export const SMOKE_SUITE: SuiteEntry[] = [
@@ -95,7 +129,9 @@ export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntr
         ? QUALITY_SUITE
         : suite === 'voice'
           ? VOICE_SUITE
-          : FULL_SUITE;
+          : suite === 'extended'
+            ? EXTENDED_SUITE
+            : FULL_SUITE;
   if (!scenarioId) return base;
   return base.filter((e) => e.scenario.id === scenarioId);
 }

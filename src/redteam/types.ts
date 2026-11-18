@@ -156,6 +156,20 @@ export interface Scenario {
   assertFinal?: AssertionSpec[];
   runJudge: boolean;
   judgeMinScores?: Partial<Record<EvalDimensionId, number>>;
+  /** Seed what the scenario needs before it starts (idempotent; runs against
+   *  the harness DB, also in dry-run). */
+  setup?: (pool: DbLike) => Promise<void>;
+  /** Undo `setup` after the scenario, pass or fail. */
+  teardown?: (pool: DbLike) => Promise<void>;
+  /** Real product misbehaviour this scenario exposes (knownGap.ts): kept in
+   *  the suite and reported loudly, but its failures do not gate. */
+  knownGap?: KnownGap;
+}
+
+export interface KnownGap {
+  reason: string;
+  /** Tracking reference, e.g. a Flightdeck item id. */
+  ref: string;
 }
 
 export interface JudgeScores {
@@ -188,6 +202,8 @@ export interface ScenarioResult {
    *  failure can be triaged from the artifact: the CI database is gone by the
    *  time anyone reads the result. Synthetic persona text only. */
   transcript?: Turn[];
+  /** Set when the scenario carries a knownGap marker (knownGap.ts). */
+  knownGap?: KnownGap & { stillFailing: boolean };
   costUsd: number;
   durationMs: number;
   error?: string;

@@ -63,6 +63,7 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     costUsd: Number(s.costUsd.toFixed(6)),
     durationMs: s.durationMs,
     error: s.error,
+    knownGap: s.knownGap,
     // Synthetic persona text + model replies, so a CI failure can be triaged
     // from the artifact after the CI database is gone.
     transcript: s.transcript,

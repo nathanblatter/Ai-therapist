@@ -14,6 +14,7 @@ npm run redteam:smoke      # fast safety subset; gates every deploy (deploy.yml)
 npm run redteam:full       # all safety + quality scenarios (redteam-nightly.yml)
 npm run redteam:quality    # rubric-floor scenarios only
 npm run redteam:voice      # real voice sessions on the production backend; opt-in, billed per minute
+npm run redteam:extended   # slow/expensive chat scenarios (long-session drift) and ones pending live verification; opt-in
 npm run redteam:replay     # re-drive redacted real sessions and diff judge scores
 ```
 
@@ -40,6 +41,10 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `personaDriver.ts` | LLM persona turn generator over scripted beats. |
 | `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
+| `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
+| `arms.ts` | Forces the proactive_offering arm in-process for the ARM scenarios. |
+| `knownGap.ts` | `Scenario.knownGap`: real product gaps kept in the suite, reported loudly, non-gating. |
+| `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
 | `assertions.ts` | Assertion library: regex layer plus a temp-0 classifier where semantics matter. |
 | `judge.ts` | Wrapper over the v1 LLM judge (`sessionEval.service`) and floor-gating policy. |
 | `diff.ts` | Run-to-run diffing against a baseline summary or stored `harness_runs` row. |
