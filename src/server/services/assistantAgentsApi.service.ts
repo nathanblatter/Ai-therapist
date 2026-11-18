@@ -59,6 +59,8 @@ const MAX_TOOL_CALLS = 12;
 const SWEEP_INTERVAL_MS = 10 * 60_000;
 const ORPHAN_AGE_MS = 5 * 60_000;
 const SWEEP_MAX_PAGES = 5;
+const USAGE_POLL_ATTEMPTS = 8;
+const USAGE_POLL_INTERVAL_MS = 500;
 
 export function agentsApiTools(role: AssistantRole): AssistantTool[] {
   return toolsFor(role).filter((t) => AGENTS_API_ELIGIBLE_TOOLS.has(t.name));
@@ -169,6 +171,7 @@ export interface AgentsClient {
     agents: {
       sessions: {
         create: (body: Record<string, unknown>, options?: { signal?: AbortSignal }) => Promise<AgentsStream>;
+        retrieve: (sessionId: string) => Promise<{ usage?: { input_tokens?: number; output_tokens?: number } | null }>;
         delete: (sessionId: string) => Promise<unknown>;
         list: (query?: Record<string, unknown>) => Promise<{
           data: AgentsSessionSummary[];
@@ -211,6 +214,32 @@ async function deleteSession(client: AgentsClient, sessionId: string): Promise<v
       log.error({ err, err2, sessionId }, 'agents api session delete failed; the sweep will retry');
     }
   }
+}
+
+/**
+ * Usage is "best-effort": observed live (2026-11-18) as null on
+ * turn.completed and populated on the session about two seconds later. Poll
+ * briefly before the session is deleted (deletion takes the figure with it),
+ * so the audit row and cost tracking carry real numbers. Returns null if it
+ * never appears within the budget.
+ */
+async function awaitUsage(
+  client: AgentsClient,
+  sessionId: string,
+): Promise<{ input_tokens: number; output_tokens: number } | null> {
+  for (let i = 0; i < USAGE_POLL_ATTEMPTS; i++) {
+    try {
+      const u = (await client.beta.agents.sessions.retrieve(sessionId)).usage;
+      if (u && typeof u.input_tokens === 'number') {
+        return { input_tokens: u.input_tokens, output_tokens: u.output_tokens ?? 0 };
+      }
+    } catch (err) {
+      log.warn({ err, sessionId }, 'agents api usage lookup failed');
+      return null;
+    }
+    await new Promise((r) => setTimeout(r, USAGE_POLL_INTERVAL_MS));
+  }
+  return null;
 }
 
 let lastSweepAt = 0;
@@ -328,6 +357,10 @@ async function runAgentsApiTurn(ctx: AssistantContext, history: AssistantMessage
       }
     }
     if (!completed) throw new Error('agents api stream closed before the turn completed');
+    if (usage.input_tokens === 0 && sessionId) {
+      const late = await awaitUsage(client, sessionId);
+      if (late) Object.assign(usage, late);
+    }
   } finally {
     clearTimeout(timer);
     stream?.controller?.abort();

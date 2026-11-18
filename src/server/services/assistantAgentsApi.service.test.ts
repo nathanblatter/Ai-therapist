@@ -70,9 +70,12 @@ function fakeAgents(events: Ev[]) {
   const del = vi.fn().mockResolvedValue({ deleted: true });
   const eventsCreate = vi.fn().mockResolvedValue(undefined);
   const list = vi.fn().mockResolvedValue({ data: [], has_more: false });
-  const client = { beta: { agents: { sessions: { create, delete: del, list, events: { create: eventsCreate } } } } };
+  const retrieve = vi.fn().mockResolvedValue({ usage: null });
+  const client = {
+    beta: { agents: { sessions: { create, retrieve, delete: del, list, events: { create: eventsCreate } } } },
+  };
   setAgentsClientForTest(client as never);
-  return { create, del, eventsCreate, list };
+  return { create, del, eventsCreate, list, retrieve };
 }
 
 function submittedResults(eventsCreate: ReturnType<typeof vi.fn>): Ev[] {
@@ -218,6 +221,19 @@ describe('agents api backend', () => {
     await expect(runAssistantTurn(CTX_RESEARCHER, [{ role: 'user', content: 'x' }])).rejects.toThrow(/boom/);
     const auditArgs = poolMocks.pool.query.mock.calls.at(-1)![1] as unknown[];
     expect(JSON.parse(auditArgs[3] as string)).toEqual([{ name: 'study_overview', args: {}, row_count: 1 }]);
+  });
+
+  it('waits for late usage (null on turn.completed, observed live) before deleting the session', async () => {
+    const lateCompleted: Ev = { ...completed, turn: { session_id: 'sess_1', subagent_id: null, usage: null } };
+    const { retrieve, del } = fakeAgents([created, done('Hi.'), lateCompleted]);
+    retrieve
+      .mockResolvedValueOnce({ usage: null })
+      .mockResolvedValueOnce({ usage: { input_tokens: 9990, output_tokens: 42 } });
+    await runAssistantTurn(CTX_RESEARCHER, [{ role: 'user', content: 'hi' }]);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    const auditArgs = poolMocks.pool.query.mock.calls.at(-1)![1] as unknown[];
+    expect(auditArgs.slice(5)).toEqual([9990, 42]);
+    expect(retrieve.mock.invocationCallOrder.at(-1)!).toBeLessThan(del.mock.invocationCallOrder[0]);
   });
 
   it('errors when the stream ends before the turn completes', async () => {
