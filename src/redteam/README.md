@@ -44,6 +44,8 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `judge.ts` | Wrapper over the v1 LLM judge (`sessionEval.service`) and floor-gating policy. |
 | `diff.ts` | Run-to-run diffing against a baseline summary or stored `harness_runs` row. |
 | `report.ts` | JUnit XML, `summary.json`, console table. |
+| `configSnapshot.ts` | `--config-snapshot <file>`: load an environment's evaluated configuration into the eval DB (config drift gate, `docs/redteam.md`). |
+| `configEvalClient.ts` | HTTP client the `redteam-config.yml` workflow uses to claim and record config evaluations. |
 | `*.test.ts` | Offline unit tests (assertions, diff, judge policy, suite composition, voice helpers); run in the normal `npm test`. |
 
 Results are written to `redteam-results/` (gitignored). Scheduled in-app runs

@@ -37,6 +37,8 @@ import crisisRoutes from './routes/admin/crisis.routes.js';
 import adverseEventsRoutes from './routes/admin/adverseEvents.routes.js';
 import redactionRoutes from './routes/admin/redaction.routes.js';
 import adminConfigRoutes from './routes/admin/config.routes.js';
+import adminConfigEvaluationRoutes from './routes/admin/configEvaluation.routes.js';
+import redteamConfigEvalRoutes from './routes/redteamConfigEval.routes.js';
 import analyticsRoutes from './routes/admin/analytics.routes.js';
 import studyOpsRoutes from './routes/admin/studyOps.routes.js';
 import irbPacketRoutes from './routes/admin/irbPacket.routes.js';
@@ -329,6 +331,10 @@ app.use(
 
 // Health + bug-report (public, pre-session/IP middleware).
 app.use(healthRoutes());
+// Red-team config gate machine API: bearer-token only, 404 unless
+// REDTEAM_CONFIG_EVAL_TOKEN is set; before the session middleware so these
+// calls never create a session (routes/redteamConfigEval.routes.ts).
+app.use(redteamConfigEvalRoutes());
 app.use(bugReportRoutes());
 
 // Session configuration with PostgreSQL store. One middleware instance shared
@@ -789,6 +795,8 @@ app.use(configRoutes());
 app.use(voicesRoutes());
 // Admin config read/write API -> routes/admin/config.routes.ts.
 app.use(adminConfigRoutes());
+// Red-team config drift status + snapshot export -> routes/admin/configEvaluation.routes.ts
+app.use(adminConfigEvaluationRoutes());
 
 // Versioned IRB consent documents (publish/re-consent) -> routes/admin/consent.routes.ts.
 app.use(adminConsentRoutes());

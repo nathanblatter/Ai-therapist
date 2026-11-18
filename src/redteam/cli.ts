@@ -582,6 +582,15 @@ async function main(): Promise<void> {
   const { pool } = await import('../server/config/db.js');
   const { CURRENT_CONSENT_VERSION } = await import('../server/utils/consent.js');
 
+  // --config-snapshot <file>: load an environment's evaluated configuration
+  // into this (disposable) database first. See configSnapshot.ts.
+  try {
+    await (await import('./configSnapshot.js')).loadConfigSnapshotFromArgv(process.argv.slice(2), pool, cfg.outDir);
+  } catch (err) {
+    console.error(`[redteam] ${(err as Error).message}`);
+    process.exit(2);
+  }
+
   const client = new HarnessClient(app, io, CURRENT_CONSENT_VERSION);
   client.patchEmissions();
 
