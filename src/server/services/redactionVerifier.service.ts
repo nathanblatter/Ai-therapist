@@ -122,7 +122,12 @@ export async function getVerifierConfig(): Promise<VerifierConfig> {
 // The preview-era body sent a single `question` object; the GA API rejects it
 // with "400 Missing required parameter: questions" (ai-therapist-284).
 
-type DecisionsClient = { post: <R>(path: string, opts: { body: Record<string, unknown> }) => Promise<R> };
+// The request is typed by the SDK (openai >= 7 ships `client.decisions`), so a
+// future change to the request contract fails typecheck on the SDK bump
+// instead of failing in production. The response is still parsed defensively
+// from `unknown`: types do not stop the API returning something else.
+
+type DecisionsClient = { decisions: { create: (body: OpenAI.DecisionCreateParams) => Promise<unknown> } };
 
 /** Name echoed back on the answer, so the parser never trusts position alone. */
 export const LEAK_QUESTION_NAME = 'phi_leak';
@@ -135,7 +140,7 @@ export const LEAK_QUESTION_NAME = 'phi_leak';
  * governed by the org's data controls, not per request), and an unknown
  * parameter risks the same 400 this adapter was fixed for.
  */
-export function buildDecisionsBody(text: string): Record<string, unknown> {
+export function buildDecisionsBody(text: string): OpenAI.DecisionCreateParams {
   return {
     model: DECISIONS_MODEL,
     input: text,
@@ -190,7 +195,7 @@ export function isDecisionsUnavailableError(err: unknown): boolean {
 }
 
 async function askDecisions(client: DecisionsClient, text: string): Promise<DecisionAnswer> {
-  const raw = await client.post<unknown>('/decisions', { body: buildDecisionsBody(text) });
+  const raw = await client.decisions.create(buildDecisionsBody(text));
   const parsed = parseDecisionsResponse(raw);
   return { ...parsed, backend: 'decisions', model: DECISIONS_MODEL };
 }
@@ -264,7 +269,7 @@ export async function askLeakCheck(text: string, cfg: VerifierConfig, client?: O
   const wantDecisions = cfg.backend === 'decisions' || (cfg.backend === 'auto' && !decisionsUnavailableUntilRestart);
   if (wantDecisions) {
     try {
-      return await askDecisions(c as unknown as DecisionsClient, text);
+      return await askDecisions(c, text);
     } catch (err) {
       if (cfg.backend === 'decisions' || !isDecisionsUnavailableError(err)) throw err;
       if (!decisionsUnavailableUntilRestart) {

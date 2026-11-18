@@ -2,8 +2,8 @@
 // Decisions API adapter, the Responses fallback, and the per-row persistence.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { postMock, createMock, queryMock, getSystemConfigByKeyMock, recordLlmUsageMock } = vi.hoisted(() => ({
-  postMock: vi.fn(),
+const { decisionsCreateMock, createMock, queryMock, getSystemConfigByKeyMock, recordLlmUsageMock } = vi.hoisted(() => ({
+  decisionsCreateMock: vi.fn(),
   createMock: vi.fn(),
   queryMock: vi.fn(),
   getSystemConfigByKeyMock: vi.fn(),
@@ -12,7 +12,7 @@ const { postMock, createMock, queryMock, getSystemConfigByKeyMock, recordLlmUsag
 
 vi.mock('openai', () => ({
   default: class MockOpenAI {
-    post = postMock;
+    decisions = { create: decisionsCreateMock };
     responses = { create: createMock };
   },
 }));
@@ -37,7 +37,7 @@ import {
 const CFG = { ...DEFAULT_VERIFIER_CONFIG };
 
 beforeEach(() => {
-  postMock.mockReset();
+  decisionsCreateMock.mockReset();
   createMock.mockReset();
   queryMock.mockReset();
   queryMock.mockResolvedValue({ rows: [], rowCount: 1 });
@@ -120,16 +120,16 @@ describe('Decisions API adapter', () => {
 
 describe('askLeakCheck backend selection', () => {
   it('auto: uses the Decisions API when it answers', async () => {
-    postMock.mockResolvedValue(decision(0.05));
+    decisionsCreateMock.mockResolvedValue(decision(0.05));
     const a = await askLeakCheck('clean text', CFG);
     expect(a.backend).toBe('decisions');
     expect(a.pLeak).toBeCloseTo(0.05);
-    expect(postMock).toHaveBeenCalledWith('/decisions', { body: buildDecisionsBody('clean text') });
+    expect(decisionsCreateMock).toHaveBeenCalledWith(buildDecisionsBody('clean text'));
     expect(createMock).not.toHaveBeenCalled();
   });
 
   it('auto: falls back to Responses when the preview is not enabled, and stays there', async () => {
-    postMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
+    decisionsCreateMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
     createMock.mockResolvedValue({
       output_text: JSON.stringify({ leaks: true, probability: 0.8 }),
       usage: { input_tokens: 50, output_tokens: 10 },
@@ -140,18 +140,18 @@ describe('askLeakCheck backend selection', () => {
     expect(first.pLeak).toBeCloseTo(0.8);
 
     await askLeakCheck('second message', CFG);
-    expect(postMock).toHaveBeenCalledTimes(1); // not re-probed per message
+    expect(decisionsCreateMock).toHaveBeenCalledTimes(1); // not re-probed per message
     expect(createMock).toHaveBeenCalledTimes(2);
   });
 
   it('auto: a non-gating Decisions error propagates (no silent fallback that hides an outage)', async () => {
-    postMock.mockRejectedValue(new Error('rate limit exceeded'));
+    decisionsCreateMock.mockRejectedValue(new Error('rate limit exceeded'));
     await expect(askLeakCheck('x', CFG)).rejects.toThrow(/rate limit/);
     expect(createMock).not.toHaveBeenCalled();
   });
 
   it('backend=decisions never falls back', async () => {
-    postMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
+    decisionsCreateMock.mockRejectedValue(new Error('Decision API is not enabled for this user.'));
     await expect(askLeakCheck('x', { ...CFG, backend: 'decisions' })).rejects.toThrow(/not enabled/);
     expect(createMock).not.toHaveBeenCalled();
   });
@@ -164,13 +164,13 @@ describe('askLeakCheck backend selection', () => {
     expect(req.text.format.strict).toBe(true);
     expect(req.input).not.toMatch(/ignore previous/i);
     expect(a.pLeak).toBe(0.5); // leaks=true but p=0.2 -> at least 0.5
-    expect(postMock).not.toHaveBeenCalled();
+    expect(decisionsCreateMock).not.toHaveBeenCalled();
   });
 });
 
 describe('verifyRedactedMessages', () => {
   it('persists a redaction_check verdict per row and records usage', async () => {
-    postMock
+    decisionsCreateMock
       .mockResolvedValueOnce(decision(0.9, { input_tokens: 30, output_tokens: 1 }))
       .mockResolvedValueOnce(decision(0.01));
 
@@ -193,17 +193,17 @@ describe('verifyRedactedMessages', () => {
     getSystemConfigByKeyMock.mockResolvedValue({
       config_value: { enabled: true, backend: 'decisions', threshold: 0.95 },
     });
-    postMock.mockResolvedValue(decision(0.9));
+    decisionsCreateMock.mockResolvedValue(decision(0.9));
     expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 1, flagged: 0 });
 
     getSystemConfigByKeyMock.mockResolvedValue({ config_value: { enabled: false } });
-    postMock.mockClear();
+    decisionsCreateMock.mockClear();
     expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 0, flagged: 0 });
-    expect(postMock).not.toHaveBeenCalled();
+    expect(decisionsCreateMock).not.toHaveBeenCalled();
   });
 
   it('records a per-row error and never throws when the model call fails', async () => {
-    postMock.mockRejectedValue(new Error('boom'));
+    decisionsCreateMock.mockRejectedValue(new Error('boom'));
     const summary = await verifyRedactedMessages('s', [{ id: 7, text: 'x' }]);
     expect(summary).toEqual({ checked: 0, flagged: 0 });
     const [, params] = queryMock.mock.calls.find(([sql]) => /redaction_check/.test(sql as string))!;
@@ -214,7 +214,9 @@ describe('verifyRedactedMessages', () => {
   // so the fail policy is a tested fact: the row is recorded as errored and
   // unflagged, nothing is counted as checked, and no fallback is attempted.
   it('a 400 from the Decisions API leaves the row errored and unverified (fail-soft)', async () => {
-    postMock.mockRejectedValue(Object.assign(new Error('400 Missing required parameter: questions.'), { status: 400 }));
+    decisionsCreateMock.mockRejectedValue(
+      Object.assign(new Error('400 Missing required parameter: questions.'), { status: 400 }),
+    );
     const summary = await verifyRedactedMessages('s', [{ id: 9, text: 'I saw Marie' }]);
     expect(summary).toEqual({ checked: 0, flagged: 0 });
     expect(createMock).not.toHaveBeenCalled();
@@ -224,7 +226,7 @@ describe('verifyRedactedMessages', () => {
 
   it('skips empty redacted text without a model call', async () => {
     expect(await verifyRedactedMessages('s', [{ id: 1, text: '   ' }])).toEqual({ checked: 0, flagged: 0 });
-    expect(postMock).not.toHaveBeenCalled();
+    expect(decisionsCreateMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
   });
 });

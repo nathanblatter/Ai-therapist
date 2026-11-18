@@ -67,6 +67,7 @@ describe('diffRuns (summary.json baseline)', () => {
     expect(diff.baseline).toEqual({
       source: 'base.json',
       suite: 'full',
+      variant: 'default',
       startedAt: '2026-10-21T08:00:00Z',
       gitSha: 'abc1234',
     });

@@ -12,6 +12,9 @@ import {
   resetPsychoeducationCueColumnCache,
   resolveLeadConversation,
   getSystemPrompt,
+  getSystemConfig,
+  setFeatureOverrides,
+  setPsychoeducationCueArmOverride,
 } from './sessionHelpers.js';
 
 const SESSION_LIMITS = {
@@ -245,5 +248,37 @@ describe('resolveLeadConversation', () => {
     const off = await getSystemPrompt('en', 'realtime', false);
     expect(on).toBe(off);
     expect(on).not.toContain('Leading the conversation');
+  });
+});
+
+// ---------- red-team variant hooks (src/redteam/variants.ts) ----------
+
+describe('harness overrides', () => {
+  beforeEach(() => {
+    setFeatureOverrides(null);
+    setPsychoeducationCueArmOverride(null);
+  });
+
+  it('overlays feature flags in-process without touching the database', async () => {
+    setupCue({ chat_enabled: true });
+    setFeatureOverrides({ lead_conversation_enabled: true });
+    expect(await resolveLeadConversation()).toBe(true);
+    const features = (await getSystemConfig()).features ?? {};
+    expect(features.chat_enabled).toBe(true);
+    expect(features.lead_conversation_enabled).toBe(true);
+    expect(queryMock.mock.calls.some(([sql]) => /UPDATE|INSERT/i.test(String(sql)))).toBe(false);
+    setFeatureOverrides(null);
+    expect(await resolveLeadConversation()).toBe(false);
+  });
+
+  it('pins the psychoeducation-cue arm only when the experiment is on', async () => {
+    setPsychoeducationCueArmOverride(true);
+    setupCue({});
+    expect(await resolvePsychoeducationCue()).toBeNull();
+    setupCue({ psychoeducation_cue_ab_enabled: true });
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.9);
+    for (let i = 0; i < 3; i++) expect(await resolvePsychoeducationCue()).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
