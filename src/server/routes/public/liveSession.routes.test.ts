@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   reportQuota: vi.fn(),
   connectAndWait: vi.fn(),
   upstreamFetch: vi.fn(),
+  systemConfig: {} as Record<string, unknown>,
 }));
 
 vi.mock('../../db/index.js', () => dbMocks);
@@ -33,7 +34,7 @@ vi.mock('../../utils/sessionHelpers.js', () => ({
   checkSessionLimits: async () => ({ allowed: true, limits: null }),
   getSystemPrompt: async () => 'prompt',
   getActiveModality: async () => null,
-  getSystemConfig: async () => ({}),
+  getSystemConfig: async () => mocks.systemConfig,
   resolveProactiveOffering: async () => false,
   resolvePsychoeducationCue: async () => null,
   resolveLeadConversation: async () => false,
@@ -53,11 +54,11 @@ vi.mock('../../middleware/quietHours.js', () => ({ requireOutsideQuietHours: pas
 vi.mock('../../middleware/studyStatus.js', () => ({ requireActiveStudyStatus: pass }));
 vi.mock('../../utils/adminBroadcast.js', () => ({ broadcastAdminEvent: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../utils/sessionAutoTerminate.js', () => ({ scheduleAutoTermination: vi.fn() }));
-vi.mock('../../utils/liveSessionConfig.js', () => ({
-  buildLiveSessionConfig: () => ({ model: 'gpt-live-test' }),
+// The REAL session builder and effort resolution, so the tests below see the
+// exact body the mint sends to OpenAI.
+vi.mock('../../utils/liveSessionConfig.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/liveSessionConfig.js')>()),
   isLiveModel: () => true,
-  resolveLiveVoice: () => 'voice',
-  LIVE_DEFAULT_BACKEND_MODEL: 'backend-test',
 }));
 vi.mock('../../services/sidebandManager.service.js', () => ({
   sidebandManager: { connectAndWait: mocks.connectAndWait, tryInject: vi.fn(), disconnect: vi.fn() },
@@ -94,6 +95,7 @@ beforeEach(() => {
   mocks.reportQuota.mockReset().mockResolvedValue(undefined);
   mocks.connectAndWait.mockReset().mockResolvedValue(undefined);
   mocks.upstreamFetch.mockReset();
+  mocks.systemConfig = {};
   // supertest talks to the app over a real socket; only the upstream fetch is stubbed.
   vi.stubGlobal('fetch', mocks.upstreamFetch);
 });
@@ -204,5 +206,52 @@ describe('POST /api/live/session sideband delegation mode', () => {
     mocks.upstreamFetch.mockResolvedValue(healthy());
     await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: 'true' }).expect(201);
     expect(mocks.connectAndWait.mock.calls[0][3]).toMatchObject({ delegationMode: 'responses' });
+  });
+});
+
+// What reaches OpenAI at mint (ai-therapist-309): with neither new key set
+// the delegation block must be exactly what it was before
+// live_backend_reasoning_effort existed; with it set, the effort rides along on
+// the configured backend; recovery never gets a backend at all.
+describe('POST /api/live/session delegation request body', () => {
+  const healthy = () => upstream(200, { session: { id: 'sess_live_3' }, transport: { sdp: 'answer' } });
+  const mintedSession = () =>
+    JSON.parse((mocks.upstreamFetch.mock.calls[0][1] as RequestInit).body as string).session as {
+      delegation: { type: string; responses?: Record<string, unknown> };
+    };
+
+  it('with nothing configured: default backend, no reasoning block, keys unchanged', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    const { delegation } = mintedSession();
+    expect(delegation.type).toBe('responses');
+    expect(Object.keys(delegation.responses ?? {}).sort()).toEqual(
+      ['instructions', 'model', 'parallel_tool_calls', 'tool_choice', 'tools'].sort(),
+    );
+    expect(delegation.responses?.model).toBe('gpt-5.6-terra');
+  });
+
+  it('sends the configured backend with the configured effort, and pins the backend on the session row', async () => {
+    mocks.systemConfig = { live_backend_model: 'gpt-6.1-terra', live_backend_reasoning_effort: 'low' };
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    const { delegation } = mintedSession();
+    expect(delegation.responses).toMatchObject({ model: 'gpt-6.1-terra', reasoning: { effort: 'low' } });
+    expect(dbMocks.upsertSessionConfig.mock.calls[0][1]).toMatchObject({ live_backend_model: 'gpt-6.1-terra' });
+    expect(mocks.connectAndWait.mock.calls[0][3]).toMatchObject({ backendModel: 'gpt-6.1-terra' });
+  });
+
+  it('a bad effort value cannot break session start: it is dropped', async () => {
+    mocks.systemConfig = { live_backend_model: 'gpt-6.1-terra', live_backend_reasoning_effort: 'lowest' };
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    expect(mintedSession().delegation.responses).not.toHaveProperty('reasoning');
+  });
+
+  it('a recovery start stays client-delegated with no backend, whatever is configured', async () => {
+    mocks.systemConfig = { live_backend_model: 'gpt-6.1-terra', live_backend_reasoning_effort: 'low' };
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: true }).expect(201);
+    expect(mintedSession().delegation).toEqual({ type: 'client' });
   });
 });

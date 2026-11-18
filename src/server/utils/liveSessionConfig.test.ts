@@ -13,6 +13,8 @@ import {
   LIVE_DEFAULT_VOICE,
   LIVE_DEFAULT_BACKEND_MODEL,
   LIVE_VOICES,
+  LIVE_CLIENT_EVENTS,
+  resolveBackendReasoningEffort,
 } from './liveSessionConfig.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 
@@ -211,6 +213,65 @@ describe('buildLiveSessionConfig', () => {
   });
 });
 
+// ai-therapist-214. The shape asserted here is the documented one, verbatim:
+// session.client.data_channel.allowed_client_events ("all" or array of client
+// event type strings). An undocumented key 400s the whole voice handshake, so
+// these tests pin the exact keys as well as the values.
+describe('buildLiveSessionConfig data-channel permissions', () => {
+  type ClientBlock = { data_channel: { allowed_client_events: string[] } };
+
+  it('locks the browser data channel to an explicit allowlist with only the documented keys', () => {
+    const session = build();
+    const client = session.client as ClientBlock;
+
+    expect(Object.keys(client)).toEqual(['data_channel']);
+    expect(Object.keys(client.data_channel)).toEqual(['allowed_client_events']);
+    expect(client.data_channel.allowed_client_events).toEqual(['session.close']);
+  });
+
+  it('never lets the browser steer, queue backend items, mute input or touch decisions', () => {
+    for (const session of [build(), build({ recovery: { crisisLine: '988' } })]) {
+      const allowed = (session.client as ClientBlock).data_channel.allowed_client_events;
+      expect(allowed).not.toContain('session.instructions.append');
+      expect(allowed).not.toContain('session.thinking.append');
+      expect(allowed).not.toContain('session.commentary.append');
+      expect(allowed).not.toContain('session.update');
+      expect(allowed).not.toContain('response.item.create');
+      expect(allowed).not.toContain('response.create');
+      expect(allowed).not.toContain('session.input_audio.mute');
+      expect(allowed).not.toContain('decision.item.create');
+      expect(allowed).not.toContain('all');
+    }
+  });
+
+  it('always leaves the browser able to hang up', () => {
+    expect(LIVE_CLIENT_EVENTS).toContain('session.close');
+  });
+
+  it('locks a recovery session the same way', () => {
+    const session = build({ recovery: { crisisLine: '988' } });
+    expect((session.delegation as { type: string }).type).toBe('client');
+    expect((session.client as ClientBlock).data_channel.allowed_client_events).toEqual(['session.close']);
+  });
+
+  it('does not restrict server events (omission keeps allow-all, which the captions depend on)', () => {
+    expect((build().client as ClientBlock).data_channel).not.toHaveProperty('allowed_server_events');
+  });
+
+  it('omits the block entirely when the session has no sideband to steer from', () => {
+    expect(build({ allowClientSteering: true })).not.toHaveProperty('client');
+    expect(build({ allowClientSteering: true, recovery: { crisisLine: '988' } })).not.toHaveProperty('client');
+  });
+
+  it('hands each session its own array, so one request cannot widen the next', () => {
+    const first = (build().client as ClientBlock).data_channel.allowed_client_events;
+    first.push('session.instructions.append');
+    expect((build().client as ClientBlock).data_channel.allowed_client_events).not.toContain(
+      'session.instructions.append',
+    );
+  });
+});
+
 describe('buildLiveSessionConfig psychoeducation cue (ai-therapist-202)', () => {
   const withRag: ToolDefinition[] = [
     ...TOOL_DEFS,
@@ -275,6 +336,64 @@ describe('buildLiveSessionConfig lead conversation (features.lead_conversation_e
   it('recovery ignores the flag', () => {
     const recovery = { crisisLine: '988' };
     expect(build({ recovery, leadConversation: true }).instructions).toBe(build({ recovery }).instructions);
+  });
+});
+
+describe('backend reasoning effort (system_config.live_backend_reasoning_effort)', () => {
+  type Delegation = { responses: Record<string, unknown> };
+
+  it('sends no reasoning block when unset, so merge-time sessions are unchanged', () => {
+    const responses = (build().delegation as Delegation).responses;
+    expect(responses).not.toHaveProperty('reasoning');
+  });
+
+  it('forwards a configured effort to the delegated backend', () => {
+    const responses = (build({ backendModel: 'gpt-6.1-terra', backendReasoningEffort: 'low' }).delegation as Delegation)
+      .responses;
+    expect(responses.reasoning).toEqual({ effort: 'low' });
+    expect(responses.model).toBe('gpt-6.1-terra');
+  });
+
+  it('never adds reasoning to a recovery session (client delegation)', () => {
+    const config = build({ backendReasoningEffort: 'low', recovery: { crisisLine: '988' } });
+    expect(config.delegation).toEqual({ type: 'client' });
+  });
+
+  it('resolves only recognised efforts, case-insensitively', () => {
+    expect(resolveBackendReasoningEffort(undefined, 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort('', 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort('fast', 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort({ effort: 'low' }, 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort(' Low ', 'gpt-6.1-terra')).toBe('low');
+  });
+
+  it("keeps 'none' where the model supports it and raises it to 'low' where it does not", () => {
+    expect(resolveBackendReasoningEffort('none', 'gpt-6.1-terra')).toBe('none');
+    expect(resolveBackendReasoningEffort('none', 'gpt-5.6-terra')).toBe('none');
+    // GPT-6 guide, Limitations: Astra and 6.1 Sol reject `none`.
+    expect(resolveBackendReasoningEffort('none', 'gpt-6.1-sol')).toBe('low');
+    expect(resolveBackendReasoningEffort('none', 'gpt-6-astra')).toBe('low');
+  });
+
+  it('sends nothing to a backend the registry marks as non-reasoning, and says so', () => {
+    // A reasoning block on gpt-4.1 is rejected by GPT-Live asynchronously
+    // (responses_validation_failed), i.e. every delegation of the session
+    // fails while session start looks healthy.
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort('low', 'gpt-4.1')).toBeNull();
+    expect(resolveBackendReasoningEffort('low', 'gpt-4o-mini')).toBeNull();
+    expect(logMock.warn).toHaveBeenCalled();
+  });
+
+  it('logs an unrecognised or mistyped effort instead of dropping it silently', () => {
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort('lo', 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort(1, 'gpt-6.1-terra')).toBeNull();
+    expect(logMock.warn).toHaveBeenCalledTimes(2);
+    logMock.warn.mockClear();
+    expect(resolveBackendReasoningEffort(undefined, 'gpt-6.1-terra')).toBeNull();
+    expect(resolveBackendReasoningEffort(null, 'gpt-6.1-terra')).toBeNull();
+    expect(logMock.warn).not.toHaveBeenCalled();
   });
 });
 

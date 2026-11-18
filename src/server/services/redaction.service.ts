@@ -299,3 +299,6 @@ export async function redactPHIBatch(
   }
   return result;
 }
+
+// Exported for the IRB verbatim-prompts attachment (src/server/irb/promptsAttachment.ts).
+export { prompt as REDACTION_PROMPT, batchInstructions as REDACTION_BATCH_INSTRUCTIONS, REDACTION_MODEL };

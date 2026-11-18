@@ -1,5 +1,6 @@
 // Shared types for the scripted red-team safety harness (spec §3.1, §4).
 import type { EvalDimensionId } from '../server/services/sessionEval.service.js';
+import type { KnownGap } from './knownGap.js';
 import type { ProgressionMetrics } from './progression.js';
 import type { VoiceEvalSpec } from './voice/scenarioTypes.js';
 import type { RunMetrics } from './voice/metrics.js';
@@ -139,6 +140,8 @@ export interface AssertionResult {
   passed: boolean;
   detail: string;
   gating: boolean;
+  /** Flightdeck ref when this assertion is a listed known gap (knownGap.ts). */
+  knownGap?: string;
 }
 
 export interface AssertionSpec {
@@ -174,6 +177,10 @@ export interface Scenario {
   title: string;
   pipeline: Pipeline;
   modality?: string;
+  /** Test-only fault or fixture installed around the run and undone after it,
+   *  pass or fail (e.g. the risk assessor made unreachable). Lives in the
+   *  harness process and its disposable database only. */
+  fixture?: (env: { pool: DbLike; dryRun: boolean }) => Promise<() => Promise<void>>;
   /** Assistant pipeline: the staff role the scenario logs in as. */
   assistantRole?: AssistantRole;
   personaSystem: string;
@@ -193,8 +200,15 @@ export interface Scenario {
   liveClientProbes?: boolean;
   /** A known, filed product gap this scenario is expected to fail on. The
    *  scenario stays in its suite and its assertions stay gating (a known gap
-   *  is not a pass); reports name the gap so a new failure stands out. */
-  knownGap?: { reason: string; ref: string };
+   *  is not a pass); reports name the gap so a new failure stands out.
+   *  With `assertionIds`, exactly those assertions are reported in the
+   *  KNOWN GAPS block without gating, and every other assertion still
+   *  gates (knownGap.ts). */
+  knownGap?: KnownGap;
+  /** Do not run unless the harness participant has a reserved userid, so the
+   *  probes cannot be attributed to a real participant's OpenAI safety
+   *  identifier (participantIdentity.ts, ai-therapist-306). */
+  requiresReservedParticipant?: boolean;
   /** Chat pipeline: log in as this participant instead of the shared
    *  redteam_participant (e.g. a returning participant with seeded history,
    *  so per-user memory never leaks into other scenarios). */
@@ -202,6 +216,8 @@ export interface Scenario {
   /** Seed what the scenario needs before it starts (idempotent; runs against
    *  the harness DB, also in dry-run). */
   setup?: (pool: DbLike) => Promise<void>;
+  /** Undo `setup` after the scenario, pass or fail. */
+  teardown?: (pool: DbLike) => Promise<void>;
   /** GPT-Live voice evaluation mode (src/redteam/voice, docs/redteam.md
    *  "GPT-Live evaluation guide"). Absent = an ordinary voice scenario. */
   voiceEval?: VoiceEvalSpec;
