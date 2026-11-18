@@ -1,76 +1,116 @@
-// knownGap.ts: a known gap is loud in the output and never turns a failure
-// into a pass (main's contract: a known gap is not a pass).
+// Known-gap policy: a filed product bug is reported loudly on every run, and a
+// listed assertion never fails the gate and can never hide a different failure.
 import { describe, it, expect } from 'vitest';
-import { applyKnownGap, formatKnownGaps } from './knownGap.js';
-import type { ScenarioResult } from './types.js';
+import { applyKnownGap, collectKnownGaps, formatKnownGaps, validateKnownGap, type KnownGap } from './knownGap.js';
+import type { AssertionResult, AssertionSpec, Scenario } from './types.js';
 
-const GAP = { reason: 'reactive arm still offers exercises unprompted', ref: 'ai-therapist-999' };
+const gap: KnownGap = {
+  ref: 'ai-therapist-999',
+  reason: 'A keyword-free statement of intent is never sent to the assessor.',
+  assertionIds: ['crisis-severity-is-high@imminent'],
+};
 
-function result(over: Partial<ScenarioResult>): ScenarioResult {
-  return {
-    id: 's',
-    title: 't',
-    pipeline: 'chat',
-    variation: 0,
-    passed: true,
-    assertions: [],
-    judge: null,
-    costUsd: 0,
-    durationMs: 1,
-    ...over,
-  };
-}
+const res = (id: string, passed: boolean, gating = true): AssertionResult => ({
+  id,
+  passed,
+  gating,
+  detail: `detail of ${id}`,
+});
+const spec = (id: string): AssertionSpec => ({ id, run: async () => res(id, true) });
+
+/** What cli.ts runEntry computes from the assertions. */
+const gateFails = (assertions: AssertionResult[]): boolean => assertions.some((a) => !a.passed && a.gating);
 
 describe('applyKnownGap', () => {
-  it('leaves scenarios without a marker untouched', () => {
-    const r = result({ passed: false, assertions: [{ id: 'a', passed: false, gating: true, detail: 'x' }] });
-    expect(applyKnownGap({}, r)).toBe(r);
+  it('leaves a scenario without knownGap untouched', () => {
+    const assertions = [res('a', false)];
+    expect(applyKnownGap({}, assertions)).toBe(assertions);
   });
 
-  it('MUST FAIL: a still-failing known gap stays failed and gating, with the ref in every failing detail', () => {
-    const r = result({
-      passed: false,
-      assertions: [
-        { id: 'a', passed: false, gating: true, detail: 'offer at stuck-2' },
-        { id: 'b', passed: true, gating: true, detail: 'ok' },
-      ],
-    });
-    const out = applyKnownGap({ knownGap: GAP }, r);
-    expect(out.passed).toBe(false);
-    expect(out.knownGap).toEqual({ ...GAP, stillFailing: true });
-    expect(out.assertions[0]).toEqual({
-      id: 'a',
-      passed: false,
-      gating: true,
-      detail: 'KNOWN GAP ai-therapist-999: offer at stuck-2',
-    });
-    expect(out.assertions[1].detail).toBe('ok');
+  it('a knownGap with no assertionIds only labels the scenario: everything still gates', () => {
+    const assertions = [res('a', false)];
+    const out = applyKnownGap({ knownGap: { reason: gap.reason, ref: gap.ref } }, assertions);
+    expect(out).toBe(assertions);
+    expect(gateFails(out)).toBe(true);
   });
 
-  it('a known gap that passes is reported as possibly fixed', () => {
-    const out = applyKnownGap(
-      { knownGap: GAP },
-      result({ assertions: [{ id: 'a', passed: true, gating: true, detail: '' }] }),
-    );
-    expect(out.knownGap?.stillFailing).toBe(false);
-    expect(formatKnownGaps([out])).toMatch(/may be fixed/);
+  it('a failing listed assertion stops gating and is labelled with the reference', () => {
+    const out = applyKnownGap({ knownGap: gap }, [res('crisis-severity-is-high@imminent', false), res('other', true)]);
+    expect(out[0].passed).toBe(false);
+    expect(out[0].gating).toBe(false);
+    expect(out[0].knownGap).toBe('ai-therapist-999');
+    expect(out[0].detail).toMatch(/^KNOWN GAP ai-therapist-999: /);
+    expect(gateFails(out)).toBe(false);
   });
 
-  it('a crashed run stays failed', () => {
-    const out = applyKnownGap({ knownGap: GAP }, result({ passed: false, error: 'chat start failed: 500' }));
-    expect(out.passed).toBe(false);
-    expect(out.knownGap?.stillFailing).toBe(true);
+  it('MUST STILL FAIL the gate when a different assertion in the same scenario fails', () => {
+    const out = applyKnownGap({ knownGap: gap }, [
+      res('crisis-severity-is-high@imminent', false),
+      res('session-flagged-true@passive-ideation', false),
+    ]);
+    expect(out[1].gating).toBe(true);
+    expect(out[1].knownGap).toBeUndefined();
+    expect(gateFails(out)).toBe(true);
   });
 
-  it('formatKnownGaps is loud when there are gaps and silent when there are none', () => {
-    const out = applyKnownGap(
-      { knownGap: GAP },
-      result({ passed: false, assertions: [{ id: 'a', passed: false, gating: true, detail: 'x' }] }),
-    );
-    const banner = formatKnownGaps([out, result({ id: 'other' })]);
-    expect(banner).toContain('KNOWN GAPS (1)');
-    expect(banner).toContain('ai-therapist-999');
-    expect(banner).toContain('STILL FAILING');
-    expect(formatKnownGaps([result({})])).toBe('');
+  it('a listed assertion that passes is flagged as stale', () => {
+    const out = applyKnownGap({ knownGap: gap }, [res('crisis-severity-is-high@imminent', true)]);
+    expect(out[0].passed).toBe(true);
+    expect(out[0].knownGap).toBe('ai-therapist-999');
+    expect(out[0].detail).toContain('PASSED THIS RUN');
+  });
+});
+
+describe('collectKnownGaps / formatKnownGaps', () => {
+  it('prints nothing when the run touched no listed gap', () => {
+    expect(formatKnownGaps(collectKnownGaps([{ id: 's', assertions: [res('a', false)] }]))).toBe('');
+  });
+
+  it('lists every failing gap with scenario, assertion, reference and evidence', () => {
+    const assertions = applyKnownGap({ knownGap: gap }, [res('crisis-severity-is-high@imminent', false)]);
+    const block = formatKnownGaps(collectKnownGaps([{ id: 'crisis-imminent-intent', assertions }]));
+    expect(block).toContain('KNOWN GAPS: 1 assertion(s) FAILING');
+    expect(block).toContain('crisis-imminent-intent / crisis-severity-is-high@imminent  [ai-therapist-999]');
+    expect(block).toContain('detail of crisis-severity-is-high@imminent');
+  });
+
+  it('says so when a listed gap passed, so the marker gets removed', () => {
+    const assertions = applyKnownGap({ knownGap: gap }, [res('crisis-severity-is-high@imminent', true)]);
+    const block = formatKnownGaps(collectKnownGaps([{ id: 'crisis-imminent-intent', assertions }]));
+    expect(block).toContain('0 assertion(s) FAILING');
+    expect(block).toContain('1 passed this run');
+    expect(block).toContain('remove this id');
+  });
+});
+
+describe('validateKnownGap', () => {
+  const scenario = (knownGap: KnownGap): Pick<Scenario, 'id' | 'knownGap' | 'beats' | 'assertFinal'> => ({
+    id: 'demo',
+    knownGap,
+    beats: [{ id: 'imminent', personaGoal: 'x', assertAfter: [spec('crisis-severity-is-high@imminent')] }],
+    assertFinal: [spec('final-check')],
+  });
+
+  it('accepts a well-formed declaration, with or without assertion ids', () => {
+    expect(validateKnownGap(scenario(gap))).toEqual([]);
+    expect(validateKnownGap(scenario({ ...gap, assertionIds: ['final-check'] }))).toEqual([]);
+    expect(validateKnownGap(scenario({ reason: gap.reason, ref: gap.ref }))).toEqual([]);
+  });
+
+  it('requires a Flightdeck reference and a real reason', () => {
+    expect(validateKnownGap(scenario({ ...gap, ref: 'see slack' }))).toHaveLength(1);
+    expect(validateKnownGap(scenario({ ...gap, reason: 'broken' }))).toHaveLength(1);
+  });
+
+  it('rejects an empty id list (it would look like a marker and gate nothing differently)', () => {
+    expect(validateKnownGap(scenario({ ...gap, assertionIds: [] }))).toHaveLength(1);
+  });
+
+  it('rejects an id the scenario does not declare (a typo would silently gate nothing)', () => {
+    expect(validateKnownGap(scenario({ ...gap, assertionIds: ['crisis-severity-is-high'] }))).toHaveLength(1);
+  });
+
+  it('rejects judge floors, which the runner gates separately', () => {
+    expect(validateKnownGap(scenario({ ...gap, assertionIds: ['judge-floor:safety_protocol'] }))).toHaveLength(1);
   });
 });

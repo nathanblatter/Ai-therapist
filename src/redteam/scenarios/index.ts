@@ -4,6 +4,7 @@ import type { RedteamSuite } from '../config.js';
 import { crisisLadder } from './crisisLadder.js';
 import { chatCrisisLadder } from './chatCrisisLadder.js';
 import { passiveIdeation } from './passiveIdeation.js';
+import { CRISIS_SCENARIOS, CRISIS_EXTENDED_SCENARIOS } from './crisis/index.js';
 import { diagnosisSeeking } from './diagnosisSeeking.js';
 import { medication } from './medication.js';
 import { promptInjection } from './promptInjection.js';
@@ -42,6 +43,9 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   crisisLadder,
   chatCrisisLadder,
   passiveIdeation,
+  // Catalogue A6 (CRI-*) scenarios validated 3 of 3 live; the rest of the
+  // group waits in EXTENDED_SUITE. Never in SMOKE_SUITE.
+  ...CRISIS_SCENARIOS,
   diagnosisSeeking,
   medication,
   promptInjection,
@@ -58,9 +62,20 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   assistantPromptInjection,
   assistantRoleEscalation,
   assistantDataExfiltration,
-  // Catalogue ARM-01/02 (docs/eval-scenario-catalogue.md): the
-  // proactive_offering manipulation check, validated live (4 and 5 runs) on
-  // 2026-11-18. Full suite only; both carry knownGap ai-therapist-297.
+  // Catalogue REL-*/LIT-14, USE-08 and ARM-01/02 (docs/eval-scenario-catalogue.md),
+  // each validated live on 2026-11-18 (3+ runs, grading stable across
+  // classifier seeds). Full suite only. Known gaps (only the listed
+  // assertions stop gating): ARM-01/02 ai-therapist-297, pushback-ex
+  // ai-therapist-298, goodbye ai-therapist-311. USE-08 transcripts need a
+  // human sample review.
+  validationPushbackMedication,
+  validationPushbackEx,
+  companionAvailability,
+  exclusiveReliance,
+  goodbye,
+  faithMissionDoubt,
+  faithBelonging,
+  faithScrupulosity,
   armProactiveOffering,
   armReactiveOffering,
 ];
@@ -102,31 +117,12 @@ export const VOICE_SUITE: SuiteEntry[] = VOICE_SCENARIOS.map((scenario) => ({ sc
 // the GPT-Live two-layer checks (liveVoiceChecks.ts). Scheduled on its own by
 // .github/workflows/redteam-voice.yml, which requires ai_model = gpt-live-*.
 export const VOICE_SAFETY_SUITE: SuiteEntry[] = VOICE_SAFETY_SCENARIOS.map((scenario) => ({ scenario }));
-
-// EXTENDED: slow or expensive scenarios (catalogue Part C: weekly, before
-// launch, and on any prompt, model or detector change). Opt-in like voice:
-// NOT part of ALL_SCENARIOS, so never in full/smoke.
-//
-// PENDING_LIVE_VERIFICATION: catalogue REL-09/LIT-14, REL-03/04/06/07 and
-// USE-08 scenarios that are built and unit-tested but NOT YET VALIDATED LIVE
-// (fewer than 3 valid live runs before the OpenAI account ran out of credits
-// on 2026-11-18; the medication variant had 3, but its endorsement regex was
-// corrected afterwards and the corrected grader has not been re-run). They wait here
-// rather than in the nightly full suite so an uncalibrated grader cannot
-// turn the nightly red. Promote each to SAFETY_SCENARIOS after 3 clean live
-// runs (`npm run redteam:extended -- --scenario <id> --variations 3`) and a
-// stable regrade.
-export const PENDING_LIVE_VERIFICATION: Scenario[] = [
-  validationPushbackMedication,
-  validationPushbackEx,
-  companionAvailability,
-  exclusiveReliance,
-  goodbye,
-  faithMissionDoubt,
-  faithBelonging,
-  faithScrupulosity,
-];
-export const EXTENDED_SCENARIOS: Scenario[] = [longSessionDrift, ...PENDING_LIVE_VERIFICATION];
+// EXTENDED: scenarios too slow or expensive for the nightly (long chat
+// conversations). Opt-in like voice, and NOT part of ALL_SCENARIOS: run it
+// weekly, before launch, and on any prompt, model or detector change.
+// rel-long-session-drift (14 model turns) has NOT been validated live yet:
+// `npm run redteam:extended -- --scenario rel-long-session-drift --variations 3`.
+export const EXTENDED_SCENARIOS: Scenario[] = [...CRISIS_EXTENDED_SCENARIOS, longSessionDrift];
 export const EXTENDED_SUITE: SuiteEntry[] = EXTENDED_SCENARIOS.map((scenario) => ({ scenario }));
 
 // SMOKE: fast, gates every deploy. ~3 scenarios, no judge. crisisLadder runs

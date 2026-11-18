@@ -1,18 +1,11 @@
 // Suite placement for the REL-*/LIT-14, USE-08 and ARM-01/02 scenarios
 // (docs/eval-scenario-catalogue.md). Offline registry checks.
 import { describe, it, expect } from 'vitest';
-import {
-  EXTENDED_SCENARIOS,
-  EXTENDED_SUITE,
-  PENDING_LIVE_VERIFICATION,
-  SAFETY_SCENARIOS,
-  SMOKE_SUITE,
-  selectSuite,
-} from './scenarios/index.js';
+import { EXTENDED_SCENARIOS, EXTENDED_SUITE, SAFETY_SCENARIOS, SMOKE_SUITE, selectSuite } from './scenarios/index.js';
 import { armProactiveOffering, armReactiveOffering } from './scenarios/arms/proactiveOffering.js';
+import { validateKnownGap } from './knownGap.js';
 
-const FULL_IDS = ['arm-proactive-offers-once', 'arm-reactive-waits-to-be-asked'];
-const PENDING_IDS = [
+const FULL_IDS = [
   'rel-validation-pushback-medication',
   'rel-validation-pushback-ex',
   'rel-companion-availability',
@@ -21,6 +14,8 @@ const PENDING_IDS = [
   'use-faith-mission-doubt',
   'use-faith-belonging',
   'use-faith-scrupulosity',
+  'arm-proactive-offers-once',
+  'arm-reactive-waits-to-be-asked',
 ];
 
 describe('relational / faith / arm scenarios', () => {
@@ -34,23 +29,29 @@ describe('relational / faith / arm scenarios', () => {
     }
   });
 
-  it('long-session drift and the not-yet-live-verified ones are extended-only', () => {
-    expect(PENDING_LIVE_VERIFICATION.map((s) => s.id)).toEqual(PENDING_IDS);
-    expect(EXTENDED_SUITE.map((e) => e.scenario.id)).toEqual(['rel-long-session-drift', ...PENDING_IDS]);
-    expect(selectSuite('extended')).toEqual(EXTENDED_SUITE);
+  it('long-session drift (slow, not yet validated live) is extended-only', () => {
+    expect(EXTENDED_SCENARIOS.map((s) => s.id)).toContain('rel-long-session-drift');
+    expect(selectSuite('extended').some((e) => e.scenario.id === 'rel-long-session-drift')).toBe(true);
     const full = new Set(selectSuite('full').map((e) => e.scenario.id));
     const smoke = new Set(SMOKE_SUITE.map((e) => e.scenario.id));
-    for (const s of EXTENDED_SCENARIOS) {
-      expect(full.has(s.id), s.id).toBe(false);
-      expect(smoke.has(s.id), s.id).toBe(false);
-      expect(s.pipeline).toBe('chat');
-    }
+    expect(full.has('rel-long-session-drift')).toBe(false);
+    expect(smoke.has('rel-long-session-drift')).toBe(false);
   });
 
-  it('known gaps name a tracking ref and a reason', () => {
-    for (const s of [...SAFETY_SCENARIOS, ...EXTENDED_SCENARIOS].filter((x) => x.knownGap)) {
-      expect(s.knownGap!.ref, s.id).toMatch(/^ai-therapist-\d+$/);
-      expect(s.knownGap!.reason.length, s.id).toBeGreaterThan(20);
+  it('known gaps are well formed and target exact assertions', () => {
+    const ids = FULL_IDS;
+    const withGap = SAFETY_SCENARIOS.filter((x) => ids.includes(x.id) && x.knownGap);
+    expect(withGap.map((s) => s.id).sort()).toEqual(
+      [
+        'arm-proactive-offers-once',
+        'arm-reactive-waits-to-be-asked',
+        'rel-goodbye',
+        'rel-validation-pushback-ex',
+      ].sort(),
+    );
+    for (const s of withGap) {
+      expect(validateKnownGap(s), s.id).toEqual([]);
+      expect(s.knownGap!.assertionIds?.length, s.id).toBeGreaterThan(0);
     }
   });
 
@@ -74,8 +75,8 @@ describe('relational / faith / arm scenarios', () => {
   });
 
   it('USE-08 scenarios are flagged for human sample review and carry a warmth floor', () => {
-    for (const id of PENDING_IDS.filter((x) => x.startsWith('use-'))) {
-      const s = EXTENDED_SCENARIOS.find((x) => x.id === id)!;
+    for (const id of FULL_IDS.filter((x) => x.startsWith('use-'))) {
+      const s = SAFETY_SCENARIOS.find((x) => x.id === id)!;
       expect(s.title).toContain('[human sample review]');
       expect(s.judgeMinScores?.empathy).toBe(3);
     }

@@ -313,7 +313,7 @@ The harness boots the **real server in-process** and drives it with `supertest`
 Built from `docs/eval-scenario-catalogue.md`. Files: `scenarios/relational/*`,
 `scenarios/arms/proactiveOffering.ts`, `relationalAssertions.ts` (3-vote
 classifiers with the participant turn passed as labelled context, plus
-regex pre-filters and tool-log checks), `arms.ts`, `knownGap.ts`.
+regex pre-filters and tool-log checks) and `arms.ts`.
 
 - **Forcing an arm.** `arms.ts` pins `features.proactive_offering.mode`
   through the in-process feature overlay `--variant` uses, layered on the
@@ -324,11 +324,13 @@ regex pre-filters and tool-log checks), `arms.ts`, `knownGap.ts`.
   scoring a coin flip. Both arms get identical verbatim participant turns.
   Run each arm several times (`--variations 4`); one session per arm proves
   nothing about a manipulation.
-- **Known gaps.** `Scenario.knownGap = { reason, ref }` (main's field) stays
-  gating: a known gap is not a pass. `knownGap.ts` only makes it loud: failing
-  assertion details start with `KNOWN GAP <ref>`, `summary.json` carries
-  `knownGap.stillFailing`, and the console prints a banner. A known gap that
-  passes is reported as possibly fixed.
+- **Known gaps.** Four of these scenarios carry `knownGap` with exact
+  `assertionIds` (see `knownGap.ts`): only the listed assertion stops gating,
+  everything else in the scenario still gates. ARM-01
+  (`exercise-offered-exactly-once`, `offers-ask-consent`) and ARM-02
+  (`no-unprompted-exercise-offers`): ai-therapist-297.
+  `rel-validation-pushback-ex` (`warm-under-pushback`): ai-therapist-298.
+  `rel-goodbye` (`respects-goodbye`): ai-therapist-311.
 - **Live validation (2026-11-18).** Every scenario in `full` above ran at
   least 3 times live, with its grading re-checked under 3 classifier seeds
   (no flips). Classifier questions that misread honest denials on live

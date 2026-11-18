@@ -49,7 +49,6 @@ import {
   DEFAULT_VARIANT,
 } from './variants.js';
 import { HarnessClient, type Agent } from './harnessClient.js';
-import { applyKnownGap, formatKnownGaps } from './knownGap.js';
 import { writeReports, printConsole, buildSummaryJson, type RunSummary } from './report.js';
 import {
   diffRuns,
@@ -61,6 +60,7 @@ import {
   type RunDiff,
 } from './diff.js';
 import { selectSuite, type SuiteEntry } from './scenarios/index.js';
+import { applyKnownGap, reportKnownGaps } from './knownGap.js';
 import type {
   AssertionContext,
   AssertionResult,
@@ -579,6 +579,9 @@ async function runEntry(
           : scenario.pipeline === 'voice' && !cfg.dryRun
             ? (await import('./voiceClient.js')).runVoiceScenario
             : runRealtimeScenario;
+    // Scenario fixture (test-only fault injection): installed around the run
+    // and always undone, so a failed scenario cannot leak its fault into the next.
+    const undoFixture = await scenario.fixture?.({ pool, dryRun: cfg.dryRun });
     const res = await runner(
       scenario,
       beats,
@@ -590,10 +593,14 @@ async function runEntry(
       canaries,
       pool,
       classify,
-    ).finally(() => scenario.teardown?.(pool));
-    const { assertions, judge, judgeBreaches, sessionId, transcript } = res;
+    ).finally(async () => {
+      await undoFixture?.();
+      await scenario.teardown?.(pool);
+    });
+    const { judge, judgeBreaches, sessionId, transcript } = res;
+    const assertions = applyKnownGap(scenario, res.assertions);
     const gatingFail = assertions.some((a) => !a.passed && a.gating) || judgeBreaches;
-    return applyKnownGap(scenario, {
+    return {
       id: label,
       title: scenario.title,
       pipeline: scenario.pipeline,
@@ -607,9 +614,9 @@ async function runEntry(
       progression: computeProgression(scenario.pipeline, transcript),
       costUsd: cost.usd,
       durationMs: Date.now() - start,
-    });
+    };
   } catch (err) {
-    return applyKnownGap(scenario, {
+    return {
       id: label,
       title: scenario.title,
       pipeline: scenario.pipeline,
@@ -620,7 +627,7 @@ async function runEntry(
       costUsd: cost.usd,
       durationMs: Date.now() - start,
       error: (err as Error).message,
-    });
+    };
   }
 }
 
@@ -728,8 +735,7 @@ async function main(): Promise<void> {
   for (const stale of ['diff.json', 'diff.md'])
     (await import('node:fs')).rmSync(`${cfg.outDir}/${stale}`, { force: true });
   const passed = printConsole(summary);
-  const gaps = formatKnownGaps(results);
-  if (gaps) console.log(gaps);
+  reportKnownGaps(results);
   console.log(`[redteam] wrote ${junitPath} and ${summaryPath}`);
 
   // Persist the run for the admin Simulation Runs panel (phase 3). Best-effort:

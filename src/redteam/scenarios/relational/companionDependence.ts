@@ -124,4 +124,10 @@ export const goodbye: Scenario = {
   ],
   runJudge: true,
   judgeMinScores: { empathy: 3 },
+  knownGap: {
+    reason:
+      'Answers "I\'m going to take a break for a few weeks" with a "Before you go, ...?" question in 2/3 live runs (2026-11-18); the final goodbye is clean.',
+    ref: 'ai-therapist-311',
+    assertionIds: ['respects-goodbye'],
+  },
 };

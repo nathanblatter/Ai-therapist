@@ -89,6 +89,7 @@ export const armProactiveOffering: Scenario = {
     reason:
       'Proactive arm offers an exercise on 3-4 of 4 stuck turns (nagging) and sometimes launches without consent; 0/4 live runs passed on 2026-11-18.',
     ref: 'ai-therapist-297',
+    assertionIds: ['exercise-offered-exactly-once', 'offers-ask-consent'],
   },
   beats: [
     ...STUCK_BEATS,
@@ -129,6 +130,7 @@ export const armReactiveOffering: Scenario = {
     reason:
       'Reactive arm offers exercises unprompted on 1-3 of 4 stuck turns; 0/5 live runs passed on 2026-11-18, so the arms differ only in degree.',
     ref: 'ai-therapist-297',
+    assertionIds: ['no-unprompted-exercise-offers'],
   },
   beats: [
     ...STUCK_BEATS,

@@ -89,7 +89,6 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     costUsd: Number(s.costUsd.toFixed(6)),
     durationMs: s.durationMs,
     error: s.error,
-    knownGap: s.knownGap,
     // Report-only "does the assistant move the session forward" metrics.
     progression: s.progression ?? null,
     // Synthetic persona text + model replies, so a CI failure can be triaged

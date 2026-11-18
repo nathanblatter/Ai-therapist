@@ -314,6 +314,79 @@ export function buildPracticeBlock(open: PracticeAssignment[], completedSinceLas
   return `\nBetween-session practice:\n${lines.join('\n')}\nAsk warmly how the practice went — celebrate follow-through, never scold a skipped one.`;
 }
 
+/** Everything the returning-participant block is built from (see buildMemoryBlock). */
+export interface MemoryBlockInput {
+  endedCount: number;
+  summaries: Array<{
+    summary: {
+      headline?: string;
+      topics?: string[];
+      mood_trajectory?: string;
+      techniques_helped?: string[];
+      follow_up?: string;
+    };
+    ended_at: Date | null;
+    created_at: Date;
+  }>;
+  facts: string[];
+  caseProfile: CaseProfile | null;
+  scaleHistory: ScaleScorePoint[];
+  moodTrajectory: MoodPoint[];
+  safetyPlan: { plan: { warning_signs?: string[] }; created_at: Date } | null;
+  thoughtRecord: { record: { balanced_thought?: string }; created_at: Date } | null;
+  clinicianNote: { notes: string } | null;
+  riskFlags: PriorCrisisFlag[];
+  openAssignments: PracticeAssignment[];
+  completedSinceLast: PracticeAssignment[];
+  now?: Date;
+}
+
+/**
+ * Pure assembly of the returning-participant block from already-loaded data.
+ * Split out of buildMemoryBlock so the IRB verbatim-prompts attachment renders
+ * the exact template text the model receives.
+ */
+export function assembleMemoryBlock(input: MemoryBlockInput): string {
+  const {
+    endedCount,
+    summaries,
+    facts,
+    caseProfile,
+    scaleHistory,
+    moodTrajectory,
+    safetyPlan,
+    thoughtRecord,
+    clinicianNote,
+    riskFlags,
+    openAssignments,
+    completedSinceLast,
+    now = new Date(),
+  } = input;
+  const entries = summaries.map((row) => {
+    const s = row.summary;
+    const date = (row.ended_at ?? row.created_at).toISOString().slice(0, 10);
+    const parts: string[] = [];
+    if (s.topics?.length) parts.push(`topics: ${s.topics.join(', ')}`);
+    if (s.mood_trajectory) parts.push(s.mood_trajectory);
+    if (s.techniques_helped?.length) parts.push(`what helped: ${s.techniques_helped.join(', ')}`);
+    if (s.follow_up) parts.push(`possible follow-up: ${s.follow_up}`);
+    return `- ${date}${s.headline ? ` ("${s.headline}")` : ''}: ${parts.join(' | ')}`;
+  });
+
+  const factsBlock =
+    facts.length > 0 ? `\nThings they explicitly asked you to remember:\n${facts.map((f) => `- ${f}`).join('\n')}` : '';
+  const entriesBlock =
+    entries.length > 0 ? `\nContext from recent conversations, most recent first:\n${entries.join('\n')}` : '';
+  const caseProfileBlock = buildCaseProfileBlock(caseProfile);
+  const signalsBlock = buildReturningSignalsBlock({ scaleHistory, moodTrajectory, safetyPlan, thoughtRecord });
+  const screenerCadenceBlock = buildScreenerCadenceBlock(scaleHistory, now);
+  const practiceBlock = buildPracticeBlock(openAssignments, completedSinceLast);
+  const clinicianBlock = buildClinicianNoteBlock(clinicianNote);
+  const riskBlock = buildRiskHistoryBlock(riskFlags);
+
+  return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}${caseProfileBlock}${signalsBlock}${screenerCadenceBlock}${practiceBlock}${clinicianBlock}${riskBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
+}
+
 /**
  * Prompt block giving the model continuity with a returning participant.
  * Empty string for anonymous users, users who haven't opted in, or first-timers.
@@ -382,31 +455,20 @@ export async function buildMemoryBlock(userId: number | null, sessionId: string 
       completedSinceLast.length > 0;
     if (!hasAnyContext) return '';
 
-    const entries = summaries.map((row) => {
-      const s = row.summary;
-      const date = (row.ended_at ?? row.created_at).toISOString().slice(0, 10);
-      const parts: string[] = [];
-      if (s.topics?.length) parts.push(`topics: ${s.topics.join(', ')}`);
-      if (s.mood_trajectory) parts.push(s.mood_trajectory);
-      if (s.techniques_helped?.length) parts.push(`what helped: ${s.techniques_helped.join(', ')}`);
-      if (s.follow_up) parts.push(`possible follow-up: ${s.follow_up}`);
-      return `- ${date}${s.headline ? ` ("${s.headline}")` : ''}: ${parts.join(' | ')}`;
+    return assembleMemoryBlock({
+      endedCount,
+      summaries,
+      facts,
+      caseProfile: caseProfileRow?.profile ?? null,
+      scaleHistory,
+      moodTrajectory,
+      safetyPlan,
+      thoughtRecord,
+      clinicianNote,
+      riskFlags,
+      openAssignments,
+      completedSinceLast,
     });
-
-    const factsBlock =
-      facts.length > 0
-        ? `\nThings they explicitly asked you to remember:\n${facts.map((f) => `- ${f}`).join('\n')}`
-        : '';
-    const entriesBlock =
-      entries.length > 0 ? `\nContext from recent conversations, most recent first:\n${entries.join('\n')}` : '';
-    const caseProfileBlock = buildCaseProfileBlock(caseProfileRow?.profile ?? null);
-    const signalsBlock = buildReturningSignalsBlock({ scaleHistory, moodTrajectory, safetyPlan, thoughtRecord });
-    const screenerCadenceBlock = buildScreenerCadenceBlock(scaleHistory);
-    const practiceBlock = buildPracticeBlock(openAssignments, completedSinceLast);
-    const clinicianBlock = buildClinicianNoteBlock(clinicianNote);
-    const riskBlock = buildRiskHistoryBlock(riskFlags);
-
-    return `\n\n## Returning participant (conversation #${endedCount + 1} — they consented to session memory)${entriesBlock}${factsBlock}${caseProfileBlock}${signalsBlock}${screenerCadenceBlock}${practiceBlock}${clinicianBlock}${riskBlock}\nUse this for warmth and continuity ("last time we talked about..."), and to build on techniques that helped. Do not recite it back verbatim or claim to remember more than this.`;
   } catch (err) {
     // Memory must never block a session from starting.
     log.error({ err }, `Failed to build memory block for user ${userId}`);

@@ -15,7 +15,7 @@ npm run redteam:full       # all safety + quality scenarios (redteam-nightly.yml
 npm run redteam:quality    # rubric-floor scenarios only
 npm run redteam:voice      # real voice sessions on the production backend; opt-in, billed per minute
 npm run redteam:voice-safety  # safety families over real voice + GPT-Live checks (redteam-voice.yml)
-npm run redteam:extended   # slow/expensive chat scenarios (long-session drift) and ones pending live verification; opt-in
+npm run redteam:extended   # slow or expensive scenarios (long chat conversations); opt-in, not scheduled
 npm run redteam:replay     # re-drive redacted real sessions and diff judge scores
 ```
 
@@ -38,13 +38,17 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/index.ts` | Scenario registry: `SAFETY_SCENARIOS`, `QUALITY_SCENARIOS`, suite composition. |
 | `scenarios/*.ts` | One safety scenario per file (crisis ladders, passive ideation, eating disorder, substance use, minor age, medication, diagnosis seeking, delusional content, prompt injection, boundary testing, voice). |
 | `scenarios/quality/*.ts` | Rubric-floor quality scenarios (first session, low mood, advice seeker, rambling venting, terse participant, stalling participant, returning participant). |
+| `scenarios/crisis/*.ts` | The crisis group from `docs/eval-scenario-catalogue.md` (CRI-03, 04, 06, 08, 09, 10, 12, 17, 24), one catalogue entry per file. Design, measured pass rates and known gaps: `docs/redteam-crisis-scenarios.md`. |
+| `crisisAssertions.ts` | Assertions for the crisis group: pipeline state, reply regexes, one classifier question per Crisis Protocol promise. |
+| `crisisFixtures.ts` | Test-only fixtures and probes for the crisis group: assessor made unreachable, `end_session` guard probe, session-timer probe. |
+| `knownGap.ts` | Known product gaps: listed assertions report loudly on every run and do not gate until the filed bug is fixed. |
+| `crisisRubrics.live.test.ts` | Opt-in calibration of the crisis classifier questions against the real classifier (skipped in `npm test`). |
 | `scenarios/_preamble.ts` | Shared persona preamble. |
 | `personaDriver.ts` | LLM persona turn generator over scripted beats. |
 | `harnessClient.ts` | In-process HTTP driver (supertest), socket-emission capture, DB reads. |
 | `voiceClient.ts`, `liveVoiceClient.ts` | Voice drivers: Grok proxy socket and GPT-Live WebRTC, selected by `system_config.ai_model`. |
 | `relationalAssertions.ts` | REL/LIT-14/USE-08/ARM assertions (sycophancy, dependence, faith, exercise-offer counts, tool log). |
 | `arms.ts` | Forces the proactive_offering arm in-process for the ARM scenarios. |
-| `knownGap.ts` | `Scenario.knownGap`: known-gap annotation and console banner (gaps stay gating). |
 | `scenarios/relational/*.ts`, `scenarios/arms/*.ts` | Catalogue REL-*, USE-08 and ARM-01/02 scenarios. |
 | `liveVoiceChecks.ts` | GPT-Live checks: which layer answered each turn, client probes, risk/resource assertions. |
 | `voiceSummary.ts` | Markdown job summary for `redteam-voice.yml`. |
