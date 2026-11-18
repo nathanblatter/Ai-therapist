@@ -180,3 +180,29 @@ describe('POST /api/live/session when the voice provider refuses the mint', () =
     expect(mocks.connectAndWait).toHaveBeenCalled();
   });
 });
+
+// The sideband must be told the delegation mode the session was actually
+// minted with (ai-therapist-282): a crisis recovery start is client-delegated
+// with no tools, and the manager refuses trigger-tool on it only if the route
+// says so here.
+describe('POST /api/live/session sideband delegation mode', () => {
+  const healthy = () => upstream(200, { session: { id: 'sess_live_2' }, transport: { sdp: 'answer' } });
+
+  it('attaches an ordinary session as responses-delegated', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    expect(mocks.connectAndWait.mock.calls[0][3]).toMatchObject({ delegationMode: 'responses' });
+  });
+
+  it('attaches a recovery session as client-delegated', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: true }).expect(201);
+    expect(mocks.connectAndWait.mock.calls[0][3]).toMatchObject({ delegationMode: 'client' });
+  });
+
+  it('only the literal boolean marks a recovery start', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: 'true' }).expect(201);
+    expect(mocks.connectAndWait.mock.calls[0][3]).toMatchObject({ delegationMode: 'responses' });
+  });
+});
