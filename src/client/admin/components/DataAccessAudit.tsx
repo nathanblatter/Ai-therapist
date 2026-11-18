@@ -36,6 +36,7 @@ const ACTIONS = [
   'dataset_export',
   'audit_log_view',
   'worksheet_review',
+  'semantic_search',
 ];
 
 interface Column<Row> {
