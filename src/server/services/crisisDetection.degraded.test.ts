@@ -25,6 +25,7 @@ vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue
 vi.mock('./adverseEvent.service.js', () => ({ draftAdverseEventFromCrisis: vi.fn() }));
 vi.mock('./crisisAlert.service.js', () => ({
   reportOpenAIQuotaExhausted: reportQuotaMock,
+  reportRiskAssessorOutage: vi.fn().mockResolvedValue(true),
   sendCrisisAlert: vi.fn(),
 }));
 vi.mock('openai', () => ({

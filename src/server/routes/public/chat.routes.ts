@@ -52,6 +52,13 @@ import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('chatRoutes');
 
+/** Longest a chat reply waits for a context assessment of a keyword-free turn
+ *  (ai-therapist-299). Measured live on 2026-11-18 the moderation screen plus
+ *  the assessor took 2 to 3.5 seconds, with an occasional call over 5; this
+ *  leaves room for those without ever tying the participant's reply to an
+ *  assessor that is timing out (10s per attempt) or being retried. */
+const CHAT_CONTEXT_ASSESS_DEADLINE_MS = 6000;
+
 /**
  * Synthetic-account gate (caseworker portal, spec section 7 item 6): demo-role
  * magic-link accounts AND sandbox-org accounts both get behavioral safety
@@ -480,7 +487,9 @@ export default function chatRoutes(): Router {
         }
       }
 
-      const { detectCrisisKeywords } = await import('../../services/crisisDetection.service.js');
+      const { detectCrisisKeywords, needsContextAssessment } = await import(
+        '../../services/crisisDetection.service.js'
+      );
       const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
       const { sendMessage, injectGuidance } = await import('../../services/chatTherapy.service.js');
 
@@ -489,11 +498,55 @@ export default function chatRoutes(): Router {
       // SAME-TURN steering. Clean turns defer everything (incl. the 8-turn LLM
       // sweep) to post-response, exactly like /logs/batch, so the happy path
       // adds no LLM call before the reply.
+      //
+      // In between (ai-therapist-299): a keyword-free turn that carries a
+      // context-dependent signal, or that arrives in a session already flagged
+      // or recently risk-bearing ("I'm going to do it tonight" after an
+      // ideation turn). It is assessed before the reply too, so the steer
+      // lands on THIS turn, but only up to CHAT_CONTEXT_ASSESS_DEADLINE_MS: the
+      // reply is never held longer than that for an assessor that is slow or
+      // down. Past the deadline the pipeline keeps running (it still flags and
+      // pages when it finishes) and its steer lands on the next turn, exactly
+      // like the deferred path.
       let steering: string | null = null;
       try {
         if (detectCrisisKeywords(message).keywordScore > 0) {
           const risk = await runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat');
           steering = risk.steeringGuidance;
+        } else if (
+          // needsContextAssessment never throws; if it somehow does, assess the
+          // turn (bounded below) rather than skip its detection altogether.
+          await needsContextAssessment(sessionId, message).catch((err) => {
+            log.error({ err }, '[ChatCrisis] context check failed; assessing the turn anyway');
+            return true;
+          })
+        ) {
+          let settled = false;
+          let timer: NodeJS.Timeout | undefined;
+          const pending = runCrisisPipeline({ sessionId, messageId: userMsg.message_id, content: message }, 'chat');
+          const inTime = await Promise.race([
+            pending.then((r) => {
+              settled = true;
+              return r;
+            }),
+            new Promise<null>((resolve) => {
+              timer = setTimeout(() => resolve(null), CHAT_CONTEXT_ASSESS_DEADLINE_MS);
+            }),
+          ]);
+          clearTimeout(timer);
+          if (inTime) {
+            steering = inTime.steeringGuidance;
+          } else if (!settled) {
+            log.warn(
+              `[ChatCrisis] context assessment for session ${sessionId.substring(0, 12)}... passed ` +
+                `${CHAT_CONTEXT_ASSESS_DEADLINE_MS}ms; replying now, detection continues in the background`,
+            );
+            void pending
+              .then((r) => {
+                if (r.steeringGuidance) injectGuidance(sessionId, r.steeringGuidance);
+              })
+              .catch((err) => log.error({ err }, '[ChatCrisis] late context pipeline failed'));
+          }
         } else {
           // Clean turn: run the pipeline after the response ships (covers the
           // periodic sweep); any steering lands on the NEXT turn.

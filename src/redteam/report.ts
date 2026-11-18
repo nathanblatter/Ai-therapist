@@ -4,6 +4,7 @@ import path from 'path';
 import type { RedteamConfig } from './config.js';
 import type { ScenarioResult } from './types.js';
 import { aggregateProgression } from './progression.js';
+import { aggregateVoice } from './voice/aggregate.js';
 import type { VariantLabel } from './variants.js';
 import type { DiscardedVariant } from './generatedVariants.js';
 import { mergeBreakdowns } from './config.js';
@@ -120,6 +121,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
     // from the artifact after the CI database is gone.
     transcript: s.transcript,
     ...(s.generated ? { generated: s.generated } : {}),
+    // GPT-Live runs: the voice evaluation metrics (voice/metrics.ts).
+    ...(s.voiceMetrics ? { voiceMetrics: s.voiceMetrics } : {}),
   }));
   // Totals describe the SCRIPTED scenarios only, so they stay comparable run
   // to run whether or not generated variants rode along; those get their own
@@ -173,6 +176,8 @@ export function buildSummaryJson(summary: RunSummary): Record<string, unknown> {
       },
       judge: judgeStats(scripted),
       progression: aggregateProgression(scripted.map((s) => s.progression)),
+      // P50/P90 across repeats, per risk band and for crisis turns (voice/aggregate.ts).
+      voice: aggregateVoice(scripted),
     },
     ...generatedBlock,
   };

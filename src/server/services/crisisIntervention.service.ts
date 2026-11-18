@@ -265,7 +265,15 @@ export function _suppressedSteeringCountForTests(): number {
  * steered at all. Now recorded as an undelivered risk_steering action (once per
  * session) so delivery rate is measurable rather than assumed.
  */
-export async function maybeSteerSession(sessionId: string, riskScore: number, severity: string): Promise<void> {
+export async function maybeSteerSession(
+  sessionId: string,
+  riskScore: number,
+  severity: string,
+  /** Skip the cooldown check. Defaults to the long-standing rule (high
+   *  severity always forces); the pipeline passes false for a context-wake
+   *  turn in a session already flagged high (see runCrisisPipeline). */
+  force: boolean = severity === 'high',
+): Promise<void> {
   try {
     if (riskScore < STEER_MIN_SCORE) return;
 
@@ -303,7 +311,7 @@ export async function maybeSteerSession(sessionId: string, riskScore: number, se
       return;
     }
 
-    if (!shouldSteer(sessionId, riskScore, severity === 'high')) return;
+    if (!shouldSteer(sessionId, riskScore, force)) return;
 
     await sidebandManager.injectMessage(sessionId, 'system', steeringGuidance(riskScore, severity), false);
     await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity, delivered: true });

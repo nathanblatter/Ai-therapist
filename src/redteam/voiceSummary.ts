@@ -9,6 +9,7 @@
 // workflow goes red from the suite step's own exit code, after the upload.
 // Kept separate from report.ts on purpose (that file belongs to the nightly).
 import fs from 'node:fs';
+import { formatVoiceAggregate, type VoiceAggregate } from './voice/aggregate.js';
 
 interface SummaryAssertion {
   id: string;
@@ -33,6 +34,8 @@ export interface VoiceSummaryJson {
   suite?: string;
   gitSha?: string | null;
   scenarios: SummaryScenario[];
+  /** P50/P90 voice metrics (voice/aggregate.ts), when the run produced any. */
+  totals?: { voice?: VoiceAggregate | null };
 }
 
 /** Table-cell safe: no pipes, no newlines, bounded length. */
@@ -60,7 +63,7 @@ export function formatVoiceSummary(s: VoiceSummaryJson, knownGaps: KnownGaps = {
   const ok = passed === scenarios.length && scenarios.length > 0;
 
   const out: string[] = [];
-  out.push('## Red-team voice-safety suite (GPT-Live)');
+  out.push(`## Red-team ${s.suite && s.suite !== 'voice-safety' ? s.suite : 'voice-safety'} suite (GPT-Live)`);
   out.push('');
   out.push(
     `**${ok ? 'PASS' : 'FAIL'}**: ${passed}/${scenarios.length} scenarios passed, ` +
@@ -143,6 +146,10 @@ export function formatVoiceSummary(s: VoiceSummaryJson, knownGaps: KnownGaps = {
     out.push('');
     for (const { scenario, a } of notes) out.push(`- ${scenario} \`${a.id}\`: ${cell(a.detail, 300)}`);
   }
+  if (s.totals?.voice) {
+    out.push('');
+    out.push(formatVoiceAggregate(s.totals.voice).trimEnd());
+  }
   out.push('');
   out.push(
     'Transcripts (with the layer per turn and the backend text) are in the `redteam-voice-results` artifact, `summary.json`.',
@@ -157,8 +164,15 @@ async function main(): Promise<void> {
     md = `## Red-team voice-safety suite (GPT-Live)\n\n**FAIL**: no ${path} was written; the run did not finish. See the job log.\n`;
   } else {
     const { VOICE_SAFETY_SCENARIOS } = await import('./scenarios/voice.js');
+    const modes = await import('./voice/scenarios.js');
     const knownGaps: KnownGaps = {};
-    for (const sc of VOICE_SAFETY_SCENARIOS) if (sc.knownGap) knownGaps[sc.id] = sc.knownGap;
+    for (const sc of [
+      ...VOICE_SAFETY_SCENARIOS,
+      ...modes.VOICE_CRAWL_SCENARIOS,
+      ...modes.VOICE_WALK_SCENARIOS,
+      ...modes.VOICE_RUN_SCENARIOS,
+    ])
+      if (sc.knownGap) knownGaps[sc.id] = sc.knownGap;
     md = formatVoiceSummary(JSON.parse(fs.readFileSync(path, 'utf8')) as VoiceSummaryJson, knownGaps);
   }
   const target = process.env.GITHUB_STEP_SUMMARY;

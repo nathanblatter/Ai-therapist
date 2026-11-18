@@ -735,11 +735,28 @@ function buildItems(): Item[] {
     'p',
     'Runs when a keyword screen flags possible crisis language in a participant message, and additionally as a ' +
       `periodic sweep after every ${SWEEP_EVERY} participant messages without an assessment (so unusual phrasing is ` +
-      'not missed). System prompt, verbatim:',
+      'not missed). It also runs on a message that matched no crisis keyword when the conversation around it calls ' +
+      'for it: every participant message in a session that is already flagged or had a recent risk-bearing message, ' +
+      'and any message that states intent, a goodbye or a question about dangerous amounts with its subject left ' +
+      'unsaid (for example "I\'m going to do it tonight"). System prompt, verbatim:',
   );
   add('pre', RISK_ASSESSMENT_PROMPT);
   add('note', 'The accompanying user message is, verbatim:');
   add('pre', buildRiskAssessmentUserMessage('<recent transcript>', '<flagged participant message>'));
+  add(
+    'note',
+    'For a message that matched no crisis keyword in a session with earlier risk, the user message is, verbatim ' +
+      '(the session risk context line is omitted when the session has no earlier risk):',
+  );
+  add(
+    'pre',
+    buildRiskAssessmentUserMessage('<recent transcript>', '<latest participant message>', {
+      sessionContext:
+        '<one sentence: the highest severity band assessed earlier in this session, how many participant turns ago, ' +
+        'the factors noted then, and whether the session is currently flagged>',
+      keywordFree: true,
+    }),
+  );
 
   add('h2', `C.2 Minor-eligibility confirmation prompt (${CONFIRM_MODEL})`);
   add(
