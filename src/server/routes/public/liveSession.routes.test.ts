@@ -58,6 +58,7 @@ vi.mock('../../utils/liveSessionConfig.js', () => ({
   isLiveModel: () => true,
   resolveLiveVoice: () => 'voice',
   LIVE_DEFAULT_BACKEND_MODEL: 'backend-test',
+  resolveBackendReasoningEffort: () => null,
 }));
 vi.mock('../../services/sidebandManager.service.js', () => ({
   sidebandManager: { connectAndWait: mocks.connectAndWait, tryInject: vi.fn(), disconnect: vi.fn() },
