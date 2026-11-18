@@ -21,9 +21,11 @@
     "redteam:full": "tsx src/redteam/cli.ts --suite full",
     "redteam:quality": "tsx src/redteam/cli.ts --suite quality",
     "redteam:voice": "tsx src/redteam/cli.ts --suite voice",
+    "redteam:voice-safety": "tsx src/redteam/cli.ts --suite voice-safety",
     "redteam:replay": "tsx src/redteam/replay.ts",
     "redteam:ci-summary": "tsx src/redteam/ciSummary.ts",
     "counterfactual": "tsx src/database/scripts/runCounterfactual.ts",
+    "config:snapshot": "tsx src/database/scripts/exportConfigSnapshot.ts",
     "irb:redteam": "tsx src/server/irb/buildRedteamAttachment.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
