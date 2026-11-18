@@ -30,6 +30,10 @@ import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('sessionsRoutes');
 
+/** Typed-text relay cap (the composer allows 4000; a shared journal entry rides
+ *  the same path, so leave headroom). */
+const PARTICIPANT_TEXT_MAX_CHARS = 10_000;
+
 export default function sessionsRoutes(): Router {
   const router = Router();
 
@@ -355,6 +359,32 @@ export default function sessionsRoutes(): Router {
     } catch (err) {
       log.error({ err }, 'Failed to deliver live opening');
       res.status(500).json({ error: 'Failed to deliver opening' });
+    }
+  });
+
+  // POST /api/sessions/:sessionId/text - a GPT-Live participant's TYPED message
+  // (ai-therapist-214). The browser's data channel is locked to session.close,
+  // so typed text reaches the delegated backend through the server, always as
+  // a user-role message. Persistence and crisis scoring still ride the
+  // browser's /logs/batch upload, exactly as before. Owner-gated.
+  router.post('/api/sessions/:sessionId/text', async (req, res) => {
+    const { sessionId } = req.params;
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: 'non-empty text required' });
+    if (text.length > PARTICIPANT_TEXT_MAX_CHARS) return res.status(413).json({ error: 'text too long' });
+    try {
+      const session = await getSessionAccessInfo(sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found' });
+      if (!canAccessSession(req, session, sessionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      const { sidebandManager } = await import('../../services/sidebandManager.service.js');
+      const sent = sidebandManager.sendParticipantText(sessionId, text);
+      if (!sent) return res.status(409).json({ error: 'no_live_backend' });
+      res.json({ sent: true });
+    } catch (err) {
+      log.error({ err }, 'Failed to relay typed text');
+      res.status(500).json({ error: 'Failed to send message' });
     }
   });
 

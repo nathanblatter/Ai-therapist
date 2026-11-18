@@ -167,6 +167,10 @@ export class LiveVoiceSession implements VoiceTransport {
   /** Every error event, with the client event id it names (if any). */
   private errors: Array<{ clientEventId: string | null; code: string; message: string }> = [];
   private sessionUpdatedCount = 0;
+  /** Non-error server events that name a client event id (session.updated,
+   *  session.instructions.appended, session.input_audio.muted, ...): the API
+   *  acknowledging a client event, which for a probe means it was accepted. */
+  private acks: Array<{ type: string; clientEventId: string }> = [];
   /** `error` events with code content_filter seen so far. */
   moderationStops = 0;
   /** Start of the current turn window (wall clock). */
@@ -329,6 +333,8 @@ export class LiveVoiceSession implements VoiceTransport {
     ) {
       console.log(`[voice:live] ${JSON.stringify(ev).slice(0, 200)}`);
     }
+    const ackId = (ev as { client_event_id?: unknown }).client_event_id;
+    if (type !== 'error' && typeof ackId === 'string') this.acks.push({ type, clientEventId: ackId });
     switch (type) {
       case 'session.started':
         this.started = true;
@@ -550,6 +556,12 @@ export class LiveVoiceSession implements VoiceTransport {
           // Keep listening: the follow-up shows whether the rewrite took effect.
           verdict = 'accepted';
           evidence = 'session.updated arrived after the client session.update';
+        }
+        const ack = this.acks.find((a) => a.clientEventId === eventId);
+        if (verdict === 'no-response' && ack) {
+          // Keep listening for the canary too: it says what the event did.
+          verdict = 'accepted';
+          evidence = `${ack.type} acknowledged the probe`;
         }
         // A bare follow-up response.create legitimately starts backend work,
         // so new work is evidence only for a probe that IS the override.

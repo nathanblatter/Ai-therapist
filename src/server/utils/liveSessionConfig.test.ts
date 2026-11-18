@@ -14,7 +14,6 @@ import {
   LIVE_DEFAULT_BACKEND_MODEL,
   LIVE_VOICES,
   LIVE_CLIENT_EVENTS,
-  LIVE_RECOVERY_CLIENT_EVENTS,
 } from './liveSessionConfig.js';
 import type { ToolDefinition } from '../services/toolRegistry.service.js';
 
@@ -226,30 +225,29 @@ describe('buildLiveSessionConfig data-channel permissions', () => {
 
     expect(Object.keys(client)).toEqual(['data_channel']);
     expect(Object.keys(client.data_channel)).toEqual(['allowed_client_events']);
-    expect(client.data_channel.allowed_client_events).toEqual([
-      'session.close',
-      'response.item.create',
-      'response.create',
-    ]);
+    expect(client.data_channel.allowed_client_events).toEqual(['session.close']);
   });
 
-  it('never lets the browser append instructions, thinking or commentary, or update the session', () => {
+  it('never lets the browser steer, queue backend items, mute input or touch decisions', () => {
     for (const session of [build(), build({ recovery: { crisisLine: '988' } })]) {
       const allowed = (session.client as ClientBlock).data_channel.allowed_client_events;
       expect(allowed).not.toContain('session.instructions.append');
       expect(allowed).not.toContain('session.thinking.append');
       expect(allowed).not.toContain('session.commentary.append');
       expect(allowed).not.toContain('session.update');
+      expect(allowed).not.toContain('response.item.create');
+      expect(allowed).not.toContain('response.create');
+      expect(allowed).not.toContain('session.input_audio.mute');
+      expect(allowed).not.toContain('decision.item.create');
       expect(allowed).not.toContain('all');
     }
   });
 
   it('always leaves the browser able to hang up', () => {
     expect(LIVE_CLIENT_EVENTS).toContain('session.close');
-    expect(LIVE_RECOVERY_CLIENT_EVENTS).toContain('session.close');
   });
 
-  it('allows only the hang-up on a recovery session, which has no Responses backend to queue text for', () => {
+  it('locks a recovery session the same way', () => {
     const session = build({ recovery: { crisisLine: '988' } });
     expect((session.delegation as { type: string }).type).toBe('client');
     expect((session.client as ClientBlock).data_channel.allowed_client_events).toEqual(['session.close']);

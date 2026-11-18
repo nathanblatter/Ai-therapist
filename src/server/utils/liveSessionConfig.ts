@@ -574,28 +574,29 @@ export interface LiveSessionConfigInput {
 
 /**
  * Client events the participant's browser may send on the WebRTC data channel
- * (`session.client.data_channel.allowed_client_events`).
+ * (`session.client.data_channel.allowed_client_events`), for every session:
+ * normal and recovery alike.
  *
- * Deliberately absent: `session.instructions.append`, `session.thinking.append`,
- * `session.commentary.append` and `session.update`. Those are the application's
- * steering surface and are sent by the server over the sideband, which the
- * permission block does not affect.
+ *  - session.close   graceful end; the browser must be able to hang up.
  *
- *  - session.close         graceful end; the browser must be able to hang up.
- *  - response.item.create  typed participant text, queued for the backend.
- *  - response.create       continues the backend after a typed message.
+ * Everything else the browser used to send now goes through the server's
+ * sideband, which this block does not affect: the opening and recovery nudge
+ * (POST /api/sessions/:id/opening), typed text (POST /api/sessions/:id/text,
+ * always a user-role message) and tool outcomes (/tool-event).
+ *
+ * Deliberately absent, each measured live against gpt-live-1 on 2026-11-18
+ * (accepted from an unlocked browser channel): `session.update` (replaced the
+ * backend prompt and tools, set tool_choice none, cleared triggers),
+ * `session.instructions.append`, `session.thinking.append`,
+ * `session.commentary.append` (each made the model speak a canary),
+ * `response.item.create` (took a developer-role message for the backend),
+ * `session.input_audio.mute` and `decision.item.create`. `response.create` has
+ * no use without `response.item.create`.
  *
  * Every string here is a documented Live client event `type`. Do not add a
  * name that is not in the API reference.
  */
-export const LIVE_CLIENT_EVENTS = ['session.close', 'response.item.create', 'response.create'] as const;
-
-/**
- * The recovery session runs in client delegation mode with no Responses
- * backend. `response.item.create` and `response.create` both require Responses
- * delegation, so there is nothing for the browser to send but the hang-up.
- */
-export const LIVE_RECOVERY_CLIENT_EVENTS = ['session.close'] as const;
+export const LIVE_CLIENT_EVENTS = ['session.close'] as const;
 
 export { LIVE_RECOVERY_SPEAK_FIRST_NUDGE } from '../../shared/openingPrompt.js';
 
@@ -722,7 +723,7 @@ export function buildLiveSessionConfig(input: LiveSessionConfigInput): Record<st
   if (!input.allowClientSteering) {
     session.client = {
       data_channel: {
-        allowed_client_events: [...(recovery ? LIVE_RECOVERY_CLIENT_EVENTS : LIVE_CLIENT_EVENTS)],
+        allowed_client_events: [...LIVE_CLIENT_EVENTS],
       },
     };
   }

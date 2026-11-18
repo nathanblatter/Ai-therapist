@@ -1375,6 +1375,31 @@ export class SidebandManager {
   }
 
   /**
+   * Queue the participant's TYPED text for the delegated backend and continue
+   * it (ai-therapist-214). The browser used to send this pair on its own data
+   * channel; the channel is now locked to `session.close`, because
+   * `response.item.create` from the browser also accepts developer-role
+   * messages and tool outputs. Here the item is always a user-role message
+   * built from plain text, so the participant keeps the participant's voice
+   * and nothing more.
+   *
+   * Returns false when there is no sideband, and on a client-delegated
+   * (recovery) session, which has no Responses backend to queue text for.
+   */
+  sendParticipantText(sessionId: string, text: string): boolean {
+    const state = this.sessions.get(sessionId);
+    if (!state || state.delegationMode === 'client' || state.ws.readyState !== WebSocket.OPEN) return false;
+    const stamp = Date.now();
+    this.sendEvent(sessionId, {
+      type: 'response.item.create',
+      event_id: `typed_${stamp}`,
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+    });
+    this.sendEvent(sessionId, { type: 'response.create', event_id: `typed_continue_${stamp}` });
+    return true;
+  }
+
+  /**
    * Best-effort steer. Mirrors sidebandManager.tryInject so the shared crisis
    * code can treat both channels identically: false means the guidance could NOT
    * be delivered, which the caller records as an undelivered intervention rather

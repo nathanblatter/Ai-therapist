@@ -2681,6 +2681,34 @@ export default function App() {
     // does not start work on its own — response.create is what continues the
     // backend. (Both replace the Realtime conversation.item.create pair; Live
     // has no conversation item list to write into.)
+    //
+    // On a locked data channel (ai-therapist-214) the browser may send only
+    // session.close, so the server queues the same pair over the sideband.
+    if (liveChannelLockedRef.current) {
+      const liveId = liveSessionIdRef.current ?? sessionId;
+      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text: message }]);
+      logConversation({ sessionId: liveId, role: 'user', type: 'chat', message });
+      try {
+        const res = await fetch(`/api/sessions/${liveId}/text`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: message }),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+      } catch (error) {
+        console.error('[Live] Failed to send typed text:', error);
+        reportClientEvent(
+          'chat_send_failed',
+          { where: 'live_text', message: (error instanceof Error ? error.message : String(error)).slice(0, 300) },
+          liveId,
+        );
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: 'system', text: 'Error: Failed to send message. Please try again.' },
+        ]);
+      }
+      return;
+    }
     sendClientEvent({
       type: 'response.item.create',
       item: {

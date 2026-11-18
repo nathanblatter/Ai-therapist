@@ -49,10 +49,12 @@ vi.mock('../../services/sessionName.service.js', () => ({
 vi.mock('../../utils/adminBroadcast.js', () => ({
   broadcastAdminEventForSession: vi.fn().mockResolvedValue(undefined),
 }));
+const sidebandTextMock = vi.hoisted(() => vi.fn());
 vi.mock('../../services/sidebandManager.service.js', () => ({
   sidebandManager: {
     tryInject: vi.fn().mockResolvedValue(true),
     disconnect: vi.fn().mockResolvedValue(undefined),
+    sendParticipantText: sidebandTextMock,
   },
 }));
 const openingMocks = vi.hoisted(() => ({ deliverLiveOpeningViaSideband: vi.fn() }));
@@ -215,5 +217,45 @@ describe('POST /api/sessions/:id/opening', () => {
 
     expect(res.status).toBe(404);
     expect(openingMocks.deliverLiveOpeningViaSideband).not.toHaveBeenCalled();
+  });
+});
+
+// ai-therapist-214: typed text on a GPT-Live session goes through the server,
+// because the browser's data channel is locked to session.close.
+describe('POST /api/sessions/:id/text', () => {
+  it('relays the text for the session owner', async () => {
+    sidebandTextMock.mockReturnValue(true);
+    const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/text`).send({ text: '  hi there ' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: true });
+    expect(sidebandTextMock).toHaveBeenCalledWith(SESSION_ID, 'hi there');
+  });
+
+  it('carries only text: no role, item or event fields reach the sideband', async () => {
+    sidebandTextMock.mockReturnValue(true);
+    await request(makeApp())
+      .post(`/api/sessions/${SESSION_ID}/text`)
+      .send({ text: 'hi', role: 'developer', item: { type: 'function_call_output' } });
+    expect(sidebandTextMock).toHaveBeenCalledWith(SESSION_ID, 'hi');
+  });
+
+  it('rejects empty and oversized text', async () => {
+    expect((await request(makeApp()).post(`/api/sessions/${SESSION_ID}/text`).send({ text: ' ' })).status).toBe(400);
+    expect((await request(makeApp()).post(`/api/sessions/${SESSION_ID}/text`).send({ text: 5 })).status).toBe(400);
+    const big = 'a'.repeat(10_001);
+    expect((await request(makeApp()).post(`/api/sessions/${SESSION_ID}/text`).send({ text: big })).status).toBe(413);
+    expect(sidebandTextMock).not.toHaveBeenCalled();
+  });
+
+  it('409s when there is no live backend to queue for (no sideband, recovery session)', async () => {
+    sidebandTextMock.mockReturnValue(false);
+    const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/text`).send({ text: 'hi' });
+    expect(res.status).toBe(409);
+  });
+
+  it("refuses another participant's session", async () => {
+    const res = await request(makeApp()).post('/api/sessions/sess_someone_else/text').send({ text: 'hi' });
+    expect(res.status).toBe(403);
+    expect(sidebandTextMock).not.toHaveBeenCalled();
   });
 });

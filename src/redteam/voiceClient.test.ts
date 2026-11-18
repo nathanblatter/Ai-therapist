@@ -196,6 +196,8 @@ describe('LIVE_RECOVERY_SPEAK_FIRST_NUDGE', () => {
     const route = readFileSync(new URL('../server/routes/public/liveSession.routes.ts', import.meta.url), 'utf8');
     expect(app).toContain('LIVE_RECOVERY_SPEAK_FIRST_NUDGE');
     expect(route).toContain('LIVE_RECOVERY_SPEAK_FIRST_NUDGE');
-    expect(LIVE_RECOVERY_SPEAK_FIRST_NUDGE).toMatch(/^The voice connection just dropped and has reconnected\. Speak first/);
+    expect(LIVE_RECOVERY_SPEAK_FIRST_NUDGE).toMatch(
+      /^The voice connection just dropped and has reconnected\. Speak first/,
+    );
   });
 });
