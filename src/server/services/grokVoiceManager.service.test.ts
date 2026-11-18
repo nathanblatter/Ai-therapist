@@ -71,8 +71,10 @@ const { FakeWs, upstreams } = await vi.hoisted(async () => {
   return { FakeWs, upstreams: [] as InstanceType<typeof FakeWs>[] };
 });
 
+// `new WebSocket(...)` constructs the mock since Vitest 4, so the
+// implementation must be a `function` (arrow functions are not constructors).
 vi.mock('ws', () => {
-  const ctor = vi.fn((url: string) => {
+  const ctor = vi.fn(function (url: string) {
     const ws = new FakeWs(url);
     upstreams.push(ws);
     // Open on the next microtask, after the manager has registered listeners.

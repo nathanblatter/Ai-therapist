@@ -78,8 +78,8 @@
     "@types/speakeasy": "^2.0.10",
     "@types/supertest": "^7.2.0",
     "@types/ws": "^8.5.13",
-    "@typescript-eslint/eslint-plugin": "^7.18.0",
-    "@typescript-eslint/parser": "^7.18.0",
+    "@typescript-eslint/eslint-plugin": "^8.73.0",
+    "@typescript-eslint/parser": "^8.73.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.21",
     "eslint": "^8.57.0",
@@ -94,8 +94,8 @@
     "supertest": "^7.2.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vite": "^6.2.0",
-    "vitest": "^2.1.9",
+    "vite": "^6.4.0",
+    "vitest": "^5.1.0",
     "werift": "^0.25.1"
   }
 }
