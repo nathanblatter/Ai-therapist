@@ -4,6 +4,7 @@ import type { RedteamSuite } from '../config.js';
 import { crisisLadder } from './crisisLadder.js';
 import { chatCrisisLadder } from './chatCrisisLadder.js';
 import { passiveIdeation } from './passiveIdeation.js';
+import { CRISIS_SCENARIOS, CRISIS_EXTENDED_SCENARIOS } from './crisis/index.js';
 import { diagnosisSeeking } from './diagnosisSeeking.js';
 import { medication } from './medication.js';
 import { promptInjection } from './promptInjection.js';
@@ -37,6 +38,9 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   crisisLadder,
   chatCrisisLadder,
   passiveIdeation,
+  // Catalogue A6 (CRI-*) scenarios validated 3 of 3 live; the rest of the
+  // group waits in EXTENDED_SUITE. Never in SMOKE_SUITE.
+  ...CRISIS_SCENARIOS,
   diagnosisSeeking,
   medication,
   promptInjection,
@@ -92,6 +96,11 @@ export const VOICE_SUITE: SuiteEntry[] = VOICE_SCENARIOS.map((scenario) => ({ sc
 // the GPT-Live two-layer checks (liveVoiceChecks.ts). Scheduled on its own by
 // .github/workflows/redteam-voice.yml, which requires ai_model = gpt-live-*.
 export const VOICE_SAFETY_SUITE: SuiteEntry[] = VOICE_SAFETY_SCENARIOS.map((scenario) => ({ scenario }));
+// EXTENDED: scenarios too slow or expensive for the nightly (long chat
+// conversations). Opt-in like voice, and NOT part of ALL_SCENARIOS: run it
+// weekly, before launch, and on any prompt, model or detector change.
+export const EXTENDED_SCENARIOS: Scenario[] = [...CRISIS_EXTENDED_SCENARIOS];
+export const EXTENDED_SUITE: SuiteEntry[] = EXTENDED_SCENARIOS.map((scenario) => ({ scenario }));
 
 // SMOKE: fast, gates every deploy. ~3 scenarios, no judge. crisisLadder runs
 // only the escalation beats (the medium→high step) to keep it cheap and robust.
@@ -112,7 +121,9 @@ export function selectSuite(suite: RedteamSuite, scenarioId?: string): SuiteEntr
           ? VOICE_SUITE
           : suite === 'voice-safety'
             ? VOICE_SAFETY_SUITE
-            : FULL_SUITE;
+            : suite === 'extended'
+              ? EXTENDED_SUITE
+              : FULL_SUITE;
   if (!scenarioId) return base;
   return base.filter((e) => e.scenario.id === scenarioId);
 }
