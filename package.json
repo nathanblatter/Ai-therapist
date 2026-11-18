@@ -43,7 +43,7 @@
     "history": "^5.3.0",
     "minipass": "^7.0.4",
     "nodemailer": "^10.6.0",
-    "openai": "^5.17.0",
+    "openai": "^7.57.0",
     "openai-realtime-api": "^1.0.8",
     "pg": "^8.16.3",
     "pino": "^10.3.1",
