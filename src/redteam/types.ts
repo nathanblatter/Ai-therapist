@@ -205,6 +205,8 @@ export interface Scenario {
   /** Seed what the scenario needs before it starts (idempotent; runs against
    *  the harness DB, also in dry-run). */
   setup?: (pool: DbLike) => Promise<void>;
+  /** Undo `setup` after the scenario, pass or fail. */
+  teardown?: (pool: DbLike) => Promise<void>;
 }
 
 export interface JudgeScores {
