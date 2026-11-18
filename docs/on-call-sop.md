@@ -94,6 +94,14 @@ On acknowledging a page:
 - **Launch blocker (ai-therapist-147):** the prod crisis-paging env vars are
   currently UNSET — paging must be wired and test-fired before the first
   participant onboards.
+- **OpenAI spend limit page (ai-therapist-190):** a page beginning "OpenAI is
+  rejecting requests because the account spend or usage limit has been
+  reached" is a system alert, not a participant crisis. While it lasts, crisis
+  detection runs on the keyword screen only (no AI risk assessment, no
+  moderation screen), async client messages without crisis keywords wait
+  unscanned (`scan_failed`, re-tried every 3 minutes), new voice sessions cannot
+  start and chat replies fail. Raise the limit in the OpenAI billing settings at once. The page
+  repeats hourly until it is fixed.
 - After every deploy touching the crisis path: run the red-team smoke suite
   (CI does this automatically) and send one manual test page.
 

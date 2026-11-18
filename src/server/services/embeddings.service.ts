@@ -3,6 +3,7 @@
 // dependency-free so both the ingest script and the retrieve_psychoeducation
 // tool share one code path (and one model choice).
 import { getOpenAIKey } from '../config/secrets.js';
+import { BACKGROUND_RETRY_POLICY, classifyOpenAIResponse, nextRetryDelayMs } from '../utils/openaiErrors.js';
 
 // text-embedding-3-small: 1536 dims, cheap, strong retrieval quality. Must match
 // the VECTOR(1536) column in migration 031 and whatever the corpus was ingested
@@ -12,29 +13,39 @@ export const EMBEDDING_DIMENSIONS = 1536;
 
 // Raw fetch bypasses the OpenAI SDK's built-in retry, so retryable statuses
 // (429 incl. the 2026-09 `slow_down` code, 5xx incl. `server_is_overloaded`)
-// are retried here, honoring Retry-After when the API sends one.
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
-const MAX_ATTEMPTS = 3;
-
+// are retried here under the shared background policy (utils/openaiErrors):
+// Retry-After is honoured when the API sends one, attempts and total wait are
+// bounded, and a billing/spend-limit 429 is NOT retried - it cannot succeed
+// until a human raises the limit.
 async function postEmbeddings(body: string): Promise<Response> {
   const apiKey = await getOpenAIKey();
-  let lastRes: Response | null = null;
-  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+  let waitedMs = 0;
+  for (let retryIndex = 0; ; retryIndex++) {
     const res = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body,
     });
-    if (res.ok || !RETRYABLE_STATUS.has(res.status)) return res;
-    lastRes = res;
-    if (i < MAX_ATTEMPTS - 1) {
-      const retryAfter = Number(res.headers.get('retry-after'));
-      const delayMs =
-        Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 30_000) : 1000 * (i + 1);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
+    if (res.ok) return res;
+    // Only a 429 needs its body read (quota vs rate limit); clone so the
+    // caller can still read the original for its error message.
+    const bodyText =
+      res.status === 429
+        ? await res
+            .clone()
+            .text()
+            .catch(() => '')
+        : '';
+    const delayMs = nextRetryDelayMs(
+      classifyOpenAIResponse(res.status, bodyText, res.headers),
+      retryIndex,
+      waitedMs,
+      BACKGROUND_RETRY_POLICY,
+    );
+    if (delayMs === null) return res;
+    waitedMs += delayMs;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
-  return lastRes!;
 }
 
 /** Embed a single string into a dense vector. Throws on API failure. */

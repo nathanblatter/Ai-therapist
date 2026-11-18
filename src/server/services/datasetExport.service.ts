@@ -8,7 +8,7 @@
 // Nothing here ever emits raw PII: the queries join through research_pseudonyms
 // and select only pseudonyms + non-identifying aggregates. The mapping table is
 // never exported. Transcript/feedback-comment free text is opt-in only.
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import type { Writable } from 'node:stream';
 import { gitSha } from '../utils/gitSha.js';
 import { SCALES } from '../utils/scales.js';
@@ -924,7 +924,7 @@ function archiveDate(asOf: string): Date {
  * Resolves when the archive has been fully written.
  */
 export function streamDatasetZip(result: BuildResult, out: Writable): Promise<void> {
-  const archive = archiver('zip', { zlib: { level: 9 } });
+  const archive = new ZipArchive({ zlib: { level: 9 } });
   const date = archiveDate(result.asOf);
   const done = new Promise<void>((resolve, reject) => {
     archive.on('error', reject);
@@ -941,6 +941,8 @@ export function streamDatasetZip(result: BuildResult, out: Writable): Promise<vo
       archive.append(f.content, { name: `${folder}/${f.name}`, date });
     }
   }
-  archive.finalize();
+  // finalize() also rejects on failure; the same error reaches the 'error'
+  // listener above, so swallow it here rather than leave it unhandled.
+  archive.finalize().catch(() => undefined);
   return done;
 }

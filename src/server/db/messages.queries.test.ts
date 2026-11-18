@@ -174,7 +174,7 @@ describe('updateMessage', () => {
     expect(clientSql()).toEqual(['BEGIN', 'UPDATE', 'COMMIT']);
     const [sql, params] = clientQueryMock.mock.calls[1] as [string, unknown[]];
     expect(sql).toMatch(
-      /SET content = \$1,\s+content_redacted = \$2,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$3::jsonb\s+WHERE message_id = \$4\s+RETURNING \*/,
+      /SET content = \$1,\s+content_redacted = \$2,\s+embedding = NULL,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$3::jsonb\s+WHERE message_id = \$4\s+RETURNING \*/,
     );
     expect(params).toEqual(['Alice said hi', '[NAME] said hi', JSON.stringify(meta), 5]);
     expect(releaseMock).toHaveBeenCalledTimes(1);
@@ -190,7 +190,7 @@ describe('updateMessage', () => {
     expect(redactMock).not.toHaveBeenCalled();
     const [sql, params] = clientQueryMock.mock.calls[1] as [string, unknown[]];
     expect(sql).toMatch(
-      /SET content_redacted = \$1,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$2::jsonb\s+WHERE message_id = \$3/,
+      /SET content_redacted = \$1,\s+embedding = NULL,\s+metadata = COALESCE\(metadata, '\{\}'::jsonb\) \|\| \$2::jsonb\s+WHERE message_id = \$3/,
     );
     expect(sql).not.toMatch(/SET content =/);
     expect(params).toEqual(['cleaned', JSON.stringify(meta), '5']);
