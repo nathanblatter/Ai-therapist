@@ -82,6 +82,25 @@ export function toRealtimeTools(defs: ToolDefinition[]): Array<Record<string, un
   }));
 }
 
+/**
+ * Normalise a model-supplied knowledge `topic` to the corpus's slug form
+ * (lowercase, words joined by underscores: 'social_anxiety', 'ptsd'). The
+ * column is matched exactly in SQL, so without this "PTSD" or
+ * "social anxiety" matched nothing (ai-therapist-202). Null when nothing
+ * usable is left.
+ */
+export function normalizeKnowledgeTopic(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const slug = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+    .replace(/[^a-z0-9_]/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+  return slug || null;
+}
+
 /** Server-side context injected per invocation (the model never supplies it). */
 export interface ToolContext {
   sessionId?: string;
@@ -1302,7 +1321,7 @@ export class ToolRegistry {
       async (args: Record<string, unknown>, ctx: ToolContext) => {
         const query = typeof args['query'] === 'string' ? args['query'].trim() : '';
         if (!query) return { error: 'query text is required' };
-        const topic = typeof args['topic'] === 'string' && args['topic'].trim() ? args['topic'].trim() : null;
+        const topic = normalizeKnowledgeTopic(args['topic']);
 
         try {
           const { embedText } = await import('./embeddings.service.js');
@@ -1310,7 +1329,14 @@ export class ToolRegistry {
           const embedding = await embedText(query);
           // Widen the vector candidate set, then LLM-rerank down to the 3 that
           // most directly answer the query (ai-therapist-88).
-          const candidates = await searchKnowledgeChunks(embedding, { kind: 'psychoeducation', topic }, 8);
+          let candidates = await searchKnowledgeChunks(embedding, { kind: 'psychoeducation', topic }, 8);
+          // The topic is only a coarse hint. A topic the corpus does not use
+          // (a paraphrase, or a technique topic such as 'sleep') used to return
+          // nothing and tell the model to rely on general knowledge; fall back
+          // to the unfiltered vector search instead (ai-therapist-202).
+          if (candidates.length === 0 && topic !== null) {
+            candidates = await searchKnowledgeChunks(embedding, { kind: 'psychoeducation', topic: null }, 8);
+          }
 
           if (candidates.length === 0) {
             return {

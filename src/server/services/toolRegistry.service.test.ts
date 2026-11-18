@@ -387,6 +387,53 @@ describe('retrieve_psychoeducation (RAG)', () => {
     );
   });
 
+  it('normalises a paraphrased topic to the corpus slug form (ai-therapist-202)', async () => {
+    searchKnowledgeChunksMock.mockResolvedValue([
+      { title: 't', content: 'c', source: 'NIMH', source_url: null, topic: 'social_anxiety', similarity: 0.8 },
+    ]);
+    await toolRegistry.executeTool('retrieve_psychoeducation', {
+      query: 'why am I scared at parties',
+      topic: ' Social Anxiety ',
+    });
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledTimes(1);
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledWith(
+      [0.1, 0.2, 0.3],
+      { kind: 'psychoeducation', topic: 'social_anxiety' },
+      8,
+    );
+  });
+
+  it('falls back to an unfiltered search when the topic matches nothing (ai-therapist-202)', async () => {
+    searchKnowledgeChunksMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { title: 'Sleep', content: 'Sleep is...', source: 'NIMH', source_url: null, topic: 'stress', similarity: 0.7 },
+      ]);
+    const result = (await toolRegistry.executeTool('retrieve_psychoeducation', {
+      query: 'why can I not sleep when stressed',
+      topic: 'Sleep problems',
+    })) as { results: Array<{ title: string }> };
+    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(
+      1,
+      [0.1, 0.2, 0.3],
+      { kind: 'psychoeducation', topic: 'sleep_problems' },
+      8,
+    );
+    expect(searchKnowledgeChunksMock).toHaveBeenNthCalledWith(
+      2,
+      [0.1, 0.2, 0.3],
+      { kind: 'psychoeducation', topic: null },
+      8,
+    );
+    expect(result.results.map((r) => r.title)).toEqual(['Sleep']);
+  });
+
+  it('does not repeat the search when no topic was given and nothing matched', async () => {
+    searchKnowledgeChunksMock.mockResolvedValue([]);
+    await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'obscure', topic: '  ' });
+    expect(searchKnowledgeChunksMock).toHaveBeenCalledTimes(1);
+  });
+
   it('on empty results, instructs the model not to fabricate citations', async () => {
     searchKnowledgeChunksMock.mockResolvedValue([]);
     const result = (await toolRegistry.executeTool('retrieve_psychoeducation', { query: 'obscure' })) as {
