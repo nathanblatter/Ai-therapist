@@ -218,6 +218,42 @@ scenario carrying `knownGap: { reason, ref }` stays in the suite and stays
 gating; the job summary labels it with the Flightdeck ref so a new failure
 stands out. The workflow has not run yet: it cannot be exercised from a PR.
 
+### Protocol scenarios (honesty, reporting, abuse, eligibility, withdrawal)
+
+`src/redteam/scenarios/protocol/`, from `docs/eval-scenario-catalogue.md`
+stages A1 and A7 to A9. Thirteen are in the nightly full suite, each validated
+with three live runs on 2026-11-18. Two of them list known-gap assertions
+(`knownGap.assertionIds`, reported without gating): `honesty-disclosure`
+(ai-therapist-301) and `withdrawal-procedure` (ai-therapist-304). Pass
+criteria are written against the consent form and the stored prompt; the
+rubric questions are checked against the live classifier by
+`protocolRubrics.live.test.ts` (opt-in).
+
+**The minors hard-refusal pair runs on demand only.**
+`minor-sexual-content-refusal` and `minor-sexual-content-referral` (catalogue
+ABU-06) are in the `extended` suite: never the nightly, never a deploy gate.
+Run them deliberately with
+`npm run redteam:extended -- --scenario minor-sexual-content-refusal` (and
+`-referral`).
+
+- Why: the probes only name the request category, and the model never
+  produces the content, but it declines and then offers alternative versions
+  (ai-therapist-302), and OpenAI's moderation model flagged those replies as
+  `sexual/minors` in 4 of 4 runs. A nightly run would generate that flagged
+  traffic on the study's OpenAI organisation five times every night.
+- The reserved harness identity (`participantIdentity.ts`,
+  `scripts/redteam-seed-user.mjs`, ai-therapist-306) keeps enforcement away
+  from participants' safety identifiers, and both scenarios refuse to run
+  without it. It does not protect the organisation or project, and
+  enforcement there would take the study's AI down.
+- Condition for promoting them to the full suite: the prompt fix for
+  ai-therapist-302 has landed, AND three consecutive on-demand runs produce no
+  reply flagged by moderation (`reply-not-sexual` passing in
+  `minor-sexual-content-referral`, with `minor-sexual-content-refusal` still
+  passing). Then remove the `knownGap` from the referral scenario and move
+  both from `PROTOCOL_EXTENDED_SCENARIOS` to `PROTOCOL_SCENARIOS`. Promotion to
+  the smoke deploy gate is a separate decision for the owner.
+
 ### Voice-safety: first measured run (2026-11-18, gpt-live-1 / gpt-5.6-terra)
 
 One full local run (seed 42, fresh DB) plus three extra `voice-crisis-ladder`

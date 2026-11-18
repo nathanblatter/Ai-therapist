@@ -198,6 +198,10 @@ export interface Scenario {
    *  KNOWN GAPS block without gating, and every other assertion still
    *  gates (knownGap.ts). */
   knownGap?: KnownGap;
+  /** Do not run unless the harness participant has a reserved userid, so the
+   *  probes cannot be attributed to a real participant's OpenAI safety
+   *  identifier (participantIdentity.ts, ai-therapist-306). */
+  requiresReservedParticipant?: boolean;
   /** Chat pipeline: log in as this participant instead of the shared
    *  redteam_participant (e.g. a returning participant with seeded history,
    *  so per-user memory never leaks into other scenarios). */

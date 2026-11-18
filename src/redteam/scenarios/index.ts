@@ -24,6 +24,7 @@ import { lowMoodSupport } from './quality/lowMoodSupport.js';
 import { stallingParticipant } from './quality/stallingParticipant.js';
 import { returningParticipant } from './quality/returningParticipant.js';
 import { voiceCrisisLadder, voiceFirstSession, VOICE_SAFETY_SCENARIOS } from './voice.js';
+import { PROTOCOL_SCENARIOS, PROTOCOL_EXTENDED_SCENARIOS } from './protocol/index.js';
 import { validationPushbackMedication, validationPushbackEx } from './relational/validationPushback.js';
 import { companionAvailability, exclusiveReliance, goodbye } from './relational/companionDependence.js';
 import { faithMissionDoubt, faithBelonging, faithScrupulosity } from './relational/faith.js';
@@ -62,6 +63,11 @@ export const SAFETY_SCENARIOS: Scenario[] = [
   assistantPromptInjection,
   assistantRoleEscalation,
   assistantDataExfiltration,
+  // docs/eval-scenario-catalogue.md A1, A7 to A9: honesty, reporting, abuse,
+  // eligibility leaks and withdrawal. Full suite only; two carry a declared
+  // known gap (listed assertions reported loudly, not gating). The minors
+  // hard-refusal pair is NOT here: on demand only, in EXTENDED_SCENARIOS.
+  ...PROTOCOL_SCENARIOS,
   // Catalogue REL-*/LIT-14, USE-08 and ARM-01/02 (docs/eval-scenario-catalogue.md),
   // each validated live on 2026-11-18 (3+ runs, grading stable across
   // classifier seeds). Full suite only. Known gaps (only the listed
@@ -120,9 +126,16 @@ export const VOICE_SAFETY_SUITE: SuiteEntry[] = VOICE_SAFETY_SCENARIOS.map((scen
 // EXTENDED: scenarios too slow or expensive for the nightly (long chat
 // conversations). Opt-in like voice, and NOT part of ALL_SCENARIOS: run it
 // weekly, before launch, and on any prompt, model or detector change.
+// It also holds the two minors hard-refusal scenarios (ABU-06), which must
+// run only when someone deliberately runs them: see protocol/index.ts and
+// docs/redteam.md for why and for the condition to promote them.
 // rel-long-session-drift (14 model turns) has NOT been validated live yet:
 // `npm run redteam:extended -- --scenario rel-long-session-drift --variations 3`.
-export const EXTENDED_SCENARIOS: Scenario[] = [...CRISIS_EXTENDED_SCENARIOS, longSessionDrift];
+export const EXTENDED_SCENARIOS: Scenario[] = [
+  ...CRISIS_EXTENDED_SCENARIOS,
+  ...PROTOCOL_EXTENDED_SCENARIOS,
+  longSessionDrift,
+];
 export const EXTENDED_SUITE: SuiteEntry[] = EXTENDED_SCENARIOS.map((scenario) => ({ scenario }));
 
 // SMOKE: fast, gates every deploy. ~3 scenarios, no judge. crisisLadder runs
