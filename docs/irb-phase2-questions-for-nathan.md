@@ -1,5 +1,76 @@
 # Phase 2 IRB — Open questions for Nathan (and Dr. Gaskin / Dr. Erekson)
 
+## ALIGNMENT PASS 2026-11-18 (agent-drafted; nothing entered in OneAegis or Qualtrics)
+
+The repo's IRB materials were brought in line with the form's launch-gated commitments and with
+the code on main. Where each change goes is in `docs/irb-phase2-submission-checklist.md`. The
+decisions below are the PI's; each has a drafted default so the documents are complete, and
+each default is marked in the documents with its Q-number.
+
+**Instruments (launch-gated commitments now met in the repo):**
+
+- **Q-PSY1 — PQ-B screen-out threshold. Drafted: Distress score 46 or more.** The PQ-B (21
+  items, past month) is now in the screener. Its published cut-offs (Total 3+, Distress 6+) pick
+  people for a clinical interview in help-seeking clinics and would exclude many ordinary
+  students; this study has no interview stage. Distress 46+ is the cut-off validated against
+  interview in 23,063 Chinese university students (Wu et al. 2021; sensitivity 90%,
+  specificity 81%), so expect up to about one screen-out in five. Options: Total 6+ (Loewy's
+  maximum-specificity rule, misses about two thirds of true cases in help-seekers); Distress 22
+  or Total 7 (Italian students, no interview reference). Drafted check: if more than 25% of the
+  first 40 screened respondents screen out on the PQ-B, the PI reviews the threshold and files
+  an amendment for any change.
+- **Q-PSY2 (replaces Q-LIT2) — diagnosed psychotic or bipolar disorder: exclusion or monitored
+  subgroup. Drafted: exclusion** (screener item 8). If you choose a monitored subgroup instead,
+  delete the item's routing and add the subgroup to the weekly-review rule.
+- **Q-PSY3 — keep PQ-B scores of enrolled participants as a baseline covariate?** Drafted: no;
+  screener answers are used for eligibility only. Keeping them would let the delusional-content
+  findings be read against baseline risk, but the consent form would have to say so.
+- **Q-DEP1 — weekly dependence thresholds. Drafted:** flag when the ADS-9 Craving mean (5
+  adapted items) is 4.0+, or rises by 1.0+ from the participant's first weekly survey, or the
+  BSMAS total (6 adapted items) is 19+. Action: one in-app check-in message within one business
+  day; a second consecutive flag goes to the PI. None of these cut-offs is validated for a
+  chatbot. Written into `docs/on-call-sop.md` section 5. Note the ADS-9's CC BY-NC 3.0 licence:
+  free for the study, but a commercial therapist product would need the publisher's permission.
+- **Optional permission note:** the PQ-B authors distribute it with a request to cite; an email
+  to Dr. Rachel Loewy (UCSF) confirming research use costs nothing and closes the question if the
+  IRB asks. Not sent.
+
+**System as built (application "System as built" subsection):**
+
+- **Q-SYS1 — Grok Voice.** Present in the code and selectable by one config value; not the study
+  condition (Nathan, 2026-11-01). Drafted: the form says Grok will not be used; consent names only
+  OpenAI. Confirm, and confirm prod `system_config.ai_model` is a `gpt-live-*` value at launch.
+- **Q-SYS2 — the crisis recovery prompt says "the connection dropped for a moment".** Phase 1
+  answered No to deception. Drafted: keep the wording and disclose the behaviour in consent (done
+  in consent2.html). Alternative: change the prompt (a prompt change, research-sensitive).
+- **Q-SYS3 — session limits.** Seeded defaults 30 min, 3 a day, 30-min cooldown; consent says
+  "however much you wish". Check prod values; state them or lift them for participants.
+- **Q-SYS4 — derived records and the 24-hour wipe.** Session summaries and notes are generated
+  from the original (unredacted) text, and the nightly wipe clears only the messages table, so
+  summaries, notes, case profiles, remembered facts, safety plans and worksheet answers persist.
+  The consent used to say summaries came from the de-identified transcript (now corrected).
+  Decide: redact these records on the same schedule (engineering task), or disclose their
+  retention in Confidentiality and keep them out of de-identified exports until reviewed.
+- **Q-SYS5 — therapist note and risk-history blocks.** Clinical-pilot features that can enter a
+  participant's memory note. Confirm they cannot be enabled for research participants.
+- **Q-SYS6 — psychoeducation-cue A/B (PR #30, off).** Describe it now as a second exploratory
+  per-session condition, or commit to leaving it off and amend before switching it on.
+- **Q-SYS7 — lead-conversation block (PR #32, off).** Applies to every session when on. Decide
+  before launch; a mid-study switch is a protocol change with a logged date.
+- **Q-SYS8 — model updates.** Drafted: model version changes are logged with their date and
+  summarised at continuing review; prompt or safety-pipeline changes go to the IRB as amendments.
+  The move of the voice reasoning model and the chat model to `gpt-6.1-terra` (approved
+  2026-11-18, pending evaluation) is listed in the dated model table as planned. Confirm the
+  reporting line with the IRB.
+- **Q-SYS9 — home-screen progress card.** The Risks text says "no gamified engagement mechanics";
+  the home screen shows how often the participant has talked in recent weeks. Keep, reword, or
+  hide it for participants.
+- **Q8 follow-on — consent data-retention sentence.** consent2.html and the baseline survey's
+  consent text said "zero data retention enabled"; Flightdeck ai-therapist-132 found no BAA and no
+  ZDR (2026-09-09). Both now say there is no zero-data-retention agreement and that OpenAI may keep
+  request data up to 30 days for abuse monitoring. Confirm against OpenAI's current terms, or
+  restore a ZDR statement if an agreement is signed before submission.
+
 ## PRE-SUBMISSION SWEEP 2026-09-07 (Nathan-authed session; form saved, NOT submitted)
 
 - OneAegis draft verified page-by-page and the **Check & Submit validation passes clean**
@@ -316,12 +387,18 @@ currently assumes; correct anything wrong and the draft gets updated.
   agent as a "mental health chatbot." Add an explicit compliance statement to the form (clinician
   involvement, safety testing, real-time acute-risk protocol, harm reporting, 7-day/on-request AI
   disclosure, no sale/sharing of user input). See review section 4.
-- **[DECISION Q-LIT2]** Psychotic-spectrum history: exclusion or monitored subgroup? The 2026
-  delusion-reinforcement literature (Olsen; Morrin) argues for one or the other.
+- **[DECISION Q-LIT2, now Q-PSY2 at the top of this file]** Psychotic-spectrum history: exclusion
+  or monitored subgroup? The 2026 delusion-reinforcement literature (Olsen; Morrin) argues for
+  one or the other. 2026-11-18: screener item 8 drafted as an exclusion.
 - Risks, Subject Enrollment, and Benefits pages were updated in OneAegis on 2026-09-21 (second
   pass). Four launch-gated commitments now appear in the form text and must ship before launch:
   screener psychosis item, red-team eating-disorder/substance/delusion scenarios, weekly-survey
   dependence and problematic-use items, 7-day AI re-disclosure. See review section 4.
+  Status 2026-11-18: screener psychosis item (PQ-B + history item) and weekly dependence and
+  problematic-use items (ADS-9 Craving + BSMAS, adapted) are now in the repo instruments, not yet
+  in Qualtrics; red-team eating-disorder, substance and delusion scenarios run nightly (the
+  delusion scenario failed its referral check on 2026-11-18); 7-day re-disclosure is met only
+  because every session opens with the disclosure.
 
 ## System prompt revised (2026-09-22, from Kimberly Sagers' stage sessions)
 
