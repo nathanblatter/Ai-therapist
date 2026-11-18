@@ -425,7 +425,7 @@ describe('review fix: "the easiest way to go about it" is not a means question',
   });
 });
 
-describe('review fix: a periodic sweep in a risk-bearing session gets no trajectory bonus', () => {
+describe('review fix: a periodic sweep that only repeats the session level gets no trajectory bonus', () => {
   // The session is flagged and every keyword-free turn is context-assessed. The
   // assessor repeats the level the session already holds (60). On the eighth
   // such turn the sweep is due; its run-up is that flat line, which the
@@ -450,6 +450,23 @@ describe('review fix: a periodic sweep in a risk-bearing session gets no traject
     expect(sweep.method).toBe('llm_sweep');
     expect(sweep.riskScore).toBe(60);
     expect(sweep.riskScore).toBeLessThan(75);
+  });
+
+  it('a sweep that scores above the level the session holds keeps the bonus, as before', async () => {
+    const state: SessionState = {
+      flagged: true,
+      severity: 'medium',
+      recent: [55, 55, 55, 55, 55].map((risk_score) => ({ risk_score, score_factors: { context_wake: true } })),
+      trajectory: [55, 55, 55, 55, 55],
+    };
+    sessionIs(state);
+    createMock.mockResolvedValue(verdict(55));
+    const sessionId = 'sess-class-sweep-rising';
+    for (let i = 1; i < SWEEP_EVERY; i++) await analyzeMessageRisk(turn('fine I guess', sessionId), []);
+    createMock.mockResolvedValue(verdict(65));
+    const sweep = await analyzeMessageRisk(turn('I wrote some letters this week', sessionId), []);
+    expect(sweep.method).toBe('llm_sweep');
+    expect(sweep.riskScore).toBe(80);
   });
 
   it('a sweep in a calm session keeps the bonus, as before', async () => {

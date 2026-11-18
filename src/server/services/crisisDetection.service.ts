@@ -1548,18 +1548,20 @@ export async function analyzeMessageRisk(
     // slow-drift scenario: assessor 30 / 50 / 65 / 80 recorded as 50 / 65 / 80
     // / 95, a page raised by the bonus alone).
     //
-    // For the same reason it is not applied to a periodic sweep in a session
-    // that is already risk-bearing. That turn is chosen by a counter, not by
-    // its content; the assessor is given the same session risk context; and
-    // the run-up it would be compared with is the context-wake rows before it.
-    // When the assessor simply repeats the level the session already holds,
-    // those rows are a flat line, which the trajectory reads as "deteriorating"
-    // (+15): 15 more than the stored score is always a re-flag, and from 60 or
-    // above it is a high flag and a page, for a turn that said nothing new. A
-    // sweep in a calm session keeps the bonus, as before.
-    const sweepWithSessionContext = isSweep && sessionContext.elevated;
+    // Nor is it applied to a periodic sweep in a risk-bearing session whose
+    // score does not exceed the level that session already holds. That turn is
+    // chosen by a counter, not by its content; the assessor is given the same
+    // session risk context; and the run-up it is compared with is the
+    // context-wake rows before it. When the assessor simply repeats the
+    // session's level those rows are a flat line, which the trajectory reads
+    // as "deteriorating" (+15): 15 more than the stored score is always a
+    // re-flag, and from 60 it is a high flag and a page, for a turn that said
+    // nothing new (measured live: three neutral turns in a session flagged at
+    // 65 each came back 60). A sweep that scores ABOVE the session's level, and
+    // every sweep in a calm session, keeps the bonus exactly as before.
+    const sweepRepeatsSessionLevel = isSweep && sessionContext.elevated && riskScore <= sessionContext.recentPeak;
     const trajectoryApplies =
-      riskScore > 0 && trajectory.trajectoryScore > 0 && !isContextWake && !sweepWithSessionContext;
+      riskScore > 0 && trajectory.trajectoryScore > 0 && !isContextWake && !sweepRepeatsSessionLevel;
     if (trajectoryApplies) {
       riskScore = Math.min(100, riskScore + trajectory.trajectoryScore);
       factors = [...factors, `trajectory: ${trajectory.trend}`];
@@ -1592,7 +1594,7 @@ export async function analyzeMessageRisk(
                   trajectory_score: trajectory.trajectoryScore,
                   trajectory_trend: trajectory.trend,
                   // Computed but deliberately not added (context wake).
-                  ...(isContextWake || sweepWithSessionContext ? { trajectory_applied: false } : {}),
+                  ...(isContextWake || sweepRepeatsSessionLevel ? { trajectory_applied: false } : {}),
                 }
               : {}),
             ...(moderation

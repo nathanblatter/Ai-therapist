@@ -128,12 +128,13 @@ Three guards keep "assess every turn" from inflating a session:
   Observed before this guard, on the slow-drift script: assessor scores 30 / 50 / 65 / 80
   recorded as 50 / 65 / 80 / 95. The bonus is still computed and logged
   (`trajectory_applied: false`), and still applies to keyword and moderation turns and to a
-  sweep in a calm session. A periodic sweep in a session that is already risk-bearing gets no
-  bonus either: that turn is picked by a counter, the assessor has the same session context,
-  and its run-up is the context-wake rows before it. An assessor that merely repeats the level
-  the session holds produces a flat line, which the trajectory reads as "deteriorating" (+15);
-  15 above the stored score is always a re-flag, and from 60 it is a high flag and a page for
-  a turn that said nothing new (found in review, pinned in
+  sweep in a calm session. A periodic sweep in a risk-bearing session keeps it only when its
+  score exceeds the level the session already holds: that turn is picked by a counter, the
+  assessor has the same session context, and its run-up is the context-wake rows before it.
+  An assessor that merely repeats the session's level produces a flat line, which the
+  trajectory reads as "deteriorating" (+15); 15 above the stored score is always a re-flag,
+  and from 60 it is a high flag and a page for a turn that said nothing new (found in review;
+  measured live, three neutral turns in a session flagged at 65 each came back 60; pinned in
   `crisisDetection.contextClass.test.ts`).
 - **Context-signal floor** (`context_signal_floor`). The assessor is not stable at the band
   edge: "This is the last time we'll talk" after a passive-ideation turn came back 80 on one
