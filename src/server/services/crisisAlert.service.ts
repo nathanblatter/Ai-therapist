@@ -49,16 +49,16 @@ async function resolveAlertTarget(): Promise<{ enabled: boolean; phone: string }
  * failure (config lookup, network, non-2xx) can never propagate up and break
  * the crisis-detection/session path that calls it.
  */
-export async function sendCrisisAlert(message: string): Promise<void> {
+export async function sendCrisisAlert(message: string): Promise<boolean> {
   try {
     const { enabled, phone } = await resolveAlertTarget();
     if (!enabled) {
       log.warn('[alert] crisis SMS disabled via admin config; skipping');
-      return;
+      return false;
     }
     if (!IMESSAGE_API_KEY || !phone) {
       log.warn('[alert] crisis SMS not configured (IMESSAGE_API_KEY / on-call phone); skipping');
-      return;
+      return false;
     }
     const res = await fetch(`${IMESSAGE_API_URL}/send`, {
       method: 'POST',
@@ -68,12 +68,14 @@ export async function sendCrisisAlert(message: string): Promise<void> {
     });
     if (!res.ok) {
       log.error(`[alert] crisis SMS failed: HTTP ${res.status}`);
-    } else {
-      log.info('[alert] crisis SMS sent');
+      return false;
     }
+    log.info('[alert] crisis SMS sent');
+    return true;
   } catch (err) {
     // Never let a paging failure bubble up into the crisis-detection flow.
     log.error({ err }, '[alert] crisis SMS failed');
+    return false;
   }
 }
 
@@ -110,13 +112,22 @@ export async function reportOpenAIQuotaExhausted(component: OpenAIQuotaComponent
     );
     const now = Date.now();
     if (lastQuotaPageAt !== null && now - lastQuotaPageAt < QUOTA_PAGE_INTERVAL_MS) return;
+    // Claim the hour before sending so concurrent detections (every message
+    // re-detects the cap) cannot each page; hand it back if the page was not
+    // delivered, so a pager blip does not silence this alert for an hour.
+    const previous = lastQuotaPageAt;
     lastQuotaPageAt = now;
-    await sendCrisisAlert(
-      `AI-Therapist: OpenAI is rejecting requests because the account spend or usage limit has been reached` +
-        `${code ? ` (${code})` : ''}. This is a system alert, not a participant crisis. Until the limit is raised, ` +
-        'crisis detection runs on the keyword screen only (no AI risk assessment, no moderation screen) and new ' +
-        'voice sessions cannot start (chat replies fail too). Raise the limit in the OpenAI billing settings. Repeats hourly.',
-    );
+    let delivered = false;
+    try {
+      delivered = await sendCrisisAlert(
+        `AI-Therapist: OpenAI is rejecting requests because the account spend or usage limit has been reached` +
+          `${code ? ` (${code})` : ''}. This is a system alert, not a participant crisis. Until the limit is raised, ` +
+          'crisis detection runs on the keyword screen only (no AI risk assessment, no moderation screen) and new ' +
+          'voice sessions cannot start (chat replies fail too). Raise the limit in the OpenAI billing settings. Repeats hourly.',
+      );
+    } finally {
+      if (!delivered && lastQuotaPageAt === now) lastQuotaPageAt = previous;
+    }
   } catch (err) {
     log.error({ err }, '[alert] failed to report OpenAI quota exhaustion');
   }

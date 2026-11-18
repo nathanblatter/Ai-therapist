@@ -68,7 +68,8 @@ describe('sendCrisisAlert', () => {
     fetchMock.mockResolvedValue({ ok: true });
 
     const { sendCrisisAlert } = await import('./crisisAlert.service.js');
-    await expect(sendCrisisAlert('test message')).resolves.toBeUndefined();
+    // Resolves (never rejects) with whether the page was delivered.
+    await expect(sendCrisisAlert('test message')).resolves.toBe(true);
   });
 
   it('never throws when the network request fails (fail-safe)', async () => {
@@ -76,7 +77,7 @@ describe('sendCrisisAlert', () => {
     fetchMock.mockRejectedValue(new Error('network error'));
 
     const { sendCrisisAlert } = await import('./crisisAlert.service.js');
-    await expect(sendCrisisAlert('test message')).resolves.toBeUndefined();
+    await expect(sendCrisisAlert('test message')).resolves.toBe(false);
   });
 });
 
@@ -130,6 +131,30 @@ describe('reportOpenAIQuotaExhausted', () => {
     await vi.advanceTimersByTimeAsync(60 * 1000);
     await reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a page that was not delivered does not use up the hour', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 502 }).mockRejectedValueOnce(new Error('pager down'));
+    const { reportOpenAIQuotaExhausted } = await import('./crisisAlert.service.js');
+    await reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota');
+    await reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // The pager is back: the very next detection pages, and that one starts the hour.
+    await reportOpenAIQuotaExhausted('moderation', 'insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await reportOpenAIQuotaExhausted('moderation', 'insufficient_quota');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('concurrent detections send one page, not one each', async () => {
+    const { reportOpenAIQuotaExhausted } = await import('./crisisAlert.service.js');
+    await Promise.all([
+      reportOpenAIQuotaExhausted('moderation', 'insufficient_quota'),
+      reportOpenAIQuotaExhausted('risk_assessor', 'insufficient_quota'),
+      reportOpenAIQuotaExhausted('voice_session_mint', 'insufficient_quota'),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('never throws, even when the pager itself is down', async () => {

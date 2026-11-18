@@ -11,6 +11,7 @@ import {
   classifyOpenAIError,
   withOpenAIRetry,
   CRISIS_RETRY_POLICY,
+  CRISIS_PATIENT_RETRY_POLICY,
   type OpenAIErrorInfo,
 } from '../utils/openaiErrors.js';
 
@@ -422,20 +423,35 @@ function noteAssessorFailure(err: unknown): OpenAIErrorInfo {
 }
 
 /**
+ * Which retry budget a live turn gets, from what its screen already found.
+ *
+ * 'fast' only when the keyword tier alone lands in the high band: the fallback
+ * then already produces the full response (high flag + page), so retrying the
+ * assessor can only delay it. Everything else is 'patient': a low (15) or
+ * medium (50) keyword tier, a sweep or a moderation wake-up all depend on the
+ * assessor to reach the score that flags or pages, so a transient failure
+ * there must be waited out rather than converted into a lower score.
+ */
+function liveBudgetFor(keywordScore: number): 'fast' | 'patient' {
+  return severityForScore(keywordScore) === 'high' ? 'fast' : 'patient';
+}
+
+/**
  * LLM contextual assessment of the recent conversation. Throws on failure.
  *
- * `budget` 'live' (the default: session turns and thread messages) runs under
- * ASSESSOR_TIMEOUT_MS and CRISIS_RETRY_POLICY with the SDK's own retries
- * switched off, so there is exactly one retry layer and the caller's keyword
- * fallback fires within seconds. 'offline' (the calibration harness, possibly
- * on the slow flex tier) keeps the SDK defaults.
+ * `budget` 'fast' / 'patient' (session turns and thread messages, chosen by
+ * liveBudgetFor) run under ASSESSOR_TIMEOUT_MS per attempt with the SDK's own
+ * retries switched off, so there is exactly one retry layer:
+ * CRISIS_RETRY_POLICY for 'fast' (the caller's keyword fallback fires within
+ * seconds), CRISIS_PATIENT_RETRY_POLICY for 'patient'. 'offline' (the
+ * calibration harness, possibly on the slow flex tier) keeps the SDK defaults.
  */
 async function assessRiskWithLLM(
   latestContent: string,
   conversationHistory: HistoryMessage[],
   sessionId?: string,
   extraParams: Record<string, string> = {},
-  budget: 'live' | 'offline' = 'live',
+  budget: 'fast' | 'patient' | 'offline' = 'patient',
 ): Promise<LlmRiskAssessment> {
   const client = await getClient();
 
@@ -479,14 +495,17 @@ async function assessRiskWithLLM(
         },
       ],
     } satisfies Parameters<typeof client.chat.completions.create>[0];
-    return budget === 'live'
-      ? client.chat.completions.create(body, { timeout: ASSESSOR_TIMEOUT_MS, maxRetries: 0 })
-      : client.chat.completions.create(body);
+    return budget === 'offline'
+      ? client.chat.completions.create(body)
+      : client.chat.completions.create(body, { timeout: ASSESSOR_TIMEOUT_MS, maxRetries: 0 });
   };
   const callAssessor = (useStrictSchema: boolean) =>
-    budget === 'live'
-      ? withOpenAIRetry(() => requestAssessment(useStrictSchema), CRISIS_RETRY_POLICY)
-      : requestAssessment(useStrictSchema);
+    budget === 'offline'
+      ? requestAssessment(useStrictSchema)
+      : withOpenAIRetry(
+          () => requestAssessment(useStrictSchema),
+          budget === 'fast' ? CRISIS_RETRY_POLICY : CRISIS_PATIENT_RETRY_POLICY,
+        );
 
   let response;
   if (strictSchemaUnsupported) {
@@ -650,7 +669,13 @@ export async function analyzeStandaloneRisk(
   // marked clear, never seeing the LLM. Message volume is low, so an LLM call
   // per message is affordable and the safe default.
   try {
-    const llm = await assessRiskWithLLM(content, historyLines);
+    const llm = await assessRiskWithLLM(
+      content,
+      historyLines,
+      undefined,
+      {},
+      liveBudgetFor(keywordAnalysis.keywordScore),
+    );
     const floored = applyIdeationFloor(llm, keywordAnalysis.keywordScore);
     log.info(
       `[risk] standalone: keywords [${keywordAnalysis.keywords.join(', ')}] ` +
@@ -788,13 +813,18 @@ export async function analyzeMessageRisk(
   conversationHistory: HistoryMessage[] = [],
 ): Promise<RiskAnalysisResult> {
   try {
-    // Free moderation screen runs in parallel with the keyword/trajectory
-    // work (ai-therapist-167). It is a supplementary signal: null on outage.
-    const moderationPromise = import('./moderation.service.js')
-      .then((m) => m.getSelfHarmScreen(message.content).then((screen) => ({ screen, riskOf: m.moderationRiskScore })))
-      .catch(() => null);
-
     const keywordAnalysis = detectCrisisKeywords(message.content);
+    // Retry patience for this turn's OpenAI calls: short only when the keyword
+    // tier already justifies the full response on its own (liveBudgetFor).
+    const budget = liveBudgetFor(keywordAnalysis.keywordScore);
+
+    // Free moderation screen runs in parallel with the trajectory work
+    // (ai-therapist-167). It is a supplementary signal: null on outage.
+    const moderationPromise = import('./moderation.service.js')
+      .then((m) =>
+        m.getSelfHarmScreen(message.content, budget).then((screen) => ({ screen, riskOf: m.moderationRiskScore })),
+      )
+      .catch(() => null);
 
     // Trajectory across the session's recent scores (computed BEFORE this
     // message's insert, so it reflects the run-up, not the current message).
@@ -824,7 +854,7 @@ export async function analyzeMessageRisk(
 
     if (keywordAnalysis.keywordScore > 0 || isSweep || isModerationWake) {
       try {
-        llm = await assessRiskWithLLM(message.content, conversationHistory, message.session_id);
+        llm = await assessRiskWithLLM(message.content, conversationHistory, message.session_id, {}, budget);
         resetSweep(message.session_id);
         const floored = applyIdeationFloor(llm, keywordAnalysis.keywordScore);
         riskScore = floored.riskScore;

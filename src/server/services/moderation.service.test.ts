@@ -2,7 +2,7 @@
 // supplementary signal that must never throw - but "could not run" has to be
 // distinguishable from "ran and found nothing", and a spend-limit rejection
 // has to reach the on-call. OpenAI and the pager are mocked.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { moderationCreateMock, reportQuotaMock } = vi.hoisted(() => ({
   moderationCreateMock: vi.fn(),
@@ -39,7 +39,7 @@ describe('getSelfHarmScreen', () => {
     });
   });
 
-  it('makes exactly one attempt: the SDK retries are switched off', async () => {
+  it('a healthy screen is one call, with the SDK retries switched off', async () => {
     moderationCreateMock.mockResolvedValue({ results: [{ flagged: false, category_scores: {} }] });
     await getSelfHarmScreen('some text');
     expect(moderationCreateMock).toHaveBeenCalledTimes(1);
@@ -61,10 +61,46 @@ describe('getSelfHarmScreen', () => {
     ['429 slow_down', apiError(429, 'slow_down', 'rate_limit_error'), 'rate_limit'],
     ['503 server_is_overloaded', apiError(503, 'server_is_overloaded'), 'overloaded'],
     ['timeout', new Error('Request timed out.'), 'timeout'],
-  ])('%s: failed with its kind, no spend-limit page', async (_label, err, kind) => {
+  ])("%s on the 'fast' budget: one attempt, failed with its kind, no spend-limit page", async (_label, err, kind) => {
     moderationCreateMock.mockRejectedValue(err);
-    expect(await getSelfHarmScreen('some text')).toEqual({ scores: null, failed: true, errorKind: kind });
+    expect(await getSelfHarmScreen('some text', 'fast')).toEqual({ scores: null, failed: true, errorKind: kind });
+    expect(moderationCreateMock).toHaveBeenCalledTimes(1);
     expect(reportQuotaMock).not.toHaveBeenCalled();
+  });
+
+  describe("the default 'patient' budget", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it.each([
+      ['429 slow_down', apiError(429, 'slow_down', 'rate_limit_error'), 'rate_limit'],
+      ['503 server_is_overloaded', apiError(503, 'server_is_overloaded'), 'overloaded'],
+      ['timeout', new Error('Request timed out.'), 'timeout'],
+    ])('%s that persists: three attempts, then failed with its kind, no page', async (_label, err, kind) => {
+      moderationCreateMock.mockRejectedValue(err);
+      const p = getSelfHarmScreen('some text');
+      await vi.advanceTimersByTimeAsync(130_000);
+      expect(await p).toEqual({ scores: null, failed: true, errorKind: kind });
+      expect(moderationCreateMock).toHaveBeenCalledTimes(3);
+      expect(reportQuotaMock).not.toHaveBeenCalled();
+    });
+
+    it('a transient failure that clears is not a failure at all', async () => {
+      moderationCreateMock
+        .mockRejectedValueOnce(apiError(503, 'server_is_overloaded'))
+        .mockResolvedValueOnce({ results: [{ flagged: true, category_scores: { 'self-harm/intent': 0.7 } }] });
+      const p = getSelfHarmScreen('some text');
+      await vi.advanceTimersByTimeAsync(130_000);
+      expect(await p).toMatchObject({ scores: { selfHarmIntent: 0.7 }, failed: false });
+      // Each attempt still has the SDK's own retries switched off.
+      expect(moderationCreateMock.mock.calls.map((c) => c[1])).toEqual([{ maxRetries: 0 }, { maxRetries: 0 }]);
+    });
+
+    it('a spend-limit 429 is not retried', async () => {
+      moderationCreateMock.mockRejectedValue(apiError(429, 'project_spend_limit_exceeded', 'insufficient_quota'));
+      expect(await getSelfHarmScreen('some text')).toMatchObject({ failed: true, errorKind: 'quota' });
+      expect(moderationCreateMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('a response with no result is a failure, not a clean screen', async () => {

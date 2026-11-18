@@ -235,11 +235,11 @@ describe('transient assessor failures: retried once inside a small budget', () =
     expect(reportQuotaMock).not.toHaveBeenCalled();
   });
 
-  it('async messages use the same budget: 503 twice, then the keyword verdict', async () => {
+  it('async messages use the same budgets: high tier, 503 twice, then the keyword verdict', async () => {
     createMock.mockRejectedValue(OVERLOADED());
-    const r = await settle(analyzeStandaloneRisk("I just don't want to be here anymore"));
+    const r = await settle(analyzeStandaloneRisk('I want to end my life'));
     expect(createMock).toHaveBeenCalledTimes(2);
-    expect(r).toMatchObject({ riskScore: 50, severity: 'medium', method: 'keyword_fallback' });
+    expect(r).toMatchObject({ riskScore: 75, severity: 'high', method: 'keyword_fallback' });
   });
 });
 
@@ -279,5 +279,133 @@ describe('moderation screen failures', () => {
     await settle(analyzeMessageRisk(turn('I want to end my life'), []));
     expect(historyFactors()).not.toHaveProperty('moderation_unavailable');
     expect(historyFactors()).not.toHaveProperty('llm_error');
+  });
+});
+
+// Review follow-up. The short crisis budget is only safe where the keyword
+// fallback already produces the full response (the high tier: flag + page).
+// Everywhere else the assessor or the moderation screen is what gets a turn
+// to the score that flags, so one transient failure must be waited out, as
+// the SDK default did before, and not converted into a lower score.
+describe('transient failures where the keyword fallback is not enough', () => {
+  const LOW_TIER = 'I feel hopeless, there is no way out';
+  const MEDIUM_TIER = "I just don't want to be here anymore";
+  const KEYWORD_FREE = 'unusual phrasing with no screen keywords at all';
+
+  /** Advance past every wait the patient budget allows. */
+  async function settleLong<T>(p: Promise<T>): Promise<T> {
+    await vi.advanceTimersByTimeAsync(130_000);
+    return p;
+  }
+
+  it('keyword-free turn: a moderation rate limit is retried, so the screen still wakes the assessor', async () => {
+    moderationCreateMock
+      .mockRejectedValueOnce(SLOW_DOWN('5'))
+      .mockResolvedValueOnce(modResponse({ 'self-harm/intent': 0.7 }));
+    createMock.mockResolvedValue(GENUINE_HIGH);
+    const r = await settleLong(analyzeMessageRisk(turn(KEYWORD_FREE), []));
+    expect(moderationCreateMock).toHaveBeenCalledTimes(2);
+    expect(r.riskScore).toBe(85);
+    expect(historyFactors()).toMatchObject({ method: 'llm_moderation_wake', moderation_score: 70 });
+    expect(historyFactors()).not.toHaveProperty('moderation_unavailable');
+  });
+
+  it.each([
+    ['503', OVERLOADED],
+    ['timeout', timeoutError],
+  ])('keyword-free turn: a moderation %s is retried too', async (_label, makeError) => {
+    moderationCreateMock
+      .mockRejectedValueOnce(makeError())
+      .mockRejectedValueOnce(makeError())
+      .mockResolvedValueOnce(modResponse({ 'self-harm/intent': 0.7 }));
+    createMock.mockResolvedValue(GENUINE_HIGH);
+    const r = await settleLong(analyzeMessageRisk(turn(KEYWORD_FREE), []));
+    expect(moderationCreateMock).toHaveBeenCalledTimes(3);
+    expect(r.riskScore).toBe(85);
+  });
+
+  it('low keyword tier: a slow_down with a 5s Retry-After is waited out instead of scoring 15', async () => {
+    createMock.mockRejectedValueOnce(SLOW_DOWN('5')).mockResolvedValueOnce(GENUINE_HIGH);
+    const p = analyzeMessageRisk(turn(LOW_TIER), []);
+    await vi.advanceTimersByTimeAsync(4900);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    const r = await settleLong(p);
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(r.riskScore).toBe(85);
+    expect(r.severity).toBe('high');
+    expect(historyFactors()).toMatchObject({ method: 'llm_assessed', keyword_score: 15, llm_score: 85 });
+  });
+
+  it('low keyword tier: two transient failures in a row still reach the assessor on the third attempt', async () => {
+    createMock
+      .mockRejectedValueOnce(OVERLOADED())
+      .mockRejectedValueOnce(RATE_LIMIT())
+      .mockResolvedValueOnce(GENUINE_HIGH);
+    const r = await settleLong(analyzeMessageRisk(turn(LOW_TIER), []));
+    expect(createMock).toHaveBeenCalledTimes(3);
+    expect(r.riskScore).toBe(85);
+  });
+
+  it('medium keyword tier: a timeout is retried, so a high verdict is not capped at the medium fallback', async () => {
+    createMock.mockRejectedValueOnce(timeoutError()).mockResolvedValueOnce(GENUINE_HIGH);
+    const r = await settleLong(analyzeMessageRisk(turn(MEDIUM_TIER), []));
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(r.severity).toBe('high');
+  });
+
+  it('periodic sweep: a transient failure is retried within the same turn', async () => {
+    const sessionId = 'sess-degraded-sweep-transient';
+    const quiet = (i: number) => ({ content: `ordinary message ${i}`, session_id: sessionId, message_id: i });
+    for (let i = 1; i <= 7; i++) await settleLong(analyzeMessageRisk(quiet(i), []));
+    createMock.mockRejectedValueOnce(SLOW_DOWN('10')).mockResolvedValueOnce(GENUINE_HIGH);
+    const r = await settleLong(analyzeMessageRisk(quiet(8), []));
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(r.riskScore).toBe(85);
+  });
+
+  it('async messages: a low-tier message is not recorded at its keyword score after one rate limit', async () => {
+    createMock.mockRejectedValueOnce(SLOW_DOWN('5')).mockResolvedValueOnce(GENUINE_HIGH);
+    const r = await settleLong(analyzeStandaloneRisk(LOW_TIER));
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(r).toMatchObject({ riskScore: 85, severity: 'high', method: 'llm_assessed' });
+  });
+
+  it('stays bounded: three attempts, then the screen-tier score with the failure recorded', async () => {
+    createMock.mockRejectedValue(OVERLOADED());
+    moderationCreateMock.mockRejectedValue(OVERLOADED());
+    const r = await settleLong(analyzeMessageRisk(turn(LOW_TIER), []));
+    expect(createMock).toHaveBeenCalledTimes(3);
+    expect(moderationCreateMock).toHaveBeenCalledTimes(3);
+    expect(r.riskScore).toBe(15);
+    expect(historyFactors()).toMatchObject({
+      method: 'keyword_fallback',
+      llm_error: 'overloaded',
+      moderation_unavailable: true,
+    });
+  });
+
+  it('a Retry-After beyond a minute is not waited for', async () => {
+    createMock.mockRejectedValue(SLOW_DOWN('300'));
+    const r = await analyzeMessageRisk(turn(LOW_TIER), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(r.riskScore).toBe(15);
+  });
+
+  it('a spend-cap rejection is still never retried, whatever the tier', async () => {
+    createMock.mockRejectedValue(QUOTA());
+    moderationCreateMock.mockRejectedValue(QUOTA());
+    await analyzeMessageRisk(turn(LOW_TIER), []);
+    await analyzeMessageRisk(turn(KEYWORD_FREE), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(moderationCreateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('high keyword tier keeps the short budget: its fallback already flags and pages', async () => {
+    createMock.mockRejectedValue(SLOW_DOWN('5'));
+    moderationCreateMock.mockRejectedValue(OVERLOADED());
+    const r = await analyzeMessageRisk(turn('I want to end my life'), []);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(moderationCreateMock).toHaveBeenCalledTimes(1);
+    expect(r.riskScore).toBe(75);
   });
 });

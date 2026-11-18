@@ -161,18 +161,41 @@ export interface OpenAIRetryPolicy {
 }
 
 /**
- * Crisis path (risk assessor): ONE retry, after at most 2 seconds, and never
- * after a timeout. The fallback here is the keyword-tier score, which is
- * already computed - so waiting only delays the flag/page it would produce.
+ * Crisis path when the screen ALREADY justifies the full response (keyword
+ * tier in the high band): ONE retry, after at most 2 seconds, and never after
+ * a timeout. The fallback here is the keyword-tier score, which is already
+ * computed and already flags + pages - so waiting only delays that.
  * With the assessor's 10s per-attempt timeout the worst case before the
  * fallback fires is ~12s (a fast rejection, a 2s wait, then a full timeout);
  * a quota rejection falls back after a single round trip.
+ *
+ * Do NOT use this where the fallback is weaker than the call's answer could
+ * be (see CRISIS_PATIENT_RETRY_POLICY).
  */
 export const CRISIS_RETRY_POLICY: OpenAIRetryPolicy = {
   maxAttempts: 2,
   maxDelayMs: 2_000,
   maxTotalDelayMs: 2_000,
   retryTimeouts: false,
+};
+
+/**
+ * Crisis path when the fallback is NOT enough on its own: a low or medium
+ * keyword tier (15 / 50) that the assessor might raise to high, a periodic
+ * sweep or moderation wake-up (keyword score 0), and the moderation screen on
+ * any such turn (it is the only thing that can wake the assessor for a
+ * keyword-free message). Giving up early there does not speed a flag up, it
+ * loses one - so a transient failure gets the same patience the SDK default
+ * gave these calls before this module existed (3 attempts, Retry-After
+ * honoured up to 60s, timeouts retried), minus the pointless retries of a
+ * billing-cap rejection. Bounded: the per-attempt timeouts (10s assessor, 5s
+ * moderation) and this policy cap one call at 3 attempts and 120s of waiting.
+ */
+export const CRISIS_PATIENT_RETRY_POLICY: OpenAIRetryPolicy = {
+  maxAttempts: 3,
+  maxDelayMs: 60_000,
+  maxTotalDelayMs: 120_000,
+  retryTimeouts: true,
 };
 
 /** Background jobs (embeddings sweeps and the like): patient but bounded. */

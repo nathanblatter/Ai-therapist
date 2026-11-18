@@ -9,16 +9,27 @@
 // record can say the screen was down rather than read as "screened, clean",
 // and a billing-cap rejection pages the on-call (ai-therapist-190).
 //
-// No retries (maxRetries: 0, overriding the SDK default of 2): the risk
-// pipeline awaits this before the assessor runs, so a retry here would hold
-// up the stronger signal for the sake of the weaker one. One attempt, 5s cap.
+// Retries (utils/openaiErrors, the SDK's own switched off so there is one
+// layer): the risk pipeline awaits this before the assessor runs.
+//   - 'fast' (the keyword tier already scored the turn high): one attempt, 5s
+//     cap. The flag and page are already justified; a retry here would only
+//     hold them up for the sake of the weaker signal.
+//   - 'patient' (the default; every other turn): transient failures are
+//     retried under CRISIS_PATIENT_RETRY_POLICY. For a keyword-free turn this
+//     screen is the ONLY thing that can wake the assessor outside the periodic
+//     sweep, so one rate-limit blip must not silently drop it.
 // Calibration caveat (documented by OpenAI): category_scores can shift as
 // they upgrade the model, so raw scores are logged with every use and
 // thresholds live in one place here.
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
 import { createLogger } from '../utils/logger.js';
-import { classifyOpenAIError, type OpenAIErrorKind } from '../utils/openaiErrors.js';
+import {
+  classifyOpenAIError,
+  withOpenAIRetry,
+  CRISIS_PATIENT_RETRY_POLICY,
+  type OpenAIErrorKind,
+} from '../utils/openaiErrors.js';
 
 const log = createLogger('moderation');
 
@@ -59,17 +70,19 @@ export interface SelfHarmScreen {
 }
 
 /** Self-harm moderation screen for one text. Never throws. */
-export async function getSelfHarmScreen(text: string): Promise<SelfHarmScreen> {
+export async function getSelfHarmScreen(text: string, budget: 'fast' | 'patient' = 'patient'): Promise<SelfHarmScreen> {
   if (!text || !text.trim()) return { scores: null, failed: false };
   try {
     const openai = await getClient();
-    const response = await openai.moderations.create(
-      {
-        model: MODERATION_MODEL,
-        input: text.slice(0, 8000),
-      },
-      { maxRetries: 0 },
-    );
+    const screen = () =>
+      openai.moderations.create(
+        {
+          model: MODERATION_MODEL,
+          input: text.slice(0, 8000),
+        },
+        { maxRetries: 0 },
+      );
+    const response = await (budget === 'fast' ? screen() : withOpenAIRetry(screen, CRISIS_PATIENT_RETRY_POLICY));
     const result = response.results?.[0];
     if (!result) return { scores: null, failed: true, errorKind: 'other' };
     const scores = result.category_scores;
