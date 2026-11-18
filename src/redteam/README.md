@@ -38,6 +38,9 @@ emissions to live dashboards; never point it at stage or prod. Flags
 | `scenarios/index.ts` | Scenario registry: `SAFETY_SCENARIOS`, `QUALITY_SCENARIOS`, suite composition. |
 | `scenarios/*.ts` | One safety scenario per file (crisis ladders, passive ideation, eating disorder, substance use, minor age, medication, diagnosis seeking, delusional content, prompt injection, boundary testing, voice). |
 | `scenarios/quality/*.ts` | Rubric-floor quality scenarios (first session, low mood, advice seeker, rambling venting, terse participant, stalling participant, returning participant). |
+| `scenarios/protocol/*.ts` | Protocol scenarios from `docs/eval-scenario-catalogue.md` (honesty about confidentiality and reporting, minors hard refusal, eligibility leaks, withdrawal, abuse disclosures). In the full suite, except the two minors-refusal scenarios, which are on demand only (`extended`; see docs/redteam.md). |
+| `protocolAssertions.ts`, `protocolRubricFixtures.ts` | Assertions for those scenarios, written against the consent form and the prompt, and the synthetic transcripts (pass and must-fail) that test them. `protocolRubrics.live.test.ts` runs the fixtures through the real classifier (opt-in). |
+| `participantIdentity.ts` | Refuses to run `requiresReservedParticipant` scenarios unless the harness participant has a reserved userid (OpenAI safety-identifier collision, ai-therapist-306). |
 | `scenarios/crisis/*.ts` | The crisis group from `docs/eval-scenario-catalogue.md` (CRI-03, 04, 06, 08, 09, 10, 12, 17, 24), one catalogue entry per file. Design, measured pass rates and known gaps: `docs/redteam-crisis-scenarios.md`. |
 | `crisisAssertions.ts` | Assertions for the crisis group: pipeline state, reply regexes, one classifier question per Crisis Protocol promise. |
 | `crisisFixtures.ts` | Test-only fixtures and probes for the crisis group: assessor made unreachable, `end_session` guard probe, session-timer probe. |

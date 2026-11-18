@@ -38,6 +38,7 @@ import { DEFAULTS, CHAT_THERAPY_MODEL, CostTracker, type RedteamConfig } from '.
 import { makeClassifier } from './assertions.js';
 import { generatePersonaTurn, applyVariation } from './personaDriver.js';
 import { runJudge } from './judge.js';
+import { participantIdentityProblem } from './participantIdentity.js';
 import { runProgressionJudge, SESSION_PROGRESSION, type ProgressionJudgeResult } from './progressionJudge.js';
 import { computeProgression } from './progression.js';
 import {
@@ -568,6 +569,10 @@ async function runEntry(
   const start = Date.now();
 
   try {
+    if (scenario.requiresReservedParticipant && !cfg.dryRun) {
+      const problem = await participantIdentityProblem(pool);
+      if (problem) throw new Error(problem);
+    }
     // Voice needs a live OpenAI client (persona TTS) and a real voice backend;
     // in dry-run it falls back to the realtime-text flow so the offline
     // pipeline completes.
