@@ -189,8 +189,9 @@ from the browser: `session.update` replacing the backend instructions and tools,
 setting `tool_choice: "none"`, changing `acknowledgement_delay_ms` and clearing
 `triggers`; `session.instructions.append`, `session.thinking.append` and
 `session.commentary.append` (each made the model speak a canary);
-`response.item.create` with a developer-role message (the backend repeated the
-canary); `decision.item.create`; and `session.input_audio.mute`, which deafens
+`response.item.create` with a developer-role message (accepted and run by the
+backend; its effect was not isolated, because the backend prompt had already
+been rewritten earlier in the same session); `decision.item.create`; and `session.input_audio.mute`, which deafens
 the model and the sideband's crisis pipeline. After the tampering, a request
 for a breathing exercise got no reply at all (2 of 2 runs). On the locked
 channel every one of these is refused with an `error` event, code
