@@ -37,7 +37,14 @@ import ToastContainer, { toast } from '../../shared/components/Toast';
 import BugReport from './BugReport';
 import DemoSwitcher from '../../shared/components/DemoSwitcher';
 import { startMixedTee, type AudioTeeHandle } from '../lib/audioTee';
-import { createAudioUploader, type AudioUploader } from '../lib/audioUploader';
+import {
+  beaconRecordingTail,
+  createAudioUploader,
+  drainAndReport,
+  endAfterRecordingDrained,
+  isMicMuted,
+  type AudioUploader,
+} from '../lib/audioUploader';
 import { createParticipantSocket } from '../lib/participantSocket';
 import { GrokVoiceClient } from '../lib/grokVoiceClient';
 import { VoiceOverlayGate, type PendingOverlay } from '../lib/voiceOverlayGate';
@@ -139,6 +146,9 @@ function truncateForAppend(content: string): string {
 
 /** How long to wait for `session.closed` after asking the session to finish. */
 const LIVE_CLOSE_TIMEOUT_MS = 15_000;
+// What page hide may spend on beacons: the browser's 64 KiB keepalive budget
+// less a margin for anything already in flight (ai-therapist-372).
+const PAGEHIDE_BEACON_BUDGET_BYTES = 60 * 1024;
 /** How long to wait for `session.started` after the SDP answer is applied. */
 const LIVE_START_TIMEOUT_MS = 20_000;
 /** How long a delegation may run before the "thinking" hint gives up on itself. */
@@ -2177,11 +2187,11 @@ export default function App() {
       // consent screen the participant just accepted) — when it's off, capture
       // never starts and nothing is uploaded.
       if (!audioTeeRef.current && features.session_recording_enabled) {
-        const uploader = createAudioUploader(newSessionId);
+        const uploader = createAudioUploader(newSessionId, 'mixed');
         audioUploaderRef.current = uploader;
         // Second, mic-only track (pre-gain tap) for prosody research — a
         // subset of the audio already captured in the mix, same consent gate.
-        const participantUploader = createAudioUploader(newSessionId, 400, 'participant');
+        const participantUploader = createAudioUploader(newSessionId, 'participant');
         participantUploaderRef.current = participantUploader;
         audioTeeRef.current = startMixedTee(
           [ms, e.streams[0]],
@@ -2191,7 +2201,10 @@ export default function App() {
           {
             stream: ms,
             onChunk: (pcm, sampleRate) => {
-              participantUploader.push(pcm, sampleRate);
+              // Each chunk carries whether the mic was muted (the mic button
+              // disables this very track), so muted stretches are not mistaken
+              // for lost audio and prosody analysis can tell them from pauses.
+              participantUploader.push(pcm, sampleRate, isMicMuted(ms));
             },
           },
         );
@@ -2522,9 +2535,9 @@ export default function App() {
     // Session recording: same consent-gated tee and HTTP uploader as the
     // GPT-Live path, tapping the mic and the assistant playback stream.
     if (!audioTeeRef.current && features.session_recording_enabled && client.remoteStream) {
-      const uploader = createAudioUploader(newSessionId);
+      const uploader = createAudioUploader(newSessionId, 'mixed');
       audioUploaderRef.current = uploader;
-      const participantUploader = createAudioUploader(newSessionId, 400, 'participant');
+      const participantUploader = createAudioUploader(newSessionId, 'participant');
       participantUploaderRef.current = participantUploader;
       audioTeeRef.current = startMixedTee(
         [ms, client.remoteStream],
@@ -2534,11 +2547,32 @@ export default function App() {
         {
           stream: ms,
           onChunk: (pcm, sampleRate) => {
-            participantUploader.push(pcm, sampleRate);
+            participantUploader.push(pcm, sampleRate, isMicMuted(ms));
           },
         },
       );
     }
+  }
+
+  /**
+   * Stop capturing the session's audio and drain both uploaders (bounded by
+   * DRAIN_TIMEOUT_MS), then report the upload counts and the mic timeline once
+   * (ai-therapist-372). The tee and the refs are released synchronously, so a
+   * recovery session can start its own capture at once; only the drain is
+   * asynchronous. Callers await it before POST /end, except on the
+   * content-filter takeover, where it runs in the background so it can never
+   * delay the hold screen and the crisis numbers. Never rejects.
+   */
+  function stopRecordingCapture(endingSessionId: string | null): Promise<void> {
+    audioTeeRef.current?.stop();
+    audioTeeRef.current = null;
+    const uploaders = { mixed: audioUploaderRef.current, participant: participantUploaderRef.current };
+    audioUploaderRef.current = null;
+    participantUploaderRef.current = null;
+    if (!uploaders.mixed && !uploaders.participant) return Promise.resolve();
+    return drainAndReport(uploaders, (kind, detail) => reportClientEvent(kind, detail, endingSessionId)).catch(
+      () => {},
+    );
   }
 
   /** Teardown for a Grok session (called from stopSession). */
@@ -2553,36 +2587,27 @@ export default function App() {
 
     logConversation({ sessionId: endingSessionId, role: 'system', type: 'session_end', message: 'Session ended' });
     stopPeriodicFlush();
-    await flushLogs();
-
-    if (endingSessionId) {
-      try {
-        await fetch(`/api/sessions/${endingSessionId}/end`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch (error) {
-        console.error('Failed to end session:', error);
-      }
-    }
+    // The recording's last batches must land before POST /end finalises it.
+    await endAfterRecordingDrained({
+      flushLogs,
+      drained: stopRecordingCapture(endingSessionId),
+      end: async () => {
+        if (!endingSessionId) return;
+        try {
+          await fetch(`/api/sessions/${endingSessionId}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (error) {
+          console.error('Failed to end session:', error);
+        }
+      },
+    });
 
     if (socketRef.current) {
       if (endingSessionId) socketRef.current.emit('session:leave', { sessionId: endingSessionId });
       socketRef.current.disconnect();
       socketRef.current = null;
-    }
-
-    if (audioTeeRef.current) {
-      audioTeeRef.current.stop();
-      audioTeeRef.current = null;
-    }
-    if (audioUploaderRef.current) {
-      audioUploaderRef.current.stop();
-      audioUploaderRef.current = null;
-    }
-    if (participantUploaderRef.current) {
-      participantUploaderRef.current.stop();
-      participantUploaderRef.current = null;
     }
 
     grokClientRef.current?.stop();
@@ -3008,18 +3033,28 @@ export default function App() {
     // Flush the logs, then mark the session ended (which also triggers session
     // name generation).
     const endedSessionId = sessionId;
-    const finishOnServer = async (): Promise<void> => {
-      await flushLogs();
-      if (!endedSessionId) return;
-      try {
-        await fetch(`/api/sessions/${endedSessionId}/end`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch (error) {
-        console.error('Failed to end session:', error);
-      }
-    };
+    // Stop the capture now and drain the uploads: POST /end finalises the
+    // recording, so it must come after the last batches have landed
+    // (ai-therapist-372). finishOnServer waits for the drain (at most
+    // DRAIN_TIMEOUT_MS); on the takeover below the whole of it runs in the
+    // background, so the drain never delays the recovery screen.
+    const recordingDrained = stopRecordingCapture(endedSessionId);
+    const finishOnServer = (): Promise<void> =>
+      endAfterRecordingDrained({
+        flushLogs,
+        drained: recordingDrained,
+        end: async () => {
+          if (!endedSessionId) return;
+          try {
+            await fetch(`/api/sessions/${endedSessionId}/end`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (error) {
+            console.error('Failed to end session:', error);
+          }
+        },
+      });
     if (moderationTakeoverRef.current) {
       // The vendor cut this call and the participant is waiting in silence for
       // the assistant to come back (ai-therapist-293). These two round trips
@@ -3046,19 +3081,6 @@ export default function App() {
       }
       socketRef.current.disconnect();
       socketRef.current = null;
-    }
-
-    if (audioTeeRef.current) {
-      audioTeeRef.current.stop();
-      audioTeeRef.current = null;
-    }
-    if (audioUploaderRef.current) {
-      audioUploaderRef.current.stop(); // flush the final batch
-      audioUploaderRef.current = null;
-    }
-    if (participantUploaderRef.current) {
-      participantUploaderRef.current.stop();
-      participantUploaderRef.current = null;
     }
 
     if (dataChannelRef.current) {
@@ -3109,13 +3131,27 @@ export default function App() {
 
     // Actually end the session when page is being unloaded
     const handlePageHide = () => {
-      // Flush logs regardless of session state
       const logBlob = new Blob([JSON.stringify({ records: logBufferRef.current })], { type: 'application/json' });
+      const endBlob = new Blob([JSON.stringify({ sessionId })], { type: 'application/json' });
+
+      // The recording's unsent tail goes first, before the /end that finalises
+      // it, inside what the browser's 64 KiB beacon budget leaves after the
+      // log batch and the end beacon; the participant track has priority
+      // (ai-therapist-372). The rest is lost, and counted.
+      if (audioUploaderRef.current || participantUploaderRef.current) {
+        audioTeeRef.current?.stop();
+        audioTeeRef.current = null;
+        beaconRecordingTail(
+          { mixed: audioUploaderRef.current, participant: participantUploaderRef.current },
+          PAGEHIDE_BEACON_BUDGET_BYTES - logBlob.size - endBlob.size,
+        );
+      }
+
+      // Flush logs regardless of session state
       navigator.sendBeacon?.('/logs/batch', logBlob);
 
       // If session is active, end it
       if (isSessionActive && sessionId) {
-        const endBlob = new Blob([JSON.stringify({ sessionId })], { type: 'application/json' });
         if (sessionType === 'chat') {
           navigator.sendBeacon?.('/api/chat/end', endBlob);
         } else {

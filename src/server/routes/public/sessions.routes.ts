@@ -45,14 +45,35 @@ export default function sessionsRoutes(): Router {
   // uploader already treats as "recording off" (ai-therapist-322).
   router.post('/api/sessions/:sessionId/audio', json({ limit: '8mb' }), dropIfWithdrawn, async (req, res) => {
     const { sessionId } = req.params;
-    const { chunks, sampleRate, track } = req.body as {
+    const { chunks, sampleRate, track, seq, muted } = req.body as {
       chunks?: string[];
       sampleRate?: number;
       track?: string;
+      seq?: unknown;
+      muted?: unknown;
     };
     if (!sessionId || !Array.isArray(chunks) || typeof sampleRate !== 'number') {
       return res.status(400).json({ error: 'chunks[] and sampleRate required' });
     }
+    // Optional (ai-therapist-372): `seq` is the per-track index of the batch's
+    // first chunk, so the recorder can log gaps and drop stale (duplicate or
+    // out-of-order) chunks; `muted` lists the batch positions recorded while
+    // the participant's mic was muted. Older clients send neither.
+    if (seq !== undefined && !(Number.isSafeInteger(seq) && (seq as number) >= 0)) {
+      return res.status(400).json({ error: 'invalid seq' });
+    }
+    if (
+      muted !== undefined &&
+      !(
+        Array.isArray(muted) &&
+        muted.length <= chunks.length &&
+        muted.every((i) => Number.isInteger(i) && i >= 0 && i < chunks.length)
+      )
+    ) {
+      return res.status(400).json({ error: 'invalid muted' });
+    }
+    const mutedSet = new Set<number>((muted as number[] | undefined) ?? []);
+    const firstSeq = seq as number | undefined;
     // Track tag (086): 'participant' = pre-gain mic-only tap for prosody
     // research; untagged/legacy clients and the redteam harness are 'mixed'.
     if (track !== undefined && track !== 'mixed' && track !== 'participant') {
@@ -92,10 +113,13 @@ export default function sessionsRoutes(): Router {
     const { isRecordingConsentedForSession } = await import('../../db/index.js');
     if (!(await isRecordingConsentedForSession(sessionId))) return res.sendStatus(204);
 
-    for (const pcm of chunks) {
+    for (const [i, pcm] of chunks.entries()) {
       if (typeof pcm !== 'string' || !pcm) continue;
       try {
-        appendChunk(sessionId, pcm, sampleRate, recordingTrack);
+        appendChunk(sessionId, pcm, sampleRate, recordingTrack, {
+          seq: firstSeq === undefined ? undefined : firstSeq + i,
+          muted: mutedSet.has(i),
+        });
       } catch {
         /* best-effort recording */
       }

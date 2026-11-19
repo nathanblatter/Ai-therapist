@@ -90,7 +90,32 @@ describe('POST /api/sessions/:id/audio recording-consent gate (039/086)', () => 
   it('persists audio when the global flag is on and the owner consented', async () => {
     const res = await request(makeApp()).post(`/api/sessions/${SESSION_ID}/audio`).send(body);
     expect(res.status).toBe(204);
-    expect(recorderMocks.appendChunk).toHaveBeenCalledWith(SESSION_ID, 'AAAA', 24000, 'participant');
+    expect(recorderMocks.appendChunk).toHaveBeenCalledWith(SESSION_ID, 'AAAA', 24000, 'participant', {
+      seq: undefined,
+      muted: false,
+    });
+  });
+
+  it('passes each chunk its sequence index and mute flag (ai-therapist-372)', async () => {
+    const res = await request(makeApp())
+      .post(`/api/sessions/${SESSION_ID}/audio`)
+      .send({ chunks: ['AAAA', 'BBBB', 'CCCC'], sampleRate: 48000, track: 'participant', seq: 7, muted: [1] });
+    expect(res.status).toBe(204);
+    expect(recorderMocks.appendChunk.mock.calls.map((c) => c[4])).toEqual([
+      { seq: 7, muted: false },
+      { seq: 8, muted: true },
+      { seq: 9, muted: false },
+    ]);
+  });
+
+  it('refuses a malformed seq or muted list', async () => {
+    for (const extra of [{ seq: -1 }, { seq: 1.5 }, { seq: '3' }, { muted: [5] }, { muted: 'all' }, { muted: [0.5] }]) {
+      const res = await request(makeApp())
+        .post(`/api/sessions/${SESSION_ID}/audio`)
+        .send({ ...body, ...extra });
+      expect(res.status).toBe(400);
+    }
+    expect(recorderMocks.appendChunk).not.toHaveBeenCalled();
   });
 
   it("drops BOTH tracks when the owner's latest consent has recording_enabled=false", async () => {
