@@ -67,8 +67,11 @@ export interface SessionRecording {
 export interface ParticipantAudioProblemDetails {
   problem: 'missing' | 'short' | 'silent';
   mixedMs: number;
+  wallMs: number;
   participantMs: number;
+  participantUnmutedMs: number;
   participantRmsDbfs: number | null;
+  participantGapChunks: number;
 }
 
 const PARTICIPANT_AUDIO_DESCRIPTION: Record<ParticipantAudioProblemDetails['problem'], string> = {
@@ -83,7 +86,9 @@ const PARTICIPANT_AUDIO_DESCRIPTION: Record<ParticipantAudioProblemDetails['prob
  * finding out at analysis time. Uses the existing protocol_deviations log as
  * an auto row (category technical_failure, deduplicated per session by
  * auto_key); demo and harness sessions are left out like every other auto
- * flag. Returns whether a new row was added.
+ * flag. Returns whether a new row was added. Called only when
+ * features.participant_audio_auto_deviation is on (default off; see
+ * recorder.service.ts).
  */
 export async function flagParticipantAudioProblem(
   sessionId: string,
