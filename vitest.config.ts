@@ -21,7 +21,7 @@ export default defineConfig({
     include: ['src/**/*.test.ts'],
     // supertest servers bind 127.0.0.1 so no other process on the machine can
     // answer a test's request (ai-therapist-279; see the file's header).
-    setupFiles: ['src/server/testing/supertestLoopback.ts'],
+    setupFiles: ['src/server/testing/supertestLoopback.ts', 'src/server/testing/shiftedClock.ts'],
     // Set before any test module loads. OPENAI_API_KEY makes getOpenAIKey()
     // short-circuit before touching AWS Secrets Manager — several modules call
     // it at import time (e.g. redaction.service), so tests must never depend on

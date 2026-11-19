@@ -1,9 +1,26 @@
 name: PR verify
-# Fast, read-only gate for pull requests into main: the same typecheck / lint /
-# no-emoji / unit-test steps as the `verify` job in deploy.yml, without the
-# red-team smoke (which needs OPENAI_API_KEY and a Postgres service). The unit
-# tests mock the DB pool and vitest.config.ts injects a fake OPENAI_API_KEY, so
-# this job needs no secrets and no services.
+# Gate for pull requests into main.
+#
+# - verify: the same typecheck / lint / no-emoji / format / unit-test steps as
+#   the `verify` job in deploy.yml, on every pull request. The unit tests mock
+#   the DB pool and vitest.config.ts injects a fake OPENAI_API_KEY, so it needs
+#   no secrets and no services.
+# - changes: what the WHOLE pull request changes against its base (the
+#   merge-base diff), whatever the last push touched. Docs-only pull requests
+#   stop at verify.
+# - redteam-smoke: the red-team smoke suite deploy.yml runs on main before the
+#   stage deploy, run here first when the pull request changes product code
+#   (server, database, shared, red-team harness, evals, dependencies), so a
+#   failure blocks the merge instead of skipping the deploy after it.
+#   About USD 0.03 per run.
+# - quality-gate: the judge-floor quality suite (eval spec WP4) when the pull
+#   request touches prompt-affecting paths. About USD 0.10 per run.
+# - test-robustness: the unit suite with the clock moved forward a day and
+#   eight days, and in a shuffled order. A REPORT, not a gate yet: it always
+#   passes and says what failed in the job summary and as a warning.
+#
+# The two live-model jobs only run for same-repo pull requests (secrets are
+# unavailable to forks, and the jobs are skipped cleanly then).
 on:
   pull_request:
     branches: [main]
@@ -38,15 +55,70 @@ jobs:
       - name: Test
         run: npm test
 
-  # Path-filtered judge-floor gate (eval spec WP4): a PR that touches the
-  # prompt-affecting paths re-runs the quality suite against the live model
-  # with judgeMinScores GATING (--gate-quality). Costs about USD 0.10 per run
-  # and only fires for same-repo PRs (secrets are unavailable to forks, and the
-  # job is skipped cleanly then). Everything else gets the fast verify job only.
-  quality-gate:
+  changes:
     runs-on: ubuntu-latest
-    needs: verify
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+      product: ${{ steps.diff.outputs.product }}
+      prompt: ${{ steps.diff.outputs.prompt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Files changed by the whole pull request
+        id: diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Three-dot diff: everything the pull request's commits change since
+          # it left its base, and nothing main changed in the meantime (a
+          # two-dot diff against the base tip also lists main's own newer
+          # changes, as if the pull request had reverted them).
+          base=$(git merge-base "origin/$BASE_REF" "$HEAD_SHA" 2>/dev/null || true)
+          [ -n "$base" ] || base="$BASE_SHA"
+          files=$(git diff --name-only "$base" "$HEAD_SHA")
+          echo "Diff $base...$HEAD_SHA ($(echo "$files" | grep -c . || true) files):"
+          echo "$files"
+
+          # code: anything the unit suite can be affected by.
+          if echo "$files" | grep -Eq '^(src/|evals/|package\.json$|package-lock\.json$|tsconfig\.json$|vitest\.config\.ts$)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # product: what the red-team smoke exercises. Test files, test
+          # helpers and the browser client are left out: they cannot change
+          # what the server answers.
+          product=$(echo "$files" \
+            | grep -E '^(src/(server|database|shared|redteam)/|evals/|scripts/redteam|package\.json$|package-lock\.json$|Dockerfile$|\.github/actions/redteam-db-setup/)' \
+            | grep -Ev '(\.test\.ts$|^src/server/testing/)' || true)
+          if [ -n "$product" ]; then
+            echo "product=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "product=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$files" | grep -Eq '^(src/server/services/chatTherapy|src/server/utils/promptContext\.ts|src/server/utils/sessionHelpers\.ts|src/server/utils/openingLine\.ts|src/server/services/sessionEval\.service\.ts|src/database/migrations/.*prompt|src/server/services/toolRegistry\.service\.ts)'; then
+            echo "prompt=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prompt=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "### Changed paths (merge-base diff)"
+            echo "- base: \`$base\`, head: \`$HEAD_SHA\`"
+            echo "- files: $(echo "$files" | grep -c . || true)"
+            echo "- unit-suite relevant: $(grep '^code=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+            echo "- red-team smoke: $(grep '^product=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+            echo "- quality gate: $(grep '^prompt=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  redteam-smoke:
+    runs-on: ubuntu-latest
+    needs: [verify, changes]
+    if: needs.changes.outputs.product == 'true' && github.event.pull_request.head.repo.full_name == github.repository
     # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
     # and redteam-nightly.yml (composite actions cannot declare services). The
     # setup-node -> npm ci -> migrate+seed sequence lives in
@@ -70,31 +142,127 @@ jobs:
       # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Detect prompt-affecting changes
-        id: changed
-        run: |
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
-          files=$(git diff --name-only "$base" "$head")
-          echo "$files"
-          if echo "$files" | grep -Eq '^(src/server/services/chatTherapy|src/server/utils/promptContext\.ts|src/server/utils/sessionHelpers\.ts|src/server/utils/openingLine\.ts|src/server/services/sessionEval\.service\.ts|src/database/migrations/.*prompt|src/server/services/toolRegistry\.service\.ts)'; then
-            echo "prompt=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prompt=false" >> "$GITHUB_OUTPUT"
-          fi
       - uses: ./.github/actions/redteam-db-setup
-        if: steps.changed.outputs.prompt == 'true'
+      - name: Red-team smoke suite
+        run: npm run redteam:smoke
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteam-smoke-results-pr
+          path: redteam-results/
+
+  quality-gate:
+    runs-on: ubuntu-latest
+    needs: [verify, changes]
+    if: needs.changes.outputs.prompt == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
+    # and redteam-nightly.yml (composite actions cannot declare services). The
+    # setup-node -> npm ci -> migrate+seed sequence lives in
+    # .github/actions/redteam-db-setup; keep the copies of this block identical.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17  # migrations need the vector extension (matches prod)
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_therapist_redteam
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_therapist_redteam
+      DATABASE_SSL: 'false'
+      SESSION_SECRET: ci-redteam-secret
+      NODE_ENV: test
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # No IMESSAGE_API_KEY / CRISIS_ALERT_PHONE: CI must never page the on-call.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/redteam-db-setup
       - name: Red-team quality suite (judge floors gating)
-        if: steps.changed.outputs.prompt == 'true'
         run: npm run redteam:quality -- --gate-quality
       - name: Upload results
-        if: always() && steps.changed.outputs.prompt == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: redteam-quality-results-pr
           path: redteam-results/
-      - name: Skipped
-        if: steps.changed.outputs.prompt != 'true'
-        run: echo "No prompt-affecting paths changed; quality gate not required."
+
+  # Non-blocking report (ai-therapist-370): a test that passes today and fails
+  # tomorrow (a date time-bomb), or only passes in file order, fails the
+  # deploy's verify job after the merge and skips the stage deploy. This runs
+  # the suite as it will run on later days and in another order. Every step
+  # continues on error; the summary step reports, and the job passes. Make it
+  # blocking once it has been green for a while.
+  test-robustness:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      # src/server/testing/shiftedClock.ts moves the global Date by this many
+      # days (the clock keeps ticking; explicit vi.setSystemTime still wins).
+      - name: Unit tests, clock +1 day
+        id: plus1
+        continue-on-error: true
+        env:
+          TEST_CLOCK_SHIFT_DAYS: '1'
+        run: |
+          set -o pipefail
+          npx vitest run 2>&1 | tee plus1.log
+      - name: Unit tests, clock +8 days
+        id: plus8
+        continue-on-error: true
+        env:
+          TEST_CLOCK_SHIFT_DAYS: '8'
+        run: |
+          set -o pipefail
+          npx vitest run 2>&1 | tee plus8.log
+      - name: Unit tests, shuffled order
+        id: shuffled
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          seed=$(( (RANDOM << 15 | RANDOM) + 1 ))
+          echo "$seed" > shuffle-seed.txt
+          echo "Shuffle seed: $seed (reproduce: npx vitest run --sequence.shuffle --sequence.seed=$seed)"
+          npx vitest run --sequence.shuffle --sequence.seed="$seed" 2>&1 | tee shuffled.log
+      - name: Report
+        if: always()
+        env:
+          PLUS1: ${{ steps.plus1.outcome }}
+          PLUS8: ${{ steps.plus8.outcome }}
+          SHUFFLED: ${{ steps.shuffled.outcome }}
+        run: |
+          seed=$(cat shuffle-seed.txt 2>/dev/null || echo unknown)
+          failed() { grep -E '^ +(FAIL|×) ' "$1" 2>/dev/null | sed -E 's/ [0-9]+ms$//' | sort -u | head -20; }
+          {
+            echo "### Unit-suite robustness (report only, not a gate)"
+            echo ""
+            echo "| Run | Result |"
+            echo "|---|---|"
+            echo "| clock +1 day | $PLUS1 |"
+            echo "| clock +8 days | $PLUS8 |"
+            echo "| shuffled, seed $seed | $SHUFFLED |"
+            for run in plus1 plus8 shuffled; do
+              if [ -n "$(failed "$run.log")" ]; then
+                echo ""
+                echo "Failing in $run:"
+                echo '```'
+                failed "$run.log"
+                echo '```'
+              fi
+            done
+            echo ""
+            echo "Reproduce locally: \`TEST_CLOCK_SHIFT_DAYS=8 npm test\`, \`npx vitest run --sequence.shuffle --sequence.seed=$seed\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PLUS1" != success ] || [ "$PLUS8" != success ] || [ "$SHUFFLED" != success ]; then
+            echo "::warning title=Unit-suite robustness::clock+1d=$PLUS1 clock+8d=$PLUS8 shuffled(seed $seed)=$SHUFFLED; see the job summary"
+          fi
