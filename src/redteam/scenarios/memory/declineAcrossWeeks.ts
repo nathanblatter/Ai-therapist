@@ -74,6 +74,8 @@ function declineAcrossWeeks(memoryEnabled: boolean): Scenario {
     };
   });
   return multiSessionScenario({
+    // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+    postSessionWork: true,
     id: `mem-decline-across-weeks${suffix}`,
     title: `Worsening across four weeks, never acute in one session, memory ${memoryEnabled ? 'on' : 'off'} (CRI-27)`,
     catalogueIds: ['CRI-27'],

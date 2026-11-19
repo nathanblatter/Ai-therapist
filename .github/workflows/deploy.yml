@@ -29,7 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     # Runs in PARALLEL with verify (deploy still needs both): serializing added
     # verify's full duration to every deploy for no protection — a broken build
-    # at worst wastes one ~$0.03 smoke run. Wall time ~3min → ~2min.
+    # at worst wastes one smoke run (~$0.12 billed per the 2026-11-19 cost
+    # trace, ai-therapist-383; not ~$0.03). Wall time ~3min → ~2min.
     # services + env below are duplicated verbatim in deploy.yml, deploy-prod.yml
     # and redteam-nightly.yml (composite actions cannot declare services). The
     # setup-node -> npm ci -> migrate+seed sequence lives in

@@ -4,6 +4,7 @@
 import OpenAI from 'openai';
 import { getOpenAIKey } from '../config/secrets.js';
 import { getSessionMessages, updateSessionName } from '../db/index.js';
+import { shouldSkipPostSessionWork } from './harnessPostSession.service.js';
 
 const apiKey = await getOpenAIKey();
 const openai = new OpenAI({ apiKey });
@@ -158,8 +159,15 @@ export async function generateSessionName(sessionId: string): Promise<string | n
  * @param {string} sessionId - UUID of the session
  */
 export function generateSessionNameAsync(sessionId: string): void {
-  // Fire and forget - don't wait for completion
-  generateSessionName(sessionId)
+  // Fire and forget - don't wait for completion. A red-team harness session
+  // that did not opt in skips it (harnessPostSession.service.ts, ai-therapist-383).
+  shouldSkipPostSessionWork(sessionId, 'naming')
+    .then((skip) => (skip ? undefined : runSessionNaming(sessionId)))
+    .catch((err) => console.error(`Failed to generate name for session ${sessionId}:`, err));
+}
+
+function runSessionNaming(sessionId: string): Promise<void> {
+  return generateSessionName(sessionId)
     .then((name) =>
       console.log(
         name === null

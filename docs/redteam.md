@@ -2651,6 +2651,35 @@ estimated split, a per-category table and the caveats. All figures are priced
 from `MODEL_PRICING` and the backend-model registry: estimates of the bill,
 never the invoice.
 
+**Post-session work on harness sessions (ai-therapist-383).** Redaction (two
+`gpt-5` passes), the redaction leak check, session naming and insights are
+skipped for a harness session unless its scenario sets `postSessionWork: true`.
+The server skips only when BOTH hold: the process is the harness CLI
+(`src/redteam/cli.ts` sets `REDTEAM_HARNESS_PROCESS=1` in its own process for
+runs against a disposable database; the in-app runner, which sets
+`REDTEAM_TRIGGER`, does not set it, and a server under `NODE_ENV=production`
+ignores it), and the session's user is in the reserved harness id range
+(`RESERVED_PARTICIPANT_USERID_MIN`). Otherwise the jobs run as before. The
+check sits in the jobs themselves (`server/services/harnessPostSession.service.ts`),
+so every end path and the 15-minute redaction sweep are covered; the server
+logs one line per skipped session. Opted in: every multi-session scenario
+(they wait for each session's summary) and CONF-07/08 (`conf-identifiers-volunteered`,
+`conf-redaction-injection`); `postSessionOptIn.test.ts` fails if a scenario
+reads post-session output without opting in. The summary's "Not included"
+notes say how many sessions skipped it, and the run does not wait for jobs that
+were skipped. Billed saving: about $0.012 per skipped session (far more when
+redaction falls back to per-message calls), about $0.035 per smoke run (3 of
+its 4 scenarios end a session through a route) and about $0.18 per nightly
+leg (about 15 sessions; the two opted-in scenarios keep theirs).
+
+**Prices.** Post-session `gpt-5` and `gpt-5-mini` rows are priced at the flex
+rate (half of Standard), which is the tier those jobs request; a flex request
+that found no capacity and fell back to Standard is under-counted. Cached input
+is priced at the cached rate when a harness call's usage reports
+`prompt_tokens_details.cached_tokens`. The app's `session_llm_usage` stores no
+cached-token count, so app-recorded rows (chat replies above all) are still
+priced at the full input rate: an upper bound until the app records it.
+
 The per-scenario line printed while a run is going shows only the harness's
 own calls; the app-side spend is added once, at the end of the run.
 

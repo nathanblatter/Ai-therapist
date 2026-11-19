@@ -5,6 +5,7 @@ import { pool } from '../config/db.js';
 import { redactPHIBatch, type RedactionUsage } from './redaction.service.js';
 import { REDACTABLE_ROWS_SQL } from '../db/redactionScope.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
+import { shouldSkipPostSessionWork } from './harnessPostSession.service.js';
 
 interface RedactRow {
   message_id: number;
@@ -18,6 +19,11 @@ interface RedactRow {
  * for re-run.
  */
 export async function redactSession(sessionId: string): Promise<void> {
+  // A red-team harness session that did not opt in skips redaction and with it
+  // the leak check (harnessPostSession.service.ts, ai-therapist-383). This
+  // covers every end path and the 15-minute sweep, which all come through here.
+  if (await shouldSkipPostSessionWork(sessionId, 'redaction')) return;
+
   const { rows } = await pool.query<RedactRow>(
     // Scope (including the tool_event_% rows whose body is participant free
     // text) comes from the shared fragment in db/redactionScope.ts so this job,

@@ -182,7 +182,13 @@ export function applySessionUsage(
     const category = categoryForPurpose(r.purpose);
     if (!category) continue;
     const model = r.model ?? (category === 'chat-reply' ? plan.chatModel : 'default');
-    if (r.counted_calls > 0) plan.cost.addRecorded(model, r.tokens_in, r.tokens_out, category, r.counted_calls);
+    // The post-session jobs request the flex tier (withFlex); priceTokens
+    // applies it only to flex-eligible models (gpt-5 redaction, gpt-5-mini
+    // leak check; not gpt-4o-mini insights).
+    if (r.counted_calls > 0)
+      plan.cost.addRecorded(model, r.tokens_in, r.tokens_out, category, r.counted_calls, {
+        flex: category === 'post-session',
+      });
     const uncounted = r.calls - r.counted_calls;
     if (category === 'chat-reply') {
       recordedReplies += r.counted_calls;
@@ -292,6 +298,10 @@ export interface RunCostNotes {
   /** session_llm_usage was read (false under --dry-run or on a DB error). */
   appUsageRead: boolean;
   postSessionWaitMs: number;
+  /** Harness sessions whose post-session jobs (redaction, leak check, naming,
+   *  insights) the server skipped because the scenario did not opt in
+   *  (ai-therapist-383). Not run, so not billed. */
+  postSessionSkipped?: number;
   /** What part of the figure is estimated, and how. */
   estimated: string[];
   /** What the figure does not include. */
@@ -304,6 +314,7 @@ export function costNotes(
   settled: SettledCost | null,
   estimatedCategories: CostCategory[],
   dryRun = false,
+  postSession: { skippedSessions: number; optedIn: string[] } = { skippedSessions: 0, optedIn: [] },
 ): { estimated: string[]; excluded: string[] } {
   const estimated: string[] = [];
   const has = (c: CostCategory) => estimatedCategories.includes(c);
@@ -329,6 +340,12 @@ export function costNotes(
   else if (!settled)
     excluded.unshift(
       'app-side session usage (chat replies, crisis assessor, redaction, insights): not read in this run',
+    );
+  if (postSession.skippedSessions > 0)
+    excluded.push(
+      `post-session work (redaction, leak check, session naming, insights) was skipped for ${postSession.skippedSessions} ` +
+        `harness session(s) whose scenario did not opt in: not run, so not billed` +
+        (postSession.optedIn.length ? `; kept for ${postSession.optedIn.join(', ')}` : ''),
     );
   for (const p of settled?.pending ?? [])
     excluded.push(

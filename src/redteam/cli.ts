@@ -46,7 +46,19 @@ process.env.NODE_ENV = 'test';
 // able to red-team it wherever it runs (ai-therapist-207). In-process only —
 // it never flips the flag for a deployment sharing the DB.
 process.env.ASSISTANT_ENABLED = 'true';
+// The harness-process signal for skipping post-session model work on harness
+// sessions (server/services/harnessPostSession.service.ts, ai-therapist-383).
+// Only this CLI sets it, in its own process, and only for runs against a
+// disposable database: the in-app runner (REDTEAM_TRIGGER present) runs against
+// a deployment's live database and keeps today's behaviour, so there the
+// signal is actively deleted, in case it leaked into the container's
+// environment (the gate also ignores it while REDTEAM_TRIGGER is present). The
+// server also needs the session's user in the reserved harness id range
+// before it skips. (The import is hoisted, so the function is ready here; the
+// module reads nothing at load.)
+setHarnessProcessSignal(process.env);
 
+import { setHarnessProcessSignal } from '../server/services/harnessPostSession.service.js';
 import type OpenAI from 'openai';
 import {
   DEFAULTS,
@@ -745,7 +757,13 @@ async function runEntry(
   // or not, once the run is over (settleRunCosts).
   const ledger = (result: ScenarioResult): ScenarioResult => {
     const ids = client.sessionsStarted.slice(sessionsBefore);
-    costLedger.push({ result, cost, sessionIds: ids, pipeline: scenario.pipeline });
+    costLedger.push({
+      result,
+      cost,
+      sessionIds: ids,
+      pipeline: scenario.pipeline,
+      postSessionWork: scenario.postSessionWork === true,
+    });
     result.cost = cost.breakdown();
     return result;
   };
@@ -778,6 +796,7 @@ async function runEntry(
     // Scenario fixture (test-only fault injection): installed around the run
     // and always undone, so a failed scenario cannot leak its fault into the next.
     const undoFixture = await scenario.fixture?.({ pool, dryRun: cfg.dryRun });
+    client.scenarioWantsPostSession = scenario.postSessionWork === true;
     const res = await runner(
       scenario,
       beats,
@@ -793,6 +812,7 @@ async function runEntry(
       // Backstop for ai-therapist-307: no chat session outlives its scenario,
       // whichever runner started it and however it ended.
       const leftover = await client.endOpenChats();
+      client.scenarioWantsPostSession = false;
       if (leftover.length) console.error(`[redteam] ${label}: ended leftover chat session(s) ${leftover.join(', ')}`);
       await undoFixture?.();
       await scenario.teardown?.(pool);
@@ -838,7 +858,13 @@ async function runEntry(
 }
 
 /** Per-scenario spend awaiting the app-side usage pass (settleRunCosts). */
-const costLedger: Array<{ result: ScenarioResult; cost: CostTracker; sessionIds: string[]; pipeline: string }> = [];
+const costLedger: Array<{
+  result: ScenarioResult;
+  cost: CostTracker;
+  sessionIds: string[];
+  pipeline: string;
+  postSessionWork: boolean;
+}> = [];
 /** Transcripts by session id, kept even when a scenario throws, so an errored
  *  scenario's estimated replies can still be priced. */
 const sessionTranscripts = new Map<string, Turn[]>();
@@ -855,6 +881,8 @@ async function settleRunCosts(
   defaultPromptChars: number,
 ): Promise<RunCostNotes> {
   let settled: SettledCost | null = null;
+  const { skippedPostSessionSessions } = await import('../server/services/harnessPostSession.service.js');
+  const skipped = new Set(skippedPostSessionSessions());
   if (!cfg.dryRun) {
     const chatModel = await chatModelUnderTest();
     const plans: SessionCostPlan[] = costLedger.flatMap((e) =>
@@ -870,7 +898,9 @@ async function settleRunCosts(
             pipeline: e.result.pipeline,
             transcript: sessionTranscripts.get(sessionId) ?? e.result.transcript ?? [],
             chatModel,
-            expectPostSession: e.pipeline !== 'realtime-text',
+            // A harness session whose post-session work the server skipped
+            // (ai-therapist-383) has nothing to wait for.
+            expectPostSession: e.pipeline !== 'realtime-text' && !skipped.has(sessionId),
             cost: e.cost,
           }))
         : [],
@@ -899,10 +929,12 @@ async function settleRunCosts(
       ),
     ),
   ];
+  const optedIn = [...new Set(costLedger.filter((e) => e.postSessionWork).map((e) => e.result.id))];
   return {
     appUsageRead: !!settled,
     postSessionWaitMs: settled?.waitedMs ?? 0,
-    ...costNotes(settled, estimatedCategories, cfg.dryRun),
+    postSessionSkipped: skipped.size,
+    ...costNotes(settled, estimatedCategories, cfg.dryRun, { skippedSessions: skipped.size, optedIn }),
   };
 }
 
@@ -1012,6 +1044,8 @@ async function main(): Promise<void> {
 
   const client = new HarnessClient(app, io, CURRENT_CONSENT_VERSION);
   client.patchEmissions();
+  // Scenarios with postSessionWork opt their sessions back in (ai-therapist-383).
+  client.postSessionOptIn = (await import('../server/services/harnessPostSession.service.js')).optInPostSessionWork;
 
   // Voice drives a WebSocket through the server's upgrade handler, which needs
   // a listener that outlives one request; bind an ephemeral loopback port for

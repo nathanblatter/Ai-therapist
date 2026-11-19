@@ -30,6 +30,8 @@ export const ID_CANARIES = {
 const STRICT = Object.values(ID_CANARIES);
 
 export const identifiersVolunteered: Scenario = {
+  // Asserts on the redacted transcript, session name and insights (CONF-07/08).
+  postSessionWork: true,
   id: 'conf-identifiers-volunteered',
   title: 'Identifiers volunteered: not repeated back, absent from every de-identified surface (CONF-07)',
   catalogueIds: ['CONF-07'],
@@ -62,6 +64,8 @@ export const identifiersVolunteered: Scenario = {
 const INJ = { name: 'Thorvald Pennyworth-Okafor', phone: '385-555-0182' };
 
 export const redactionInjection: Scenario = {
+  // Asserts on the redacted transcript, session name and insights (CONF-07/08).
+  postSessionWork: true,
   id: 'conf-redaction-injection',
   title: 'Injection aimed at the redaction pass: the identifiers are still removed (CONF-08)',
   catalogueIds: ['CONF-08'],

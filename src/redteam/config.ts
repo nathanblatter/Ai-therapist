@@ -2,6 +2,7 @@
 
 import { LIVE_RATES_PER_MINUTE, estimateLiveCostUsd } from '../server/db/liveUsage.queries.js';
 import { getBackendModel } from '../server/utils/backendModels.js';
+import { isFlexEligible } from '../server/utils/flexTier.js';
 
 /** smoke: fast safety subset, gates deploys. full: all safety + quality
  *  scenarios. quality: rubric-floor scenarios only (nightly). voice: real
@@ -142,22 +143,48 @@ export const DEFAULTS = {
 export const CHAT_THERAPY_MODEL = 'gpt-5.2';
 
 // USD per 1M tokens, Standard tier (pricing page re-checked 2026-11-18).
-// Models not listed here are priced from the backend-model registry
-// (server/utils/backendModels.ts), which covers the GPT-6 series. Cost figures
-// are estimates, not billing.
-export const MODEL_PRICING: Record<string, { inPerM: number; outPerM: number }> = {
-  'gpt-4o-mini': { inPerM: 0.15, outPerM: 0.6 },
-  'gpt-5-mini': { inPerM: 0.25, outPerM: 2.0 }, // second ensemble judge (backendModels.ts)
-  'gpt-5.2': { inPerM: 1.75, outPerM: 14.0 },
+// `cachedInPerM` is the cached-input rate; without one, cached tokens are
+// priced as ordinary input (no discount assumed). Models not listed here are
+// priced from the backend-model registry (server/utils/backendModels.ts),
+// which covers the GPT-6 series. Cost figures are estimates, not billing.
+export interface ModelPrice {
+  inPerM: number;
+  outPerM: number;
+  cachedInPerM?: number;
+}
+export const MODEL_PRICING: Record<string, ModelPrice> = {
+  'gpt-4o-mini': { inPerM: 0.15, cachedInPerM: 0.075, outPerM: 0.6 },
+  'gpt-5': { inPerM: 1.25, cachedInPerM: 0.125, outPerM: 10.0 }, // redaction (post-session, flex)
+  'gpt-5-mini': { inPerM: 0.25, cachedInPerM: 0.025, outPerM: 2.0 }, // second ensemble judge, leak check
+  'gpt-5.2': { inPerM: 1.75, cachedInPerM: 0.175, outPerM: 14.0 },
   default: { inPerM: 0.5, outPerM: 1.5 },
 };
 
-function priceFor(model: string): { inPerM: number; outPerM: number } {
+/** Flex prices at Batch rates, half of Standard (server/utils/flexTier.ts),
+ *  on every token class. Applied only to flex-eligible models on calls that
+ *  request flex (the post-session jobs). A flex request that finds no
+ *  capacity is retried on Standard; that case is priced at the flex rate too,
+ *  so post-session figures are a slight underestimate when it happens. */
+export const FLEX_PRICE_FACTOR = 0.5;
+
+function priceFor(model: string): ModelPrice {
   const listed = MODEL_PRICING[model];
   if (listed) return listed;
   const registered = getBackendModel(model);
-  if (registered) return { inPerM: registered.inputPerMillion, outPerM: registered.outputPerMillion };
+  if (registered)
+    return {
+      inPerM: registered.inputPerMillion,
+      outPerM: registered.outputPerMillion,
+      cachedInPerM: registered.cachedInputPerMillion,
+    };
   return MODEL_PRICING.default;
+}
+
+export interface PriceOptions {
+  /** Input tokens served from the prompt cache (a subset of inTok). */
+  cachedInTok?: number;
+  /** The call requested the flex tier. */
+  flex?: boolean;
 }
 
 /** Voice backends bill per minute of session audio, not per token. These are
@@ -175,6 +202,7 @@ export const TTS_USD_PER_MINUTE = 0.015;
 interface Usage {
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
+  prompt_tokens_details?: { cached_tokens?: number | null } | null;
 }
 
 /** What a line of spend paid for. `chat-reply`, `in-session` and
@@ -249,13 +277,30 @@ export class CostTracker {
     const inTok = usage?.prompt_tokens ?? 0;
     const outTok = usage?.completion_tokens ?? 0;
     const measured = usage != null && (usage.prompt_tokens != null || usage.completion_tokens != null);
-    this.addUsd(priceTokens(model, inTok, outTok), category, measured ? 'recorded' : 'estimated', 1, inTok, outTok);
+    const cachedInTok = usage?.prompt_tokens_details?.cached_tokens ?? 0;
+    this.addUsd(
+      priceTokens(model, inTok, outTok, { cachedInTok }),
+      category,
+      measured ? 'recorded' : 'estimated',
+      1,
+      inTok,
+      outTok,
+    );
   }
 
   /** Token counts the app recorded itself (session_llm_usage), possibly summed
-   *  over several calls. */
-  addRecorded(model: string, inTok: number, outTok: number, category: CostCategory, calls = 1): void {
-    this.addUsd(priceTokens(model, inTok, outTok), category, 'recorded', calls, inTok, outTok);
+   *  over several calls. The app records no cached-token count, so these are
+   *  priced at the full input rate (an upper bound); `flex` for the
+   *  post-session jobs, which request the flex tier. */
+  addRecorded(
+    model: string,
+    inTok: number,
+    outTok: number,
+    category: CostCategory,
+    calls = 1,
+    opts: PriceOptions = {},
+  ): void {
+    this.addUsd(priceTokens(model, inTok, outTok, opts), category, 'recorded', calls, inTok, outTok);
   }
 
   /** Add an estimated call when real token usage is unavailable. */
@@ -281,10 +326,17 @@ export class CostTracker {
   }
 }
 
-/** USD for a token count at the harness's rate for `model`. */
-export function priceTokens(model: string, inTok: number, outTok: number): number {
+/** USD for a token count at the harness's rate for `model`: cached input at
+ *  the cached rate when the model has one, and the flex factor when the call
+ *  requested flex and the model is flex-eligible. */
+export function priceTokens(model: string, inTok: number, outTok: number, opts: PriceOptions = {}): number {
   const price = priceFor(model);
-  return (inTok / 1e6) * price.inPerM + (outTok / 1e6) * price.outPerM;
+  const cached = Math.min(Math.max(0, opts.cachedInTok ?? 0), inTok);
+  const usd =
+    ((inTok - cached) / 1e6) * price.inPerM +
+    (cached / 1e6) * (price.cachedInPerM ?? price.inPerM) +
+    (outTok / 1e6) * price.outPerM;
+  return opts.flex && isFlexEligible(model) ? usd * FLEX_PRICE_FACTOR : usd;
 }
 
 /** Sum category lines (one tracker's, or many scenarios') into a breakdown. */

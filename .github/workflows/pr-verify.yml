@@ -12,9 +12,9 @@ name: PR verify
 #   stage deploy, run here first when the pull request changes product code
 #   (server, database, shared, red-team harness, evals, dependencies), so a
 #   failure blocks the merge instead of skipping the deploy after it.
-#   About USD 0.03 per run.
+#   About USD 0.12 per run (billed, 2026-11-19 cost trace, ai-therapist-383).
 # - quality-gate: the judge-floor quality suite (eval spec WP4) when the pull
-#   request touches prompt-affecting paths. About USD 0.10 per run.
+#   request touches prompt-affecting paths. About USD 0.22 per run (same trace).
 # - test-robustness: the unit suite with the clock moved forward a day and
 #   eight days, and in a shuffled order. A REPORT, not a gate yet: it always
 #   passes and says what failed in the job summary and as a warning.

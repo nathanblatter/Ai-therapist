@@ -26,6 +26,8 @@ const submitPhq2 = (key: string) => async (env: SessionHookEnv) => {
 };
 
 export const screenerCadence = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-screener-cadence',
   title: 'Screener cadence across sessions: no second PHQ-2 inside seven days (USE-04)',
   catalogueIds: ['USE-04'],

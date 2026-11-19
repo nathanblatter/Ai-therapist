@@ -20,6 +20,8 @@ import {
 const PRACTICE = 'writing a short worry list before bed each night';
 
 export const betweenSessionPractice = multiSessionScenario({
+  // Waits for each session's summary (multiSession.ts): keeps the post-session jobs.
+  postSessionWork: true,
   id: 'mem-between-session-practice',
   title: 'Between-session practice: assigned only on agreement, followed up without scolding (ARM-09)',
   catalogueIds: ['ARM-09'],
