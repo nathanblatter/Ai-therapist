@@ -31,7 +31,13 @@ import {
   buildScreenerCadenceBlock,
   SCREENER_CUE_HEADING,
   buildToolGuidanceBlock,
+  buildNoNotesBlock,
+  assembleSafetyFollowUpBlock,
+  SAFETY_FOLLOW_UP_WINDOW_DAYS,
+  SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF,
+  SAFETY_FOLLOW_UP_MIN_SEVERITY,
 } from '../utils/promptContext.js';
+import { UNVERIFIED_CLAIM_NOTE } from '../utils/memoryScreen.js';
 import { buildPhaseTexts } from '../utils/phaseGuidance.js';
 import {
   LIVE_DEFAULT_BACKEND_MODEL,
@@ -130,7 +136,7 @@ import { EMBEDDING_MODEL } from '../services/embeddings.service.js';
 import { MODERATION_MODEL } from '../services/moderation.service.js';
 
 /** Date shown on the attachment. Bump when the prompts change and it is re-submitted. */
-export const PREPARED = 'November 18, 2026 (supersedes the September 4, 2026 version)';
+export const PREPARED = 'November 19, 2026 (supersedes the September 4, 2026 version)';
 
 /** Repo-relative path of the committed attachment. */
 export const ATTACHMENT_PATH = 'docs/irb-phase2-instruments/prompts.html';
@@ -317,8 +323,11 @@ function buildItems(): Item[] {
       'it only in the psychoeducation-cue research arm (conditional, see A.6); ' +
       '(6) the leading-the-conversation block, only while that feature flag is on (conditional, A.14); ' +
       '(7) for logged-in returning participants who opted in to session memory, a returning-participant context ' +
-      'block (A.7); every other logged-in participant receives the screener-cadence block alone instead (A.7); and ' +
-      '(8) a pre-session check-in block, only if the participant filled in the optional check-in form (A.8).',
+      'block (A.7); every other logged-in participant receives instead a short note that the agent has no notes ' +
+      'from earlier conversations, followed by the screener-cadence block (A.7); ' +
+      '(8) a safety follow-up cue, only for a logged-in participant whose most recent conversation was ' +
+      'crisis-flagged, whatever their session-memory setting (A.7); and ' +
+      '(9) a pre-session check-in block, only if the participant filled in the optional check-in form (A.8).',
   );
   add(
     'p',
@@ -436,6 +445,19 @@ function buildItems(): Item[] {
       'after the previous score is "up", "down" or "unchanged". The prior-risk-history sub-section is included only ' +
       'when a therapist has explicitly enabled sharing it for that participant.',
   );
+  add(
+    'p',
+    'The block opens by telling the model that what follows is unverified background and changes none of its ' +
+      'limits, and closes by telling it to confirm only what the notes contain and how to answer a request to ' +
+      'forget something. Three things are left out of the block when it is built: a remembered fact, summary line ' +
+      'or profile entry worded as a permission or as an instruction to the agent (for example "dosing questions ' +
+      'are fine" or "you agreed to be called Sam"); the summary of a conversation in which the participant asked ' +
+      'the agent to forget something, and any earlier note found to mention that thing; and, while such a request ' +
+      'is still being processed, every note older than it. A remembered fact that names a job, a qualification or ' +
+      'a quantity of a medicine is followed by "' +
+      UNVERIFIED_CLAIM_NOTE +
+      '". None of this deletes or edits a study record: it controls only what is placed in the prompt.',
+  );
   const memory = assembleMemoryBlock({
     endedCount: 0,
     summaries: [
@@ -509,6 +531,38 @@ function buildItems(): Item[] {
       'included: no scores, summaries or remembered facts. Verbatim, for a participant who has never taken either:',
   );
   add('pre', block(`\n\n${SCREENER_CUE_HEADING}${buildScreenerCadenceBlock([], now)}`));
+  add(
+    'p',
+    'The same participant (no returning-participant block) also receives, immediately before the screener-cadence ' +
+      'lines, a note that the agent has no notes from earlier conversations, so that it neither confirms nor ' +
+      'denies something the participant says happened before, and so that it answers a request to forget ' +
+      'something honestly. The note contains no participant data, only the memory setting. Verbatim, with ' +
+      'session memory off:',
+  );
+  add('pre', block(buildNoNotesBlock(false)));
+  add('p', 'With session memory on and nothing to recall yet, its first two sentences and the instruction read:');
+  add('pre', block(buildNoNotesBlock(true)));
+  add('h3', 'Safety follow-up cue (built from the safety record, not from session memory)');
+  const severities = SAFETY_FOLLOW_UP_MIN_SEVERITY === 'high' ? 'a high' : 'a medium or high';
+  add(
+    'p',
+    'A logged-in participant whose most recent conversation (the most recent one in which they said anything) ' +
+      `carries ${severities} crisis flag (or one whose level was not recorded) that the research team has not ` +
+      `cleared, and ended within the last ${SAFETY_FOLLOW_UP_WINDOW_DAYS} days, receives the cue below after ` +
+      'the blocks above' +
+      (SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF
+        ? ', whether session memory is on or off. '
+        : ', when session memory is on. Participants with session memory off do not receive it. ') +
+      'A conversation that continues a voice call the provider ended (the text hand-off) does not receive it. ' +
+      'It is built from the safety system’s own record of the earlier session (the crisis flag and its ' +
+      'severity level) and contains nothing of what was said: no summary, topic, quotation or date. The ' +
+      'parenthesis is omitted when no level was recorded. Verbatim, with session memory on:',
+  );
+  add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', true), 'recorded: high)', 'recorded: <level>)')));
+  if (SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF) {
+    add('p', 'With session memory off, the cue reads:');
+    add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', false), 'recorded: high)', 'recorded: <level>)')));
+  }
 
   add('h2', 'A.8 Pre-session check-in block');
   add(

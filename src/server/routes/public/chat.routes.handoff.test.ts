@@ -47,6 +47,7 @@ const handoffMocks = vi.hoisted(() => ({
 const queryMocks = vi.hoisted(() => ({ getHandoffSessionRow: vi.fn() }));
 vi.mock('../../db/textHandoff.queries.js', () => queryMocks);
 const pipelineMocks = vi.hoisted(() => ({ runCrisisPipeline: vi.fn() }));
+const contextMocks = vi.hoisted(() => ({ buildParticipantContextBlock: vi.fn(async () => '') }));
 const detectionMocks = vi.hoisted(() => ({ detectCrisisKeywords: vi.fn(), needsContextAssessment: vi.fn() }));
 
 vi.mock('../../db/index.js', () => dbMocks);
@@ -54,7 +55,7 @@ vi.mock('../../utils/sessionHelpers.js', () => helperMocks);
 vi.mock('../../utils/promptContext.js', () => ({
   sanitizeCheckin: () => null,
   buildCheckinBlock: () => '',
-  buildParticipantContextBlock: async () => '',
+  buildParticipantContextBlock: contextMocks.buildParticipantContextBlock,
   buildToolGuidanceBlock: () => '',
   buildLeadConversationBlock: () => '',
 }));
@@ -252,6 +253,13 @@ describe('POST /api/chat/start with continued_from (text hand-off)', () => {
     expect(res.status).toBe(200);
     expect(res.body.sessionId).toBeTruthy();
     expect(res.body.handoff).toBeNull();
+  });
+
+  it('a continuation gets no safety follow-up cue; an ordinary start does (ai-therapist-344)', async () => {
+    await request(makeApp()).post('/api/chat/start').send({ continued_from: 'live_A' });
+    expect(contextMocks.buildParticipantContextBlock).toHaveBeenLastCalledWith(7, null, { safetyFollowUp: false });
+    await request(makeApp()).post('/api/chat/start').send({});
+    expect(contextMocks.buildParticipantContextBlock).toHaveBeenLastCalledWith(7, null, { safetyFollowUp: true });
   });
 
   it('an ordinary chat start is untouched: the normal opening, no hand-off', async () => {
