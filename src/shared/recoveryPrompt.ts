@@ -67,3 +67,17 @@ export function buildRecoverySpeakFirstNudge(contact?: RecoveryCrisisContact | n
  * the first sentence has to stand on its own.
  */
 export const RECOVERY_INTERIM_SPOKEN_LINE = 'The call was cut off. That was not your fault. Reconnecting now.';
+
+/** The interim line without its last sentence, for a cut after which no voice call follows. */
+export const RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE = 'The call was cut off. That was not your fault.';
+
+/**
+ * What the browser says when the call is cut. "Reconnecting now." is said only
+ * when a voice call really is about to come back. Once the voice attempts are
+ * spent the conversation moves to typed chat (or, with no typed chat, stays on
+ * the crisis screen): no voice returns, and a participant who is listening and
+ * not looking at the screen must not be told to wait for one.
+ */
+export function recoveryInterimSpokenLine(voiceReturning: boolean): string {
+  return voiceReturning ? RECOVERY_INTERIM_SPOKEN_LINE : RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE;
+}

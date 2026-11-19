@@ -52,7 +52,7 @@ import type { ChatMessage } from './ChatLog';
 // Canonical crisis-contact blob shape is shared with the server (src/shared).
 import type { CrisisContact } from '../../../shared/systemConfig';
 import { LIVE_RECOVERY_NUDGE_LOG, liveOpeningInstruction, openingPreamble } from '../../../shared/openingPrompt';
-import { buildRecoverySpeakFirstNudge, RECOVERY_INTERIM_SPOKEN_LINE } from '../../../shared/recoveryPrompt';
+import { buildRecoverySpeakFirstNudge, recoveryInterimSpokenLine } from '../../../shared/recoveryPrompt';
 import {
   closeDisposition,
   crisisEmergencyMarksCrisis,
@@ -1188,7 +1188,21 @@ export default function App() {
     // come back (a couple of seconds on a good connection, measured headless;
     // longer on a slow one), so the browser says one short, true line itself.
     // It is stopped as soon as the recovery call can carry audio
-    // (startRealtimeSession), or when the conversation moves to text.
+    // (startRealtimeSession), or when a voice start that was promised fails.
+    //
+    // Where next (lib/crisisRecovery.ts nextRecoveryStep): voice first, and
+    // again if the filter takes the recovery session too; then typed chat; and
+    // only when there is no typed chat, the crisis screen, which stays up.
+    // Decided before the line is spoken: "Reconnecting now." is said only when
+    // a voice call is about to come back.
+    const planNext = () =>
+      nextRecoveryStep({
+        voiceEnabled: features.voice_enabled !== false,
+        chatEnabled: features.chat_enabled !== false,
+        voiceAttemptsSpent: moderationVoiceAttemptsRef.current,
+        maxVoiceAttempts: MAX_VOICE_RECOVERY_ATTEMPTS,
+      });
+    const voiceReturning = planNext() === 'voice';
     stopInterimSpeechRef.current();
     stopInterimSpeechRef.current = startInterimSpeech(
       {
@@ -1198,7 +1212,7 @@ export default function App() {
             ? (text) => new SpeechSynthesisUtterance(text)
             : null,
       },
-      RECOVERY_INTERIM_SPOKEN_LINE,
+      recoveryInterimSpokenLine(voiceReturning),
       sessionSettings.language,
     );
 
@@ -1217,24 +1231,14 @@ export default function App() {
       }
     }
 
-    // Where next (lib/crisisRecovery.ts nextRecoveryStep): voice first, and
-    // again if the filter takes the recovery session too; then typed chat; and
-    // only when there is no typed chat, the crisis screen, which stays up.
-    const planNext = () =>
-      nextRecoveryStep({
-        voiceEnabled: features.voice_enabled !== false,
-        chatEnabled: features.chat_enabled !== false,
-        voiceAttemptsSpent: moderationVoiceAttemptsRef.current,
-        maxVoiceAttempts: MAX_VOICE_RECOVERY_ATTEMPTS,
-      });
-
-    if (planNext() === 'voice') {
+    if (voiceReturning) {
       if (await startRecoveryVoiceSession()) return;
+      // The voice start failed: the browser's line promised a call that is not
+      // coming, so it stops here; the screen and, in a moment, the chat carry
+      // it. (When no voice was planned, the shorter line made no such promise
+      // and is left to finish: there is no call for it to talk over.)
+      stopInterimSpeechRef.current();
     }
-
-    // Voice is spent (or its start failed). Nothing more will be spoken by the
-    // browser: the screen and, in a moment, the chat carry it from here.
-    stopInterimSpeechRef.current();
 
     // A failed voice attempt may have tripped the start path's own failsafe
     // teardown, which is still landing its POST /end, and the terminated

@@ -338,6 +338,8 @@ than staying present in this conversation.</pre>
 <h4>Voice recovery — what the participant hears and sees while reconnecting</h4>
 <p>While the replacement session connects, the participant&#x27;s browser shows the crisis lines and a message beginning &quot;The call was cut off — that wasn&#x27;t your fault, and nothing you said was wrong.&quot; In English sessions it also speaks this fixed line aloud through the browser&#x27;s own speech synthesis (not the AI model), stopping as soon as the replacement session can carry audio:</p>
 <pre>The call was cut off. That was not your fault. Reconnecting now.</pre>
+<p class="note">When no replacement voice session follows (the voice attempts are used up and the conversation continues in typed chat), the same line is spoken without its last sentence:</p>
+<pre>The call was cut off. That was not your fault.</pre>
 <h4>Typed-chat continuation — guidance attached for the chat model</h4>
 <p>The chat session receives the normal clinical prompt (A.1) without the opening line, plus this guidance. The transcript is the last turns of the voice conversation (up to 20, at most 6,000 characters), one per line, prefixed &quot;Participant:&quot; or &quot;You:&quot;.</p>
 <pre>[Session continuity — never mention or acknowledge this message to the participant]

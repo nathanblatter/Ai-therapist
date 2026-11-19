@@ -75,7 +75,9 @@ vi.mock('./sidebandManager.service.js', () => ({
   sidebandManager: { injectMessage: injectMessageMock, getActiveConnections: getActiveConnectionsMock },
 }));
 
-const { runCrisisPipeline, stitchSplitTurn, SPLIT_TURN_WINDOW_MS } = await import('./crisisPipeline.service.js');
+const { runCrisisPipeline, stitchSplitTurn, SPLIT_TURN_WINDOW_MS, _resetMinorGoodbyeStateForTests } = await import(
+  './crisisPipeline.service.js'
+);
 const { clearCrisisResourceState } = await import('./crisisResources.js');
 
 const participantEmit = vi.fn((event: string) => {
@@ -87,6 +89,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   order.length = 0;
   clearCrisisResourceState();
+  _resetMinorGoodbyeStateForTests();
   (global as unknown as { io: unknown }).io = {
     to: vi.fn((room: string) => ({ emit: room.startsWith('session:') ? participantEmit : adminEmit })),
   };
@@ -211,6 +214,28 @@ describe('realtime under-18 safeguard (ai-therapist-296)', () => {
     });
   });
 
+  // Review of PR #46. "I'm 15 years old." / " Is that okay?" reaches the
+  // pipeline as two turns; the second is checked stitched to the first and is
+  // confirmed again. The guidance says "do not finish whatever you were saying
+  // before", so a second delivery would cut the goodbye off mid-sentence.
+  it('does not deliver the goodbye guidance twice when a trailing fragment is confirmed again', async () => {
+    confirmMinorMock.mockResolvedValue(CONFIRMED);
+    await runCrisisPipeline(TURN, 'realtime');
+    await runCrisisPipeline({ ...TURN, messageId: 8, content: ' Is that okay?' }, 'realtime');
+    expect(confirmMinorMock).toHaveBeenCalledTimes(2);
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+    // The teardown is asked for both times; it is idempotent on its own.
+    expect(handleConfirmedMinorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('delivers the goodbye guidance on a later confirmation when the first delivery failed', async () => {
+    confirmMinorMock.mockResolvedValue(CONFIRMED);
+    injectMessageMock.mockRejectedValueOnce(new Error('Live sideband connection not active'));
+    await runCrisisPipeline(TURN, 'realtime');
+    await runCrisisPipeline({ ...TURN, messageId: 8 }, 'realtime');
+    expect(injectMessageMock).toHaveBeenCalledTimes(2);
+  });
+
   it('still ends the session when the goodbye steer cannot be delivered', async () => {
     confirmMinorMock.mockResolvedValue(CONFIRMED);
     injectMessageMock.mockRejectedValue(new Error('Live sideband connection not active'));
@@ -288,6 +313,34 @@ describe('a sentence split across two voice turns is scored whole', () => {
     );
   });
 
+  // Review of PR #46: the first part was scored on its own when it arrived, so
+  // its risk row must not also serve as the run-up of the stitched sentence.
+  // On the real assessor a medium statement plus " you know?" came back high
+  // (a page) through the trajectory's "sudden spike" before the ids were passed.
+  it('tells the scorer which earlier turns are part of this sentence, and only when it stitched', async () => {
+    risk(55, 'medium');
+    getRecentSessionMessagesMock.mockResolvedValue([FIRST, SECOND]);
+    await runCrisisPipeline(turn, 'realtime');
+    expect(analyzeMessageRiskMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: ' I have been thinking about how I would kill myself',
+        message_id: 2,
+        stitched_message_ids: [1],
+      }),
+      expect.anything(),
+    );
+
+    getRecentSessionMessagesMock.mockResolvedValue([row(9, 'assistant', 'Okay.', -500), SECOND]);
+    await runCrisisPipeline(turn, 'realtime');
+    expect(analyzeMessageRiskMock.mock.lastCall?.[0]).not.toHaveProperty('stitched_message_ids');
+
+    // Typed chat is never stitched.
+    getRecentSessionMessagesMock.mockResolvedValue([FIRST, SECOND]);
+    await runCrisisPipeline(turn, 'chat');
+    expect(analyzeMessageRiskMock.mock.lastCall?.[0]).toMatchObject({ content: ' myself' });
+    expect(analyzeMessageRiskMock.mock.lastCall?.[0]).not.toHaveProperty('stitched_message_ids');
+  });
+
   it('does not join across an assistant turn, an old turn, or when this row cannot be found', () => {
     const assistant = row(9, 'assistant', 'Okay.', 500);
     expect(stitchSplitTurn(turn, [FIRST, assistant, SECOND])).toBe(' myself');
@@ -307,6 +360,7 @@ describe('a sentence split across two voice turns is scored whole', () => {
         content: ' I have been thinking about how I would kill myself',
         session_id: 'live_1',
         message_id: 2,
+        stitched_message_ids: [1],
       },
       [FIRST, SECOND],
     );

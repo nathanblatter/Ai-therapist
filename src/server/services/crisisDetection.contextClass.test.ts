@@ -488,3 +488,50 @@ describe('review fix: a periodic sweep that only repeats the session level gets 
     expect(r.riskScore).toBe(75);
   });
 });
+
+describe('review of PR #46: a stitched voice sentence is not its own run-up', () => {
+  // "some days I don't want to be here anymore." was scored when it arrived
+  // (assessor 55, +15 on three calm rows = 70, medium). A trailing fragment
+  // (" you know?") then has the whole sentence scored again. If the first
+  // part's own row stays in the trajectory it reads as a sudden spike (0 to
+  // 70): +20, 75, a HIGH flag and a page for a statement the assessor put at
+  // 55 both times. Measured on the real assessor before the fix, 2 of 2.
+  const ROWS = [
+    { message_id: '8', risk_score: 70 }, // the first part, already scored
+    { message_id: '3', risk_score: 0 },
+    { message_id: '2', risk_score: 0 },
+    { message_id: '1', risk_score: 0 },
+  ];
+  function historyIs(): void {
+    queryMock.mockImplementation(async (sql: unknown, params?: unknown[]) => {
+      const text = String(sql);
+      if (text.includes('session-risk-context')) {
+        return { rows: [{ crisis_flagged: false, crisis_severity: null, recent: [] }] };
+      }
+      if (text.includes('LIMIT 5')) {
+        const excluded = Array.isArray(params?.[1]) ? (params[1] as string[]) : [];
+        // The filter has to be in the SQL, not only in the parameters.
+        const filters = /message_id::text = ANY\(\$2::text\[\]\)/.test(text);
+        return { rows: ROWS.filter((r) => !(filters && excluded.includes(r.message_id))) };
+      }
+      return { rows: [] };
+    });
+  }
+  const sentence = "Honestly some days I don't want to be here anymore. you know?";
+
+  it('leaves the earlier part of the sentence out of the trajectory', async () => {
+    historyIs();
+    createMock.mockResolvedValue(verdict(55));
+    const r = await analyzeMessageRisk({ ...turn(sentence), stitched_message_ids: ['8'] }, []);
+    expect(r.riskScore).toBe(70);
+    expect(r.severity).toBe('medium');
+  });
+
+  it('an ordinary turn after the same history keeps the spike bonus, as before', async () => {
+    historyIs();
+    createMock.mockResolvedValue(verdict(55));
+    const r = await analyzeMessageRisk(turn(sentence), []);
+    expect(r.riskScore).toBe(75);
+    expect(r.severity).toBe('high');
+  });
+});

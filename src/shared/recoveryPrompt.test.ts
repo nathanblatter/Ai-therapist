@@ -3,6 +3,8 @@ import {
   buildRecoverySpeakFirstNudge,
   recoveryCrisisLinePhrase,
   RECOVERY_INTERIM_SPOKEN_LINE,
+  RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
+  recoveryInterimSpokenLine,
 } from './recoveryPrompt.js';
 
 // Wording around a vendor cut of a voice session (ai-therapist-293). The two
@@ -85,5 +87,18 @@ describe('RECOVERY_INTERIM_SPOKEN_LINE', () => {
     expect(RECOVERY_INTERIM_SPOKEN_LINE).not.toMatch(DECEPTIVE);
     // A few seconds of speech at most: it is stopped when the new call connects.
     expect(RECOVERY_INTERIM_SPOKEN_LINE.split(/\s+/).length).toBeLessThanOrEqual(14);
+  });
+});
+
+describe('recoveryInterimSpokenLine', () => {
+  it('promises a reconnection only when a voice call is coming back', () => {
+    expect(recoveryInterimSpokenLine(true)).toBe(RECOVERY_INTERIM_SPOKEN_LINE);
+    expect(recoveryInterimSpokenLine(true)).toMatch(/Reconnecting now/);
+    const noVoice = recoveryInterimSpokenLine(false);
+    expect(noVoice).toBe(RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE);
+    expect(noVoice).not.toMatch(/reconnect/i);
+    expect(noVoice.startsWith('The call was cut off.')).toBe(true);
+    expect(noVoice).toMatch(/not your fault/);
+    expect(noVoice).not.toMatch(DECEPTIVE);
   });
 });

@@ -95,13 +95,24 @@ export async function runCrisisPipeline(
     // half), so an explicit statement of intent was never flagged or paged.
     // Scoring and the age check therefore read the sentence as it was spoken:
     // this turn joined to the participant turn(s) that ended moments before it.
-    const spoken = channel === 'realtime' ? stitchSplitTurn(turn, history) : turn.content;
-    const scoredTurn = spoken === turn.content ? turn : { ...turn, content: spoken };
+    const stitched =
+      channel === 'realtime' ? stitchSplitTurnParts(turn, history) : { content: turn.content, priorMessageIds: [] };
+    const scoredTurn = stitched.content === turn.content ? turn : { ...turn, content: stitched.content };
 
     const minorVerdict = channel === 'realtime' ? startRealtimeMinorConfirmation(scoredTurn, history) : null;
 
     const risk = await analyzeMessageRisk(
-      { content: scoredTurn.content, session_id: turn.sessionId, message_id: turn.messageId ?? undefined },
+      {
+        content: scoredTurn.content,
+        session_id: turn.sessionId,
+        message_id: turn.messageId ?? undefined,
+        // The earlier part(s) of this sentence were scored on their own when
+        // they arrived. Their rows are this message, not its run-up: the
+        // scorer leaves them out of the trajectory so the sentence is not its
+        // own "sudden spike" (a medium statement plus " you know?" scored
+        // high, and paged, before this was passed).
+        ...(stitched.priorMessageIds.length > 0 ? { stitched_message_ids: stitched.priorMessageIds } : {}),
+      },
       history,
     );
 
@@ -346,14 +357,27 @@ export function stitchSplitTurn(
   turn: ParticipantTurn,
   history: Array<{ role: string; content?: string | null; message_id?: unknown; created_at?: unknown }>,
 ): string {
-  if (turn.messageId == null) return turn.content;
+  return stitchSplitTurnParts(turn, history).content;
+}
+
+/**
+ * stitchSplitTurn, plus the ids of the earlier turn(s) that were joined in
+ * (oldest first; empty when nothing was stitched). Pure; exported for tests.
+ */
+export function stitchSplitTurnParts(
+  turn: ParticipantTurn,
+  history: Array<{ role: string; content?: string | null; message_id?: unknown; created_at?: unknown }>,
+): { content: string; priorMessageIds: Array<string | number> } {
+  const alone = { content: turn.content, priorMessageIds: [] as Array<string | number> };
+  if (turn.messageId == null) return alone;
   const at = history.findIndex((m) => m.message_id != null && String(m.message_id) === String(turn.messageId));
-  if (at <= 0) return turn.content;
+  if (at <= 0) return alone;
   const time = (m: { created_at?: unknown }): number | null => {
     const t = m.created_at instanceof Date ? m.created_at.getTime() : Date.parse(String(m.created_at ?? ''));
     return Number.isFinite(t) ? t : null;
   };
   let text = turn.content;
+  const priorMessageIds: Array<string | number> = [];
   let laterAt = time(history[at]);
   for (let i = at - 1; i >= 0 && at - i <= 3; i--) {
     const prev = history[i];
@@ -361,9 +385,32 @@ export function stitchSplitTurn(
     if (prev.role !== 'user' || !prev.content || laterAt == null || prevAt == null) break;
     if (laterAt - prevAt > SPLIT_TURN_WINDOW_MS || laterAt < prevAt) break;
     text = prev.content + text;
+    if (typeof prev.message_id === 'string' || typeof prev.message_id === 'number') {
+      priorMessageIds.unshift(prev.message_id);
+    }
     laterAt = prevAt;
   }
-  return text;
+  return { content: text, priorMessageIds };
+}
+
+/**
+ * When the under-18 goodbye guidance was last DELIVERED to a session's voice
+ * model. A failed delivery is not recorded, so a later confirmation tries
+ * again. Entries outlive the session's forced end (60 s) and are then dropped.
+ */
+const MINOR_GOODBYE_REPEAT_GUARD_MS = 90_000;
+const minorGoodbyeDeliveredAt = new Map<string, number>();
+
+function minorGoodbyeRecentlyDelivered(sessionId: string, now = Date.now()): boolean {
+  for (const [id, at] of minorGoodbyeDeliveredAt) {
+    if (now - at > MINOR_GOODBYE_REPEAT_GUARD_MS) minorGoodbyeDeliveredAt.delete(id);
+  }
+  return minorGoodbyeDeliveredAt.has(sessionId);
+}
+
+/** Test hook. */
+export function _resetMinorGoodbyeStateForTests(): void {
+  minorGoodbyeDeliveredAt.clear();
 }
 
 /** How many times the stage-2 confirmation is attempted before failing open. */
@@ -435,13 +482,24 @@ async function applyRealtimeMinorVerdict(turn: ParticipantTurn, verdict: MinorVe
       );
       try {
         const { sidebandManager } = await import('./sidebandManager.service.js');
-        if (sidebandManager.getActiveConnections().includes(turn.sessionId)) {
+        if (minorGoodbyeRecentlyDelivered(turn.sessionId)) {
+          // The goodbye is being spoken (or was just spoken). The guidance
+          // tells the model "do not finish whatever you were saying before",
+          // so delivering it a second time would cut the goodbye off and start
+          // it again. A second confirmation is routine on voice: a trailing
+          // fragment ("... Is that okay?") arrives as its own turn and is
+          // checked together with the sentence before it (stitchSplitTurn).
+          console.log(
+            `[MinorSafeguard] goodbye guidance already delivered for ${turn.sessionId.substring(0, 12)}...; not repeated`,
+          );
+        } else if (sidebandManager.getActiveConnections().includes(turn.sessionId)) {
           await sidebandManager.injectMessage(
             turn.sessionId,
             'system',
             `${REALTIME_MINOR_GUIDANCE} ${REALTIME_MINOR_SPEAK_NOW}`,
             false,
           );
+          minorGoodbyeDeliveredAt.set(turn.sessionId, Date.now());
         } else {
           console.error(
             `[MinorSafeguard] no live sideband for ${turn.sessionId.substring(0, 12)}...: ` +

@@ -95,7 +95,11 @@ import {
   REALTIME_MINOR_SPEAK_NOW,
   buildMinorConfirmUserMessage,
 } from '../services/minorSafeguard.service.js';
-import { RECOVERY_INTERIM_SPOKEN_LINE, buildRecoverySpeakFirstNudge } from '../../shared/recoveryPrompt.js';
+import {
+  RECOVERY_INTERIM_SPOKEN_LINE,
+  RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
+  buildRecoverySpeakFirstNudge,
+} from '../../shared/recoveryPrompt.js';
 import { LIVE_STEER_KEEP_SPEAKING, LIVE_STEER_RESUME_COMMENTARY } from '../services/sidebandManager.service.js';
 import { REDACTION_BATCH_INSTRUCTIONS, REDACTION_MODEL, REDACTION_PROMPT } from '../services/redaction.service.js';
 import {
@@ -607,6 +611,12 @@ function buildItems(): Item[] {
       'stopping as soon as the replacement session can carry audio:',
   );
   add('pre', RECOVERY_INTERIM_SPOKEN_LINE);
+  add(
+    'note',
+    'When no replacement voice session follows (the voice attempts are used up and the conversation continues in ' +
+      'typed chat), the same line is spoken without its last sentence:',
+  );
+  add('pre', RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE);
   add('h3', 'Typed-chat continuation — guidance attached for the chat model');
   add(
     'p',
