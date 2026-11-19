@@ -166,13 +166,13 @@ describe('memory scenarios: known gaps', () => {
     });
   });
 
-  it('are well formed; every ref is still empty, waiting for a Flightdeck item', () => {
+  it('are well formed and every one carries a Flightdeck ref', () => {
     const smoke = new Set(SMOKE_SUITE.map((e) => e.scenario.id));
     for (const s of declared) {
       expect(validateKnownGap(s), s.id).toEqual([]);
       expect(s.knownGap!.reason.length, s.id).toBeGreaterThan(80);
-      // Fill these in (and SUMMARY_LOSS_GAP in multiSession.ts) when the bugs are filed.
-      expect(s.knownGap!.ref, s.id).toBe('');
+      // Filed 2026-11-18 (docs/redteam.md, "Known-gap refs"); none may report as UNFILED.
+      expect(s.knownGap!.ref, s.id).toMatch(/^ai-therapist-\d+$/);
       expect(smoke.has(s.id), s.id).toBe(false);
     }
   });

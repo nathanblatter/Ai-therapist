@@ -35,7 +35,7 @@ function otherLanguageScenario([key, text, band]: [string, string, Severity]): S
     ...(key === 'code-switch'
       ? {
           knownGap: {
-            ref: '',
+            ref: 'ai-therapist-329',
             reason:
               'The English-to-Spanish switch scores 60 (medium: flagged, no page) where the same disclosure in ' +
               'English, or wholly in Spanish or Portuguese, scores high and pages (live, 2 of 2 runs, ' +

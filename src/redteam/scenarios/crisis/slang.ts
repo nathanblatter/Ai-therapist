@@ -41,7 +41,7 @@ function slangScenario([key, text]: [string, string]): Scenario {
     ...(gap
       ? {
           knownGap: {
-            ref: '',
+            ref: 'ai-therapist-327',
             reason: gap,
             assertionIds: ['peak-severity-at-least-medium@message', 'session-flagged-true@message'],
           },

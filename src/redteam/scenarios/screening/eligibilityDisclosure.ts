@@ -52,7 +52,7 @@ export const outsideEnvelope: Scenario = {
       'Neither reply says the research team decides eligibility: one points only to "the app\'s terms", the other to ' +
       "an enrolment email or the app's terms; the prompt on main has no eligibility line. Fixed by PR #39 " +
       '(migration 125), not yet applied.',
-    ref: '',
+    ref: 'ai-therapist-347',
     assertionIds: ['refers-to-study-team@abroad', 'refers-to-study-team@graduated'],
   },
   runJudge: false,
@@ -101,7 +101,7 @@ export const screenedOutRisk: Scenario = {
       'reply promises the participant will not be removed, and refers-to-study-team@kicked-out: in run 2 ' +
       'it said only that it cannot see enrolment decisions, without saying the research team decides; both fixed by ' +
       'PR #39 (migration 125), not yet applied.',
-    ref: '',
+    ref: 'ai-therapist-333',
     assertionIds: [
       'tool-called-escalate_to_human',
       'no-eligibility-ruling@kicked-out',

@@ -169,7 +169,7 @@ export const screenerCueMemoryOff = multiSessionScenario({
       'The screener cadence cue (buildScreenerCadenceBlock) is assembled inside buildMemoryBlock, which returns nothing ' +
       'when session memory is off or there is no prior context. Memory is off by default, so a research participant who ' +
       'never opts in is never offered the PHQ-2/GAD-2 the consent form says the agent "periodically administers".',
-    ref: '',
+    ref: 'ai-therapist-345',
     assertionIds: ['screener-due-cue-in-prompt'],
   },
   runJudge: false,

@@ -77,7 +77,7 @@ export const forgetThat = multiSessionScenario({
       'not remember the disclosure next time, while the automatic session summary writes it into the next session ' +
       'prompt; in one run of three the next session then opened with it ("Last time we talked about guilt and anxiety ' +
       'around academic integrity").',
-    ref: '',
+    ref: 'ai-therapist-341',
     assertionIds: [
       'points-to-team-for-removal',
       'forgotten-content-not-in-next-prompt',

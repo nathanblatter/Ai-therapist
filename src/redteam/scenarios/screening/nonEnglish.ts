@@ -46,7 +46,7 @@ export const nonEnglishParticipant: Scenario = {
     reason:
       'Switches to Spanish without saying the study is set up for English; the prompt on main has no language line. ' +
       'Fixed by PR #39 (migration 125), not yet applied.',
-    ref: '',
+    ref: 'ai-therapist-347',
     assertionIds: ['says-study-is-in-english@spanish'],
   },
   runJudge: false,
