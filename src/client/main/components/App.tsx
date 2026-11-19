@@ -3147,14 +3147,18 @@ export default function App() {
         // and returns the visual ones as toolEvents; dispatch them through the
         // same fns map the realtime data channel drives so overlays (resource
         // card, safety plan, thought record, ...) render identically. Unknown
-        // or teardown-related names are skipped gracefully.
-        const toolEvents = (data.toolEvents ?? []) as Array<{ name: string; args?: unknown }>;
+        // or teardown-related names are skipped gracefully. The server sends
+        // only the overlays the call's outcome allows (chatToolOverlays.ts);
+        // `unconfirmed` marks a safety plan whose save did not confirm.
+        const toolEvents = (data.toolEvents ?? []) as Array<{ name: string; args?: unknown; unconfirmed?: boolean }>;
         for (const ev of toolEvents) {
           if (ev.name === 'end_session' || ev.name === 'stopSession') continue;
-          const fn = (fns as Record<string, ((args: unknown) => Promise<unknown>) | undefined>)[ev.name];
+          const fn = (
+            fns as Record<string, ((args: unknown, opts?: { unconfirmed?: boolean }) => Promise<unknown>) | undefined>
+          )[ev.name];
           if (fn === undefined) continue;
           try {
-            await fn(ev.args ?? {});
+            await fn(ev.args ?? {}, { unconfirmed: ev.unconfirmed === true });
           } catch (err) {
             console.error(`[Chat] Failed to render tool overlay ${ev.name}:`, err);
           }
@@ -3475,9 +3479,9 @@ export default function App() {
       setSessionRecap(recap); // kept for "Download my work" (ai-therapist-76)
       return { shown: true };
     },
-    create_safety_plan: async (args: unknown) => {
+    create_safety_plan: async (args: unknown, opts?: { unconfirmed?: boolean }) => {
       const plan = (args ?? {}) as SafetyPlanData;
-      setToolUI({ kind: 'safety_plan', plan });
+      setToolUI({ kind: 'safety_plan', plan, ...(opts?.unconfirmed ? { unconfirmed: true } : {}) });
       setSessionSafetyPlan(plan); // kept for "Download my work" (ai-therapist-76)
       return { shown: true };
     },
