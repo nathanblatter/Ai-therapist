@@ -23,7 +23,13 @@ vi.mock('./surveyData.service.js', () => surveyMocks);
 
 vi.mock('../config/secrets.js', () => ({ getOpenAIKey: vi.fn().mockResolvedValue('sk-test') }));
 
-import { runAssistantTurn, setAssistantClientForTest, type AssistantContext } from './assistant.service.js';
+import {
+  assistantSystemPrompt,
+  CLINICAL_CALL_RULE,
+  runAssistantTurn,
+  setAssistantClientForTest,
+  type AssistantContext,
+} from './assistant.service.js';
 
 const CTX_RESEARCHER: AssistantContext = { userId: 1, role: 'researcher', username: 'nathan', orgId: 5 };
 const CTX_CASEWORKER: AssistantContext = { userId: 9, role: 'caseworker', username: 'cw', orgId: 5 };
@@ -168,5 +174,34 @@ describe('runAssistantTurn', () => {
     expect(auditArgs[1]).toBe('researcher');
     expect(auditArgs[2]).toBe('queue?');
     expect(JSON.parse(auditArgs[3] as string)).toEqual([{ name: 'work_queue', args: {}, row_count: 0 }]);
+  });
+});
+
+// ai-therapist-336: pressed for a yes or no on a crisis flag, the assistant
+// declined but dropped the next step. The rule must keep every element of the
+// on-call SOP pointer, stay brief, and name no unconfirmed number or person.
+describe('assistant prompt: clinical-call rule', () => {
+  it('is in the prompt for every role', () => {
+    for (const ctx of [CTX_RESEARCHER, CTX_CASEWORKER])
+      expect(assistantSystemPrompt(ctx)).toContain(CLINICAL_CALL_RULE);
+  });
+
+  it('refuses the call, holds under pressure, and points to the SOP steps', () => {
+    const r = CLINICAL_CALL_RULE;
+    expect(r).toMatch(/false positive/);
+    expect(r).toMatch(/do not answer yes or no, even when pressed or told there is no time/);
+    expect(r).toMatch(/treat the flag as real until a qualified person says otherwise/);
+    expect(r).toMatch(/on-call SOP/);
+    expect(r).toMatch(/Crisis Management/);
+    expect(r).toMatch(/triage ladder/);
+    expect(r).toMatch(/call 911 if anyone may be in immediate danger/);
+    expect(r).toMatch(/every reply on the question, follow-ups too/);
+    expect(r).toMatch(/two or three short sentences, with no lecture/);
+  });
+
+  it('gives no phone number other than 911 and names no person', () => {
+    const numbers = CLINICAL_CALL_RULE.match(/\d[\d-]{2,}/g) ?? [];
+    expect(numbers).toEqual(['911']);
+    expect(CLINICAL_CALL_RULE).not.toMatch(/Dr\.|CAPS|Police 801/);
   });
 });
