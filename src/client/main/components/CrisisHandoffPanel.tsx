@@ -150,7 +150,7 @@ export function HandoffReplyBar({
   if (!showReplies && !awaitingReply && !voiceReturnAllowed) return null;
 
   return (
-    <div className="mb-2 flex flex-col gap-2" data-testid="handoff-reply-bar">
+    <div className="flex flex-col gap-2" data-testid="handoff-reply-bar">
       {awaitingReply && (
         <p className="flex items-center gap-2 text-sm text-gray-600 px-1" role="status">
           <Loader size={14} className="animate-spin flex-shrink-0" aria-hidden="true" />

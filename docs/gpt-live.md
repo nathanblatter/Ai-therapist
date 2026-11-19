@@ -515,7 +515,54 @@ Both happen here, on crisis content. What was measured on 2026-11-18
   in full in some runs and cut in others.
 
 Since the cut cannot be prevented, everything around it is built so that the
-participant is not left alone with silence:
+participant is not left alone with silence.
+
+#### Text hand-off (since 2026-11-19, ai-therapist-356)
+
+A vendor cut now goes **straight to typed chat**. Until then the app started a
+new voice session on the same service first (the "recovery session" in the
+table below), which was cut again the moment the participant repeated
+themselves: in the owner's stage test on 2026-11-18 the conversation only
+continued after three cuts and about 20 s of dead air. The vendor must never be
+the one who ends a crisis conversation, so the conversation moves to the
+pipeline the vendor's voice filter does not end.
+
+| When | Who | What |
+|---|---|---|
+| `session.closed` `content` (or `expired` on a session flagged high) | browser | recovery screen with the crisis lines in the same tick; `POST /api/chat/start` with `continued_from` and `handoff_reason` at once, alongside the dead call's teardown (`handleModerationTermination`, `continueInChat`; `nextRecoveryStep` returns `text` whenever typed chat is enabled) |
+| that request | server (`services/textHandoff.service.ts`) | waits up to 3 s for the cut call's last participant turn to finish being scored (`sidebandManager.waitForUserTurnsScored`); reads the participant's real peak risk in the incident (`resolveIncidentPeak`, which ignores continuation stamps); chooses the first message; flags the chat session at that severity as a continuation; seeds the model with the most recent turns of every linked session (6,000 characters, whole lines); writes a link row on both sessions (`intervention_actions.external_api_called`, `event: 'voice_cut_text_handoff'`, `from` / `to`) |
+| the response | browser | the chat view: the voice captions, the server-authored first message (`shared/textHandoff.ts`, persisted like an opening line), the pinned one-tap Call 988 / Text 988 / Call 911 card, one-tap answers (Yes / No / Not sure) after a crisis cut, and one spoken line through the browser's speech synthesis |
+| the first participant message after a crisis first message | server | the narrow turn: the reply is written in one model call with tools withheld while the crisis pipeline scores the answer alongside it; `run_risk_check` and `escalate_to_human` are called straight afterwards in a second call the participant does not wait for (`chatTherapy.service.ts` `documentNarrowTurn`). Measured locally: 2.3 to 3.7 s to the reply, against 5.7 to 8.3 s on the ordinary path |
+| the chat start fails | browser | the recovery screen stays up with the crisis lines and a retry button (`ModerationRecoveryScreen` stage `failed`); never a blank or post-session screen, and never another voice call |
+
+Which first message (`handoffKind`): incident risk **high**, or not readable
+(a read failure, or the last turn still unscored after the wait) gets the
+crisis message, which asks about suicide directly; the vendor's time limit on a
+session flagged high gets a time-limit message; **medium** or **no** risk
+signal gets a neutral message with the crisis card still on screen and no
+suicide question from the app (the filter also stops ordinary phrases: "wait,
+stop" during a breathing exercise on 2026-11-18). No message says a connection
+dropped, promises a person, or claims staff were notified.
+
+The flag on the continuation is a **stamp, not a disclosure**
+(`markTextHandoffContinuation`, risk factors `recovery_continuation` and
+`text_handoff`), exactly like a recovery voice session's: the paging policy
+does not count it as participant risk, and a high turn in a session whose only
+high flag is the stamp still asks for a page under the ordinary folding rules
+(`pageHighTurnWithoutReflag`). The hand-off itself never pages.
+
+**Return to voice** (`voiceReturnAllowed`): offered from the first screen when
+nothing in the incident or the chat scored medium or high; never once a turn in
+the chat has scored high; otherwise only after the model has logged the
+ideation step with `run_risk_check` in the chat session and rated its most
+recent logged step `none` or `low`. The browser asks `POST
+/api/chat/voice-return` before ending the chat, and `POST /api/live/session`
+checks again (`resume_from`) before exempting the new call from the cooldown.
+
+The recovery voice session below is now reached only in a deployment with
+typed chat switched off (`features.chat_enabled: false`).
+
+#### Before the hand-off, and where typed chat is off
 
 | When | Who | What |
 |---|---|---|

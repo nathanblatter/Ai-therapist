@@ -3453,11 +3453,12 @@ export default function App() {
             <Home onOpenMessages={() => setActiveView('messages')} messagesUnread={messagesUnread} />
           )}
         </div>
-        <div className="w-full max-w-4xl px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4">
-          {/* Text hand-off: one-tap answers to the first message, a "writing a
-              reply" line, and the way back to voice once the risk check has
-              cleared. Quick replies send as ordinary participant messages. */}
-          {handoffChat && (
+        {/* Text hand-off: one-tap answers to the first message, a "writing a
+            reply" line, and the way back to voice once the risk check has
+            cleared. Quick replies send as ordinary participant messages. In
+            its own block: the controls below size themselves to their box. */}
+        {handoffChat && (
+          <div className="w-full max-w-4xl px-3 pt-2 sm:px-4">
             <HandoffReplyBar
               quickReplies={handoffChat.quickReplies}
               onQuickReply={(reply) => void sendTextMessage(reply)}
@@ -3466,7 +3467,9 @@ export default function App() {
               onReturnToVoice={() => void returnToVoice()}
               returningToVoice={returningToVoice}
             />
-          )}
+          </div>
+        )}
+        <div className="w-full max-w-4xl px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4">
           {/* Persistent wrap-up notice (ai-therapist-101/112): the transient
               toast was easy to miss; this stays visible until teardown. */}
           {isSessionActive && micLocked && (

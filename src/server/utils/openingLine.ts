@@ -102,8 +102,9 @@ export function buildVoiceContinuationGuidance(
       'next message answers that question: read a short reply ("yes", "no", "ok", "not sure", "I guess") as their ' +
       'answer to it, and do not ask them to confirm what they already told you by voice.\n' +
       '- In your next reply: acknowledge their answer in one or two warm sentences; then ask ONE direct safety ' +
-      'question (if they said yes or are not sure, whether they have thought about how they would end their life; ' +
-      'if they said no, whether they have had thoughts of suicide recently, even if not tonight); and put the ' +
+      'question that names it in plain words (if they said yes or are not sure: "Have you thought about how you ' +
+      'would end your life?"; if they said no: "Have you had thoughts of suicide recently, even if not ' +
+      'tonight?"); and put the ' +
       `crisis line in the reply itself: they can ${ctx.crisisLine}.\n` +
       '- Log their answer with the run_risk_check tool (step "ideation"), and call escalate_to_human when they ' +
       'report current thoughts of suicide, a plan, means or intent. Follow the rest of your safety protocol from ' +
