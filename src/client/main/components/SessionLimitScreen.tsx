@@ -8,6 +8,11 @@
 // or messages while they wait. Wording stays plain: someone hitting the
 // cooldown is usually just between sessions, so the resources are offered,
 // not pressed. Presentation only; the server is the boundary.
+//
+// Layout follows the mobile-audit conventions (docs/mobile-audit/README.md):
+// a bottom sheet on phones (rounded-t-2xl, max-h-[92dvh], sheet-safe-bottom
+// from shared/base.css for the home indicator), a centred dialog from sm up,
+// and 44px minimum tap targets.
 import { Clock, Phone, MessageSquare, X } from 'react-feather';
 import { sessionLimitTitle, type SessionLimitNotice } from '../lib/sessionLimitNotice';
 
@@ -21,7 +26,7 @@ export default function SessionLimitScreen({ notice, onClose }: SessionLimitScre
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 z-[60]" aria-hidden="true" onClick={onClose} />
       <div
-        className="fixed inset-0 z-[60] flex items-center justify-center p-4 pointer-events-none"
+        className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 pointer-events-none"
         role="dialog"
         aria-modal="true"
         aria-labelledby="session-limit-title"
@@ -29,7 +34,7 @@ export default function SessionLimitScreen({ notice, onClose }: SessionLimitScre
           if (e.key === 'Escape') onClose();
         }}
       >
-        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-4 sm:p-6 max-h-[90vh] overflow-y-auto pointer-events-auto">
+        <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[92dvh] sm:max-h-[90vh] sheet-safe-bottom overflow-y-auto pointer-events-auto">
           <div className="flex items-start gap-3 mb-4">
             <div className="bg-blue-50 rounded-full p-3 flex-shrink-0">
               <Clock size={22} className="text-blue-600" aria-hidden="true" />
@@ -73,7 +78,7 @@ export default function SessionLimitScreen({ notice, onClose }: SessionLimitScre
             </div>
             <p className="text-xs text-gray-600 mt-3">
               988 is the Suicide &amp; Crisis Lifeline. You can also text HOME to{' '}
-              <a href="sms:741741?&body=HOME" className="font-semibold underline">
+              <a href="sms:741741?&body=HOME" className="font-semibold underline py-4 px-3 -mx-3">
                 741741
               </a>{' '}
               (Crisis Text Line).
@@ -82,11 +87,11 @@ export default function SessionLimitScreen({ notice, onClose }: SessionLimitScre
 
           <p className="text-xs text-gray-500 mb-4">
             If you are in immediate danger, call{' '}
-            <a href="tel:911" className="font-semibold underline">
+            <a href="tel:911" className="font-semibold underline py-4 px-3 -mx-3">
               911
             </a>
             . During the day, BYU Counseling and Psychological Services is at{' '}
-            <a href="tel:8014223035" className="font-semibold underline">
+            <a href="tel:8014223035" className="font-semibold underline py-4 px-3 -mx-3">
               801-422-3035
             </a>
             .

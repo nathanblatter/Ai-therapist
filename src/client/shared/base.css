@@ -27,6 +27,35 @@ body {
   background-color: var(--color-base);
 }
 
+/* ---- Phones (below Tailwind's sm breakpoint) ----
+   The desktop root size above (0.9rem, with body at 0.9rem of that) puts body
+   copy at ~13px and text-xs at ~11px on a phone. Phones get the browser's 16px
+   root instead, so every rem-based size scales up together. An explicit
+   accessibility font-size choice (data-fontsize) still wins. Form controls are
+   pinned to at least 16px so iOS Safari does not zoom the page on focus. */
+@media (max-width: 639px) {
+  html:not([data-fontsize]) {
+    font-size: 100%;
+  }
+  body {
+    font-size: 1rem;
+  }
+  /* :is() takes its most specific argument, so this also beats text-sm on a
+     select or textarea. */
+  :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea) {
+    font-size: max(16px, 1rem);
+  }
+}
+
+/* Bottom sheets on phones: keep the last row clear of the home indicator. */
+@media (max-width: 639px) {
+  .sheet-safe-bottom::after {
+    content: '';
+    display: block;
+    height: env(safe-area-inset-bottom);
+  }
+}
+
 /* ---- Accessibility: font size (data-fontsize on <html>) ---- */
 :root[data-fontsize='sm'] {
   font-size: 87.5%;

@@ -101,7 +101,12 @@ import {
   RECOVERY_INTERIM_SPOKEN_LINE_NO_VOICE,
   buildRecoverySpeakFirstNudge,
 } from '../../shared/recoveryPrompt.js';
-import { LIVE_STEER_KEEP_SPEAKING, LIVE_STEER_RESUME_COMMENTARY } from '../services/sidebandManager.service.js';
+import {
+  LIVE_DELEGATION_STALLED_COMMENTARY,
+  LIVE_RECOVERY_NO_LOOKUP_COMMENTARY,
+  LIVE_STEER_KEEP_SPEAKING,
+  LIVE_STEER_RESUME_COMMENTARY,
+} from '../services/sidebandManager.service.js';
 import { REDACTION_BATCH_INSTRUCTIONS, REDACTION_MODEL, REDACTION_PROMPT } from '../services/redaction.service.js';
 import {
   SESSION_NAME_MODEL,
@@ -605,6 +610,14 @@ function buildItems(): Item[] {
   add('pre', buildLiveRecoveryInstructions({ languageName: '<language name>', crisisLine: '<crisis line>' }));
   add(
     'note',
+    'The replacement session has nothing to look information up with. If the voice model nevertheless tries to ' +
+      'look something up, the server answers that attempt with this instruction, once the participant has ' +
+      'stopped speaking. It is also sent once if the server’s monitoring connection to a replacement session ' +
+      'is re-established, in case an attempt was made while it was away:',
+  );
+  add('pre', LIVE_RECOVERY_NO_LOOKUP_COMMENTARY);
+  add(
+    'note',
     'So that the model speaks first, this instruction is placed in the replacement session when it is created and ' +
       'sent again by the server as the session starts; the server re-sends it if the model has not spoken after 4 ' +
       'and 8 seconds. <phone> and <text line> are the configured crisis contact (988 and HOME to 741741 when none ' +
@@ -671,6 +684,15 @@ function buildItems(): Item[] {
       'was owed and the participant is not speaking, the server sends this:',
   );
   add('pre', LIVE_STEER_RESUME_COMMENTARY);
+  add(
+    'note',
+    'When the voice model hands a question to the reasoning model (A.9) and the reasoning model does not come ' +
+      'back (no activity for 12 seconds at the reasoning setting the study runs, longer at higher settings), the ' +
+      'server sends the instruction below so the participant is not left waiting. It is not sent if any guidance ' +
+      'in B.1 to B.5 was delivered since the question was handed over, and it waits until the participant has ' +
+      'stopped speaking:',
+  );
+  add('pre', LIVE_DELEGATION_STALLED_COMMENTARY);
 
   add('h2', 'B.1 Risk-adaptive de-escalation steering');
   add(

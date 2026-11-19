@@ -1,0 +1,2175 @@
+{
+ "a01-login-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "13": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a01-login-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "13": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a02-landing-therapist-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 12,
+   "14": 31,
+   "16": 20,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a02-landing-therapist-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 12,
+   "14": 31,
+   "16": 20,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a03-nav-drawer-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 12,
+   "14": 31,
+   "16": 20,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a03-nav-drawer-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 12,
+   "14": 31,
+   "16": 20,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a04-escalations-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 8,
+   "14": 8,
+   "16": 18,
+   "24": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Active (74x36)",
+   "Raised by me (125x36)",
+   "Resolved (91x36)",
+   "All (49x36)"
+  ],
+  "overflowX": []
+ },
+ "a04-escalations-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 8,
+   "14": 8,
+   "16": 18,
+   "24": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Active (74x36)",
+   "Raised by me (125x36)",
+   "Resolved (91x36)",
+   "All (49x36)"
+  ],
+  "overflowX": []
+ },
+ "a05-escalation-detail-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 7,
+   "14": 9,
+   "16": 22,
+   "20": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a05-escalation-detail-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 7,
+   "14": 9,
+   "16": 22,
+   "20": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a06-crisis-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 41,
+   "14": 25,
+   "16": 18,
+   "18": 1,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a06-crisis-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 41,
+   "14": 25,
+   "16": 18,
+   "18": 1,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a07-triage-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 20,
+   "14": 12,
+   "16": 24,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Refresh (107x38)"
+  ],
+  "overflowX": []
+ },
+ "a07-triage-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 20,
+   "14": 12,
+   "16": 24,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Refresh (107x38)"
+  ],
+  "overflowX": []
+ },
+ "a08-work-queue-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 18,
+   "14": 12,
+   "16": 18,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   14,
+   16,
+   14
+  ],
+  "smallTargets": [
+   "Refresh (107x38)",
+   "Active (74x32)",
+   "Resolved (91x32)",
+   "All (44x26)",
+   "crisis flag (101x26)",
+   "escalation inbound (152x26)",
+   "View client (79x16)",
+   "BUTTON (36x28)",
+   "BUTTON (36x28)"
+  ],
+  "overflowX": []
+ },
+ "a08-work-queue-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 18,
+   "14": 12,
+   "16": 18,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   14,
+   16,
+   14
+  ],
+  "smallTargets": [
+   "Refresh (107x38)",
+   "Active (74x32)",
+   "Resolved (91x32)",
+   "All (44x26)",
+   "crisis flag (101x26)",
+   "escalation inbound (152x26)",
+   "View client (79x16)",
+   "BUTTON (36x28)",
+   "BUTTON (36x28)",
+   "View client (79x16)",
+   "BUTTON (36x28)",
+   "BUTTON (36x28)"
+  ],
+  "overflowX": []
+ },
+ "a09-participant-profile-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "11": 1,
+   "12": 92,
+   "14": 87,
+   "16": 24,
+   "18": 1,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Refresh (107x38)",
+   "All (42x24)",
+   "Progress (78x24)",
+   "Case (49x24)",
+   "New note (109x36)",
+   "New (64x28)",
+   "Re-issue (100x28)"
+  ],
+  "overflowX": []
+ },
+ "a09-participant-profile-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "11": 1,
+   "12": 92,
+   "14": 89,
+   "16": 24,
+   "18": 1,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Refresh (107x38)",
+   "All (42x24)",
+   "Progress (78x24)",
+   "Case (49x24)",
+   "New note (109x36)",
+   "New (64x28)",
+   "Re-issue (100x28)"
+  ],
+  "overflowX": []
+ },
+ "a10-caseload-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 12,
+   "14": 31,
+   "16": 20,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a10-caseload-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 12,
+   "14": 31,
+   "16": 20,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a11-messages-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 5,
+   "14": 4,
+   "16": 16,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a11-messages-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 5,
+   "14": 4,
+   "16": 16,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a12-sessions-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 64,
+   "14": 93,
+   "16": 74,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Search session ID, name, or username... (280x42)",
+   "Min messages (128x42)",
+   "Max messages (128x42)",
+   "Advanced Filters ▼ (205x40)",
+   "Clear All (118x40)",
+   "View (58x28)",
+   "Edit (58x28)",
+   "Delete (74x28)"
+  ],
+  "overflowX": []
+ },
+ "a12-sessions-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 64,
+   "14": 93,
+   "16": 74,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Search session ID, name, or username... (310x42)",
+   "Min messages (128x42)",
+   "Max messages (128x42)",
+   "Advanced Filters ▼ (205x40)",
+   "Clear All (118x40)",
+   "View (58x28)",
+   "Edit (58x28)",
+   "Delete (74x28)"
+  ],
+  "overflowX": []
+ },
+ "a13-session-detail-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 81,
+   "14": 118,
+   "16": 91,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Search session ID, name, or username... (280x42)",
+   "Min messages (128x42)",
+   "Max messages (128x42)",
+   "Advanced Filters ▼ (205x40)",
+   "Clear All (118x40)",
+   "View (58x28)",
+   "Edit (58x28)",
+   "Delete (74x28)"
+  ],
+  "overflowX": []
+ },
+ "a13-session-detail-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 81,
+   "14": 118,
+   "16": 91,
+   "20": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Search session ID, name, or username... (310x42)",
+   "Min messages (128x42)",
+   "Max messages (128x42)",
+   "Advanced Filters ▼ (205x40)",
+   "Clear All (118x40)",
+   "View (58x28)",
+   "Edit (58x28)",
+   "Delete (74x28)"
+  ],
+  "overflowX": []
+ },
+ "a14-live-monitor-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 5,
+   "14": 15,
+   "16": 23,
+   "24": 1,
+   "30": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Overview (91x28)"
+  ],
+  "overflowX": []
+ },
+ "a14-live-monitor-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 5,
+   "14": 15,
+   "16": 23,
+   "24": 1,
+   "30": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "Overview (91x28)"
+  ],
+  "overflowX": []
+ },
+ "a15-live-session-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 18,
+   "14": 29,
+   "16": 33,
+   "20": 1,
+   "24": 1,
+   "30": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Overview (91x28)"
+  ],
+  "overflowX": []
+ },
+ "a15-live-session-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 18,
+   "14": 29,
+   "16": 33,
+   "20": 1,
+   "24": 1,
+   "30": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Overview (91x28)"
+  ],
+  "overflowX": []
+ },
+ "a16-analytics-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 5,
+   "14": 13,
+   "16": 58,
+   "18": 12,
+   "24": 1,
+   "30": 5
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Overview (91x28)",
+   "Usage (74x38)",
+   "Performance (124x38)",
+   "Cost (66x38)",
+   "Tools (74x38)",
+   "Current Month (157x40)",
+   "Advanced Filters ▼ (205x40)",
+   "Clear All (118x40)"
+  ],
+  "overflowX": []
+ },
+ "a16-analytics-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 5,
+   "14": 13,
+   "16": 59,
+   "18": 12,
+   "24": 1,
+   "30": 5
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Overview (91x28)",
+   "Usage (74x38)",
+   "Performance (124x38)",
+   "Cost (66x38)",
+   "Tools (74x38)",
+   "Current Month (157x40)",
+   "Advanced Filters ▼ (205x40)",
+   "Clear All (118x40)"
+  ],
+  "overflowX": []
+ },
+ "a17-assistant-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 5,
+   "14": 8,
+   "16": 16,
+   "20": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Ask about your data… (243x38)",
+   "Ask (77x38)"
+  ],
+  "overflowX": []
+ },
+ "a17-assistant-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 5,
+   "14": 8,
+   "16": 16,
+   "20": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Ask about your data… (273x38)",
+   "Ask (77x38)"
+  ],
+  "overflowX": []
+ },
+ "a18-users-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 73,
+   "14": 151,
+   "16": 36,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Search by username or user ID... (171x42)",
+   "Filters (129x42)",
+   "View profile for mobile_demo (92x20)",
+   "View profile for demo_3bd4c236 (109x20)",
+   "View profile for demo_bd9774ce (109x20)",
+   "View profile for demo_e2a93043 (109x20)",
+   "View profile for demo_715783cb (109x20)",
+   "View profile for demo_bfd3a510 (109x20)"
+  ],
+  "overflowX": []
+ },
+ "a18-users-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 73,
+   "14": 151,
+   "16": 36,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Search by username or user ID... (201x42)",
+   "Filters (129x42)",
+   "View profile for mobile_demo (92x20)",
+   "View profile for demo_3bd4c236 (109x20)",
+   "View profile for demo_bd9774ce (109x20)",
+   "View profile for demo_e2a93043 (109x20)",
+   "View profile for demo_715783cb (109x20)",
+   "View profile for demo_bfd3a510 (109x20)",
+   "View profile for demo_7b04215f (109x20)"
+  ],
+  "overflowX": []
+ },
+ "a19-system-config-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 169,
+   "14": 79,
+   "16": 55,
+   "18": 15,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "a19-system-config-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 170,
+   "14": 79,
+   "16": 57,
+   "18": 15,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "INPUT (15x16)",
+   "988 Suicide & Crisis Lifeline (294x42)"
+  ],
+  "overflowX": []
+ },
+ "a20-adverse-events-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 8,
+   "14": 8,
+   "16": 17,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Draft (66x32)",
+   "Submitted (102x34)",
+   "Closed (76x34)",
+   "All (51x34)",
+   "Filter by category (167x34)"
+  ],
+  "overflowX": []
+ },
+ "a20-adverse-events-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 8,
+   "14": 8,
+   "16": 17,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Draft (66x32)",
+   "Submitted (102x34)",
+   "Closed (76x34)",
+   "All (51x34)",
+   "Filter by category (167x34)"
+  ],
+  "overflowX": []
+ },
+ "p01-login-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 4,
+   "16": 1,
+   "18": 1,
+   "30": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p01-login-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 4,
+   "16": 1,
+   "18": 1,
+   "30": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p02-login-keyboard-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 4,
+   "16": 1,
+   "18": 1,
+   "30": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p02-login-keyboard-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 4,
+   "16": 1,
+   "18": 1,
+   "30": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p03-home-new-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 8,
+   "16": 3,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "Watch the short tour of the app (277x20)"
+  ],
+  "overflowX": []
+ },
+ "p03-home-new-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 8,
+   "16": 3,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "Watch the short tour of the app (277x20)"
+  ],
+  "overflowX": []
+ },
+ "p04-consent-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 20,
+   "16": 3,
+   "20": 1,
+   "24": 2
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "Watch the short tour of the app (277x20)",
+   "INPUT (13x13)"
+  ],
+  "overflowX": []
+ },
+ "p04-consent-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 20,
+   "16": 3,
+   "20": 1,
+   "24": 2
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "Watch the short tour of the app (277x20)",
+   "INPUT (13x13)"
+  ],
+  "overflowX": []
+ },
+ "p05-home-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 11,
+   "14": 15,
+   "16": 5,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p05-home-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 11,
+   "14": 15,
+   "16": 5,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p06-home-scrolled-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 10,
+   "14": 12,
+   "16": 3,
+   "24": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "Mark done (89x36)"
+  ],
+  "overflowX": []
+ },
+ "p06-home-scrolled-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 10,
+   "14": 12,
+   "16": 3,
+   "24": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "Mark done (89x36)"
+  ],
+  "overflowX": []
+ },
+ "p07-checkin-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 13,
+   "14": 21,
+   "16": 5,
+   "18": 1,
+   "24": 2
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "INPUT (312x16)",
+   "e.g. stress about exams, a difficult con (312x38)",
+   "e.g. feel a bit calmer, think through op (312x38)"
+  ],
+  "overflowX": []
+ },
+ "p07-checkin-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 13,
+   "14": 21,
+   "16": 5,
+   "18": 1,
+   "24": 2
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "INPUT (342x16)",
+   "e.g. stress about exams, a difficult con (342x38)",
+   "e.g. feel a bit calmer, think through op (342x38)"
+  ],
+  "overflowX": []
+ },
+ "p08-session-settings-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 51,
+   "14": 41,
+   "16": 5,
+   "18": 1,
+   "24": 2
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)"
+  ],
+  "overflowX": []
+ },
+ "p08-session-settings-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 51,
+   "14": 41,
+   "16": 5,
+   "18": 1,
+   "24": 2
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)",
+   "INPUT (16x16)"
+  ],
+  "overflowX": []
+ },
+ "p09-voice-idle-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 6,
+   "16": 2,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p09-voice-idle-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 6,
+   "16": 2,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p10-voice-listening-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 6,
+   "16": 4,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p10-voice-listening-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 6,
+   "16": 4,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p11-voice-speaking-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 6,
+   "16": 6,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p11-voice-speaking-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 6,
+   "16": 7,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p12-chat-long-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 5,
+   "16": 6,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p12-chat-long-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 5,
+   "16": 6,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p13-chat-keyboard-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 5,
+   "16": 4
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)"
+  ],
+  "overflowX": []
+ },
+ "p13-chat-keyboard-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 5,
+   "16": 4
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)"
+  ],
+  "overflowX": []
+ },
+ "p14-breathing-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 7,
+   "16": 4,
+   "24": 2
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p14-breathing-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 7,
+   "16": 4,
+   "24": 2
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p15-grounding-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 7,
+   "16": 5,
+   "24": 1,
+   "30": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p15-grounding-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 7,
+   "16": 5,
+   "24": 1,
+   "30": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p16-crisis-resources-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 10,
+   "14": 13,
+   "16": 9,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p16-crisis-resources-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 10,
+   "14": 13,
+   "16": 9,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p17-thought-record-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 4,
+   "14": 7,
+   "16": 5,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p17-thought-record-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 4,
+   "14": 7,
+   "16": 5,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p18-scale-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 12,
+   "14": 10,
+   "16": 4,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p18-scale-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 12,
+   "14": 10,
+   "16": 4,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p19-safety-plan-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 9,
+   "14": 16,
+   "16": 4,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p19-safety-plan-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 9,
+   "14": 16,
+   "16": 4,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p20-journal-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 4,
+   "14": 7,
+   "16": 5,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p20-journal-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 4,
+   "14": 7,
+   "16": 5,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p21-recap-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 9,
+   "14": 5,
+   "16": 6,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p21-recap-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 9,
+   "14": 5,
+   "16": 6,
+   "18": 1,
+   "24": 1
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "Copy (70x28)",
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p22-post-session-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 9,
+   "14": 9,
+   "16": 3,
+   "18": 1,
+   "24": 2
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p22-post-session-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 9,
+   "14": 9,
+   "16": 3,
+   "18": 1,
+   "24": 2
+  },
+  "inputFontPx": [
+   16
+  ],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p23-messages-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 7,
+   "16": 3,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "988 (25x16)"
+  ],
+  "overflowX": []
+ },
+ "p23-messages-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 7,
+   "16": 3,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)",
+   "988 (25x16)"
+  ],
+  "overflowX": []
+ },
+ "p24-profile-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 8,
+   "14": 32,
+   "16": 11,
+   "18": 1,
+   "24": 3,
+   "30": 2,
+   "36": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Watch the tour or read the guide (235x36)"
+  ],
+  "overflowX": []
+ },
+ "p24-profile-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 8,
+   "14": 32,
+   "16": 11,
+   "18": 1,
+   "24": 3,
+   "30": 2,
+   "36": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [
+   "Watch the tour or read the guide (277x36)",
+   "Download everything we have about you (286x36)"
+  ],
+  "overflowX": []
+ },
+ "p25-profile-scrolled-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 8,
+   "14": 20,
+   "16": 8,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p25-profile-scrolled-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 8,
+   "14": 20,
+   "16": 8,
+   "24": 1
+  },
+  "inputFontPx": [
+   16,
+   16,
+   16
+  ],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p26-menu-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 11,
+   "14": 19,
+   "16": 5,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p26-menu-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 11,
+   "14": 19,
+   "16": 5,
+   "24": 2
+  },
+  "inputFontPx": [],
+  "smallTargets": [
+   "988 (23x39)",
+   "988lifeline.org (82x39)"
+  ],
+  "overflowX": []
+ },
+ "p27-moderation-recovery-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 10,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p27-moderation-recovery-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "14": 10,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p28-quiet-hours-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 8,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p28-quiet-hours-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 8,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p29-study-status-360": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 13,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ },
+ "p29-study-status-390": {
+  "bodyFontPx": 16,
+  "textSizes": {
+   "12": 3,
+   "14": 13,
+   "18": 1
+  },
+  "inputFontPx": [],
+  "smallTargets": [],
+  "overflowX": []
+ }
+}

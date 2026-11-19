@@ -367,7 +367,15 @@ What NOT to do:
 - Do not go silent. If you are unsure what to say, say that you are still here.
 
 Delegation policy: do not delegate. Answer directly and immediately. Nothing matters more right now
-than staying present in this conversation.</pre>
+than staying present in this conversation.
+You have no way to look anything up on this call. Never say you are checking, pulling something up or
+looking into it. If they are talking about how they feel, their safety, or thoughts of suicide or
+self-harm, never say you cannot answer: respond to them directly and warmly.
+If they ask a factual question you cannot answer, such as a question about the study, their data,
+privacy or leaving the study, say plainly that you cannot answer it on this call, and that the research
+team can: the team&#x27;s contact details are on their consent form. Then stay with them.</pre>
+<p class="note">The replacement session has nothing to look information up with. If the voice model nevertheless tries to look something up, the server answers that attempt with this instruction, once the participant has stopped speaking. It is also sent once if the server’s monitoring connection to a replacement session is re-established, in case an attempt was made while it was away:</p>
+<pre>You cannot look anything up on this call, so do not say you are checking or looking into it. If they were talking about how they feel, their safety, or thoughts of suicide or self-harm, do not say you cannot answer: respond to them directly and warmly now, as your instructions say. Only if they asked a factual question you cannot answer, such as about the study, their data, privacy or leaving the study, say plainly that you cannot answer that on this call, that the research team can, and that the team&#x27;s contact details are on their consent form. Either way, stay with them.</pre>
 <p class="note">So that the model speaks first, this instruction is placed in the replacement session when it is created and sent again by the server as the session starts; the server re-sends it if the model has not spoken after 4 and 8 seconds. &lt;phone&gt; and &lt;text line&gt; are the configured crisis contact (988 and HOME to 741741 when none is configured):</p>
 <pre>The call with this participant was cut off and has just been restored. Speak first, immediately, before the participant says anything. Say this, in the language of this conversation and keeping every part of it: &quot;I&#x27;m back. The call got cut off. That was not your fault, and nothing you said was wrong. I&#x27;m still here with you. And you can call or text &lt;phone&gt; at any time, or text &lt;text line&gt;.&quot; Do not call it a dropped connection or a technical problem, and do not repeat or ask about what was said before. Then stop and listen.</pre>
 <h4>Voice recovery — what the participant hears and sees while reconnecting</h4>
@@ -400,6 +408,8 @@ Take an active, guiding role in this conversation instead of waiting for the par
 <pre>This guidance does not end your turn. If you were speaking when it arrived, or the participant is waiting for your reply, speak again now and follow it; do not go silent.</pre>
 <p class="note">If the model has still said nothing 3 seconds (and again 7 seconds) after such an instruction, while a reply was owed and the participant is not speaking, the server sends this:</p>
 <pre>The participant is waiting and you have stopped speaking. Speak now: respond to what they just said, following the guidance you were given. Do not stay silent.</pre>
+<p class="note">When the voice model hands a question to the reasoning model (A.9) and the reasoning model does not come back (no activity for 12 seconds at the reasoning setting the study runs, longer at higher settings), the server sends the instruction below so the participant is not left waiting. It is not sent if any guidance in B.1 to B.5 was delivered since the question was handed over, and it waits until the participant has stopped speaking:</p>
+<pre>You could not get an answer to the participant&#x27;s last question: the lookup did not come back. Stop saying you are checking or looking into it. If they were talking about how they feel, their safety, or thoughts of suicide or self-harm, do not say you could not get an answer: respond to them directly and warmly now, as your instructions say. Only if they asked a factual question, tell them plainly that you could not get that answer just now. If it was about the study, their data, privacy or leaving the study, say that the research team can answer it and that the team&#x27;s contact details are on their consent form. Otherwise offer to try again.</pre>
 <h3>B.1 Risk-adaptive de-escalation steering</h3>
 <p>Trigger: the crisis-detection pipeline (Part C.1) scores a participant message at 25/100 or higher. Injected at most once per 3 minutes per session, shared across the voice and chat channels (a high-severity score skips this wait). The voice texts are also injected when a member of the research team manually flags a voice session. &lt;risk score&gt; is the numeric score.</p>
 <h4>Voice sessions — severity below high</h4>

@@ -84,12 +84,10 @@ describe('protocol scenarios', () => {
   it('every declared known gap has a real reason and a Flightdeck ref, and never sits in smoke', () => {
     const smoke = new Set(SMOKE_SUITE.map((e) => e.scenario.id));
     const declared = [...PROTOCOL_SCENARIOS, ...PROTOCOL_EXTENDED_SCENARIOS].filter((x) => x.knownGap);
-    expect(declared.map((s) => s.id).sort()).toEqual([
-      'conf-recording-questions',
-      'honesty-disclosure',
-      'minor-sexual-content-referral',
-      'withdrawal-procedure',
-    ]);
+    // conf-recording-questions, minor-sexual-content-referral and
+    // withdrawal-procedure lost their markers on 2026-11-18 (4 of 4 live
+    // passes after PR #39).
+    expect(declared.map((s) => s.id).sort()).toEqual(['honesty-disclosure']);
     for (const s of declared) {
       expect(validateKnownGap(s), s.id).toEqual([]);
       // Each lists the exact assertions that may fail without gating; anything
