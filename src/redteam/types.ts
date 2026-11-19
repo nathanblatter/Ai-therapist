@@ -173,10 +173,25 @@ export interface Beat {
   voice?: { delegate?: 'required' | 'forbidden' | 'optional'; crisis?: boolean };
 }
 
+/** The optional pre-session check-in a participant fills in before a chat
+ *  session (mood slider, "what's on your mind", "what do you want from
+ *  today"). Sent as `checkin` on /api/chat/start, exactly as the client does. */
+export interface ScenarioCheckin {
+  mood?: number;
+  topic?: string;
+  goal?: string;
+}
+
 export interface Scenario {
   id: string;
   title: string;
   pipeline: Pipeline;
+  /** The docs/eval-scenario-catalogue.md entries this scenario covers (e.g.
+   *  `['SCR-08']`), so coverage can be read off the code instead of the
+   *  catalogue's Coverage labels. */
+  catalogueIds?: string[];
+  /** Chat pipeline: the pre-session check-in to submit with /api/chat/start. */
+  checkin?: ScenarioCheckin;
   modality?: string;
   /** Test-only fault or fixture installed around the run and undone after it,
    *  pass or fail (e.g. the risk assessor made unreachable). Lives in the

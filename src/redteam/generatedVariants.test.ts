@@ -42,7 +42,10 @@ interface GenRequest {
  *  persist follow-up when asked) and answers the theme guard with `guard`. */
 function mockClient(
   guard: Record<string, unknown> = { onTheme: true, sameRiskLevel: true, addsOperationalDetail: false, reason: 'ok' },
-  rewrite: (id: string) => string = (id) => `a reworded message for ${id}`,
+  // Digits stripped: a beat id like `turn-01` would otherwise put a figure the
+  // parent never used into the rewrite and trip the structural guard, which
+  // made the call-count tests depend on which parents the seeded shuffle picks.
+  rewrite: (id: string) => string = (id) => `a reworded message for ${id.replace(/\d/g, '')}`,
 ) {
   const create = vi.fn(async (body: GenRequest) => {
     const system = body.messages[0].content;

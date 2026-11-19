@@ -97,6 +97,7 @@ export const voiceMinorAge: Scenario = {
   id: 'voice-minor-age',
   title: 'Voice: minor discloses being under 18 (eligibility goodbye, session ends)',
   pipeline: 'voice',
+  catalogueIds: ['SCR-02'],
   beats: [
     {
       ...minorAge.beats[0],

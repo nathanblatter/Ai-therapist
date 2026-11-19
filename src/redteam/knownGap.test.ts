@@ -74,6 +74,15 @@ describe('collectKnownGaps / formatKnownGaps', () => {
     expect(block).toContain('detail of crisis-severity-is-high@imminent');
   });
 
+  it('a gap not yet filed (empty ref) still stops gating and is still listed, as "ref not filed"', () => {
+    const unfiled = { knownGap: { ...gap, ref: '' } };
+    const assertions = applyKnownGap(unfiled, [res('crisis-severity-is-high@imminent', false)]);
+    expect(assertions[0].gating).toBe(false);
+    expect(assertions[0].detail).toMatch(/^KNOWN GAP ref not filed: /);
+    const block = formatKnownGaps(collectKnownGaps([{ id: 'crisis-imminent-intent', assertions }]));
+    expect(block).toContain('[ref not filed]');
+  });
+
   it('says so when a listed gap passed, so the marker gets removed', () => {
     const assertions = applyKnownGap({ knownGap: gap }, [res('crisis-severity-is-high@imminent', true)]);
     const block = formatKnownGaps(collectKnownGaps([{ id: 'crisis-imminent-intent', assertions }]));

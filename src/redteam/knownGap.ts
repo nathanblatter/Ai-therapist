@@ -22,7 +22,9 @@ import type { AssertionResult, Scenario, ScenarioResult } from './types.js';
 export interface KnownGap {
   /** What the product does today and which protocol or prompt line it breaks. */
   reason: string;
-  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`. */
+  /** Flightdeck item for the product bug, e.g. `ai-therapist-301`. Empty
+   *  while the gap is waiting for the owner to file it: the gap still reports
+   *  (as "ref not filed"), and validateKnownGap flags the missing ref. */
   ref: string;
   /** Assertion ids (exact) that report without gating until the bug is fixed.
    *  Omitted: the scenario is only labelled and every assertion still gates. */
@@ -62,11 +64,12 @@ export function applyKnownGap(scenario: Pick<Scenario, 'knownGap'>, assertions: 
   const gap = scenario.knownGap;
   if (!gap?.assertionIds?.length) return assertions;
   const listed = new Set(gap.assertionIds);
+  const label = gap.ref || 'ref not filed';
   return assertions.map((a) => {
     if (!listed.has(a.id)) return a;
     return a.passed
-      ? { ...a, knownGap: gap.ref, detail: `KNOWN GAP ${gap.ref} PASSED THIS RUN: ${a.detail}` }
-      : { ...a, gating: false, knownGap: gap.ref, detail: `KNOWN GAP ${gap.ref}: ${a.detail}` };
+      ? { ...a, knownGap: gap.ref, detail: `KNOWN GAP ${label} PASSED THIS RUN: ${a.detail}` }
+      : { ...a, gating: false, knownGap: gap.ref, detail: `KNOWN GAP ${label}: ${a.detail}` };
   });
 }
 
@@ -82,7 +85,8 @@ export function collectKnownGaps(results: Array<Pick<ScenarioResult, 'id' | 'ass
   const lines: KnownGapLine[] = [];
   for (const r of results) {
     for (const a of r.assertions) {
-      if (!a.knownGap) continue;
+      // An empty ref is a gap not yet filed, not "no gap".
+      if (a.knownGap === undefined) continue;
       lines.push({ scenarioId: r.id, assertionId: a.id, ref: a.knownGap, passed: a.passed, detail: a.detail });
     }
   }
@@ -102,11 +106,11 @@ export function formatKnownGaps(lines: KnownGapLine[]): string {
   );
   out.push('=============================================================');
   for (const l of failing) {
-    out.push(` FAILING  ${l.scenarioId} / ${l.assertionId}  [${l.ref}]`);
+    out.push(` FAILING  ${l.scenarioId} / ${l.assertionId}  [${l.ref || 'ref not filed'}]`);
     out.push(`          ${l.detail}`);
   }
   for (const l of stale) {
-    out.push(` PASSED   ${l.scenarioId} / ${l.assertionId}  [${l.ref}]`);
+    out.push(` PASSED   ${l.scenarioId} / ${l.assertionId}  [${l.ref || 'ref not filed'}]`);
     out.push(`          if the bug is fixed, remove this id from the scenario's knownGap so it gates again`);
   }
   out.push('=============================================================');

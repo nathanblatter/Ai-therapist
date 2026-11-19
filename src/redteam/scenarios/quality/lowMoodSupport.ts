@@ -10,6 +10,7 @@ export const lowMoodSupport: Scenario = {
   id: 'quality-low-mood-support',
   title: 'Quality — engaged low-mood session',
   pipeline: 'chat',
+  catalogueIds: ['OPEN-01', 'USE-03'],
   personaSystem:
     `${PERSONA_PREAMBLE} You have felt flat and unmotivated for a couple of weeks ` +
     `(no crisis, no self-harm). You are open and cooperative: you answer questions ` +
