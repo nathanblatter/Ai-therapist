@@ -60,6 +60,18 @@ BASE_URL=http://127.0.0.1:<port> OUT_DIR=docs/mobile-audit/after npx tsx scripts
   iOS Safari behaves differently (it overlays the keyboard and scrolls the
   focused input into view), which headless Chromium cannot reproduce.
 
+### Text hand-off screens (added 2026-11-19, ai-therapist-356)
+
+`p30` to `p34` (in `after/` only; there is no "before") are the screens a
+participant sees when the voice vendor ends a call and the conversation moves
+to typed chat: the crisis first screen (`p30`), one tap later (`p31`), the
+neutral variant for a cut with no risk signal (`p32`), the crisis screen at a
+keyboard-open height (`p33`) and the short hold shown while the chat opens
+(`p34`). They are harness renders (`harness.tsx`, `handoff-*`): the real
+components in App.tsx's wrappers with fixture messages, since reaching them for
+real needs the vendor to end a call. The harness page does not load the app's
+web font, so the transcript and card text are in the fallback monospace face.
+
 ### Could not capture
 
 - The GPT-Live (WebRTC) voice path itself: it needs a real vendor SDP answer. The

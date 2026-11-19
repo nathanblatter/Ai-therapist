@@ -17,9 +17,15 @@ const {
   isDemoAccountSessionMock,
   getSessionAccessInfoMock,
   enqueueWorkItemMock,
-  pageHighTurnWithoutReflagMock,
+  pageHighRiskMock,
+  recordRecoveryDisclosureMock,
+  incidentHasCrisisAdverseEventMock,
+  draftAdverseEventFromCrisisMock,
 } = vi.hoisted(() => ({
-  pageHighTurnWithoutReflagMock: vi.fn(async () => null),
+  pageHighRiskMock: vi.fn(async () => ({ outcome: 'paged' })),
+  recordRecoveryDisclosureMock: vi.fn(),
+  incidentHasCrisisAdverseEventMock: vi.fn(),
+  draftAdverseEventFromCrisisMock: vi.fn(async () => 1),
   analyzeMessageRiskMock: vi.fn(),
   flagSessionCrisisMock: vi.fn(),
   logInterventionActionMock: vi.fn(),
@@ -53,14 +59,19 @@ vi.mock('../db/index.js', () => ({
   getSessionCrisisState: getSessionCrisisStateMock,
   isDemoAccountSession: isDemoAccountSessionMock,
   getSessionAccessInfo: getSessionAccessInfoMock,
+  recordRecoveryDisclosure: recordRecoveryDisclosureMock,
+  incidentHasCrisisAdverseEvent: incidentHasCrisisAdverseEventMock,
   // Transitive imports of utils/adminBroadcast.js:
   getTherapistIdsForClient: vi.fn(async () => []),
   getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
 vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: enqueueWorkItemMock }));
-vi.mock('./crisisPaging.service.js', () => ({ pageHighTurnWithoutReflag: pageHighTurnWithoutReflagMock }));
+vi.mock('./crisisPaging.service.js', () => ({ pageHighRisk: pageHighRiskMock }));
+vi.mock('./adverseEvent.service.js', () => ({ draftAdverseEventFromCrisis: draftAdverseEventFromCrisisMock }));
 
-const { runCrisisPipeline } = await import('./crisisPipeline.service.js');
+const { runCrisisPipeline, handleHighTurnWithoutReflag, RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS } = await import(
+  './crisisPipeline.service.js'
+);
 
 const emitMock = vi.fn();
 const toMock = vi.fn(() => ({ emit: emitMock }));
@@ -80,6 +91,9 @@ beforeEach(() => {
   buildChatSteeringGuidanceMock.mockImplementation((s: number) => `CHAT_STEER_${s}`);
   shouldSteerMock.mockReturnValue(true);
   maybeRequireRiskCheckMock.mockResolvedValue(null);
+  // Default: an ordinary session whose high flag came from the participant.
+  recordRecoveryDisclosureMock.mockResolvedValue({ recorded: false, eventId: null, stampedScore: null });
+  incidentHasCrisisAdverseEventMock.mockResolvedValue(false);
 });
 
 const TURN = { sessionId: 'chat_1', messageId: 42, content: 'hi' };
@@ -167,23 +181,28 @@ describe('runCrisisPipeline — flag matrix', () => {
   });
 
   // A recovery session is stamped high at the inherited score, or at 100, so
-  // the re-flag rule never fires in it. The paging policy is asked about every
-  // high turn the rule lets pass; it pages when the stored flag is only that
-  // stamp (crisisPaging.service.test.ts).
-  it('a high turn in an already-high session that is not re-flagged is handed to the paging policy', async () => {
+  // the re-flag rule never fires in it. Every high turn the rule lets pass is
+  // handed to handleHighTurnWithoutReflag (below), without holding the turn.
+  it('a high turn in an already-high session that is not re-flagged is handed on, and the turn does not wait', async () => {
     getSessionCrisisStateMock.mockResolvedValue({
       crisis_flagged: true,
       crisis_severity: 'high',
       crisis_risk_score: 100,
     });
-    risk(90, 'high');
+    risk(90, 'high', ['explicit_intent']);
+    recordRecoveryDisclosureMock.mockReturnValue(new Promise(() => undefined)); // never answers
     const r = await runCrisisPipeline(TURN, 'realtime');
     expect(r.flagged).toBe(false);
     expect(flagSessionCrisisMock).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(pageHighTurnWithoutReflagMock).toHaveBeenCalledWith('chat_1', 90));
+    expect(recordRecoveryDisclosureMock).toHaveBeenCalledWith({
+      sessionId: 'chat_1',
+      riskScore: 90,
+      messageId: 42,
+      factors: ['explicit_intent'],
+    });
   });
 
-  it('is not asked when the turn re-flags (that path pages itself), nor for a turn below high', async () => {
+  it('is not asked when the turn re-flags (that path flags and pages itself), nor for a turn below high', async () => {
     getSessionCrisisStateMock.mockResolvedValue({
       crisis_flagged: true,
       crisis_severity: 'high',
@@ -195,7 +214,148 @@ describe('runCrisisPipeline — flag matrix', () => {
     risk(60, 'medium');
     await runCrisisPipeline(TURN, 'realtime');
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(pageHighTurnWithoutReflagMock).not.toHaveBeenCalled();
+    expect(recordRecoveryDisclosureMock).not.toHaveBeenCalled();
+    expect(pageHighRiskMock).not.toHaveBeenCalled();
+  });
+});
+
+// ai-therapist-363. Before: a real high disclosure in a recovery session (high
+// flag = the automatic continuation stamp) paged, and left no flag event and,
+// when the session it continues was never flagged, no adverse-event draft.
+describe('a high turn the re-flag rule let pass (handleHighTurnWithoutReflag)', () => {
+  const HIGH = { riskScore: 78, factors: ['explicit_intent', 'plan'] };
+  const recordedAs = { recorded: true, eventId: 501, stampedScore: 100 };
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10));
+
+  it('stamp-only recovery session: the disclosure is recorded, paged, logged, shown, queued and gets its adverse-event draft', async () => {
+    recordRecoveryDisclosureMock.mockResolvedValue(recordedAs);
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
+    await settle();
+
+    expect(recordRecoveryDisclosureMock).toHaveBeenCalledTimes(1);
+    expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 78, { trigger: 'high_turn_in_recovery_session' });
+    expect(logInterventionActionMock).toHaveBeenCalledWith('chat_1', 'auto_flag', {
+      riskScore: 78,
+      severity: 'high',
+      messageId: 42,
+      factors: ['explicit_intent', 'plan'],
+      recoveryDisclosure: true,
+      crisisEventId: 501,
+      replacesStampScore: 100,
+    });
+    const events = emitMock.mock.calls.map((c) => c[0]);
+    expect(events).toContain('session:crisis-detected');
+    expect(incidentHasCrisisAdverseEventMock).toHaveBeenCalledWith('chat_1');
+    expect(draftAdverseEventFromCrisisMock).toHaveBeenCalledWith('chat_1');
+    expect(enqueueWorkItemMock).toHaveBeenCalledWith(
+      expect.objectContaining({ itemType: 'crisis_flag', sourceId: 'chat_1:high', sessionId: 'chat_1', reopen: true }),
+    );
+    // The record path does not re-run the high-risk response or the flag writer.
+    expect(executeGraduatedResponseMock).not.toHaveBeenCalled();
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+  });
+
+  it('the incident already has its adverse-event report (flagged high before the cut): no second draft', async () => {
+    recordRecoveryDisclosureMock.mockResolvedValue({ ...recordedAs, stampedScore: 82 });
+    incidentHasCrisisAdverseEventMock.mockResolvedValue(true);
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
+    await settle();
+    expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
+    expect(logInterventionActionMock).toHaveBeenCalledWith('chat_1', 'auto_flag', expect.any(Object));
+    expect(draftAdverseEventFromCrisisMock).not.toHaveBeenCalled();
+  });
+
+  it('if it cannot tell whether the incident has a report, it drafts one', async () => {
+    recordRecoveryDisclosureMock.mockResolvedValue(recordedAs);
+    incidentHasCrisisAdverseEventMock.mockRejectedValue(new Error('db down'));
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
+    await settle();
+    expect(draftAdverseEventFromCrisisMock).toHaveBeenCalledWith('chat_1');
+  });
+
+  it('a session with a real high flag: nothing is written, paged or drafted (no duplicates)', async () => {
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
+    await settle();
+    expect(recordRecoveryDisclosureMock).toHaveBeenCalledTimes(1);
+    expect(pageHighRiskMock).not.toHaveBeenCalled();
+    expect(logInterventionActionMock).not.toHaveBeenCalled();
+    expect(draftAdverseEventFromCrisisMock).not.toHaveBeenCalled();
+    expect(enqueueWorkItemMock).not.toHaveBeenCalled();
+    expect(emitMock).not.toHaveBeenCalled();
+  });
+
+  it('the second high turn of the same recovery session finds the real flag and adds nothing', async () => {
+    recordRecoveryDisclosureMock
+      .mockResolvedValueOnce(recordedAs)
+      .mockResolvedValueOnce({ recorded: false, eventId: null, stampedScore: null });
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
+    await handleHighTurnWithoutReflag({ ...TURN, messageId: 43 }, { riskScore: 80, factors: [] }, 'realtime');
+    await settle();
+    expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
+    expect(draftAdverseEventFromCrisisMock).toHaveBeenCalledTimes(1);
+    expect(logInterventionActionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails toward paging: the record throws, so the page goes anyway and nothing is claimed in the record', async () => {
+    recordRecoveryDisclosureMock.mockRejectedValue(new Error('db down'));
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'chat');
+    await settle();
+    expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 78, { trigger: 'high_turn_in_recovery_session' });
+    expect(logInterventionActionMock).not.toHaveBeenCalled();
+    expect(draftAdverseEventFromCrisisMock).not.toHaveBeenCalled();
+  });
+
+  it('a slow record does not hold the page back, and the record-side work still follows when it lands', async () => {
+    vi.useFakeTimers();
+    try {
+      let land: (value: unknown) => void = () => undefined;
+      recordRecoveryDisclosureMock.mockReturnValue(new Promise((resolve) => (land = resolve)));
+      const handling = handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
+      await vi.advanceTimersByTimeAsync(RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS - 50);
+      expect(pageHighRiskMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
+      expect(logInterventionActionMock).not.toHaveBeenCalled();
+
+      land(recordedAs);
+      await vi.advanceTimersByTimeAsync(10);
+      await handling;
+      expect(logInterventionActionMock).toHaveBeenCalledWith('chat_1', 'auto_flag', expect.any(Object));
+      expect(draftAdverseEventFromCrisisMock).toHaveBeenCalledTimes(1);
+      expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an anonymous session gets the record and the page, and no care-team item', async () => {
+    recordRecoveryDisclosureMock.mockResolvedValue(recordedAs);
+    getSessionAccessInfoMock.mockResolvedValue({ status: 'active', user_id: null, session_type: 'voice' });
+    await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
+    await settle();
+    expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
+    expect(enqueueWorkItemMock).not.toHaveBeenCalled();
+  });
+
+  // The text hand-off stamps a chat high with NO score when the incident's
+  // risk could not be read (textHandoff.service). Seen live in the PR #77
+  // review: "Not sure" scored 65/medium and the +10 clause rewrote the session
+  // to medium.
+  it('never lowers the severity: a medium turn under a high flag stored without a score', async () => {
+    getSessionCrisisStateMock.mockResolvedValue({
+      crisis_flagged: true,
+      crisis_severity: 'high',
+      crisis_risk_score: null,
+    });
+    risk(65, 'medium');
+    const r = await runCrisisPipeline(TURN, 'chat');
+    expect(r.flagged).toBe(false);
+    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
+    // A high turn under the same stamp still flags (and pages) for real.
+    risk(80, 'high');
+    const high = await runCrisisPipeline(TURN, 'chat');
+    expect(high.flagged).toBe(true);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80);
   });
 });
 

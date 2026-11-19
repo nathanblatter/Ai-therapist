@@ -127,10 +127,9 @@ export interface CallerTurn {
 }
 
 /**
- * The run's shared timeline. One instance spans every GPT-Live session the
- * conversation used (the original and any recovery segment), so the gap
- * between a vendor cut and the recovery's first audio is measured on one
- * clock.
+ * The run's shared timeline. One instance spans every GPT-Live session of
+ * the run, on one wall clock, which is also the clock the text hand-off after
+ * a vendor cut is timed on (textHandoffChecks.ts).
  */
 export class Timeline {
   readonly t0: number;

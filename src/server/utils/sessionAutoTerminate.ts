@@ -92,9 +92,10 @@ export function crisisTimeNotice(remainingMinutes: number): string {
 
 export const CRISIS_CEILING_LIVE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
-  `The connection is about to reset in roughly a minute; that is the platform, not you, and you will be ` +
-  `reconnected with them automatically. In your next reply, calmly tell them the line may drop for a moment ` +
-  `and that you will be right back with them; remind them they can call or text 988 at any time. ` +
+  `The voice call will reach the voice service's time limit in roughly a minute; that is the platform, not you. ` +
+  `The app then moves this conversation to writing on their screen straight away, and you continue with them ` +
+  `there. In your next reply, calmly tell them the voice call is about to end because of a time limit and that ` +
+  `you will keep going with them in writing on their screen; remind them they can call or text 988 at any time. ` +
   `Do not say goodbye as if the conversation is over, and do NOT call end_session.`;
 
 export const CRISIS_DISREGARD_WRAP_UP =

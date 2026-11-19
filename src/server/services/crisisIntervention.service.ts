@@ -445,11 +445,20 @@ async function hardEndCrisisSession(sessionId: string, endedBy: string): Promise
  * @param {string} sessionId - Session ID
  * @param {string} severity - Risk severity ('high' or 'none')
  * @param {number} riskScore - Risk score (0-100)
+ * @param source - Where the flag came from. 'model_escalation' (the model's
+ *   escalate_to_human tool) only changes what the on-call page says: its
+ *   score is the fixed value for that request, not a score of anything the
+ *   participant said.
  */
-export async function executeGraduatedResponse(sessionId: string, severity: string, riskScore: number): Promise<void> {
+export async function executeGraduatedResponse(
+  sessionId: string,
+  severity: string,
+  riskScore: number,
+  source: 'participant_turn' | 'model_escalation' = 'participant_turn',
+): Promise<void> {
   try {
     if (severity === 'high') {
-      await executeHighRiskResponse(sessionId, riskScore);
+      await executeHighRiskResponse(sessionId, riskScore, source);
     }
   } catch (error) {
     console.error('Error executing graduated response:', error);
@@ -497,7 +506,11 @@ export async function pageOnCall(message: string): Promise<void> {
  * dashboards, and inject the structured safety-assessment protocol into the
  * live model over the sideband.
  */
-async function executeHighRiskResponse(sessionId: string, riskScore: number): Promise<void> {
+async function executeHighRiskResponse(
+  sessionId: string,
+  riskScore: number,
+  source: 'participant_turn' | 'model_escalation' = 'participant_turn',
+): Promise<void> {
   try {
     // Crisis resources to the participant FIRST, before anything that can
     // stall (ai-therapist-293): on GPT-Live the vendor's filter can close the
@@ -517,7 +530,7 @@ async function executeHighRiskResponse(sessionId: string, riskScore: number): Pr
     // is crisisPaging.service's decision (sandbox suppression, wording and
     // the audit row live there too).
     import('./crisisPaging.service.js')
-      .then((m) => m.pageHighRisk(sessionId, riskScore))
+      .then((m) => m.pageHighRisk(sessionId, riskScore, { source }))
       .catch((err) => console.error('Error sending crisis SMS:', err));
 
     // Steer the live model into a structured safety assessment.
