@@ -69,7 +69,11 @@ vi.mock('../../services/toolRegistry.service.js', () => ({
   toolRegistry: { getEnabledToolDefinitions: async () => [] },
 }));
 vi.mock('../../utils/harness.js', () => ({ isNonStudyUser: () => false }));
-vi.mock('../../utils/safetyIdentifier.js', () => ({ isIdentifierBlockedError: () => false }));
+// The real identifier derivation (ai-therapist-306); only the block detector is stubbed.
+vi.mock('../../utils/safetyIdentifier.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/safetyIdentifier.js')>()),
+  isIdentifierBlockedError: () => false,
+}));
 vi.mock('../../services/crisisAlert.service.js', () => ({ reportOpenAIQuotaExhausted: mocks.reportQuota }));
 vi.mock('../../services/crisisPipeline.service.js', () => ({ runCheckinCrisisScreen: mocks.runCheckinCrisisScreen }));
 
@@ -392,5 +396,41 @@ describe('POST /api/live/session with a check-in', () => {
     mocks.upstreamFetch.mockResolvedValue(healthy());
     await start().expect(201);
     await settle();
+  });
+});
+
+// ai-therapist-306: the mint's OpenAI-Safety-Identifier comes from the one
+// helper, so it is salted per environment and matches what the chat, assessor
+// and sideband calls send for the same user.
+describe('POST /api/live/session safety identifier', () => {
+  const SALT_ENV = 'OPENAI_SAFETY_IDENTIFIER_SALT';
+  const sentIdentifier = () =>
+    (mocks.upstreamFetch.mock.calls[0][1] as { headers: Record<string, string> }).headers['OpenAI-Safety-Identifier'];
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('a signed-in user gets safetyIdentifierForUser, salted, never the bare sha256 of the user id', async () => {
+    vi.stubEnv(SALT_ENV, 'stage-salt-for-test');
+    mocks.upstreamFetch.mockResolvedValue(upstream(429, { error: { code: 'slow_down' } }));
+    await request(makeApp({ userId: 7 }))
+      .post('/api/live/session')
+      .send({ sdp: 'v=0 offer' });
+    const { safetyIdentifierForUser } = await import('../../utils/safetyIdentifier.js');
+    const { sha256Hex } = await import('../../utils/crypto.js');
+    expect(sentIdentifier()).toBe(safetyIdentifierForUser(7));
+    expect(sentIdentifier()).not.toBe(sha256Hex('user:7'));
+    expect(sentIdentifier()).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('an anonymous browser gets the salted participant-cookie identifier', async () => {
+    vi.stubEnv(SALT_ENV, 'stage-salt-for-test');
+    mocks.upstreamFetch.mockResolvedValue(upstream(429, { error: { code: 'slow_down' } }));
+    const pid = '3f2a9c1b-7d0e-4a5b-9c8d-1e2f3a4b5c6d';
+    await request(makeApp()).post('/api/live/session').set('Cookie', `att_pid=${pid}`).send({ sdp: 'v=0 offer' });
+    const { safetyIdentifierForParticipantCookie } = await import('../../utils/safetyIdentifier.js');
+    const { sha256Hex } = await import('../../utils/crypto.js');
+    expect(sentIdentifier()).toBe(safetyIdentifierForParticipantCookie(pid));
+    expect(sentIdentifier()).not.toBe(sha256Hex(`participant:${pid}`));
   });
 });

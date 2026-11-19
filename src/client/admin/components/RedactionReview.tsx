@@ -4,8 +4,11 @@ import { formatDateTime } from '../../shared/format';
 import { getJson, postJson } from '../../shared/http';
 
 interface RedactionCheck {
+  /** Absent on rows written before ai-therapist-288. */
+  status?: 'checked' | 'errored';
   p_leak: number;
-  flagged: boolean;
+  /** null when the check errored (unknown, not clean). */
+  flagged: boolean | null;
   backend: string;
   model: string;
   checked_at: string;
@@ -23,6 +26,11 @@ interface RedactMessage {
   redaction_check?: RedactionCheck | null;
 }
 
+/** The leak check did not produce an answer (ai-therapist-288). Older rows carry only `error`. */
+function leakCheckErrored(check: RedactionCheck | null | undefined): boolean {
+  return !!check && (check.status === 'errored' || typeof check.error === 'string');
+}
+
 // Researcher-only redaction-verification view: review and correct the
 // auto-redacted message content served by /redact/api (redaction.routes.ts).
 // Formerly the standalone /redact SSR app; merged into admin.
@@ -35,16 +43,22 @@ export default function RedactionReview() {
   const [saving, setSaving] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [flaggedUnreviewed, setFlaggedUnreviewed] = useState<number>(0);
+  const [erroredUnreviewed, setErroredUnreviewed] = useState<number>(0);
 
   const fetchMessages = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getJson<{ messages: RedactMessage[]; flagged_unreviewed?: number }>('/redact/api/messages', {
+      const data = await getJson<{
+        messages: RedactMessage[];
+        flagged_unreviewed?: number;
+        errored_unreviewed?: number;
+      }>('/redact/api/messages', {
         fallback: 'Failed to fetch messages',
       });
       setMessages(data.messages);
       setFlaggedUnreviewed(Number(data.flagged_unreviewed ?? 0));
+      setErroredUnreviewed(Number(data.errored_unreviewed ?? 0));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -106,6 +120,14 @@ export default function RedactionReview() {
                 they are listed first.
               </p>
             )}
+            {erroredUnreviewed > 0 && (
+              <p className="text-sm text-red-700 mt-1 flex items-center gap-1.5">
+                <AlertCircle size={14} />
+                {erroredUnreviewed} message{erroredUnreviewed === 1 ? '' : 's'} could not be leak-checked (the check
+                errored) and {erroredUnreviewed === 1 ? 'has' : 'have'} not been verified; listed after the flagged
+                ones.
+              </p>
+            )}
           </div>
           <button
             onClick={fetchMessages}
@@ -160,6 +182,15 @@ export default function RedactionReview() {
                       >
                         <AlertCircle size={12} />
                         Possible leak, p={message.redaction_check.p_leak.toFixed(2)}
+                      </span>
+                    )}
+                    {leakCheckErrored(message.redaction_check) && !message.redaction_check?.reviewed && (
+                      <span
+                        className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800"
+                        title={`Leak-check errored (${message.redaction_check?.error ?? 'no detail'}); this message has not been verified`}
+                      >
+                        <AlertCircle size={12} />
+                        Leak-check did not run
                       </span>
                     )}
                   </div>

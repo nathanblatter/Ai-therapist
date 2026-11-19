@@ -2,13 +2,15 @@
 // Decisions API adapter, the Responses fallback, and the per-row persistence.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { decisionsCreateMock, createMock, queryMock, getSystemConfigByKeyMock, recordLlmUsageMock } = vi.hoisted(() => ({
-  decisionsCreateMock: vi.fn(),
-  createMock: vi.fn(),
-  queryMock: vi.fn(),
-  getSystemConfigByKeyMock: vi.fn(),
-  recordLlmUsageMock: vi.fn(),
-}));
+const { decisionsCreateMock, createMock, queryMock, getSystemConfigByKeyMock, recordLlmUsageMock, getOpenAIKeyMock } =
+  vi.hoisted(() => ({
+    getOpenAIKeyMock: vi.fn(),
+    decisionsCreateMock: vi.fn(),
+    createMock: vi.fn(),
+    queryMock: vi.fn(),
+    getSystemConfigByKeyMock: vi.fn(),
+    recordLlmUsageMock: vi.fn(),
+  }));
 
 vi.mock('openai', () => ({
   default: class MockOpenAI {
@@ -16,7 +18,7 @@ vi.mock('openai', () => ({
     responses = { create: createMock };
   },
 }));
-vi.mock('../config/secrets.js', () => ({ getOpenAIKey: async () => 'test-key' }));
+vi.mock('../config/secrets.js', () => ({ getOpenAIKey: getOpenAIKeyMock }));
 vi.mock('../config/db.js', () => ({ pool: { query: queryMock, connect: vi.fn(), on: vi.fn() } }));
 vi.mock('../db/index.js', () => ({
   getSystemConfigByKey: getSystemConfigByKeyMock,
@@ -45,6 +47,8 @@ beforeEach(() => {
   getSystemConfigByKeyMock.mockResolvedValue(null);
   recordLlmUsageMock.mockReset();
   recordLlmUsageMock.mockResolvedValue(undefined);
+  getOpenAIKeyMock.mockReset();
+  getOpenAIKeyMock.mockResolvedValue('test-key');
   _resetVerifierStateForTests();
 });
 
@@ -179,12 +183,19 @@ describe('verifyRedactedMessages', () => {
       { id: 12, text: 'I saw [REDACTED: NAME] at the clinic' },
     ]);
 
-    expect(summary).toEqual({ checked: 2, flagged: 1 });
+    expect(summary).toEqual({ checked: 2, flagged: 1, errored: 0 });
     const updates = queryMock.mock.calls.filter(([sql]) => /redaction_check/.test(sql as string));
     expect(updates).toHaveLength(2);
     const byId = Object.fromEntries(updates.map(([, params]) => [params![1], JSON.parse(params![0] as string)]));
-    expect(byId[11]).toMatchObject({ p_leak: 0.9, flagged: true, backend: 'decisions', model: 'gpt-6-luna' });
-    expect(byId[12]).toMatchObject({ p_leak: 0.01, flagged: false });
+    expect(byId[11]).toMatchObject({
+      status: 'checked',
+      p_leak: 0.9,
+      flagged: true,
+      backend: 'decisions',
+      model: 'gpt-6-luna',
+    });
+    expect(byId[12]).toMatchObject({ status: 'checked', p_leak: 0.01, flagged: false });
+    expect(byId[12]).not.toHaveProperty('error');
     await Promise.resolve();
     expect(recordLlmUsageMock).toHaveBeenCalledWith('sess_1', 'redaction', 'gpt-6-luna', 30, 1);
   });
@@ -194,38 +205,74 @@ describe('verifyRedactedMessages', () => {
       config_value: { enabled: true, backend: 'decisions', threshold: 0.95 },
     });
     decisionsCreateMock.mockResolvedValue(decision(0.9));
-    expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 1, flagged: 0 });
+    expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 1, flagged: 0, errored: 0 });
 
     getSystemConfigByKeyMock.mockResolvedValue({ config_value: { enabled: false } });
     decisionsCreateMock.mockClear();
-    expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 0, flagged: 0 });
+    expect(await verifyRedactedMessages('s', [{ id: 1, text: 'x' }])).toEqual({ checked: 0, flagged: 0, errored: 0 });
     expect(decisionsCreateMock).not.toHaveBeenCalled();
   });
 
-  it('records a per-row error and never throws when the model call fails', async () => {
+  // ai-therapist-288: "could not check" must never read as "checked and clean".
+  it('records a failed call as its own errored state (flagged null, never false) and never throws', async () => {
     decisionsCreateMock.mockRejectedValue(new Error('boom'));
     const summary = await verifyRedactedMessages('s', [{ id: 7, text: 'x' }]);
-    expect(summary).toEqual({ checked: 0, flagged: 0 });
+    expect(summary).toEqual({ checked: 0, flagged: 0, errored: 1 });
     const [, params] = queryMock.mock.calls.find(([sql]) => /redaction_check/.test(sql as string))!;
-    expect(JSON.parse(params![0] as string)).toMatchObject({ flagged: false, error: 'boom' });
+    const check = JSON.parse(params![0] as string);
+    expect(check).toMatchObject({ status: 'errored', flagged: null, p_leak: -1, error: 'boom' });
+    expect(check.flagged).not.toBe(false);
+  });
+
+  it('when no OpenAI client can be built, every due row is recorded as errored, not left looking unchecked', async () => {
+    getOpenAIKeyMock.mockRejectedValue(new Error('no key'));
+    const summary = await verifyRedactedMessages('s', [
+      { id: 1, text: 'a' },
+      { id: 2, text: '  ' },
+      { id: 3, text: 'b' },
+    ]);
+    expect(summary).toEqual({ checked: 0, flagged: 0, errored: 2 });
+    const writes = queryMock.mock.calls.filter(([sql]) => /redaction_check/.test(sql as string));
+    expect(writes.map(([, p]) => p![1])).toEqual([1, 3]);
+    for (const [, p] of writes) {
+      expect(JSON.parse(p![0] as string)).toMatchObject({ status: 'errored', flagged: null, error: 'no key' });
+    }
+    expect(decisionsCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('a failure to record the errored state is logged, not thrown, and not counted', async () => {
+    decisionsCreateMock.mockRejectedValue(new Error('boom'));
+    queryMock.mockRejectedValue(new Error('db down'));
+    await expect(verifyRedactedMessages('s', [{ id: 7, text: 'x' }])).resolves.toEqual({
+      checked: 0,
+      flagged: 0,
+      errored: 0,
+    });
   });
 
   // The 2026-11-01 incident: the API 400'd every request. Pin what that does
-  // so the fail policy is a tested fact: the row is recorded as errored and
-  // unflagged, nothing is counted as checked, and no fallback is attempted.
+  // so the fail policy is a tested fact: the row is recorded as errored (not
+  // as unflagged, ai-therapist-288), nothing is counted as checked, and no
+  // fallback is attempted.
   it('a 400 from the Decisions API leaves the row errored and unverified (fail-soft)', async () => {
     decisionsCreateMock.mockRejectedValue(
       Object.assign(new Error('400 Missing required parameter: questions.'), { status: 400 }),
     );
     const summary = await verifyRedactedMessages('s', [{ id: 9, text: 'I saw Marie' }]);
-    expect(summary).toEqual({ checked: 0, flagged: 0 });
+    expect(summary).toEqual({ checked: 0, flagged: 0, errored: 1 });
     expect(createMock).not.toHaveBeenCalled();
     const [, params] = queryMock.mock.calls.find(([sql]) => /redaction_check/.test(sql as string))!;
-    expect(JSON.parse(params![0] as string)).toMatchObject({ p_leak: -1, flagged: false, model: 'n/a' });
+    expect(JSON.parse(params![0] as string)).toMatchObject({
+      status: 'errored',
+      p_leak: -1,
+      flagged: null,
+      model: 'n/a',
+      error: expect.stringContaining('Missing required parameter: questions'),
+    });
   });
 
   it('skips empty redacted text without a model call', async () => {
-    expect(await verifyRedactedMessages('s', [{ id: 1, text: '   ' }])).toEqual({ checked: 0, flagged: 0 });
+    expect(await verifyRedactedMessages('s', [{ id: 1, text: '   ' }])).toEqual({ checked: 0, flagged: 0, errored: 0 });
     expect(decisionsCreateMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
   });

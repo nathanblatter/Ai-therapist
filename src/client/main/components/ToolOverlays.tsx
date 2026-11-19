@@ -4,6 +4,7 @@
 // screener form. One overlay at a time, dispatched by `kind`.
 import { useState, useEffect, useRef } from 'react';
 import { X, Phone, MessageSquare, CheckCircle, AlertCircle } from 'react-feather';
+import { CrisisListenPrompt } from './AgentVoiceMute';
 
 // ---------- shared ----------
 
@@ -46,6 +47,13 @@ interface ToolOverlaysProps {
   /** Persist a structured record into the session log. */
   onLogRecord: (type: string, message: string, extras: Record<string, unknown>) => void;
   sessionId: string | null;
+  /**
+   * The assistant's voice is muted on this device (voice sessions only). The
+   * resource card then pins a "Tap to hear the assistant" button at its top;
+   * nothing unmutes on the participant's behalf (lib/speakerMute.ts).
+   */
+  agentVoiceMuted?: boolean;
+  onUnmuteAgentVoice?: () => void;
 }
 
 // Exported for reuse by the between-sessions Home view (ai-therapist-121):
@@ -148,12 +156,22 @@ const RESOURCES = [
   },
 ];
 
-function ResourceCard({ resourceType, onClose }: { resourceType: string; onClose: () => void }) {
+function ResourceCard({
+  resourceType,
+  onClose,
+  onUnmuteAgentVoice,
+}: {
+  resourceType: string;
+  onClose: () => void;
+  /** Given only while the assistant's voice is muted: pins the listen prompt. */
+  onUnmuteAgentVoice?: () => void;
+}) {
   const shown = resourceType === 'all' ? RESOURCES : RESOURCES.filter((r) => r.key === resourceType);
   const list = shown.length > 0 ? shown : RESOURCES;
   return (
     <Shell title="Support is available" onClose={onClose}>
       <div className="px-6 py-5 space-y-3">
+        {onUnmuteAgentVoice && <CrisisListenPrompt onUnmute={onUnmuteAgentVoice} />}
         <p className="text-sm text-gray-500">You can tap any of these, any time — now or later.</p>
         {list.map((r) => (
           <div key={r.key} className="border border-gray-200 rounded-xl p-4">
@@ -769,12 +787,20 @@ export default function ToolOverlays({
   onToolEvent,
   onLogRecord,
   sessionId,
+  agentVoiceMuted = false,
+  onUnmuteAgentVoice,
 }: ToolOverlaysProps) {
   if (!ui) return null;
 
   switch (ui.kind) {
     case 'resource':
-      return <ResourceCard resourceType={ui.resourceType} onClose={onClose} />;
+      return (
+        <ResourceCard
+          resourceType={ui.resourceType}
+          onClose={onClose}
+          onUnmuteAgentVoice={agentVoiceMuted ? onUnmuteAgentVoice : undefined}
+        />
+      );
     case 'thought_record':
       return (
         <ThoughtRecord

@@ -10,7 +10,7 @@ import request from 'supertest';
 
 const dbMocks = vi.hoisted(() => ({
   getRandomRedactedMessages: vi.fn(),
-  countFlaggedUnreviewed: vi.fn(),
+  countLeakCheckBacklog: vi.fn(),
   updateRedactedContent: vi.fn(),
   recordRedactionApproval: vi.fn(),
   // Caseload middleware (requireMessageClientAccess) + org resolution.
@@ -46,7 +46,7 @@ function appAs(role: string, userId = 7, orgId = IRB_ORG) {
 beforeEach(() => {
   vi.clearAllMocks();
   dbMocks.getRandomRedactedMessages.mockResolvedValue([{ message_id: 42 }]);
-  dbMocks.countFlaggedUnreviewed.mockResolvedValue(1);
+  dbMocks.countLeakCheckBacklog.mockResolvedValue({ flaggedUnreviewed: 1, erroredUnreviewed: 3 });
   dbMocks.updateRedactedContent.mockResolvedValue(true);
   dbMocks.recordRedactionApproval.mockResolvedValue(true);
   dbMocks.getMessageOwner.mockResolvedValue({ session_id: 's1', user_id: 9, owner_organization_id: IRB_ORG });
@@ -54,12 +54,12 @@ beforeEach(() => {
 });
 
 describe('GET /redact/api/messages', () => {
-  it('hands the caller org to the queue and the backlog count', async () => {
+  it('hands the caller org to the queue and the backlog counts; errored checks are counted apart from flagged (288)', async () => {
     const res = await request(appAs('researcher', 7, PRACTICE_ORG)).get('/redact/api/messages');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ messages: [{ message_id: 42 }], flagged_unreviewed: 1 });
+    expect(res.body).toEqual({ messages: [{ message_id: 42 }], flagged_unreviewed: 1, errored_unreviewed: 3 });
     expect(dbMocks.getRandomRedactedMessages).toHaveBeenCalledWith(PRACTICE_ORG);
-    expect(dbMocks.countFlaggedUnreviewed).toHaveBeenCalledWith(PRACTICE_ORG);
+    expect(dbMocks.countLeakCheckBacklog).toHaveBeenCalledWith(PRACTICE_ORG);
   });
 
   it('is researcher-only', async () => {
