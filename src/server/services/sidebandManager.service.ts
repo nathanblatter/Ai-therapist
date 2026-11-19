@@ -968,17 +968,12 @@ export class SidebandManager {
             'Surfacing crisis resources and asking the client to reconnect.',
     );
 
-    // 2. Alert the study team.
+    // 2. Alert the study team. Whether this is an SMS, a page folded into one
+    // the on-call already has for this participant, or (no risk signal from
+    // the participant) a record for review is decided in crisisPaging.service.
     try {
-      const { sendCrisisAlert } = await import('./crisisAlert.service.js');
-      await sendCrisisAlert(
-        cause === 'content_filter'
-          ? `AI-Therapist: OpenAI's safety filter TERMINATED voice session ${short}... mid-conversation` +
-              `${flagged ? ' DURING AN ACTIVE CRISIS FLAG' : ''}. The participant lost the assistant without warning. ` +
-              'Review the transcript and consider reaching out.'
-          : `AI-Therapist: voice session ${short}... hit the voice platform's session ceiling DURING AN ACTIVE HIGH CRISIS FLAG. ` +
-              'The client is reconnecting them automatically; review the transcript and consider reaching out.',
-      );
+      const { pageVendorTermination } = await import('./crisisPaging.service.js');
+      await pageVendorTermination({ sessionId, cause, flagged, severity });
     } catch (err) {
       console.error(`[Live] Failed to alert on ${cause} termination for ${short}...:`, err);
     }
