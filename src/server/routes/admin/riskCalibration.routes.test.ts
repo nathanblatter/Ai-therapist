@@ -90,7 +90,7 @@ describe('org scope', () => {
     expect(res.status).toBe(200);
     expect(mocks.listRiskCalibrationRuns).toHaveBeenCalledWith(5, 20);
     expect(res.body.runs[0].org_id).toBe(5);
-    expect(res.body.current_bands).toEqual({ low: 25, medium: 50, high: 75 });
+    expect(res.body.current_bands).toEqual({ low: 25, medium: 50, high: 65 });
     expect(res.body.defaults).toEqual({ sample_size: 50, max_sample_size: 500, budget_usd: 0.5 });
   });
 

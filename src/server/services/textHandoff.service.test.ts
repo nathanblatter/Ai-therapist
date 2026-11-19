@@ -288,6 +288,40 @@ describe('prepareTextHandoff: wording follows this call, the flag follows the pa
     );
   });
 
+  it.each(['third_party', 'harm_to_others'])(
+    'the high flag in this call was about someone else (%s): no question about ending their life, still flagged high',
+    async (subject) => {
+      arrange({ peak: { severity: 'high', riskScore: 90 } });
+      pq.getParticipantFlagEvents.mockImplementation(async (ids: string[]) => [
+        { session_id: ids[0], severity: 'high', risk_score: 90, subject },
+      ]);
+      const result = await start();
+      expect(result!.firstMessage).toBe(HANDOFF_CHECKIN_FIRST_MESSAGE);
+      expect(result!.firstMessage).not.toMatch(/ending your life|suicid/i);
+      expect(result!.payload).toMatchObject({
+        kind: 'checkin',
+        severity: 'medium',
+        participantSeverity: 'high',
+        quickReplies: [],
+        voiceReturnAllowed: false,
+      });
+      expect(q.markTextHandoffContinuation).toHaveBeenCalledWith(
+        'chat_new',
+        expect.objectContaining({ severity: 'high' }),
+      );
+    },
+  );
+
+  it("someone else's crisis AND the participant's own high risk in the call: the crisis wording", async () => {
+    arrange({ peak: { severity: 'high', riskScore: 90 } });
+    pq.getParticipantFlagEvents.mockImplementation(async (ids: string[]) => [
+      { session_id: ids[0], severity: 'high', risk_score: 90, subject: 'third_party' },
+      { session_id: ids[0], severity: 'high', risk_score: 75, subject: null },
+    ]);
+    const result = await start();
+    expect(result!.payload).toMatchObject({ kind: 'crisis', severity: 'high' });
+  });
+
   it('high earlier but not in this chain: the check-in wording, no "I heard you", flagged high', async () => {
     // An ordinary call cut 90 minutes after a high flag in another session.
     arrange({

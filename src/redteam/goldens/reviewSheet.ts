@@ -107,8 +107,11 @@ export function buildDetectorSheet(rows: DetectorRow[], previous = new Map<strin
     rows.map((r) => [
       r.id,
       r.category,
-      r.modality,
-      renderHistory(r.history),
+      r.inputVia === 'checkin' ? `${r.modality} (check-in form)` : r.modality,
+      [
+        ...(r.checkin ? [`Check-in form: ${[r.checkin.topic, r.checkin.goal].filter(Boolean).join(' / ')}`] : []),
+        ...(r.history.length > 0 ? [renderHistory(r.history)] : []),
+      ].join('\n'),
       r.input,
       r.expected.band,
       acceptableBands(r).length > 1 ? acceptableBands(r).join(' / ') : '',

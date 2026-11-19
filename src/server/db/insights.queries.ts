@@ -206,6 +206,22 @@ export async function setSessionCheckin(sessionId: string, checkin: SessionCheck
   ]);
 }
 
+/** The session's stored pre-session check-in, or null. */
+export async function getSessionCheckin(sessionId: string): Promise<SessionCheckin | null> {
+  const result = await pool.query<{ checkin: SessionCheckin | string | null }>(
+    'SELECT checkin FROM therapy_sessions WHERE session_id = $1',
+    [sessionId],
+  );
+  const raw = result.rows[0]?.checkin ?? null;
+  if (!raw) return null;
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw) as SessionCheckin;
+  } catch {
+    return null;
+  }
+}
+
 /** Participant's memory-consent flag. */
 export async function getUserMemoryEnabled(userId: number): Promise<boolean> {
   const result = await pool.query<{ memory_enabled: boolean }>('SELECT memory_enabled FROM users WHERE userid = $1', [

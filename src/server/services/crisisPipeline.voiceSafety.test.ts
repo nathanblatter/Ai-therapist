@@ -54,10 +54,14 @@ vi.mock('./crisisIntervention.service.js', () => ({
   maybeRequireRiskCheck: maybeRequireRiskCheckMock,
   executeGraduatedResponse: executeGraduatedResponseMock,
   CHAT_SAFETY_PROTOCOL_GUIDANCE: 'CHAT_HIGH_GUIDANCE',
+  subjectGuidance: () => null,
+  subjectLabel: () => null,
 }));
 vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,
   getSessionCrisisState: getSessionCrisisStateMock,
+  // No automatic high flag on record about anyone: the level rule decides.
+  getSessionHighFlagSubjects: vi.fn(async () => []),
   isDemoAccountSession: vi.fn(async () => false),
   getSessionAccessInfo: vi.fn(async () => ({ status: 'active', user_id: 42, session_type: 'voice' })),
   getTherapistIdsForClient: vi.fn(async () => []),

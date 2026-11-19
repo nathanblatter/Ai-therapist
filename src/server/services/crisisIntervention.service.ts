@@ -1,5 +1,5 @@
 import { pool } from '../config/db.js';
-import { logInterventionAction } from './crisisDetection.service.js';
+import { logInterventionAction, type CrisisSubject } from './crisisDetection.service.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { emitCrisisResources, clearCrisisResourceState } from './crisisResources.js';
 
@@ -36,12 +36,13 @@ export const RISK_CHECK_REQUIRED_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `Risk in this session has reached the level that requires a structured safety assessment, ` +
   `and no assessment ladder has been logged yet. On this turn, begin the ladder: ask ONE gentle, ` +
-  `direct question (start with ideation — whether they are having thoughts of ending their life), ` +
+  `direct question (start with ideation — ask whether they are having thoughts of suicide, and use the word "suicide" when you ask), ` +
   `then call the run_risk_check tool with that step, the participant's answer in their own words, ` +
   `and your clinical risk_band. Continue one rung at a time on later turns ` +
   `(ideation, plan, means, timeframe, intent), logging each with run_risk_check, ` +
   `and record protective_factors when they surface. Stay warm and validating between questions — ` +
-  `this is an assessment, not an interrogation.`;
+  `this is an assessment, not an interrogation. ` +
+  `Ask the question plainly. Do not say or imply that the participant told you something they did not say, and do not describe their feelings for them.`;
 
 /** Default trigger score: the moderate/medium entry boundary the stage-2 risk
  *  assessor already uses (40-60 = medium/passive ideation in its rubric).
@@ -205,6 +206,7 @@ export function shouldSteer(sessionId: string, riskScore: number, force = false)
 /** Clear a session's steering cooldown entry (chat end / cleanup). */
 export function clearSteeringState(sessionId: string): void {
   steeringLastSent.delete(sessionId);
+  pendingSteers.delete(sessionId);
   riskCheckRequiredAt.delete(sessionId);
   clearCrisisResourceState(sessionId);
 }
@@ -236,7 +238,7 @@ export const CHAT_SAFETY_PROTOCOL_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `A high-severity safety concern has been detected and the research team's monitoring systems have been alerted. ` +
   `Shift fully into safety assessment, gently and without alarm. One question at a time, in this order, adapting to their answers: ` +
-  `(1) ask directly whether they are having thoughts of ending their life right now; ` +
+  `(1) ask directly whether they are having thoughts of suicide right now, and use the word "suicide" when you ask; ` +
   `(2) if yes, ask whether they have thought about how; ` +
   `(3) whether they have access to that method; ` +
   `(4) whether they have a timeframe in mind. ` +
@@ -245,6 +247,176 @@ export const CHAT_SAFETY_PROTOCOL_GUIDANCE =
   `and, if they engage, offer to write out a simple safety plan together in the chat. ` +
   `Do not end the session yourself. Stay with them. ` +
   RISK_CHECK_DIRECTIVE;
+
+// ============================================
+// THIRD PARTY AT RISK (ai-therapist-326)
+// ============================================
+// Owner decision 2026-11-18: a participant reporting SOMEONE ELSE's active
+// crisis ("my roommate just texted me that she's going to kill herself
+// tonight") flags high and pages staff. The detection side is the assessor's
+// `bystander` context at medium or high (crisisDetection analyzeMessageRisk
+// `thirdParty`). Everything that reaches a person says so in words, because a
+// page that reads like the participant's own crisis sends the on-call to the
+// wrong problem:
+//   - the page and the dashboard alert carry THIRD_PARTY_PAGE_LABEL;
+//   - crisis_events.notes / risk_factors and the intervention rows carry
+//     subject 'third_party' (existing JSON and text columns, no migration);
+//   - the model is steered to help the participant act for the other person
+//     instead of being told to run the participant through the suicide
+//     ladder, and the structured ladder is not demanded for that turn.
+
+/** Line added to the on-call page and the dashboard alert. */
+export const THIRD_PARTY_PAGE_LABEL =
+  'THIRD PARTY AT RISK: the participant is reporting someone else in crisis, not their own.';
+
+const THIRD_PARTY_GUIDANCE_CORE =
+  `The participant has just told you that SOMEONE ELSE may be at risk of suicide or is in a crisis right now. ` +
+  `The research team's monitoring systems have been alerted. Take it seriously and stay calm. In your reply: ` +
+  `acknowledge how frightening this is for them; ` +
+  `if the other person may be in immediate danger (a stated plan for now or tonight, an attempt under way, or they cannot be reached after saying something suicidal), ` +
+  `say plainly to call 911 now, or campus police or a resident assistant if they are on campus, and to stay with the person or get someone to them if that is safe; ` +
+  `say that they can call or text 988 themselves, right now, to get guidance on helping someone else; ` +
+  `encourage them not to carry this alone or keep it secret, and to bring in someone who can reach the person (family, a roommate, an RA). ` +
+  `Do not question whether the other person means it, and do not run the participant through questions about their own suicidal thoughts as if the risk were theirs. ` +
+  `Once the immediate steps are covered, check how the participant is doing: hearing this is heavy, and if they voice thoughts of their own, follow your crisis protocol. ` +
+  `Do not end the session yourself. Stay with them.`;
+
+/** Realtime steer for a third party at risk (the resource card tool exists there). */
+export const THIRD_PARTY_GUIDANCE =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  THIRD_PARTY_GUIDANCE_CORE +
+  ` Call the show_resource_card tool so crisis lines are on their screen.`;
+
+/** Chat steer for a third party at risk (resources go in the reply). */
+export const CHAT_THIRD_PARTY_GUIDANCE =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  THIRD_PARTY_GUIDANCE_CORE +
+  ` Include 911 and the 988 Suicide & Crisis Lifeline (call or text 988) directly in your reply.`;
+
+// ============================================
+// RISK TO OTHERS (ai-therapist-330)
+// ============================================
+// Owner decision 2026-11-18: "bring them down from the ledge and notify
+// staff". A credible statement of intent or planning to harm another person
+// is flagged and paged exactly as a high self-risk is, labelled as risk to
+// others on everything a person reads (same places as a third party at risk),
+// and the model gets a de-escalation steer instead of the suicide protocol:
+// stay, slow down, ask calmly about what is happening and what they intend,
+// no reflex questions about the participant's own suicide, no lecture or
+// threat, emergency guidance only when harm is imminent. The suicide ladder
+// is not demanded and the 988 resource card is not pushed for these turns.
+
+/** Line added to the on-call page and the dashboard alert. */
+export const RISK_TO_OTHERS_PAGE_LABEL =
+  'RISK TO OTHERS: the participant is describing thoughts of harming another person, not self-harm.';
+
+/** Steer for thoughts of harming another person (voice and chat: no tools involved). */
+export const HARM_TO_OTHERS_GUIDANCE =
+  `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
+  `The participant has described thoughts of harming another person that may be serious, and the research team's monitoring systems have been alerted. ` +
+  `Your job now is to bring the temperature down and stay with them. Slow your pace; keep replies short, calm and steady. ` +
+  `Acknowledge the anger or hurt underneath without agreeing that anyone deserves to be harmed. ` +
+  `Ask, one question at a time and without accusation, what is going on and what they mean: what the thoughts are like, whether they intend to act on them, and whether anything is about to happen. ` +
+  `Do not lecture, moralise, argue or threaten consequences. Do not give any help finding, approaching or harming the person, do not ask where that person is, and do not bring up the places the participant mentioned (where the person parks, lives or works) or whether the participant is going there. ` +
+  `Do not ask about the participant's own suicidal thoughts by reflex; ask only if they say something that points that way. ` +
+  `Help them put distance between the feeling and acting on it: staying away from the person for now, stepping away from anything they could use, something that lets the anger come down, someone they trust to be with. ` +
+  `Do not promise secrecy: if they ask, be honest that conversations flagged for safety are reviewed by the research team, which has a duty to act when someone may be in danger. ` +
+  `Only if harm seems imminent (they say they are about to act) say plainly that this is an emergency: ask them to stop and step away now and to call 911, or 988 to talk it through. ` +
+  `Do not end the session yourself. Stay with them.`;
+
+/** The page / alert label for a subject, or null for the participant's own risk. */
+export function subjectLabel(subject: CrisisSubject | null | undefined): string | null {
+  return subject === 'third_party'
+    ? THIRD_PARTY_PAGE_LABEL
+    : subject === 'harm_to_others'
+      ? RISK_TO_OTHERS_PAGE_LABEL
+      : null;
+}
+
+/** The steer that replaces the standard one for a subject, or null. */
+export function subjectGuidance(
+  subject: CrisisSubject | null | undefined,
+  channel: 'realtime' | 'chat',
+): string | null {
+  return subject === 'third_party'
+    ? channel === 'chat'
+      ? CHAT_THIRD_PARTY_GUIDANCE
+      : THIRD_PARTY_GUIDANCE
+    : subject === 'harm_to_others'
+      ? HARM_TO_OTHERS_GUIDANCE
+      : null;
+}
+
+// ============================================
+// A STEER EARNED BEFORE THE VOICE SOCKET IS OPEN
+// ============================================
+// The pre-session check-in is scored at session start. On Grok voice that is
+// before the browser has attached and the upstream socket exists, so the steer
+// a check-in earns ("I'm going to kill myself tonight" in the form) had no
+// socket to travel on and was recorded as undeliverable: the flag and the
+// page went out, and the model then opened the conversation with no safety
+// guidance at all. A steer that cannot be delivered because there is no live
+// connection is now held here and delivered the moment the socket is ready
+// (deliverPendingSteer, called by the voice manager once the session is
+// configured). One per session, the most serious; dropped after
+// PENDING_STEER_TTL_MS, so a steer for something said long ago is never
+// replayed into a later reconnect.
+export const PENDING_STEER_TTL_MS = 5 * 60 * 1000;
+
+interface PendingSteer {
+  text: string;
+  riskScore: number;
+  severity: string;
+  subject: CrisisSubject | null;
+  /** 2: the high-severity protocol; 1: an ordinary steer. */
+  rank: 1 | 2;
+  at: number;
+}
+const pendingSteers = new Map<string, PendingSteer>();
+
+function holdSteer(sessionId: string, steer: Omit<PendingSteer, 'at'>): void {
+  const now = Date.now();
+  for (const [id, held] of pendingSteers) {
+    if (now - held.at > PENDING_STEER_TTL_MS) pendingSteers.delete(id);
+  }
+  const held = pendingSteers.get(sessionId);
+  if (held && held.rank > steer.rank) return;
+  pendingSteers.set(sessionId, { ...steer, at: now });
+}
+
+/** Test hook. */
+export function _pendingSteerCountForTests(): number {
+  return pendingSteers.size;
+}
+
+/**
+ * Deliver the steer this session earned while it had no live connection, if
+ * there is one and it is still fresh. Called by a voice manager when its
+ * socket becomes ready. Returns true when a steer was delivered. Never throws.
+ */
+export async function deliverPendingSteer(sessionId: string): Promise<boolean> {
+  const held = pendingSteers.get(sessionId);
+  if (!held) return false;
+  pendingSteers.delete(sessionId);
+  if (Date.now() - held.at > PENDING_STEER_TTL_MS) return false;
+  try {
+    const { sidebandManager } = await import('./sidebandManager.service.js');
+    const delivered = await sidebandManager.tryInject(sessionId, 'system', held.text, false);
+    await logInterventionAction(sessionId, held.rank === 2 ? 'safety_protocol' : 'risk_steering', {
+      riskScore: held.riskScore,
+      severity: held.severity,
+      delivered,
+      deliveredOn: 'socket_ready',
+      heldForMs: Date.now() - held.at,
+      ...(held.subject ? { subject: held.subject } : {}),
+    });
+    if (delivered) steeringLastSent.set(sessionId, Date.now());
+    return delivered;
+  } catch (error) {
+    console.error('[crisis] delivering the held steer failed:', error);
+    return false;
+  }
+}
 
 // Sessions already recorded as having undeliverable steering. Keeps the signal
 // to one row per session rather than one per risky turn, while still making the
@@ -275,6 +447,12 @@ export async function maybeSteerSession(
    *  severity always forces); the pipeline passes false for a context-wake
    *  turn in a session already flagged high (see runCrisisPipeline). */
   force: boolean = severity === 'high',
+  /** Steer with this text instead of the standard copy (a third party at
+   *  risk, or risk to others). The cooldown, the sideband gate and the
+   *  logging are unchanged. */
+  guidanceOverride: string | null = null,
+  /** Recorded on the steering row when an override is used. */
+  subject: CrisisSubject | null = null,
 ): Promise<void> {
   try {
     if (riskScore < STEER_MIN_SCORE) return;
@@ -290,6 +468,14 @@ export async function maybeSteerSession(
     // requires readyState OPEN), leaving the steer recorded as neither
     // delivered nor undelivered, and the cooldown spent.
     if (!sidebandManager.isConnected(sessionId)) {
+      // Held for the moment the socket is ready (deliverPendingSteer).
+      holdSteer(sessionId, {
+        text: guidanceOverride ?? steeringGuidance(riskScore, severity),
+        riskScore,
+        severity,
+        subject: guidanceOverride ? (subject ?? 'third_party') : null,
+        rank: 1,
+      });
       if (!steeringSuppressed.has(sessionId)) {
         steeringSuppressed.add(sessionId);
         // Bounded so a long-lived process can't grow this without limit.
@@ -315,8 +501,18 @@ export async function maybeSteerSession(
 
     if (!shouldSteer(sessionId, riskScore, force)) return;
 
-    await sidebandManager.injectMessage(sessionId, 'system', steeringGuidance(riskScore, severity), false);
-    await logInterventionAction(sessionId, 'risk_steering', { riskScore, severity, delivered: true });
+    await sidebandManager.injectMessage(
+      sessionId,
+      'system',
+      guidanceOverride ?? steeringGuidance(riskScore, severity),
+      false,
+    );
+    await logInterventionAction(sessionId, 'risk_steering', {
+      riskScore,
+      severity,
+      delivered: true,
+      ...(guidanceOverride ? { subject: subject ?? 'third_party' } : {}),
+    });
 
     if (global.io) {
       void broadcastAdminEventForSession(
@@ -439,6 +635,17 @@ async function hardEndCrisisSession(sessionId: string, endedBy: string): Promise
 // GRADUATED RESPONSE SYSTEM
 // ============================================
 
+/** Who raised a high flag (PR 70). */
+export type RiskFlagRaisedBy = 'participant_turn' | 'model_escalation';
+
+export interface GraduatedResponseOptions {
+  source?: RiskFlagRaisedBy;
+  thirdParty?: boolean;
+  subject?: CrisisSubject | null;
+  escalation?: 'plan_or_time' | 'attempt' | null;
+  alsoSubject?: CrisisSubject | null;
+}
+
 /**
  * Execute graduated response based on risk severity.
  * Only 'high' severity triggers a response (admin alert only).
@@ -454,11 +661,29 @@ export async function executeGraduatedResponse(
   sessionId: string,
   severity: string,
   riskScore: number,
-  source: 'participant_turn' | 'model_escalation' = 'participant_turn',
+  /** Either who raised the flag (PR 70: 'participant_turn' by default, or
+   *  'model_escalation' for the assistant's escalate tool), or an options
+   *  object carrying that and what PR 65 added:
+   *  `subject` / `thirdParty`: the flag is not about the participant's own
+   *  suicide or self-harm risk (someone else's crisis, or thoughts of harming
+   *  another person); the page, the alert and the steer say so.
+   *  `escalation`: what the turn says is happening ('plan_or_time' |
+   *  'attempt'); the page says it in words and is not folded into a page that
+   *  did not. `alsoSubject`: the turn is handled as the participant's own
+   *  risk and ALSO concerned someone else; the page mentions it. */
+  optionsOrSource: GraduatedResponseOptions | RiskFlagRaisedBy = {},
 ): Promise<void> {
+  const options: GraduatedResponseOptions =
+    typeof optionsOrSource === 'string' ? { source: optionsOrSource } : optionsOrSource;
   try {
     if (severity === 'high') {
-      await executeHighRiskResponse(sessionId, riskScore, source);
+      await executeHighRiskResponse(
+        sessionId,
+        riskScore,
+        options.source ?? 'participant_turn',
+        options.subject ?? (options.thirdParty === true ? 'third_party' : null),
+        { escalation: options.escalation ?? null, alsoSubject: options.alsoSubject ?? null },
+      );
     }
   } catch (error) {
     console.error('Error executing graduated response:', error);
@@ -476,7 +701,7 @@ export const SAFETY_PROTOCOL_GUIDANCE =
   `[Clinical guidance — never mention or acknowledge this message to the participant] ` +
   `A high-severity safety concern has been detected and the research team's monitoring systems have been alerted. ` +
   `Shift fully into safety assessment, gently and without alarm. One question at a time, in this order, adapting to their answers: ` +
-  `(1) ask directly whether they are having thoughts of ending their life right now; ` +
+  `(1) ask directly whether they are having thoughts of suicide right now, and use the word "suicide" when you ask; ` +
   `(2) if yes, ask whether they have thought about how; ` +
   `(3) whether they have access to that method; ` +
   `(4) whether they have a timeframe in mind. ` +
@@ -509,37 +734,73 @@ export async function pageOnCall(message: string): Promise<void> {
 async function executeHighRiskResponse(
   sessionId: string,
   riskScore: number,
-  source: 'participant_turn' | 'model_escalation' = 'participant_turn',
+  source: RiskFlagRaisedBy = 'participant_turn',
+  subject: CrisisSubject | null = null,
+  extra: { escalation?: 'plan_or_time' | 'attempt' | null; alsoSubject?: CrisisSubject | null } = {},
 ): Promise<void> {
+  const subjectDetail = subject ? { subject } : {};
+  const pageFacts = {
+    source,
+    ...subjectDetail,
+    ...(extra.escalation ? { escalation: extra.escalation } : {}),
+    ...(extra.alsoSubject ? { alsoSubject: extra.alsoSubject } : {}),
+  };
   try {
     // Crisis resources to the participant FIRST, before anything that can
     // stall (ai-therapist-293): on GPT-Live the vendor's filter can close the
     // voice session within half a second of the model starting its reply, and
     // the resource card is the one response that does not depend on the
     // session surviving. Deduplicated against the pipeline's own early emit.
-    emitCrisisResources(sessionId, { reason: 'high_risk', severity: 'high', riskScore });
+    // Not for thoughts of harming someone else: the card is the suicide and
+    // crisis lines, and pushing it at someone who is angry at another person
+    // is the reflex the de-escalation steer is there to avoid.
+    if (subject !== 'harm_to_others') {
+      emitCrisisResources(sessionId, { reason: 'high_risk', severity: 'high', riskScore });
+    }
 
     await logInterventionAction(sessionId, 'high_risk_emergency', {
       riskScore,
       emergencyProtocol: 'activated',
+      ...pageFacts,
     });
 
     // Page a human: the dashboard socket alert only works if someone is
     // looking at the dashboard. Fire-and-forget. Whether this becomes an SMS,
     // or is folded into a page the on-call already has for this participant,
     // is crisisPaging.service's decision (sandbox suppression, wording and
-    // the audit row live there too).
+    // the audit row live there too). The subject goes with it: the page says
+    // who is at risk, and a page about someone else never absorbs one about
+    // the participant (or the reverse).
     import('./crisisPaging.service.js')
-      .then((m) => m.pageHighRisk(sessionId, riskScore, { source }))
+      .then((m) => m.pageHighRisk(sessionId, riskScore, pageFacts))
       .catch((err) => console.error('Error sending crisis SMS:', err));
 
-    // Steer the live model into a structured safety assessment.
+    // Steer the live model into a structured safety assessment, or, when the
+    // person at risk is someone else, into helping the participant respond.
     try {
       const { sidebandManager } = await import('./sidebandManager.service.js');
       if (sidebandManager.getActiveConnections().includes(sessionId)) {
-        await sidebandManager.injectMessage(sessionId, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
-        await logInterventionAction(sessionId, 'safety_protocol', { riskScore });
+        await sidebandManager.injectMessage(
+          sessionId,
+          'system',
+          subjectGuidance(subject, 'realtime') ?? SAFETY_PROTOCOL_GUIDANCE,
+          false,
+        );
+        await logInterventionAction(sessionId, 'safety_protocol', {
+          riskScore,
+          ...subjectDetail,
+        });
         console.log(`Safety protocol injected for session ${sessionId}`);
+      } else {
+        // No live connection yet (a check-in scored before the voice socket
+        // opened): held, and delivered when the socket is ready.
+        holdSteer(sessionId, {
+          text: subjectGuidance(subject, 'realtime') ?? SAFETY_PROTOCOL_GUIDANCE,
+          riskScore,
+          severity: 'high',
+          subject,
+          rank: 2,
+        });
       }
     } catch (err) {
       console.error('Error injecting safety protocol:', err);
@@ -556,7 +817,10 @@ async function executeHighRiskResponse(
           severity: 'high',
           riskScore,
           priority: 'critical',
-          message: `CRITICAL: High-risk crisis detected - Immediate attention required`,
+          message: subject
+            ? `CRITICAL: High-risk crisis detected - ${subjectLabel(subject)} Immediate attention required`
+            : `CRITICAL: High-risk crisis detected - Immediate attention required`,
+          ...subjectDetail,
           emergencyAt: new Date(),
           requiresImmediateIntervention: true,
         },

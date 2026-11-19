@@ -55,8 +55,37 @@ vi.mock('../db/index.js', () => ({
   getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
 
-const { executeGraduatedResponse, maybeSteerSession } = await import('./crisisIntervention.service.js');
-const { _resetPagingStateForTests } = await import('./crisisPaging.service.js');
+const {
+  executeGraduatedResponse,
+  maybeSteerSession,
+  THIRD_PARTY_PAGE_LABEL,
+  THIRD_PARTY_GUIDANCE,
+  CHAT_THIRD_PARTY_GUIDANCE,
+  SAFETY_PROTOCOL_GUIDANCE,
+  HARM_TO_OTHERS_GUIDANCE,
+  RISK_TO_OTHERS_PAGE_LABEL,
+  deliverPendingSteer,
+  clearSteeringState,
+  PENDING_STEER_TTL_MS,
+  RISK_CHECK_REQUIRED_GUIDANCE,
+  CHAT_SAFETY_PROTOCOL_GUIDANCE,
+} = await import('./crisisIntervention.service.js');
+const { _resetPagingStateForTests, buildRiskPageMessage, PAGE_SUBJECT_LABEL } = await import(
+  './crisisPaging.service.js'
+);
+/** The session page text for a first page (no earlier page, no vendor cut). */
+const buildCrisisPageMessage = (
+  sessionId: string,
+  riskScore: number,
+  subject: 'own' | 'third_party' | 'harm_to_others' = 'own',
+) =>
+  buildRiskPageMessage(
+    sessionId,
+    riskScore,
+    { previousPage: null, unpagedCut: null, now: 0 },
+    'participant_turn',
+    subject,
+  );
 
 /**
  * Wait until a fire-and-forget spy has been called.
@@ -305,5 +334,277 @@ describe('maybeSteerSession — undeliverable steering must be recorded, not sil
     sidebandManagerMock.isConnected.mockReturnValue(false);
     await maybeSteerSession('sess_low_risk', 5, 'none');
     expect(logInterventionActionMock).not.toHaveBeenCalled();
+  });
+});
+
+// Owner decision 2026-11-18 (ai-therapist-326): a participant reporting someone
+// else's active crisis flags high and pages. The on-call must be able to tell,
+// from the page itself, that the person at risk is not the participant.
+describe('third party at risk — the page and the steer say who is at risk', () => {
+  it('the page text names a third party on its first two lines; the ordinary page is unchanged', () => {
+    const ordinary = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 80);
+    expect(ordinary).toBe(
+      'URGENT: AI-Therapist HIGH crisis flag\nWhy: RISK SCORE 80/100 from what the participant said.\n' +
+        'Session sess_abcdefghijk...\n' +
+        'https://ai-therapist.nathanblatter.com/admin#session=sess_abcdefghijklmnopqrstuvwxyz',
+    );
+
+    const lines = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 80, 'third_party').split('\n');
+    expect(lines[0]).toBe('URGENT: AI-Therapist HIGH crisis flag (third party)');
+    expect(lines[1]).toBe(THIRD_PARTY_PAGE_LABEL);
+    expect(lines[1]).toMatch(/someone else in crisis, not their own/);
+    expect(lines[2]).toBe('Why: RISK SCORE 80/100 from what the participant reported about someone else.');
+    // PHI-free, like the ordinary page: prefix and link. Nothing else.
+    expect(lines.slice(3)).toEqual(ordinary.split('\n').slice(2));
+  });
+
+  it('the paging service and the dashboard use the same label text', () => {
+    expect(PAGE_SUBJECT_LABEL.third_party).toBe(THIRD_PARTY_PAGE_LABEL);
+    expect(PAGE_SUBJECT_LABEL.harm_to_others).toBe(RISK_TO_OTHERS_PAGE_LABEL);
+    expect(PAGE_SUBJECT_LABEL.own).toBeNull();
+  });
+
+  it('pages with that text and records the subject on the page row and the emergency row', async () => {
+    await executeGraduatedResponse('sess-3p', 'high', 90, { thirdParty: true });
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    await settle();
+
+    expect(sendCrisisAlertMock.mock.calls[0][0]).toContain(THIRD_PARTY_PAGE_LABEL);
+    const page = pagingRows().find((r) => r.sessionId === 'sess-3p' && r.actionType === 'crisis_sms_alert');
+    expect(page?.details).toMatchObject({ riskScore: 90, paging: { kind: 'risk', subject: 'third_party' } });
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'sess-3p',
+      'high_risk_emergency',
+      expect.objectContaining({ subject: 'third_party' }),
+    );
+  });
+
+  it('a sandbox session still never pages, third party or not', async () => {
+    isSandboxAccountSessionMock.mockResolvedValue(true);
+    await executeGraduatedResponse('sess-3p-sandbox', 'high', 90, { thirdParty: true });
+    await settle();
+    expect(sendCrisisAlertMock).not.toHaveBeenCalled();
+  });
+
+  it('steers the live model to help the participant respond, not through the suicide ladder', async () => {
+    const s = 'sess_3p_live';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([s]);
+    sidebandManagerMock.isConnected.mockReturnValue(true);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+
+    await executeGraduatedResponse(s, 'high', 90, { thirdParty: true });
+
+    const injected = sidebandManagerMock.injectMessage.mock.calls.map((c) => c[2] as string);
+    expect(injected).toContain(THIRD_PARTY_GUIDANCE);
+    expect(injected).not.toContain(SAFETY_PROTOCOL_GUIDANCE);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'safety_protocol', {
+      riskScore: 90,
+      subject: 'third_party',
+    });
+  });
+
+  it('the guidance covers the emergency number, 988 for a third party, and not interrogating the participant', () => {
+    for (const text of [THIRD_PARTY_GUIDANCE, CHAT_THIRD_PARTY_GUIDANCE]) {
+      expect(text).toMatch(/SOMEONE ELSE/);
+      expect(text).toMatch(/911/);
+      expect(text).toMatch(/988/);
+      expect(text).toMatch(/do not run the participant through questions about their own suicidal thoughts/);
+      expect(text).toMatch(/check how the participant is doing/);
+      expect(text).toMatch(/^\[Clinical guidance — never mention or acknowledge this message to the participant\]/);
+    }
+  });
+
+  it('maybeSteerSession sends the override text and marks the row', async () => {
+    const s = 'sess_3p_steer';
+    sidebandManagerMock.isConnected.mockReturnValue(true);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+
+    await maybeSteerSession(s, 90, 'high', true, THIRD_PARTY_GUIDANCE);
+
+    expect(sidebandManagerMock.injectMessage).toHaveBeenCalledWith(s, 'system', THIRD_PARTY_GUIDANCE, false);
+    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'risk_steering', {
+      riskScore: 90,
+      severity: 'high',
+      delivered: true,
+      subject: 'third_party',
+    });
+  });
+
+  it("the participant's own high flag is unchanged: standard page text, standard protocol, no subject", async () => {
+    const s = 'sess_own_high';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([s]);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+
+    await executeGraduatedResponse(s, 'high', 90);
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    await settle();
+
+    expect(sendCrisisAlertMock.mock.calls[0][0]).not.toContain('THIRD PARTY');
+    expect(sidebandManagerMock.injectMessage).toHaveBeenCalledWith(s, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
+    const page = pagingRows().find((r) => r.sessionId === s && r.actionType === 'crisis_sms_alert');
+    expect(page?.details).toMatchObject({ riskScore: 90, paging: { kind: 'risk', subject: 'own' } });
+    expect(logInterventionActionMock).toHaveBeenCalledWith(s, 'safety_protocol', { riskScore: 90 });
+  });
+});
+
+// Owner decision 2026-11-18 (ai-therapist-330): thoughts of harming someone
+// else are de-escalated by the model and staff are notified as for a high
+// self-risk, with the page saying what kind of risk it is.
+describe('risk to others — the page says so and the steer de-escalates', () => {
+  it('the page text names risk to others on its first two lines', () => {
+    const lines = buildCrisisPageMessage('sess_abcdefghijklmnopqrstuvwxyz', 80, 'harm_to_others').split('\n');
+    expect(lines[0]).toBe('URGENT: AI-Therapist HIGH crisis flag (risk to others)');
+    expect(lines[1]).toBe(RISK_TO_OTHERS_PAGE_LABEL);
+    expect(lines[1]).toMatch(/harming another person, not self-harm/);
+    expect(lines[2]).toBe('Why: RISK SCORE 80/100 from what the participant said.');
+    expect(lines).toHaveLength(5);
+  });
+
+  it('pages, records the subject, steers with the de-escalation text and does not push the crisis-line card', async () => {
+    const s = 'sess_harm_live';
+    const emit = vi.fn();
+    (global as unknown as { io: unknown }).io = { to: vi.fn(() => ({ emit })) };
+    sidebandManagerMock.getActiveConnections.mockReturnValue([s]);
+    sidebandManagerMock.injectMessage.mockResolvedValue(undefined);
+
+    await executeGraduatedResponse(s, 'high', 80, { subject: 'harm_to_others' });
+    await waitForCall(sendCrisisAlertMock, 1, 'sendCrisisAlert');
+    await settle();
+
+    expect(sendCrisisAlertMock.mock.calls[0][0]).toContain(RISK_TO_OTHERS_PAGE_LABEL);
+    const page = pagingRows().find((r) => r.sessionId === s && r.actionType === 'crisis_sms_alert');
+    expect(page?.details).toMatchObject({ riskScore: 80, paging: { kind: 'risk', subject: 'harm_to_others' } });
+    const injected = sidebandManagerMock.injectMessage.mock.calls.map((c) => c[2] as string);
+    expect(injected).toContain(HARM_TO_OTHERS_GUIDANCE);
+    expect(injected).not.toContain(SAFETY_PROTOCOL_GUIDANCE);
+    // The participant's room gets no crisis-emergency card for this subject;
+    // the admin dashboards still get their alert.
+    const emergency = emit.mock.calls.filter((c) => c[0] === 'session:crisis-emergency');
+    expect(emergency.every((c) => (c[1] as { subject?: string }).subject === 'harm_to_others')).toBe(true);
+  });
+
+  it('the guidance: stay, slow down, ask about intent, no reflex suicide questions, no lecture, 911 only when imminent', () => {
+    const g = HARM_TO_OTHERS_GUIDANCE;
+    expect(g).toMatch(/^\[Clinical guidance — never mention or acknowledge this message to the participant\]/);
+    expect(g).toMatch(/bring the temperature down and stay with them/);
+    expect(g).toMatch(/Slow your pace/);
+    expect(g).toMatch(/whether they intend to act on them/);
+    expect(g).toMatch(/without accusation/);
+    expect(g).toMatch(/Do not ask about the participant's own suicidal thoughts by reflex/);
+    expect(g).toMatch(/Do not lecture, moralise, argue or threaten consequences/);
+    expect(g).toMatch(/Only if harm seems imminent[^.]*\) say plainly that this is an emergency[^.]*911/);
+    expect(g).toMatch(/Do not give any help finding, approaching or harming the person/);
+    // An imminence question about the place ("are you on your way to where he
+    // parks?") read as help approaching him in 2 of 6 live runs.
+    expect(g).toMatch(/do not bring up the places the participant mentioned/);
+    expect(g).toMatch(/Do not end the session yourself\. Stay with them\./);
+    // It names no ladder tool and does not ask for the resource card.
+    expect(g).not.toMatch(/run_risk_check|show_resource_card/);
+  });
+});
+
+// On Grok voice the check-in is scored before the voice socket exists. The
+// flag and the page do not wait; the steer used to be lost.
+describe('a steer earned before the voice socket is open is delivered when it opens', () => {
+  const steerRows = (s: string) =>
+    logInterventionActionMock.mock.calls
+      .filter((c) => c[0] === s)
+      .map((c) => [c[1], c[2]] as [string, Record<string, unknown>]);
+
+  it('a high check-in with no live connection: the safety protocol is held, then delivered on socket ready', async () => {
+    const s = 'grok_checkin_high';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    sidebandManagerMock.isConnected.mockReturnValue(false);
+
+    await maybeSteerSession(s, 90, 'high');
+    await executeGraduatedResponse(s, 'high', 90);
+    expect(sidebandManagerMock.injectMessage).not.toHaveBeenCalled();
+
+    sidebandManagerMock.tryInject.mockResolvedValue(true);
+    expect(await deliverPendingSteer(s)).toBe(true);
+
+    // The protocol, not the lighter steer that was held first.
+    expect(sidebandManagerMock.tryInject).toHaveBeenCalledTimes(1);
+    expect(sidebandManagerMock.tryInject).toHaveBeenCalledWith(s, 'system', SAFETY_PROTOCOL_GUIDANCE, false);
+    const delivered = steerRows(s).find(([, d]) => d['deliveredOn'] === 'socket_ready');
+    expect(delivered).toBeDefined();
+    expect(delivered![0]).toBe('safety_protocol');
+    expect(delivered![1]).toMatchObject({ delivered: true, riskScore: 90 });
+    // Once: a second socket-ready (a reconnect) delivers nothing.
+    expect(await deliverPendingSteer(s)).toBe(false);
+    expect(sidebandManagerMock.tryInject).toHaveBeenCalledTimes(1);
+  });
+
+  it('a medium check-in: the ordinary steer is held and delivered', async () => {
+    const s = 'grok_checkin_medium';
+    sidebandManagerMock.isConnected.mockReturnValue(false);
+    await maybeSteerSession(s, 55, 'medium');
+    sidebandManagerMock.tryInject.mockResolvedValue(true);
+
+    expect(await deliverPendingSteer(s)).toBe(true);
+    expect((sidebandManagerMock.tryInject.mock.calls[0] as unknown[])[2]).toContain(
+      'Risk signals in this conversation are elevated',
+    );
+  });
+
+  it('a held steer for someone else at risk keeps its own text and subject', async () => {
+    const s = 'grok_checkin_third';
+    sidebandManagerMock.getActiveConnections.mockReturnValue([]);
+    await executeGraduatedResponse(s, 'high', 90, { thirdParty: true });
+    sidebandManagerMock.tryInject.mockResolvedValue(true);
+    await deliverPendingSteer(s);
+    expect(sidebandManagerMock.tryInject).toHaveBeenCalledWith(s, 'system', THIRD_PARTY_GUIDANCE, false);
+    expect(steerRows(s).find(([, d]) => d['deliveredOn'] === 'socket_ready')![1]).toMatchObject({
+      subject: 'third_party',
+    });
+  });
+
+  it('nothing held: nothing is injected (an ordinary session start)', async () => {
+    expect(await deliverPendingSteer('grok_plain')).toBe(false);
+    expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
+  });
+
+  it('a stale steer is dropped, not replayed into a later reconnect', async () => {
+    const s = 'grok_stale';
+    vi.useFakeTimers();
+    try {
+      sidebandManagerMock.isConnected.mockReturnValue(false);
+      await maybeSteerSession(s, 55, 'medium');
+      vi.advanceTimersByTime(PENDING_STEER_TTL_MS + 1000);
+      expect(await deliverPendingSteer(s)).toBe(false);
+      expect(sidebandManagerMock.tryInject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ending the session clears what was held', async () => {
+    const s = 'grok_ended';
+    sidebandManagerMock.isConnected.mockReturnValue(false);
+    await maybeSteerSession(s, 55, 'medium');
+    clearSteeringState(s);
+    expect(await deliverPendingSteer(s)).toBe(false);
+  });
+});
+
+// Voice-layer measurement (2026-11-19): GPT-Live's own filter cut the
+// assistant's screening question in 9 of 20 calm sessions when the guidance
+// led it to say "thoughts of ending your life" (25 of 67 asks), against 1 of
+// 43 asks when the question used the word "suicide".
+describe('the screening question is asked with the word "suicide"', () => {
+  it.each([
+    ['RISK_CHECK_REQUIRED_GUIDANCE', () => RISK_CHECK_REQUIRED_GUIDANCE],
+    ['SAFETY_PROTOCOL_GUIDANCE', () => SAFETY_PROTOCOL_GUIDANCE],
+    ['CHAT_SAFETY_PROTOCOL_GUIDANCE', () => CHAT_SAFETY_PROTOCOL_GUIDANCE],
+  ])('%s', (_name, text) => {
+    expect(text()).toMatch(/thoughts of suicide/);
+    expect(text()).toMatch(/use the word "suicide" when you ask/);
+    expect(text()).not.toMatch(/thoughts of ending their life/);
+  });
+
+  it("the requirement tells the model not to put words in the participant's mouth", () => {
+    expect(RISK_CHECK_REQUIRED_GUIDANCE).toMatch(
+      /Ask the question plainly\. Do not say or imply that the participant told you something they did not say, and do not describe their feelings for them\.$/,
+    );
   });
 });

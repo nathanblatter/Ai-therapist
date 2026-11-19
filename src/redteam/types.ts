@@ -1,5 +1,6 @@
 // Shared types for the scripted red-team safety harness (spec §3.1, §4).
 import type { EvalDimensionId } from '../server/services/sessionEval.service.js';
+import { riskSeverityForScore } from '../shared/riskBands.js';
 import type { KnownGap } from './knownGap.js';
 import type { ProgressionMetrics } from './progression.js';
 import type { CostBreakdown } from './config.js';
@@ -78,7 +79,7 @@ export const SEVERITY_RANK: Record<Severity, number> = { none: 0, low: 1, medium
 /** Map a 0-100 risk score to a band using the SAME thresholds as prod
  *  (crisisDetection.service.ts). */
 export function scoreToBand(score: number): Severity {
-  return score >= 75 ? 'high' : score >= 50 ? 'medium' : score >= 25 ? 'low' : 'none';
+  return riskSeverityForScore(score);
 }
 
 export interface Turn {

@@ -185,7 +185,7 @@ the per-session and per-crisis-event widgets.
   `--since` (default 90 days), not already queued. Stratum =
   `modality|risk_band|ISO-week` where modality is `voice` (realtime) or
   `chat`, risk band is `none` / `low` (>= 25) / `moderate` (>= 50) / `high`
-  (>= 75) over `max(crisis_risk_score, max(risk_score_history))`, and the week
+  (>= 65 since 2026-11-18, `src/shared/riskBands.ts`; 75 before) over `max(crisis_risk_score, max(risk_score_history))`, and the week
   is from `ended_at`. Allocation: every non-empty stratum gets one slot
   first, the rest is split by weight (1 per session, x3 for crisis-adjacent =
   flagged, has a crisis event, or peak band >= moderate) with largest
@@ -352,7 +352,7 @@ no adjudication notes.
   today every run renders that way (0 adjudications).
 - Metrics: precision / recall / F1 at every threshold on a 0..100 step-5 grid
   (score >= threshold predicts positive), performance at the live bands
-  (25 / 50 / 75), an F1-maximising threshold per layer next to the medium
+  (25 / 50 / 65; high was 75 until 2026-11-18), an F1-maximising threshold per layer next to the medium
   band, and a layer-agreement matrix (pairwise Cohen's kappa with each layer
   binarised at >= 50, over messages where both layers have a value; needs no
   labels so it is always reported).
@@ -362,7 +362,8 @@ no adjudication notes.
   same assessor prompt and model (`assessRiskOffline`, via `withFlex`; the
   default gpt-4o-mini is not flex-eligible so it runs on the default tier)
   from `content_redacted` plus up to 10 preceding redacted turns. Reports the
-  fraction that would now score >= 50 and >= 75, per stratum, with token
+  fraction that would now score >= 50 and >= 75 (fixed cut points of the
+  archived report format, not the bands: what pages today is >= 65), per stratum, with token
   usage and spend under a hard cap of USD 0.50 per run (the run stops early
   and says so). `--dry-run` / `dry_run` prints the sampled ids and makes no
   calls. Raw `content` is never read.

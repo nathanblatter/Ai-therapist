@@ -1497,6 +1497,64 @@ describe('what the page says (review wording)', () => {
   });
 });
 
+// Review of PR 65 with PR 64: who a page is about is part of what it says.
+describe('a page about someone else does not absorb a page about the participant (PR 65 subjects)', () => {
+  it("REPRODUCTION: third-party page at 95 (critical), then the participant's own 75 two minutes later: both are texted", async () => {
+    const s = session('s1', 7);
+    flag(s, 'high', 95);
+    const first = await pageHighRisk(s, 95, { subject: 'third_party' });
+    expect(first.outcome).toBe('paged');
+    expect(texts()[0]).toMatch(/^URGENT: AI-Therapist HIGH crisis flag \(third party\)\nTHIRD PARTY AT RISK: /);
+    expect(texts()[0]).toMatch(/RISK SCORE 95\/100 from what the participant reported about someone else\./);
+    expect(paging(rowsOf('paged')[0])).toMatchObject({ subject: 'third_party' });
+
+    at(2 * MIN);
+    const own = await pageHighRisk(s, 75);
+    expect(own.outcome).toBe('paged');
+    expect(texts()[1]).toMatch(
+      /^URGENT: AI-Therapist HIGH crisis flag\nPARTICIPANT'S OWN RISK: the earlier page was about someone else/,
+    );
+    expect(texts()[1]).not.toMatch(/ESCALATED|up from/);
+    expect(paging(rowsOf('paged')[1])).toMatchObject({ subject: 'own' });
+  });
+
+  it('own risk first, then credible intent to harm someone: the risk-to-others page goes out, labelled, not as an escalation', async () => {
+    const s = session('s1', 7);
+    flag(s, 'high', 80);
+    await pageHighRisk(s, 80);
+    at(MIN);
+    const other = await pageHighRisk(s, 95, { subject: 'harm_to_others' });
+    expect(other.outcome).toBe('paged');
+    expect(texts()[1]).toMatch(/^URGENT: AI-Therapist HIGH crisis flag \(risk to others\)\nRISK TO OTHERS: /);
+    expect(texts()[1]).not.toMatch(/ESCALATED|up from 80/);
+  });
+
+  it('a repeat about the same person still folds', async () => {
+    const s = session('s1', 7);
+    flag(s, 'high', 90);
+    await pageHighRisk(s, 90, { subject: 'third_party' });
+    at(MIN);
+    expect((await pageHighRisk(s, 92, { subject: 'third_party' })).outcome).toBe('folded');
+    expect(paging(rowsOf('folded')[0])).toMatchObject({ subject: 'third_party' });
+    expect(sendCrisisAlertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('pageCovers: same subject only, for risk pages; rows written before subjects existed count as own', () => {
+    const prior = { at: T0, level: PAGE_LEVEL.critical, kinds: ['risk' as const] };
+    const now = T0 + MIN;
+    expect(pageCovers({ ...prior, subject: 'third_party' }, { kind: 'risk', level: PAGE_LEVEL.high }, now)).toBe(false);
+    expect(
+      pageCovers(
+        { ...prior, subject: 'third_party' },
+        { kind: 'risk', level: PAGE_LEVEL.high, subject: 'third_party' },
+        now,
+      ),
+    ).toBe(true);
+    expect(pageCovers(prior, { kind: 'risk', level: PAGE_LEVEL.high }, now)).toBe(true);
+    expect(pageCovers(prior, { kind: 'risk', level: PAGE_LEVEL.high, subject: 'harm_to_others' }, now)).toBe(false);
+  });
+});
+
 describe('the last line of defence: an unexpected error inside the policy still pages', () => {
   // A history row that is not a row at all makes the decision itself throw,
   // past every inner guard. Both entry points then send directly.

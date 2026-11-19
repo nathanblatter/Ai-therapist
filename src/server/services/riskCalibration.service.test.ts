@@ -197,7 +197,8 @@ describe('precision / recall / F1', () => {
     const bands = computeBandPerformance(pairs);
     expect(bands.low).toMatchObject({ threshold: 25, tp: 3, fp: 2, precision: 0.6, recall: 0.75 });
     expect(bands.medium.threshold).toBe(50);
-    expect(bands.high).toMatchObject({ threshold: 75, tp: 1, fp: 0, precision: 1, recall: 0.25, f1: 0.4 });
+    // High is 65 since 2026-11-18 (src/shared/riskBands.ts); only the 90 clears it, as at 75.
+    expect(bands.high).toMatchObject({ threshold: 65, tp: 1, fp: 0, precision: 1, recall: 0.25, f1: 0.4 });
   });
 });
 
@@ -471,7 +472,8 @@ describe('report assembly', () => {
     const composite = r.layers.find((l) => l.key === 'composite')!;
     expect(composite.n).toBe(19);
     expect(composite.grid).toHaveLength(THRESHOLD_GRID.length);
-    expect(composite.bands!.high).toMatchObject({ tp: 1, fp: 0, fn: 5 }); // only risk 75 clears the high band
+    // Risk 70 to 75 all clear the high band now that it starts at 65 (only 75 did when it started at 75).
+    expect(composite.bands!.high).toMatchObject({ tp: 6, fp: 0, fn: 0 });
     expect(composite.bands!.medium).toMatchObject({ tp: 6, fp: 3, fn: 0 });
     // LLM layer: only the 9 event rows carry a score -> 6 positives, 3 negatives: not enough negatives.
     const llm = r.layers.find((l) => l.key === 'llm')!;

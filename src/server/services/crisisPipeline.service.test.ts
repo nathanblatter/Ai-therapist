@@ -53,12 +53,18 @@ vi.mock('./crisisIntervention.service.js', () => ({
   maybeRequireRiskCheck: maybeRequireRiskCheckMock,
   executeGraduatedResponse: executeGraduatedResponseMock,
   CHAT_SAFETY_PROTOCOL_GUIDANCE: 'CHAT_HIGH_GUIDANCE',
+  subjectGuidance: () => null,
+  subjectLabel: () => null,
 }));
 vi.mock('../db/index.js', () => ({
   getRecentSessionMessages: getRecentSessionMessagesMock,
   getSessionCrisisState: getSessionCrisisStateMock,
+  // No automatic high flag on record about anyone: the level rule decides.
+  getSessionHighFlagSubjects: vi.fn(async () => []),
   isDemoAccountSession: isDemoAccountSessionMock,
   getSessionAccessInfo: getSessionAccessInfoMock,
+  // No pre-session check-in in these tests (see crisisPipeline.thirdPartyCheckin.test.ts).
+  getSessionCheckin: vi.fn(async () => null),
   recordRecoveryDisclosure: recordRecoveryDisclosureMock,
   incidentHasCrisisAdverseEvent: incidentHasCrisisAdverseEventMock,
   // Transitive imports of utils/adminBroadcast.js:
@@ -66,7 +72,12 @@ vi.mock('../db/index.js', () => ({
   getCaseworkerIdsForClient: vi.fn(async () => []),
 }));
 vi.mock('./workQueue.service.js', () => ({ enqueueWorkItem: enqueueWorkItemMock }));
-vi.mock('./crisisPaging.service.js', () => ({ pageHighRisk: pageHighRiskMock }));
+// The real level rule and constants (riskPageLevel, PAGE_LEVEL,
+// REPAGE_ON_STATED_TIME_OR_PLAN); only the page itself is a mock.
+vi.mock('./crisisPaging.service.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./crisisPaging.service.js')>()),
+  pageHighRisk: pageHighRiskMock,
+}));
 vi.mock('./adverseEvent.service.js', () => ({ draftAdverseEventFromCrisis: draftAdverseEventFromCrisisMock }));
 
 const { runCrisisPipeline, handleHighTurnWithoutReflag, RECOVERY_DISCLOSURE_RECORD_TIMEOUT_MS } = await import(
@@ -271,6 +282,63 @@ describe('a high turn the re-flag rule let pass (handleHighTurnWithoutReflag)', 
     await handleHighTurnWithoutReflag(TURN, HIGH, 'realtime');
     await settle();
     expect(draftAdverseEventFromCrisisMock).toHaveBeenCalledWith('chat_1');
+  });
+
+  // PR 65 with PR 70: the rule that a critical turn without a re-flag always
+  // asks for a page lives here now, and holds when a REAL high flag exists.
+  it('a real high flag and a turn at 90 or more: a page is requested (the fold rule decides), nothing is written', async () => {
+    await handleHighTurnWithoutReflag(TURN, { riskScore: 95, factors: ['attempt'] }, 'realtime');
+    await settle();
+    expect(pageHighRiskMock).toHaveBeenCalledTimes(1);
+    expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 95, { trigger: 'critical_turn_without_reflag' });
+    expect(logInterventionActionMock).not.toHaveBeenCalled();
+    expect(draftAdverseEventFromCrisisMock).not.toHaveBeenCalled();
+  });
+
+  it('a real high flag and an attempt in progress scored below 90: still requested, with what it says', async () => {
+    await handleHighTurnWithoutReflag(TURN, { riskScore: 85, factors: [], acute: 'attempt' }, 'realtime');
+    await settle();
+    expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 85, {
+      escalation: 'attempt',
+      trigger: 'critical_turn_without_reflag',
+    });
+  });
+
+  it('a real high flag and a stated time or plan below 90: requested (REPAGE_ON_STATED_TIME_OR_PLAN)', async () => {
+    await handleHighTurnWithoutReflag(TURN, { riskScore: 85, factors: [], acute: 'plan_or_time' }, 'realtime');
+    await settle();
+    expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 85, {
+      escalation: 'plan_or_time',
+      trigger: 'stated_plan_without_reflag',
+    });
+  });
+
+  it('who the turn is about goes into the page, the record, the dashboard, the work item and the draft', async () => {
+    recordRecoveryDisclosureMock.mockResolvedValue(recordedAs);
+    const THIRD = 'third party at risk (reported by participant)';
+    await handleHighTurnWithoutReflag(
+      TURN,
+      { riskScore: 90, factors: [THIRD, 'stated intent'], subject: 'third_party', acute: 'plan_or_time' },
+      'realtime',
+    );
+    await settle();
+
+    // The crisis event carries the subject through its factors (the label first).
+    expect(recordRecoveryDisclosureMock).toHaveBeenCalledWith(
+      expect.objectContaining({ factors: [THIRD, 'stated intent'] }),
+    );
+    expect(pageHighRiskMock).toHaveBeenCalledWith('chat_1', 90, {
+      subject: 'third_party',
+      escalation: 'plan_or_time',
+      trigger: 'high_turn_in_recovery_session',
+    });
+    expect(logInterventionActionMock).toHaveBeenCalledWith(
+      'chat_1',
+      'auto_flag',
+      expect.objectContaining({ recoveryDisclosure: true, subject: 'third_party', escalation: 'plan_or_time' }),
+    );
+    expect(draftAdverseEventFromCrisisMock).toHaveBeenCalledWith('chat_1', { subject: 'third_party' });
+    expect(enqueueWorkItemMock.mock.calls[0][0].title).toContain('third party at risk');
   });
 
   it('a session with a real high flag: nothing is written, paged or drafted (no duplicates)', async () => {

@@ -166,7 +166,9 @@ describe('crisis scenario group: premises', () => {
   it('slang: each form runs alone; the misspelled keyword and the shorthand forms trip no keyword', () => {
     expect(CRISIS_SLANG_SCENARIOS).toHaveLength(7);
     for (const s of CRISIS_SLANG_SCENARIOS) expect(s.beats).toHaveLength(1);
-    const zero = ['kms', 'unalive', 'end-it-all', 'ctb', 'want-out'];
+    // "unaliving myself" is a keyword since the word-form fix; the others
+    // reach the assessor as slang context signals or through moderation.
+    const zero = ['kms', 'end-it-all', 'ctb', 'want-out'];
     for (const [key, text] of SLANG_LINES) {
       if (zero.includes(key)) expect(detectCrisisKeywords(text).keywordScore, text).toBe(0);
     }

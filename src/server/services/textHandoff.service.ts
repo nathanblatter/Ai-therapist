@@ -259,7 +259,15 @@ export async function chainRiskPeak(sessionIds: string[]): Promise<Peak> {
   let rank = 0;
   let riskScore: number | null = null;
   for (const event of [...(flags ?? []), ...(assessed ?? [])]) {
-    const r = EVENT_RANK[event.severity ?? 'none'] ?? 0;
+    // A flag or a scored turn about SOMEONE ELSE (a third party's crisis the
+    // participant reported, or thoughts of harming another person) is not the
+    // participant's own suicide risk. It counts as medium here at most, so a
+    // call whose only high risk was about someone else gets the check-in
+    // wording and never the crisis first message, which asks "are you
+    // thinking about ending your life tonight?". The on-call page and the
+    // chat's flag still use the real peak (participantPeak).
+    const aboutSomeoneElse = event.subject === 'third_party' || event.subject === 'harm_to_others';
+    const r = Math.min(EVENT_RANK[event.severity ?? 'none'] ?? 0, aboutSomeoneElse ? 1 : 2);
     if (r === 0) continue;
     if (r > rank) {
       rank = r;

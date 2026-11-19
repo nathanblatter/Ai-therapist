@@ -110,6 +110,27 @@ describe('draftAdverseEventFromCrisis', () => {
     expect(input.participantRef).toBe('user 42');
   });
 
+  // A high flag about someone else still drafts (a reviewer decides whether it
+  // is reportable for this participant); the draft must say whom it was about.
+  it.each([
+    ['third_party', /^SUBJECT: THIRD PARTY AT RISK\. .*not about the participant's own risk/],
+    ['harm_to_others', /^SUBJECT: RISK TO OTHERS\. .*not a suicide or self-harm flag/],
+  ] as const)('labels a draft whose flag was about %s, and still drafts it', async (subject, opening) => {
+    const id = await draftAdverseEventFromCrisis('sess-1', { subject });
+    expect(id).toBe(101);
+    const input = insertAdverseEventDraftMock.mock.calls[0][0];
+    expect(input.summary).toMatch(opening);
+    expect(input.summary).toContain('Auto-drafted from high-severity crisis flag');
+    expect(input.triggerSource).toBe('auto_crisis_flag');
+  });
+
+  it("a draft for the participant's own risk carries no subject line", async () => {
+    await draftAdverseEventFromCrisis('sess-1');
+    expect(insertAdverseEventDraftMock.mock.calls[0][0].summary).toMatch(
+      /^Auto-drafted from high-severity crisis flag/,
+    );
+  });
+
   it('only redacts messages that lack a stored redacted form', async () => {
     await draftAdverseEventFromCrisis('sess-1');
     // Just the assistant message (no content_redacted) is sent to redactPHIBatch.

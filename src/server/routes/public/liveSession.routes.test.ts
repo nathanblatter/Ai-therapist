@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   connectAndWait: vi.fn(),
   upstreamFetch: vi.fn(),
   systemConfig: {} as Record<string, unknown>,
+  checkin: null as Record<string, unknown> | null,
+  runCheckinCrisisScreen: vi.fn(),
 }));
 
 vi.mock('../../db/index.js', () => dbMocks);
@@ -42,7 +44,7 @@ vi.mock('../../utils/sessionHelpers.js', () => ({
 }));
 vi.mock('../../utils/sessionOwnership.js', () => ({ recordSessionOwnership: vi.fn() }));
 vi.mock('../../utils/promptContext.js', () => ({
-  sanitizeCheckin: () => null,
+  sanitizeCheckin: () => mocks.checkin,
   buildCheckinBlock: () => '',
   buildParticipantContextBlock: async () => '',
   buildToolGuidanceBlock: () => '',
@@ -69,6 +71,7 @@ vi.mock('../../services/toolRegistry.service.js', () => ({
 vi.mock('../../utils/harness.js', () => ({ isNonStudyUser: () => false }));
 vi.mock('../../utils/safetyIdentifier.js', () => ({ isIdentifierBlockedError: () => false }));
 vi.mock('../../services/crisisAlert.service.js', () => ({ reportOpenAIQuotaExhausted: mocks.reportQuota }));
+vi.mock('../../services/crisisPipeline.service.js', () => ({ runCheckinCrisisScreen: mocks.runCheckinCrisisScreen }));
 
 const { default: liveSessionRoutes, PROVIDER_UNAVAILABLE_BODY } = await import('./liveSession.routes.js');
 
@@ -96,6 +99,8 @@ beforeEach(() => {
   mocks.connectAndWait.mockReset().mockResolvedValue(undefined);
   mocks.upstreamFetch.mockReset();
   mocks.systemConfig = {};
+  mocks.checkin = null;
+  mocks.runCheckinCrisisScreen.mockReset().mockResolvedValue({ riskScore: 0 });
   // supertest talks to the app over a real socket; only the upstream fetch is stubbed.
   vi.stubGlobal('fetch', mocks.upstreamFetch);
 });
@@ -303,5 +308,56 @@ describe('POST /api/live/session recovery speak-first', () => {
     mocks.upstreamFetch.mockResolvedValue(healthy());
     await start().expect(201);
     expect(mintedSession()).not.toHaveProperty('input');
+  });
+});
+
+// The pre-session check-in goes through the crisis pipeline at session start
+// (PR 65). On GPT-Live that is after the sideband attach, so a steer has a
+// socket to travel on.
+describe('POST /api/live/session with a check-in', () => {
+  const healthy = () => upstream(200, { session: { id: 'sess_live_ci' }, transport: { sdp: 'answer' } });
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  it('sends the check-in through the crisis pipeline on the realtime channel, after the sideband is attached', async () => {
+    mocks.checkin = { mood: 1, topic: "I don't really want to be alive" };
+    const order: string[] = [];
+    mocks.connectAndWait.mockImplementation(async () => {
+      order.push('attached');
+    });
+    mocks.runCheckinCrisisScreen.mockImplementation(async () => {
+      order.push('screened');
+      return { riskScore: 55 };
+    });
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+
+    await start().expect(201);
+    await settle();
+
+    expect(mocks.runCheckinCrisisScreen).toHaveBeenCalledTimes(1);
+    expect(mocks.runCheckinCrisisScreen).toHaveBeenCalledWith('sess_live_ci', mocks.checkin, 'realtime');
+    expect(order).toEqual(['attached', 'screened']);
+  });
+
+  it('no check-in: the pipeline is not called', async () => {
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    await settle();
+    expect(mocks.runCheckinCrisisScreen).not.toHaveBeenCalled();
+  });
+
+  it('a recovery start does not re-score a check-in', async () => {
+    mocks.checkin = { topic: 'anything' };
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await request(makeApp()).post('/api/live/session').send({ sdp: 'v=0 offer', recovery: true }).expect(201);
+    await settle();
+    expect(mocks.runCheckinCrisisScreen).not.toHaveBeenCalled();
+  });
+
+  it('a failing screen never fails the session start', async () => {
+    mocks.checkin = { topic: 'anything' };
+    mocks.runCheckinCrisisScreen.mockRejectedValue(new Error('pipeline down'));
+    mocks.upstreamFetch.mockResolvedValue(healthy());
+    await start().expect(201);
+    await settle();
   });
 });

@@ -13,6 +13,7 @@ import {
   type RatingQueueSource,
 } from '../db/index.js';
 import { getSystemConfig } from '../utils/sessionHelpers.js';
+import { RISK_BANDS } from '../../shared/riskBands.js';
 
 export const DEFAULT_SECOND_RATER_FRACTION = 0.2;
 /** Weight multiplier for crisis-adjacent sessions in the allocation. */
@@ -22,12 +23,12 @@ export const DEFAULT_SAMPLE_SINCE_DAYS = 90;
 export type RiskBand = 'none' | 'low' | 'moderate' | 'high';
 export type Modality = 'voice' | 'chat';
 
-/** Risk bands mirror the crisis-pipeline thresholds (>= 25 / 50 / 75). */
+/** Risk bands mirror the crisis-pipeline thresholds (src/shared/riskBands.ts). */
 export function riskBand(maxRiskScore: number | null | undefined): RiskBand {
   const s = Number(maxRiskScore) || 0;
-  if (s >= 75) return 'high';
-  if (s >= 50) return 'moderate';
-  if (s >= 25) return 'low';
+  if (s >= RISK_BANDS.high) return 'high';
+  if (s >= RISK_BANDS.medium) return 'moderate';
+  if (s >= RISK_BANDS.low) return 'low';
   return 'none';
 }
 

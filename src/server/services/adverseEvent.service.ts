@@ -55,7 +55,24 @@ async function buildRedactedExcerpt(sessionId: string): Promise<string | null> {
 interface DraftOptions {
   triggerSource?: 'auto_crisis_flag' | 'manual';
   createdBy?: string;
+  /** Who the high flag that triggered an auto-draft was about, when it was not
+   *  the participant's own risk. The draft is still written (a reviewer
+   *  decides whether it is a reportable event for this participant); its
+   *  summary says so, so it is not read as the participant's own crisis. */
+  subject?: 'third_party' | 'harm_to_others' | null;
 }
+
+/** First sentence of an auto-draft's summary when the flag was about someone else. */
+export const AE_SUBJECT_NOTE: Record<'third_party' | 'harm_to_others', string> = {
+  third_party:
+    'SUBJECT: THIRD PARTY AT RISK. The high flag was raised because the participant reported someone ELSE in ' +
+    "crisis; it was not about the participant's own risk. Decide whether this is a reportable event for this " +
+    'participant.',
+  harm_to_others:
+    'SUBJECT: RISK TO OTHERS. The high flag was raised because the participant described thoughts of harming ' +
+    'another person; it was not a suicide or self-harm flag. Decide whether this is a reportable event and ' +
+    'whether the protocol requires anything further.',
+};
 
 /**
  * Auto-draft (or manually draft) an AE report from a session's latest crisis.
@@ -137,7 +154,8 @@ export async function draftAdverseEventFromCrisis(sessionId: string, opts: Draft
     const summary =
       triggerSource === 'manual'
         ? `Manually filed adverse-event report at ${new Date().toISOString()}. Review and complete.`
-        : `Auto-drafted from high-severity crisis flag at ${occurredAt.toISOString()}, risk score ${snapshot.crisis_risk_score ?? 'n/a'}. Review and complete.`;
+        : (opts.subject ? `${AE_SUBJECT_NOTE[opts.subject]} ` : '') +
+          `Auto-drafted from high-severity crisis flag at ${occurredAt.toISOString()}, risk score ${snapshot.crisis_risk_score ?? 'n/a'}. Review and complete.`;
 
     const reportId = await insertAdverseEventDraft({
       sessionId,

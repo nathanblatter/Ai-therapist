@@ -296,7 +296,10 @@ describe('analyzeMessageRisk (two-stage pipeline)', () => {
       { content: "I can't go on like this", session_id: 'sess-traj', message_id: 1 },
       [],
     );
-    expect(r.riskScore).toBe(70); // 55 + 15 deteriorating-trend bonus
+    // 55 + 15 would be 70, which is over the page line (65): the bonus is
+    // applied but may not carry a turn across it by itself (ai-therapist-357).
+    expect(r.riskScore).toBe(64);
+    expect(r.severity).toBe('medium');
     expect(r.factors).toContain('trajectory: deteriorating');
     expect(r.breakdown.trajectory).toBe(15);
   });
@@ -486,6 +489,32 @@ describe('flagSessionCrisis → adverse-event auto-draft hook', () => {
     // The draft is fire-and-forget after COMMIT; let the microtask run.
     await new Promise((r) => setTimeout(r, 0));
     expect(draftAeMock).toHaveBeenCalledWith('sess-hi');
+  });
+
+  it('passes on whom the flag was about, so the draft is labelled', async () => {
+    await flagSessionCrisis(
+      'sess-3p',
+      'high',
+      90,
+      'system',
+      'auto',
+      1,
+      ['third party at risk (reported by participant)', 'stated intent'],
+      null,
+    );
+    await flagSessionCrisis(
+      'sess-harm',
+      'high',
+      85,
+      'system',
+      'auto',
+      1,
+      ['risk to others (thoughts of harming another person)'],
+      null,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(draftAeMock).toHaveBeenCalledWith('sess-3p', { subject: 'third_party' });
+    expect(draftAeMock).toHaveBeenCalledWith('sess-harm', { subject: 'harm_to_others' });
   });
 
   it('does NOT schedule an AE draft on medium or low flags', async () => {

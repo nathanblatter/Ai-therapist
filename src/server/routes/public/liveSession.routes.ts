@@ -579,6 +579,17 @@ export default function liveSessionRoutes(): Router {
                 ),
           );
           scheduleLiveOpeningFallback(sessionId);
+
+          // The check-in's free text goes through the crisis pipeline as a
+          // first participant turn would (score, flag, page, steer); until now
+          // it only reached the prompt. After the attach, so a steer has a
+          // sideband to travel on; not awaited, so it never delays or fails
+          // the start. The pipeline itself never throws.
+          if (checkin && !isRecovery) {
+            void import('../../services/crisisPipeline.service.js')
+              .then((m) => m.runCheckinCrisisScreen(sessionId, checkin, 'realtime'))
+              .catch((err) => log.error({ err }, 'check-in crisis screen failed'));
+          }
         }
 
         // `limitCheck.allowed` narrows the union: the denied variants carry no

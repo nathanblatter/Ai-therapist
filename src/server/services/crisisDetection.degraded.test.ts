@@ -254,7 +254,9 @@ describe('moderation wake-up when the assessor is down', () => {
     createMock.mockRejectedValue(makeError());
     const r = await settle(analyzeMessageRisk(turn('unusual phrasing with no screen keywords at all'), []));
     expect(r.riskScore).toBe(70);
-    expect(r.severity).toBe('medium');
+    // High since the cutoff moved from 75 to 65 (2026-11-18): with the
+    // assessor down, a moderation self-harm score of 65 to 74 now pages.
+    expect(r.severity).toBe('high');
     expect(historyFactors()).toMatchObject({ method: 'keyword_fallback', moderation_score: 70 });
     expect(historyFactors()).not.toHaveProperty('moderation_unavailable');
   });
