@@ -10,7 +10,13 @@
 // - a forbidden tool gates everywhere (it is application state, not style);
 // - latency, silence and vendor-cut timing are measurements, never gates.
 import type { AssertionResult, DbLike, Scenario, Turn } from '../types.js';
-import { computeRunMetrics, RESPONSE_DEADLINE_MS, type RunMetrics, type TurnFacts } from './metrics.js';
+import {
+  computeRunMetrics,
+  RESPONSE_DEADLINE_MS,
+  type DelegationFallback,
+  type RunMetrics,
+  type TurnFacts,
+} from './metrics.js';
 import type { Timeline } from './timeline.js';
 
 export interface FinishInput {
@@ -32,6 +38,22 @@ export async function executedTools(pool: DbLike, segments: string[]): Promise<s
     [segments],
   );
   return rows.map((r) => String(r.name ?? '')).filter(Boolean);
+}
+
+/** Delegations the server gave its fallback to instead of an answer, per segment. */
+export async function delegationFallbacks(pool: DbLike, segments: string[]): Promise<DelegationFallback[]> {
+  if (segments.length === 0) return [];
+  const { rows } = await pool.query(
+    `SELECT session_id, action_details->>'reason' AS reason, (action_details->>'afterMs')::float8 AS after_ms
+       FROM intervention_actions
+      WHERE session_id = ANY($1) AND action_details->>'event' = 'delegation_fallback' ORDER BY performed_at`,
+    [segments],
+  );
+  return rows.map((r) => ({
+    sessionId: String(r.session_id),
+    reason: String(r.reason ?? ''),
+    afterMs: r.after_ms == null ? null : Number(r.after_ms),
+  }));
 }
 
 export async function readConsumption(
@@ -131,6 +153,16 @@ export function evalAssertions(scenario: Scenario, metrics: RunMetrics, executed
         `participant finished speaking; crisis line ${c.crisisLineAfterCut ? 'named' : 'not named'} by the recovery`,
     });
   }
+  // A measurement, like the cut timing: the participant got "I could not get
+  // that answer" instead of the answer. Recorded so a run report shows it.
+  for (const f of metrics.delegationFallbacks ?? []) {
+    out.push({
+      id: `voice-delegation-fallback:${f.sessionId.slice(-6)}`,
+      passed: false,
+      gating: false,
+      detail: `a delegation got the server's fallback instead of an answer (${f.reason}) ${ms(f.afterMs)} after it started`,
+    });
+  }
   return out;
 }
 
@@ -148,5 +180,6 @@ export async function finishLiveEval(
     frontendSecondsFallback: consumption.seconds,
   });
   metrics.toolsExecuted = executed;
+  metrics.delegationFallbacks = await delegationFallbacks(input.pool, input.segments).catch(() => []);
   return { metrics, assertions: evalAssertions(input.scenario, metrics, executed) };
 }

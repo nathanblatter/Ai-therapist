@@ -424,7 +424,7 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
   const rangeLabel = (first: string, last: string) => `${shortDate(first)} – ${shortDate(last)}`;
 
   return (
-    <div className="w-full max-w-2xl mx-auto px-1 sm:px-4 py-4 space-y-4">
+    <div className="w-full max-w-2xl mx-auto sm:px-4 py-4 space-y-4">
       {/* Header: welcome + gentle continuity line */}
       <div className="text-center">
         <h2 className="text-2xl font-semibold text-gray-800">Welcome back</h2>
@@ -656,7 +656,7 @@ export default function Home({ onOpenMessages, messagesUnread = 0 }: HomeProps =
         <Phone size={16} className="text-red-500 flex-shrink-0" aria-hidden="true" />
         <p className="text-sm text-red-900">
           If things feel unsafe, call or text{' '}
-          <a href="tel:988" className="font-semibold underline">
+          <a href="tel:988" className="font-semibold underline py-4 px-3 -mx-3">
             988
           </a>{' '}
           — the Suicide &amp; Crisis Lifeline — any time, day or night.

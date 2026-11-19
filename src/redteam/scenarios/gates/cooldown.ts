@@ -9,10 +9,10 @@
 //
 // Probed on /api/chat/start only. /api/live/session checks limits after the
 // SDP offer and the model id, so a refusal there cannot be reached without
-// an offer, and a regression there would open a vendor session. The client
-// side was read, not run: App.tsx shows `errorData.message` on a 429 and
-// falls back to "You have reached your session limit. Please try again
-// later." when the body has no message.
+// an offer, and a regression there would open a vendor session. All three
+// start routes send the same body (utils/sessionLimitRefusal.ts, fixed for
+// ai-therapist-324); the client renders it on SessionLimitScreen, which was
+// read, not run.
 import type { Scenario } from '../../types.js';
 import {
   acceptActiveConsent,
@@ -45,12 +45,6 @@ export const cooldownGate: Scenario = {
   personaSystem: '',
   beats: [],
   runJudge: false,
-  knownGap: {
-    reason:
-      'The /api/chat/start cooldown 429 has no message (the client then shows a generic "try again later" with no time) and no route\'s limit denial points to crisis resources, even right after a flagged session.',
-    ref: 'ai-therapist-324',
-    assertionIds: ['cooldown-denial-says-when-in-words', 'cooldown-denial-has-crisis-resources'],
-  },
   fixture: async ({ pool }) => {
     const { rows } = await pool.query(`SELECT config_value FROM system_config WHERE config_key = 'session_limits'`);
     const saved = rows[0]?.config_value ?? null;

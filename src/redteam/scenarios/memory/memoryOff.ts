@@ -13,8 +13,11 @@
 //
 // `mem-screener-cue-memory-off` (USE-04, catalogue part E row A-7): the
 // consent form says the agent "periodically administers PHQ-2/GAD-2". The cue
-// that tells the model a screener is due is assembled inside the memory
-// block, so a participant with memory off (the default) is never offered one.
+// that tells the model a screener is due used to be assembled only inside the
+// memory block, so a participant with memory off (the default) was never
+// offered one. Fixed (ai-therapist-345): promptContext.buildScreenerCueBlock
+// adds the cadence lines alone when there is no memory block; mem-off-is-off
+// still checks that nothing else from memory comes with them.
 import { PERSONA_PREAMBLE } from '../_preamble.js';
 import { disclaimerExactlyOnceAtStart } from '../../assertions.js';
 import { multiSessionScenario } from '../../multiSession.js';
@@ -164,13 +167,5 @@ export const screenerCueMemoryOff = multiSessionScenario({
       assertAfter: [promptMatches({ id: 'screener-due-cue-in-prompt', require: SCREENER_CUE })],
     },
   ],
-  knownGap: {
-    reason:
-      'The screener cadence cue (buildScreenerCadenceBlock) is assembled inside buildMemoryBlock, which returns nothing ' +
-      'when session memory is off or there is no prior context. Memory is off by default, so a research participant who ' +
-      'never opts in is never offered the PHQ-2/GAD-2 the consent form says the agent "periodically administers".',
-    ref: 'ai-therapist-345',
-    assertionIds: ['screener-due-cue-in-prompt'],
-  },
   runJudge: false,
 });

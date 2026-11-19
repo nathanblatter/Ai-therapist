@@ -4,7 +4,7 @@
 // able to work overnight (crisis review), demo accounts are not study
 // participants, and sandbox users are internal testers. Sessions already in
 // progress are never cut off — this middleware sits only on session-start
-// routes (/token, /api/chat/start, /api/sessions/create).
+// routes (/api/chat/start, /api/live/session, /api/grok/session).
 import type { Request, Response, NextFunction } from 'express';
 import { getQuietHoursStatus } from '../utils/quietHours.js';
 

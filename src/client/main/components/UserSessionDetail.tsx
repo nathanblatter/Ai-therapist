@@ -54,9 +54,9 @@ export default function UserSessionDetail({ sessionId, onClose }: UserSessionDet
   const formatTime = timeLabel;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white w-full max-w-4xl h-5/6 rounded-lg shadow-xl flex flex-col">
-        <header className="bg-navy text-white p-4 flex justify-between items-start rounded-t-lg">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 sm:p-4">
+      <div className="bg-white w-full max-w-4xl h-full sm:h-5/6 sm:rounded-lg shadow-xl flex flex-col sheet-safe-bottom">
+        <header className="bg-navy text-white p-4 pt-[max(1rem,env(safe-area-inset-top))] sm:pt-4 flex justify-between items-start sm:rounded-t-lg">
           <div className="flex-1">
             <h2 className="text-xl font-bold">{session?.session_name || 'Session Details'}</h2>
             <p className="text-xs text-gray-300 mt-1 font-mono">{sessionId}</p>
