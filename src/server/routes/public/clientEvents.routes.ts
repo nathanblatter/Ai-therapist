@@ -32,6 +32,13 @@ export const CLIENT_EVENT_KINDS = [
   // The browser refused to start the assistant's audio (ai-therapist-348): the
   // participant hears nothing until a touch lets the retry through.
   'audio_play_refused',
+  // End of a voice session (ai-therapist-372). audio_upload_summary: per-track
+  // counts of chunks sent, retried, lost, dropped and undelivered, numbers
+  // only. mic_timeline: when the participant's mic was on or muted, as offsets
+  // into participant.wav, so prosody analysis can tell muted stretches from
+  // pauses and a muted session from lost audio.
+  'audio_upload_summary',
+  'mic_timeline',
   // Sideband attach failures (ai-therapist-195). Without a sideband a realtime
   // session has no live monitoring and no crisis de-escalation steering, so
   // these are safety-relevant, not just diagnostics.

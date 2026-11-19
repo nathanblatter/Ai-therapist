@@ -1,8 +1,17 @@
 import { pool } from '../config/db.js';
-import { logInterventionAction, type CrisisSubject } from './crisisDetection.service.js';
+import { logInterventionAction, type AcuteStage, type CrisisSubject } from './crisisDetection.service.js';
 import { broadcastAdminEventForSession } from '../utils/adminBroadcast.js';
 import { trackBackground } from '../utils/backgroundWork.js';
 import { emitCrisisResources, clearCrisisResourceState } from './crisisResources.js';
+import {
+  HEADS_UP_TRIGGER_REQUESTED,
+  VOICE_HEADS_UP_GUIDANCE,
+  clearVoiceHeadsUp,
+  VOICE_HEADS_UP_STEER,
+  markVoiceHeadsUpRequested,
+  voiceHeadsUpDue,
+  voiceHeadsUpEnabled,
+} from './voiceHeadsUp.service.js';
 
 // ============================================
 // RISK-ADAPTIVE LIVE STEERING (ai-therapist-42)
@@ -210,6 +219,7 @@ export function clearSteeringState(sessionId: string): void {
   pendingSteers.delete(sessionId);
   riskCheckRequiredAt.delete(sessionId);
   clearCrisisResourceState(sessionId);
+  clearVoiceHeadsUp(sessionId);
 }
 
 // ============================================
@@ -419,6 +429,64 @@ export async function deliverPendingSteer(sessionId: string): Promise<boolean> {
   }
 }
 
+// ============================================
+// VOICE HEADS-UP BEFORE A VENDOR CUT
+// ============================================
+// See voiceHeadsUp.service.ts. The steer decides when; the voice model says it.
+
+type Sideband = typeof import('./sidebandManager.service.js').sidebandManager;
+
+/** The append cap the sideband enforces (withKeepSpeaking / truncateForAppend). */
+const LIVE_APPEND_MAX_CHARS = 1600;
+/** LIVE_STEER_KEEP_SPEAKING and its space, added after every clinical steer
+ *  (sidebandManager.steerKind.test.ts holds this against the real text). */
+export const KEEP_SPEAKING_RESERVE = 171;
+
+/** Do this steer and the heads-up fit in one append without the sideband truncating either? */
+export function fitsWithHeadsUp(guidance: string): boolean {
+  return guidance.length + 1 + VOICE_HEADS_UP_GUIDANCE.length <= LIVE_APPEND_MAX_CHARS - KEEP_SPEAKING_RESERVE;
+}
+
+/** Is the heads-up due on this voice turn? Never throws: a failure here must not cost the steer. */
+async function voiceHeadsUpFor(sessionId: string, severity: string, sidebandManager: Sideband): Promise<boolean> {
+  try {
+    if (severity !== 'medium' && severity !== 'high') return false;
+    if (!(await voiceHeadsUpEnabled())) return false;
+    return await voiceHeadsUpDue(sessionId, severity, sidebandManager.headsUpEligible(sessionId));
+  } catch (error) {
+    console.error('[voice-heads-up] could not decide (not requested):', error);
+    return false;
+  }
+}
+
+/** The heads-up as a clinical steer of its own. Never throws. */
+async function sendVoiceHeadsUpAlone(
+  sessionId: string,
+  riskScore: number,
+  severity: string,
+  sidebandManager: Sideband,
+): Promise<void> {
+  try {
+    const delivered = await sidebandManager.tryInject(sessionId, 'system', VOICE_HEADS_UP_STEER, false);
+    if (delivered) {
+      markVoiceHeadsUpRequested(sessionId, {
+        severity,
+        riskScore,
+        participantSpokeAt: sidebandManager.participantLastSpokeAt(sessionId),
+        delivery: 'separate',
+      });
+    }
+    await logInterventionAction(sessionId, 'risk_steering', {
+      riskScore,
+      severity,
+      delivered,
+      trigger: HEADS_UP_TRIGGER_REQUESTED,
+    });
+  } catch (error) {
+    console.error('[voice-heads-up] sending failed:', error);
+  }
+}
+
 // Sessions already recorded as having undeliverable steering. Keeps the signal
 // to one row per session rather than one per risky turn, while still making the
 // session countable.
@@ -454,6 +522,11 @@ export async function maybeSteerSession(
   guidanceOverride: string | null = null,
   /** Recorded on the steering row when an override is used. */
   subject: CrisisSubject | null = null,
+  /** The assessor's observation that this turn states an attempt, or a
+   *  time or plan (high turns only). Such a turn never carries the voice
+   *  heads-up: emergency help opens that reply (base prompt), and a sentence
+   *  about the voice dropping must not come before it. */
+  acute: Exclude<AcuteStage, 'none'> | null = null,
 ): Promise<void> {
   try {
     if (riskScore < STEER_MIN_SCORE) return;
@@ -500,20 +573,43 @@ export async function maybeSteerSession(
       return;
     }
 
-    if (!shouldSteer(sessionId, riskScore, force)) return;
+    // The voice heads-up (voiceHeadsUp.service): at the first medium or high
+    // turn, once per session, behind a switch that is off by default. Not on
+    // a turn that states an attempt or a plan (see `acute`).
+    const headsUp = acute === null && (await voiceHeadsUpFor(sessionId, severity, sidebandManager));
 
+    if (!shouldSteer(sessionId, riskScore, force)) {
+      // No risk steer on this turn (the cooldown): the heads-up goes alone.
+      if (headsUp) await sendVoiceHeadsUpAlone(sessionId, riskScore, severity, sidebandManager);
+      return;
+    }
+
+    const guidance = guidanceOverride ?? steeringGuidance(riskScore, severity);
+    // Attached to the steer when both fit in one append (the keep-speaking
+    // line is added after it); otherwise sent straight after it on its own.
+    const attach = headsUp && fitsWithHeadsUp(guidance);
     await sidebandManager.injectMessage(
       sessionId,
       'system',
-      guidanceOverride ?? steeringGuidance(riskScore, severity),
+      attach ? `${guidance} ${VOICE_HEADS_UP_GUIDANCE}` : guidance,
       false,
     );
+    if (attach) {
+      markVoiceHeadsUpRequested(sessionId, {
+        severity,
+        riskScore,
+        participantSpokeAt: sidebandManager.participantLastSpokeAt(sessionId),
+        delivery: 'attached',
+      });
+    }
     await logInterventionAction(sessionId, 'risk_steering', {
       riskScore,
       severity,
       delivered: true,
       ...(guidanceOverride ? { subject: subject ?? 'third_party' } : {}),
+      ...(attach ? { voiceHeadsUp: 'attached' } : {}),
     });
+    if (headsUp && !attach) await sendVoiceHeadsUpAlone(sessionId, riskScore, severity, sidebandManager);
 
     if (global.io) {
       void broadcastAdminEventForSession(

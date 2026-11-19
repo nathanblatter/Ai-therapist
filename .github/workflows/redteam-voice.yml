@@ -96,10 +96,15 @@ jobs:
           esac
           case "$REPEATS" in ''|*[!0-9]*) echo "::error::repeats must be a number"; exit 2 ;; esac
           rc=0
+          # The weekly run skips the on-demand-only scenarios (src/redteam/onDemand.ts:
+          # the voice heads-up trio, a feature switched off everywhere); `safety` and
+          # `all` run them.
+          skip=""
+          [ "$MODE" = weekly ] && skip="--skip-on-demand"
           for suite in $suites; do
             reps="$REPEATS"
             [ "$suite" = "voice-safety" ] && reps=1
-            npx tsx src/redteam/cli.ts --suite "$suite" --variations "$reps" --out "redteam-results/$suite" || rc=1
+            npx tsx src/redteam/cli.ts --suite "$suite" --variations "$reps" --out "redteam-results/$suite" $skip || rc=1
           done
           exit $rc
       - name: Job summary

@@ -64,6 +64,53 @@ export interface SessionRecording {
   sizeBytes: number | null;
 }
 
+export interface ParticipantAudioProblemDetails {
+  problem: 'missing' | 'short' | 'silent';
+  mixedMs: number;
+  wallMs: number;
+  participantMs: number;
+  participantUnmutedMs: number;
+  participantRmsDbfs: number | null;
+  participantGapChunks: number;
+}
+
+const PARTICIPANT_AUDIO_DESCRIPTION: Record<ParticipantAudioProblemDetails['problem'], string> = {
+  missing: 'Voice session ended with no participant audio track (participant.wav not stored)',
+  short: 'Voice session ended with a participant audio track much shorter than the session recording',
+  silent: 'Voice session ended with a silent participant audio track',
+};
+
+/**
+ * Put a voice session that ended without usable participant audio on the
+ * Study Ops deviation list (ai-therapist-372), so staff see it instead of
+ * finding out at analysis time. Uses the existing protocol_deviations log as
+ * an auto row (category technical_failure, deduplicated per session by
+ * auto_key); demo and harness sessions are left out like every other auto
+ * flag. Returns whether a new row was added. Called only when
+ * features.participant_audio_auto_deviation is on (default off; see
+ * recorder.service.ts).
+ */
+export async function flagParticipantAudioProblem(
+  sessionId: string,
+  details: ParticipantAudioProblemDetails,
+): Promise<boolean> {
+  const res = await pool.query(
+    `INSERT INTO protocol_deviations
+            (source, category, severity, session_id, description, details, auto_key, created_by)
+     SELECT 'auto', 'technical_failure', 'minor', ts.session_id, $2, $3::jsonb, $4, 'system'
+       FROM therapy_sessions ts
+      WHERE ts.session_id = $1 AND ts.is_demo IS NOT TRUE
+     ON CONFLICT (auto_key) DO NOTHING`,
+    [
+      sessionId,
+      PARTICIPANT_AUDIO_DESCRIPTION[details.problem],
+      JSON.stringify(details),
+      `participant_audio:${sessionId}`,
+    ],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
 /** Fetch a session's recording metadata, or null if none stored. */
 export async function getSessionRecording(sessionId: string): Promise<SessionRecording | null> {
   const res = await pool.query<{

@@ -54,6 +54,7 @@ import { isToolTimeoutError, toolTimeoutMs } from './toolTimeouts.js';
 import { clearVoiceToolOutcomes, reportVoiceToolOutcome, voiceOverlayEvent, withScreenNote } from './toolOverlays.js';
 import { buildRecoverySpeakFirstNudge, type RecoveryCrisisContact } from '../../shared/recoveryPrompt.js';
 import { rememberTurn } from '../utils/recentTurns.js';
+import { noteVoiceHeadsUpSpeech, voiceHeadsUpPending } from './voiceHeadsUp.service.js';
 
 /**
  * When the server re-sends the speak-first instruction to a recovery session
@@ -359,6 +360,14 @@ export class TranscriptAssembler {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => this.flush(), this.gapMs);
     this.timer.unref?.();
+  }
+
+  /** The turn so far, in timeline order, without closing it. */
+  pendingText(): string {
+    return [...this.fragments]
+      .sort((a, b) => a.start_ms - b.start_ms)
+      .map((f) => f.delta)
+      .join('');
   }
 
   /**
@@ -1813,6 +1822,12 @@ export class SidebandManager {
           end_ms: Number(event.end_ms ?? 0),
         });
         this.emitTranscript(sessionId, { role: 'assistant', delta: String(event.delta ?? ''), final: false });
+        // The voice heads-up (voiceHeadsUp.service): noticed as it is being
+        // said, so its time is when the participant heard it, not when the
+        // turn closed 900 ms after the last word.
+        if (voiceHeadsUpPending(sessionId)) {
+          noteVoiceHeadsUpSpeech(sessionId, state.assistantTranscript.pendingText(), false);
+        }
         break;
       }
 
@@ -2143,6 +2158,9 @@ export class SidebandManager {
   private onAssistantTurn(sessionId: string, text: string, startMs: number, endMs: number): void {
     this.emitTranscript(sessionId, { role: 'assistant', text, final: true });
     rememberTurn(sessionId, 'assistant', text);
+    // A finished turn without the heads-up counts toward "missed" (and a line
+    // whose fragments only completed at the flush is caught here).
+    noteVoiceHeadsUpSpeech(sessionId, text, true);
 
     void (async () => {
       try {
@@ -3222,6 +3240,22 @@ export class SidebandManager {
     if (delegate) return delegate.isConnected(sessionId);
     const state = this.sessions.get(sessionId);
     return !!state && state.ws.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Can this session be given the voice heads-up (voiceHeadsUp.service)? Only
+   * an ordinary GPT-Live session attached here and open: not another
+   * backend's session, and not a crisis recovery session (client delegation),
+   * which runs on a narrow prompt of its own.
+   */
+  headsUpEligible(sessionId: string): boolean {
+    return this.getDelegationMode(sessionId) === 'responses' && this.isConnected(sessionId);
+  }
+
+  /** Wall-clock time of the participant's newest transcribed speech on this attach (0 = none). */
+  participantLastSpokeAt(sessionId: string): number {
+    if (this.delegateFor(sessionId)) return 0;
+    return this.sessions.get(sessionId)?.lastUserDeltaAt ?? 0;
   }
 
   /** Latest known cumulative voice seconds, or null when not tracked. */
