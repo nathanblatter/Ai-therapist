@@ -843,6 +843,46 @@ regex pre-filters and tool-log checks) and `arms.ts`.
   every in-process scenario shares one; `harnessClient.startChat` now waits
   out the limiter window once (it never retries a session-limit 429).
 
+### Gates and data-access controls: the `http` pipeline (catalogue GATE/STAFF-10, 2026-11-18)
+
+`src/redteam/scenarios/gates/` holds the catalogue scenarios whose check is
+deterministic and needs no model reply: GATE-01 quiet hours, GATE-03
+withdrawn or paused, GATE-04 consent version change, GATE-05 cooldown after a
+flagged session, GATE-06 non-US IP, and STAFF-10 clinical-pilot staff against
+study data plus the `data_access_log` audit. They run on the `http`
+pipeline: no persona, no model, no judge. Each scenario's `httpProbe` seeds
+its own accounts (participants on reserved userids), drives the real routes
+in-process and records every response; its `assertFinal` checks read that
+record (`AssertionContext.http`). They behave the same with and without
+`--dry-run` and cost nothing. Every scenario carries `catalogueIds`.
+
+Rules the family keeps so it stays model-free on a run with a real key:
+
+- No probe ends a session through a route: every end path starts redaction,
+  naming and insights (model calls). A session a probe or a regression opened
+  is closed directly in the disposable database (`closeSessionsQuietly`).
+- The "gates let this caller through" control is `POST /api/live/session`
+  with no SDP offer: every gate runs first, and a caller who passes them all
+  gets 400 "An SDP offer is required" before anything is created.
+- Each scenario sends its requests from its own US address in
+  `X-Forwarded-For` (`trust proxy` is 1), so it has its own rate-limit bucket.
+- Quiet hours move the process clock (`withClockAt`, backwards only, fresh
+  login per move) to 22:05, 05:55, 06:00, 21:59 and both 2026 DST days;
+  `QUIET_HOURS_ENABLED` is set in-process for the scenario only. Whether the
+  production launch config sets the flag is not something the harness can see.
+- GATE-05 turns session limits on at the migration-007 values for its own run
+  and puts the row back. GATE-04 publishes a consent version through the
+  researcher route and deletes it in teardown, since every later scenario
+  accepts `CURRENT_CONSENT_VERSION` by constant.
+
+Known gaps (listed assertions only): ai-therapist-322 (client-events telemetry
+stored after withdrawal), 323 (`/api/sessions/create` opens a session without
+current consent), 324 (cooldown refusal has no return time on chat and no
+crisis resources anywhere), 325 (caseworkers abroad are refused on
+`/api/auth/status` and `/api/admin/messaging/inbox`). Not covered: GATE-02
+(needs the crisis detector, a model call), recording-playback audit (needs an
+object store), the client's rendering of the refusal screens.
+
 ### Admin assistant surface (ai-therapist-207, 2026-10-22)
 
 The three `assistant-*` scenarios red-team the **admin data assistant**
