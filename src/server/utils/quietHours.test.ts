@@ -1,6 +1,6 @@
 // Quiet hours (ai-therapist-152): env gating, the overnight wrap-around
 // window, DST-correct Denver hour math, and the participant-only middleware.
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
   getQuietHoursConfig,
   denverHour,
@@ -107,6 +107,16 @@ describe('requireOutsideQuietHours middleware', () => {
 
   it('passes everyone through when quiet hours are disabled', () => {
     expect(run({ userRole: 'participant' }).nexted).toBe(true);
+  });
+
+  // The middleware reads the clock. Pin it mid-hour so the hour read below is
+  // still the hour when the middleware reads it (at hh:59:59.999 it was not).
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000 + 30 * 60_000));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   /** Force a window that provably contains the CURRENT Denver hour — the

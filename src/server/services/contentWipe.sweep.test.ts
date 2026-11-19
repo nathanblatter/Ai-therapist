@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, onTestFinished, vi } from 'vitest';
 
 const { queryMock } = vi.hoisted(() => ({ queryMock: vi.fn() }));
 vi.mock('../config/db.js', () => ({
@@ -107,6 +107,14 @@ describe('executeContentWipe thread-message inclusion', () => {
   }
 
   it('wipes thread message bodies on the same cutoff, passing the redaction-complete guard through', async () => {
+    // A fixed ordinary day: on a DST change day the cutoff is off by an hour
+    // in a DST time zone (the it.fails case below), which made this test fail
+    // locally in America/Denver on those two days a year.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T18:00:00Z'));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     mockWipeRun();
     wipeAgedThreadMessageBodiesMock.mockResolvedValue(4);
 
@@ -195,5 +203,56 @@ describe('executeContentWipe thread-message inclusion', () => {
     expect(result.error).toBe('db down');
     const failLog = queryMock.mock.calls.find((c) => String(c[0]).includes(`status = 'failed'`));
     expect(failLog).toBeTruthy();
+  });
+});
+
+// KNOWN BUG (ai-therapist-374, found 2026-11-19 by running the suite with a shifted clock):
+// the cutoff is computed as `cutoff.setHours(cutoff.getHours() - retention_hours)`,
+// which counts LOCAL wall-clock hours. On a DST change day in a zone with DST
+// the cutoff is 23 or 25 real hours back, so a 24-hour retention wipe removes
+// content an hour early (spring forward) or keeps it an hour late (fall back).
+// Production containers run in UTC (no TZ set), where it cannot happen; a host
+// or container with TZ set to a DST zone would. Remove `.fails` once the
+// service subtracts milliseconds instead.
+describe('executeContentWipe cutoff across a DST change (known bug)', () => {
+  const savedTz = process.env.TZ;
+  afterEach(() => {
+    vi.useRealTimers();
+    if (savedTz === undefined) delete process.env.TZ;
+    else process.env.TZ = savedTz;
+  });
+
+  it.fails('cuts off exactly retention_hours of real time on the spring-forward day in America/Denver', async () => {
+    process.env.TZ = 'America/Denver';
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // 03:30 MDT on 2027-03-14, an hour after clocks went forward.
+    vi.setSystemTime(new Date('2027-03-14T09:30:00Z'));
+    queryMock.mockImplementation((sql: string) => {
+      const s = String(sql);
+      if (s.includes('SELECT config_value')) {
+        return Promise.resolve({
+          rows: [
+            {
+              config_value: {
+                enabled: true,
+                retention_hours: 24,
+                wipe_time: '03:00',
+                require_redaction_complete: true,
+              },
+            },
+          ],
+        });
+      }
+      if (s.includes('INSERT INTO content_wipe_log')) return Promise.resolve({ rows: [{ wipe_id: 'w1' }] });
+      if (s.includes('UPDATE messages')) return Promise.resolve({ rows: [], rowCount: 0 });
+      if (s.includes('SELECT COUNT(*)')) return Promise.resolve({ rows: [{ count: '0' }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await executeContentWipe('manual', 'admin');
+
+    const [cutoff] = wipeAgedThreadMessageBodiesMock.mock.calls[0];
+    // Today it is 23 hours back (2027-03-13T10:30:00Z), not 24.
+    expect((cutoff as Date).toISOString()).toBe('2027-03-13T09:30:00.000Z');
   });
 });

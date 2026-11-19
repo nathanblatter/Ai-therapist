@@ -54,6 +54,27 @@ describe('supertest loopback binding', () => {
     expect(responses.map((r) => r.body.cookie)).toEqual(['k=v', 'k=v', 'k=v']);
   });
 
+  // ai-therapist-370: the request that started the server used to close it as
+  // soon as it finished, under requests still using it. Concurrent ones were
+  // reset (ECONNRESET, seen once in a loaded full-suite run); one created
+  // alongside it and sent afterwards found no server at all.
+  it('keeps the server up until the last request that shares it has finished', async () => {
+    const server = http.createServer(echoApp());
+    const agent = request.agent(server);
+    const first = agent.get('/where');
+    const second = agent.get('/where');
+    expect((await first).status).toBe(200);
+    expect(server.listening).toBe(true);
+    expect((await second).status).toBe(200);
+    expect(server.listening).toBe(false);
+  });
+
+  it('serves a burst of concurrent agent requests on one bind without resets', async () => {
+    const agent = request.agent(echoApp());
+    const statuses = await Promise.all(Array.from({ length: 50 }, () => agent.get('/where').then((r) => r.status)));
+    expect(statuses).toEqual(Array.from({ length: 50 }, () => 200));
+  });
+
   it('supports the expect() chain', async () => {
     await request(echoApp()).get('/where').expect(200).expect('Content-Type', /json/);
   });

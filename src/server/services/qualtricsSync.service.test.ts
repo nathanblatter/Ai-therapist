@@ -18,6 +18,12 @@ vi.mock('./workQueue.service.js', () => workQueueMocks);
 const studyStatusMocks = vi.hoisted(() => ({ setStudyStatus: vi.fn() }));
 vi.mock('../db/studyStatus.queries.js', () => studyStatusMocks);
 
+// The scheduler's tick also starts the daily drift check (a dynamic import).
+// Left real, it ran in the background past the end of the scheduler test and
+// called the next test's stubbed fetch (ai-therapist-370).
+const driftMocks = vi.hoisted(() => ({ claimAndRunDailyDriftCheck: vi.fn() }));
+vi.mock('./qualtricsDriftGuard.service.js', () => driftMocks);
+
 import {
   getQualtricsSyncConfig,
   extractTypedStudyId,
@@ -238,6 +244,7 @@ describe('runSync + scheduler', () => {
     dbMocks.resolveStudySidToUserId.mockResolvedValue(null);
     dbMocks.findUserIdForBaselineResponse.mockResolvedValue(null);
     dbMocks.upsertQualtricsResponse.mockResolvedValue(undefined);
+    driftMocks.claimAndRunDailyDriftCheck.mockResolvedValue(undefined);
     process.env.QUALTRICS_API_TOKEN = 't';
     process.env.QUALTRICS_WEEKLY_SURVEY_ID = 'SV_w';
   });
@@ -283,8 +290,11 @@ describe('runSync + scheduler', () => {
     const status = getSyncRunStatus();
     expect(status.schedulerActive).toBe(true);
     expect(status.intervalMinutes).toBe(5);
-    // the boot-time tick ran
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    // the boot-time tick ran, to the end: a run still in flight when the test
+    // ends answers the next test's runSync with 'busy'
+    await vi.waitFor(() => expect(getSyncRunStatus().lastRunTrigger).toBe('scheduled'));
+    expect(fetchMock).toHaveBeenCalled();
+    await vi.waitFor(() => expect(driftMocks.claimAndRunDailyDriftCheck).toHaveBeenCalled());
   });
 });
 

@@ -1,9 +1,20 @@
 // Weekly digest routes (eval spec WP7): role matrix, sandbox 404, org scoping
 // through orgIdFor (list, get, download, generate), week validation, the
 // schedule endpoint, and the absence of any data_access_log write.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+
+/** The route bounds week_ending by the real clock (at most 104 weeks back, at
+ *  most a week ahead). Tests that send a literal week pin the clock near it,
+ *  or '2026-10-11' would turn "too old" on 2028-10-09 (ai-therapist-370). */
+function pinClock(iso = '2026-10-20T12:00:00Z'): void {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(iso));
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
 
 const mocks = vi.hoisted(() => ({
   logDataAccess: vi.fn().mockResolvedValue(undefined),
@@ -129,6 +140,7 @@ describe('org scope', () => {
   });
 
   it('generates for the session org with the caller as generator, and never logs data access', async () => {
+    pinClock();
     const res = await request(appAs(researcher(5)))
       .post('/admin/api/evals/digests/generate')
       .send({ week_ending: '2026-10-11', orgId: 1 });
@@ -163,6 +175,7 @@ describe('validation', () => {
   });
 
   it('rejects malformed, far-past and future weeks', async () => {
+    pinClock();
     for (const week_ending of ['soon', '2026-13-01', '2020-01-05', '2099-01-03']) {
       const res = await request(appAs(researcher())).post('/admin/api/evals/digests/generate').send({ week_ending });
       expect(res.status, week_ending).toBe(400);
