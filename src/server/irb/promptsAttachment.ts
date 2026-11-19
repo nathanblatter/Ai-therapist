@@ -34,6 +34,8 @@ import {
   buildNoNotesBlock,
   assembleSafetyFollowUpBlock,
   SAFETY_FOLLOW_UP_WINDOW_DAYS,
+  SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF,
+  SAFETY_FOLLOW_UP_MIN_SEVERITY,
 } from '../utils/promptContext.js';
 import { UNVERIFIED_CLAIM_NOTE } from '../utils/memoryScreen.js';
 import { buildPhaseTexts } from '../utils/phaseGuidance.js';
@@ -540,20 +542,27 @@ function buildItems(): Item[] {
   add('pre', block(buildNoNotesBlock(false)));
   add('p', 'With session memory on and nothing to recall yet, its first two sentences and the instruction read:');
   add('pre', block(buildNoNotesBlock(true)));
-  add('h3', 'Safety follow-up cue (independent of session memory)');
+  add('h3', 'Safety follow-up cue (built from the safety record, not from session memory)');
+  const severities = SAFETY_FOLLOW_UP_MIN_SEVERITY === 'high' ? 'a high' : 'a medium or high';
   add(
     'p',
     'A logged-in participant whose most recent conversation (the most recent one in which they said anything) ' +
-      'carries a crisis flag that the research team has not cleared, and ended within the last ' +
-      `${SAFETY_FOLLOW_UP_WINDOW_DAYS} days, receives the cue below after the blocks above, whether session ` +
-      'memory is on or off. It is built from the safety system’s own record of the earlier session (the ' +
-      'crisis flag and its severity level) and contains nothing of what was said: no summary, topic, quotation ' +
-      'or date. The level is "low", "medium" or "high"; the parenthesis is omitted when none was recorded. ' +
-      'Verbatim, with session memory off:',
+      `carries ${severities} crisis flag (or one whose level was not recorded) that the research team has not ` +
+      `cleared, and ended within the last ${SAFETY_FOLLOW_UP_WINDOW_DAYS} days, receives the cue below after ` +
+      'the blocks above' +
+      (SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF
+        ? ', whether session memory is on or off. '
+        : ', when session memory is on. Participants with session memory off do not receive it. ') +
+      'A conversation that continues a voice call the provider ended (the text hand-off) does not receive it. ' +
+      'It is built from the safety system’s own record of the earlier session (the crisis flag and its ' +
+      'severity level) and contains nothing of what was said: no summary, topic, quotation or date. The ' +
+      'parenthesis is omitted when no level was recorded. Verbatim, with session memory on:',
   );
-  add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', false), 'recorded: high)', 'recorded: <level>)')));
-  add('p', 'With session memory on, the cue reads:');
   add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', true), 'recorded: high)', 'recorded: <level>)')));
+  if (SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF) {
+    add('p', 'With session memory off, the cue reads:');
+    add('pre', block(replaceOnce(assembleSafetyFollowUpBlock('high', false), 'recorded: high)', 'recorded: <level>)')));
+  }
 
   add('h2', 'A.8 Pre-session check-in block');
   add(

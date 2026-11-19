@@ -642,6 +642,39 @@ export function buildNoNotesBlock(memoryEnabled: boolean): string {
  */
 export const SAFETY_FOLLOW_UP_WINDOW_DAYS = 30;
 
+/**
+ * OWNER'S DECISION, pending (ai-therapist-344; IRB ledger ai-therapist-359).
+ * Whether a participant with session memory OFF gets the safety follow-up
+ * cue. The cue carries no conversation content, but the session-settings
+ * guide and the tutorial tell participants: "When it is off, each
+ * conversation starts fresh, with no memory of previous ones." Until the
+ * consent, settings-guide and tutorial wording says otherwise, memory-off
+ * participants do not get it. Turning it on is this one line; the memory-off
+ * text and its tests are kept (assembleSafetyFollowUpBlock(..., false)).
+ */
+export const SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF = false;
+
+/**
+ * The lowest crisis severity on the last conversation that earns a check-in.
+ * 'high' for now (PR #78 review): a medium flag is often a likely false
+ * positive (the owner's own "wait, stop" test flagged a session medium), and
+ * should not open the next session with a safety question. For the owner to
+ * revisit; 'medium' restores the PR's original behaviour. A flag whose
+ * severity was not recorded still counts (fail toward safety).
+ */
+export const SAFETY_FOLLOW_UP_MIN_SEVERITY: 'medium' | 'high' = 'high';
+
+const SEVERITY_RANK: Record<string, number> = { low: 1, medium: 2, high: 3 };
+
+/** Does a recorded severity meet the threshold? Unknown counts as meeting it. */
+export function meetsSafetyFollowUpSeverity(
+  severity: string | null,
+  min: 'medium' | 'high' = SAFETY_FOLLOW_UP_MIN_SEVERITY,
+): boolean {
+  if (!severity || !(severity in SEVERITY_RANK)) return true;
+  return SEVERITY_RANK[severity] >= SEVERITY_RANK[min];
+}
+
 /** Heading of the safety follow-up cue. */
 export const SAFETY_FOLLOW_UP_HEADING = '## Safety follow-up';
 
@@ -653,17 +686,23 @@ export const SAFETY_FOLLOW_UP_HEADING = '## Safety follow-up';
 export function assembleSafetyFollowUpBlock(severity: string | null, memoryEnabled: boolean): string {
   const level = severity && /^(low|medium|high)$/.test(severity) ? ` (highest level recorded: ${severity})` : '';
   const whatYouHave = memoryEnabled
-    ? 'This note adds nothing about what was said; anything you have about that conversation is in your notes above.'
+    ? 'This note adds nothing about what was said; anything you have about that conversation is in your notes, if ' +
+      'it is there at all.'
     : 'You have not been given what was said, and session memory is off: you have no notes about that conversation.';
   // Asked "have I been flagged? how serious was it?", the first wording of
   // this line ("be honest: the safety system lets you know ...") had the model
-  // read the level back ("it was marked high severity"). It now declines the
-  // record without denying that there is one.
+  // read the level back ("it was marked high severity"), so the level and the
+  // record stay explicitly off limits. The PR #78 review replaced "checking in
+  // on how they are is part of your role", which made a triggered check-in
+  // sound routine, with what is true: the safety system said to check in.
+  // Memory on, the assistant may have notes, so it never claims it was not
+  // told what was said.
   const ifAsked =
-    'If they ask whether they have been flagged, what is on record about them, or how you know to ask, do not ' +
-    'state levels, scores, dates or details and do not guess: say that you cannot share the internal safety ' +
-    'records the study keeps, that checking in on how they are is part of your role, and that the research team ' +
-    'can answer questions about their record.' +
+    'If they ask whether they have been flagged, what is on record about them, or how you know to ask, answer ' +
+    "honestly and without detail: the study's safety system lets you know when to check in after a conversation" +
+    (memoryEnabled ? '' : ', and you are not told what was said') +
+    "; you cannot share the study's internal safety records, so do not state or guess levels, scores, dates or " +
+    'details; and the research team can answer questions about their record.' +
     (memoryEnabled ? '' : ' You still do not keep notes between conversations while session memory is off.');
   return (
     `\n\n${SAFETY_FOLLOW_UP_HEADING} (from the study's safety system, not from session memory)\n` +
@@ -675,7 +714,7 @@ export function assembleSafetyFollowUpBlock(severity: string | null, memoryEnabl
     'okay, accept that and move on to what they want to talk about. If anything they say suggests risk, follow ' +
     'the Crisis Protocol.\n' +
     'Do not recite, quote or guess at what was said last time, do not ask them to go over it again, and do not ' +
-    `mention levels, scores, flags, dates or this note. ${ifAsked}`
+    `mention levels, scores, flags, dates or this note unless they ask. ${ifAsked}`
   );
 }
 
@@ -699,11 +738,14 @@ export async function buildSafetyFollowUpBlock(
   userId: number | null,
   sessionId: string | null = null,
   memoryEnabled = false,
+  minSeverity: 'medium' | 'high' = SAFETY_FOLLOW_UP_MIN_SEVERITY,
 ): Promise<string> {
   if (!userId) return '';
   try {
     const signal = await getLastSessionSafetySignal(userId, sessionId, SAFETY_FOLLOW_UP_WINDOW_DAYS);
-    return signal ? assembleSafetyFollowUpBlock(signal.severity, memoryEnabled) : '';
+    return signal && meetsSafetyFollowUpSeverity(signal.severity, minSeverity)
+      ? assembleSafetyFollowUpBlock(signal.severity, memoryEnabled)
+      : '';
   } catch (err) {
     log.error({ err }, `Failed to build safety follow-up for user ${userId}`);
     return '';
@@ -724,11 +766,13 @@ export async function buildSafetyFollowUpBlock(
  *      (PR #77) is the same incident, carries its transcript and its own
  *      crisis first message, and must not be told to ask "how have you been
  *      since you last talked" or that it has not been given what was said.
+ *      For a memory-off participant only when SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF
+ *      (the owner's pending decision; `whenMemoryOff` overrides it in tests).
  */
 export async function buildParticipantContextBlock(
   userId: number | null,
   sessionId: string | null = null,
-  options: { safetyFollowUp?: boolean } = {},
+  options: { safetyFollowUp?: boolean; whenMemoryOff?: boolean } = {},
 ): Promise<string> {
   if (!userId) return '';
   const memory = await buildMemoryBlock(userId, sessionId);
@@ -743,5 +787,6 @@ export async function buildParticipantContextBlock(
     context = buildNoNotesBlock(memoryEnabled) + (await buildScreenerCueBlock(userId));
   }
   if (options.safetyFollowUp === false) return context;
+  if (!memoryEnabled && !(options.whenMemoryOff ?? SAFETY_FOLLOW_UP_WHEN_MEMORY_OFF)) return context;
   return context + (await buildSafetyFollowUpBlock(userId, sessionId, memoryEnabled));
 }
