@@ -407,6 +407,23 @@ describe('redactPHI (one message, therapist edit)', () => {
   });
 });
 
+describe('transient API errors are not rejections (review of PR #102)', () => {
+  for (const [label, err] of [
+    ['429 rate limit', Object.assign(new Error('429 Rate limit reached for requests per min'), { status: 429 })],
+    ['503', Object.assign(new Error('503 Service Unavailable'), { status: 503 })],
+    ['timeout', Object.assign(new Error('Request timed out.'), { name: 'APIConnectionTimeoutError' })],
+  ] as const) {
+    it(`a ${label} on a single-message re-send propagates; nothing is reported as rejected`, async () => {
+      createMock.mockResolvedValueOnce(REFUSAL).mockRejectedValue(err);
+      const rejected = new Map<number, string>();
+      const deferred = new Map<number, string>();
+      await expect(redactPHIBatch(ITEMS, { rejected, deferred })).rejects.toBe(err);
+      expect(rejected.size).toBe(0);
+      expect(deferred.size).toBe(0);
+    });
+  }
+});
+
 describe('call_cap is deferred, not rejected, when the caller asks (review of PR #102)', () => {
   it('a message the budget never reached goes to `deferred`, a judged one to `rejected`', async () => {
     // pass 1: batch refused, both singles echo (budget 2 -> 0); pass 2: batch refused, no budget
