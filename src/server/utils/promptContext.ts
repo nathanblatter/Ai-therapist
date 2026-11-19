@@ -324,6 +324,8 @@ export interface MemoryBlockInput {
       mood_trajectory?: string;
       techniques_helped?: string[];
       follow_up?: string;
+      /** Fallback row (ai-therapist-346): placeholder headline, no content. */
+      incomplete?: boolean;
     };
     ended_at: Date | null;
     created_at: Date;
@@ -362,16 +364,21 @@ export function assembleMemoryBlock(input: MemoryBlockInput): string {
     completedSinceLast,
     now = new Date(),
   } = input;
-  const entries = summaries.map((row) => {
-    const s = row.summary;
-    const date = (row.ended_at ?? row.created_at).toISOString().slice(0, 10);
-    const parts: string[] = [];
-    if (s.topics?.length) parts.push(`topics: ${s.topics.join(', ')}`);
-    if (s.mood_trajectory) parts.push(s.mood_trajectory);
-    if (s.techniques_helped?.length) parts.push(`what helped: ${s.techniques_helped.join(', ')}`);
-    if (s.follow_up) parts.push(`possible follow-up: ${s.follow_up}`);
-    return `- ${date}${s.headline ? ` ("${s.headline}")` : ''}: ${parts.join(' | ')}`;
-  });
+  // A fallback row (summary generation failed) has only a placeholder
+  // headline and staff-facing safety fields: nothing to give the participant
+  // continuity with, so it is left out rather than shown as an empty entry.
+  const entries = summaries
+    .filter((row) => !row.summary.incomplete)
+    .map((row) => {
+      const s = row.summary;
+      const date = (row.ended_at ?? row.created_at).toISOString().slice(0, 10);
+      const parts: string[] = [];
+      if (s.topics?.length) parts.push(`topics: ${s.topics.join(', ')}`);
+      if (s.mood_trajectory) parts.push(s.mood_trajectory);
+      if (s.techniques_helped?.length) parts.push(`what helped: ${s.techniques_helped.join(', ')}`);
+      if (s.follow_up) parts.push(`possible follow-up: ${s.follow_up}`);
+      return `- ${date}${s.headline ? ` ("${s.headline}")` : ''}: ${parts.join(' | ')}`;
+    });
 
   const factsBlock =
     facts.length > 0 ? `\nThings they explicitly asked you to remember:\n${facts.map((f) => `- ${f}`).join('\n')}` : '';
