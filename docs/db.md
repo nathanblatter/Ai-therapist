@@ -241,8 +241,11 @@ file or `.env`. The command shape is:
 ```sh
 export PGSSLMODE=require PGHOST=<rds endpoint> PGUSER=<master user> PGPASSWORD=<from Secrets Manager>
 
-pg_dump --no-owner ai_therapist_prod | gzip > ~/backups/ai_therapist_prod-pre-NNN-$(date +%Y%m%d).sql.gz
-gunzip -t ~/backups/ai_therapist_prod-pre-NNN-$(date +%Y%m%d).sql.gz
+# Backup first: an RDS snapshot, inside AWS. Never pg_dump prod to a laptop,
+# the stage host or any other machine outside the study's AWS account.
+aws rds create-db-snapshot --db-instance-identifier ai-therapist \
+  --db-snapshot-identifier ai-therapist-pre-NNN-$(date +%Y%m%d)
+aws rds wait db-snapshot-available --db-snapshot-identifier ai-therapist-pre-NNN-$(date +%Y%m%d)
 
 psql -d ai_therapist_prod -v ON_ERROR_STOP=1 -f src/database/migrations/NNN_name.sql
 ```
@@ -256,12 +259,26 @@ Flightdeck. Prod writes that touch participant data follow
 
 ### Backup-before-migrate convention
 
-Every migration run, on either environment, starts with a `pg_dump | gzip`
-into `~/backups/` named `ai_therapist[_prod]-pre-<range>-<YYYYMMDD>.sql.gz`
-(`pre-107-20261022`, `pre-088-096-20260909`), verified with `gunzip -t`
-before the migration is applied. The nightly encrypted off-box backup
-(`scripts/README-backups.md`) is a separate safety net, not a substitute: it
-may be up to a day behind.
+Every migration run starts with a verified backup, and where the backup
+lives depends on whose data it is (owner decision, 2026-11-19):
+
+- **Prod: real study data never leaves AWS.** The backup is a manual RDS
+  snapshot named `ai-therapist-pre-<range>-<YYYYMMDD>`, waited on until it is
+  `available`, on top of the instance's 14-day automated backups. Do not
+  `pg_dump` prod to the stage host, a laptop, a NAS or any other machine
+  outside the study's AWS account, encrypted or not. Record the snapshot
+  identifier in Flightdeck. (Dumps named `ai_therapist_prod-pre-*.sql.gz`
+  taken under the earlier convention, August to November 2026, are being
+  removed from the stage host.)
+- **Stage: the data is test data.** A `pg_dump | gzip` into `~/backups/` named
+  `ai_therapist-pre-<range>-<YYYYMMDD>.sql.gz`, verified with `gunzip -t`
+  before the migration is applied, is enough; keep it only until the change
+  has settled.
+
+The nightly encrypted backup on the stage host (`scripts/README-backups.md`)
+covers the stage database and stage recordings only. It is a separate safety
+net for stage, not a substitute for the pre-migration backup (it may be up to
+a day behind), and it never contains prod data.
 
 ### Intentionally irreversible migrations
 

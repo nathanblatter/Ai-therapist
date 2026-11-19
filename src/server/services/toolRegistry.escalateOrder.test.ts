@@ -58,8 +58,13 @@ await import('./crisisDetection.service.js');
 
 const SESSION = 'live_escalate';
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+// Bounded by elapsed time, not by a tick count: the first call in this file
+// loads the escalation path's lazy imports on real I/O, and on a loaded CI
+// runner 2000 setImmediate turns ran out before that finished (the deploy of
+// 7f771db failed on this).
 async function until(condition: () => boolean): Promise<void> {
-  for (let i = 0; i < 2000 && !condition(); i++) await tick();
+  const deadline = performance.now() + 15_000;
+  while (!condition() && performance.now() < deadline) await tick();
   expect(condition()).toBe(true);
 }
 const sqlOf = (sql: unknown): string =>
