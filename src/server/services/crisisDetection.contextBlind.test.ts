@@ -131,6 +131,11 @@ describe('applyContextBlindFloor (pure)', () => {
     ['a painless-way question', "What's the most painless way to die?"],
     ['a time and a goodbye together', "I'm doing it tonight. I've already said goodbye to my sister."],
     ['an implicit plan and a goodbye note together', "I'm going to do it after I finish my goodbye letters."],
+    // A preparatory act (C-SSRS) is the goodbye half too.
+    ['an implicit plan and a note written', "I wrote my note and I'm going to do it after my roommate leaves."],
+    ['a time and a letter left', "I've left a letter for my mom. I'm doing it tonight."],
+    ['a time and belongings given away', "I've given away all my things. I'm doing it tonight."],
+    ['an implicit plan and belongings given away', "I gave my stuff away, I'm going to go through with it."],
   ])('blind, %s: raised (and pages with the assessor down)', (_label, content) => {
     expect(blind(content)).toEqual({ raised: true, pagesWhenDown: true });
   });
@@ -157,6 +162,20 @@ describe('applyContextBlindFloor (pure)', () => {
     ['a retracted time and goodbye', "I'm doing it tonight, I said goodbye to everyone, jk"],
     // A weak signal only wakes the assessor; it is not the intent half.
     ['a weak "I\'ve decided" and a goodbye', "I've decided. I said goodbye to my sister at the airport."],
+    ['a note written, no intent', 'I wrote my note.'],
+    ['belongings given away, no intent', "I've given away all my things."],
+    ['a note not written', "I haven't written my note, I'm going to do it tonight."],
+    ['a retracted note and plan', "I wrote my note and I'm going to do it after my roommate leaves. jk"],
+    // The negation and retraction guards apply to the preparatory act itself.
+    ['a negated preparatory act beside a plan', "I don't think I gave my stuff away yet, I'm doing it this weekend."],
+    [
+      'a retracted preparatory act beside a plan',
+      "I wrote a letter but tore it up instead. I'm doing it this weekend.",
+    ],
+    ['a negated plan beside a note', "I wrote my note. I'm not going to do it."],
+    ['lecture notes and a plan', "I wrote my notes for the exam and I'm going to do it tonight."],
+    ['a recommendation letter and a plan', "I wrote the letter of recommendation, I'm going to do it this weekend."],
+    ['someone else gave things away', "She gave all my stuff away, I'm going to do it, I'm moving out."],
   ])('blind, %s: not raised (and no page with the assessor down)', (_label, content) => {
     expect(blind(content)).toEqual({ raised: false, pagesWhenDown: false });
   });
@@ -279,6 +298,25 @@ describe('analyzeMessageRisk with the history source', () => {
     createMock.mockResolvedValue(assess(30));
     const result = await analyzeMessageRisk(turn('everything is a lot right now', { history_source: 'none' }), []);
     expect(result.riskScore).toBeLessThan(65);
+    expect(riskRow()).not.toHaveProperty('context_blind_floor');
+  });
+
+  // PR #86 review, in this window: the rule no longer raises a help step, so
+  // the page rests on the assessor's own reading; the help-step cap must still
+  // not hold that reading at 64 when the session context is unread.
+  it('blind with the context unread, a help step the assessor reads as high: not capped, pages', async () => {
+    queryMock.mockImplementation(async (sql: unknown) => {
+      if (String(sql).includes('session-risk-context')) throw new Error('timeout exceeded when trying to connect');
+      return { rows: [] };
+    });
+    createMock.mockResolvedValue(assess(70));
+    const result = await analyzeMessageRisk(
+      turn("I'm going to do it, I'll text my sister tonight.", { history_source: 'none' }),
+      [],
+    );
+    expect(result.riskScore).toBe(70);
+    expect(result.severity).toBe('high');
+    expect(riskRow().help_step_cap).toBeUndefined();
     expect(riskRow()).not.toHaveProperty('context_blind_floor');
   });
 

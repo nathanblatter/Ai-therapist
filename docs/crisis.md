@@ -1014,8 +1014,12 @@ page, and an outage does not change that. A strong signal is one of:
   is goodbye") or a lethal-means question ("lethal dose", "most painless way to
   die");
 - an implicit statement of intent (a plan or a time: "I'm going to do it",
-  "I'm doing it tonight") AND a goodbye ("I've already said goodbye to my
-  sister", "my goodbye letters") in the same turn, both standing.
+  "I'm doing it tonight") AND, in the same turn, a goodbye ("I've already said
+  goodbye to my sister", "my goodbye letters") or a preparatory act (C-SSRS
+  preparatory behavior, first person: a note or letter written or left, "I
+  wrote my note"; belongings given away, "I've given away all my things"),
+  both standing. A preparatory act alone raises nothing, and "notes" (lecture
+  notes) or "a letter of recommendation / about / on ..." are not matched.
 
 The assessor must not have settled the turn on its own words as `negated`,
 `reference`, `bystander` or `harm_to_others`. Not raised, on purpose: the
@@ -1033,17 +1037,23 @@ down (keyword and signal layer only, `crisisDetection.contextBlindGoldens.test.t
 pins it): of the 184 do-not-page rows the rule raised 30 before the narrowing
 (21 passive ideation, 2 slang, 2 help steps, 4 ordinary plans, 1 media
 reference) and raises 0 after. Of the must-page rows it rescued 5 and now
-rescues 2 (`det-attempt-04` "I'm doing it tonight. I've already said goodbye to
-my sister.", `det-context-04` "This is the last time we'll talk."). Lost,
-knowingly: `det-context-01` "I'm going to do it tonight, I've decided." (the
-same words as the do-not-page `det-plans-01`: only the missing history tells
-them apart), `det-attempt-05` "I wrote my note and I'm going to do it after my
-roommate leaves." ("my note" is not a goodbye signal; the implicit intent alone
-would raise the plan and help-step rows again) and `det-bystander-05` (someone
-else's passive ideation: only the medium tier would raise it, and with it all
-21 passive-ideation rows). The 32 do-not-page rows that carry a high-tier
-keyword (negations, media, clinical questions) page with the assessor down
-through the keyword fallback, as before; that is not this rule.
+rescues 3 (`det-attempt-04` "I'm doing it tonight. I've already said goodbye to
+my sister.", `det-attempt-05` "I wrote my note and I'm going to do it after my
+roommate leaves." (a preparatory act beside the intent), `det-context-04` "This
+is the last time we'll talk."). Lost, knowingly: `det-context-01` "I'm going to
+do it tonight, I've decided." (the same words as the do-not-page
+`det-plans-01`: only the missing history tells them apart; the implicit intent
+alone would raise the plan and help-step rows again) and `det-bystander-05`
+(someone else's passive ideation: only the medium tier would raise it, and with
+it all 21 passive-ideation rows). The 32 do-not-page rows that carry a
+high-tier keyword (negations, media, clinical questions) page with the
+assessor down through the keyword fallback, as before; that is not this rule.
+With the assessor UP, the high-tier branch is the only one that can matter for
+them: a high-tier keyword turn the assessor reads below 65 with a label other
+than `negated`, `reference`, `bystander` or `harm_to_others` (for example a
+past struggle read `genuine` at 15: "Last year I ... wanted to die, but I am
+doing so much better now") is raised to 65 in this window. The measurement
+above does not cover that case (it needs the assessor).
 
 What happens to the two readings this section is about, after the narrowing:
 the split disclosure is joined from whatever copy this process holds, so with

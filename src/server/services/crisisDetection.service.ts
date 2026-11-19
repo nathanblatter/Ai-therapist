@@ -2018,6 +2018,38 @@ const CONTEXT_BLIND_STANDALONE_SIGNALS: ReadonlySet<string> = new Set([
   'asks for a painless or quick way',
 ]);
 
+/** Preparatory acts (C-SSRS "preparatory behavior"): the participant says they
+ *  have written a note or letter, or given their belongings away. With the
+ *  history missing they stand in for the goodbye half of the intent-and-goodbye
+ *  rule ("I wrote my note and I'm going to do it after my roommate leaves" is
+ *  the same statement as "... I've said my goodbyes"); alone they raise
+ *  nothing. First person only. Narrow on purpose: "notes" (lecture notes) and
+ *  "a letter of recommendation / about the rent" are not matched. Consulted by
+ *  the context-blind rule only: the other screens and floors are unchanged. */
+const CONTEXT_BLIND_PREPARATORY_ACTS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+  {
+    label: 'wrote a note or letters',
+    pattern:
+      /\bi(?:'ve| have| had|'d)?\s+(?:already\s+|just\s+|finally\s+)?(?:wrote|written|finished(?: writing)?|left)\s+(?:my|the|a)\s+(?:last\s+|final\s+)?(?:note|letter|letters)\b(?!\s+(?:of|about|on)\b)/,
+  },
+  {
+    label: 'gave belongings away',
+    pattern:
+      /\bi(?:'ve| have| had|'d|'m| am)?\s+(?:already\s+|just\s+|finally\s+)?(?:gave|given|giving)\s+(?:away\s+(?:all\s+(?:of\s+)?)?my\s+(?:things|stuff|belongings|possessions|valuables)\b|(?:all\s+(?:of\s+)?)?my\s+(?:things|stuff|belongings|possessions|valuables)\s+away\b)/,
+  },
+];
+
+/** A preparatory act in the message, neither negated nor retracted. */
+function hasStandingPreparatoryAct(content: string): boolean {
+  const text = normalizeForScreen(content);
+  return CONTEXT_BLIND_PREPARATORY_ACTS.some(({ label, pattern }) => {
+    const m = pattern.exec(text);
+    if (!m) return false;
+    const match: ContextSignalMatch = { kind: 'farewell', label, strong: true, index: m.index, text: m[0] };
+    return !signalIsNegated(text, match) && !signalIsRetracted(text, match);
+  });
+}
+
 /**
  * The context-blind rule (ai-therapist-373; narrowed to strong signals by the
  * study owner on 2026-11-19, PR #88 review). A turn scored with no history it
@@ -2031,9 +2063,11 @@ const CONTEXT_BLIND_STANDALONE_SIGNALS: ReadonlySet<string> = new Set([
  *   - a strong context signal that names its own object, neither negated nor
  *     retracted: a final message to us or a lethal-means question
  *     (CONTEXT_BLIND_STANDALONE_SIGNALS), or
- *   - an implicit statement of intent (a plan, a time) AND a goodbye in the
- *     same turn ("I'm doing it tonight. I've already said goodbye to my
- *     sister"), both standing,
+ *   - an implicit statement of intent (a plan, a time) AND a goodbye or a
+ *     preparatory act (a note written, belongings given away;
+ *     CONTEXT_BLIND_PREPARATORY_ACTS) in the same turn ("I'm doing it
+ *     tonight. I've already said goodbye to my sister", "I wrote my note and
+ *     I'm going to do it after my roommate leaves"), both standing,
  * and the assessor must not have settled the turn on its own words as a
  * negation, a reference, someone else's situation or harm to others.
  * Not raised, on purpose: passive ideation (the medium tier, "I'm tired of
@@ -2068,7 +2102,8 @@ function hasContextBlindStrongSignal(keywordScore: number, content: string): boo
   if (keywordScore >= CRISIS_KEYWORDS.high.score) return true;
   const standing = standingStrongSignals(content);
   if (standing.some((s) => CONTEXT_BLIND_STANDALONE_SIGNALS.has(s.label))) return true;
-  return standing.some((s) => s.kind === 'intent') && standing.some((s) => s.kind === 'farewell');
+  if (!standing.some((s) => s.kind === 'intent')) return false;
+  return standing.some((s) => s.kind === 'farewell') || hasStandingPreparatoryAct(content);
 }
 
 interface RiskAnalysisResult {

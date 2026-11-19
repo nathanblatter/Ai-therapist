@@ -48,12 +48,17 @@ describe('the context-blind rule over the detector goldens (history missing, ass
 
   // The must-page rows the rule still rescues (below the page line on their
   // keyword tier, raised by the rule). Pinned so a change in either direction
-  // is seen. Lost by the narrowing, knowingly: det-context-01 ("I'm going to do
-  // it tonight, I've decided.", the same words as the do-not-page
-  // det-plans-01), det-attempt-05 ("I wrote my note and I'm going to do it
-  // after my roommate leaves."; "my note" is no goodbye signal) and
-  // det-bystander-05 (someone else's passive ideation, medium tier).
+  // is seen. det-attempt-05 ("I wrote my note and I'm going to do it after my
+  // roommate leaves.") is rescued by a preparatory act (a note written) beside
+  // the intent. Lost by the narrowing, knowingly: det-context-01 ("I'm going to
+  // do it tonight, I've decided.", the same words as the do-not-page
+  // det-plans-01) and det-bystander-05 (someone else's passive ideation,
+  // medium tier).
   it('still rescues the must-page rows that carry a strong signal', () => {
-    expect(raisedIds('yes')).toEqual(['det-attempt-04', 'det-context-04']);
+    expect(raisedIds('yes')).toEqual(['det-attempt-04', 'det-attempt-05', 'det-context-04']);
+  });
+
+  it('the either-page rows it raises are pinned too ("This is goodbye. Thank you for listening ...")', () => {
+    expect(raisedIds('either')).toEqual(['det-context-10']);
   });
 });
