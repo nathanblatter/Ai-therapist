@@ -121,7 +121,6 @@ import {
 } from '../../shared/recoveryPrompt.js';
 import {
   LIVE_DELEGATION_STALLED_COMMENTARY,
-  LIVE_DELEGATION_STALLED_SHORT_COMMENTARY,
   LIVE_DELEGATION_GAP_COMMENTARY,
   DELEGATION_QUIET_CEILING_MS,
   LIVE_RECOVERY_NO_LOOKUP_COMMENTARY,
@@ -870,15 +869,17 @@ function buildItems(): Item[] {
   add('pre', LIVE_DELEGATION_STALLED_COMMENTARY);
   add(
     'note',
-    `If the participant keeps speaking for ${DELEGATION_QUIET_CEILING_MS / 1000} seconds, this shorter version ` +
-      'is sent instead:',
+    `If the participant keeps speaking for ${DELEGATION_QUIET_CEILING_MS / 1000} seconds, nothing is sent: ` +
+      'the unanswered question is recorded and left alone, so the assistant is never prompted to speak over them.',
   );
-  add('pre', LIVE_DELEGATION_STALLED_SHORT_COMMENTARY);
   add(
     'note',
     "If the server's monitoring connection to a voice session is re-established after a break longer than the " +
       'few seconds the voice service replays, a question may have been handed over while it was away. If ' +
-      'nothing has been handed over again 12 seconds later, it sends this, under the same conditions:',
+      'nothing has been handed over again 12 seconds later, it sends this, under the same conditions. It is not ' +
+      'armed at all while the session is flagged at high crisis severity, or when any guidance in B.1 to B.4 (or the ' +
+      'crisis notice that cancels a wrap-up, B.6) was delivered in the 12 seconds before the break ended; such ' +
+      'guidance delivered after it cancels the instruction:',
   );
   add('pre', LIVE_DELEGATION_GAP_COMMENTARY);
 

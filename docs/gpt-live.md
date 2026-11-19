@@ -742,7 +742,7 @@ One run each: enough to show the mechanism, not a rate.
   | default (all others) | 5 s | local database reads and writes |
   | `retrieve_psychoeducation`, `find_worksheet`, `suggest_modality_technique` | 10 s | embedding (with its own retries), vector search, LLM rerank (hard 2.5 s) |
   | `recall_relevant_history`, `remember_this` | 10 s | embedding plus a query or insert |
-  | `escalate_to_human` | 20 s | at high urgency runs the graduated crisis response, which pages; on a timeout the page may still go out |
+  | `escalate_to_human` | 10 s | at high urgency runs the graduated crisis response (database work; the page is not awaited); on a timeout the model is told the alert is still being sent |
 
   As a backstop the watch stops pausing for a call still pending 5 s
   (`TOOL_PAUSE_GRACE_MS`) after its tool's limit, in case something around
@@ -784,9 +784,12 @@ delegated. So:
   participant transcript fragment has arrived for 1.5 s, looking again every
   0.5 s; a backend answer in the meantime cancels it. The wait has a ceiling
   (`DELEGATION_QUIET_CEILING_MS`, 8 s): someone who has talked that long is
-  not waiting on the answer, but the delegation must still be settled, so
-  `LIVE_DELEGATION_STALLED_SHORT_COMMENTARY` (one line, names nobody) goes
-  out then, with `participantTalkingMs` in the record.
+  not waiting on the answer. On an ordinary session the watch is then
+  settled and recorded (`suppressed: 'participant_talking'`,
+  `participantTalkingMs`, `delivered: false`) and nothing is sent:
+  commentary makes the model speak, and it would speak over someone who may
+  be in the middle of a disclosure (PR #80 review). A recovery session's
+  delegation is addressed to us and still gets its safety-first answer.
 - The `intervention_actions` row carries `origin: 'sideband_watchdog'`
   (besides `event: 'delegation_fallback'`), because its type
   `external_api_called` is shared with vendor terminations and pager rows.
@@ -871,11 +874,15 @@ WebSocket reference). Replayed events keep their `event_id`.
   any other, and one watch with no delegation id is armed for one quiet
   period. It stands down when the voice model delegates again, when a gap
   delegation is adopted, or when any fallback goes out; if it runs out it
-  sends `LIVE_DELEGATION_GAP_COMMENTARY` ("If you told the participant you
-  were checking or looking something up and have not yet given them the
-  answer, that lookup did not come back ... If you were not waiting on a
-  lookup, ignore this and carry on"), under the same rules as every
-  fallback (`reason: reconnect_gap`, `delegationId: null`).
+  sends `LIVE_DELEGATION_GAP_COMMENTARY` ("Only if you told the participant
+  you were checking or looking something up and have not yet given them the
+  answer: that lookup did not come back ... If you were not waiting on a
+  lookup, ignore this entirely and carry on."), under the same rules as every
+  fallback (`reason: reconnect_gap`, `delegationId: null`). It is not armed
+  at all, and the skip is logged (`reconnect-gap watch not armed`), when a
+  risk or safety steer was delivered in the quiet period before the
+  reconnect or the session is crisis-flagged at high severity; a risk steer
+  after the reconnect suppresses it like any fallback.
 - Not covered: a gap delegation whose backend dies after that one window
   (the null watch fires once); a gap delegation whose backend answered while
   nobody was attached (nothing is owed); after a process restart an ordinary

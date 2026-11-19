@@ -38,7 +38,7 @@ describe('the timeout table', () => {
     expect(toolTimeoutMs('log_mood')).toBe(TOOL_TIMEOUT_DEFAULT_MS);
     expect(toolTimeoutMs('no_such_tool')).toBe(TOOL_TIMEOUT_DEFAULT_MS);
     expect(toolTimeoutMs('find_worksheet')).toBe(10_000);
-    expect(toolTimeoutMs('escalate_to_human')).toBe(20_000);
+    expect(toolTimeoutMs('escalate_to_human')).toBe(10_000);
     // Every override names a registered tool, and none is shorter than the default.
     for (const [name, ms] of Object.entries(TOOL_TIMEOUT_OVERRIDES_MS)) {
       expect(toolRegistry.hasTool(name), name).toBe(true);

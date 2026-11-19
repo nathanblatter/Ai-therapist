@@ -113,8 +113,8 @@ import {
   TOOL_PAUSE_GRACE_MS,
   DELEGATION_QUIET_CEILING_MS,
   SIDEBAND_REPLAY_COVERED_MS,
-  LIVE_DELEGATION_STALLED_SHORT_COMMENTARY,
   LIVE_DELEGATION_GAP_COMMENTARY,
+  LIVE_DELEGATION_GAP_COMMENTARY_NEUTRAL,
 } from './sidebandManager.service.js';
 import { ToolTimeoutError, toolTimeoutMessage, toolTimeoutMs } from './toolTimeouts.js';
 
@@ -1821,7 +1821,7 @@ describe('unanswered delegations (ai-therapist-348)', () => {
       });
     });
 
-    it('waits for a talking participant for at most the ceiling, then sends one short line (ai-therapist-364)', async () => {
+    it('waits for a talking participant for at most the ceiling, then settles and records it, sending nothing (PR #80 review)', async () => {
       const sessionId = 's-deleg-talking-ceiling';
       const ws = await attach(sessionId);
       await fire(sessionId, created());
@@ -1835,20 +1835,30 @@ describe('unanswered delegations (ai-therapist-348)', () => {
       };
       await talk(DELEGATION_QUIET_CEILING_MS - 500);
       await settle();
-      expect(commentary(ws)).toHaveLength(0);
+      expect(fallbackBroadcasts()).toHaveLength(0);
       await talk(1_500);
       await settle();
-      const sent = commentary(ws);
-      expect(sent).toHaveLength(1);
-      expect(sent[0].content).toBe(LIVE_DELEGATION_STALLED_SHORT_COMMENTARY);
-      expect(sent[0].delegation_id).toBeNull();
-      expect(fallbackBroadcasts()[0][2]).toMatchObject({ delivered: true, delegationId: 'dg_w' });
+      // Settled and recorded (the voice metrics count it), but not spoken:
+      // commentary would make the model talk over them.
+      expect(commentary(ws)).toHaveLength(0);
+      expect(fallbackBroadcasts()).toHaveLength(1);
+      expect(fallbackBroadcasts()[0][2]).toMatchObject({
+        delivered: false,
+        suppressed: 'participant_talking',
+        delegationId: 'dg_w',
+      });
       expect(fallbackBroadcasts()[0][2].participantTalkingMs).toBeGreaterThanOrEqual(DELEGATION_QUIET_CEILING_MS);
-      // Settled: nothing more, however long they go on.
+      expect(fallbackRecords()).toHaveLength(1);
+      expect(JSON.parse(String((fallbackRecords()[0][1] as unknown[])[2]))).toMatchObject({
+        event: 'delegation_fallback',
+        suppressed: 'participant_talking',
+      });
+      // Settled: nothing more, however long they go on or once they stop.
       await talk(10_000);
       await vi.advanceTimersByTimeAsync(5 * DELEGATION_STALL_MS);
       await settle();
-      expect(commentary(ws)).toHaveLength(1);
+      expect(commentary(ws)).toHaveLength(0);
+      expect(fallbackBroadcasts()).toHaveLength(1);
     });
 
     it('records the fallback with a field that sets it apart from vendor terminations (origin)', async () => {
@@ -2069,6 +2079,77 @@ describe('unanswered delegations (ai-therapist-348)', () => {
         expect(fallbackBroadcasts().find((c) => c[3] === 's-gap-steer')![2]).toMatchObject({
           suppressed: 'clinical_steer',
         });
+      });
+
+      it('the gap line is conditional as a whole', () => {
+        for (const text of [LIVE_DELEGATION_GAP_COMMENTARY, LIVE_DELEGATION_GAP_COMMENTARY_NEUTRAL]) {
+          expect(text.startsWith('Only if you told the participant you were checking or looking something up')).toBe(
+            true,
+          );
+          expect(text.endsWith('If you were not waiting on a lookup, ignore this entirely and carry on.')).toBe(true);
+        }
+      });
+
+      it('is not armed when a risk steer went out in the quiet period before the reconnect (PR #80 review)', async () => {
+        const sessionId = 's-gap-recent-steer';
+        activeStudySession();
+        const first = await attach(sessionId);
+        await sidebandManager.tryInject(sessionId, 'system', CLINICAL_STEER, false);
+        const warn = vi.spyOn(console, 'warn');
+        const ws = await dropAndRejoin(sessionId, first, SIDEBAND_REPLAY_COVERED_MS);
+        expect(sb.sessions.get(sessionId).delegationWatches.has('\u0000reconnect_gap')).toBe(false);
+        expect(
+          warn.mock.calls.some(
+            (c) => String(c[0]).includes('reconnect-gap watch not armed') && String(c[1]).includes('recent_risk_steer'),
+          ),
+        ).toBe(true);
+        await vi.advanceTimersByTimeAsync(5 * DELEGATION_STALL_MS);
+        await settle();
+        expect(commentary(ws)).toHaveLength(0);
+        expect(fallbackBroadcasts()).toHaveLength(0);
+      });
+
+      it('an older risk steer does not stop it being armed', async () => {
+        const sessionId = 's-gap-old-steer';
+        activeStudySession();
+        const first = await attach(sessionId);
+        await sidebandManager.tryInject(sessionId, 'system', CLINICAL_STEER, false);
+        await vi.advanceTimersByTimeAsync(2 * DELEGATION_STALL_UNKNOWN_MS);
+        const ws = await dropAndRejoin(sessionId, first, SIDEBAND_REPLAY_COVERED_MS);
+        await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+        await settle();
+        expect(commentary(ws).map((e) => e.content)).toEqual([LIVE_DELEGATION_GAP_COMMENTARY]);
+      });
+
+      it('is not armed while the session is crisis-flagged high, and is armed at medium (PR #80 review)', async () => {
+        getSystemConfigMock.mockResolvedValue({ features: {}, live_backend_reasoning_effort: 'low' });
+        queryMock.mockImplementation((sql: string, params?: unknown[]) => {
+          if (sql.includes('SELECT status')) return Promise.resolve({ rows: [{ status: 'active' }] });
+          if (sql.includes('SELECT is_demo')) return Promise.resolve({ rows: [{ is_demo: false }] });
+          if (sql.includes('SELECT crisis_flagged')) {
+            const high = params?.[0] === 's-gap-crisis-high';
+            return Promise.resolve({
+              rows: [{ crisis_flagged: true, crisis_severity: high ? 'high' : 'medium' }],
+            });
+          }
+          return Promise.resolve({ rows: [] });
+        });
+        const warn = vi.spyOn(console, 'warn');
+        const high = await dropAndRejoin(
+          's-gap-crisis-high',
+          await attach('s-gap-crisis-high'),
+          SIDEBAND_REPLAY_COVERED_MS,
+        );
+        const medium = await dropAndRejoin(
+          's-gap-crisis-med',
+          await attach('s-gap-crisis-med'),
+          SIDEBAND_REPLAY_COVERED_MS,
+        );
+        expect(warn.mock.calls.some((c) => String(c[1]).includes('crisis_flagged_high'))).toBe(true);
+        await vi.advanceTimersByTimeAsync(DELEGATION_STALL_MS);
+        await settle();
+        expect(commentary(high)).toHaveLength(0);
+        expect(commentary(medium).map((e) => e.content)).toEqual([LIVE_DELEGATION_GAP_COMMENTARY]);
       });
 
       it('adopts a delegation created during the gap from its first backend event, and watches it', async () => {

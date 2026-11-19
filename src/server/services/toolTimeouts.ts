@@ -29,7 +29,8 @@ export const TOOL_TIMEOUT_DEFAULT_MS = 5_000;
  *    search and, for the retrieval tools, an LLM rerank with its own hard
  *    2.5 s timeout (rerank.service.ts): 10 s;
  *  - escalate_to_human at high urgency flags the session and runs the
- *    graduated crisis response, which pages the on-call: 20 s. If it times
+ *    graduated crisis response, which pages the on-call (the page itself is
+ *    not awaited; the handler is about ten database round trips): 10 s. If it times
  *    out the flag and page are still on their way, and the model is told
  *    exactly that (toolTimeoutMessage), never that help could not be reached.
  */
@@ -39,7 +40,7 @@ export const TOOL_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
   suggest_modality_technique: 10_000,
   recall_relevant_history: 10_000,
   remember_this: 10_000,
-  escalate_to_human: 20_000,
+  escalate_to_human: 10_000,
 };
 
 export function toolTimeoutMs(name: string): number {

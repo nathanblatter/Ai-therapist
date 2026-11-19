@@ -146,9 +146,10 @@ const STEER_PARTICIPANT_TALKING_MS = 1_500;
  *    period per steer (ai-therapist-364);
  *  - it is never sent while the participant is speaking: it waits until they
  *    have been quiet for STEER_PARTICIPANT_TALKING_MS, but not for longer
- *    than DELEGATION_QUIET_CEILING_MS, after which a short form is sent
- *    anyway (a participant who has talked that long is not waiting on the
- *    answer, but the delegation must still be settled).
+ *    than DELEGATION_QUIET_CEILING_MS, after which an ordinary session's
+ *    watch is settled and recorded with nothing sent (a participant who has
+ *    talked that long is not waiting on the answer, and commentary would make
+ *    the model speak over them).
  */
 export const DELEGATION_STALL_MS = 12_000;
 export const DELEGATION_STALL_UNKNOWN_MS = 20_000;
@@ -256,15 +257,6 @@ export function delegationStalledCommentary(study: boolean): string {
   );
 }
 /**
- * Sent instead of the full text when the participant has been speaking for
- * DELEGATION_QUIET_CEILING_MS: they are not waiting on the answer, so it is
- * one line, and it names nobody (it is the same for every session).
- */
-export const LIVE_DELEGATION_STALLED_SHORT_COMMENTARY =
-  "The lookup for the participant's earlier question did not come back. When it fits, tell them briefly that you " +
-  'could not get that answer just now. If they are talking about how they feel or their safety, respond to that ' +
-  'instead.';
-/**
  * Sent once after the sideband rejoins an ordinary session it was away from
  * for longer than the API replays (SIDEBAND_REPLAY_COVERED_MS), in case a
  * delegation was created while nobody was watching and its backend never
@@ -272,10 +264,10 @@ export const LIVE_DELEGATION_STALLED_SHORT_COMMENTARY =
  */
 export function delegationGapCommentary(study: boolean): string {
   return (
-    'If you told the participant you were checking or looking something up and have not yet given them the ' +
-    'answer, that lookup did not come back: stop saying you are checking or looking into it. ' +
+    'Only if you told the participant you were checking or looking something up and have not yet given them the ' +
+    'answer: that lookup did not come back, so stop saying you are checking or looking into it. ' +
     `${SAFETY_FIRST.replace('cannot answer', 'could not get an answer')} ${stalledWhoCanAnswer(study)} ` +
-    'If you were not waiting on a lookup, ignore this and carry on with the conversation.'
+    'If you were not waiting on a lookup, ignore this entirely and carry on.'
   );
 }
 /** The study-session wording, as printed in the IRB prompts attachment. */
@@ -1303,8 +1295,15 @@ export class SidebandManager {
    *    it, it waits for quiet, and so on).
    * Not covered: a gap delegation whose backend did answer while nobody was
    * attached (nothing is owed), and one whose backend died after this window.
+   *
+   * The crisis response matters more than an unanswered lookup (PR #80
+   * review), so the watch is not armed at all, and the skip is logged, when
+   * a risk or safety steer was delivered in the quiet period before the
+   * reconnect or the session is crisis-flagged at high severity; a risk steer
+   * after it suppresses the line (delegationFallback). A failed crisis-state
+   * read arms it: the line is conditional and risk steers still suppress it.
    */
-  private armReconnectGapWatch(sessionId: string): void {
+  private async armReconnectGapWatch(sessionId: string): Promise<void> {
     const state = this.sessions.get(sessionId);
     if (!state || state.openingAttach || state.delegationMode !== 'responses' || state.finalized) return;
     if (state.delegationWatches.has(GAP_WATCH_KEY)) return;
@@ -1312,6 +1311,34 @@ export class SidebandManager {
     this.sidebandClosedAt.delete(sessionId);
     const awayMs = closedAt === undefined ? null : Date.now() - closedAt;
     if (awayMs !== null && awayMs < SIDEBAND_REPLAY_COVERED_MS) return;
+
+    let skip: 'recent_risk_steer' | 'crisis_flagged_high' | null =
+      state.lastRiskSteerAt > 0 && Date.now() - state.lastRiskSteerAt < state.delegationStallMs
+        ? 'recent_risk_steer'
+        : null;
+    if (!skip) {
+      try {
+        const { rows } = await pool.query<{ crisis_flagged: boolean; crisis_severity: string | null }>(
+          'SELECT crisis_flagged, crisis_severity FROM therapy_sessions WHERE session_id = $1',
+          [sessionId],
+        );
+        if (rows[0]?.crisis_flagged && rows[0].crisis_severity === 'high') skip = 'crisis_flagged_high';
+      } catch (err) {
+        console.error(`[Live] crisis state read failed before the reconnect-gap watch; arming it:`, err);
+      }
+    }
+    // The read was async: the session may have moved on (a new attach, a
+    // delegation that armed its own watch, the end).
+    if (this.sessions.get(sessionId) !== state || state.finalized || state.delegationWatches.has(GAP_WATCH_KEY)) {
+      return;
+    }
+    if (skip) {
+      console.warn(
+        '[Live] reconnect-gap watch not armed',
+        JSON.stringify({ session: sessionId.substring(0, 12), reason: skip, awayMs }),
+      );
+      return;
+    }
     state.delegationWatches.set(GAP_WATCH_KEY, newDelegationWatch());
     this.armDelegationWatch(sessionId, GAP_WATCH_KEY);
   }
@@ -1494,7 +1521,11 @@ export class SidebandManager {
     // while they are speaking again. Look again shortly; the watch stays
     // open, so a backend answer in the meantime still settles it. But not
     // for ever: after DELEGATION_QUIET_CEILING_MS of talking they are not
-    // waiting on this answer, and it goes out as one short line.
+    // waiting on this answer. An ordinary session's watch is then settled
+    // and recorded, and NOTHING is sent: commentary makes the model speak,
+    // and it would speak over someone who may be in the middle of a
+    // disclosure (PR #80 review). A recovery session's delegation is
+    // addressed to us and still gets its (safety-first) answer.
     const now = Date.now();
     let cutShort = false;
     if (now - state.lastUserDeltaAt < STEER_PARTICIPANT_TALKING_MS) {
@@ -1518,7 +1549,15 @@ export class SidebandManager {
     // model what to say about the participant's safety. "I could not get that
     // answer" must not follow it. (A recovery session answers at once, before
     // any steer could have been sent, and its text puts safety first itself.)
-    const suppressed = !client && state.lastRiskSteerAt >= watch.startedAt ? 'clinical_steer' : null;
+    // (The reconnect-gap watch is not even armed after a recent risk steer:
+    // armReconnectGapWatch.) An ordinary session that reached the quiet
+    // ceiling is recorded and left alone (see above).
+    const suppressed =
+      !client && state.lastRiskSteerAt >= watch.startedAt
+        ? 'clinical_steer'
+        : !client && cutShort
+          ? 'participant_talking'
+          : null;
     const details = {
       delegationId: gap ? null : delegationId,
       reason,
@@ -1533,7 +1572,6 @@ export class SidebandManager {
     if (!suppressed) {
       let text: string;
       if (client) text = recoveryNoLookupCommentary(state.studyContact);
-      else if (cutShort) text = LIVE_DELEGATION_STALLED_SHORT_COMMENTARY;
       else if (gap) text = delegationGapCommentary(state.studyContact);
       else text = delegationStalledCommentary(state.studyContact);
       try {
@@ -1625,7 +1663,7 @@ export class SidebandManager {
       this.startKeepalive(sessionId);
       await this.loadDelegationContext(sessionId);
       this.coverRecoveryReconnectGap(sessionId);
-      this.armReconnectGapWatch(sessionId);
+      await this.armReconnectGapWatch(sessionId);
       await this.schedulePhaseNudges(sessionId);
       await this.scheduleRegrounding(sessionId);
       console.log(`[Live] Sideband established for ${sessionId.substring(0, 12)}...`);
