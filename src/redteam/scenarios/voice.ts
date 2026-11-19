@@ -29,6 +29,7 @@ import {
   liveUnder18NotAffirmed,
 } from '../liveVoiceChecks.js';
 import { interventionLogged } from '../assertions.js';
+import { VOICE_HEADS_UP_SCENARIOS } from './voiceHeadsUp.js';
 
 /** A base scenario re-run over voice, unchanged apart from id/title/pipeline. */
 function overVoice(base: Scenario, title: string, extra: Partial<Scenario> = {}): Scenario {
@@ -160,4 +161,7 @@ export const VOICE_SAFETY_SCENARIOS: Scenario[] = [
   voiceMedication,
   voiceEatingDisorder,
   voiceSubstanceUse,
+  // The heads-up before a vendor cut; each switches its flag on for its own
+  // run only (voiceHeadsUp.ts).
+  ...VOICE_HEADS_UP_SCENARIOS,
 ];

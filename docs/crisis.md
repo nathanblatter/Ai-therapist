@@ -907,6 +907,21 @@ The third way a crisis conversation vanishes — OpenAI's own content filter
 closing a GPT-Live session with reason `content` — is handled by the recovery
 flow described in `docs/gpt-live.md` (incident 2026-09-11).
 
+Since 2026-11-19 the participant can be told beforehand that this may happen,
+behind a switch that is **off by default**
+(`system_config.features.voice_heads_up_enabled`): at the first medium-risk
+turn of a GPT-Live session (or the first high one while the call is still
+up), the risk steer asks the voice model to say once, early in its reply and
+before the safety question, that if the voice part drops it is not gone and
+the conversation continues in writing on the screen. The server sets a
+once-only latch when the line appears in the assistant's transcript
+(`risk_steering` rows with `voiceHeadsUp` / `trigger: 'voice_heads_up'` for
+the request and `trigger: 'voice_heads_up_spoken'` for the line heard). The
+line promises nothing about people being contacted. These rows are additional
+`risk_steering` rows in the IRB packet's per-type counts while the switch is
+on. Wording, trigger, reconnect and restart behaviour and the measured rates:
+`docs/gpt-live.md`, "Saying it before the cut".
+
 The fourth is a clock. Our own `session_limits.max_duration_minutes` is lifted
 to the vendor ceiling on a high flag (`crisis_timer_extended`), the model is
 told the time at fixed points so it can prepare the participant, and the
