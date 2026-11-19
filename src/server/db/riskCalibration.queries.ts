@@ -17,6 +17,7 @@
 import { pool } from '../config/db.js';
 import { SESSION_SCOPE, irbWindowParams, type IrbWindow } from './irbPacket.queries.js';
 import type { AdjudicationVerdict } from './crisisAdjudications.queries.js';
+import { withLongQueries } from '../config/dbLongQueries.js';
 
 const num = (v: unknown): number | null => {
   if (v === null || v === undefined) return null;
@@ -58,7 +59,7 @@ export interface ScoredMessageRow {
  * writes the flag with the message that tripped it); manual flags and
  * unflag events carry no message_id and so never attach here.
  */
-export async function getScoredMessages(w: IrbWindow): Promise<ScoredMessageRow[]> {
+async function getScoredMessagesUnbounded(w: IrbWindow): Promise<ScoredMessageRow[]> {
   const r = await pool.query<{
     history_id: string;
     message_id: string | null;
@@ -182,7 +183,7 @@ export const UNFLAGGED_MAX_SCORE = 24;
  * were never scored or scored at most UNFLAGGED_MAX_SCORE. Ordered by
  * message_id so the seeded sampler is deterministic for a fixed window.
  */
-export async function getUnflaggedCandidates(w: IrbWindow): Promise<UnflaggedCandidate[]> {
+async function getUnflaggedCandidatesUnbounded(w: IrbWindow): Promise<UnflaggedCandidate[]> {
   const r = await pool.query<{ message_id: string; session_id: string; stratum: string }>(
     `SELECT m.message_id, m.session_id,
             COALESCE(ts.session_type, 'unknown') || '|' ||
@@ -313,3 +314,11 @@ export async function getRiskCalibrationRun(runId: number, orgId: number): Promi
   );
   return r.rows[0] ?? null;
 }
+
+// Bulk work: these run under the long statement limit instead of the pool's
+// default (config/dbLongQueries.ts, ai-therapist-366).
+export const getScoredMessages: typeof getScoredMessagesUnbounded = (...args) =>
+  withLongQueries('risk_calibration', () => getScoredMessagesUnbounded(...args));
+
+export const getUnflaggedCandidates: typeof getUnflaggedCandidatesUnbounded = (...args) =>
+  withLongQueries('risk_calibration', () => getUnflaggedCandidatesUnbounded(...args));

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock every collaborator so the shared pipeline runs without a DB or network.
 // The pipeline's job is orchestration: demo skip, steering delivery per
@@ -263,6 +263,12 @@ describe('a high turn the re-flag rule let pass (handleHighTurnWithoutReflag)', 
   const recordedAs = { recorded: true, eventId: 501, stampedScore: 100 };
   // handleHighTurnWithoutReflag's promise settles when its page, dashboard
   // events and draft have: awaiting it is all the waiting these tests need.
+  // The paging module is mocked over its real exports (importOriginal), so
+  // its first dynamic import loads the whole paging graph; loaded once up
+  // front, the fake-timer tests below do not race that load.
+  beforeAll(async () => {
+    await import('./crisisPaging.service.js');
+  });
 
   it('stamp-only recovery session: the disclosure is recorded, paged, logged, shown, queued and gets its adverse-event draft', async () => {
     recordRecoveryDisclosureMock.mockResolvedValue(recordedAs);
@@ -749,14 +755,100 @@ describe('runCrisisPipeline — context-wake turns (ai-therapist-299)', () => {
 });
 
 describe('runCrisisPipeline — reading the flag state must not cost the turn its steer', () => {
-  it('still steers a high turn when the state read fails, then fails the flagging step as before', async () => {
+  it('still steers a high turn when the state read fails, then flags and pages it as unflagged (ai-therapist-366)', async () => {
     getSessionCrisisStateMock.mockRejectedValue(new Error('db down'));
     risk(90, 'high');
 
     const r = await runCrisisPipeline(TURN, 'realtime');
 
     expect(maybeSteerSessionMock).toHaveBeenCalledWith('chat_1', 90, 'high', true);
-    expect(flagSessionCrisisMock).not.toHaveBeenCalled();
-    expect(r).toMatchObject({ riskScore: 0, flagged: false });
+    // It used to throw here: no flag, no page, NONE returned.
+    expect(flagSessionCrisisMock).toHaveBeenCalled();
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(r).toMatchObject({ riskScore: 90, flagged: true });
+  });
+});
+
+// ai-therapist-366: the pool now REJECTS where it used to wait forever, with
+// pg-pool's acquire timeout or Postgres' statement timeout (57014). Each read
+// or write on the way to the page must resolve toward paging and resources.
+describe('runCrisisPipeline — a database timeout fails toward paging (ai-therapist-366)', () => {
+  const acquireTimeout = () => new Error('timeout exceeded when trying to connect');
+  const statementTimeout = () =>
+    Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
+
+  it('demo check times out: the pipeline still runs and a high turn pages', async () => {
+    isDemoAccountSessionMock.mockRejectedValue(acquireTimeout());
+    risk(90, 'high');
+
+    const r = await runCrisisPipeline(TURN, 'realtime');
+
+    expect(analyzeMessageRiskMock).toHaveBeenCalled();
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(r).toMatchObject({ severity: 'high', flagged: true });
+  });
+
+  it('history read times out: scored without history, and a high turn pages', async () => {
+    getRecentSessionMessagesMock.mockRejectedValue(statementTimeout());
+    risk(90, 'high');
+
+    const r = await runCrisisPipeline(TURN, 'chat');
+
+    expect(analyzeMessageRiskMock).toHaveBeenCalledWith(expect.objectContaining({ content: 'hi' }), []);
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(r.steeringGuidance).toBe('CHAT_HIGH_GUIDANCE');
+  });
+
+  it('crisis state read times out: flagged as if unflagged, and paged', async () => {
+    getSessionCrisisStateMock.mockRejectedValue(acquireTimeout());
+    risk(85, 'high');
+
+    const r = await runCrisisPipeline(TURN, 'chat');
+
+    expect(flagSessionCrisisMock).toHaveBeenCalledWith(
+      'chat_1',
+      'high',
+      85,
+      'system',
+      'auto',
+      42,
+      [],
+      expect.any(String),
+    );
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 85);
+    expect(r.flagged).toBe(true);
+  });
+
+  it('flag write times out (acquire): the graduated response (page + resources) still runs', async () => {
+    flagSessionCrisisMock.mockRejectedValue(acquireTimeout());
+    risk(90, 'high');
+
+    const r = await runCrisisPipeline(TURN, 'realtime');
+
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 90);
+    expect(r).toMatchObject({ severity: 'high', flagged: true });
+  });
+
+  it('flag write times out (statement): the graduated response still runs', async () => {
+    flagSessionCrisisMock.mockRejectedValue(statementTimeout());
+    risk(80, 'high');
+
+    await runCrisisPipeline(TURN, 'chat');
+
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 80);
+  });
+
+  it('every read and write times out at once: a high turn still reaches the graduated response', async () => {
+    isDemoAccountSessionMock.mockRejectedValue(acquireTimeout());
+    getRecentSessionMessagesMock.mockRejectedValue(acquireTimeout());
+    getSessionCrisisStateMock.mockRejectedValue(acquireTimeout());
+    flagSessionCrisisMock.mockRejectedValue(acquireTimeout());
+    getSessionAccessInfoMock.mockRejectedValue(acquireTimeout());
+    risk(95, 'high');
+
+    const r = await runCrisisPipeline(TURN, 'realtime');
+
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('chat_1', 'high', 95);
+    expect(r).toMatchObject({ riskScore: 95, severity: 'high', flagged: true });
   });
 });

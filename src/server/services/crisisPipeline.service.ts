@@ -155,9 +155,23 @@ export async function runCrisisPipeline(
     // on-call. Keyed on the owner's role, NOT the session is_demo flag — the
     // eval harness's sessions carry is_demo for analytics exclusion but must
     // still exercise the real pipeline (its runner neuters paging/broadcast).
-    if (await sessionSuppressesSafetyPipeline(turn.sessionId)) return NONE_RESULT;
+    // A failed or timed-out read (ai-therapist-366: the pool now rejects
+    // instead of waiting forever) fails toward running the pipeline: a demo
+    // session may then be scored, a real one is never skipped.
+    let suppressed = false;
+    try {
+      suppressed = await sessionSuppressesSafetyPipeline(turn.sessionId);
+    } catch (err) {
+      logDbMiss('demo check')(err);
+    }
+    if (suppressed) return NONE_RESULT;
 
-    const history = await getRecentSessionMessages(turn.sessionId, HISTORY_WINDOW);
+    let history: Awaited<ReturnType<typeof getRecentSessionMessages>> = [];
+    try {
+      history = await getRecentSessionMessages(turn.sessionId, HISTORY_WINDOW);
+    } catch (err) {
+      logDbMiss('history read')(err);
+    }
 
     // Age-eligibility confirmation starts NOW, alongside risk scoring, and is
     // acted on after the crisis block below (ai-therapist-296). On voice the
@@ -227,8 +241,8 @@ export async function runCrisisPipeline(
       // Flag state BEFORE this turn's own flagging: read once, used by both
       // the steering decision and the flagging decision below.
       // A failed read must not cost this turn its steer (the read used to come
-      // after steering): steer on the default rule, then let the flagging step
-      // fail exactly as it did before.
+      // after steering): steer on the default rule, then flag as if the
+      // session were unflagged (see the flagging step).
       let state: Awaited<ReturnType<typeof getSessionCrisisState>> = null;
       let stateError: unknown = null;
       try {
@@ -339,7 +353,10 @@ export async function runCrisisPipeline(
       }
 
       // ---- Flagging ---- (identical to the original realtime logic)
-      if (stateError) throw stateError;
+      // An unreadable state is treated as unflagged: the turn flags, and a
+      // high one pages (the paging layer folds a duplicate). It used to throw
+      // here, so a database timeout meant no flag and no page.
+      if (stateError) logDbMiss('crisis state read')(stateError);
       const currentScore = state?.crisis_risk_score || 0;
       const currentRank = SEVERITY_RANK[state?.crisis_severity ?? 'none'] ?? 0;
       // A re-flag never LOWERS a session's severity. The score clause exists
@@ -347,11 +364,19 @@ export async function runCrisisPipeline(
       // (the text hand-off's stamp when the incident's risk could not be read)
       // it would otherwise let a medium turn rewrite the session to medium.
       // Seen live in the PR #77 review.
+      // An unreadable state flags a HIGH turn only. flagSessionCrisis writes
+      // the turn's severity unconditionally, so a medium turn flagged "as if
+      // unflagged" would rewrite a session that is in fact flagged high down
+      // to medium (monitoring 'critical' to 'high', and the next high turn
+      // treated as a first flag) whenever the read failed but the write got
+      // through. A high turn cannot lower the severity, and it must page.
       const flagByLevel =
         (severity === 'high' || severity === 'medium') &&
-        (!state?.crisis_flagged ||
-          SEVERITY_RANK[severity] > currentRank ||
-          (SEVERITY_RANK[severity] >= currentRank && risk.riskScore > currentScore + 10));
+        (stateError
+          ? severity === 'high'
+          : !state?.crisis_flagged ||
+            SEVERITY_RANK[severity] > currentRank ||
+            (SEVERITY_RANK[severity] >= currentRank && risk.riskScore > currentScore + 10));
       // A high turn about someone this session's high flags have not been
       // about. The level rule above compares numbers only, and a third party's
       // active crisis scores 80-100: after "my roommate is going to kill
@@ -397,22 +422,29 @@ export async function runCrisisPipeline(
         : null;
 
       if (shouldFlag) {
-        await flagSessionCrisis(
-          turn.sessionId,
-          severity,
-          risk.riskScore,
-          'system',
-          'auto',
-          turn.messageId ?? null,
-          fromCheckin ? [...risk.factors, CHECKIN_FACTOR] : risk.factors,
-          `Risk score: ${risk.riskScore} - ` +
-            (label ? `${label} - ` : '') +
-            (subjectChangeNote ? `${subjectChangeNote} - ` : '') +
-            (escalationNote ? `${escalationNote} - ` : '') +
-            (alsoSubject ? `Also in the same message: ${FLAG_SUBJECT_NAME[alsoSubject]} - ` : '') +
-            (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
-            `Factors: ${risk.factors.join(', ')}`,
-        );
+        // A flag write that fails must not cost the turn its response: the
+        // page and the resources below do not depend on the row
+        // (ai-therapist-366).
+        try {
+          await flagSessionCrisis(
+            turn.sessionId,
+            severity,
+            risk.riskScore,
+            'system',
+            'auto',
+            turn.messageId ?? null,
+            fromCheckin ? [...risk.factors, CHECKIN_FACTOR] : risk.factors,
+            `Risk score: ${risk.riskScore} - ` +
+              (label ? `${label} - ` : '') +
+              (subjectChangeNote ? `${subjectChangeNote} - ` : '') +
+              (escalationNote ? `${escalationNote} - ` : '') +
+              (alsoSubject ? `Also in the same message: ${FLAG_SUBJECT_NAME[alsoSubject]} - ` : '') +
+              (fromCheckin ? 'Source: pre-session check-in text - ' : '') +
+              `Factors: ${risk.factors.join(', ')}`,
+          );
+        } catch (err) {
+          logDbMiss('flag write')(err);
+        }
 
         await logInterventionAction(turn.sessionId, 'auto_flag', {
           riskScore: risk.riskScore,
@@ -531,6 +563,14 @@ export async function runCrisisPipeline(
     console.error('[CrisisPipeline] pipeline failed (non-fatal):', err);
     return NONE_RESULT;
   }
+}
+
+/** Logs a database read or write the pipeline continues without. */
+function logDbMiss(what: string): (err: unknown) => undefined {
+  return (err: unknown) => {
+    console.error(`[CrisisPipeline] ${what} failed; continuing toward paging:`, err);
+    return undefined;
+  };
 }
 
 /** Who a high flag is about: a labelled subject, or the participant. */

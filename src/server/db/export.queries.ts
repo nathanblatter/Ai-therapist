@@ -8,6 +8,7 @@ import { pool } from '../config/db.js';
 import { projectRowsMetadata } from './metadataProjection.js';
 import { messageTextSql } from './adminSessions.queries.js';
 import { ownerOrgScopeSql } from './organizations.queries.js';
+import { withLongQueries } from '../config/dbLongQueries.js';
 
 export type ExportRow = Record<string, unknown>;
 
@@ -35,7 +36,7 @@ function orgClause(orgId: number | null | undefined, paramIndex: number): string
 }
 
 /** Per-session metadata, no message content. */
-export async function getMetadataExport(f: ExportFilters, orgId?: number | null): Promise<ExportRow[]> {
+async function getMetadataExportUnbounded(f: ExportFilters, orgId?: number | null): Promise<ExportRow[]> {
   const result = await pool.query(
     `
     SELECT
@@ -70,7 +71,7 @@ export async function getMetadataExport(f: ExportFilters, orgId?: number | null)
 }
 
 /** Messages with per-user research IDs in place of identities. */
-export async function getAnonymizedExport(
+async function getAnonymizedExportUnbounded(
   f: ExportFilters,
   contentColumn: ExportContentColumn,
   orgId?: number | null,
@@ -109,7 +110,7 @@ export async function getAnonymizedExport(
 }
 
 /** Aggregated session statistics bucketed by day/week/month. */
-export async function getAggregatedExport(
+async function getAggregatedExportUnbounded(
   f: ExportFilters,
   aggregationPeriod: string,
   orgId?: number | null,
@@ -143,7 +144,7 @@ export async function getAggregatedExport(
 }
 
 /** Full message export. A single session skips the session/user joins. */
-export async function getFullExport(
+async function getFullExportUnbounded(
   f: ExportFilters,
   contentColumn: ExportContentColumn,
   orgId?: number | null,
@@ -204,3 +205,17 @@ export async function getFullExport(
   );
   return contentColumn === 'content_redacted' ? projectRowsMetadata(result.rows) : result.rows;
 }
+
+// Bulk work: these run under the long statement limit instead of the pool's
+// default (config/dbLongQueries.ts, ai-therapist-366).
+export const getMetadataExport: typeof getMetadataExportUnbounded = (...args) =>
+  withLongQueries('researcher_export', () => getMetadataExportUnbounded(...args));
+
+export const getAnonymizedExport: typeof getAnonymizedExportUnbounded = (...args) =>
+  withLongQueries('researcher_export', () => getAnonymizedExportUnbounded(...args));
+
+export const getAggregatedExport: typeof getAggregatedExportUnbounded = (...args) =>
+  withLongQueries('researcher_export', () => getAggregatedExportUnbounded(...args));
+
+export const getFullExport: typeof getFullExportUnbounded = (...args) =>
+  withLongQueries('researcher_export', () => getFullExportUnbounded(...args));

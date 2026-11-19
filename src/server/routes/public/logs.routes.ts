@@ -126,7 +126,25 @@ export default function logsRoutes(): Router {
         }
       }
 
-      const insertedMessages = await insertMessagesBatch(messages);
+      let insertedMessages: Awaited<ReturnType<typeof insertMessagesBatch>>;
+      try {
+        insertedMessages = await insertMessagesBatch(messages);
+      } catch (insertErr) {
+        // Every session in the batch passed the ownership check above, so
+        // its participant turns are scored even though they could not be
+        // stored: a database that cannot write must not also silence crisis
+        // detection (ai-therapist-366; the sideband path already does this).
+        // The 500 below is unchanged.
+        const unsaved = messages.filter((m) => m.role === 'user' && m.content);
+        if (unsaved.length > 0) {
+          setImmediate(() => {
+            void scoreUnsavedTurns(unsaved).catch((err) =>
+              log.error({ err }, 'crisis processing of unsaved turns failed'),
+            );
+          });
+        }
+        throw insertErr;
+      }
 
       // Redaction is no longer per-message — it runs once per session at session
       // end (see sessionRedaction.service). Messages persist with
@@ -148,6 +166,13 @@ export default function logsRoutes(): Router {
       res.sendStatus(500);
     }
   });
+
+  async function scoreUnsavedTurns(unsaved: InsertMessageInput[]): Promise<void> {
+    const { runCrisisPipeline } = await import('../../services/crisisPipeline.service.js');
+    for (const msg of unsaved) {
+      await runCrisisPipeline({ sessionId: msg.session_id, messageId: null, content: msg.content ?? '' }, 'realtime');
+    }
+  }
 
   // Crisis detection + admin socket fan-out for freshly persisted messages.
   // Runs off the request path (fire-and-forget).

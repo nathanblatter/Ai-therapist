@@ -14,6 +14,7 @@
 // queries exclude message_threads.is_sandbox and (belt-and-suspenders) threads
 // whose client user is is_sandbox.
 import { pool } from '../config/db.js';
+import { withLongQueries } from '../config/dbLongQueries.js';
 
 export interface AgedMessageDeletionInput {
   days: number;
@@ -50,7 +51,7 @@ export interface AgedMessageDeletionResult {
  * Threads themselves are kept: the thread row is the care-team assignment
  * record, not content.
  */
-export async function deleteAgedThreadMessages(input: AgedMessageDeletionInput): Promise<AgedMessageDeletionResult> {
+async function deleteAgedThreadMessagesUnbounded(input: AgedMessageDeletionInput): Promise<AgedMessageDeletionResult> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -125,7 +126,7 @@ export async function deleteAgedThreadMessages(input: AgedMessageDeletionInput):
  * require_redaction_complete guard: scan_status='pending' messages are left
  * alone so the async safety scan never loses its input mid-flight.
  */
-export async function wipeAgedThreadMessageBodies(cutoff: Date, requireScanComplete: boolean): Promise<number> {
+async function wipeAgedThreadMessageBodiesUnbounded(cutoff: Date, requireScanComplete: boolean): Promise<number> {
   const scanGuard = requireScanComplete ? `\n        AND tm.scan_status <> 'pending'` : '';
   const result = await pool.query(
     `UPDATE thread_messages tm
@@ -195,3 +196,11 @@ export async function getMessageHistoryForClient(clientId: number): Promise<Expo
   );
   return result.rows;
 }
+
+// Bulk work: these run under the long statement limit instead of the pool's
+// default (config/dbLongQueries.ts, ai-therapist-366).
+export const deleteAgedThreadMessages: typeof deleteAgedThreadMessagesUnbounded = (...args) =>
+  withLongQueries('messaging_retention', () => deleteAgedThreadMessagesUnbounded(...args));
+
+export const wipeAgedThreadMessageBodies: typeof wipeAgedThreadMessageBodiesUnbounded = (...args) =>
+  withLongQueries('content_wipe', () => wipeAgedThreadMessageBodiesUnbounded(...args));

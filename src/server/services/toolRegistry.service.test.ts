@@ -353,6 +353,22 @@ describe('escalate_to_human', () => {
     );
   });
 
+  // ai-therapist-366: the pool rejects instead of waiting forever. A flag write
+  // that fails used to throw past executeGraduatedResponse: no page, no card.
+  it.each([
+    ['acquire timeout', new Error('timeout exceeded when trying to connect')],
+    ['statement timeout', Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' })],
+  ])('high urgency still pages and shows resources when the flag write fails (%s)', async (_label, err) => {
+    flagSessionCrisisMock.mockRejectedValueOnce(err);
+    const result = (await toolRegistry.executeTool(
+      'escalate_to_human',
+      { reason: 'participant at risk', urgency: 'high' },
+      { sessionId: 's1' },
+    )) as { success: boolean };
+    expect(executeGraduatedResponseMock).toHaveBeenCalledWith('s1', 'high', 80, 'model_escalation');
+    expect(result.success).toBe(true);
+  });
+
   it('lower urgencies alert without raising a crisis flag', async () => {
     await toolRegistry.executeTool(
       'escalate_to_human',

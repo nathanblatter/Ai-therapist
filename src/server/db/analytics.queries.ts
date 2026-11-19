@@ -2,6 +2,7 @@
 // single large CTE query so every metric shares one consistent date/attribute
 // filter; this module is the only place that query lives.
 import { pool } from '../config/db.js';
+import { withLongQueries } from '../config/dbLongQueries.js';
 
 // Parsed, validated filters for the analytics query (route does the parsing).
 export interface AnalyticsFilters {
@@ -38,7 +39,7 @@ export interface DashboardAnalyticsRow {
 }
 
 /** Compute every dashboard metric for the given filter set in one round-trip. */
-export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<DashboardAnalyticsRow> {
+async function getDashboardAnalyticsUnbounded(f: AnalyticsFilters): Promise<DashboardAnalyticsRow> {
   const result = await pool.query<DashboardAnalyticsRow>(
     `
       WITH date_filtered_sessions AS (
@@ -316,3 +317,8 @@ export async function getDashboardAnalytics(f: AnalyticsFilters): Promise<Dashbo
 
   return result.rows[0];
 }
+
+// Bulk work: these run under the long statement limit instead of the pool's
+// default (config/dbLongQueries.ts, ai-therapist-366).
+export const getDashboardAnalytics: typeof getDashboardAnalyticsUnbounded = (...args) =>
+  withLongQueries('admin_analytics', () => getDashboardAnalyticsUnbounded(...args), { timeoutMs: 60_000 });
